@@ -348,3 +348,4 @@
 {"id":"int-015668b9136c2e8b1f5e1b72d1fd0395","kind":"field_change","created_at":"2026-08-25T16:38:20.2951094Z","actor":"Greg Lapinski","issue_id":"tm-fcsc","extra":{"field":"priority","new_value":"1","old_value":"3"}}
 {"id":"int-f62348879e01d0b0c69cb9c4a52c4117","kind":"field_change","created_at":"2026-08-26T13:25:11.6840368Z","actor":"Greg Lapinski","issue_id":"tm-hrfc","extra":{"field":"priority","new_value":"1","old_value":"2"}}
 {"id":"int-b0a76aa5b43feca0533b2c6f5f527628","kind":"field_change","created_at":"2026-08-26T17:50:48.2890138Z","actor":"Greg Lapinski","issue_id":"tm-ps26","extra":{"field":"priority","new_value":"2","old_value":"3"}}
+{"id":"int-5fcb626ffc8d81e9b695e8691109ce28","kind":"field_change","created_at":"2026-08-26T21:57:14.4620091Z","actor":"Greg Lapinski","issue_id":"tm-7cu.24","extra":{"field":"priority","new_value":"2","old_value":"3"}}

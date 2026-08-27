@@ -2049,6 +2049,17 @@ describe("session pane historical-window tail state", () => {
       scrollHeight: { configurable: true, value: 1_000 },
       scrollTop: { configurable: true, writable: true, value: 800 },
     });
+    const virtualizedList = document.createElement("div");
+    virtualizedList.className = "virtualized-message-list";
+    const visibleSlot = document.createElement("div");
+    visibleSlot.className = "virtualized-message-slot";
+    visibleSlot.dataset.messageId = "message-visible";
+    virtualizedList.append(visibleSlot);
+    scrollNode.append(virtualizedList);
+    scrollNode.getBoundingClientRect = () =>
+      ({ top: 100, bottom: 300 } as DOMRect);
+    visibleSlot.getBoundingClientRect = () =>
+      ({ top: 124, bottom: 204 } as DOMRect);
     const hook = renderHook(() => {
       const state = useSessionPaneScrollState({
         ...params(activeSession),
@@ -2075,6 +2086,10 @@ describe("session pane historical-window tail state", () => {
       } as unknown as ReactKeyboardEvent<HTMLElement>);
     });
     expect(paneScrollPositions[scrollStateKey]).toEqual({
+      anchor: {
+        messageId: "message-visible",
+        viewportOffsetPx: 24,
+      },
       top: 800,
       shouldStick: false,
     });
@@ -2089,6 +2104,10 @@ describe("session pane historical-window tail state", () => {
     });
 
     expect(paneScrollPositions[scrollStateKey]).toEqual({
+      anchor: {
+        messageId: "message-visible",
+        viewportOffsetPx: 24,
+      },
       top: 799.5,
       shouldStick: false,
     });
@@ -2108,6 +2127,19 @@ describe("session pane historical-window tail state", () => {
       current: { [scrollStateKey]: true },
     };
     const scrollNode = document.createElement("section");
+    const virtualizedList = document.createElement("div");
+    virtualizedList.className = "virtualized-message-list";
+    const visibleSlot = document.createElement("div");
+    visibleSlot.className = "virtualized-message-slot";
+    visibleSlot.dataset.messageId = "message-visible";
+    virtualizedList.append(visibleSlot);
+    scrollNode.append(virtualizedList);
+    scrollNode.getBoundingClientRect = () =>
+      ({ top: 100, bottom: 300 } as DOMRect);
+    visibleSlot.getBoundingClientRect = () => {
+      const top = 124 - (scrollNode.scrollTop - 720);
+      return { top, bottom: top + 80 } as DOMRect;
+    };
     Object.defineProperties(scrollNode, {
       clientHeight: { configurable: true, value: 200 },
       scrollHeight: { configurable: true, value: 1_000 },
@@ -2138,6 +2170,10 @@ describe("session pane historical-window tail state", () => {
     expect(wheelEvent.defaultPrevented).toBe(true);
     expect(scrollNode.scrollTop).toBe(760);
     expect(paneScrollPositions[scrollStateKey]).toEqual({
+      anchor: {
+        messageId: "message-visible",
+        viewportOffsetPx: -16,
+      },
       top: 760,
       shouldStick: false,
     });

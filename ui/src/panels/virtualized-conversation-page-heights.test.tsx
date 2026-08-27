@@ -4,7 +4,10 @@ import { act, render } from "@testing-library/react";
 import { useLayoutEffect, useRef, type MutableRefObject } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { useVirtualizedConversationPageHeightChange } from "./virtualized-conversation-page-heights";
+import {
+  shouldFlushVirtualizedPageHeightLayout,
+  useVirtualizedConversationPageHeightChange,
+} from "./virtualized-conversation-page-heights";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -33,10 +36,12 @@ function MeasurementCaller({
 }
 
 function Harness({
+  clearPendingDeferredBottomRestore = vi.fn(),
   isActive,
   observations,
   scrollNode,
 }: {
+  clearPendingDeferredBottomRestore?: () => void;
   isActive: boolean;
   observations: boolean[];
   scrollNode: HTMLElement;
@@ -44,6 +49,7 @@ function Harness({
   const shouldKeepBottomAfterLayoutRef = useRef(false);
   const handlePageHeightChange = useVirtualizedConversationPageHeightChange({
     bumpLayoutVersion: vi.fn(),
+    clearPendingDeferredBottomRestore,
     clearPendingDeferredLayoutTimer: vi.fn(),
     hasUserScrollInteractionRef: useRef(true),
     isActive,
@@ -59,6 +65,7 @@ function Harness({
       "page-0": { hasTrailingGap: false, messages: [] },
     }),
     renderedListRef: useRef(null),
+    scheduleDeferredBottomRestoreLayoutVersion: vi.fn(),
     scheduleDeferredLayoutVersion: vi.fn(),
     scrollContainerRef: { current: scrollNode },
     shouldKeepBottomAfterLayoutRef,
@@ -80,7 +87,7 @@ function Harness({
 function RecentBottomReentryHarness({
   bumpLayoutVersion,
   onReady,
-  scheduleDeferredLayoutVersion,
+  scheduleDeferredBottomRestoreLayoutVersion,
   scrollNode,
   writeScrollTopAndSyncViewport,
 }: {
@@ -94,7 +101,7 @@ function RecentBottomReentryHarness({
       flushLayout?: boolean,
     ) => void,
   ) => void;
-  scheduleDeferredLayoutVersion: (delayMs: number) => void;
+  scheduleDeferredBottomRestoreLayoutVersion: (delayMs: number) => void;
   scrollNode: HTMLElement;
   writeScrollTopAndSyncViewport: (
     node: HTMLElement,
@@ -103,6 +110,7 @@ function RecentBottomReentryHarness({
 }) {
   const handlePageHeightChange = useVirtualizedConversationPageHeightChange({
     bumpLayoutVersion,
+    clearPendingDeferredBottomRestore: vi.fn(),
     clearPendingDeferredLayoutTimer: vi.fn(),
     hasUserScrollInteractionRef: useRef(false),
     isActive: true,
@@ -118,7 +126,8 @@ function RecentBottomReentryHarness({
       "page-0": { hasTrailingGap: false, messages: [] },
     }),
     renderedListRef: useRef(null),
-    scheduleDeferredLayoutVersion,
+    scheduleDeferredBottomRestoreLayoutVersion,
+    scheduleDeferredLayoutVersion: vi.fn(),
     scrollContainerRef: { current: scrollNode },
     shouldKeepBottomAfterLayoutRef: useRef(true),
     userScrollAdjustmentCooldownMs: 200,
@@ -158,6 +167,46 @@ describe("useVirtualizedConversationPageHeightChange", () => {
     expect(observations).toEqual([false, true]);
   });
 
+  it("clears pending bottom restoration when the pane has no bottom authority", () => {
+    const clearPendingDeferredBottomRestore = vi.fn();
+    const scrollNode = document.createElement("section");
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 500 },
+      scrollHeight: { configurable: true, value: 1_000 },
+      scrollTop: { configurable: true, value: 200, writable: true },
+    });
+
+    render(
+      <Harness
+        clearPendingDeferredBottomRestore={clearPendingDeferredBottomRestore}
+        isActive={false}
+        observations={[]}
+        scrollNode={scrollNode}
+      />,
+    );
+
+    expect(clearPendingDeferredBottomRestore).toHaveBeenCalled();
+  });
+
+  it("flushes only when bottom restoration can run outside the user cooldown", () => {
+    expect(
+      shouldFlushVirtualizedPageHeightLayout({
+        flushLayout: true,
+        hasUserScrollInteraction: false,
+        isInUserScrollCooldown: false,
+        shouldKeepBottom: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldFlushVirtualizedPageHeightLayout({
+        flushLayout: true,
+        hasUserScrollInteraction: false,
+        isInUserScrollCooldown: true,
+        shouldKeepBottom: true,
+      }),
+    ).toBe(false);
+  });
+
   it("defers a recent physical-bottom reentry until the scroll cooldown expires", () => {
     vi.spyOn(performance, "now").mockReturnValue(1_000);
     const scrollNode = document.createElement("section");
@@ -167,7 +216,7 @@ describe("useVirtualizedConversationPageHeightChange", () => {
       scrollTop: { configurable: true, value: 400, writable: true },
     });
     const writeScrollTopAndSyncViewport = vi.fn();
-    const scheduleDeferredLayoutVersion = vi.fn();
+    const scheduleDeferredBottomRestoreLayoutVersion = vi.fn();
     const bumpLayoutVersion = vi.fn();
     let handlePageHeightChange:
       | ((
@@ -185,7 +234,9 @@ describe("useVirtualizedConversationPageHeightChange", () => {
         onReady={(callback) => {
           handlePageHeightChange = callback;
         }}
-        scheduleDeferredLayoutVersion={scheduleDeferredLayoutVersion}
+        scheduleDeferredBottomRestoreLayoutVersion={
+          scheduleDeferredBottomRestoreLayoutVersion
+        }
         scrollNode={scrollNode}
         writeScrollTopAndSyncViewport={writeScrollTopAndSyncViewport}
       />,
@@ -198,7 +249,7 @@ describe("useVirtualizedConversationPageHeightChange", () => {
 
     expect(writeScrollTopAndSyncViewport).not.toHaveBeenCalled();
     expect(bumpLayoutVersion).toHaveBeenCalledTimes(1);
-    expect(scheduleDeferredLayoutVersion).toHaveBeenCalledTimes(1);
-    expect(scheduleDeferredLayoutVersion).toHaveBeenCalledWith(100);
+    expect(scheduleDeferredBottomRestoreLayoutVersion).toHaveBeenCalledTimes(1);
+    expect(scheduleDeferredBottomRestoreLayoutVersion).toHaveBeenCalledWith(100);
   });
 });

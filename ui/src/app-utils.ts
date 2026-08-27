@@ -233,6 +233,16 @@ export function buildSessionConversationSignature(session: Session) {
   ].join("|");
 }
 
+function jsonContentChangeMarker(value: unknown) {
+  const serialized = JSON.stringify(value) ?? "undefined";
+  let hash = 2_166_136_261;
+  for (let index = 0; index < serialized.length; index += 1) {
+    hash ^= serialized.charCodeAt(index);
+    hash = Math.imul(hash, 16_777_619);
+  }
+  return `${serialized.length}:${(hash >>> 0).toString(16)}`;
+}
+
 export function messageChangeMarker(message: Message) {
   switch (message.type) {
     case "text":
@@ -260,6 +270,16 @@ export function messageChangeMarker(message: Message) {
       return `${message.type}:${message.title.length}:${message.summary.length}`;
     case "approval":
       return `${message.type}:${message.decision}:${message.command.length}`;
+    case "userInputRequest":
+      return `${message.type}:${message.state}:${message.questions.length}:${jsonContentChangeMarker(message.submittedAnswers)}`;
+    case "mcpElicitationRequest":
+      return `${message.type}:${message.state}:${message.request.mode}:${message.submittedAction ?? "none"}:${jsonContentChangeMarker(message.submittedContent)}`;
+    case "codexAppRequest":
+      return `${message.type}:${message.state}:${message.method}:${jsonContentChangeMarker(message.submittedResult)}`;
+    default: {
+      const exhaustiveMessage: never = message;
+      return `unknown:${String((exhaustiveMessage as { type?: unknown }).type ?? "?")}`;
+    }
   }
 }
 

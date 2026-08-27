@@ -6,7 +6,7 @@ import {
   MAX_PASTED_IMAGE_BYTES,
   messageChangeMarker,
 } from "./app-utils";
-import type { ParallelAgentsMessage } from "./types";
+import type { Message, ParallelAgentsMessage } from "./types";
 
 describe("messageChangeMarker", () => {
   const baseParallelAgentsMessage: ParallelAgentsMessage = {
@@ -75,6 +75,173 @@ describe("messageChangeMarker", () => {
       );
     },
   );
+
+  it.each([
+    [
+      "user-input request",
+      {
+        id: "request-user-input",
+        type: "userInputRequest",
+        timestamp: "10:02",
+        author: "assistant",
+        title: "Choose",
+        detail: "Pick one",
+        questions: [],
+        state: "pending",
+      },
+      {
+        id: "request-user-input",
+        type: "userInputRequest",
+        timestamp: "10:02",
+        author: "assistant",
+        title: "Choose",
+        detail: "Pick one",
+        questions: [],
+        state: "submitted",
+        submittedAnswers: {},
+      },
+    ],
+    [
+      "MCP elicitation",
+      {
+        id: "request-mcp",
+        type: "mcpElicitationRequest",
+        timestamp: "10:02",
+        author: "assistant",
+        title: "Authorize",
+        detail: "Continue?",
+        request: {
+          threadId: "thread-1",
+          serverName: "server",
+          mode: "url",
+          elicitationId: "elicitation-1",
+          message: "Continue?",
+          url: "https://example.invalid",
+        },
+        state: "pending",
+      },
+      {
+        id: "request-mcp",
+        type: "mcpElicitationRequest",
+        timestamp: "10:02",
+        author: "assistant",
+        title: "Authorize",
+        detail: "Continue?",
+        request: {
+          threadId: "thread-1",
+          serverName: "server",
+          mode: "url",
+          elicitationId: "elicitation-1",
+          message: "Continue?",
+          url: "https://example.invalid",
+        },
+        state: "submitted",
+        submittedAction: "accept",
+      },
+    ],
+    [
+      "Codex app request",
+      {
+        id: "request-app",
+        type: "codexAppRequest",
+        timestamp: "10:02",
+        author: "assistant",
+        title: "Open app",
+        detail: "Open connector",
+        method: "open",
+        params: {},
+        state: "pending",
+      },
+      {
+        id: "request-app",
+        type: "codexAppRequest",
+        timestamp: "10:02",
+        author: "assistant",
+        title: "Open app",
+        detail: "Open connector",
+        method: "open",
+        params: {},
+        state: "submitted",
+        submittedResult: {},
+      },
+    ],
+  ] satisfies [string, Message, Message][])(
+    "changes markers when a %s state changes",
+    (_label, pending, submitted) => {
+      expect(messageChangeMarker(pending)).not.toBe(
+        messageChangeMarker(submitted),
+      );
+    },
+  );
+
+  it.each([
+    [
+      "user-input answer",
+      {
+        id: "request-user-input",
+        type: "userInputRequest",
+        timestamp: "10:02",
+        author: "assistant",
+        title: "Choose",
+        detail: "Pick one",
+        questions: [],
+        state: "submitted",
+        submittedAnswers: { choice: ["one"] },
+      },
+      { submittedAnswers: { choice: ["two"] } },
+    ],
+    [
+      "MCP submitted content",
+      {
+        id: "request-mcp",
+        type: "mcpElicitationRequest",
+        timestamp: "10:02",
+        author: "assistant",
+        title: "Authorize",
+        detail: "Continue?",
+        request: {
+          threadId: "thread-1",
+          serverName: "server",
+          mode: "form",
+          message: "Continue?",
+          requestedSchema: { type: "object", properties: {} },
+        },
+        state: "submitted",
+        submittedAction: "accept",
+        submittedContent: { choice: "one" },
+      },
+      { submittedContent: { choice: "two" } },
+    ],
+    [
+      "Codex app submitted result",
+      {
+        id: "request-app",
+        type: "codexAppRequest",
+        timestamp: "10:02",
+        author: "assistant",
+        title: "Open app",
+        detail: "Open connector",
+        method: "open",
+        params: {},
+        state: "submitted",
+        submittedResult: { outcome: "one" },
+      },
+      { submittedResult: { outcome: "two" } },
+    ],
+  ] satisfies [string, Message, Partial<Message>][])(
+    "changes markers when submitted %s changes without changing state or shape",
+    (_label, original, update) => {
+      expect(messageChangeMarker(original)).not.toBe(
+        messageChangeMarker({ ...original, ...update } as Message),
+      );
+    },
+  );
+
+  it("returns a defensive marker for a future runtime message variant", () => {
+    expect(
+      messageChangeMarker({ type: "futureMessage" } as unknown as Message),
+    ).toBe("unknown:futureMessage");
+  });
 });
 
 describe("isMonacoEditorEventTarget", () => {

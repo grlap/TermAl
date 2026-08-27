@@ -889,20 +889,36 @@ describe("App scroll behaviour", () => {
         expect(messageStack.scrollTop).toBe(9800);
 
         act(() => {
-          // Start from a deterministic mid-transcript position, then use a
-          // real upward wheel input to hand ownership to the reader and save
-          // the resulting detached geometry through the production handler.
+          // Clicking non-focusable transcript content can leave focus on the
+          // document body even though Chromium routes ArrowUp to this scroll
+          // container. Exercise that exact path: intent arrives outside the
+          // React message-stack handler, followed by the browser-owned native
+          // scroll event.
           messageStack.scrollTop = 5001;
-          fireEvent.wheel(messageStack, { deltaY: -1 });
+          fireEvent.keyDown(document.body, { key: "ArrowUp" });
+          messageStack.scrollTop = 5000;
           fireEvent.scroll(messageStack);
         });
-        // Commit the wheel/detach update before advancing timers. Keeping
+        // Commit the keyboard/detach update before advancing timers. Keeping
         // flushUiWork inside one async act lets jsdom run an old activation
         // timeout before React can apply the cancellation, an ordering the
         // browser cannot produce between separate input and timer tasks.
-        expect(messageStack.scrollTop).toBe(5000);
+        expect(messageStack.scrollTop).toBeLessThan(9800);
         await settleAsyncUi();
-        expect(messageStack.scrollTop).toBe(5000);
+        const detachedScrollTop = messageStack.scrollTop;
+        expect(detachedScrollTop).toBeLessThan(9800);
+        const detachedAnchor = Array.from(
+          messageStack.querySelectorAll<HTMLElement>(
+            ".virtualized-message-slot[data-message-id]",
+          ),
+        ).find((slot) => {
+          const rect = slot.getBoundingClientRect();
+          return rect.bottom > 0 && rect.top < 200;
+        });
+        expect(detachedAnchor).toBeDefined();
+        const detachedAnchorId = detachedAnchor?.dataset.messageId;
+        const detachedAnchorOffset =
+          detachedAnchor?.getBoundingClientRect().top;
 
         let nextFrameId = 1;
         const pendingFrames = new Map<number, FrameRequestCallback>();
@@ -1028,15 +1044,17 @@ describe("App scroll behaviour", () => {
             );
           });
 
-          expect(messageStack.scrollTop).toBe(5400);
+          expect(messageStack.scrollTop).toBe(detachedScrollTop + 400);
           expect(scrollKinds).toContain("position_restore");
           expect(scrollKinds).not.toContain("bottom_pin");
           expect(scrollKinds).not.toContain("bottom_boundary");
           const restoredAnchor = messageStack.querySelector(
-            '[data-message-id="session-2-message-40"]',
+            `[data-message-id="${detachedAnchorId}"]`,
           );
           expect(restoredAnchor).not.toBeNull();
-          expect(restoredAnchor?.getBoundingClientRect().top).toBe(20);
+          expect(restoredAnchor?.getBoundingClientRect().top).toBe(
+            detachedAnchorOffset,
+          );
         } finally {
           messageStack.removeEventListener(
             MESSAGE_STACK_SCROLL_WRITE_EVENT,

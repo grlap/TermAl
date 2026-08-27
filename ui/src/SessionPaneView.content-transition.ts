@@ -3,8 +3,8 @@
 // Does not own: React lifecycle, scroll intent, indicator state, or DOM writes.
 // Split from: ui/src/SessionPaneView.scroll.ts.
 
-import { messageChangeMarker } from "./app-utils";
 import type { Message } from "./types";
+import { valuesHaveSameBoundedContent } from "./bounded-content-equality";
 
 export type TurnContentTransition = {
   fromMessageContentSignature: string | undefined;
@@ -39,14 +39,14 @@ export function didLatestTurnContentChangeBeyondPromptResidency({
   previousPromptMessageId: string | null | undefined;
   promptResidencyChanged: boolean;
 }) {
-  if (!latestTurnChanged) {
-    return false;
-  }
   if (!promptResidencyChanged) {
-    return true;
+    return latestTurnChanged;
   }
   if (!previousMessages) {
-    return false;
+    // Without a trustworthy baseline, hiding the change risks losing genuine
+    // activity. The caller can safely show an extra indicator, but it cannot
+    // recover an update that was misclassified as resident history.
+    return true;
   }
 
   const unchangedSuffix = (
@@ -61,7 +61,12 @@ export function didLatestTurnContentChangeBeyondPromptResidency({
       const candidate = longer[offset + index];
       return (
         candidate?.id === message.id &&
-        messageChangeMarker(candidate) === messageChangeMarker(message)
+        // Cheap list signatures deliberately summarize large payloads. This
+        // rare residency-boundary comparison must instead be content-sensitive
+        // and independent of object key insertion order. Its explicit budget
+        // fails open to visible activity rather than blocking a layout effect
+        // on an unexpectedly large full-state payload.
+        valuesHaveSameBoundedContent(candidate, message)
       );
     });
   };

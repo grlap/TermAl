@@ -236,6 +236,122 @@ describe("turn content transitions", () => {
     ).toBe(false);
   });
 
+  it("detects an equal-length text replacement during a prompt reveal", () => {
+    const previousTail = {
+      id: "tail",
+      type: "text" as const,
+      author: "assistant" as const,
+      text: "old",
+      timestamp: "10:02",
+    };
+
+    expect(
+      didLatestTurnContentChangeBeyondPromptResidency({
+        currentMessages: [
+          {
+            id: "prompt",
+            type: "text",
+            author: "you",
+            text: "prompt",
+            timestamp: "10:00",
+          },
+          { ...previousTail, text: "new" },
+        ],
+        currentPromptMessageId: "prompt",
+        // The ordinary length-based signature cannot see this replacement.
+        latestTurnChanged: false,
+        previousMessages: [previousTail],
+        previousPromptMessageId: null,
+        promptResidencyChanged: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("detects interaction-state activity during a prompt reveal", () => {
+    const pendingRequest = {
+      id: "request",
+      type: "userInputRequest" as const,
+      author: "assistant" as const,
+      timestamp: "10:02",
+      title: "Choose",
+      detail: "Pick one",
+      questions: [],
+      state: "pending" as const,
+    };
+
+    expect(
+      didLatestTurnContentChangeBeyondPromptResidency({
+        currentMessages: [
+          {
+            id: "prompt",
+            type: "text",
+            author: "you",
+            text: "prompt",
+            timestamp: "10:00",
+          },
+          { ...pendingRequest, state: "submitted" },
+        ],
+        currentPromptMessageId: "prompt",
+        // The boundary comparison remains content-sensitive even if a caller
+        // arrives with a stale or summarized latest-turn change signal.
+        latestTurnChanged: false,
+        previousMessages: [pendingRequest],
+        previousPromptMessageId: null,
+        promptResidencyChanged: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("ignores object-key insertion order during a prompt reveal", () => {
+    const previousTail = {
+      id: "tail",
+      type: "text" as const,
+      timestamp: "10:02",
+      author: "assistant" as const,
+      text: "stable",
+    };
+    const currentTail = {
+      text: "stable",
+      author: "assistant" as const,
+      timestamp: "10:02",
+      type: "text" as const,
+      id: "tail",
+    };
+
+    expect(
+      didLatestTurnContentChangeBeyondPromptResidency({
+        currentMessages: [
+          {
+            id: "prompt",
+            type: "text",
+            author: "you",
+            text: "prompt",
+            timestamp: "10:00",
+          },
+          currentTail,
+        ],
+        currentPromptMessageId: "prompt",
+        latestTurnChanged: true,
+        previousMessages: [previousTail],
+        previousPromptMessageId: null,
+        promptResidencyChanged: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("fails open when a residency transition has no prior message baseline", () => {
+    expect(
+      didLatestTurnContentChangeBeyondPromptResidency({
+        currentMessages: [],
+        currentPromptMessageId: "prompt",
+        latestTurnChanged: false,
+        previousMessages: undefined,
+        previousPromptMessageId: null,
+        promptResidencyChanged: true,
+      }),
+    ).toBe(true);
+  });
+
   it("detects an insertion when the prompt is trimmed in the same render", () => {
     const prompt = {
       id: "prompt",

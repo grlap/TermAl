@@ -657,6 +657,7 @@ export function SessionPaneView({
     paneMessageContentSignaturesRef.current[pane.id] ??
     (paneMessageContentSignaturesRef.current[pane.id] = {});
   const {
+    captureDetachedMessageStackPosition,
     handleConversationSearchItemMount,
     handleMessageStackFocusCapture,
     handleMessageStackScroll,
@@ -693,6 +694,15 @@ export function SessionPaneView({
     visibleLastMessageAuthor,
     visibleMessageContentSignature,
   });
+
+  const handleSelectPaneTab = useStableEvent(
+    (selectedPaneId: string, tabId: string) => {
+      if (selectedPaneId === pane.id && tabId !== activeTab?.id) {
+        captureDetachedMessageStackPosition();
+      }
+      onSelectTab(selectedPaneId, tabId);
+    },
+  );
   const queuedPromptHistoryAffordanceCount =
     activeSession?.hasNewerHistory === true ? pendingPrompts.length : 0;
   const effectiveShowNewResponseIndicator =
@@ -851,7 +861,7 @@ export function SessionPaneView({
     if (!nextTab) {
       return;
     }
-    onSelectTab(pane.id, nextTab.id);
+    handleSelectPaneTab(pane.id, nextTab.id);
   }
 
   function resolvePaneTabCycleDirection(event: {
@@ -1193,7 +1203,7 @@ export function SessionPaneView({
               draggedTab={draggedTab}
               getKnownDraggedTab={getKnownDraggedTab}
               tabDecorations={tabDecorations}
-              onSelectTab={onSelectTab}
+              onSelectTab={handleSelectPaneTab}
               onCloseTab={onCloseTab}
               onTabDragStart={onTabDragStart}
               onTabDragEnd={onTabDragEnd}

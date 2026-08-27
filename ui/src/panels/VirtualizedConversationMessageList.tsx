@@ -18,6 +18,7 @@ import {
 import { flushSync } from "react-dom";
 import { isExpandedPromptOpen } from "../ExpandedPromptPanel";
 import {
+  MESSAGE_STACK_BOTTOM_FOLLOW_SCROLL_MS,
   requestMessageStackBottomRepin,
   writeMessageStackScrollTopImmediately,
 } from "../message-stack-scroll-sync";
@@ -71,6 +72,7 @@ import {
   shouldCollapseIncrementalMountedRange,
 } from "./virtualized-conversation-controller";
 import { useVirtualizedConversationHandle } from "./virtualized-conversation-handle";
+import { useVirtualizedConversationDeferredBottomRestore } from "./virtualized-conversation-deferred-bottom-restore";
 import {
   mountedPrependRestoreIsCurrent,
   resolveRenderedMountedPageRange,
@@ -275,6 +277,12 @@ export function VirtualizedConversationMessageList({
   const pendingProgrammaticBottomFollowUntilRef = useRef(
     Number.NEGATIVE_INFINITY,
   );
+  // A marker/search command can fall back to browser-owned smooth
+  // scrollIntoView. Its native upward frames are programmatic even though the
+  // command advanced the user-navigation generation first.
+  const pendingProgrammaticNavigationUntilRef = useRef(
+    Number.NEGATIVE_INFINITY,
+  );
   const pendingBottomBoundarySeekRef = useRef(false);
   const renderedListRef = useRef<HTMLDivElement | null>(null);
   const hasUserScrollInteractionRef = useRef(false);
@@ -430,6 +438,12 @@ export function VirtualizedConversationMessageList({
     setLayoutVersion((current) => current + 1);
   }, []);
 
+  const {
+    clear: clearPendingDeferredBottomRestore,
+    isPending: isPendingDeferredBottomRestore,
+    scheduleLayoutVersion: scheduleDeferredBottomRestoreLayoutVersion,
+  } = useVirtualizedConversationDeferredBottomRestore({ bumpLayoutVersion });
+
   const clearPendingDeferredLayoutTimer = useCallback(() => {
     if (pendingDeferredLayoutTimerRef.current !== null) {
       window.clearTimeout(pendingDeferredLayoutTimerRef.current);
@@ -530,7 +544,6 @@ export function VirtualizedConversationMessageList({
     },
     [bumpLayoutVersion, clearPendingDeferredLayoutTimer],
   );
-
   const scheduleProgrammaticViewportSync = useCallback(
     (node: HTMLElement) => {
       if (pendingProgrammaticViewportSyncRef.current) {
@@ -1007,6 +1020,8 @@ export function VirtualizedConversationMessageList({
   }, []);
   const beginUserScrollNavigation = useCallback(() => {
     advanceUserScrollGeneration();
+    pendingProgrammaticNavigationUntilRef.current =
+      performance.now() + MESSAGE_STACK_BOTTOM_FOLLOW_SCROLL_MS;
     return userScrollGenerationRef.current;
   }, [advanceUserScrollGeneration]);
   const getUserScrollGeneration = useCallback(
@@ -1849,6 +1864,7 @@ export function VirtualizedConversationMessageList({
       !shouldKeepBottomAfterLayoutRef.current ||
       isDetachedFromBottomRef.current
     ) {
+      clearPendingDeferredBottomRestore();
       return;
     }
     // A programmatic `bottom_follow` smooth-scroll is in flight; the browser is
@@ -1857,12 +1873,25 @@ export function VirtualizedConversationMessageList({
     // of glides). The cooldown ends naturally when the animation lands or when
     // a real user gesture fires `markUserScroll`.
     if (pendingProgrammaticBottomFollowUntilRef.current >= performance.now()) {
+      // The in-flight pane-owned follow supersedes an older page-measurement
+      // restore. Clear its explicit authority so an ordinary later layout pass
+      // cannot re-arm a stale snap after the animation finishes.
+      clearPendingDeferredBottomRestore();
       return;
     }
 
     const timeSinceUserScroll =
       performance.now() - lastUserScrollInputTimeRef.current;
     if (timeSinceUserScroll < VIRTUALIZED_USER_SCROLL_ADJUSTMENT_COOLDOWN_MS) {
+      // Only a page measurement that actually deferred bottom restoration may
+      // keep this retry alive. Ordinary layout passes during a near-bottom
+      // scrollbar or touch adjustment must never manufacture future authority
+      // to snap the reader back down.
+      if (isPendingDeferredBottomRestore()) {
+        scheduleDeferredBottomRestoreLayoutVersion(
+          VIRTUALIZED_USER_SCROLL_ADJUSTMENT_COOLDOWN_MS - timeSinceUserScroll,
+        );
+      }
       return;
     }
 
@@ -1875,8 +1904,11 @@ export function VirtualizedConversationMessageList({
       !isScrollContainerNearBottom(node)
     ) {
       shouldKeepBottomAfterLayoutRef.current = false;
+      clearPendingDeferredBottomRestore();
       return;
     }
+
+    clearPendingDeferredBottomRestore();
 
     // Bottom-follow motion belongs to the pane scroll authority. Writing the
     // new virtualized bottom here runs in a child layout effect before the
@@ -1890,6 +1922,9 @@ export function VirtualizedConversationMessageList({
     isActive,
     layoutVersion,
     pageLayout.totalHeight,
+    clearPendingDeferredBottomRestore,
+    isPendingDeferredBottomRestore,
+    scheduleDeferredBottomRestoreLayoutVersion,
     scrollContainerRef,
     writeScrollTopAndSyncViewport,
   ]);
@@ -1924,6 +1959,7 @@ export function VirtualizedConversationMessageList({
     buildBottomMountedRange,
     cancelPostActivationBottomRestore,
     captureLatestVisibleMessageAnchor,
+    clearPendingDeferredBottomRestore,
     clearPendingDeferredLayoutTimer,
     clearPendingIdleCompactionTimer,
     hasUserScrollInteractionRef,
@@ -1945,6 +1981,7 @@ export function VirtualizedConversationMessageList({
     pendingPrependedBottomGapRef,
     pendingPrependedTopBoundaryRef,
     pendingProgrammaticBottomFollowUntilRef,
+    pendingProgrammaticNavigationUntilRef,
     pendingProgrammaticScrollTopRef,
     prewarmMountedRangeForUpwardWheel,
     reconcileMountedRangeForNativeScroll,
@@ -2002,6 +2039,7 @@ export function VirtualizedConversationMessageList({
 
   const handlePageHeightChange = useVirtualizedConversationPageHeightChange({
     bumpLayoutVersion,
+    clearPendingDeferredBottomRestore,
     clearPendingDeferredLayoutTimer,
     hasUserScrollInteractionRef,
     isActive,
@@ -2015,6 +2053,7 @@ export function VirtualizedConversationMessageList({
     pageHeightsRef,
     currentPageIdentityRef,
     renderedListRef,
+    scheduleDeferredBottomRestoreLayoutVersion,
     scheduleDeferredLayoutVersion,
     scrollContainerRef,
     shouldKeepBottomAfterLayoutRef,

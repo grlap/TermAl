@@ -4488,6 +4488,9 @@ textarea {
 }
 
 .message-stack:has(.virtualized-message-list) {
+  /* Reserve classic scrollbar width only for transcript stacks. Other panel
+     variants share the base class but own non-scrolling layouts. */
+  scrollbar-gutter: stable;
   /* The virtualizer compensates layout changes itself. Chromium's native
      overflow anchoring would apply a second, browser-timed correction. */
   overflow-anchor: none;

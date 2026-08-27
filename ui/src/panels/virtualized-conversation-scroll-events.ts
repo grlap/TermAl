@@ -65,6 +65,29 @@ export function nativeScrollAdvancesUserScrollGeneration({
   );
 }
 
+export function nativeScrollKeepsPassiveTailFollow({
+  hadUserScrollInteraction,
+  isDetachedFromBottom,
+  isNativeUserMovement,
+  isProgrammaticNavigation,
+  scrollDelta,
+  tailFollowIntent,
+}: {
+  hadUserScrollInteraction: boolean;
+  isDetachedFromBottom: boolean;
+  isNativeUserMovement: boolean;
+  isProgrammaticNavigation: boolean;
+  scrollDelta: number;
+  tailFollowIntent: boolean;
+}) {
+  return (
+    tailFollowIntent &&
+    !hadUserScrollInteraction &&
+    !isDetachedFromBottom &&
+    (isProgrammaticNavigation || scrollDelta >= 0 || !isNativeUserMovement)
+  );
+}
+
 type DeferredLayoutAnchor = {
   messageId: string;
   viewportOffsetPx: number;
@@ -76,6 +99,7 @@ export function useVirtualizedConversationScrollEvents({
   buildBottomMountedRange,
   cancelPostActivationBottomRestore,
   captureLatestVisibleMessageAnchor,
+  clearPendingDeferredBottomRestore,
   clearPendingDeferredLayoutTimer,
   clearPendingIdleCompactionTimer,
   hasUserScrollInteractionRef,
@@ -97,6 +121,7 @@ export function useVirtualizedConversationScrollEvents({
   pendingPrependedBottomGapRef,
   pendingPrependedTopBoundaryRef,
   pendingProgrammaticBottomFollowUntilRef,
+  pendingProgrammaticNavigationUntilRef,
   pendingProgrammaticScrollTopRef,
   prewarmMountedRangeForUpwardWheel,
   reconcileMountedRangeForNativeScroll,
@@ -122,6 +147,7 @@ export function useVirtualizedConversationScrollEvents({
   buildBottomMountedRange: (clientHeight: number) => VirtualizedRange;
   cancelPostActivationBottomRestore: () => void;
   captureLatestVisibleMessageAnchor: (node: HTMLElement) => VisibleMessageAnchor | null;
+  clearPendingDeferredBottomRestore: () => void;
   clearPendingDeferredLayoutTimer: () => void;
   clearPendingIdleCompactionTimer: () => void;
   hasUserScrollInteractionRef: MutableRefObject<boolean>;
@@ -143,6 +169,7 @@ export function useVirtualizedConversationScrollEvents({
   pendingPrependedBottomGapRef: MutableRefObject<number | null>;
   pendingPrependedTopBoundaryRef: MutableRefObject<boolean>;
   pendingProgrammaticBottomFollowUntilRef: MutableRefObject<number>;
+  pendingProgrammaticNavigationUntilRef: MutableRefObject<number>;
   pendingProgrammaticScrollTopRef: MutableRefObject<number | null>;
   prewarmMountedRangeForUpwardWheel: (node: HTMLElement, wheelDeltaY: number) => void;
   reconcileMountedRangeForNativeScroll: (
@@ -177,6 +204,7 @@ export function useVirtualizedConversationScrollEvents({
 
     const enterBottomFollowMode = () => {
       pendingProgrammaticScrollTopRef.current = null;
+      pendingProgrammaticNavigationUntilRef.current = Number.NEGATIVE_INFINITY;
       lastNativeScrollTopRef.current = node.scrollTop;
       shouldKeepBottomAfterLayoutRef.current = true;
       isDetachedFromBottomRef.current = false;
@@ -212,17 +240,23 @@ export function useVirtualizedConversationScrollEvents({
           if (isMeasuringPostActivation) {
             cancelPostActivationBottomRestore();
           }
+          // This is the shared generic layout timer used by prepend, anchor,
+          // and range restoration, so real native movement invalidates it. The
+          // page-measurement bottom retry has a dedicated timer and remains
+          // separately governed by bottom authority.
           clearPendingDeferredLayoutTimer();
           pendingDeferredLayoutAnchorRef.current = null;
           const scrollDelta = node.scrollTop - lastNativeScrollTopRef.current;
           lastNativeScrollTopRef.current = node.scrollTop;
-          if (
+          const isProgrammaticNavigation =
+            pendingProgrammaticNavigationUntilRef.current >= performance.now();
+          const isNativeUserMovement =
             nativeScrollAdvancesUserScrollGeneration({
               currentScrollHeight: node.scrollHeight,
               previousScrollHeight: previousNativeScrollHeight,
               scrollDelta,
-            })
-          ) {
+            });
+          if (isNativeUserMovement && !isProgrammaticNavigation) {
             // Scrollbar drags and touch inertia can arrive without an input
             // prelude. A height-changing native event can instead be caused by
             // the prepend/compaction reflow whose restore is still valid.
@@ -232,9 +266,14 @@ export function useVirtualizedConversationScrollEvents({
             pendingPrependedBottomGapRef.current = null;
           }
           const isPassiveTailFollowScroll =
-            tailFollowIntent &&
-            !hadUserScrollInteraction &&
-            !isDetachedFromBottomRef.current;
+            nativeScrollKeepsPassiveTailFollow({
+              hadUserScrollInteraction,
+              isDetachedFromBottom: isDetachedFromBottomRef.current,
+              isNativeUserMovement,
+              isProgrammaticNavigation,
+              scrollDelta,
+              tailFollowIntent,
+            });
           if (lastUserScrollKindRef.current === null) {
             lastUserScrollKindRef.current = resolveNativeScrollKind(
               lastUserScrollKindRef.current,
@@ -245,6 +284,18 @@ export function useVirtualizedConversationScrollEvents({
           if (isPassiveTailFollowScroll) {
             shouldKeepBottomAfterLayoutRef.current = true;
           } else {
+            if (
+              scrollDelta < 0 &&
+              isNativeUserMovement &&
+              !isProgrammaticNavigation
+            ) {
+              // Scrollbar-thumb drags and touch inertia can move upward with no
+              // wheel/key/touch prelude. Transfer authority immediately even
+              // while the viewport remains inside the near-bottom band.
+              shouldKeepBottomAfterLayoutRef.current = false;
+              isDetachedFromBottomRef.current = true;
+              clearPendingDeferredBottomRestore();
+            }
             releaseConversationSearchPinForUserScroll();
             setHasUserScrollInteraction(true);
             lastUserScrollInputTimeRef.current = performance.now();
@@ -378,6 +429,7 @@ export function useVirtualizedConversationScrollEvents({
       }
       pendingProgrammaticBottomFollowUntilRef.current =
         Number.NEGATIVE_INFINITY;
+      pendingProgrammaticNavigationUntilRef.current = Number.NEGATIVE_INFINITY;
       pendingProgrammaticScrollTopRef.current = null;
       pendingPrependedTopBoundaryRef.current = false;
       if (upwardInputDeltaPx === null || !isLikelyBottomEscape) {
@@ -388,6 +440,9 @@ export function useVirtualizedConversationScrollEvents({
         cancelPostActivationBottomRestore();
       }
       suspendDeferredRenderActivation(node);
+      // User input invalidates the generic prepend/anchor/range layout timer.
+      // The page-measurement bottom retry uses a dedicated timer and is cleared
+      // below only when this gesture actually detaches the reader.
       clearPendingDeferredLayoutTimer();
       pendingDeferredLayoutAnchorRef.current = null;
       const isSeekKeyboardNavigation =
@@ -404,6 +459,7 @@ export function useVirtualizedConversationScrollEvents({
             event.key === "ArrowUp" ||
             event.key === "Home"));
       if (isExplicitUpwardScrollIntent) {
+        clearPendingDeferredBottomRestore();
         if (isLikelyBottomEscape) {
           // Preserve the browser's first upward escape from the bottom. The
           // mounted-band prepend that follows should expand DOM above without
@@ -452,6 +508,7 @@ export function useVirtualizedConversationScrollEvents({
         // mistaken for continuation of that animation.
         pendingProgrammaticBottomFollowUntilRef.current =
           Number.NEGATIVE_INFINITY;
+        pendingProgrammaticNavigationUntilRef.current = Number.NEGATIVE_INFINITY;
       }
 
       if (explicitScrollKind === "position_restore") {
@@ -475,6 +532,7 @@ export function useVirtualizedConversationScrollEvents({
         pendingMountedPrependRestoreRef.current = null;
         skipNextMountedPrependRestoreRef.current = false;
         clearPendingDeferredLayoutTimer();
+        clearPendingDeferredBottomRestore();
         clearPendingIdleCompactionTimer();
         // Handle-owned restores install their new deferred anchor after this
         // synchronous listener returns; this clear removes only stale anchor
@@ -514,6 +572,7 @@ export function useVirtualizedConversationScrollEvents({
         pendingMountedPrependRestoreRef.current = null;
         skipNextMountedPrependRestoreRef.current = false;
         clearPendingDeferredLayoutTimer();
+        clearPendingDeferredBottomRestore();
         clearPendingIdleCompactionTimer();
         pendingDeferredLayoutAnchorRef.current = null;
         syncViewportFromScrollNode(node);
@@ -539,6 +598,7 @@ export function useVirtualizedConversationScrollEvents({
         pendingMountedPrependRestoreRef.current = null;
         skipNextMountedPrependRestoreRef.current = false;
         clearPendingDeferredLayoutTimer();
+        clearPendingDeferredBottomRestore();
         clearPendingIdleCompactionTimer();
         pendingDeferredLayoutAnchorRef.current = null;
         syncViewportFromScrollNode(node);
@@ -584,6 +644,7 @@ export function useVirtualizedConversationScrollEvents({
         explicitScrollSource === "user" &&
         !hasBottomAuthorityAfterWrite
       ) {
+        clearPendingDeferredBottomRestore();
         isDetachedFromBottomRef.current = true;
         setHasUserScrollInteraction(true);
       }
@@ -649,6 +710,7 @@ export function useVirtualizedConversationScrollEvents({
     // scrollbar correctly hands control back to the user.
     const cancelBottomFollowOnMouseDown = (event: MouseEvent) => {
       pendingProgrammaticBottomFollowUntilRef.current = Number.NEGATIVE_INFINITY;
+      pendingProgrammaticNavigationUntilRef.current = Number.NEGATIVE_INFINITY;
       if (event.target === node) {
         advanceUserScrollGeneration();
         pendingProgrammaticScrollTopRef.current = null;
@@ -707,6 +769,7 @@ export function useVirtualizedConversationScrollEvents({
     buildBottomMountedRange,
     cancelPostActivationBottomRestore,
     captureLatestVisibleMessageAnchor,
+    clearPendingDeferredBottomRestore,
     clearPendingDeferredLayoutTimer,
     clearPendingIdleCompactionTimer,
     isActive,

@@ -8,7 +8,10 @@ import {
   mountedPrependRestoreIsCurrent,
   type MountedPrependRestore,
 } from "./virtualized-conversation-mounted-range";
-import { nativeScrollAdvancesUserScrollGeneration } from "./virtualized-conversation-scroll-events";
+import {
+  nativeScrollAdvancesUserScrollGeneration,
+  nativeScrollKeepsPassiveTailFollow,
+} from "./virtualized-conversation-scroll-events";
 
 function restoreAtGeneration(
   userScrollGeneration: number,
@@ -57,6 +60,59 @@ describe("mounted prepend restore generation", () => {
         currentScrollHeight: 12_000,
         previousScrollHeight: 12_000,
         scrollDelta: -600,
+      }),
+    ).toBe(true);
+  });
+
+  it("keeps tail-follow authority when content shrink clamps scrollTop upward", () => {
+    const isNativeUserMovement = nativeScrollAdvancesUserScrollGeneration({
+      currentScrollHeight: 11_998,
+      previousScrollHeight: 12_000,
+      scrollDelta: -2,
+    });
+
+    expect(isNativeUserMovement).toBe(false);
+    expect(
+      nativeScrollKeepsPassiveTailFollow({
+        hadUserScrollInteraction: false,
+        isDetachedFromBottom: false,
+        isNativeUserMovement,
+        isProgrammaticNavigation: false,
+        scrollDelta: -2,
+        tailFollowIntent: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("transfers tail-follow authority for stable-height upward native movement", () => {
+    const isNativeUserMovement = nativeScrollAdvancesUserScrollGeneration({
+      currentScrollHeight: 12_000,
+      previousScrollHeight: 12_000,
+      scrollDelta: -2,
+    });
+
+    expect(isNativeUserMovement).toBe(true);
+    expect(
+      nativeScrollKeepsPassiveTailFollow({
+        hadUserScrollInteraction: false,
+        isDetachedFromBottom: false,
+        isNativeUserMovement,
+        isProgrammaticNavigation: false,
+        scrollDelta: -2,
+        tailFollowIntent: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps an attached search jump passive during smooth upward native frames", () => {
+    expect(
+      nativeScrollKeepsPassiveTailFollow({
+        hadUserScrollInteraction: false,
+        isDetachedFromBottom: false,
+        isNativeUserMovement: true,
+        isProgrammaticNavigation: true,
+        scrollDelta: -600,
+        tailFollowIntent: true,
       }),
     ).toBe(true);
   });

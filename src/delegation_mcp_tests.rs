@@ -872,35 +872,46 @@ fn delegation_mcp_hides_and_rejects_peer_tools_for_unlinked_durable_child() {
 
 #[test]
 fn delegation_mcp_hides_and_rejects_review_submission_for_non_reviewer_child() {
-    let state_snapshot = serialized_delegation_child_state(
-        "session-worker",
-        DelegationMode::Explorer,
-        false,
-    );
-    let (base_url, _requests, server) = spawn_test_mcp_http_server(1, move |request| {
-        assert_eq!(request.method, "GET");
-        assert_eq!(request.path, "/api/state");
-        (200, state_snapshot.clone())
-    });
-    let bridge = TermalDelegationMcpBridge::new("session-worker".to_owned(), base_url)
-        .expect("bridge should initialize");
+    for mode in [DelegationMode::Explorer, DelegationMode::Worker] {
+        let child_session_id = format!("session-non-reviewer-{mode:?}").to_lowercase();
+        let state_snapshot =
+            serialized_delegation_child_state(&child_session_id, mode, false);
+        let (base_url, _requests, server) =
+            spawn_test_mcp_http_server(1, move |request| {
+                assert_eq!(request.method, "GET");
+                assert_eq!(request.path, "/api/state");
+                (200, state_snapshot.clone())
+            });
+        let bridge = TermalDelegationMcpBridge::new(child_session_id, base_url)
+            .expect("bridge should initialize");
 
-    let tools = bridge.tools_list_for_caller();
-    let names = tools["tools"]
-        .as_array()
-        .expect("tools should be an array")
-        .iter()
-        .filter_map(|tool| tool["name"].as_str())
-        .collect::<Vec<_>>();
-    assert!(!names.contains(&TERMAL_SUBMIT_REVIEW_RESULT_TOOL_NAME));
-    let error = bridge
-        .handle_tool_call(json!({
-            "name": TERMAL_SUBMIT_REVIEW_RESULT_TOOL_NAME,
-            "arguments": {}
-        }))
-        .expect_err("non-reviewer child must not invoke structured review submission");
-    assert!(error.to_string().contains("reviewer child"));
-    server.join().expect("test server should join");
+        let tools = bridge.tools_list_for_caller();
+        let names = tools["tools"]
+            .as_array()
+            .expect("tools should be an array")
+            .iter()
+            .filter_map(|tool| tool["name"].as_str())
+            .collect::<Vec<_>>();
+        assert!(
+            !names.contains(&TERMAL_SUBMIT_REVIEW_RESULT_TOOL_NAME),
+            "{mode:?} child must not receive structured review submission"
+        );
+        let error = bridge
+            .handle_tool_call(json!({
+                "name": TERMAL_SUBMIT_REVIEW_RESULT_TOOL_NAME,
+                "arguments": {}
+            }))
+            .expect_err(&format!(
+                "{mode:?} child must not invoke structured review submission"
+            ));
+        assert!(
+            error.to_string().contains("reviewer child"),
+            "{mode:?} rejection should explain reviewer-child authority: {error}"
+        );
+        server
+            .join()
+            .unwrap_or_else(|_| panic!("{mode:?} test server should join"));
+    }
 }
 
 #[test]

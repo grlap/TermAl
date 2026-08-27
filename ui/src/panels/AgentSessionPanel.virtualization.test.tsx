@@ -816,6 +816,20 @@ describe("AgentSessionPanel virtualization", () => {
       });
       await screen.findByLabelText(/^Conversation overview,/);
 
+      await waitFor(() =>
+        expect(
+          container.querySelector(".virtualized-message-list"),
+        ).not.toBeNull(),
+      );
+      // AgentSessionPanel is rendered without SessionPaneView's outer stack in
+      // this unit harness. Give the RTL container that production role so the
+      // resolved :has(.virtualized-message-list) selector is exercised without
+      // falling back to a source-text assertion.
+      container.classList.add("message-stack");
+      expect(window.getComputedStyle(container).scrollbarGutter).toBe(
+        "stable",
+      );
+
       const widthConstraintSelectors = [
         ".session-conversation-page",
         ".conversation-with-overview",
@@ -2381,29 +2395,66 @@ describe("AgentSessionPanel virtualization", () => {
 
       expect(scrollWrites).toContain(480);
 
-      // Phase 2 — positive assertion. Simulate the user wheeling up
-      // inside the scroll container. The component's `syncViewport`
-      // effect attaches a `wheel` listener on `scrollNode` that
-      // timestamps `lastUserScrollInputTimeRef`.
-      fireEvent.wheel(scrollNode, { deltaY: -50 });
-
-      // Trigger another streaming measurement. The card grows from
-      // 260 → 340 px; the live `scrollHeight` getter now reports
-      // 660. `scrollTop` is still near the bottom (480 from phase
-      // 1) so `shouldKeepBottom` stays true. Without the cooldown
-      // on EITHER the inline `handleHeightChange` write path OR
-      // the follow-up re-pin `useLayoutEffect`, `scrollTop` would
-      // be written to 660 − 100 = 560. The cooldown must suppress
-      // both paths.
+      // Phase 2 — remain attached at the physical bottom while a downward
+      // gesture refreshes the cooldown. The measurement must defer its bottom
+      // correction, follow the newest input timestamp, and eventually restore
+      // once that renewed cooldown really expires.
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      let now = 1_000;
+      vi.spyOn(performance, "now").mockImplementation(() => now);
+      fireEvent.wheel(scrollNode, { deltaY: 20 });
+      fireEvent.scroll(scrollNode);
       scrollWrites.length = 0;
-      measuredSlotHeight = 340;
+      measuredSlotHeight = 300;
       await act(async () => {
         resizeCallbacks.get(slot)?.([] as unknown as ResizeObserverEntry[], {} as ResizeObserver);
         await Promise.resolve();
       });
 
       expect(scrollWrites).toEqual([]);
+      now = 1_100;
+      fireEvent.wheel(scrollNode, { deltaY: 20 });
+      // Native scrolling reaches the new physical bottom, which reattaches
+      // bottom-follow but deliberately preserves the renewed input timestamp.
+      scrollTop = 520;
+      fireEvent.scroll(scrollNode);
+      // A subsequent DOM-height refinement is visible to the pending layout
+      // pass without scheduling a replacement measurement timer.
+      measuredSlotHeight = 340;
+      scrollWrites.length = 0;
+      now = 1_200;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(200);
+        await Promise.resolve();
+      });
+      expect(scrollWrites).toEqual([]);
+
+      now = 1_300;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100);
+        await Promise.resolve();
+      });
+      expect(scrollWrites).toContain(560);
+
+      // Phase 3 — an explicit upward gesture really detaches. A later growth
+      // must remain suppressed even after time advances because the reader,
+      // not bottom-follow, now owns the viewport.
+      scrollWrites.length = 0;
+      now = 1_400;
+      fireEvent.wheel(scrollNode, { deltaY: -50 });
+      measuredSlotHeight = 340;
+      await act(async () => {
+        resizeCallbacks.get(slot)?.([] as unknown as ResizeObserverEntry[], {} as ResizeObserver);
+        await Promise.resolve();
+      });
+      now = 1_700;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(300);
+        await Promise.resolve();
+      });
+      expect(scrollWrites).toEqual([]);
     } finally {
+      vi.useRealTimers();
       window.ResizeObserver = OriginalResizeObserver;
       window.requestAnimationFrame = originalRequestAnimationFrame;
       window.cancelAnimationFrame = originalCancelAnimationFrame;
@@ -2478,6 +2529,8 @@ describe("AgentSessionPanel virtualization", () => {
       const { container } = render(
         <VirtualizedConversationMessageList
           isActive
+          tailFollowIntent
+          tailFollowIntentIsAuthoritative
           renderMessageCard={(message) => (
             <article className="message-card">{message.id}</article>
           )}

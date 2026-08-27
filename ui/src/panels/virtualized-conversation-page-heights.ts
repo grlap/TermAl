@@ -19,8 +19,28 @@ import {
 import { useCommittedRef } from "./use-committed-ref";
 import { useStableEvent } from "./use-stable-event";
 
+export function shouldFlushVirtualizedPageHeightLayout({
+  flushLayout,
+  hasUserScrollInteraction,
+  isInUserScrollCooldown,
+  shouldKeepBottom,
+}: {
+  flushLayout: boolean;
+  hasUserScrollInteraction: boolean;
+  isInUserScrollCooldown: boolean;
+  shouldKeepBottom: boolean;
+}) {
+  return (
+    flushLayout &&
+    shouldKeepBottom &&
+    !hasUserScrollInteraction &&
+    !isInUserScrollCooldown
+  );
+}
+
 export function useVirtualizedConversationPageHeightChange({
   bumpLayoutVersion,
+  clearPendingDeferredBottomRestore,
   clearPendingDeferredLayoutTimer,
   hasUserScrollInteractionRef,
   isActive,
@@ -34,6 +54,7 @@ export function useVirtualizedConversationPageHeightChange({
   pageHeightsRef,
   currentPageIdentityRef,
   renderedListRef,
+  scheduleDeferredBottomRestoreLayoutVersion,
   scheduleDeferredLayoutVersion,
   scrollContainerRef,
   shouldKeepBottomAfterLayoutRef,
@@ -42,6 +63,7 @@ export function useVirtualizedConversationPageHeightChange({
   writeScrollTopAndSyncViewport,
 }: {
   bumpLayoutVersion: () => void;
+  clearPendingDeferredBottomRestore: () => void;
   clearPendingDeferredLayoutTimer: () => void;
   hasUserScrollInteractionRef: MutableRefObject<boolean>;
   isActive: boolean;
@@ -59,6 +81,7 @@ export function useVirtualizedConversationPageHeightChange({
     Record<string, PageMeasurementIdentity>
   >;
   renderedListRef: RefObject<HTMLDivElement | null>;
+  scheduleDeferredBottomRestoreLayoutVersion: (delayMs: number) => void;
   scheduleDeferredLayoutVersion: (delayMs: number) => void;
   scrollContainerRef: RefObject<HTMLElement | null>;
   shouldKeepBottomAfterLayoutRef: MutableRefObject<boolean>;
@@ -114,6 +137,8 @@ export function useVirtualizedConversationPageHeightChange({
         : false;
     if (shouldKeepBottom) {
       shouldKeepBottomAfterLayoutRef.current = true;
+    } else {
+      clearPendingDeferredBottomRestore();
     }
 
     const isInUserScrollCooldown = () =>
@@ -209,15 +234,18 @@ export function useVirtualizedConversationPageHeightChange({
     if (isVisiblePage || intersectsViewport) {
       clearPendingDeferredLayoutTimer();
       if (
-        flushLayout &&
-        shouldKeepBottom &&
-        !hasUserScrollInteractionRef.current
+        shouldFlushVirtualizedPageHeightLayout({
+          flushLayout,
+          hasUserScrollInteraction: hasUserScrollInteractionRef.current,
+          isInUserScrollCooldown: isInUserScrollCooldown(),
+          shouldKeepBottom,
+        })
       ) {
         // ResizeObserver measurements arrive in an animation frame before
-        // paint. Commit the refined spacer in that frame, but keep bottom
-        // restoration behind the user-scroll cooldown below. Reaching the
-        // physical bottom intentionally preserves the timestamp because a
-        // later inertial tick may still detach the reader again.
+        // paint. Commit the refined spacer synchronously only when its paired
+        // bottom restoration can run in the same frame. During the user-scroll
+        // cooldown both parts stay asynchronous so inertial input keeps
+        // authority over the viewport.
         flushSync(bumpLayoutVersion);
       } else {
         bumpLayoutVersion();
@@ -233,9 +261,10 @@ export function useVirtualizedConversationPageHeightChange({
         // Re-run the layout-owned bottom restoration once the gesture window
         // expires. This avoids both a permanent post-measurement gap and a
         // synchronous recapture between inertial native scroll ticks.
-        scheduleDeferredLayoutVersion(remainingCooldown);
+        scheduleDeferredBottomRestoreLayoutVersion(remainingCooldown);
         return;
       }
+      clearPendingDeferredBottomRestore();
       restoreBottomAfterLayout();
       return;
     }
@@ -243,9 +272,13 @@ export function useVirtualizedConversationPageHeightChange({
     const timeSinceUserScroll = performance.now() - lastUserScrollInputTimeRef.current;
     const inUserScrollCooldown = timeSinceUserScroll < userScrollAdjustmentCooldownMs;
     if (inUserScrollCooldown) {
-      scheduleDeferredLayoutVersion(
-        userScrollAdjustmentCooldownMs - timeSinceUserScroll,
-      );
+      const remainingCooldown =
+        userScrollAdjustmentCooldownMs - timeSinceUserScroll;
+      if (shouldKeepBottom && !hasUserScrollInteractionRef.current) {
+        scheduleDeferredBottomRestoreLayoutVersion(remainingCooldown);
+      } else {
+        scheduleDeferredLayoutVersion(remainingCooldown);
+      }
       return;
     }
 

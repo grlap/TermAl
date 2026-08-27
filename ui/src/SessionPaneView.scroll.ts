@@ -25,6 +25,7 @@ import {
   didLatestTurnContentChangeBeyondPromptResidency,
   type TurnContentTransition,
 } from "./SessionPaneView.content-transition";
+import { resolveSessionPaneResizeMeasurement } from "./SessionPaneView.resize-measurement";
 import {
   buildMessageListSignature,
   canNestedScrollableConsumeWheel,
@@ -393,10 +394,8 @@ export function useSessionPaneScrollState({
       // the exact pre-animation position now. The scroll handler can then
       // recognize that first upward frame as reader movement instead of
       // reattaching tail-follow and bouncing the viewport back down.
-      paneScrollPositions[scrollStateKey] = {
-        shouldStick: false,
-        top: node.scrollTop,
-      };
+      paneScrollPositions[scrollStateKey] =
+        captureDetachedPaneScrollPosition(node);
     }
   }
 
@@ -405,6 +404,22 @@ export function useSessionPaneScrollState({
       top: node.scrollTop,
       shouldStick: true,
     };
+  }
+
+  function captureDetachedMessageStackPosition() {
+    if (getTailFollowIntent()) {
+      return;
+    }
+    const node = messageStackRef.current;
+    if (!node) {
+      return;
+    }
+    // Tab selection is the last synchronous point where the shared stack still
+    // contains the outgoing session's fully reconciled mounted range. Capture
+    // here rather than in effect cleanup: by cleanup time React may already
+    // have reused the node for the incoming tab, losing the outgoing anchor.
+    paneScrollPositions[scrollStateKey] =
+      captureDetachedPaneScrollPosition(node);
   }
 
   function beginPaneProgrammaticBottomFollow() {
@@ -770,13 +785,26 @@ export function useSessionPaneScrollState({
       const nextContentHeight =
         conversationPage?.getBoundingClientRect().height ?? 0;
       const nextViewportHeight = node.clientHeight;
-      const contentChanged =
-        Math.abs(nextContentHeight - previousContentHeight) > 0.5;
-      const viewportChanged =
-        Math.abs(nextViewportHeight - previousViewportHeight) > 0.5;
-      previousContentHeight = nextContentHeight;
-      previousViewportHeight = nextViewportHeight;
-      if (!activePageChanged && !contentChanged && !viewportChanged) {
+      const shouldRepinEveryMeasuredPixel =
+        liveFlowActiveRef.current ||
+        isSettledProgrammaticBottomFollowActive();
+      // Mermaid and other asynchronously measured cards can alternate by a
+      // pixel or two while idle. Ignore that harmless jitter, but retain the
+      // sub-pixel sensitivity needed while output is actively streaming.
+      const resizeMeasurement = resolveSessionPaneResizeMeasurement({
+        activePageChanged,
+        nextContentHeight,
+        nextViewportHeight,
+        previousContentHeight,
+        previousViewportHeight,
+        shouldRepinEveryMeasuredPixel,
+      });
+      // Keep the last handled baseline when idle jitter is suppressed. This
+      // lets same-direction one/two-pixel refinements accumulate past the
+      // threshold without reacting to a harmless back-and-forth wobble.
+      previousContentHeight = resizeMeasurement.nextContentHeightBaseline;
+      previousViewportHeight = resizeMeasurement.nextViewportHeightBaseline;
+      if (!resizeMeasurement.shouldRepin) {
         return;
       }
       if (
@@ -788,10 +816,7 @@ export function useSessionPaneScrollState({
       // ResizeObserver runs before paint. During attached live flow every
       // measured growth or collapse must converge here; deferring growth to a
       // smooth animation frame makes LIVE TURN visibly jump first.
-      if (
-        liveFlowActiveRef.current ||
-        isSettledProgrammaticBottomFollowActive()
-      ) {
+      if (shouldRepinEveryMeasuredPixel) {
         repinAttachedLiveContentBeforePaint();
         return;
       }
@@ -1049,10 +1074,9 @@ export function useSessionPaneScrollState({
       scrollKind: options.scrollKind,
       scrollSource: "user",
     });
-    paneScrollPositions[scrollStateKey] = {
-      top: node.scrollTop,
-      shouldStick: landsAtPhysicalBottom,
-    };
+    paneScrollPositions[scrollStateKey] = landsAtPhysicalBottom
+      ? { top: node.scrollTop, shouldStick: true }
+      : captureDetachedPaneScrollPosition(node);
     if (landsAtPhysicalBottom) {
       setTailFollowIntent(true);
       setNewResponseIndicator(scrollStateKey, false);
@@ -1300,6 +1324,42 @@ export function useSessionPaneScrollState({
     },
   );
 
+  const handleDocumentMessageStackUpwardKey = useStableEvent(
+    function handleDocumentMessageStackUpwardKey(event: KeyboardEvent) {
+      const node = messageStackRef.current;
+      if (
+        !isActive ||
+        !isSessionTabActive ||
+        paneViewMode !== "session" ||
+        !node ||
+        !isUpwardMessageStackKeyIntent(event) ||
+        !isMessageStackKeyboardEventInActivePane(event, node, paneRootRef.current) ||
+        !canMoveMessageStackByDelta(
+          node.scrollTop,
+          node.scrollHeight,
+          node.clientHeight,
+          -1,
+        )
+      ) {
+        return;
+      }
+
+      // Chromium can keep keyboard-scroll ownership on the transcript after a
+      // click on non-focusable message content even though document.body is the
+      // key event target. React's message-stack onKeyDown never sees that path,
+      // so claim detached authority before the browser emits its first animated
+      // upward scroll frame. Otherwise that frame is recorded as attached and
+      // an A -> B -> A tab switch restores the live bottom instead of the
+      // reader's anchored offset.
+      cancelConversationMessageEntryReveals(node);
+      cancelDetachedMessageStackRestore(scrollStateKey);
+      cancelPaneProgrammaticBottomFollow();
+      if (!hasDetachedTailFollowAuthority() || getTailFollowIntent()) {
+        markTailFollowDetachedByUser();
+      }
+    },
+  );
+
   useEffect(() => {
     if (!isActive || paneViewMode !== "session") {
       return;
@@ -1311,6 +1371,30 @@ export function useSessionPaneScrollState({
       window.removeEventListener("keydown", listener, true);
     };
   }, [handleNestedTargetPageKey, isActive, paneViewMode]);
+
+  useEffect(() => {
+    if (!isActive || !isSessionTabActive || paneViewMode !== "session") {
+      return;
+    }
+
+    document.addEventListener(
+      "keydown",
+      handleDocumentMessageStackUpwardKey,
+      true,
+    );
+    return () => {
+      document.removeEventListener(
+        "keydown",
+        handleDocumentMessageStackUpwardKey,
+        true,
+      );
+    };
+  }, [
+    handleDocumentMessageStackUpwardKey,
+    isActive,
+    isSessionTabActive,
+    paneViewMode,
+  ]);
 
   function scheduleSettledScrollToBottom(
     behavior: ScrollBehavior,
@@ -2096,6 +2180,7 @@ export function useSessionPaneScrollState({
   }, [isSending, paneViewMode, scrollStateKey]);
 
   return {
+    captureDetachedMessageStackPosition,
     handleConversationSearchItemMount,
     handleMessageStackFocusCapture,
     handleMessageStackScroll,
@@ -2150,5 +2235,58 @@ function isInteractiveMessageStackKeyTarget(
   );
   return Boolean(
     interactiveTarget && currentTarget.contains(interactiveTarget),
+  );
+}
+
+function isUpwardMessageStackKeyIntent(event: KeyboardEvent) {
+  if (
+    event.defaultPrevented ||
+    event.altKey ||
+    event.ctrlKey ||
+    event.metaKey
+  ) {
+    return false;
+  }
+  return (
+    event.key === "ArrowUp" ||
+    event.key === "PageUp" ||
+    event.key === "Home" ||
+    (event.key === " " && event.shiftKey)
+  );
+}
+
+function isMessageStackKeyboardEventInActivePane(
+  event: KeyboardEvent,
+  messageStack: HTMLElement,
+  paneRoot: HTMLElement | null,
+) {
+  if (
+    isInteractiveMessageStackKeyTarget(
+      event.target,
+      paneRoot ?? messageStack,
+    )
+  ) {
+    return false;
+  }
+
+  const path =
+    typeof event.composedPath === "function" ? event.composedPath() : [];
+  if (
+    path.includes(messageStack) ||
+    (paneRoot !== null && path.includes(paneRoot))
+  ) {
+    return true;
+  }
+  if (
+    event.target === document ||
+    event.target === document.body ||
+    event.target === document.documentElement
+  ) {
+    return true;
+  }
+  return (
+    event.target instanceof Node &&
+    (messageStack.contains(event.target) ||
+      (paneRoot?.contains(event.target) ?? false))
   );
 }

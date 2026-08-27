@@ -2519,6 +2519,45 @@ describe("VirtualizedConversationMessageList foundation", () => {
     }
   });
 
+  it("keeps an active search pin during programmatic smooth upward native frames", async () => {
+    const messages = makeTextMessages(160);
+    const matchedKeys = new Set(
+      messages.map((message) => `message:${message.id}`),
+    );
+    const virtualizerHandleRef: VirtualizedConversationMessageListHandleRef = {
+      current: null,
+    };
+    const harness = renderVirtualizedHarness({
+      messages,
+      conversationSearchQuery: "Message",
+      conversationSearchMatchedItemKeys: matchedKeys,
+      conversationSearchActiveItemKey: "message:message-140",
+      tailFollowIntent: true,
+      virtualizerHandleRef,
+    });
+
+    try {
+      await waitFor(() => {
+        expect(screen.getByText("message-140")).toBeInTheDocument();
+        expect(virtualizerHandleRef.current).not.toBeNull();
+      });
+      expect(screen.queryByText("message-1")).not.toBeInTheDocument();
+
+      vi.useFakeTimers();
+      act(() => {
+        virtualizerHandleRef.current!.beginUserScrollNavigation();
+        harness.setScrollTop(0);
+        fireEvent.scroll(harness.scrollNode);
+      });
+
+      await advanceIdleMountedRangeCompaction();
+      expect(screen.getByText("message-140")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+      harness.restore();
+    }
+  });
+
   it("uses the estimated search target when the mounted target has zero geometry", async () => {
     const messages = makeTextMessages(160);
     const matchedKeys = new Set(
