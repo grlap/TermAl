@@ -318,6 +318,32 @@ struct Project {
     remote_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     remote_project_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    engram: Option<EngramProjectSettings>,
+}
+
+/// Serializes projects for client-facing state snapshots without exposing the
+/// operator-installed Engram work-authority credential. The runtime `Project`
+/// and persisted-state projection keep the value intact; only `StateResponse`
+/// uses this sanitizer.
+fn serialize_client_projects_without_engram_authority<S>(
+    projects: &[Project],
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    let sanitized = projects
+        .iter()
+        .cloned()
+        .map(|mut project| {
+            if let Some(settings) = project.engram.as_mut() {
+                settings.work_authority_grant = None;
+            }
+            project
+        })
+        .collect::<Vec<_>>();
+    sanitized.serialize(serializer)
 }
 
 /// Enumerates conversation marker categories.
@@ -1434,6 +1460,16 @@ struct CreateProjectRequest {
     remote_id: String,
 }
 
+/// Replaces one project's Engram host-adapter configuration. The route is
+/// intentionally project-scoped: Phase 0 never enables Engram globally by
+/// accident, and a project can be disabled immediately without a restart.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateProjectEngramSettingsRequest {
+    #[serde(flatten)]
+    settings: EngramProjectSettings,
+}
+
 /// Represents the update app settings request payload.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1910,7 +1946,10 @@ struct StateResponse {
     #[serde(default)]
     agent_readiness: Vec<AgentReadiness>,
     preferences: AppPreferences,
-    #[serde(default)]
+    #[serde(
+        default,
+        serialize_with = "serialize_client_projects_without_engram_authority"
+    )]
     projects: Vec<Project>,
     #[serde(default)]
     orchestrators: Vec<OrchestratorInstance>,

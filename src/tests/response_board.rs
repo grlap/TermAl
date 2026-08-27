@@ -65,6 +65,7 @@ fn attach_response_board_project(
         root_path: format!("/tmp/{project_id}"),
         remote_id: String::new(),
         remote_project_id: None,
+        engram: None,
     });
     let session_index = inner
         .find_session_index(session_id)

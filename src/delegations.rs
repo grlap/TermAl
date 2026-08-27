@@ -671,6 +671,11 @@ impl AppState {
             delegation: delegation_summary_from_record(&record),
         });
 
+        // Binding is external process I/O and must never run under the global
+        // state mutex. It completes before the child's first synchronous turn
+        // dispatch so that evaluate can use the persisted routing token.
+        self.bind_engram_delegation_best_effort(&record);
+
         #[cfg(test)]
         if record
             .prompt

@@ -90,6 +90,7 @@ impl StateInner {
             root_path,
             remote_id,
             remote_project_id: None,
+            engram: None,
         };
         self.projects.push(project.clone());
         project
@@ -150,6 +151,7 @@ impl StateInner {
             orchestrator_auto_dispatch_blocked: false,
             runtime_stop_in_progress: false,
             deferred_stop_callbacks: Vec::new(),
+            engram: EngramSessionState::default(),
             hidden: false,
             // Freshly created records start unstamped; the call path
             // immediately inserts this record and then the caller routes

@@ -401,6 +401,12 @@ impl AppState {
         let default_workdir = normalize_local_user_facing_path(&default_workdir);
         let mut inner = load_state(&persistence_path)?
             .unwrap_or_else(|| bootstrap_default_local_state(&default_workdir));
+        #[cfg(test)]
+        TEST_ENGRAM_BOOT_TRANSPORT.with(|slot| {
+            if let Some(transport) = slot.borrow().clone() {
+                inner.engram_host_adapter = Arc::new(EngramHostAdapter { transport });
+            }
+        });
         let discovery_scopes = collect_codex_discovery_scopes(&default_workdir, &inner.projects);
         match discover_codex_threads(&default_workdir, &discovery_scopes) {
             Ok(discovery) => {
@@ -709,6 +715,7 @@ impl AppState {
             state_broadcast_mailbox: Some(state_broadcast_mailbox),
             telegram_relay_runtime: Arc::new(Mutex::new(TelegramRelayRuntime::default())),
             shared_codex_runtime: Arc::new(Mutex::new(None)),
+            shared_codex_exit_claims: Arc::new(Mutex::new(HashSet::new())),
             agent_runtime_spawning_enabled: true,
             #[cfg(test)]
             test_acp_runtime_overrides: Arc::new(Mutex::new(Vec::new())),
@@ -785,6 +792,12 @@ impl AppState {
         // and primary-state recording cannot resume a parent with a false
         // unavailable result.
         self.reconcile_durable_delegation_review_submissions_after_boot();
+        // Engram routing tokens and open grants are host-private session
+        // state. Recover them before any mailbox/workflow pass can dispatch a
+        // prompt. Recovery runs as a bounded barrier: at most eight sidecars
+        // are contacted concurrently and each call stays under the adapter's
+        // 600 ms budget, avoiding unbounded OS-thread creation.
+        self.recover_engram_sessions_after_boot();
         // Materialize unread mailbox wakes before either workflow reconciler can
         // queue and dispatch a durable resume. That preserves FIFO ordering:
         // the workflow activation drains the recovered mailbox wake first.

@@ -569,6 +569,7 @@ fn upsert_remote_proxy_session_record(
         orchestrator_auto_dispatch_blocked: false,
         runtime_stop_in_progress: false,
         deferred_stop_callbacks: Vec::new(),
+        engram: EngramSessionState::default(),
         hidden: false,
         // Freshly created records start unstamped; subsequent edits
         // flow through `session_mut*` which stamps them on access.

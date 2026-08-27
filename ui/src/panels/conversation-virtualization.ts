@@ -379,6 +379,8 @@ export function estimateConversationMessageHeight(
     }
     case "thinking":
       return Math.min(900, Math.max(140, 112 + message.lines.length * 28));
+    case "engramControl":
+      return 176 + (message.directives?.length ?? 0) * 32;
     case "command":
       return ESTIMATED_COLLAPSED_COMMAND_HEIGHT_PX;
     case "diff": {

@@ -3163,6 +3163,7 @@ fn start_turn_on_record_rejects_remote_proxy_sessions() {
         Vec::new(),
         None,
         None,
+        None,
     ) {
         Ok(_) => panic!("remote proxy sessions should reject local turn dispatch"),
         Err(error) => error,
@@ -3200,6 +3201,7 @@ fn start_turn_on_record_rejects_invalid_remote_proxy_identity() {
         "message-invalid-proxy".to_owned(),
         "This must not dispatch.".to_owned(),
         Vec::new(),
+        None,
         None,
         None,
     ) {

@@ -163,6 +163,8 @@ impl PersistedState {
         preferences.telegram.bot_token = None;
         let mut inner = StateInner {
             codex: self.codex,
+            engram_host_adapter: Arc::new(EngramHostAdapter::default()),
+            engram_project_resets: HashSet::new(),
             preferences,
             revision: self.revision,
             next_project_number: self.next_project_number,
@@ -258,6 +260,10 @@ struct PersistedSessionRecord {
     remote_session_id: Option<String>,
     #[serde(default, skip_serializing_if = "session_flag_is_false")]
     orchestrator_auto_dispatch_blocked: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    engram_routing_token: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    engram_open_grant_id: Option<String>,
     #[serde(skip)]
     message_start_index: usize,
     /// Runtime-only instruction for the SQLite serializer. Full snapshots set
@@ -351,6 +357,8 @@ impl PersistedSessionRecord {
             remote_id: record.remote_id.clone(),
             remote_session_id: record.remote_session_id.clone(),
             orchestrator_auto_dispatch_blocked: record.orchestrator_auto_dispatch_blocked,
+            engram_routing_token: record.engram.routing_token.clone(),
+            engram_open_grant_id: record.engram.active_grant_id.clone(),
             message_start_index: record.message_start_index,
             persist_prompt_history: true,
             session,
@@ -415,6 +423,12 @@ impl PersistedSessionRecord {
             runtime: SessionRuntime::None,
             runtime_reset_required: false,
             orchestrator_auto_dispatch_blocked: self.orchestrator_auto_dispatch_blocked,
+            engram: EngramSessionState {
+                routing_token: self.engram_routing_token.clone(),
+                active_grant_id: self.engram_open_grant_id,
+                rebind_required: self.engram_routing_token.is_some(),
+                ..EngramSessionState::default()
+            },
             runtime_stop_in_progress: false,
             deferred_stop_callbacks: Vec::new(),
             hidden: false,

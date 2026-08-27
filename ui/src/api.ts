@@ -30,6 +30,7 @@ import type {
   OrchestratorTemplate,
   OrchestratorTemplateDraft,
   Project,
+  EngramProjectSettings,
   RemoteConfig,
   SandboxMode,
   Session,
@@ -1063,6 +1064,19 @@ export function deleteProject(projectId: string) {
     `/api/projects/${encodeURIComponent(projectId)}`,
     {
       method: "DELETE",
+    },
+  );
+}
+
+export function updateProjectEngramSettings(
+  projectId: string,
+  settings: EngramProjectSettings,
+) {
+  return request<StateResponse>(
+    `/api/projects/${encodeURIComponent(projectId)}/engram`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(settings),
     },
   );
 }

@@ -38,6 +38,7 @@ fn acp_dispatch_publishes_queued_turn_before_writer_consumption() {
                 prompt: "queued before stop".to_owned(),
                 resume_session_id: None,
             },
+            engram_dispatch_generation: None,
             mailbox_notification: None,
             sender: input_tx,
             session_id: "queued-acp-session".to_owned(),

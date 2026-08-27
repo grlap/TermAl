@@ -215,7 +215,24 @@ export type Project = {
   name: string;
   rootPath: string;
   remoteId?: string | null;
+  engram?: EngramProjectStateSettings | null;
 };
+
+export type EngramProjectSettings = {
+  enabled: boolean;
+  binaryPath?: string | null;
+  home?: string | null;
+  workAuthorityGrant?: string | null;
+  deadlineMs?: number | null;
+};
+
+// Client-facing state snapshots deliberately omit the operator-installed
+// work-authority credential. `EngramProjectSettings` remains the update-route
+// input so an operator can install or replace that credential explicitly.
+export type EngramProjectStateSettings = Omit<
+  EngramProjectSettings,
+  "workAuthorityGrant"
+>;
 
 export type OrchestratorNodePosition = {
   x: number;
@@ -481,6 +498,7 @@ export type Message =
   | MarkdownMessage
   | ParallelAgentsMessage
   | FileChangesMessage
+  | EngramControlMessage
   | SubagentResultMessage
   | ApprovalMessage
   | UserInputRequestMessage
@@ -636,6 +654,46 @@ export type FileChangesMessage = BaseMessage & {
   type: "fileChanges";
   title: string;
   files: FileChangeSummaryFile[];
+};
+
+export type EngramControlStage = "dispatch" | "checkpoint" | "restart";
+export type EngramControlDecision =
+  | "grant"
+  | "defer"
+  | "refuse"
+  | "degraded";
+export type EngramControlDispatch =
+  | "sent_on_grant"
+  | "sent_without_grant"
+  | "queued";
+export type EngramControlFailMode = "enforced" | "shadow" | "degraded";
+export type EngramControlDirective = {
+  directiveId: string;
+  kind: string;
+  audience: string;
+  satisfaction: string;
+};
+export type EngramControlMessage = BaseMessage & {
+  type: "engramControl";
+  schemaVersion: number;
+  stage: EngramControlStage;
+  assurance: string;
+  decision: EngramControlDecision;
+  dispatch: EngramControlDispatch;
+  refusalCode?: string | null;
+  deferCode?: string | null;
+  grantId?: string | null;
+  directives?: EngramControlDirective[];
+  deliveredRange?: { from: number; to: number; head: number } | null;
+  latencyMs: {
+    evaluate?: number | null;
+    begin?: number | null;
+    checkpoint?: number | null;
+    total: number;
+  };
+  failMode: EngramControlFailMode;
+  repairArmed?: boolean;
+  nextIntent?: "continue" | "wait" | "exit" | null;
 };
 
 export type SubagentResultMessage = BaseMessage & {

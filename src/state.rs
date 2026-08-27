@@ -929,6 +929,10 @@ struct AppState {
     telegram_relay_runtime: Arc<Mutex<TelegramRelayRuntime>>,
     /// Lazily created shared Codex app-server reused across Codex sessions.
     shared_codex_runtime: Arc<Mutex<Option<SharedCodexRuntime>>>,
+    /// Runtime ids whose exit cascade has already been claimed. Several
+    /// worker threads may report one shared-process death; only the first may
+    /// terminalize sessions or rebind Engram.
+    shared_codex_exit_claims: Arc<Mutex<HashSet<String>>>,
     /// Whether this state may launch real local agent subprocesses. Production
     /// states enable spawning; lightweight test states disable it so ordinary
     /// state-transition tests cannot accidentally retain real agent runtimes.
@@ -1200,6 +1204,14 @@ fn collect_workspace_layout_summaries<'a>(
 /// Represents state inner.
 struct StateInner {
     codex: CodexState,
+    /// Process/runtime side of the optional Engram host adapter. Callers may
+    /// clone this handle while holding `inner`, but must release the state
+    /// mutex before invoking any control operation.
+    engram_host_adapter: Arc<EngramHostAdapter>,
+    /// Runtime-only project fence used while Engram connection settings drain
+    /// the old sidecars. It prevents newly-created delegations from binding to
+    /// the old connection between the reset snapshot and commit.
+    engram_project_resets: HashSet<String>,
     preferences: AppPreferences,
     /// Runtime retry marker for settings mutations that changed memory but
     /// failed synchronous persistence. An identical request must retry the
@@ -1292,6 +1304,8 @@ impl StateInner {
     fn new() -> Self {
         Self {
             codex: CodexState::default(),
+            engram_host_adapter: Arc::new(EngramHostAdapter::default()),
+            engram_project_resets: HashSet::new(),
             preferences: AppPreferences::default(),
             settings_persist_dirty: false,
             remote_settings_persist_dirty: false,
@@ -1475,6 +1489,9 @@ struct SessionRecord {
     /// reconstruct the wrong terminal sequence when completion/error and runtime-exit both land
     /// during the shutdown window.
     deferred_stop_callbacks: Vec<DeferredStopCallback>,
+    /// Host-private Engram binding and open-turn state. It is persisted in the
+    /// session row but never copied onto the wire-level `Session`.
+    engram: EngramSessionState,
     hidden: bool,
     session: Session,
     /// Monotonic mutation stamp assigned by [`StateInner::next_mutation_stamp`]

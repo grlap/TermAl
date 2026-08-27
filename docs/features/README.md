@@ -44,3 +44,4 @@ design decisions, and future plans.
 - [Kimi CLI Integration](./kimi-cli-integration.md)
 - [Territory Visualization](./territory-visualization.md)
 - [WhatsApp Integration](./whatsapp-integration.md)
+- [Engram Host Adapter](./engram-host-adapter.md)

@@ -325,7 +325,7 @@ fn project_progress_summary_for_message(message: &Message) -> Option<String> {
             }
         }
         Message::ParallelAgents { agents, .. } => Some(parallel_agents_preview_text(agents)),
-        Message::FileChanges { .. } => None,
+        Message::FileChanges { .. } | Message::EngramControl { .. } => None,
         Message::Approval { .. }
         | Message::UserInputRequest { .. }
         | Message::McpElicitationRequest { .. }

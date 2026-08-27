@@ -541,23 +541,70 @@ struct MailboxNotificationDelivery {
 enum TurnDispatch {
     PersistentClaude {
         command: ClaudePromptCommand,
+        engram_dispatch_generation: Option<u64>,
         mailbox_notification: Option<MailboxNotificationDelivery>,
         sender: Sender<ClaudeRuntimeCommand>,
         session_id: String,
     },
     PersistentCodex {
         command: CodexPromptCommand,
+        engram_dispatch_generation: Option<u64>,
         mailbox_notification: Option<MailboxNotificationDelivery>,
         sender: Sender<CodexRuntimeCommand>,
         session_id: String,
     },
     PersistentAcp {
         command: AcpPromptCommand,
+        engram_dispatch_generation: Option<u64>,
         mailbox_notification: Option<MailboxNotificationDelivery>,
         sender: Sender<AcpRuntimeCommand>,
         session_id: String,
         turn_lifecycle: AcpTurnLifecycle,
     },
+}
+
+impl TurnDispatch {
+    fn session_id(&self) -> &str {
+        match self {
+            Self::PersistentClaude { session_id, .. }
+            | Self::PersistentCodex { session_id, .. }
+            | Self::PersistentAcp { session_id, .. } => session_id,
+        }
+    }
+
+    fn engram_dispatch_generation(&self) -> Option<u64> {
+        match self {
+            Self::PersistentClaude {
+                engram_dispatch_generation,
+                ..
+            }
+            | Self::PersistentCodex {
+                engram_dispatch_generation,
+                ..
+            }
+            | Self::PersistentAcp {
+                engram_dispatch_generation,
+                ..
+            } => *engram_dispatch_generation,
+        }
+    }
+
+    fn mailbox_notification(&self) -> Option<&MailboxNotificationDelivery> {
+        match self {
+            Self::PersistentClaude {
+                mailbox_notification,
+                ..
+            }
+            | Self::PersistentCodex {
+                mailbox_notification,
+                ..
+            }
+            | Self::PersistentAcp {
+                mailbox_notification,
+                ..
+            } => mailbox_notification.as_ref(),
+        }
+    }
 }
 
 /// Defines the dispatch turn result variants.

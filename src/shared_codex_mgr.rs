@@ -277,9 +277,39 @@ impl AppState {
         runtime_id: &str,
         error_message: Option<&str>,
     ) -> Result<()> {
-        let session_exits = {
-            let inner = self.inner.lock().expect("state mutex poisoned");
-            inner
+        // EOF, wait, writer and watchdog callbacks can all report the same
+        // process death. Claim the runtime id before touching any session or
+        // Engram state so exactly one callback owns the cascade. The explicit
+        // claim also covers focused tests and setup-failure paths whose
+        // session handle exists before the runtime enters the shared slot.
+        {
+            let mut claims = self
+                .shared_codex_exit_claims
+                .lock()
+                .expect("shared Codex exit claims mutex poisoned");
+            if !claims.insert(runtime_id.to_owned()) {
+                return Ok(());
+            }
+        }
+        let removed_runtime = {
+            let mut shared_runtime = self
+                .shared_codex_runtime
+                .lock()
+                .expect("shared Codex runtime mutex poisoned");
+            if shared_runtime
+                .as_ref()
+                .is_some_and(|runtime| runtime.runtime_id == runtime_id)
+            {
+                shared_runtime.take()
+            } else {
+                None
+            }
+        };
+        let claimed_shared_slot = removed_runtime.is_some();
+
+        let (session_exits, engram_rebind_session_ids) = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let session_exits = inner
                 .sessions
                 .iter()
                 .filter_map(|record| match &record.runtime {
@@ -294,7 +324,32 @@ impl AppState {
                     }
                     _ => None,
                 })
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>();
+            let engram_rebind_session_ids = inner
+                .sessions
+                .iter()
+                .filter(|record| {
+                    record.session.agent == Agent::Codex
+                        && record.engram.routing_token.is_some()
+                        && (claimed_shared_slot
+                            || matches!(
+                                &record.runtime,
+                                SessionRuntime::Codex(handle)
+                                    if handle.runtime_id == runtime_id
+                            ))
+                })
+                .map(|record| record.session.id.clone())
+                .collect::<Vec<_>>();
+            for session_id in &engram_rebind_session_ids {
+                if let Some(index) = inner.find_session_index(session_id) {
+                    inner
+                        .session_mut_by_index(index)
+                        .expect("session index should be valid")
+                        .engram
+                        .rebind_required = true;
+                }
+            }
+            (session_exits, engram_rebind_session_ids)
         };
 
         let token = RuntimeToken::Codex(runtime_id.to_owned());
@@ -302,7 +357,14 @@ impl AppState {
             let session_error = was_busy.then_some(error_message).flatten();
             self.handle_runtime_exit_if_matches(&session_id, &token, session_error)?;
         }
-        self.clear_shared_codex_runtime_if_matches(runtime_id)?;
+        for session_id in engram_rebind_session_ids {
+            self.rebind_engram_session_after_runtime_loss(&session_id);
+        }
+        if let Some(removed_runtime) = removed_runtime {
+            removed_runtime.kill().with_context(|| {
+                format!("failed to terminate shared Codex runtime `{runtime_id}`")
+            })?;
+        }
         Ok(())
     }
 }

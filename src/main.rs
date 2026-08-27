@@ -331,6 +331,10 @@ fn app_router(state: AppState) -> Router {
         )
         .route("/api/projects", post(create_project))
         .route("/api/projects/{id}", delete(delete_project))
+        .route(
+            "/api/projects/{id}/engram",
+            patch(update_project_engram_settings),
+        )
         .route("/api/projects/{id}/digest", get(get_project_digest))
         .route(
             "/api/projects/{id}/actions/{action_id}",
@@ -641,6 +645,7 @@ include!("remote_sync.rs");
 #[cfg(test)]
 include!("test_temp_root.rs");
 include!("state.rs");
+include!("engram_host_adapter.rs");
 include!("delegation_mcp.rs");
 include!("session_runtime.rs");
 include!("session_interaction.rs");

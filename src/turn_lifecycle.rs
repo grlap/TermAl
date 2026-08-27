@@ -54,6 +54,11 @@ impl AppState {
         token: &RuntimeToken,
         error_message: &str,
     ) -> Result<()> {
+        self.checkpoint_engram_turn_off_lock(
+            session_id,
+            Some(token),
+            EngramNextIntent::Wait,
+        );
         let cleaned = error_message.trim();
         let should_dispatch_next = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
@@ -76,6 +81,7 @@ impl AppState {
                     .push(DeferredStopCallback::TurnFailed(cleaned.to_owned()));
                 return Ok(());
             }
+            take_and_abandon_engram_pending_dispatch(record);
 
             if let Some(message_id) = message_id {
                 record.session.messages.push(Message::Text {
@@ -231,6 +237,11 @@ impl AppState {
         token: &RuntimeToken,
         error_message: &str,
     ) -> Result<()> {
+        self.checkpoint_engram_turn_off_lock(
+            session_id,
+            Some(token),
+            EngramNextIntent::Wait,
+        );
         let cleaned = error_message.trim();
         let should_dispatch_next = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
@@ -252,6 +263,7 @@ impl AppState {
                     .push(DeferredStopCallback::TurnError(cleaned.to_owned()));
                 return Ok(());
             }
+            take_and_abandon_engram_pending_dispatch(record);
 
             record.session.status = SessionStatus::Error;
             if !cleaned.is_empty() {
@@ -296,6 +308,7 @@ impl AppState {
         session_id: &str,
         token: &RuntimeToken,
     ) -> Result<()> {
+        self.checkpoint_successful_engram_turn_off_lock(session_id, token);
         let stopping_orchestrator_session_ids = self.stopping_orchestrator_session_ids_snapshot();
         let (should_dispatch_next, orchestrator_delta) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
@@ -345,6 +358,7 @@ impl AppState {
                     .push(DeferredStopCallback::TurnCompleted);
                 return Ok(());
             }
+            take_and_abandon_engram_pending_dispatch(record);
 
             if record.session.status == SessionStatus::Active {
                 record.session.status = SessionStatus::Idle;
@@ -427,6 +441,11 @@ impl AppState {
         token: &RuntimeToken,
         error_message: Option<&str>,
     ) -> Result<()> {
+        self.checkpoint_engram_turn_off_lock(
+            session_id,
+            Some(token),
+            EngramNextIntent::Wait,
+        );
         let cleaned = error_message.map(str::trim).unwrap_or("");
         let (should_dispatch_next, pending_interaction_updates, created_messages, revision) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
@@ -478,6 +497,7 @@ impl AppState {
                 let record = inner
                     .session_mut_by_index(index)
                     .expect("session index should be valid");
+                take_and_abandon_engram_pending_dispatch(record);
                 record.runtime = SessionRuntime::None;
                 record.runtime_reset_required = false;
                 record.orchestrator_auto_dispatch_blocked = false;

@@ -775,6 +775,7 @@ fn opencode_prompt_dispatch_does_not_inject_repository_instruction_files() {
                 Vec::new(),
                 Some("Review the current staged and unstaged changes.".to_owned()),
                 None,
+                None,
             )
             .expect("OpenCode turn should dispatch")
     };

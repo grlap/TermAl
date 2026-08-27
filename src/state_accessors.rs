@@ -149,6 +149,7 @@ fn conversation_overview_message_metadata(
         | Message::Markdown { author, .. }
         | Message::SubagentResult { author, .. }
         | Message::ParallelAgents { author, .. }
+        | Message::EngramControl { author, .. }
         | Message::Approval { author, .. }
         | Message::UserInputRequest { author, .. }
         | Message::McpElicitationRequest { author, .. }

@@ -34,14 +34,29 @@ fn record_rejected_turn_dispatch(
     session_id: &str,
     error_message: &str,
     mailbox_notification: Option<&MailboxNotificationDelivery>,
-) {
-    if let Err(err) = state.clear_runtime(session_id) {
-        eprintln!(
-            "turn dispatch> failed clearing rejected runtime for `{session_id}`: {err:#}"
-        );
-    }
-    if let Err(err) = state.fail_turn(session_id, error_message) {
-        eprintln!("turn dispatch> failed recording rejection for `{session_id}`: {err:#}");
+    engram_dispatch_generation: Option<u64>,
+) -> bool {
+    if let Some(dispatch_generation) = engram_dispatch_generation {
+        match state.reject_engram_turn_delivery_if_current(
+            session_id,
+            dispatch_generation,
+            error_message,
+        ) {
+            Ok(true) => {}
+            Ok(false) => return false,
+            Err(err) => eprintln!(
+                "turn dispatch> failed recording guarded Engram rejection for `{session_id}`: {err:#}"
+            ),
+        }
+    } else {
+        if let Err(err) = state.clear_runtime(session_id) {
+            eprintln!(
+                "turn dispatch> failed clearing rejected runtime for `{session_id}`: {err:#}"
+            );
+        }
+        if let Err(err) = state.fail_turn(session_id, error_message) {
+            eprintln!("turn dispatch> failed recording rejection for `{session_id}`: {err:#}");
+        }
     }
     if let Some(notification) = mailbox_notification {
         if let Err(err) = state.requeue_rejected_mailbox_notification(notification) {
@@ -51,13 +66,41 @@ fn record_rejected_turn_dispatch(
             );
         }
     }
+    true
 }
 
 /// Delivers turn dispatch.
 fn deliver_turn_dispatch(state: &AppState, dispatch: TurnDispatch) -> Result<(), ApiError> {
+    if let Some(dispatch_generation) = dispatch.engram_dispatch_generation() {
+        match state.prepare_engram_turn_delivery_off_lock(
+            dispatch.session_id(),
+            dispatch_generation,
+        ) {
+            EngramTurnDeliveryPreparation::Ready => {}
+            EngramTurnDeliveryPreparation::Superseded => return Ok(()),
+            EngramTurnDeliveryPreparation::Rejected => {
+                let session_id = dispatch.session_id().to_owned();
+                let mailbox_notification = dispatch.mailbox_notification().cloned();
+                let error_message = "turn dispatch was invalidated before Engram begin completed";
+                let rejected = record_rejected_turn_dispatch(
+                    state,
+                    &session_id,
+                    error_message,
+                    mailbox_notification.as_ref(),
+                    Some(dispatch_generation),
+                );
+                return if rejected {
+                    Err(ApiError::conflict(error_message))
+                } else {
+                    Ok(())
+                };
+            }
+        }
+    }
     let mailbox_notification = match dispatch {
         TurnDispatch::PersistentClaude {
             command,
+            engram_dispatch_generation: _,
             mailbox_notification,
             sender,
             session_id,
@@ -68,6 +111,7 @@ fn deliver_turn_dispatch(state: &AppState, dispatch: TurnDispatch) -> Result<(),
                     &session_id,
                     &format!("failed to queue prompt for Claude session: {err}"),
                     mailbox_notification.as_ref(),
+                    None,
                 );
                 return Err(ApiError::internal(
                     "failed to queue prompt for Claude session",
@@ -77,6 +121,7 @@ fn deliver_turn_dispatch(state: &AppState, dispatch: TurnDispatch) -> Result<(),
         }
         TurnDispatch::PersistentCodex {
             command,
+            engram_dispatch_generation: _,
             mailbox_notification,
             sender,
             session_id,
@@ -90,6 +135,7 @@ fn deliver_turn_dispatch(state: &AppState, dispatch: TurnDispatch) -> Result<(),
                     &session_id,
                     &format!("failed to queue prompt for Codex session: {err}"),
                     mailbox_notification.as_ref(),
+                    None,
                 );
                 return Err(ApiError::internal(
                     "failed to queue prompt for Codex session",
@@ -99,6 +145,7 @@ fn deliver_turn_dispatch(state: &AppState, dispatch: TurnDispatch) -> Result<(),
         }
         TurnDispatch::PersistentAcp {
             command,
+            engram_dispatch_generation: _,
             mailbox_notification,
             sender,
             session_id,
@@ -116,6 +163,7 @@ fn deliver_turn_dispatch(state: &AppState, dispatch: TurnDispatch) -> Result<(),
                     &session_id,
                     &format!("failed to queue prompt for ACP session: {err}"),
                     mailbox_notification.as_ref(),
+                    None,
                 );
                 return Err(ApiError::internal(
                     "failed to queue prompt for agent session",
@@ -1049,6 +1097,20 @@ async fn delete_project(
     State(state): State<AppState>,
 ) -> Result<Json<StateResponse>, ApiError> {
     let response = run_blocking_api(move || state.delete_project(&project_id)).await?;
+    Ok(Json(response))
+}
+
+/// Replaces a project's Engram host-adapter settings after validating the
+/// external installation without holding TermAl's global state mutex.
+async fn update_project_engram_settings(
+    AxumPath(project_id): AxumPath<String>,
+    State(state): State<AppState>,
+    Json(request): Json<UpdateProjectEngramSettingsRequest>,
+) -> Result<Json<StateResponse>, ApiError> {
+    let response = run_blocking_api(move || {
+        state.update_project_engram_settings(&project_id, request.settings)
+    })
+    .await?;
     Ok(Json(response))
 }
 

@@ -806,7 +806,7 @@ fn transition_message_summary(message: &Message) -> Option<String> {
             }
         }
         Message::ParallelAgents { agents, .. } => Some(parallel_agents_preview_text(agents)),
-        Message::FileChanges { .. } => None,
+        Message::FileChanges { .. } | Message::EngramControl { .. } => None,
         Message::Approval { .. }
         | Message::UserInputRequest { .. }
         | Message::McpElicitationRequest { .. }
@@ -887,7 +887,8 @@ fn transition_message_text(message: &Message) -> Option<String> {
             .trim()
             .to_owned(),
         ),
-        Message::Approval { .. }
+        Message::EngramControl { .. }
+        | Message::Approval { .. }
         | Message::UserInputRequest { .. }
         | Message::McpElicitationRequest { .. }
         | Message::CodexAppRequest { .. }

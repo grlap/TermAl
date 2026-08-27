@@ -48,6 +48,32 @@ impl AppState {
         if self.remote_session_target(session_id)?.is_some() {
             return self.proxy_remote_kill_session(session_id);
         }
+        let engram_session_ids_to_terminate = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            let mut collected = vec![session_id.to_owned()];
+            let mut cursor = 0;
+            while cursor < collected.len() {
+                let parent_session_id = collected[cursor].clone();
+                for delegation in &inner.delegations {
+                    if delegation.parent_session_id == parent_session_id
+                        && !collected.contains(&delegation.child_session_id)
+                    {
+                        collected.push(delegation.child_session_id.clone());
+                    }
+                }
+                cursor += 1;
+            }
+            collected
+        };
+        for terminating_session_id in &engram_session_ids_to_terminate {
+            self.checkpoint_engram_turn_off_lock(
+                terminating_session_id,
+                None,
+                EngramNextIntent::Exit,
+            );
+            self.wait_for_engram_checkpoint_completion(terminating_session_id);
+            self.shutdown_engram_session_process_if_bound(terminating_session_id);
+        }
         let (
             runtime_to_kill,
             delegation_runtimes_to_kill,
@@ -334,6 +360,11 @@ impl AppState {
                 }
             }
         };
+        self.checkpoint_engram_turn_off_lock(session_id, None, EngramNextIntent::Wait);
+        let prepared_queued_turn = options
+            .dispatch_queued_prompts_on_success
+            .then(|| self.prepare_next_queued_turn_engram_off_lock(session_id))
+            .flatten();
         let orchestrator_stop_instance_id = options.orchestrator_stop_instance_id.clone();
         let suppress_automatic_resume = options.pause_automatic_resumes_on_success;
         let transition = {
@@ -350,6 +381,7 @@ impl AppState {
                 let record = inner
                     .session_mut_by_index(index)
                     .expect("session index should be valid");
+                take_and_abandon_engram_pending_dispatch(record);
                 record.runtime = SessionRuntime::None;
                 record.runtime_reset_required = false;
                 record.runtime_stop_in_progress = false;
@@ -443,28 +475,27 @@ impl AppState {
                 }
             }
             let should_dispatch_next = options.dispatch_queued_prompts_on_success
-                && !inner.sessions[index].queued_prompts.is_empty();
-            // Persistence failure cannot resurrect the stopped runtime. Only
-            // pay for a full record snapshot when a queued successor can add
-            // speculative transcript/runtime state that needs rolling back.
+                && prepared_queued_turn.as_ref().is_some_and(|prepared| {
+                    inner.sessions[index].engram.dispatch_generation
+                        == prepared.dispatch_generation
+                        && inner.sessions[index]
+                            .queued_prompts
+                            .front()
+                            .is_some_and(|queued| {
+                                queued.pending_prompt.id == prepared.prompt_id
+                            })
+                });
             let post_stop_record = should_dispatch_next.then(|| inner.sessions[index].clone());
-            // Start an already-queued successor before publishing the stop
-            // commit. Exposing the intermediate Idle record made the session
-            // leave the Working list while the fresh runtime was being
-            // prepared, only to reappear as Active a moment later. The stop
-            // message and successor activation are one user-visible
-            // transition; a failed successor start still commits the stopped
-            // state and reports the dispatch error below.
             let queued_turn_result = if should_dispatch_next {
+                let pending_engram = prepared_queued_turn
+                    .as_ref()
+                    .and_then(|prepared| prepared.pending_engram.clone());
+                let pending_engram_for_abandon = pending_engram.clone();
                 let result = self
-                    .start_next_queued_turn_locked(&mut inner, index, false)
+                    .start_next_queued_turn_locked(&mut inner, index, false, pending_engram)
                     .map_err(|err| ApiError::internal(format!("{err:#}")));
                 match &result {
                     Ok(Some(_)) => {
-                        // The stop/file-change messages and the successor user
-                        // message form one appended suffix. Capturing them
-                        // together after promotion keeps progressive counts,
-                        // final status, and the mutation stamp coherent.
                         let successor_message_index = inner.sessions[index]
                             .session
                             .messages
@@ -475,23 +506,33 @@ impl AppState {
                     }
                     Ok(None) => {}
                     Err(_) => {
-                        // A rejected successor still commits the stopped Idle
-                        // record. Restore the whole speculative boundary so a
-                        // fallible start cannot leak partial queue/runtime or
-                        // transcript mutations into that commit.
                         inner.sessions[index] = post_stop_record
                             .as_ref()
                             .expect("queued dispatch should retain a rollback record")
                             .clone();
-                        // Restoring a cloned record also needs a fresh mutation
-                        // stamp so the committed Idle state is persisted.
-                        let _ = inner
-                            .session_mut_by_index(index)
-                            .expect("session index should remain valid");
                     }
+                }
+                if !matches!(result, Ok(Some(_))) {
+                    abandon_engram_pending_dispatch(
+                        inner
+                            .session_mut_by_index(index)
+                            .expect("session index should remain valid"),
+                        pending_engram_for_abandon,
+                    );
                 }
                 result
             } else {
+                if let Some(pending_engram) = prepared_queued_turn
+                    .as_ref()
+                    .and_then(|prepared| prepared.pending_engram.clone())
+                {
+                    abandon_engram_pending_dispatch(
+                        inner
+                            .session_mut_by_index(index)
+                            .expect("session index should remain valid"),
+                        Some(pending_engram),
+                    );
+                }
                 Ok(None)
             };
 
@@ -541,13 +582,18 @@ impl AppState {
                         | (Err(_), _) => None,
                     };
 
-                    // Keep the stopped in-memory record, but undo every
-                    // speculative successor mutation. The old runtime is
-                    // already stopped and cannot be restored; the new runtime
-                    // is returned for teardown after releasing StateInner.
                     if let Some(post_stop_record) = post_stop_record {
                         inner.sessions[index] = post_stop_record;
+                        abandon_engram_pending_dispatch(
+                            inner
+                                .session_mut_by_index(index)
+                                .expect("session index should remain valid"),
+                            prepared_queued_turn
+                                .as_ref()
+                                .and_then(|prepared| prepared.pending_engram.clone()),
+                        );
                     }
+
                     let record = inner
                         .session_mut_by_index(index)
                         .expect("session index should be valid");

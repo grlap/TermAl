@@ -52,6 +52,17 @@ struct OrphanedWorkflowDispatch {
     queued: QueuedPromptRecord,
 }
 
+struct StartedQueuedTurn {
+    dispatch: TurnDispatch,
+    queued: QueuedPromptRecord,
+}
+
+struct PreparedEngramQueuedTurn {
+    prompt_id: String,
+    dispatch_generation: u64,
+    pending_engram: Option<EngramPendingDispatch>,
+}
+
 /// Adds transport context that a receiving agent cannot infer from its own
 /// repository instructions. Peer sessions may live in entirely different
 /// projects, so the prompt must explain both the context boundary and the
@@ -71,6 +82,42 @@ To reply to the sender, use the TermAl MCP tool `termal_send_to_session` with `s
 }
 
 impl AppState {
+    fn prepare_next_queued_turn_engram_off_lock(
+        &self,
+        session_id: &str,
+    ) -> Option<PreparedEngramQueuedTurn> {
+        let (queued, dispatch_generation) = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            let index = inner.find_session_index(session_id)?;
+            let queued = inner.sessions[index].queued_prompts.front()?;
+            let dispatch_generation = inner.sessions[index].engram.dispatch_generation;
+            if !Self::engram_child_requires_dispatch_card_locked(&inner, session_id) {
+                return Some(PreparedEngramQueuedTurn {
+                    prompt_id: queued.pending_prompt.id.clone(),
+                    dispatch_generation,
+                    pending_engram: None,
+                });
+            }
+            (queued.clone(), dispatch_generation)
+        };
+        let intent = EngramTurnIntentSnapshot {
+            session_id: session_id.to_owned(),
+            dispatch_generation: dispatch_generation.saturating_add(1),
+            intent_fingerprint: engram_turn_intent_fingerprint(
+                &queued.pending_prompt.text,
+                queued.pending_prompt.expanded_text.as_deref(),
+                &queued.attachments,
+                queued.pending_prompt.source.as_ref(),
+                queued.source,
+            ),
+        };
+        Some(PreparedEngramQueuedTurn {
+            prompt_id: queued.pending_prompt.id,
+            dispatch_generation,
+            pending_engram: self.evaluate_engram_turn_off_lock(&intent),
+        })
+    }
+
     #[cfg(test)]
     fn install_test_acp_runtime_override(&self, agent: AcpAgent, runtime: AcpRuntimeHandle) {
         self.test_acp_runtime_overrides
@@ -135,17 +182,30 @@ impl AppState {
         inner: &mut StateInner,
         index: usize,
         allow_blocked_dispatch: bool,
+        pending_engram: Option<EngramPendingDispatch>,
     ) -> Result<Option<StartedTurn>> {
         if inner.sessions[index].orchestrator_auto_dispatch_blocked && !allow_blocked_dispatch {
+            abandon_engram_pending_dispatch(
+                inner
+                    .session_mut_by_index(index)
+                    .expect("session index should be valid"),
+                pending_engram,
+            );
             return Ok(None);
         }
 
         let Some(queued) = inner.sessions[index].queued_prompts.front().cloned() else {
+            abandon_engram_pending_dispatch(
+                inner
+                    .session_mut_by_index(index)
+                    .expect("session index should be valid"),
+                pending_engram,
+            );
             return Ok(None);
         };
 
-        let mut started = self
-            .start_turn_on_record(
+        let pending_engram_for_abandon = pending_engram.clone();
+        let mut started = match self.start_turn_on_record(
                 inner
                     .session_mut_by_index(index)
                     .expect("session index should be valid"),
@@ -154,8 +214,22 @@ impl AppState {
                 queued.attachments.clone(),
                 queued.pending_prompt.expanded_text.clone(),
                 queued.pending_prompt.source.clone(),
-            )
-            .map_err(|err| anyhow!("failed to dispatch queued prompt: {}", err.message))?;
+                pending_engram,
+            ) {
+            Ok(started) => started,
+            Err(error) => {
+                abandon_engram_pending_dispatch(
+                    inner
+                        .session_mut_by_index(index)
+                        .expect("session index should be valid"),
+                    pending_engram_for_abandon,
+                );
+                return Err(anyhow!(
+                    "failed to dispatch queued prompt: {}",
+                    error.message
+                ));
+            }
+        };
         let record = inner
             .session_mut_by_index(index)
             .expect("session index should be valid");
@@ -198,6 +272,7 @@ impl AppState {
         attachments: Vec<PromptImageAttachment>,
         expanded_prompt: Option<String>,
         source: Option<MessageSource>,
+        mut pending_engram: Option<EngramPendingDispatch>,
     ) -> std::result::Result<StartedTurn, ApiError> {
         match record.remote_proxy_identity() {
             Ok(None) => {}
@@ -242,6 +317,9 @@ impl AppState {
                 session_id: record.session.id.clone(),
                 through_sequence: mailbox.sequence,
             });
+        let engram_dispatch_generation = pending_engram
+            .as_ref()
+            .map(|_| record.engram.dispatch_generation.saturating_add(1));
 
         let dispatch = match record.session.agent {
             Agent::Claude => {
@@ -304,6 +382,7 @@ impl AppState {
                         replay_generation: Uuid::new_v4().to_string(),
                         text: runtime_prompt.clone(),
                     },
+                    engram_dispatch_generation,
                     mailbox_notification: mailbox_notification.clone(),
                     sender: handle.input_tx,
                     session_id: record.session.id.clone(),
@@ -374,6 +453,7 @@ impl AppState {
                         resume_thread_id: record.external_session_id.clone(),
                         sandbox_mode: record.codex_sandbox_mode,
                     },
+                    engram_dispatch_generation,
                     mailbox_notification: mailbox_notification.clone(),
                     sender: handle.input_tx,
                     session_id: record.session.id.clone(),
@@ -457,6 +537,7 @@ impl AppState {
                         prompt: runtime_prompt.to_owned(),
                         resume_session_id: record.external_session_id.clone(),
                     },
+                    engram_dispatch_generation,
                     mailbox_notification,
                     sender: handle.input_tx,
                     session_id: record.session.id.clone(),
@@ -485,6 +566,11 @@ impl AppState {
         });
         record.session.status = SessionStatus::Active;
         record.session.preview = prompt_preview_text(&prompt, &message_attachments);
+        record.engram.dispatch_generation = record.engram.dispatch_generation.saturating_add(1);
+        if let Some(pending) = pending_engram.as_mut() {
+            pending.dispatch_generation = record.engram.dispatch_generation;
+        }
+        record.engram.pending_dispatch = pending_engram;
         let message_delta = StartedTurnMessageDelta {
             session_id: record.session.id.clone(),
             message_id,
@@ -602,43 +688,12 @@ impl AppState {
         }
         self.revalidate_queued_mailbox_wakeups_before_dispatch(session_id);
 
-        let mut inner = self.inner.lock().expect("state mutex poisoned");
-        let Some(index) = inner.find_session_index(session_id) else {
+        let Some(started) = self.start_next_queued_turn_off_lock(session_id, false, true)? else {
             return Ok(None);
         };
-        let eligible = {
-            let record = &inner.sessions[index];
-            record.is_local_session()
-                && matches!(
-                    record.session.status,
-                    SessionStatus::Idle | SessionStatus::Error
-                )
-                && matches!(record.runtime, SessionRuntime::None)
-                && !record.orchestrator_auto_dispatch_blocked
-                && record
-                    .queued_prompts
-                    .iter()
-                    .find(|queued| queued.source != QueuedPromptSource::Mailbox)
-                    .is_some_and(|queued| queued.source == QueuedPromptSource::Orchestrator)
-        };
-        if !eligible {
-            return Ok(None);
-        }
-
-        let queued = inner.sessions[index]
-            .queued_prompts
-            .front()
-            .cloned()
-            .expect("eligible workflow recovery queue should have a head");
-        let Some(started) = self.start_next_queued_turn_locked(&mut inner, index, false)? else {
-            return Ok(None);
-        };
-        let revision = self.commit_persisted_delta_locked(&mut inner)?;
-        drop(inner);
-        self.publish_started_turn_message_delta(revision, started.message_delta);
         Ok(Some(OrphanedWorkflowDispatch {
             dispatch: started.dispatch,
-            queued,
+            queued: started.queued,
         }))
     }
 
@@ -738,22 +793,183 @@ impl AppState {
             );
         }
         self.revalidate_queued_mailbox_wakeups_before_dispatch(session_id);
-        let mut inner = self.inner.lock().expect("state mutex poisoned");
-        let index = inner
-            .find_session_index(session_id)
-            .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
+        Ok(self
+            .start_next_queued_turn_off_lock(session_id, allow_blocked_dispatch, false)?
+            .map(|started| started.dispatch))
+    }
 
-        let Some(started) = self.start_next_queued_turn_locked(
-            &mut inner,
-            index,
-            allow_blocked_dispatch,
-        )? else {
-            return Ok(None);
-        };
-        let revision = self.commit_persisted_delta_locked(&mut inner)?;
-        drop(inner);
-        self.publish_started_turn_message_delta(revision, started.message_delta);
-        Ok(Some(started.dispatch))
+    /// Evaluates and promotes one stable queue head. The prompt snapshot and
+    /// generation are captured under the state mutex; all Engram work happens
+    /// after releasing it; the same queue head/generation is then revalidated
+    /// before `start_turn_on_record` mutates the session.
+    fn start_next_queued_turn_off_lock(
+        &self,
+        session_id: &str,
+        allow_blocked_dispatch: bool,
+        orphaned_workflow_only: bool,
+    ) -> Result<Option<StartedQueuedTurn>> {
+        // Preserve the exact pre-Engram queue-drain path while the adapter is
+        // absent or disabled. Besides guaranteeing zero transport work, this
+        // avoids the extra snapshot/revalidation lock pair and fingerprinting
+        // cost on the S0 hot path.
+        {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let Some(index) = inner.find_session_index(session_id) else {
+                return Ok(None);
+            };
+            if !Self::engram_child_requires_dispatch_card_locked(&inner, session_id) {
+                let record = &inner.sessions[index];
+                if record.orchestrator_auto_dispatch_blocked && !allow_blocked_dispatch {
+                    return Ok(None);
+                }
+                if orphaned_workflow_only {
+                    let eligible = record.is_local_session()
+                        && matches!(
+                            record.session.status,
+                            SessionStatus::Idle | SessionStatus::Error
+                        )
+                        && matches!(record.runtime, SessionRuntime::None)
+                        && record
+                            .queued_prompts
+                            .iter()
+                            .find(|queued| queued.source != QueuedPromptSource::Mailbox)
+                            .is_some_and(|queued| {
+                                queued.source == QueuedPromptSource::Orchestrator
+                            });
+                    if !eligible {
+                        return Ok(None);
+                    }
+                }
+                let Some(queued) = record.queued_prompts.front().cloned() else {
+                    return Ok(None);
+                };
+                let Some(started) = self.start_next_queued_turn_locked(
+                    &mut inner,
+                    index,
+                    allow_blocked_dispatch,
+                    None,
+                )? else {
+                    return Ok(None);
+                };
+                let revision = self.commit_persisted_delta_locked(&mut inner)?;
+                drop(inner);
+                let StartedTurn {
+                    dispatch,
+                    message_delta,
+                } = started;
+                self.publish_started_turn_message_delta(revision, message_delta);
+                return Ok(Some(StartedQueuedTurn { dispatch, queued }));
+            }
+        }
+
+        for _attempt in 0..3 {
+            let snapshot = {
+                let inner = self.inner.lock().expect("state mutex poisoned");
+                let Some(index) = inner.find_session_index(session_id) else {
+                    return Ok(None);
+                };
+                let record = &inner.sessions[index];
+                if record.orchestrator_auto_dispatch_blocked && !allow_blocked_dispatch {
+                    return Ok(None);
+                }
+                if orphaned_workflow_only {
+                    let eligible = record.is_local_session()
+                        && matches!(
+                            record.session.status,
+                            SessionStatus::Idle | SessionStatus::Error
+                        )
+                        && matches!(record.runtime, SessionRuntime::None)
+                        && record
+                            .queued_prompts
+                            .iter()
+                            .find(|queued| queued.source != QueuedPromptSource::Mailbox)
+                            .is_some_and(|queued| {
+                                queued.source == QueuedPromptSource::Orchestrator
+                            });
+                    if !eligible {
+                        return Ok(None);
+                    }
+                }
+                let Some(queued) = record.queued_prompts.front().cloned() else {
+                    return Ok(None);
+                };
+                (
+                    queued,
+                    record.engram.dispatch_generation,
+                    record.session.status,
+                )
+            };
+            if matches!(snapshot.2, SessionStatus::Active | SessionStatus::Approval) {
+                return Ok(None);
+            }
+            let intent = EngramTurnIntentSnapshot {
+                session_id: session_id.to_owned(),
+                dispatch_generation: snapshot.1.saturating_add(1),
+                intent_fingerprint: engram_turn_intent_fingerprint(
+                    &snapshot.0.pending_prompt.text,
+                    snapshot.0.pending_prompt.expanded_text.as_deref(),
+                    &snapshot.0.attachments,
+                    snapshot.0.pending_prompt.source.as_ref(),
+                    snapshot.0.source,
+                ),
+            };
+            let pending_engram = self.evaluate_engram_turn_off_lock(&intent);
+
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let Some(index) = inner.find_session_index(session_id) else {
+                return Ok(None);
+            };
+            let unchanged = inner.sessions[index].engram.dispatch_generation == snapshot.1
+                && inner.sessions[index]
+                    .queued_prompts
+                    .front()
+                    .is_some_and(|queued| {
+                        queued.pending_prompt.id == snapshot.0.pending_prompt.id
+                    })
+                && !matches!(
+                    inner.sessions[index].session.status,
+                    SessionStatus::Active | SessionStatus::Approval
+                );
+            if !unchanged {
+                let record = inner
+                    .session_mut_by_index(index)
+                    .expect("session index should be valid");
+                if record.engram.dispatch_generation == snapshot.1 {
+                    abandon_engram_pending_dispatch(record, pending_engram);
+                } else if pending_engram.as_ref().is_some_and(|pending| {
+                    matches!(
+                        &pending.evaluated,
+                        EngramDispatchEvaluation::Grant { .. }
+                    )
+                }) {
+                    // A newer dispatch already owns the generation counter.
+                    // Preserve its identity while still repairing the older
+                    // evaluated grant that lost the queue-head race.
+                    record.engram.rebind_required = true;
+                }
+                continue;
+            }
+            let Some(started) = self.start_next_queued_turn_locked(
+                &mut inner,
+                index,
+                allow_blocked_dispatch,
+                pending_engram,
+            )? else {
+                return Ok(None);
+            };
+            let revision = self.commit_persisted_delta_locked(&mut inner)?;
+            drop(inner);
+            let StartedTurn {
+                dispatch,
+                message_delta,
+            } = started;
+            self.publish_started_turn_message_delta(revision, message_delta);
+            return Ok(Some(StartedQueuedTurn {
+                dispatch,
+                queued: snapshot.0,
+            }));
+        }
+        Ok(None)
     }
 
     /// The inner dispatch that actually hands a ready turn to the agent
@@ -868,6 +1084,254 @@ impl AppState {
         // the moment of Stop; only a later user prompt may lift the latch.
         let blocked_automatic_prompt = orchestrator_auto_dispatch_blocked
             && queued_prompt_source == QueuedPromptSource::Mailbox;
+
+        // S0 ("off means off") keeps the pre-adapter dispatch algorithm
+        // intact. In particular, an unconfigured project must not pay the
+        // extra queue commit needed to release the state mutex around Engram
+        // evaluation. The sole added hot-path decision is this Option-backed
+        // project setting check; every branch below is the legacy transition.
+        if !Self::engram_child_requires_dispatch_card_locked(&inner, session_id) {
+            if session_is_busy || has_queued_prompts || blocked_automatic_prompt {
+                if let Some(mailbox_id) = source
+                    .as_ref()
+                    .and_then(|source| source.mailbox.as_ref())
+                    .map(|mailbox| mailbox.mailbox_id.clone())
+                {
+                    let record = inner
+                        .session_mut_by_index(index)
+                        .expect("session index should be valid");
+                    if let Some(existing) = record.queued_prompts.iter_mut().find(|queued| {
+                        queued
+                            .pending_prompt
+                            .source
+                            .as_ref()
+                            .and_then(|source| source.mailbox.as_ref())
+                            .is_some_and(|mailbox| mailbox.mailbox_id == mailbox_id)
+                    }) {
+                        let existing_sequence = existing
+                            .pending_prompt
+                            .source
+                            .as_ref()
+                            .and_then(|source| source.mailbox.as_ref())
+                            .map(|mailbox| mailbox.sequence)
+                            .unwrap_or_default();
+                        let incoming_sequence = source
+                            .as_ref()
+                            .and_then(|source| source.mailbox.as_ref())
+                            .map(|mailbox| mailbox.sequence)
+                            .unwrap_or_default();
+                        if existing_sequence <= incoming_sequence {
+                            existing.pending_prompt.timestamp = stamp_now();
+                            existing.pending_prompt.text = prompt;
+                            existing.pending_prompt.expanded_text = expanded_prompt;
+                            existing.pending_prompt.source = source;
+                            existing.source = QueuedPromptSource::Mailbox;
+                        }
+                        sync_pending_prompts(record);
+                        self.commit_locked(&mut inner).map_err(|err| {
+                            ApiError::internal(format!(
+                                "failed to persist mailbox notification: {err:#}"
+                            ))
+                        })?;
+                        if session_is_busy || orchestrator_auto_dispatch_blocked {
+                            return Ok(DispatchTurnResult::Queued);
+                        }
+                        if blocked_queue_contains_user_prompt {
+                            prioritize_user_queued_prompts(
+                                inner
+                                    .session_mut_by_index(index)
+                                    .expect("session index should be valid"),
+                            );
+                        }
+                        let started = self
+                            .start_next_queued_turn_locked(&mut inner, index, true, None)
+                            .map_err(|err| {
+                                ApiError::internal(format!(
+                                    "failed to dispatch coalesced mailbox queue: {err:#}"
+                                ))
+                            })?
+                            .ok_or_else(|| {
+                                ApiError::internal(
+                                    "coalesced mailbox prompt disappeared before dispatch",
+                                )
+                            })?;
+                        let revision = self
+                            .commit_persisted_delta_locked(&mut inner)
+                            .map_err(|err| {
+                                ApiError::internal(format!(
+                                    "failed to persist coalesced mailbox dispatch: {err:#}"
+                                ))
+                            })?;
+                        let started_current_mailbox = matches!(
+                            &started.message_delta.message,
+                            Message::Text {
+                                source: Some(source),
+                                ..
+                            } if source
+                                .mailbox
+                                .as_ref()
+                                .is_some_and(|mailbox| mailbox.mailbox_id == mailbox_id)
+                        );
+                        drop(inner);
+                        self.publish_started_turn_message_delta(revision, started.message_delta);
+                        return Ok(if started_current_mailbox {
+                            DispatchTurnResult::Dispatched(started.dispatch)
+                        } else {
+                            DispatchTurnResult::DispatchedAfterQueue(started.dispatch)
+                        });
+                    }
+                }
+            }
+            let recover_blocked_queue_with_existing_user_prompt = !session_is_busy
+                && has_queued_prompts
+                && orchestrator_auto_dispatch_blocked
+                && blocked_queue_contains_user_prompt
+                && queued_prompt_source == QueuedPromptSource::User;
+            let prioritize_manual_dispatch_over_blocked_queue = !session_is_busy
+                && has_queued_prompts
+                && orchestrator_auto_dispatch_blocked
+                && !blocked_queue_contains_user_prompt
+                && queued_prompt_source == QueuedPromptSource::User;
+
+            if recover_blocked_queue_with_existing_user_prompt {
+                let message_id = inner.next_message_id();
+                queue_prompt_on_record_with_source(
+                    inner
+                        .session_mut_by_index(index)
+                        .expect("session index should be valid"),
+                    PendingPrompt {
+                        attachments: attachments
+                            .iter()
+                            .map(|attachment| attachment.metadata.clone())
+                            .collect(),
+                        id: message_id,
+                        timestamp: stamp_now(),
+                        text: prompt,
+                        expanded_text: expanded_prompt.clone(),
+                        source: source.clone(),
+                    },
+                    attachments,
+                    queued_prompt_source,
+                );
+                prioritize_user_queued_prompts(
+                    inner
+                        .session_mut_by_index(index)
+                        .expect("session index should be valid"),
+                );
+                self.commit_locked(&mut inner).map_err(|err| {
+                    ApiError::internal(format!("failed to persist session state: {err:#}"))
+                })?;
+                let started = self
+                    .start_next_queued_turn_locked(&mut inner, index, true, None)
+                    .map_err(|err| {
+                        ApiError::internal(format!("failed to dispatch queued turn: {err:#}"))
+                    })?
+                    .ok_or_else(|| {
+                        ApiError::internal("queued prompt disappeared before dispatch")
+                    })?;
+                let revision = self
+                    .commit_persisted_delta_locked(&mut inner)
+                    .map_err(|err| {
+                        ApiError::internal(format!(
+                            "failed to persist queued turn dispatch: {err:#}"
+                        ))
+                    })?;
+                drop(inner);
+                self.publish_started_turn_message_delta(revision, started.message_delta);
+                return Ok(DispatchTurnResult::DispatchedAfterQueue(started.dispatch));
+            }
+
+            if prioritize_manual_dispatch_over_blocked_queue {
+                let message_id = inner.next_message_id();
+                let started = self.start_turn_on_record(
+                    inner
+                        .session_mut_by_index(index)
+                        .expect("session index should be valid"),
+                    message_id,
+                    prompt,
+                    attachments,
+                    expanded_prompt,
+                    source,
+                    None,
+                )?;
+                let revision = self
+                    .commit_persisted_delta_locked(&mut inner)
+                    .map_err(|err| {
+                        ApiError::internal(format!("failed to persist session state: {err:#}"))
+                    })?;
+                drop(inner);
+                self.publish_started_turn_message_delta(revision, started.message_delta);
+                return Ok(DispatchTurnResult::Dispatched(started.dispatch));
+            }
+
+            if session_is_busy || has_queued_prompts || blocked_automatic_prompt {
+                let message_id = inner.next_message_id();
+                queue_prompt_on_record_with_source(
+                    inner
+                        .session_mut_by_index(index)
+                        .expect("session index should be valid"),
+                    PendingPrompt {
+                        attachments: attachments
+                            .iter()
+                            .map(|attachment| attachment.metadata.clone())
+                            .collect(),
+                        id: message_id,
+                        timestamp: stamp_now(),
+                        text: prompt,
+                        expanded_text: expanded_prompt,
+                        source,
+                    },
+                    attachments,
+                    queued_prompt_source,
+                );
+                self.commit_locked(&mut inner).map_err(|err| {
+                    ApiError::internal(format!("failed to persist session state: {err:#}"))
+                })?;
+                if session_is_busy || blocked_automatic_prompt {
+                    return Ok(DispatchTurnResult::Queued);
+                }
+                let started = self
+                    .start_next_queued_turn_locked(&mut inner, index, true, None)
+                    .map_err(|err| {
+                        ApiError::internal(format!("failed to dispatch queued turn: {err:#}"))
+                    })?
+                    .ok_or_else(|| {
+                        ApiError::internal("queued prompt disappeared before dispatch")
+                    })?;
+                let revision = self
+                    .commit_persisted_delta_locked(&mut inner)
+                    .map_err(|err| {
+                        ApiError::internal(format!(
+                            "failed to persist queued turn dispatch: {err:#}"
+                        ))
+                    })?;
+                drop(inner);
+                self.publish_started_turn_message_delta(revision, started.message_delta);
+                return Ok(DispatchTurnResult::DispatchedAfterQueue(started.dispatch));
+            }
+
+            let message_id = inner.next_message_id();
+            let started = self.start_turn_on_record(
+                inner
+                    .session_mut_by_index(index)
+                    .expect("session index should be valid"),
+                message_id,
+                prompt,
+                attachments,
+                expanded_prompt,
+                source,
+                None,
+            )?;
+            let revision = self
+                .commit_persisted_delta_locked(&mut inner)
+                .map_err(|err| {
+                    ApiError::internal(format!("failed to persist session state: {err:#}"))
+                })?;
+            drop(inner);
+            self.publish_started_turn_message_delta(revision, started.message_delta);
+            return Ok(DispatchTurnResult::Dispatched(started.dispatch));
+        }
+
         if session_is_busy || has_queued_prompts || blocked_automatic_prompt {
             if let Some(mailbox_id) = source
                 .as_ref()
@@ -927,40 +1391,24 @@ impl AppState {
                                 .expect("session index should be valid"),
                         );
                     }
+                    drop(inner);
                     let started = self
-                        .start_next_queued_turn_locked(&mut inner, index, true)
+                        .start_next_queued_turn_off_lock(session_id, true, false)
                         .map_err(|err| {
                             ApiError::internal(format!(
                                 "failed to dispatch coalesced mailbox queue: {err:#}"
                             ))
-                        })?
-                        .ok_or_else(|| {
-                            ApiError::internal(
-                                "coalesced mailbox prompt disappeared before dispatch",
-                            )
                         })?;
-                    let revision =
-                        self.commit_persisted_delta_locked(&mut inner)
-                            .map_err(|err| {
-                                ApiError::internal(format!(
-                                    "failed to persist coalesced mailbox dispatch: {err:#}"
-                                ))
-                            })?;
-                    let started_current_mailbox = matches!(
-                        &started.message_delta.message,
-                        Message::Text {
-                            source: Some(source),
-                            ..
-                        } if source
-                            .mailbox
-                            .as_ref()
-                            .is_some_and(|mailbox| mailbox.mailbox_id == mailbox_id)
-                    );
-                    drop(inner);
-                    self.publish_started_turn_message_delta(
-                        revision,
-                        started.message_delta,
-                    );
+                    let Some(started) = started else {
+                        return Ok(DispatchTurnResult::Queued);
+                    };
+                    let started_current_mailbox = started
+                        .queued
+                        .pending_prompt
+                        .source
+                        .as_ref()
+                        .and_then(|source| source.mailbox.as_ref())
+                        .is_some_and(|mailbox| mailbox.mailbox_id == mailbox_id);
                     return Ok(if started_current_mailbox {
                         DispatchTurnResult::Dispatched(started.dispatch)
                     } else {
@@ -980,123 +1428,53 @@ impl AppState {
             && !blocked_queue_contains_user_prompt
             && queued_prompt_source == QueuedPromptSource::User;
 
-        if recover_blocked_queue_with_existing_user_prompt {
-            let message_id = inner.next_message_id();
-            queue_prompt_on_record_with_source(
-                inner
-            .session_mut_by_index(index)
-            .expect("session index should be valid"),
-                PendingPrompt {
-                    attachments: attachments
-                        .iter()
-                        .map(|attachment| attachment.metadata.clone())
-                        .collect(),
-                    id: message_id,
-                    timestamp: stamp_now(),
-                    text: prompt,
-                    expanded_text: expanded_prompt.clone(),
-                    source: source.clone(),
-                },
-                attachments,
-                queued_prompt_source,
-            );
-            prioritize_user_queued_prompts(inner
-            .session_mut_by_index(index)
-            .expect("session index should be valid"));
-            self.commit_locked(&mut inner).map_err(|err| {
-                ApiError::internal(format!("failed to persist session state: {err:#}"))
-            })?;
-
-            let started = self
-                .start_next_queued_turn_locked(&mut inner, index, true)
-                .map_err(|err| ApiError::internal(format!("failed to dispatch queued turn: {err:#}")))?
-                .ok_or_else(|| ApiError::internal("queued prompt disappeared before dispatch"))?;
-            let revision = self.commit_persisted_delta_locked(&mut inner).map_err(|err| {
-                ApiError::internal(format!("failed to persist queued turn dispatch: {err:#}"))
-            })?;
-            drop(inner);
-            self.publish_started_turn_message_delta(revision, started.message_delta);
-            return Ok(DispatchTurnResult::DispatchedAfterQueue(started.dispatch));
-        }
-
-        if prioritize_manual_dispatch_over_blocked_queue {
-            let message_id = inner.next_message_id();
-            let started = self.start_turn_on_record(
-                inner
-            .session_mut_by_index(index)
-            .expect("session index should be valid"),
-                message_id,
-                prompt,
-                attachments,
-                expanded_prompt,
-                source,
-            )?;
-
-            let revision = self.commit_persisted_delta_locked(&mut inner).map_err(|err| {
-                ApiError::internal(format!("failed to persist session state: {err:#}"))
-            })?;
-            drop(inner);
-            self.publish_started_turn_message_delta(revision, started.message_delta);
-            return Ok(DispatchTurnResult::Dispatched(started.dispatch));
-        }
-
-        if session_is_busy || has_queued_prompts || blocked_automatic_prompt {
-            let message_id = inner.next_message_id();
-            queue_prompt_on_record_with_source(
-                inner
-            .session_mut_by_index(index)
-            .expect("session index should be valid"),
-                PendingPrompt {
-                    attachments: attachments
-                        .iter()
-                        .map(|attachment| attachment.metadata.clone())
-                        .collect(),
-                    id: message_id,
-                    timestamp: stamp_now(),
-                    text: prompt,
-                    expanded_text: expanded_prompt.clone(),
-                    source: source.clone(),
-                },
-                attachments,
-                queued_prompt_source,
-            );
-            self.commit_locked(&mut inner).map_err(|err| {
-                ApiError::internal(format!("failed to persist session state: {err:#}"))
-            })?;
-            if session_is_busy || blocked_automatic_prompt {
-                return Ok(DispatchTurnResult::Queued);
-            }
-
-            let started = self
-                .start_next_queued_turn_locked(&mut inner, index, true)
-                .map_err(|err| ApiError::internal(format!("failed to dispatch queued turn: {err:#}")))?
-                .ok_or_else(|| ApiError::internal("queued prompt disappeared before dispatch"))?;
-            let revision = self.commit_persisted_delta_locked(&mut inner).map_err(|err| {
-                ApiError::internal(format!("failed to persist queued turn dispatch: {err:#}"))
-            })?;
-            drop(inner);
-            self.publish_started_turn_message_delta(revision, started.message_delta);
-            return Ok(DispatchTurnResult::DispatchedAfterQueue(started.dispatch));
-        }
-
         let message_id = inner.next_message_id();
-        let started = self.start_turn_on_record(
+        queue_prompt_on_record_with_source(
             inner
-            .session_mut_by_index(index)
-            .expect("session index should be valid"),
-            message_id,
-            prompt,
+                .session_mut_by_index(index)
+                .expect("session index should be valid"),
+            PendingPrompt {
+                attachments: attachments
+                    .iter()
+                    .map(|attachment| attachment.metadata.clone())
+                    .collect(),
+                id: message_id.clone(),
+                timestamp: stamp_now(),
+                text: prompt,
+                expanded_text: expanded_prompt,
+                source,
+            },
             attachments,
-            expanded_prompt,
-            source,
-        )?;
-
-        let revision = self.commit_persisted_delta_locked(&mut inner).map_err(|err| {
+            queued_prompt_source,
+        );
+        if recover_blocked_queue_with_existing_user_prompt
+            || prioritize_manual_dispatch_over_blocked_queue
+        {
+            prioritize_user_queued_prompts(
+                inner
+                    .session_mut_by_index(index)
+                    .expect("session index should be valid"),
+            );
+        }
+        self.commit_locked(&mut inner).map_err(|err| {
             ApiError::internal(format!("failed to persist session state: {err:#}"))
         })?;
+        if session_is_busy || blocked_automatic_prompt {
+            return Ok(DispatchTurnResult::Queued);
+        }
         drop(inner);
-        self.publish_started_turn_message_delta(revision, started.message_delta);
-
-        Ok(DispatchTurnResult::Dispatched(started.dispatch))
+        let started = self
+            .start_next_queued_turn_off_lock(session_id, true, false)
+            .map_err(|err| {
+                ApiError::internal(format!("failed to dispatch queued turn: {err:#}"))
+            })?;
+        let Some(started) = started else {
+            return Ok(DispatchTurnResult::Queued);
+        };
+        if started.queued.pending_prompt.id == message_id {
+            Ok(DispatchTurnResult::Dispatched(started.dispatch))
+        } else {
+            Ok(DispatchTurnResult::DispatchedAfterQueue(started.dispatch))
+        }
     }
 }

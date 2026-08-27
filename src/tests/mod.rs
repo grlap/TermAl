@@ -39,6 +39,7 @@ mod delegation_support;
 mod delegation_validation;
 mod delegation_wait;
 mod delegations;
+mod engram_host_adapter;
 mod file_changes;
 mod git;
 mod http_routes;
@@ -721,6 +722,7 @@ fn test_app_state() -> AppState {
         state_broadcast_mailbox: None,
         telegram_relay_runtime: Arc::new(Mutex::new(TelegramRelayRuntime::default())),
         shared_codex_runtime: Arc::new(Mutex::new(None)),
+        shared_codex_exit_claims: Arc::new(Mutex::new(HashSet::new())),
         agent_runtime_spawning_enabled: false,
         test_acp_runtime_overrides: Arc::new(Mutex::new(Vec::new())),
         test_agent_setup_failures: Arc::new(Mutex::new(Vec::new())),

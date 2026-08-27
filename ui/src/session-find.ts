@@ -229,6 +229,22 @@ function collectMessageSearchText(
       return collectParallelAgentsSearchText(message);
     case "fileChanges":
       return collectFileChangesSearchText(message);
+    case "engramControl":
+      return joinSearchableParts([
+        "Engram",
+        message.stage,
+        message.decision,
+        message.dispatch,
+        message.refusalCode,
+        message.deferCode,
+        message.grantId,
+        message.nextIntent,
+        ...(message.directives ?? []).flatMap((directive) => [
+          directive.kind,
+          directive.audience,
+          directive.satisfaction,
+        ]),
+      ]);
     case "subagentResult":
       return collectSubagentResultSearchText(message);
     case "approval":

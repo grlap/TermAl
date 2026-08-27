@@ -44,6 +44,7 @@ import type {
   ApprovalMessage,
   CommandMessage,
   DiffMessage,
+  EngramControlMessage,
   JsonValue,
   MarkdownMessage,
   McpElicitationAction,
@@ -397,6 +398,8 @@ export const MessageCard = memo(
             workspaceRoot={workspaceRoot}
           />
         );
+      case "engramControl":
+        return <EngramControlCard message={message} />;
       case "subagentResult":
         return (
           <SubagentResultCard
@@ -491,6 +494,52 @@ export const MessageCard = memo(
     );
   },
 );
+
+function EngramControlCard({ message }: { message: EngramControlMessage }) {
+  const title =
+    message.dispatch === "queued"
+      ? "Turn queued by Engram control"
+      : message.decision === "grant"
+        ? message.stage === "checkpoint"
+          ? "Turn checkpointed"
+          : message.stage === "restart"
+            ? "Session synchronized"
+            : "Turn admitted"
+        : message.decision === "defer"
+          ? "Engram would defer this turn"
+          : message.decision === "refuse"
+            ? "Engram would refuse this turn"
+            : "Engram control degraded";
+  const dispatchLabel =
+    message.dispatch === "sent_on_grant"
+      ? "sent on grant"
+      : message.dispatch === "sent_without_grant"
+        ? "sent without grant"
+        : "queued";
+  const details = [
+    message.refusalCode ? `Reason: ${message.refusalCode}` : null,
+    message.deferCode ? `Deferral: ${message.deferCode}` : null,
+    message.grantId ? `Grant: ${message.grantId}` : null,
+    `Dispatch: ${dispatchLabel}`,
+    message.repairArmed ? "Repair: armed" : null,
+    message.nextIntent ? `Next intent: ${message.nextIntent}` : null,
+    `Latency: ${message.latencyMs.total} ms`,
+  ].filter((value): value is string => Boolean(value));
+
+  return (
+    <article className="message-card reasoning-card engram-control-card">
+      <MessageMeta author={message.author} timestamp={message.timestamp} />
+      <div className="card-label">Engram · {message.stage}</div>
+      <h3>{title}</h3>
+      <p className="support-copy">{details.join(" · ")}</p>
+      {message.directives?.map((directive) => (
+        <p className="support-copy" key={directive.directiveId}>
+          {directive.kind} · {directive.audience} · {directive.satisfaction}
+        </p>
+      ))}
+    </article>
+  );
+}
 
 function ThinkingCard({
   appearance = "dark",

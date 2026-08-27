@@ -364,6 +364,14 @@ enum Message {
         title: String,
         files: Vec<FileChangeSummaryEntry>,
     },
+    #[serde(rename = "engramControl")]
+    EngramControl {
+        id: String,
+        timestamp: String,
+        author: Author,
+        #[serde(flatten)]
+        card: EngramControlCard,
+    },
     Approval {
         id: String,
         timestamp: String,
@@ -454,6 +462,7 @@ impl Message {
             | Self::SubagentResult { id, .. }
             | Self::ParallelAgents { id, .. }
             | Self::FileChanges { id, .. }
+            | Self::EngramControl { id, .. }
             | Self::Approval { id, .. }
             | Self::UserInputRequest { id, .. }
             | Self::McpElicitationRequest { id, .. }
@@ -550,6 +559,10 @@ impl Message {
             Self::Diff { summary, .. } => Some(make_preview(summary)),
             Self::SubagentResult { .. } => None,
             Self::FileChanges { .. } => None,
+            Self::EngramControl { card, .. } => Some(make_preview(&format!(
+                "Engram {:?}: {:?}",
+                card.stage, card.decision
+            ))),
             Self::ParallelAgents { agents, .. } => Some(parallel_agents_preview_text(agents)),
             Self::Command { .. } => None,
         }
