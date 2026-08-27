@@ -4632,6 +4632,182 @@ fn reset_stale_begin_cannot_clear_a_live_legacy_successor_after_stop() {
 }
 
 #[test]
+fn reset_fenced_begin_finishes_once_while_runtime_stop_is_still_gated() {
+    let (state, _codex_runtime_rx) =
+        test_app_state_with_delegation_codex_runtime("engram-reset-stop-begin-finish");
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("engram-reset-stop-begin-finish-project");
+    let worktree_root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("engram-reset-stop-begin-finish-worktree");
+    fs::create_dir_all(&root).expect("project root should exist");
+    fs::write(root.join("README.md"), "fixture\n").expect("fixture file should write");
+    run_git_test_command(&root, &["init"]);
+    run_git_test_command(&root, &["config", "user.email", "termal@example.com"]);
+    run_git_test_command(&root, &["config", "user.name", "TermAl"]);
+    run_git_test_command(&root, &["add", "README.md"]);
+    run_git_test_command(&root, &["commit", "-m", "fixture"]);
+    let project_id = create_test_project(&state, &root, "Engram reset/Stop begin finish");
+    let parent_session_id = create_test_project_session(&state, Agent::Codex, &project_id, &root);
+    enable_test_project_engram(&state, &project_id, &root);
+
+    let runtime_process = Arc::new(
+        SharedChild::new(test_sleep_child()).expect("test OpenCode process should be shared"),
+    );
+    let (runtime_tx, runtime_rx) = mpsc::channel();
+    let turn_lifecycle = Arc::new((Mutex::new(false), Condvar::new()));
+    state.install_test_acp_runtime_override(
+        AcpAgent::OpenCode,
+        AcpRuntimeHandle {
+            agent: AcpAgent::OpenCode,
+            runtime_id: "engram-reset-stop-begin-finish-opencode".to_owned(),
+            input_tx: runtime_tx,
+            process: runtime_process,
+            turn_lifecycle: turn_lifecycle.clone(),
+        },
+    );
+
+    let (begin_step, begin_gate) =
+        gated_engram_step("turn_begin", begin_reply("reset-stop-stale-grant"));
+    let transport = GatedEngramControlTransport::new([
+        immediate_engram_step("session_bind", bind_reply("reset-stop-parent-token")),
+        immediate_engram_step("session_bind", bind_reply("reset-stop-child-token")),
+        immediate_engram_step("turn_evaluate", grant_reply("reset-stop-stale-grant")),
+        begin_step,
+        immediate_engram_step(
+            "turn_checkpoint",
+            checkpoint_reply("reset-stop-stale-grant"),
+        ),
+    ]);
+    state.install_test_engram_transport(transport.clone());
+
+    let (create_done_tx, create_done_rx) = mpsc::channel();
+    let create_state = state.clone();
+    let create_parent_session_id = parent_session_id.clone();
+    let create_handle = std::thread::spawn(move || {
+        let result = create_state.create_read_only_delegation(
+            &create_parent_session_id,
+            CreateDelegationRequest {
+                prompt: "Finish this stale begin without spinning behind Stop.".to_owned(),
+                title: Some("Engram reset/Stop stale begin".to_owned()),
+                cwd: None,
+                agent: Some(Agent::OpenCode),
+                model: None,
+                mode: Some(DelegationMode::Explorer),
+                write_policy: Some(DelegationWritePolicy::IsolatedWorktree {
+                    owned_paths: Vec::new(),
+                    worktree_path: Some(worktree_root.to_string_lossy().into_owned()),
+                }),
+            },
+        );
+        create_done_tx
+            .send(result)
+            .expect("create result observer should remain connected");
+    });
+    let begin_request = begin_gate.wait();
+    let child_id = begin_request.connection.session_id;
+    {
+        let (active, _) = &*turn_lifecycle;
+        *active.lock().expect("ACP lifecycle mutex poisoned") = true;
+    }
+
+    let reset_fenced = observe_next_engram_project_reset_fence(&project_id);
+    let reset_state = state.clone();
+    let reset_project_id = project_id.clone();
+    let reset_handle = std::thread::spawn(move || {
+        reset_state
+            .update_project_engram_settings(&reset_project_id, EngramProjectSettings::default())
+    });
+    reset_fenced
+        .recv_timeout(Duration::from_secs(2))
+        .expect("project reset should advance the stale dispatch generation");
+
+    let stop_state = state.clone();
+    let stop_child_id = child_id.clone();
+    let stop_handle = std::thread::spawn(move || stop_state.stop_session(&stop_child_id));
+    assert!(matches!(
+        runtime_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("OpenCode Stop should enter its gated shutdown"),
+        AcpRuntimeCommand::Cancel
+    ));
+
+    begin_gate.release();
+    // Correct code must finish while Stop remains gated. This long deadline is
+    // only a hang guard for the broken busy-spin path, not a timing budget.
+    let create_before_stop = create_done_rx.recv_timeout(Duration::from_secs(10));
+    let deferred_behind_stale_stop = create_before_stop.is_ok() && {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let child = inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == child_id)
+            .expect("child should remain while Stop is gated");
+        child
+            .engram
+            .pending_dispatch
+            .as_ref()
+            .is_some_and(|pending| pending.awaiting_runtime_stop_resolution)
+    };
+
+    // Always release and join the gated Stop before asserting, so the mutation
+    // this test targets cannot leave spinning threads behind on failure.
+    {
+        let (active, settled) = &*turn_lifecycle;
+        *active.lock().expect("ACP lifecycle mutex poisoned") = false;
+        settled.notify_all();
+    }
+    stop_handle
+        .join()
+        .expect("Stop thread should not panic")
+        .expect("gated Stop should complete");
+    create_handle
+        .join()
+        .expect("create thread should not panic");
+    reset_handle
+        .join()
+        .expect("reset thread should not panic")
+        .expect("reset should complete after Stop abandons the pending marker");
+
+    let create_result = create_before_stop.expect(
+        "generation-stale finish must resolve while Stop is still gated; a hang here is the DeferredByRuntimeStop busy-spin",
+    );
+    create_result.expect("the reset-superseded delivery should finish silently");
+    assert!(
+        !deferred_behind_stale_stop,
+        "a generation-stale finish must not mark itself for another runtime-Stop retry"
+    );
+    let requests = transport.requests();
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|request| {
+                request.request["operation"] == "turn_checkpoint"
+                    && request.request["grant_id"] == "reset-stop-stale-grant"
+            })
+            .count(),
+        1,
+        "the stale begun grant should be closed exactly once"
+    );
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let child = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == child_id)
+        .expect("stopped child should remain after reset");
+    assert_eq!(child.session.status, SessionStatus::Idle);
+    assert!(child.engram.pending_dispatch.is_none());
+    assert!(!child.runtime_stop_in_progress);
+}
+
+#[test]
 fn api_rejection_guard_ignores_a_dispatch_marker_replaced_after_finish() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-api-rejection-marker-race");

@@ -2561,7 +2561,8 @@ impl AppState {
                 .pending_dispatch
                 .as_ref()
                 .is_some_and(|pending| pending.dispatch_generation == dispatch_generation);
-            if pending_dispatch_is_current
+            if record.engram.dispatch_generation == dispatch_generation
+                && pending_dispatch_is_current
                 && record.session.status == SessionStatus::Active
                 && record.runtime_stop_in_progress
             {
