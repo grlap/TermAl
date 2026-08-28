@@ -44,6 +44,7 @@ export function useVirtualizedConversationPrependEffects({
   buildWorkingMountedRangeForScrollTop,
   clearPendingDeferredLayoutTimer,
   estimateMessageHeight,
+  getUserScrollGeneration,
   hasUserScrollInteractionRef,
   isActive,
   isDetachedFromBottomRef,
@@ -79,6 +80,7 @@ export function useVirtualizedConversationPrependEffects({
   ) => VirtualizedRange;
   clearPendingDeferredLayoutTimer: () => void;
   estimateMessageHeight: (message: Message) => number;
+  getUserScrollGeneration: () => number;
   hasUserScrollInteractionRef: MutableRefObject<boolean>;
   isActive: boolean;
   isDetachedFromBottomRef: MutableRefObject<boolean>;
@@ -241,6 +243,7 @@ export function useVirtualizedConversationPrependEffects({
         ? {
             ...preservedAnchor,
             remainingAttempts: PREPENDED_MESSAGE_ANCHOR_RESTORE_ATTEMPTS,
+            userScrollGeneration: getUserScrollGeneration(),
           }
         : null;
 
@@ -286,6 +289,7 @@ export function useVirtualizedConversationPrependEffects({
     buildWorkingMountedRangeForScrollTop,
     clearPendingDeferredLayoutTimer,
     estimateMessageHeight,
+    getUserScrollGeneration,
     isActive,
     messageLocationById,
     messages,
@@ -301,6 +305,13 @@ export function useVirtualizedConversationPrependEffects({
   useLayoutEffect(() => {
     const pendingAnchor = pendingPrependedMessageAnchorRef.current;
     if (!pendingAnchor) {
+      return;
+    }
+
+    if (pendingAnchor.userScrollGeneration !== getUserScrollGeneration()) {
+      // A later wheel, key, thumb drag, or navigation owns the viewport now.
+      // Replaying the pre-prepend anchor would visibly undo that newer input.
+      pendingPrependedMessageAnchorRef.current = null;
       return;
     }
 
@@ -342,6 +353,7 @@ export function useVirtualizedConversationPrependEffects({
     writeScrollTopAndSyncViewport(node, targetScrollTop);
     lastNativeScrollTopRef.current = targetScrollTop;
   }, [
+    getUserScrollGeneration,
     isActive,
     layoutVersion,
     mountedPageRange,

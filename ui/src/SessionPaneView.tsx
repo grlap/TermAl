@@ -966,15 +966,22 @@ export function SessionPaneView({
       command.kind === "page" &&
       (event.key === "PageUp" || event.key === "PageDown")
     ) {
-      scrollSessionMessageStackByPageJump(command.direction === "up" ? -1 : 1);
+      scrollSessionMessageStackByPageJump(
+        command.direction === "up" ? -1 : 1,
+        event.timeStamp,
+      );
       return;
     }
     if (command.kind === "boundary") {
       scrollMessageStackToBoundary(
         command.direction === "up" ? "top" : "bottom",
+        event.timeStamp,
       );
     } else {
-      scrollMessageStackByPage(command.direction === "up" ? -1 : 1);
+      scrollMessageStackByPage(
+        command.direction === "up" ? -1 : 1,
+        event.timeStamp,
+      );
     }
   }
 

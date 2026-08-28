@@ -2240,7 +2240,12 @@ describe("App scroll behaviour", () => {
     });
   });
 
-  it("keeps a growing near-bottom send inside one live follow", async () => {
+  it.each([
+    ["before the first follow frame", 0],
+    ["after several follow frames", 3],
+  ])(
+    "keeps a growing near-bottom send inside one live follow %s",
+    async (_timing, framesBeforeGrowth) => {
     await withVerifiedNoReactActWarnings(async () => {
       let scrollHeight = 1000;
       const restoreScrollGeometry = stubElementScrollGeometry({
@@ -2322,12 +2327,50 @@ describe("App scroll behaviour", () => {
 
         scrollToMock.mockClear();
 
-        await act(async () => {
-          fireEvent.click(screen.getByRole("button", { name: "Send" }));
-          await Promise.resolve();
-        });
-
-        scrollHeight = 1120;
+        const originalRequestAnimationFrame = window.requestAnimationFrame;
+        const originalCancelAnimationFrame = window.cancelAnimationFrame;
+        const animationFrames = new Map<number, FrameRequestCallback>();
+        let nextFrameId = 1;
+        window.requestAnimationFrame = ((callback: FrameRequestCallback) => {
+          const frameId = nextFrameId;
+          nextFrameId += 1;
+          animationFrames.set(frameId, callback);
+          return frameId;
+        }) as typeof requestAnimationFrame;
+        window.cancelAnimationFrame = ((frameId: number) => {
+          animationFrames.delete(frameId);
+        }) as typeof cancelAnimationFrame;
+        try {
+          await act(async () => {
+            fireEvent.click(screen.getByRole("button", { name: "Send" }));
+            await Promise.resolve();
+          });
+          let frameTimestamp = 0;
+          for (let index = 0; index < framesBeforeGrowth; index += 1) {
+            const nextFrame = animationFrames.entries().next().value;
+            if (!nextFrame) {
+              throw new Error("Live follow ended before delayed geometry");
+            }
+            animationFrames.delete(nextFrame[0]);
+            frameTimestamp += 1000 / 60;
+            act(() => nextFrame[1](frameTimestamp));
+          }
+          scrollHeight = 1120;
+          let drainedFrames = 0;
+          while (animationFrames.size > 0 && drainedFrames < 80) {
+            const nextFrame = animationFrames.entries().next().value;
+            if (!nextFrame) {
+              break;
+            }
+            animationFrames.delete(nextFrame[0]);
+            frameTimestamp += 1000 / 60;
+            act(() => nextFrame[1](frameTimestamp));
+            drainedFrames += 1;
+          }
+        } finally {
+          window.requestAnimationFrame = originalRequestAnimationFrame;
+          window.cancelAnimationFrame = originalCancelAnimationFrame;
+        }
         await settleAsyncUi();
 
         const followedTops = scrollToTopsWithBehavior(scrollToMock, "auto");
@@ -2337,8 +2380,9 @@ describe("App scroll behaviour", () => {
         context.cleanup();
         restoreScrollGeometry();
       }
-    });
-  });
+      });
+    },
+  );
 
   it("makes room when the first agent card appears above the live turn", async () => {
     await withVerifiedNoReactActWarnings(async () => {
@@ -4056,8 +4100,19 @@ describe("App scroll behaviour", () => {
         });
         expect(liveTail).toHaveAttribute("data-tail-follow", "detached");
 
-        messageStack.scrollTop = 800;
+        const spaceDownEvent = new KeyboardEvent("keydown", {
+          bubbles: true,
+          cancelable: true,
+          key: " ",
+        });
+        act(() => {
+          messageStack.dispatchEvent(spaceDownEvent);
+        });
+        expect(spaceDownEvent.defaultPrevented).toBe(false);
         await act(async () => {
+          // Space remains browser-owned, so the test applies the native frame
+          // that Blink would produce after the key event establishes its lease.
+          messageStack.scrollTop = 800;
           fireEvent.scroll(messageStack);
           await flushUiWork();
         });
@@ -4089,9 +4144,11 @@ describe("App scroll behaviour", () => {
           await flushUiWork();
         });
 
-        messageStack.scrollTop = 800;
         await act(async () => {
+          fireEvent.mouseDown(messageStack);
+          messageStack.scrollTop = 800;
           fireEvent.scroll(messageStack);
+          fireEvent.mouseUp(document);
           await flushUiWork();
         });
         expect(liveTail).toHaveAttribute("data-tail-follow", "attached");

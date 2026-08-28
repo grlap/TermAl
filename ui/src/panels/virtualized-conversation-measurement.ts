@@ -28,6 +28,7 @@ export type VisibleMessageAnchor = {
 
 export type PendingVisibleMessageAnchor = VisibleMessageAnchor & {
   remainingAttempts: number;
+  userScrollGeneration: number;
 };
 
 export type MessagePage = {

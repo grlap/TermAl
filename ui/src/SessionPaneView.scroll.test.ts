@@ -25,9 +25,15 @@ import {
   useSessionPaneScrollState,
 } from "./SessionPaneView.scroll";
 import {
+  MESSAGE_STACK_BOTTOM_FOLLOW_SCROLL_MS,
+  MESSAGE_STACK_POINTER_OWNERSHIP_MS,
   MESSAGE_STACK_SCROLL_WRITE_EVENT,
   MESSAGE_STACK_USER_SCROLL_INTENT_EVENT,
+  claimMessageStackNativeScrollOwnership,
+  consumeMessageStackVirtualizerPositionCorrection,
+  markMessageStackVirtualizerPositionCorrection,
   requestMessageStackBottomRepin,
+  peekMessageStackNativeScrollOwnership,
 } from "./message-stack-scroll-sync";
 import {
   addSessionHistoryPageDemandListener,
@@ -86,6 +92,14 @@ function params(activeSession: Session) {
     visibleLastMessageAuthor: "assistant" as const,
     visibleMessageContentSignature: "history-message",
   };
+}
+
+function withInputTimestamp<T extends Event>(event: T, timeStamp: number) {
+  Object.defineProperty(event, "timeStamp", {
+    configurable: true,
+    value: timeStamp,
+  });
+  return event;
 }
 
 function installAnimationFrameHarness() {
@@ -275,7 +289,9 @@ describe("session pane historical-window tail state", () => {
     }
   });
 
-  it("owns body-targeted ArrowUp with one immediate transcript write", () => {
+  it("owns body-targeted ArrowUp over a residual downward wheel burst", () => {
+    let now = 1_000;
+    vi.spyOn(performance, "now").mockImplementation(() => now);
     const scrollNode = document.createElement("section");
     const messageCard = document.createElement("article");
     scrollNode.append(messageCard);
@@ -292,23 +308,41 @@ describe("session pane historical-window tail state", () => {
       intentListener,
     );
     scrollNode.addEventListener(MESSAGE_STACK_SCROLL_WRITE_EVENT, writeListener);
-    const hook = renderHook(() =>
-      useSessionPaneScrollState({
+    const hook = renderHook(() => {
+      const state = useSessionPaneScrollState({
         ...params(session(false)),
         isActive: true,
         isSessionTabActive: true,
-      }),
-    );
-    hook.result.current.messageStackRef.current = scrollNode;
+      });
+      useLayoutEffect(() => {
+        state.messageStackRef.current = scrollNode;
+      }, [state.messageStackRef]);
+      return state;
+    });
 
     try {
-      const keyEvent = new KeyboardEvent("keydown", {
-        bubbles: true,
-        cancelable: true,
-        key: "ArrowUp",
-      });
+      const keyEvent = withInputTimestamp(
+        new KeyboardEvent("keydown", {
+          bubbles: true,
+          cancelable: true,
+          key: "ArrowUp",
+        }),
+        now + 2,
+      );
+      const boundaryWheel = withInputTimestamp(
+        new WheelEvent("wheel", {
+          bubbles: true,
+          cancelable: true,
+          deltaY: 40,
+        }),
+        now,
+      );
       act(() => {
         fireEvent.mouseDown(messageCard);
+        // A downward wheel at the physical bottom cannot move, but its burst
+        // can still have inertial ticks pending behind the newer key.
+        scrollNode.dispatchEvent(boundaryWheel);
+        now += 2;
         document.body.dispatchEvent(keyEvent);
       });
 
@@ -321,6 +355,89 @@ describe("session pane historical-window tail state", () => {
         scrollSource: "user",
       });
       expect(hook.result.current.liveTailPinned).toBe(false);
+
+      now += 3;
+      const residualWheel = withInputTimestamp(
+        new WheelEvent("wheel", {
+          bubbles: true,
+          cancelable: true,
+          deltaY: 40,
+        }),
+        now,
+      );
+      act(() => {
+        scrollNode.dispatchEvent(residualWheel);
+      });
+      expect(residualWheel.defaultPrevented).toBe(true);
+      expect(scrollNode.scrollTop).toBe(760);
+      expect(hook.result.current.liveTailPinned).toBe(false);
+
+      now += 10;
+      const decayingResidualWheel = withInputTimestamp(
+        new WheelEvent("wheel", {
+          bubbles: true,
+          cancelable: true,
+          deltaY: 24,
+        }),
+        now,
+      );
+      act(() => {
+        scrollNode.dispatchEvent(decayingResidualWheel);
+      });
+      expect(decayingResidualWheel.defaultPrevented).toBe(true);
+      expect(scrollNode.scrollTop).toBe(760);
+
+      now += 10;
+      const firstAcceleratingWheel = withInputTimestamp(
+        new WheelEvent("wheel", {
+          bubbles: true,
+          cancelable: true,
+          deltaY: 32,
+        }),
+        now,
+      );
+      act(() => {
+        scrollNode.dispatchEvent(firstAcceleratingWheel);
+      });
+      expect(firstAcceleratingWheel.defaultPrevented).toBe(true);
+      expect(scrollNode.scrollTop).toBe(760);
+
+      now += 10;
+      const secondAcceleratingWheel = withInputTimestamp(
+        new WheelEvent("wheel", {
+          bubbles: true,
+          cancelable: true,
+          deltaY: 40,
+        }),
+        now,
+      );
+      act(() => {
+        scrollNode.dispatchEvent(secondAcceleratingWheel);
+      });
+      expect(secondAcceleratingWheel.defaultPrevented).toBe(true);
+      expect(scrollNode.scrollTop).toBe(800);
+
+      const nestedScroller = document.createElement("div");
+      nestedScroller.style.overflowY = "auto";
+      Object.defineProperties(nestedScroller, {
+        clientHeight: { configurable: true, value: 100 },
+        scrollHeight: { configurable: true, value: 200 },
+        scrollTop: { configurable: true, writable: true, value: 0 },
+      });
+      messageCard.append(nestedScroller);
+      const nestedWheel = withInputTimestamp(
+        new WheelEvent("wheel", {
+          bubbles: true,
+          cancelable: true,
+          deltaY: 40,
+        }),
+        now,
+      );
+      act(() => {
+        nestedScroller.dispatchEvent(nestedWheel);
+      });
+      expect(nestedWheel.defaultPrevented).toBe(false);
+      expect(scrollNode.scrollTop).toBe(800);
     } finally {
       hook.unmount();
       scrollNode.remove();
@@ -3170,7 +3287,7 @@ describe("session pane historical-window tail state", () => {
     expect(hook.result.current.liveTailPinned).toBe(false);
   });
 
-  it("owns direct ArrowUp with one immediate detached transcript write", () => {
+  it("owns direct ArrowUp and reattaches only after a native move back to bottom", () => {
     vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
     vi.stubGlobal("cancelAnimationFrame", vi.fn());
     const activeSession = session(false);
@@ -3248,6 +3365,1261 @@ describe("session pane historical-window tail state", () => {
     });
     expect(paneShouldStickToBottomRef.current[scrollStateKey]).toBe(false);
     expect(hook.result.current.liveTailPinned).toBe(false);
+
+    act(() => {
+      // A scrollbar-thumb or touch move can return without a pane-owned write.
+      // Positive movement against the recorded stable geometry is genuine
+      // reader intent and may reattach at the reachable physical bottom.
+      hook.result.current.handleMessageStackUserScrollIntent({
+        currentTarget: scrollNode,
+        defaultPrevented: false,
+        target: scrollNode,
+        type: "mousedown",
+      } as unknown as ReactMouseEvent<HTMLElement>);
+      scrollNode.scrollTop = 800;
+      hook.result.current.handleMessageStackScroll({
+        currentTarget: scrollNode,
+      } as ReactUIEvent<HTMLElement>);
+    });
+    expect(paneScrollPositions[scrollStateKey]?.shouldStick).toBe(true);
+    expect(paneShouldStickToBottomRef.current[scrollStateKey]).toBe(true);
+    expect(hook.result.current.liveTailPinned).toBe(true);
+  });
+
+  it("rejects a residual downward wheel tick after ArrowUp escapes the physical bottom", () => {
+    vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    let now = 1_000;
+    vi.spyOn(performance, "now").mockImplementation(() => now);
+    const activeSession = session(false);
+    const scrollStateKey = "pane-1:session-history";
+    const paneScrollPositions = {
+      [scrollStateKey]: {
+        top: 800,
+        shouldStick: true,
+      },
+    };
+    const paneShouldStickToBottomRef = {
+      current: { [scrollStateKey]: true },
+    };
+    const scrollNode = document.createElement("section");
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 1_000 },
+      scrollTop: { configurable: true, writable: true, value: 800 },
+    });
+    const hook = renderHook(() => {
+      const state = useSessionPaneScrollState({
+        ...params(activeSession),
+        paneScrollPositions,
+        paneShouldStickToBottomRef,
+        scrollStateKey,
+      });
+      useLayoutEffect(() => {
+        state.messageStackRef.current = scrollNode;
+      }, [state.messageStackRef]);
+      return state;
+    });
+
+    now += 2;
+    act(() => {
+      hook.result.current.handleMessageStackUserScrollIntent({
+        altKey: false,
+        ctrlKey: false,
+        currentTarget: scrollNode,
+        defaultPrevented: false,
+        key: "ArrowUp",
+        metaKey: false,
+        nativeEvent: { timeStamp: now } as KeyboardEvent,
+        preventDefault: vi.fn(),
+        shiftKey: false,
+        target: scrollNode,
+        type: "keydown",
+      } as unknown as ReactKeyboardEvent<HTMLElement>);
+    });
+    expect(scrollNode.scrollTop).toBe(760);
+    expect(paneShouldStickToBottomRef.current[scrollStateKey]).toBe(false);
+    expect(hook.result.current.liveTailPinned).toBe(false);
+
+    now += 3;
+    const firstResidualWheel = withInputTimestamp(
+      new WheelEvent("wheel", {
+        bubbles: true,
+        // Chromium may expose later ticks in one wheel sequence as
+        // non-cancelable even with a non-passive listener.
+        cancelable: false,
+        deltaY: 40,
+      }),
+      now,
+    );
+    act(() => {
+      // A final tick from the superseded downward wheel arrives after ArrowUp.
+      // It must not inherit the old direction and reclaim bottom authority.
+      scrollNode.dispatchEvent(firstResidualWheel);
+      // Non-cancelable Chromium wheel events may still apply their native
+      // scroll after dispatch. The explicit superseded-wheel token owns that
+      // later native frame and restores the ArrowUp destination.
+      scrollNode.scrollTop = 800;
+      hook.result.current.handleMessageStackScroll({
+        currentTarget: scrollNode,
+      } as ReactUIEvent<HTMLElement>);
+    });
+
+    expect(firstResidualWheel.defaultPrevented).toBe(false);
+    expect(scrollNode.scrollTop).toBe(760);
+    expect(paneScrollPositions[scrollStateKey]).toMatchObject({
+      top: 760,
+      shouldStick: false,
+    });
+    expect(paneShouldStickToBottomRef.current[scrollStateKey]).toBe(false);
+    expect(hook.result.current.liveTailPinned).toBe(false);
+
+    now += 16;
+    const secondResidualWheel = withInputTimestamp(
+      new WheelEvent("wheel", {
+        bubbles: true,
+        cancelable: true,
+        deltaY: 40,
+      }),
+      now,
+    );
+    act(() => {
+      scrollNode.dispatchEvent(secondResidualWheel);
+    });
+    expect(secondResidualWheel.defaultPrevented).toBe(true);
+    expect(scrollNode.scrollTop).toBe(760);
+    expect(hook.result.current.liveTailPinned).toBe(false);
+
+    now += 16;
+    const coalescedResidualWheel = withInputTimestamp(
+      new WheelEvent("wheel", {
+        bubbles: true,
+        cancelable: true,
+        deltaY: 200,
+      }),
+      now,
+    );
+    act(() => {
+      scrollNode.dispatchEvent(coalescedResidualWheel);
+    });
+    expect(coalescedResidualWheel.defaultPrevented).toBe(true);
+    expect(scrollNode.scrollTop).toBe(760);
+
+    now += 16;
+    const mouseNotchAfterCoalescing = withInputTimestamp(
+      new WheelEvent("wheel", {
+        bubbles: true,
+        cancelable: true,
+        deltaY: 100,
+      }),
+      now,
+    );
+    act(() => {
+      scrollNode.dispatchEvent(mouseNotchAfterCoalescing);
+    });
+    expect(mouseNotchAfterCoalescing.defaultPrevented).toBe(true);
+    expect(scrollNode.scrollTop).toBe(760);
+
+    for (let index = 0; index < 20; index += 1) {
+      now += 16;
+      const continuedNoPreludeResidual = withInputTimestamp(
+        new WheelEvent("wheel", {
+          bubbles: true,
+          cancelable: true,
+          deltaY: 40,
+        }),
+        now,
+      );
+      act(() => {
+        scrollNode.dispatchEvent(continuedNoPreludeResidual);
+      });
+      expect(continuedNoPreludeResidual.defaultPrevented).toBe(true);
+      expect(scrollNode.scrollTop).toBe(760);
+    }
+
+    now += 49;
+    const freshWheel = withInputTimestamp(
+      new WheelEvent("wheel", {
+        bubbles: true,
+        cancelable: true,
+        deltaY: 40,
+      }),
+      now,
+    );
+    act(() => {
+      scrollNode.dispatchEvent(freshWheel);
+    });
+    expect(scrollNode.scrollTop).toBe(800);
+    expect(paneShouldStickToBottomRef.current[scrollStateKey]).toBe(true);
+    expect(hook.result.current.liveTailPinned).toBe(true);
+
+    now += 2;
+    act(() => {
+      hook.result.current.handleMessageStackUserScrollIntent({
+        altKey: false,
+        ctrlKey: false,
+        currentTarget: scrollNode,
+        defaultPrevented: false,
+        key: "ArrowUp",
+        metaKey: false,
+        nativeEvent: { timeStamp: now } as KeyboardEvent,
+        preventDefault: vi.fn(),
+        shiftKey: false,
+        target: scrollNode,
+        type: "keydown",
+      } as unknown as ReactKeyboardEvent<HTMLElement>);
+    });
+    for (let index = 0; index < 24; index += 1) {
+      now += 16;
+      const continuedResidualWheel = withInputTimestamp(
+        new WheelEvent("wheel", {
+          bubbles: true,
+          cancelable: true,
+          deltaY: 40,
+        }),
+        now,
+      );
+      act(() => {
+        scrollNode.dispatchEvent(continuedResidualWheel);
+      });
+      expect(continuedResidualWheel.defaultPrevented).toBe(true);
+      expect(scrollNode.scrollTop).toBe(760);
+    }
+    now += 16;
+    const wheelAfterFormerAbsoluteCap = withInputTimestamp(
+      new WheelEvent("wheel", {
+        bubbles: true,
+        cancelable: false,
+        deltaY: 40,
+      }),
+      now,
+    );
+    act(() => {
+      scrollNode.dispatchEvent(wheelAfterFormerAbsoluteCap);
+      scrollNode.scrollTop = 800;
+      hook.result.current.handleMessageStackScroll({
+        currentTarget: scrollNode,
+      } as ReactUIEvent<HTMLElement>);
+    });
+    expect(wheelAfterFormerAbsoluteCap.defaultPrevented).toBe(false);
+    expect(scrollNode.scrollTop).toBe(760);
+    expect(hook.result.current.liveTailPinned).toBe(false);
+
+    now += 49;
+    const wheelAfterQuietBoundary = withInputTimestamp(
+      new WheelEvent("wheel", {
+        bubbles: true,
+        cancelable: true,
+        deltaY: 40,
+      }),
+      now,
+    );
+    act(() => {
+      scrollNode.dispatchEvent(wheelAfterQuietBoundary);
+    });
+    expect(wheelAfterQuietBoundary.defaultPrevented).toBe(true);
+    expect(scrollNode.scrollTop).toBe(800);
+    expect(hook.result.current.liveTailPinned).toBe(true);
+
+    now += 2;
+    act(() => {
+      hook.result.current.handleMessageStackUserScrollIntent({
+        altKey: false,
+        ctrlKey: false,
+        currentTarget: scrollNode,
+        defaultPrevented: false,
+        key: "ArrowUp",
+        metaKey: false,
+        nativeEvent: { timeStamp: now } as KeyboardEvent,
+        preventDefault: vi.fn(),
+        shiftKey: false,
+        target: scrollNode,
+        type: "keydown",
+      } as unknown as ReactKeyboardEvent<HTMLElement>);
+    });
+    now += 3;
+    const sameDirectionWheel = withInputTimestamp(
+      new WheelEvent("wheel", {
+        bubbles: true,
+        cancelable: true,
+        deltaY: -40,
+      }),
+      now,
+    );
+    act(() => {
+      scrollNode.dispatchEvent(sameDirectionWheel);
+    });
+    expect(scrollNode.scrollTop).toBe(720);
+    expect(paneShouldStickToBottomRef.current[scrollStateKey]).toBe(false);
+    expect(hook.result.current.liveTailPinned).toBe(false);
+
+    now += 3;
+    const downWheelAfterUpwardEscape = withInputTimestamp(
+      new WheelEvent("wheel", {
+        bubbles: true,
+        cancelable: true,
+        deltaY: 40,
+      }),
+      now,
+    );
+    act(() => {
+      scrollNode.dispatchEvent(downWheelAfterUpwardEscape);
+    });
+    expect(downWheelAfterUpwardEscape.defaultPrevented).toBe(true);
+    expect(scrollNode.scrollTop).toBe(760);
+  });
+
+  it("keeps a superseded wheel tail blocked when ArrowDown reverses repeated ArrowUp", () => {
+    let now = 1_000;
+    vi.spyOn(performance, "now").mockImplementation(() => now);
+    const scrollNode = document.createElement("section");
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 1_000 },
+      scrollTop: { configurable: true, writable: true, value: 800 },
+    });
+    const hook = renderHook(() => {
+      const state = useSessionPaneScrollState(params(session(false)));
+      useLayoutEffect(() => {
+        state.messageStackRef.current = scrollNode;
+      }, [state.messageStackRef]);
+      return state;
+    });
+
+    act(() => {
+      scrollNode.dispatchEvent(
+        withInputTimestamp(
+          new WheelEvent("wheel", {
+            bubbles: true,
+            cancelable: true,
+            deltaY: 100,
+          }),
+          now,
+        ),
+      );
+    });
+
+    for (let index = 0; index < 8; index += 1) {
+      now += 20;
+      act(() => {
+        hook.result.current.handleMessageStackUserScrollIntent({
+          altKey: false,
+          ctrlKey: false,
+          currentTarget: scrollNode,
+          defaultPrevented: false,
+          key: "ArrowUp",
+          metaKey: false,
+          nativeEvent: { timeStamp: now } as KeyboardEvent,
+          preventDefault: vi.fn(),
+          shiftKey: false,
+          target: scrollNode,
+          type: "keydown",
+        } as unknown as ReactKeyboardEvent<HTMLElement>);
+      });
+      expect(scrollNode.scrollTop).toBe(760 - index * 40);
+
+      now += 5;
+      const residualWheel = withInputTimestamp(
+        new WheelEvent("wheel", {
+          bubbles: true,
+          cancelable: true,
+          deltaY: 100,
+        }),
+        now,
+      );
+      act(() => {
+        scrollNode.dispatchEvent(residualWheel);
+      });
+      expect(residualWheel.defaultPrevented).toBe(true);
+      expect(scrollNode.scrollTop).toBe(760 - index * 40);
+    }
+
+    now += 20;
+    act(() => {
+      hook.result.current.handleMessageStackUserScrollIntent({
+        altKey: false,
+        ctrlKey: false,
+        currentTarget: scrollNode,
+        defaultPrevented: false,
+        key: "ArrowDown",
+        metaKey: false,
+        nativeEvent: { timeStamp: now } as KeyboardEvent,
+        preventDefault: vi.fn(),
+        shiftKey: false,
+        target: scrollNode,
+        type: "keydown",
+      } as unknown as ReactKeyboardEvent<HTMLElement>);
+    });
+    expect(scrollNode.scrollTop).toBe(520);
+
+    now += 3;
+    const lateResidualWheel = withInputTimestamp(
+      new WheelEvent("wheel", {
+        bubbles: true,
+        cancelable: false,
+        deltaY: 400,
+      }),
+      now,
+    );
+    act(() => {
+      scrollNode.dispatchEvent(lateResidualWheel);
+      scrollNode.scrollTop = 800;
+      hook.result.current.handleMessageStackScroll({
+        currentTarget: scrollNode,
+        nativeEvent: { timeStamp: now },
+      } as unknown as ReactUIEvent<HTMLElement>);
+    });
+
+    expect(lateResidualWheel.defaultPrevented).toBe(false);
+    expect(scrollNode.scrollTop).toBe(520);
+    expect(hook.result.current.liveTailPinned).toBe(false);
+    hook.unmount();
+  });
+
+  it("accepts a cancelable downward wheel reversal without a pre-key wheel prelude", () => {
+    let now = 1_000;
+    vi.spyOn(performance, "now").mockImplementation(() => now);
+    const scrollNode = document.createElement("section");
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 1_000 },
+      scrollTop: { configurable: true, writable: true, value: 800 },
+    });
+    const hook = renderHook(() => {
+      const state = useSessionPaneScrollState(params(session(false)));
+      useLayoutEffect(() => {
+        state.messageStackRef.current = scrollNode;
+      }, [state.messageStackRef]);
+      return state;
+    });
+
+    act(() => {
+      hook.result.current.handleMessageStackUserScrollIntent({
+        altKey: false,
+        ctrlKey: false,
+        currentTarget: scrollNode,
+        defaultPrevented: false,
+        key: "ArrowUp",
+        metaKey: false,
+        preventDefault: vi.fn(),
+        shiftKey: false,
+        target: scrollNode,
+        type: "keydown",
+      } as unknown as ReactKeyboardEvent<HTMLElement>);
+    });
+    expect(scrollNode.scrollTop).toBe(760);
+
+    now += 3;
+    const deliberateDownWheel = new WheelEvent("wheel", {
+      bubbles: true,
+      cancelable: true,
+      deltaY: 40,
+    });
+    act(() => {
+      scrollNode.dispatchEvent(deliberateDownWheel);
+    });
+
+    expect(deliberateDownWheel.defaultPrevented).toBe(true);
+    expect(scrollNode.scrollTop).toBe(800);
+    expect(hook.result.current.liveTailPinned).toBe(true);
+    hook.unmount();
+  });
+
+  it("uses input timestamps when the main thread delays a residual wheel handler", () => {
+    let handlerNow = 1_000;
+    vi.spyOn(performance, "now").mockImplementation(() => handlerNow);
+    const scrollNode = document.createElement("section");
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 1_000 },
+      scrollTop: { configurable: true, writable: true, value: 800 },
+    });
+    const hook = renderHook(() => {
+      const state = useSessionPaneScrollState(params(session(false)));
+      useLayoutEffect(() => {
+        state.messageStackRef.current = scrollNode;
+      }, [state.messageStackRef]);
+      return state;
+    });
+
+    const boundaryWheel = new WheelEvent("wheel", {
+      bubbles: true,
+      cancelable: true,
+      deltaY: 40,
+    });
+    Object.defineProperty(boundaryWheel, "timeStamp", {
+      configurable: true,
+      value: 1_000,
+    });
+    act(() => {
+      scrollNode.dispatchEvent(boundaryWheel);
+    });
+
+    handlerNow = 1_002;
+    act(() => {
+      hook.result.current.handleMessageStackUserScrollIntent({
+        altKey: false,
+        ctrlKey: false,
+        currentTarget: scrollNode,
+        defaultPrevented: false,
+        key: "ArrowUp",
+        metaKey: false,
+        nativeEvent: { timeStamp: 1_002 } as KeyboardEvent,
+        preventDefault: vi.fn(),
+        shiftKey: false,
+        target: scrollNode,
+        type: "keydown",
+      } as unknown as ReactKeyboardEvent<HTMLElement>);
+    });
+    expect(scrollNode.scrollTop).toBe(760);
+
+    handlerNow = 1_118;
+    const delayedResidualWheel = new WheelEvent("wheel", {
+      bubbles: true,
+      cancelable: true,
+      deltaY: 40,
+    });
+    Object.defineProperty(delayedResidualWheel, "timeStamp", {
+      configurable: true,
+      value: 1_010,
+    });
+    act(() => {
+      scrollNode.dispatchEvent(delayedResidualWheel);
+    });
+
+    expect(delayedResidualWheel.defaultPrevented).toBe(true);
+    expect(scrollNode.scrollTop).toBe(760);
+    expect(hook.result.current.liveTailPinned).toBe(false);
+
+    const wheelAfterInputQuiet = new WheelEvent("wheel", {
+      bubbles: true,
+      cancelable: true,
+      deltaY: 40,
+    });
+    Object.defineProperty(wheelAfterInputQuiet, "timeStamp", {
+      configurable: true,
+      value: 1_060,
+    });
+    act(() => {
+      scrollNode.dispatchEvent(wheelAfterInputQuiet);
+    });
+
+    expect(wheelAfterInputQuiet.defaultPrevented).toBe(true);
+    expect(scrollNode.scrollTop).toBe(800);
+    hook.unmount();
+  });
+
+  it("gives browser-owned Shift+Space authority over a confirmed residual down-wheel gesture", () => {
+    let now = 1_000;
+    vi.spyOn(performance, "now").mockImplementation(() => now);
+    const scrollNode = document.createElement("section");
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 1_000 },
+      scrollTop: { configurable: true, writable: true, value: 800 },
+    });
+    const hook = renderHook(() => {
+      const state = useSessionPaneScrollState(params(session(false)));
+      useLayoutEffect(() => {
+        state.messageStackRef.current = scrollNode;
+      }, [state.messageStackRef]);
+      return state;
+    });
+
+    act(() => {
+      scrollNode.dispatchEvent(
+        withInputTimestamp(
+          new WheelEvent("wheel", {
+            bubbles: true,
+            cancelable: true,
+            deltaY: 40,
+          }),
+          now,
+        ),
+      );
+      now += 2;
+      hook.result.current.handleMessageStackUserScrollIntent({
+        altKey: false,
+        ctrlKey: false,
+        currentTarget: scrollNode,
+        defaultPrevented: false,
+        key: " ",
+        metaKey: false,
+        nativeEvent: { timeStamp: now } as KeyboardEvent,
+        preventDefault: vi.fn(),
+        shiftKey: true,
+        target: scrollNode,
+        type: "keydown",
+      } as unknown as ReactKeyboardEvent<HTMLElement>);
+      scrollNode.scrollTop = 600;
+      hook.result.current.handleMessageStackScroll({
+        currentTarget: scrollNode,
+      } as ReactUIEvent<HTMLElement>);
+    });
+
+    now += 3;
+    const residualDownWheel = withInputTimestamp(
+      new WheelEvent("wheel", {
+        bubbles: true,
+        cancelable: true,
+        deltaY: 40,
+      }),
+      now,
+    );
+    act(() => {
+      scrollNode.dispatchEvent(residualDownWheel);
+    });
+
+    expect(residualDownWheel.defaultPrevented).toBe(true);
+    expect(scrollNode.scrollTop).toBe(600);
+    expect(hook.result.current.liveTailPinned).toBe(false);
+    hook.unmount();
+  });
+
+  it("keeps an older wheel guard across browser-owned Space", () => {
+    let now = 1_000;
+    vi.spyOn(performance, "now").mockImplementation(() => now);
+    const scrollNode = document.createElement("section");
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 1_000 },
+      scrollTop: { configurable: true, writable: true, value: 800 },
+    });
+    const hook = renderHook(() => {
+      const state = useSessionPaneScrollState(params(session(false)));
+      useLayoutEffect(() => {
+        state.messageStackRef.current = scrollNode;
+      }, [state.messageStackRef]);
+      return state;
+    });
+
+    act(() => {
+      hook.result.current.handleMessageStackUserScrollIntent({
+        altKey: false,
+        ctrlKey: false,
+        currentTarget: scrollNode,
+        defaultPrevented: false,
+        key: "ArrowUp",
+        metaKey: false,
+        preventDefault: vi.fn(),
+        shiftKey: false,
+        target: scrollNode,
+        type: "keydown",
+      } as unknown as ReactKeyboardEvent<HTMLElement>);
+      now += 2;
+      hook.result.current.handleMessageStackUserScrollIntent({
+        altKey: false,
+        ctrlKey: false,
+        currentTarget: scrollNode,
+        defaultPrevented: false,
+        key: " ",
+        metaKey: false,
+        preventDefault: vi.fn(),
+        shiftKey: false,
+        target: scrollNode,
+        type: "keydown",
+      } as unknown as ReactKeyboardEvent<HTMLElement>);
+    });
+    expect(scrollNode.scrollTop).toBe(760);
+
+    now += 3;
+    const downWheel = withInputTimestamp(
+      new WheelEvent("wheel", {
+        bubbles: true,
+        cancelable: false,
+        deltaY: 40,
+      }),
+      now,
+    );
+    act(() => {
+      scrollNode.dispatchEvent(downWheel);
+    });
+
+    expect(downWheel.defaultPrevented).toBe(false);
+    expect(scrollNode.scrollTop).toBe(760);
+    expect(hook.result.current.liveTailPinned).toBe(false);
+    hook.unmount();
+  });
+
+  it.each([
+    ["PageUp", (state: ReturnType<typeof useSessionPaneScrollState>) =>
+      state.scrollSessionMessageStackByPageJump(-1)],
+    ["Home", (state: ReturnType<typeof useSessionPaneScrollState>) =>
+      state.scrollMessageStackToBoundary("top")],
+  ] as const)(
+    "supersedes a residual downward wheel burst with %s",
+    (_key, navigate) => {
+      let now = 1_000;
+      vi.spyOn(performance, "now").mockImplementation(() => now);
+      const scrollNode = document.createElement("section");
+      Object.defineProperties(scrollNode, {
+        clientHeight: { configurable: true, value: 200 },
+        scrollHeight: { configurable: true, value: 1_000 },
+        scrollTop: { configurable: true, writable: true, value: 800 },
+      });
+      Object.defineProperty(scrollNode, "scrollTo", {
+        configurable: true,
+        value: vi.fn((options: ScrollToOptions) => {
+          if (typeof options.top === "number") {
+            scrollNode.scrollTop = options.top;
+          }
+        }),
+      });
+      const activeSession = {
+        ...session(false),
+        hasOlderHistory: false,
+        messagesLoaded: true,
+      };
+      const hook = renderHook(() => {
+        const state = useSessionPaneScrollState({
+          ...params(activeSession),
+          isActive: true,
+          isSessionTabActive: true,
+        });
+        useLayoutEffect(() => {
+          state.messageStackRef.current = scrollNode;
+        }, [state.messageStackRef]);
+        return state;
+      });
+
+      const boundaryWheel = withInputTimestamp(
+        new WheelEvent("wheel", {
+          bubbles: true,
+          cancelable: true,
+          deltaY: 40,
+        }),
+        now,
+      );
+      act(() => {
+        scrollNode.dispatchEvent(boundaryWheel);
+      });
+      expect(scrollNode.scrollTop).toBe(800);
+
+      now += 2;
+      act(() => {
+        navigate(hook.result.current);
+      });
+      const topAfterNavigation = scrollNode.scrollTop;
+      expect(topAfterNavigation).toBeLessThan(800);
+
+      now += 3;
+      const residualWheel = withInputTimestamp(
+        new WheelEvent("wheel", {
+          bubbles: true,
+          cancelable: true,
+          deltaY: 40,
+        }),
+        now,
+      );
+      act(() => {
+        scrollNode.dispatchEvent(residualWheel);
+      });
+
+      expect(residualWheel.defaultPrevented).toBe(true);
+      expect(scrollNode.scrollTop).toBe(topAfterNavigation);
+      hook.unmount();
+    },
+  );
+
+  it("rewinds only late frames from an explicitly cancelled bottom follow", () => {
+    vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    let now = 1_000;
+    vi.spyOn(performance, "now").mockImplementation(() => now);
+    const scrollStateKey = "pane-1:session-history";
+    const paneScrollPositions = {
+      [scrollStateKey]: { top: 800, shouldStick: true },
+    };
+    const paneShouldStickToBottomRef = {
+      current: { [scrollStateKey]: true },
+    };
+    let scrollHeight = 1_000;
+    const scrollNode = document.createElement("section");
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, get: () => scrollHeight },
+      scrollTop: { configurable: true, writable: true, value: 800 },
+    });
+    Object.defineProperty(scrollNode, "scrollTo", {
+      configurable: true,
+      value: vi.fn((options: ScrollToOptions) => {
+        if (typeof options.top === "number") {
+          scrollNode.scrollTop = options.top;
+        }
+      }),
+    });
+    const hook = renderHook(() => {
+      const state = useSessionPaneScrollState({
+        ...params(session(false)),
+        isSessionTabActive: true,
+        paneScrollPositions,
+        paneShouldStickToBottomRef,
+        scrollStateKey,
+      });
+      state.messageStackRef.current = scrollNode;
+      return state;
+    });
+
+    scrollHeight = 1_040;
+    act(() => {
+      expect(
+        requestMessageStackBottomRepin(scrollNode, { beforePaint: true }),
+      ).toBe(true);
+      hook.result.current.handleMessageStackUserScrollIntent({
+        altKey: false,
+        ctrlKey: false,
+        currentTarget: scrollNode,
+        defaultPrevented: false,
+        key: "ArrowUp",
+        metaKey: false,
+        preventDefault: vi.fn(),
+        shiftKey: false,
+        target: scrollNode,
+        type: "keydown",
+      } as unknown as ReactKeyboardEvent<HTMLElement>);
+    });
+    expect(scrollNode.scrollTop).toBe(800);
+
+    // The canceled producer targeted "bottom", not the numeric bottom that
+    // existed when it began. A later growth moves that late frame to 880.
+    scrollHeight = 1_080;
+    act(() => {
+      scrollNode.scrollTop = 880;
+      hook.result.current.handleMessageStackScroll({
+        currentTarget: scrollNode,
+      } as ReactUIEvent<HTMLElement>);
+    });
+    expect(scrollNode.scrollTop).toBe(800);
+    expect(hook.result.current.liveTailPinned).toBe(false);
+
+    now += MESSAGE_STACK_BOTTOM_FOLLOW_SCROLL_MS + 1;
+    act(() => {
+      claimMessageStackNativeScrollOwnership(
+        scrollNode,
+        { direction: null, owner: "pointer" },
+        MESSAGE_STACK_POINTER_OWNERSHIP_MS,
+      );
+      scrollNode.scrollTop = 880;
+      hook.result.current.handleMessageStackScroll({
+        currentTarget: scrollNode,
+      } as ReactUIEvent<HTMLElement>);
+    });
+    expect(scrollNode.scrollTop).toBe(880);
+    expect(hook.result.current.liveTailPinned).toBe(true);
+  });
+
+  it("keeps a shrink detached but accepts later forward movement to the physical bottom", () => {
+    vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    const activeSession = session(false);
+    const scrollStateKey = "pane-1:session-history";
+    const paneScrollPositions = {
+      [scrollStateKey]: {
+        top: Number.MAX_SAFE_INTEGER,
+        shouldStick: true,
+      },
+    };
+    const paneShouldStickToBottomRef = {
+      current: { [scrollStateKey]: true },
+    };
+    let scrollHeight = 1_000;
+    const scrollNode = document.createElement("section");
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, get: () => scrollHeight },
+      scrollTop: { configurable: true, writable: true, value: 800 },
+    });
+    const virtualizedList = document.createElement("div");
+    virtualizedList.className = "virtualized-message-list";
+    const visibleSlot = document.createElement("div");
+    visibleSlot.className = "virtualized-message-slot";
+    visibleSlot.dataset.messageId = "message-visible";
+    virtualizedList.append(visibleSlot);
+    scrollNode.append(virtualizedList);
+    scrollNode.getBoundingClientRect = () =>
+      ({ top: 100, bottom: 300 } as DOMRect);
+    visibleSlot.getBoundingClientRect = () =>
+      ({ top: 124, bottom: 204 } as DOMRect);
+    const hook = renderHook(() => {
+      const state = useSessionPaneScrollState({
+        ...params(activeSession),
+        paneScrollPositions,
+        paneShouldStickToBottomRef,
+        scrollStateKey,
+      });
+      useLayoutEffect(() => {
+        state.messageStackRef.current = scrollNode;
+      }, [state.messageStackRef]);
+      return state;
+    });
+
+    act(() => {
+      hook.result.current.handleMessageStackUserScrollIntent({
+        altKey: false,
+        ctrlKey: false,
+        currentTarget: scrollNode,
+        defaultPrevented: false,
+        key: "ArrowUp",
+        metaKey: false,
+        preventDefault: vi.fn(),
+        shiftKey: false,
+        target: scrollNode,
+        type: "keydown",
+      } as unknown as ReactKeyboardEvent<HTMLElement>);
+    });
+    expect(scrollNode.scrollTop).toBe(760);
+    expect(hook.result.current.liveTailPinned).toBe(false);
+
+    act(() => {
+      // Blink can deliver the write's native scroll event after a page
+      // measurement shrinks the estimated layout. The unchanged detached
+      // position is now the physical bottom, but the reader never moved down.
+      scrollHeight = 960;
+      hook.result.current.handleMessageStackScroll({
+        currentTarget: scrollNode,
+      } as ReactUIEvent<HTMLElement>);
+    });
+
+    expect(scrollNode.scrollTop).toBe(760);
+    expect(paneScrollPositions[scrollStateKey]?.shouldStick).toBe(false);
+    expect(paneShouldStickToBottomRef.current[scrollStateKey]).toBe(false);
+    expect(hook.result.current.liveTailPinned).toBe(false);
+
+    act(() => {
+      // Once geometry stabilizes, a real scrollbar-owned forward movement to
+      // the physical bottom reattaches. Ownerless bottom landings remain
+      // detached so a late producer cannot manufacture bottom authority.
+      scrollHeight = 1_000;
+      hook.result.current.handleMessageStackScroll({
+        currentTarget: scrollNode,
+      } as ReactUIEvent<HTMLElement>);
+      claimMessageStackNativeScrollOwnership(
+        scrollNode,
+        { direction: null, owner: "pointer" },
+        MESSAGE_STACK_POINTER_OWNERSHIP_MS,
+      );
+      scrollNode.scrollTop = 800;
+      hook.result.current.handleMessageStackScroll({
+        currentTarget: scrollNode,
+      } as ReactUIEvent<HTMLElement>);
+    });
+
+    expect(scrollNode.scrollTop).toBe(800);
+    expect(paneScrollPositions[scrollStateKey]?.shouldStick).toBe(true);
+    expect(hook.result.current.liveTailPinned).toBe(true);
+  });
+
+  it("does not rewind a virtualizer-owned anchor correction at the detached physical bottom", () => {
+    vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    const activeSession = session(false);
+    const scrollStateKey = "pane-1:session-history";
+    const paneScrollPositions = {
+      [scrollStateKey]: {
+        top: Number.MAX_SAFE_INTEGER,
+        shouldStick: true,
+      },
+    };
+    const paneShouldStickToBottomRef = {
+      current: { [scrollStateKey]: true },
+    };
+    let scrollHeight = 1_000;
+    const scrollNode = document.createElement("section");
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, get: () => scrollHeight },
+      scrollTop: { configurable: true, writable: true, value: 800 },
+    });
+    const hook = renderHook(() => {
+      const state = useSessionPaneScrollState({
+        ...params(activeSession),
+        paneScrollPositions,
+        paneShouldStickToBottomRef,
+        scrollStateKey,
+      });
+      useLayoutEffect(() => {
+        state.messageStackRef.current = scrollNode;
+      }, [state.messageStackRef]);
+      return state;
+    });
+
+    act(() => {
+      hook.result.current.handleMessageStackUserScrollIntent({
+        altKey: false,
+        ctrlKey: false,
+        currentTarget: scrollNode,
+        defaultPrevented: false,
+        key: "ArrowUp",
+        metaKey: false,
+        preventDefault: vi.fn(),
+        shiftKey: false,
+        target: scrollNode,
+        type: "keydown",
+      } as unknown as ReactKeyboardEvent<HTMLElement>);
+    });
+    expect(scrollNode.scrollTop).toBe(760);
+
+    act(() => {
+      // First reproduce the measurement shrink that leaves the detached reader
+      // at the physical bottom without granting bottom-follow authority.
+      scrollHeight = 960;
+      hook.result.current.handleMessageStackScroll({
+        currentTarget: scrollNode,
+      } as ReactUIEvent<HTMLElement>);
+    });
+
+    act(() => {
+      // A later page-above measurement grows by 40px. The virtualizer preserves
+      // the visible message anchor by applying the same +40px correction before
+      // its native scroll event reaches the pane. This is layout ownership, not
+      // a stale smooth-bottom tick, so the pane must retain the corrected top.
+      scrollHeight = 1_000;
+      markMessageStackVirtualizerPositionCorrection(scrollNode, 800);
+      scrollNode.scrollTop = 800;
+      hook.result.current.handleMessageStackScroll({
+        currentTarget: scrollNode,
+      } as ReactUIEvent<HTMLElement>);
+    });
+
+    expect(scrollNode.scrollTop).toBe(800);
+    expect(paneScrollPositions[scrollStateKey]).toMatchObject({
+      top: 800,
+      shouldStick: false,
+    });
+    expect(paneShouldStickToBottomRef.current[scrollStateKey]).toBe(false);
+    expect(hook.result.current.liveTailPinned).toBe(false);
+
+    act(() => {
+      // The correction marker is single-use. A later unowned positive move to
+      // the new physical bottom still cannot manufacture reader authority.
+      // Every natural reentry path now carries an input lease.
+      scrollHeight = 1_040;
+      scrollNode.scrollTop = 840;
+      hook.result.current.handleMessageStackScroll({
+        currentTarget: scrollNode,
+      } as ReactUIEvent<HTMLElement>);
+    });
+
+    expect(scrollNode.scrollTop).toBe(840);
+    expect(paneScrollPositions[scrollStateKey]).toMatchObject({
+      top: 840,
+      shouldStick: false,
+    });
+    expect(hook.result.current.liveTailPinned).toBe(false);
+  });
+
+  it("reattaches a Home-detached pane after one native thumb move to bottom", () => {
+    vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    const activeSession = {
+      ...session(false),
+      hasOlderHistory: false,
+      messagesLoaded: true,
+    };
+    const scrollStateKey = "pane-1:session-history";
+    const paneScrollPositions = {
+      [scrollStateKey]: {
+        top: Number.MAX_SAFE_INTEGER,
+        shouldStick: true,
+      },
+    };
+    const paneShouldStickToBottomRef = {
+      current: { [scrollStateKey]: true },
+    };
+    const scrollNode = document.createElement("section");
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 1_000 },
+      scrollTop: { configurable: true, writable: true, value: 800 },
+    });
+    scrollNode.scrollTo = vi.fn(
+      (optionsOrX?: ScrollToOptions | number, y?: number) => {
+        scrollNode.scrollTop =
+          typeof optionsOrX === "number"
+            ? (y ?? scrollNode.scrollTop)
+            : (optionsOrX?.top ?? scrollNode.scrollTop);
+      },
+    ) as typeof scrollNode.scrollTo;
+    const hook = renderHook(() => {
+      const state = useSessionPaneScrollState({
+        ...params(activeSession),
+        paneScrollPositions,
+        paneShouldStickToBottomRef,
+        scrollStateKey,
+      });
+      useLayoutEffect(() => {
+        state.messageStackRef.current = scrollNode;
+      }, [state.messageStackRef]);
+      return state;
+    });
+
+    act(() => {
+      hook.result.current.scrollMessageStackToBoundary("top");
+    });
+    expect(scrollNode.scrollTop).toBe(0);
+    expect(hook.result.current.liveTailPinned).toBe(false);
+
+    act(() => {
+      hook.result.current.handleMessageStackUserScrollIntent({
+        currentTarget: scrollNode,
+        defaultPrevented: false,
+        target: scrollNode,
+        type: "mousedown",
+      } as unknown as ReactMouseEvent<HTMLElement>);
+      scrollNode.scrollTop = 800;
+      hook.result.current.handleMessageStackScroll({
+        currentTarget: scrollNode,
+      } as ReactUIEvent<HTMLElement>);
+    });
+
+    expect(paneScrollPositions[scrollStateKey]?.shouldStick).toBe(true);
+    expect(paneShouldStickToBottomRef.current[scrollStateKey]).toBe(true);
+    expect(hook.result.current.liveTailPinned).toBe(true);
+  });
+
+  it.each(["touch inertia", "focus scrollIntoView", "browser Space"] as const)(
+    "reattaches a detached pane when %s reaches the physical bottom",
+    (ownerKind) => {
+      vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
+      vi.stubGlobal("cancelAnimationFrame", vi.fn());
+      let now = 1_000;
+      vi.spyOn(performance, "now").mockImplementation(() => now);
+      const activeSession = {
+        ...session(false),
+        hasOlderHistory: false,
+        messagesLoaded: true,
+      };
+      const scrollStateKey = "pane-1:session-history";
+      const paneScrollPositions = {
+        [scrollStateKey]: { top: Number.MAX_SAFE_INTEGER, shouldStick: true },
+      };
+      const paneShouldStickToBottomRef = {
+        current: { [scrollStateKey]: true },
+      };
+      const scrollNode = document.createElement("section");
+      const focusedButton = document.createElement("button");
+      scrollNode.append(focusedButton);
+      scrollNode.getBoundingClientRect = () =>
+        ({ top: 0, bottom: 200 } as DOMRect);
+      focusedButton.getBoundingClientRect = () =>
+        ({ top: 240, bottom: 272 } as DOMRect);
+      Object.defineProperties(scrollNode, {
+        clientHeight: { configurable: true, value: 200 },
+        scrollHeight: { configurable: true, value: 1_000 },
+        scrollTop: { configurable: true, writable: true, value: 800 },
+      });
+      scrollNode.scrollTo = vi.fn(
+        (optionsOrX?: ScrollToOptions | number, y?: number) => {
+          scrollNode.scrollTop =
+            typeof optionsOrX === "number"
+              ? (y ?? scrollNode.scrollTop)
+              : (optionsOrX?.top ?? scrollNode.scrollTop);
+        },
+      ) as typeof scrollNode.scrollTo;
+      const hook = renderHook(() => {
+        const state = useSessionPaneScrollState({
+          ...params(activeSession),
+          paneScrollPositions,
+          paneShouldStickToBottomRef,
+          scrollStateKey,
+        });
+        useLayoutEffect(() => {
+          state.messageStackRef.current = scrollNode;
+        }, [state.messageStackRef]);
+        return state;
+      });
+
+      act(() => {
+        hook.result.current.scrollMessageStackToBoundary("top");
+        if (ownerKind === "touch inertia") {
+          hook.result.current.handleMessageStackTouchStart({
+            currentTarget: scrollNode,
+            touches: [{ clientY: 100 }],
+          } as unknown as ReactTouchEvent<HTMLElement>);
+          hook.result.current.handleMessageStackUserScrollIntent({
+            currentTarget: scrollNode,
+            target: scrollNode,
+            touches: [{ clientY: 80 }],
+            type: "touchmove",
+          } as unknown as ReactTouchEvent<HTMLElement>);
+        } else if (ownerKind === "focus scrollIntoView") {
+          hook.result.current.handleMessageStackFocusCapture({
+            currentTarget: scrollNode,
+            target: focusedButton,
+          } as unknown as ReactFocusEvent<HTMLElement>);
+        } else {
+          hook.result.current.handleMessageStackUserScrollIntent({
+            altKey: false,
+            ctrlKey: false,
+            currentTarget: scrollNode,
+            defaultPrevented: false,
+            key: " ",
+            metaKey: false,
+            preventDefault: vi.fn(),
+            shiftKey: false,
+            target: scrollNode,
+            type: "keydown",
+          } as unknown as ReactKeyboardEvent<HTMLElement>);
+          now += 500;
+        }
+        scrollNode.scrollTop = 770;
+        hook.result.current.handleMessageStackScroll({
+          currentTarget: scrollNode,
+        } as ReactUIEvent<HTMLElement>);
+      });
+
+      expect(paneScrollPositions[scrollStateKey]?.shouldStick).toBe(false);
+      expect(hook.result.current.liveTailPinned).toBe(false);
+
+      act(() => {
+        scrollNode.scrollTop = 800;
+        hook.result.current.handleMessageStackScroll({
+          currentTarget: scrollNode,
+        } as ReactUIEvent<HTMLElement>);
+      });
+
+      expect(paneScrollPositions[scrollStateKey]?.shouldStick).toBe(true);
+      expect(hook.result.current.liveTailPinned).toBe(true);
+      hook.unmount();
+    },
+  );
+
+  it("releases shared pointer ownership when the window loses focus", () => {
+    const scrollNode = document.createElement("section");
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 1_000 },
+      scrollTop: { configurable: true, writable: true, value: 400 },
+    });
+    const hook = renderHook(() => {
+      const state = useSessionPaneScrollState({
+        ...params(session(false)),
+        isActive: true,
+        isSessionTabActive: true,
+      });
+      useLayoutEffect(() => {
+        state.messageStackRef.current = scrollNode;
+      }, [state.messageStackRef]);
+      return state;
+    });
+
+    act(() => {
+      hook.result.current.handleMessageStackUserScrollIntent({
+        currentTarget: scrollNode,
+        defaultPrevented: false,
+        target: scrollNode,
+        type: "mousedown",
+      } as unknown as ReactMouseEvent<HTMLElement>);
+    });
+    expect(peekMessageStackNativeScrollOwnership(scrollNode)?.owner).toBe(
+      "pointer",
+    );
+
+    act(() => {
+      window.dispatchEvent(new Event("blur"));
+    });
+    expect(peekMessageStackNativeScrollOwnership(scrollNode)).toBeNull();
+    hook.unmount();
   });
 
   it("keeps a downward wheel move detached inside the near-bottom band", () => {
@@ -4015,11 +5387,18 @@ describe("session pane historical-window tail state", () => {
       top: 600,
       shouldStick: false,
     });
+    markMessageStackVirtualizerPositionCorrection(
+      scrollNode,
+      scrollNode.scrollTop,
+    );
     act(() => {
       hook.result.current.handleMessageStackScroll({
         currentTarget: scrollNode,
       } as ReactUIEvent<HTMLElement>);
     });
+    expect(consumeMessageStackVirtualizerPositionCorrection(scrollNode)).toBe(
+      false,
+    );
     expect(paneScrollPositions[scrollStateKey]).toEqual({
       top: 600,
       shouldStick: false,
@@ -4385,6 +5764,42 @@ describe("session pane historical-window tail state", () => {
     });
   });
 
+  it("does not claim focus ownership for a control already inside the viewport", () => {
+    const scrollNode = document.createElement("section");
+    const focusedButton = document.createElement("button");
+    scrollNode.append(focusedButton);
+    scrollNode.getBoundingClientRect = () =>
+      ({ top: 0, bottom: 200 } as DOMRect);
+    focusedButton.getBoundingClientRect = () =>
+      ({ top: 40, bottom: 72 } as DOMRect);
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 1_200 },
+      scrollTop: { configurable: true, writable: true, value: 200 },
+    });
+    const hook = renderHook(() => {
+      const state = useSessionPaneScrollState({
+        ...params(session(false)),
+        isActive: true,
+        isSessionTabActive: true,
+      });
+      useLayoutEffect(() => {
+        state.messageStackRef.current = scrollNode;
+      }, [state.messageStackRef]);
+      return state;
+    });
+
+    act(() => {
+      hook.result.current.handleMessageStackFocusCapture({
+        currentTarget: scrollNode,
+        target: focusedButton,
+      } as unknown as ReactFocusEvent<HTMLElement>);
+    });
+
+    expect(peekMessageStackNativeScrollOwnership(scrollNode)).toBeNull();
+    hook.unmount();
+  });
+
   it("does not let a retained restore frame revert focus navigation", () => {
     let nextAnimationFrameId = 1;
     const animationFrames = new Map<number, FrameRequestCallback>();
@@ -4409,6 +5824,10 @@ describe("session pane historical-window tail state", () => {
     const scrollNode = document.createElement("section");
     const focusedButton = document.createElement("button");
     scrollNode.append(focusedButton);
+    scrollNode.getBoundingClientRect = () =>
+      ({ top: 0, bottom: 200 } as DOMRect);
+    focusedButton.getBoundingClientRect = () =>
+      ({ top: 260, bottom: 300 } as DOMRect);
     Object.defineProperties(scrollNode, {
       clientHeight: { configurable: true, value: 200 },
       scrollHeight: { configurable: true, value: 1_200 },

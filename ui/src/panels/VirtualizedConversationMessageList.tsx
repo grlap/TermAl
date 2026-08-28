@@ -19,6 +19,8 @@ import { flushSync } from "react-dom";
 import { isExpandedPromptOpen } from "../ExpandedPromptPanel";
 import {
   MESSAGE_STACK_BOTTOM_FOLLOW_SCROLL_MS,
+  clearMessageStackVirtualizerPositionCorrection,
+  markMessageStackVirtualizerPositionCorrection,
   requestMessageStackBottomRepin,
   writeMessageStackScrollTopImmediately,
 } from "../message-stack-scroll-sync";
@@ -82,7 +84,10 @@ import {
 import { useVirtualizedConversationPageHeightChange } from "./virtualized-conversation-page-heights";
 import { useVirtualizedConversationPrependEffects } from "./virtualized-conversation-prepend";
 import { MeasuredPageBand } from "./virtualized-conversation-rendering";
-import { useVirtualizedConversationScrollEvents } from "./virtualized-conversation-scroll-events";
+import {
+  useVirtualizedConversationScrollEvents,
+  type PendingPrependNativeReflow,
+} from "./virtualized-conversation-scroll-events";
 import { useCommittedRef } from "./use-committed-ref";
 import type {
   BoundCodexAppRequestSubmitHandler,
@@ -135,6 +140,13 @@ export {
 } from "./virtualized-conversation-controller";
 
 const EMPTY_MATCHED_ITEM_KEYS = new Set<string>();
+
+export function retainLatestVisibleMessageAnchor(
+  current: VisibleMessageAnchor | null,
+  captured: VisibleMessageAnchor | null,
+) {
+  return captured ?? current;
+}
 
 export function VirtualizedConversationMessageList({
   isActive,
@@ -237,6 +249,8 @@ export function VirtualizedConversationMessageList({
   const lastNativeScrollTopRef = useRef(0);
   const lastNativeScrollHeightRef = useRef(0);
   const userScrollGenerationRef = useRef(0);
+  const pendingPrependNativeReflowRef =
+    useRef<PendingPrependNativeReflow | null>(null);
   const pendingProgrammaticScrollTopRef = useRef<number | null>(null);
   const pendingMountedPrependRestoreRef =
     useRef<MountedPrependRestore | null>(null);
@@ -426,6 +440,9 @@ export function VirtualizedConversationMessageList({
             });
       if (Math.abs(node.scrollTop - targetScrollTop) >= 1) {
         pendingProgrammaticScrollTopRef.current = targetScrollTop;
+        if (options.intent !== "bottom") {
+          markMessageStackVirtualizerPositionCorrection(node, targetScrollTop);
+        }
         writeMessageStackScrollTopImmediately(node, targetScrollTop);
       }
       syncViewportFromScrollNode(node);
@@ -1017,7 +1034,11 @@ export function VirtualizedConversationMessageList({
   );
   const advanceUserScrollGeneration = useCallback(() => {
     userScrollGenerationRef.current += 1;
-  }, []);
+    const node = scrollContainerRef.current;
+    if (node) {
+      clearMessageStackVirtualizerPositionCorrection(node);
+    }
+  }, [scrollContainerRef]);
   const beginUserScrollNavigation = useCallback(() => {
     advanceUserScrollGeneration();
     pendingProgrammaticNavigationUntilRef.current =
@@ -1033,9 +1054,12 @@ export function VirtualizedConversationMessageList({
       renderedListRef.current,
       node,
     );
-    if (anchor) {
-      latestVisibleMessageAnchorRef.current = anchor;
-    }
+    // Spacer-only DOM can be a transient range transition. Preserve the last
+    // measurable anchor unless the navigation seam explicitly invalidated it.
+    latestVisibleMessageAnchorRef.current = retainLatestVisibleMessageAnchor(
+      latestVisibleMessageAnchorRef.current,
+      anchor,
+    );
     return anchor;
   }, []);
   const pageLayoutTopsRef = useCommittedRef(pageLayout.tops);
@@ -1457,6 +1481,7 @@ export function VirtualizedConversationMessageList({
     buildWorkingMountedRangeForScrollTop,
     clearPendingDeferredLayoutTimer,
     estimateMessageHeight,
+    getUserScrollGeneration,
     hasUserScrollInteractionRef,
     isActive,
     isDetachedFromBottomRef,
@@ -1717,7 +1742,18 @@ export function VirtualizedConversationMessageList({
       targetScrollTop,
       { intent: pendingRestore.writeIntent },
     );
-    lastNativeScrollTopRef.current = appliedScrollTop ?? node.scrollTop;
+    const committedScrollTop = appliedScrollTop ?? node.scrollTop;
+    const scrollHeightDelta = node.scrollHeight - pendingRestore.scrollHeight;
+    const scrollTopDelta = committedScrollTop - pendingRestore.scrollTop;
+    pendingPrependNativeReflowRef.current =
+      Math.abs(scrollHeightDelta) >= 1 || Math.abs(scrollTopDelta) >= 0.5
+        ? {
+            expectedScrollHeight: node.scrollHeight,
+            expectedScrollTop: committedScrollTop,
+            userScrollGeneration: userScrollGenerationRef.current,
+          }
+        : null;
+    lastNativeScrollTopRef.current = committedScrollTop;
   }, [
     isActive,
     mountedPageRange,
@@ -1962,6 +1998,7 @@ export function VirtualizedConversationMessageList({
     clearPendingDeferredBottomRestore,
     clearPendingDeferredLayoutTimer,
     clearPendingIdleCompactionTimer,
+    getUserScrollGeneration,
     hasUserScrollInteractionRef,
     isActive,
     isDetachedFromBottomRef,
@@ -1978,6 +2015,7 @@ export function VirtualizedConversationMessageList({
     pendingBottomBoundarySeekRef,
     pendingDeferredLayoutAnchorRef,
     pendingMountedPrependRestoreRef,
+    pendingPrependNativeReflowRef,
     pendingPrependedBottomGapRef,
     pendingPrependedTopBoundaryRef,
     pendingProgrammaticBottomFollowUntilRef,

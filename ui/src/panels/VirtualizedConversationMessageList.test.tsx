@@ -18,6 +18,7 @@ import {
   resolveNativeScrollKind,
   resolvePrependedMessageCount,
   resolveVirtualizedScrollWriteTarget,
+  retainLatestVisibleMessageAnchor,
   type VirtualizedConversationMessageListHandleRef,
 } from "./VirtualizedConversationMessageList";
 import {
@@ -32,9 +33,15 @@ import {
   DEFERRED_RENDER_SUSPENDED_ATTRIBUTE,
 } from "../deferred-render";
 import {
+  MESSAGE_STACK_BOTTOM_FOLLOW_SCROLL_MS,
+  MESSAGE_STACK_FOCUS_OWNERSHIP_MS,
+  MESSAGE_STACK_KEYBOARD_OWNERSHIP_MS,
   MESSAGE_STACK_SCROLL_WRITE_EVENT,
+  claimMessageStackNativeScrollOwnership,
+  markMessageStackWheelEventSuppressed,
   notifyMessageStackScrollWrite,
   notifyMessageStackUserScrollIntent,
+  peekMessageStackNativeScrollOwnership,
 } from "../message-stack-scroll-sync";
 import { mountedPrependRestoreIsCurrent } from "./virtualized-conversation-mounted-range";
 import type { Message } from "../types";
@@ -70,6 +77,20 @@ describe("virtualized scroll write authority", () => {
         shouldKeepBottom: false,
       }),
     ).toBe(51_966);
+  });
+
+  it("retains the last measurable anchor through a spacer-only frame", () => {
+    const current = {
+      messageId: "message-4",
+      viewportOffsetPx: 32,
+    };
+    expect(retainLatestVisibleMessageAnchor(current, null)).toBe(current);
+    expect(
+      retainLatestVisibleMessageAnchor(current, {
+        messageId: "message-5",
+        viewportOffsetPx: 48,
+      }),
+    ).toEqual({ messageId: "message-5", viewportOffsetPx: 48 });
   });
 });
 
@@ -152,6 +173,7 @@ function renderVirtualizedHarness({
   const originalGetBoundingClientRect = Element.prototype.getBoundingClientRect;
   const resizeCallbacks = new Map<Element, ResizeObserverCallback>();
   let nextFrameId = 1;
+  const cancelledFrameIds = new Set<number>();
   let resizeObserveCount = 0;
   let scrollTop = initialScrollTop;
   const scrollWrites: number[] = [];
@@ -232,11 +254,16 @@ function renderVirtualizedHarness({
   window.requestAnimationFrame = ((callback: FrameRequestCallback) => {
     const frameId = nextFrameId;
     nextFrameId += 1;
-    queueMicrotask(() => callback(performance.now()));
+    queueMicrotask(() => {
+      if (!cancelledFrameIds.has(frameId)) {
+        callback(performance.now());
+      }
+    });
     return frameId;
   }) as typeof requestAnimationFrame;
-  window.cancelAnimationFrame =
-    vi.fn() as unknown as typeof cancelAnimationFrame;
+  window.cancelAnimationFrame = vi.fn((frameId: number) => {
+    cancelledFrameIds.add(frameId);
+  }) as unknown as typeof cancelAnimationFrame;
   Element.prototype.getBoundingClientRect =
     function getBoundingClientRectMock() {
       const element = this as HTMLElement;
@@ -286,13 +313,6 @@ function renderVirtualizedHarness({
     current: scrollNode,
   } as RefObject<HTMLElement | null>;
 
-  const restore = () => {
-    window.ResizeObserver = OriginalResizeObserver;
-    window.requestAnimationFrame = originalRequestAnimationFrame;
-    window.cancelAnimationFrame = originalCancelAnimationFrame;
-    Element.prototype.getBoundingClientRect = originalGetBoundingClientRect;
-  };
-
   const renderList = (searchOptions: VirtualizedSearchOptions = {}) => (
     <VirtualizedConversationMessageList
       isActive
@@ -325,6 +345,12 @@ function renderVirtualizedHarness({
     />
   );
   const result = render(renderList());
+  const restore = () => {
+    window.ResizeObserver = OriginalResizeObserver;
+    window.requestAnimationFrame = originalRequestAnimationFrame;
+    window.cancelAnimationFrame = originalCancelAnimationFrame;
+    Element.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+  };
 
   return {
     ...result,
@@ -376,6 +402,71 @@ async function advanceIdleMountedRangeCompaction() {
 }
 
 describe("VirtualizedConversationMessageList foundation", () => {
+  it("preserves a pointer lease across listener rerenders and clears it on unmount", () => {
+    const harness = renderVirtualizedHarness({
+      clientHeight: 100,
+      initialScrollTop: 400,
+      messages: makeTextMessages(8),
+      scrollHeight: () => 1_000,
+    });
+
+    try {
+      claimMessageStackNativeScrollOwnership(
+        harness.scrollNode,
+        { direction: null, owner: "pointer" },
+        5_000,
+      );
+      act(() => {
+        harness.rerenderWithMessages(makeTextMessages(9));
+      });
+      expect(
+        peekMessageStackNativeScrollOwnership(harness.scrollNode),
+      ).toEqual({ direction: null, owner: "pointer" });
+
+      harness.unmount();
+      expect(
+        peekMessageStackNativeScrollOwnership(harness.scrollNode),
+      ).toBeNull();
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it("keeps a landing lease through a same-burst no-op and lets opposite input supersede it", () => {
+    const harness = renderVirtualizedHarness({
+      clientHeight: 100,
+      initialScrollTop: 900,
+      messages: makeTextMessages(8),
+      scrollHeight: () => 1_000,
+      tailFollowIntent: true,
+    });
+
+    try {
+      claimMessageStackNativeScrollOwnership(
+        harness.scrollNode,
+        { direction: "down", owner: "touch" },
+        MESSAGE_STACK_BOTTOM_FOLLOW_SCROLL_MS,
+      );
+      act(() => {
+        fireEvent.wheel(harness.scrollNode, { deltaY: 40 });
+      });
+      expect(
+        peekMessageStackNativeScrollOwnership(harness.scrollNode),
+      ).toEqual({ direction: "down", owner: "touch" });
+
+      harness.setScrollTop(800);
+      act(() => {
+        fireEvent.wheel(harness.scrollNode, { deltaY: -40 });
+      });
+      expect(
+        peekMessageStackNativeScrollOwnership(harness.scrollNode),
+      ).toEqual({ direction: "up", owner: "wheel" });
+    } finally {
+      harness.unmount();
+      harness.restore();
+    }
+  });
+
   it("keeps an explicit user scroll detached inside the sticky layout band", async () => {
     const messages = makeTextMessages(80);
     let scrollHeight = 5_000;
@@ -416,6 +507,144 @@ describe("VirtualizedConversationMessageList foundation", () => {
 
       expect(harness.scrollTop).toBe(4_460);
     } finally {
+      harness.unmount();
+      harness.restore();
+    }
+  });
+
+  it("does not manufacture bottom authority when shrink geometry reaches an unchanged detached position", async () => {
+    const messages = makeTextMessages(24);
+    let scrollHeight = 1_000;
+    const harness = renderVirtualizedHarness({
+      clientHeight: 100,
+      initialScrollTop: 900,
+      messages,
+      scrollHeight: () => scrollHeight,
+      tailFollowIntent: true,
+    });
+
+    try {
+      await waitFor(() => {
+        expect(screen.getByText("message-24")).toBeInTheDocument();
+      });
+      vi.useFakeTimers();
+
+      act(() => {
+        notifyMessageStackScrollWrite(harness.scrollNode, {
+          scrollKind: "bottom_follow",
+        });
+        notifyMessageStackUserScrollIntent(harness.scrollNode, {
+          direction: "up",
+          scrollKind: "incremental",
+          viewportCanMove: true,
+        });
+        harness.setScrollTop(860);
+        notifyMessageStackScrollWrite(harness.scrollNode, {
+          scrollKind: "incremental",
+          scrollSource: "user",
+        });
+        // Consume the native event that corresponds to the explicit write.
+        fireEvent.scroll(harness.scrollNode);
+      });
+
+      act(() => {
+        // A measurement shrink makes 860 the physical bottom without any
+        // downward reader movement. This second native event must not turn
+        // detached authority back into bottom-follow authority.
+        scrollHeight = 960;
+        fireEvent.scroll(harness.scrollNode);
+      });
+      await advanceIdleMountedRangeCompaction();
+      harness.scrollWrites.length = 0;
+
+      act(() => {
+        scrollHeight = 1_000;
+        harness.rerenderWithMessages([
+          ...messages,
+          {
+            author: "assistant",
+            id: "message-25",
+            text: "Message 25 after geometry recovers",
+            timestamp: "10:25",
+            type: "text",
+          },
+        ]);
+      });
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(harness.scrollTop).toBe(860);
+      expect(harness.scrollWrites).not.toContain(900);
+    } finally {
+      harness.unmount();
+      harness.restore();
+    }
+  });
+
+  it("does not treat a delayed opposite native tick as reader-owned bottom reentry", async () => {
+    const messages = makeTextMessages(24);
+    let scrollHeight = 1_000;
+    const harness = renderVirtualizedHarness({
+      clientHeight: 100,
+      initialScrollTop: 900,
+      messages,
+      scrollHeight: () => scrollHeight,
+      tailFollowIntent: true,
+    });
+
+    try {
+      await waitFor(() => {
+        expect(screen.getByText("message-24")).toBeInTheDocument();
+      });
+      vi.useFakeTimers();
+
+      act(() => {
+        notifyMessageStackScrollWrite(harness.scrollNode, {
+          scrollKind: "bottom_follow",
+        });
+        notifyMessageStackUserScrollIntent(harness.scrollNode, {
+          direction: "up",
+          scrollKind: "incremental",
+          viewportCanMove: true,
+        });
+        harness.setScrollTop(860);
+        notifyMessageStackScrollWrite(harness.scrollNode, {
+          scrollKind: "incremental",
+          scrollSource: "user",
+        });
+        fireEvent.scroll(harness.scrollNode);
+
+        // No newer wheel/touch/pointer input owns this movement. It models a
+        // final stale tick from the smooth bottom-follow that ArrowUp canceled.
+        harness.setScrollTop(900);
+        fireEvent.scroll(harness.scrollNode);
+      });
+      await advanceIdleMountedRangeCompaction();
+      harness.scrollWrites.length = 0;
+
+      act(() => {
+        scrollHeight = 1_040;
+        harness.rerenderWithMessages([
+          ...messages,
+          {
+            author: "assistant",
+            id: "message-25",
+            text: "Message 25 after a stale native tick",
+            timestamp: "10:25",
+            type: "text",
+          },
+        ]);
+      });
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(harness.scrollWrites).not.toContain(940);
+    } finally {
+      harness.unmount();
       harness.restore();
     }
   });
@@ -440,6 +669,7 @@ describe("VirtualizedConversationMessageList foundation", () => {
       expect(mountedPageScans).toHaveLength(1);
     } finally {
       querySelectorAllSpy.mockRestore();
+      harness.unmount();
       harness.restore();
     }
   });
@@ -544,6 +774,7 @@ describe("VirtualizedConversationMessageList foundation", () => {
         expect(screen.getByText("message-7")).toBeInTheDocument();
       });
     } finally {
+      harness.unmount();
       harness.restore();
     }
   });
@@ -584,6 +815,7 @@ describe("VirtualizedConversationMessageList foundation", () => {
         ),
       ).toBe(false);
     } finally {
+      harness.unmount();
       harness.restore();
     }
   });
@@ -1722,11 +1954,13 @@ describe("VirtualizedConversationMessageList foundation", () => {
     const messages = makeTextMessages(4);
     const preferImmediateValues: boolean[] = [];
     const harness = renderVirtualizedHarness({
+      initialScrollTop: 200,
       messages,
       renderMessageCard: (message, preferImmediateHeavyRender) => {
         preferImmediateValues.push(preferImmediateHeavyRender);
         return <article className="message-card">{message.id}</article>;
       },
+      scrollHeight: () => 1_000,
     });
 
     try {
@@ -1737,7 +1971,7 @@ describe("VirtualizedConversationMessageList foundation", () => {
       });
 
       act(() => {
-        fireEvent.wheel(harness.scrollNode, { deltaY: 48 });
+        fireEvent.wheel(harness.scrollNode, { deltaY: -48 });
       });
 
       await waitFor(() => {
@@ -2372,6 +2606,135 @@ describe("VirtualizedConversationMessageList foundation", () => {
     }
   });
 
+  it("cancels bottom-boundary reveal authority synchronously on newer user input", async () => {
+    const harness = renderVirtualizedHarness({
+      clientHeight: 100,
+      initialScrollTop: 900,
+      messages: [],
+      scrollHeight: () => 1_000,
+    });
+
+    try {
+      act(() => {
+        harness.rerenderWithMessages(makeTextMessages(24));
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      harness.scrollWrites.length = 0;
+
+      act(() => {
+        notifyMessageStackScrollWrite(harness.scrollNode, {
+          scrollKind: "bottom_boundary",
+        });
+        expect(
+          harness.scrollNode.dataset.virtualizedBottomBoundaryReveal,
+        ).toBe("true");
+        notifyMessageStackUserScrollIntent(harness.scrollNode, {
+          direction: "up",
+          scrollKind: "incremental",
+          viewportCanMove: true,
+        });
+        expect(
+          harness.scrollNode.dataset.virtualizedBottomBoundaryReveal,
+        ).toBe(undefined);
+        harness.setScrollTop(860);
+        notifyMessageStackScrollWrite(harness.scrollNode, {
+          scrollKind: "incremental",
+          scrollSource: "user",
+        });
+      });
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(harness.scrollTop).toBe(860);
+      expect(harness.scrollWrites).not.toContain(900);
+    } finally {
+      harness.unmount();
+      harness.restore();
+    }
+  });
+
+  it("keeps bottom-boundary reveal authority for a downward wheel already at bottom", async () => {
+    const harness = renderVirtualizedHarness({
+      clientHeight: 100,
+      initialScrollTop: 900,
+      messages: [],
+      scrollHeight: () => 1_000,
+    });
+
+    try {
+      act(() => {
+        harness.rerenderWithMessages(makeTextMessages(24));
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      act(() => {
+        notifyMessageStackScrollWrite(harness.scrollNode, {
+          scrollKind: "bottom_boundary",
+        });
+        expect(
+          harness.scrollNode.dataset.virtualizedBottomBoundaryReveal,
+        ).toBe("true");
+        fireEvent.wheel(harness.scrollNode, { deltaY: 40 });
+        expect(
+          harness.scrollNode.dataset.virtualizedBottomBoundaryReveal,
+        ).toBe("true");
+      });
+    } finally {
+      harness.unmount();
+      harness.restore();
+    }
+  });
+
+  it("ignores a wheel already rejected by the pane capture arbiter", async () => {
+    const harness = renderVirtualizedHarness({
+      clientHeight: 100,
+      initialScrollTop: 900,
+      messages: [],
+      scrollHeight: () => 1_000,
+    });
+
+    try {
+      act(() => {
+        harness.rerenderWithMessages(makeTextMessages(24));
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      act(() => {
+        notifyMessageStackScrollWrite(harness.scrollNode, {
+          scrollKind: "bottom_boundary",
+        });
+        expect(
+          harness.scrollNode.dataset.virtualizedBottomBoundaryReveal,
+        ).toBe("true");
+        const rejectedWheel = new WheelEvent("wheel", {
+          bubbles: true,
+          cancelable: false,
+          deltaY: -40,
+        });
+        markMessageStackWheelEventSuppressed(rejectedWheel);
+        harness.scrollNode.dispatchEvent(rejectedWheel);
+      });
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(
+        harness.scrollNode.dataset.virtualizedBottomBoundaryReveal,
+      ).toBe("true");
+    } finally {
+      harness.unmount();
+      harness.restore();
+    }
+  });
+
   it("keeps a saved position restore detached while mounting its virtualized range", async () => {
     const messages = makeTextMessages(160);
     const harness = renderVirtualizedHarness({
@@ -2448,6 +2811,7 @@ describe("VirtualizedConversationMessageList foundation", () => {
 
       vi.useFakeTimers();
       act(() => {
+        fireEvent.mouseDown(harness.scrollNode);
         harness.setScrollTop(240);
         fireEvent.scroll(harness.scrollNode);
       });
@@ -2479,6 +2843,81 @@ describe("VirtualizedConversationMessageList foundation", () => {
       harness.restore();
     }
   });
+
+  it.each([
+    {
+      durationMs: MESSAGE_STACK_FOCUS_OWNERSHIP_MS,
+      owner: "focus" as const,
+    },
+    {
+      durationMs: MESSAGE_STACK_KEYBOARD_OWNERSHIP_MS,
+      owner: "keyboard" as const,
+    },
+  ])(
+    "follows streamed growth after $owner navigation reaches the physical bottom",
+    async ({ durationMs, owner }) => {
+      let currentScrollHeight = 500;
+      const messages = makeTextMessages(3);
+      const harness = renderVirtualizedHarness({
+        clientHeight: 100,
+        initialScrollTop: 400,
+        messages,
+        scrollHeight: () => currentScrollHeight,
+      });
+
+      try {
+        await waitFor(() => {
+          expect(screen.getByText("message-1")).toBeInTheDocument();
+        });
+
+        vi.useFakeTimers();
+        act(() => {
+          notifyMessageStackUserScrollIntent(harness.scrollNode, {
+            direction: "up",
+            scrollKind: "incremental",
+            viewportCanMove: true,
+          });
+          harness.setScrollTop(240);
+          notifyMessageStackScrollWrite(harness.scrollNode, {
+            scrollKind: "incremental",
+            scrollSource: "user",
+          });
+          fireEvent.scroll(harness.scrollNode);
+        });
+        act(() => {
+          claimMessageStackNativeScrollOwnership(
+            harness.scrollNode,
+            { direction: "down", owner },
+            durationMs,
+          );
+          harness.setScrollTop(400);
+          fireEvent.scroll(harness.scrollNode);
+        });
+
+        await advanceIdleMountedRangeCompaction();
+        harness.scrollWrites.length = 0;
+        act(() => {
+          currentScrollHeight = 590;
+          harness.rerenderWithMessages([
+            ...messages,
+            {
+              id: "message-4",
+              type: "text",
+              timestamp: "10:04",
+              author: "assistant",
+              text: "Message 4",
+            },
+          ]);
+        });
+
+        expect(harness.scrollWrites).toContain(490);
+      } finally {
+        vi.useRealTimers();
+        harness.unmount();
+        harness.restore();
+      }
+    },
+  );
 
   it("rebuilds the rendered window after manual scroll starts from an active search result", async () => {
     const messages = makeTextMessages(160);

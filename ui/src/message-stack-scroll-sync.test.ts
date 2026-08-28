@@ -1,13 +1,23 @@
 // Owns focused tests for the shared message-stack DOM scroll-write seam.
 // Does not own pane intent, virtualizer reconciliation, or drag/drop policy.
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  claimMessageStackNativeScrollOwnership,
+  consumeMessageStackVirtualizerPositionCorrection,
+  peekMessageStackNativeScrollOwnership,
+  markMessageStackVirtualizerPositionCorrection,
   messageStackOwnsBodyKeyboardScroll,
   resolveMessageStackKeyboardScrollIntent,
+  resolveMessageStackWheelRouting,
+  revokeMessageStackNativeScrollOwnershipOnConflict,
   writeMessageStackScrollTopImmediately,
 } from "./message-stack-scroll-sync";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("message-stack keyboard ownership", () => {
   it("distinguishes embedded controls from transcript reading surfaces", () => {
@@ -379,5 +389,96 @@ describe("writeMessageStackScrollTopImmediately", () => {
     });
     expect(writes).toEqual(["auto:321", "assign:321"]);
     expect(node.scrollTop).toBe(321);
+  });
+});
+
+describe("message-stack native scroll ownership", () => {
+  it("caches the nested-scrollable routing decision per native wheel event", () => {
+    const node = document.createElement("section");
+    const nested = document.createElement("div");
+    nested.style.overflowY = "auto";
+    Object.defineProperties(nested, {
+      clientHeight: { configurable: true, value: 100 },
+      scrollHeight: { configurable: true, value: 300 },
+      scrollTop: { configurable: true, writable: true, value: 40 },
+    });
+    node.append(nested);
+    const getComputedStyleSpy = vi.spyOn(window, "getComputedStyle");
+    const results: ReturnType<typeof resolveMessageStackWheelRouting>[] = [];
+    node.addEventListener("wheel", (event) => {
+      results.push(resolveMessageStackWheelRouting(event, node));
+      results.push(resolveMessageStackWheelRouting(event, node));
+    });
+
+    nested.dispatchEvent(
+      new WheelEvent("wheel", { bubbles: true, deltaY: 40 }),
+    );
+
+    expect(results).toHaveLength(2);
+    expect(results[0]).toBe(results[1]);
+    expect(results[0]).toMatchObject({
+      deltaY: 40,
+      nestedScrollableConsumes: true,
+    });
+    expect(getComputedStyleSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("shares a bounded owner lease and rejects an opposite-direction frame", () => {
+    let now = 1_000;
+    vi.spyOn(performance, "now").mockImplementation(() => now);
+    const node = document.createElement("section");
+
+    claimMessageStackNativeScrollOwnership(
+      node,
+      { direction: "down", owner: "wheel" },
+      100,
+    );
+    expect(peekMessageStackNativeScrollOwnership(node)).toEqual({
+      direction: "down",
+      owner: "wheel",
+    });
+    expect(peekMessageStackNativeScrollOwnership(node)).toEqual({
+      direction: "down",
+      owner: "wheel",
+    });
+    expect(
+      revokeMessageStackNativeScrollOwnershipOnConflict(node, -40),
+    ).toBe(true);
+    expect(peekMessageStackNativeScrollOwnership(node)).toBeNull();
+
+    claimMessageStackNativeScrollOwnership(
+      node,
+      { direction: null, owner: "pointer" },
+      100,
+    );
+    now += 101;
+    expect(peekMessageStackNativeScrollOwnership(node)).toBeNull();
+  });
+
+  it("discards a virtualizer correction after its first nonmatching native frame", () => {
+    const node = document.createElement("section");
+    Object.defineProperty(node, "scrollTop", {
+      configurable: true,
+      writable: true,
+      value: 50,
+    });
+
+    markMessageStackVirtualizerPositionCorrection(node, 100);
+    expect(consumeMessageStackVirtualizerPositionCorrection(node)).toBe(false);
+    node.scrollTop = 100;
+    expect(consumeMessageStackVirtualizerPositionCorrection(node)).toBe(false);
+  });
+
+  it("consumes a matching virtualizer correction on its first native frame", () => {
+    const node = document.createElement("section");
+    Object.defineProperty(node, "scrollTop", {
+      configurable: true,
+      writable: true,
+      value: 100,
+    });
+
+    markMessageStackVirtualizerPositionCorrection(node, 100);
+    expect(consumeMessageStackVirtualizerPositionCorrection(node)).toBe(true);
+    expect(consumeMessageStackVirtualizerPositionCorrection(node)).toBe(false);
   });
 });

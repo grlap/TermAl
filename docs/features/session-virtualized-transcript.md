@@ -374,6 +374,55 @@ The browser owns the visible motion; the virtualizer reacts by growing the
 mounted band and updating spacer geometry. It should not continuously rewrite
 the live scroll position during ordinary reading.
 
+### Native-scroll ownership lease
+
+The pane and virtualizer classify each native scroll frame through one
+node-scoped lease in `message-stack-scroll-sync.ts`. Its owners and lifetimes
+are deliberately bounded:
+
+- wheel: 120 ms
+- touch: the 1200 ms bottom-follow window, including post-`touchend` inertia
+- pointer/scrollbar thumb: 5 s, released earlier by pointer up/cancel,
+  `lostpointercapture`, or window blur
+- focus: 400 ms, and only when focus enters a control outside the visible band
+- browser-owned keyboard motion (currently Space): the 1200 ms bottom-follow
+  window, so a long page-sized native animation keeps its landing authority
+
+A movement-capable input claims or replaces the lease. A same-burst boundary
+tick that cannot move the viewport does not clear a valid landing lease.
+Every consumer may peek at the same lease without mutating it. Only the
+virtualizer's native listener, which owns the per-frame native delta, may revoke
+a lease whose declared direction conflicts with that delta. Ordinary React
+listener re-registration never clears the lease; true node detach or unmount
+does.
+
+The capture-phase wheel arbiter records rejected residual `WheelEvent` objects
+in a `WeakSet`, so the later node and React listeners make the same no-authority
+decision. The normalized delta and layout-sensitive nested-scroller verdict are
+also cached on that native event, avoiding repeated ancestor/style walks across
+capture, bubble, React, and virtualizer listeners. A decaying opposite wheel
+tail may be suppressed briefly after upward keyboard navigation; a later tick
+whose magnitude increases is treated as a deliberate reversal and immediately
+takes authority. A separate one-shot virtualizer-position marker identifies an
+exact anchor correction. It owns only the first native frame after the write
+and is cleared by a newer user-scroll generation, so it cannot be replayed by a
+later reader movement. Listener order is therefore: pane capture arbitration,
+native node observers, then React root-delegated handlers and normalized user
+intent.
+
+Prelude-less native reader movement (for example a thumb drag, touch inertia,
+or browser navigation) advances the shared user-scroll generation. A prepend
+restore may suppress exactly one matching geometry tick using a generation- and
+geometry-bound token; the token expires on the next input or native tick.
+Finally, a detached viewport is rewound from the physical bottom only when a
+still-live canceled bottom-follow or superseded wheel token identifies that
+late frame. Mere absence of a native owner is not enough. Both pane and
+virtualizer reattach a detached reader only after owned forward movement lands
+at the exact physical bottom; entering the wider sticky-bottom band never
+manufactures bottom authority. A viewport-immobile downward boundary input
+also preserves any pending prepend generation/token because it did not move the
+reader.
+
 ### Keyboard `PgUp` / `PgDown`
 
 Session transcript page navigation is custom.

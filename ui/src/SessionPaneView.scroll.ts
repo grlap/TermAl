@@ -30,7 +30,6 @@ import {
   buildMessageListSignature,
   canNestedScrollableConsumeWheel,
   clamp,
-  normalizeWheelDelta,
 } from "./app-utils";
 import { cancelConversationMessageEntryReveals } from "./panels/conversation-message-reveal";
 import type { VirtualizedConversationMessageListHandle } from "./panels/VirtualizedConversationMessageList";
@@ -39,10 +38,24 @@ import { useStableEvent } from "./panels/use-stable-event";
 import {
   MESSAGE_STACK_BOTTOM_REPIN_REQUEST_EVENT,
   MESSAGE_STACK_BOTTOM_FOLLOW_SCROLL_MS,
+  MESSAGE_STACK_FOCUS_OWNERSHIP_MS,
+  MESSAGE_STACK_KEYBOARD_OWNERSHIP_MS,
+  MESSAGE_STACK_POINTER_OWNERSHIP_MS,
+  MESSAGE_STACK_WHEEL_OWNERSHIP_MS,
+  claimMessageStackNativeScrollOwnership,
+  clearMessageStackVirtualizerPositionCorrection,
+  clearMessageStackNativeScrollOwnership,
+  consumeMessageStackVirtualizerPositionCorrection,
+  isMessageStackWheelEventSuppressed,
+  markMessageStackWheelEventSuppressed,
+  messageStackNativeScrollOwnershipMovesTowardBottom,
   notifyMessageStackScrollWrite,
   notifyMessageStackUserScrollIntent,
+  observeMessageStackPointerOwnershipRelease,
+  peekMessageStackNativeScrollOwnership,
   isMessageStackSelectionExtensionKey,
   resolveMessageStackKeyboardScrollIntent,
+  resolveMessageStackWheelRouting,
   writeMessageStackScrollTopImmediately,
   type MessageStackBottomRepinRequestDetail,
   type MessageStackKeyboardScrollIntent,
@@ -97,8 +110,19 @@ export {
 const SESSION_PAGE_SCROLL_VIEWPORT_FACTOR = 0.85;
 const SESSION_PAGE_SCROLL_MINIMUM_PX = 160;
 const SESSION_ARROW_SCROLL_STEP_PX = 40;
+const SESSION_WHEEL_BURST_QUIET_MS = 48;
 const SESSION_BOTTOM_FOLLOW_STABLE_MS =
   SESSION_BOTTOM_FOLLOW_REFERENCE_FRAME_MS * 2;
+
+function resolveMessageStackInputTimestamp(
+  event: Pick<Event, "timeStamp"> | null | undefined,
+) {
+  return typeof event?.timeStamp === "number" &&
+    Number.isFinite(event.timeStamp) &&
+    event.timeStamp >= 0
+    ? event.timeStamp
+    : performance.now();
+}
 
 type RecordedPaneScrollGeometry = {
   clientHeight: number;
@@ -123,6 +147,16 @@ function recordPaneScrollGeometry(
     scrollHeight: node.scrollHeight,
   });
   return position;
+}
+
+function captureRecordedDetachedPaneScrollPosition(
+  node: HTMLElement,
+  top = node.scrollTop,
+) {
+  return recordPaneScrollGeometry(
+    node,
+    captureDetachedPaneScrollPosition(node, top),
+  );
 }
 
 export function resolveSessionPageScrollDistance(clientHeight: number) {
@@ -299,8 +333,18 @@ export function useSessionPaneScrollState({
   } | null>(null);
   const paneProgrammaticBottomFollowRef = useRef<{
     key: string | null;
+    node: HTMLElement | null;
     until: number;
-  }>({ key: null, until: Number.NEGATIVE_INFINITY });
+  }>({
+    key: null,
+    node: null,
+    until: Number.NEGATIVE_INFINITY,
+  });
+  const cancelledBottomFollowTickRef = useRef<{
+    expiresAt: number;
+    key: string;
+    node: HTMLElement;
+  } | null>(null);
   const liveFlowActiveRef = useCommittedRef(isSending || showWaitingIndicator);
   const paneTailFollowDetachedByKeyRef = useRef<
     Record<string, true | undefined>
@@ -318,11 +362,47 @@ export function useSessionPaneScrollState({
   const pendingTailHistoryDemandRef = useRef<{ key: string } | null>(null);
   const messageStackNavigationGenerationRef = useRef(0);
   const paneLastTouchClientYRef = useRef<number | null>(null);
+  const messageStackWheelBurstGenerationRef = useRef(0);
+  const messageStackWheelBurstRef = useRef<{
+    direction: "down" | "up";
+    generation: number;
+    key: string;
+    lastEventAt: number;
+    node: HTMLElement;
+    startedAt: number;
+  } | null>(null);
+  const supersededDownWheelBurstGenerationRef = useRef<number | null>(null);
+  const pendingKeyboardUpWheelGuardRef = useRef<{
+    adoptedPostKeyboardWheelBurst: boolean;
+    hasPreKeyboardWheelPrelude: boolean;
+    key: string;
+    node: HTMLElement;
+    startedAt: number;
+  } | null>(null);
+  const lastSuppressedDownWheelDeltaRef = useRef<number | null>(null);
+  const pendingDownWheelAccelerationRef = useRef<{
+    generation: number;
+    magnitude: number;
+  } | null>(null);
+  const supersededWheelBottomTickRef = useRef<{
+    expiresAt: number;
+    generation: number;
+    key: string;
+    node: HTMLElement;
+    targetTop: number;
+  } | null>(null);
   const ownsBodyKeyboardScroll = useSessionPaneBodyKeyboardOwnership({
     messageStackRef,
     paneViewMode,
     scrollStateKey,
   });
+  useEffect(() => {
+    const node = messageStackRef.current;
+    if (!node) {
+      return;
+    }
+    return observeMessageStackPointerOwnershipRelease(node);
+  }, [messageStackRef]);
   const canHydrateOlderHistory = Boolean(
     activeSession &&
       resolveHasOlderSessionHistory({
@@ -357,16 +437,113 @@ export function useSessionPaneScrollState({
     if (pendingTailHistoryDemandRef.current?.key !== scrollStateKey) {
       pendingTailHistoryDemandRef.current = null;
     }
+    messageStackWheelBurstRef.current = null;
+    pendingKeyboardUpWheelGuardRef.current = null;
+    supersededDownWheelBurstGenerationRef.current = null;
+    supersededWheelBottomTickRef.current = null;
+    lastSuppressedDownWheelDeltaRef.current = null;
+    pendingDownWheelAccelerationRef.current = null;
   }, [scrollStateKey]);
+
+  function clearPendingKeyboardWheelGuard() {
+    pendingKeyboardUpWheelGuardRef.current = null;
+    supersededDownWheelBurstGenerationRef.current = null;
+    supersededWheelBottomTickRef.current = null;
+    lastSuppressedDownWheelDeltaRef.current = null;
+    pendingDownWheelAccelerationRef.current = null;
+  }
 
   function beginMessageStackManualNavigation() {
     // Boundary page adoption is asynchronous. Every newer navigation owns the
     // viewport immediately, so clear the local dedupe latches and advance the
     // token that guards both promise completion and its follow-up frame.
     messageStackNavigationGenerationRef.current += 1;
+    const node = messageStackRef.current;
+    if (node) {
+      clearMessageStackVirtualizerPositionCorrection(node);
+    }
     pendingStartHistoryDemandRef.current = null;
     pendingTailHistoryDemandRef.current = null;
     return messageStackNavigationGenerationRef.current;
+  }
+
+  function recordMessageStackWheelBurst(
+    node: HTMLElement,
+    direction: "down" | "up",
+    inputTimestamp: number,
+  ) {
+    const currentBurst = messageStackWheelBurstRef.current;
+    const elapsedSinceLastEvent = currentBurst
+      ? inputTimestamp - currentBurst.lastEventAt
+      : Number.POSITIVE_INFINITY;
+    const continuesCurrentBurst = Boolean(
+      currentBurst &&
+        currentBurst.node === node &&
+        currentBurst.key === scrollStateKey &&
+        currentBurst.direction === direction &&
+        elapsedSinceLastEvent >= 0 &&
+        elapsedSinceLastEvent <= SESSION_WHEEL_BURST_QUIET_MS,
+    );
+    if (continuesCurrentBurst && currentBurst) {
+      currentBurst.lastEventAt = inputTimestamp;
+      return currentBurst;
+    }
+
+    const nextBurst = {
+      direction,
+      generation: messageStackWheelBurstGenerationRef.current + 1,
+      key: scrollStateKey,
+      lastEventAt: inputTimestamp,
+      node,
+      startedAt: inputTimestamp,
+    };
+    messageStackWheelBurstGenerationRef.current = nextBurst.generation;
+    messageStackWheelBurstRef.current = nextBurst;
+    supersededDownWheelBurstGenerationRef.current = null;
+    supersededWheelBottomTickRef.current = null;
+    pendingDownWheelAccelerationRef.current = null;
+    return nextBurst;
+  }
+
+  function updateWheelBurstAuthorityForKeyboard(
+    node: HTMLElement,
+    direction: "down" | "up",
+    inputTimestamp = performance.now(),
+  ) {
+    clearMessageStackNativeScrollOwnership(node);
+    if (direction === "down") {
+      // A deterministic Arrow/Page delta or browser-owned Space scroll has
+      // its own keyboard authority. It must not transfer that authority to a
+      // downward wheel generation that a preceding ArrowUp already
+      // superseded: Blink may deliver another queued or non-cancelable tick
+      // after the key direction changes. Keep that wheel generation blocked
+      // until its input-time quiet boundary proves a new gesture.
+      return;
+    }
+    pendingKeyboardUpWheelGuardRef.current = {
+      adoptedPostKeyboardWheelBurst: false,
+      hasPreKeyboardWheelPrelude: false,
+      key: scrollStateKey,
+      node,
+      startedAt: inputTimestamp,
+    };
+    lastSuppressedDownWheelDeltaRef.current = null;
+    pendingDownWheelAccelerationRef.current = null;
+    const currentBurst = messageStackWheelBurstRef.current;
+    const elapsedSinceLastWheel = currentBurst
+      ? inputTimestamp - currentBurst.lastEventAt
+      : Number.POSITIVE_INFINITY;
+    if (
+      currentBurst?.direction !== "down" ||
+      currentBurst.node !== node ||
+      currentBurst.key !== scrollStateKey ||
+      elapsedSinceLastWheel < 0 ||
+      elapsedSinceLastWheel > SESSION_WHEEL_BURST_QUIET_MS
+    ) {
+      return;
+    }
+    pendingKeyboardUpWheelGuardRef.current.hasPreKeyboardWheelPrelude = true;
+    supersededDownWheelBurstGenerationRef.current = currentBurst.generation;
   }
 
   function isCurrentMessageStackNavigation(
@@ -461,7 +638,7 @@ export function useSessionPaneScrollState({
       // recognize that first upward frame as reader movement instead of
       // reattaching tail-follow and bouncing the viewport back down.
       paneScrollPositions[scrollStateKey] =
-        captureDetachedPaneScrollPosition(node);
+        captureRecordedDetachedPaneScrollPosition(node);
     }
   }
 
@@ -485,19 +662,43 @@ export function useSessionPaneScrollState({
     // here rather than in effect cleanup: by cleanup time React may already
     // have reused the node for the incoming tab, losing the outgoing anchor.
     paneScrollPositions[scrollStateKey] =
-      captureDetachedPaneScrollPosition(node);
+      captureRecordedDetachedPaneScrollPosition(node);
+  }
+
+  function clearLateBottomTickRejections() {
+    cancelledBottomFollowTickRef.current = null;
+    supersededWheelBottomTickRef.current = null;
   }
 
   function beginPaneProgrammaticBottomFollow() {
+    const node = messageStackRef.current;
+    clearLateBottomTickRejections();
     paneProgrammaticBottomFollowRef.current = {
       key: scrollStateKey,
+      node,
       until: performance.now() + MESSAGE_STACK_BOTTOM_FOLLOW_SCROLL_MS,
     };
   }
 
-  function cancelPaneProgrammaticBottomFollow() {
+  function cancelPaneProgrammaticBottomFollow(
+    options: { rejectLateFrame?: boolean } = {},
+  ) {
+    const current = paneProgrammaticBottomFollowRef.current;
+    if (
+      options.rejectLateFrame === true &&
+      current.key === scrollStateKey &&
+      current.node !== null &&
+      current.until >= performance.now()
+    ) {
+      cancelledBottomFollowTickRef.current = {
+        expiresAt: current.until,
+        key: scrollStateKey,
+        node: current.node,
+      };
+    }
     paneProgrammaticBottomFollowRef.current = {
       key: null,
+      node: null,
       until: Number.NEGATIVE_INFINITY,
     };
   }
@@ -525,6 +726,7 @@ export function useSessionPaneScrollState({
     if (paneProgrammaticBottomFollowRef.current.key !== scrollStateKey) {
       paneProgrammaticBottomFollowRef.current = {
         key: null,
+        node: null,
         until: Number.NEGATIVE_INFINITY,
       };
     }
@@ -719,11 +921,19 @@ export function useSessionPaneScrollState({
     if (Math.abs(node.scrollTop - nextScrollTop) > 0.5) {
       writeMessageStackScrollTopImmediately(node, nextScrollTop);
     }
+    setTailFollowIntent(true);
+    paneScrollPositions[scrollStateKey] = recordPaneScrollGeometry(node, {
+      top: Number.MAX_SAFE_INTEGER,
+      shouldStick: true,
+    });
+    setNewResponseIndicator(scrollStateKey, false);
     notifyMessageStackScrollWrite(node, {
       scrollKind: options.scrollKind ?? "bottom_pin",
       scrollSource: options.scrollSource,
     });
-    setTailFollowIntent(true);
+    // A synchronous pane listener may persist the reachable numeric bottom;
+    // retain the sentinel after every consumer has reconciled so later growth
+    // still resolves against the current physical tail.
     paneScrollPositions[scrollStateKey] = recordPaneScrollGeometry(node, {
       top: Number.MAX_SAFE_INTEGER,
       shouldStick: true,
@@ -1083,12 +1293,23 @@ export function useSessionPaneScrollState({
   function scrollMessageStackByDelta(
     deltaY: number,
     options: {
+      keyboardDirection?: "down" | "up";
+      keyboardInputTimestamp?: number;
       scrollKind?: MessageStackScrollWriteKind;
     } = {},
   ) {
     const node = messageStackRef.current;
     if (!node) {
       return;
+    }
+
+    clearLateBottomTickRejections();
+    if (options.keyboardDirection) {
+      updateWheelBurstAuthorityForKeyboard(
+        node,
+        options.keyboardDirection,
+        options.keyboardInputTimestamp,
+      );
     }
 
     beginMessageStackManualNavigation();
@@ -1130,7 +1351,7 @@ export function useSessionPaneScrollState({
       // layout jitter while already attached.
       markTailFollowDetachedByUser();
     }
-    cancelPaneProgrammaticBottomFollow();
+    cancelPaneProgrammaticBottomFollow({ rejectLateFrame: deltaY < 0 });
     // A pane-owned Arrow/Page or wheel delta must also abort any native smooth
     // bottom-follow animation already running in Blink. The old stale
     // prepend restore used to cancel that animation as an accidental side
@@ -1146,7 +1367,7 @@ export function useSessionPaneScrollState({
           top: node.scrollTop,
           shouldStick: true,
         })
-      : captureDetachedPaneScrollPosition(node);
+      : captureRecordedDetachedPaneScrollPosition(node);
     if (landsAtPhysicalBottom) {
       setTailFollowIntent(true);
       setNewResponseIndicator(scrollStateKey, false);
@@ -1167,10 +1388,22 @@ export function useSessionPaneScrollState({
       return undefined;
     }
     repinAttachedLiveContentBeforePaint();
-    return undefined;
+    // The prompt send can commit before the composer collapses or the pending
+    // prompt/live-turn cards finish changing transcript geometry. Keep one
+    // bounded follow alive across those later frames; explicit reader input
+    // clears tail intent and the controller's ownership guard stops it before
+    // another write can pull a detached viewport back to the tail.
+    return scheduleSettledScrollToBottom("auto", {
+      maxAttempts: 60,
+      minAttempts: 4,
+      scrollKind: "bottom_follow",
+    });
   }
 
-  function scrollMessageStackByPage(direction: -1 | 1) {
+  function scrollMessageStackByPage(
+    direction: -1 | 1,
+    keyboardInputTimestamp?: number,
+  ) {
     const node = messageStackRef.current;
     if (!node) {
       return;
@@ -1179,20 +1412,37 @@ export function useSessionPaneScrollState({
     scrollMessageStackByDelta(
       resolveSessionPageScrollDistance(node.clientHeight) * direction,
       {
+        keyboardDirection: direction < 0 ? "up" : "down",
+        keyboardInputTimestamp,
         scrollKind: "page_jump",
       },
     );
   }
 
-  function scrollSessionMessageStackByPageJump(direction: -1 | 1) {
-    scrollMessageStackByPage(direction);
+  function scrollSessionMessageStackByPageJump(
+    direction: -1 | 1,
+    keyboardInputTimestamp?: number,
+  ) {
+    scrollMessageStackByPage(direction, keyboardInputTimestamp);
   }
 
-  function scrollMessageStackToBoundary(boundary: "top" | "bottom") {
+  function scrollMessageStackToBoundary(
+    boundary: "top" | "bottom",
+    keyboardInputTimestamp?: number,
+  ) {
     const canRequestTranscriptBoundaryHistory =
       isSessionTabActive && paneViewMode === "session";
     const currentNode = messageStackRef.current;
     if (currentNode) {
+      clearLateBottomTickRejections();
+      updateWheelBurstAuthorityForKeyboard(
+        currentNode,
+        boundary === "top" ? "up" : "down",
+        keyboardInputTimestamp,
+      );
+      if (boundary === "top") {
+        cancelPaneProgrammaticBottomFollow({ rejectLateFrame: true });
+      }
       cancelConversationMessageEntryReveals(currentNode);
     }
     if (boundary === "bottom") {
@@ -1280,10 +1530,10 @@ export function useSessionPaneScrollState({
         scrollSource: "user",
       });
       setTailFollowIntent(false);
-      paneScrollPositions[scrollStateKey] = {
+      paneScrollPositions[scrollStateKey] = recordPaneScrollGeometry(node, {
         top: 0,
         shouldStick: false,
-      };
+      });
     };
     const needsTrueStartPage =
       canRequestTranscriptBoundaryHistory && canHydrateOlderHistory;
@@ -1339,7 +1589,11 @@ export function useSessionPaneScrollState({
 
   const handleMessageStackWheel = useStableEvent(
     function handleMessageStackWheel(event: WheelEvent) {
-      if (event.defaultPrevented || event.ctrlKey) {
+      if (
+        isMessageStackWheelEventSuppressed(event) ||
+        event.defaultPrevented ||
+        event.ctrlKey
+      ) {
         return;
       }
 
@@ -1348,12 +1602,13 @@ export function useSessionPaneScrollState({
         return;
       }
 
-      const deltaY = normalizeWheelDelta(event, node);
+      const { deltaY, nestedScrollableConsumes } =
+        resolveMessageStackWheelRouting(event, node);
       if (Math.abs(deltaY) < 0.5) {
         return;
       }
 
-      if (canNestedScrollableConsumeWheel(event.target, node, deltaY)) {
+      if (nestedScrollableConsumes) {
         return;
       }
 
@@ -1378,17 +1633,150 @@ export function useSessionPaneScrollState({
     },
   );
 
+  const arbitrateMessageStackWheelBurst = useStableEvent(
+    function arbitrateMessageStackWheelBurst(event: WheelEvent) {
+      if (event.defaultPrevented || event.ctrlKey) {
+        return;
+      }
+      const node = messageStackRef.current;
+      if (!node) {
+        return;
+      }
+      const { deltaY, nestedScrollableConsumes } =
+        resolveMessageStackWheelRouting(event, node);
+      if (
+        Math.abs(deltaY) < 0.5 ||
+        nestedScrollableConsumes
+      ) {
+        return;
+      }
+
+      // Blink can deliver several inertial wheel ticks after an app-owned
+      // ArrowUp has already escaped the live bottom. Record even a no-op wheel
+      // at the boundary so the newer key can supersede that entire gesture,
+      // then keep extending its quiet window while residual ticks arrive.
+      const burst = recordMessageStackWheelBurst(
+        node,
+        deltaY < 0 ? "up" : "down",
+        resolveMessageStackInputTimestamp(event),
+      );
+      if (deltaY < 0) {
+        // A same-direction wheel gesture is newer reader intent, not the stale
+        // opposite motion this guard arbitrates.
+        pendingKeyboardUpWheelGuardRef.current = null;
+        supersededDownWheelBurstGenerationRef.current = null;
+        supersededWheelBottomTickRef.current = null;
+        lastSuppressedDownWheelDeltaRef.current = null;
+        pendingDownWheelAccelerationRef.current = null;
+        claimMessageStackNativeScrollOwnership(
+          node,
+          { direction: "up", owner: "wheel" },
+          MESSAGE_STACK_WHEEL_OWNERSHIP_MS,
+        );
+        return;
+      }
+      const pendingKeyboardGuard = pendingKeyboardUpWheelGuardRef.current;
+      const elapsedSinceKeyboardUp = pendingKeyboardGuard
+        ? burst.lastEventAt - pendingKeyboardGuard.startedAt
+        : Number.POSITIVE_INFINITY;
+      const canAdoptUnprovenResidualBurst = Boolean(
+        pendingKeyboardGuard?.node === node &&
+          pendingKeyboardGuard.key === scrollStateKey &&
+          !pendingKeyboardGuard.hasPreKeyboardWheelPrelude &&
+          !pendingKeyboardGuard.adoptedPostKeyboardWheelBurst &&
+          (elapsedSinceKeyboardUp < 0 || !event.cancelable) &&
+          elapsedSinceKeyboardUp >= -SESSION_WHEEL_BURST_QUIET_MS &&
+          elapsedSinceKeyboardUp <= SESSION_WHEEL_BURST_QUIET_MS,
+      );
+      if (canAdoptUnprovenResidualBurst && pendingKeyboardGuard) {
+        // A bottom-pinned pane may have no preceding wheel tick to classify.
+        // A queued tick timestamped before the key is already proven stale.
+        // For a post-key tick without a prelude, only a non-cancelable Chromium
+        // continuation is concrete enough to adopt.
+        pendingKeyboardGuard.adoptedPostKeyboardWheelBurst = true;
+        supersededDownWheelBurstGenerationRef.current = burst.generation;
+      } else if (
+        elapsedSinceKeyboardUp > SESSION_WHEEL_BURST_QUIET_MS &&
+        supersededDownWheelBurstGenerationRef.current !== burst.generation
+      ) {
+        pendingKeyboardUpWheelGuardRef.current = null;
+      }
+      if (
+        supersededDownWheelBurstGenerationRef.current === burst.generation &&
+        pendingKeyboardGuard !== null
+      ) {
+        const deltaMagnitude = Math.abs(deltaY);
+        const previousSuppressedDelta = lastSuppressedDownWheelDeltaRef.current;
+        const pendingAcceleration = pendingDownWheelAccelerationRef.current;
+        const isAccelerating =
+          previousSuppressedDelta !== null &&
+          deltaMagnitude > previousSuppressedDelta + 0.5;
+        if (
+          isAccelerating &&
+          pendingAcceleration?.generation === burst.generation &&
+          deltaMagnitude > pendingAcceleration.magnitude + 0.5
+        ) {
+          // A busy main thread can coalesce several mouse-wheel notches into
+          // one larger delta. Require a second increasing tick before treating
+          // magnitude as deliberate trackpad acceleration.
+          supersededDownWheelBurstGenerationRef.current = null;
+          pendingKeyboardUpWheelGuardRef.current = null;
+          supersededWheelBottomTickRef.current = null;
+          lastSuppressedDownWheelDeltaRef.current = null;
+          pendingDownWheelAccelerationRef.current = null;
+          claimMessageStackNativeScrollOwnership(
+            node,
+            { direction: "down", owner: "wheel" },
+            MESSAGE_STACK_WHEEL_OWNERSHIP_MS,
+          );
+          return;
+        }
+        pendingDownWheelAccelerationRef.current = isAccelerating
+          ? { generation: burst.generation, magnitude: deltaMagnitude }
+          : null;
+        lastSuppressedDownWheelDeltaRef.current = deltaMagnitude;
+        supersededWheelBottomTickRef.current = {
+          expiresAt: burst.lastEventAt + SESSION_WHEEL_BURST_QUIET_MS,
+          generation: burst.generation,
+          key: scrollStateKey,
+          node,
+          targetTop: Math.max(node.scrollHeight - node.clientHeight, 0),
+        };
+        markMessageStackWheelEventSuppressed(event);
+        event.preventDefault();
+      } else {
+        pendingKeyboardUpWheelGuardRef.current = null;
+        supersededDownWheelBurstGenerationRef.current = null;
+        supersededWheelBottomTickRef.current = null;
+        lastSuppressedDownWheelDeltaRef.current = null;
+        pendingDownWheelAccelerationRef.current = null;
+        claimMessageStackNativeScrollOwnership(
+          node,
+          { direction: "down", owner: "wheel" },
+          MESSAGE_STACK_WHEEL_OWNERSHIP_MS,
+        );
+      }
+    },
+  );
+
   useEffect(() => {
     const node = messageStackRef.current;
     if (!node) {
       return;
     }
+    const captureListener = (event: WheelEvent) =>
+      arbitrateMessageStackWheelBurst(event);
     const listener = (event: WheelEvent) => handleMessageStackWheel(event);
+    node.addEventListener("wheel", captureListener, {
+      capture: true,
+      passive: false,
+    });
     node.addEventListener("wheel", listener, { passive: false });
     return () => {
+      node.removeEventListener("wheel", captureListener, true);
       node.removeEventListener("wheel", listener);
     };
-  }, [handleMessageStackWheel]);
+  }, [arbitrateMessageStackWheelBurst, handleMessageStackWheel]);
 
   const handleNestedTargetPageKey = useStableEvent(
     function handleNestedTargetPageKey(event: KeyboardEvent) {
@@ -1434,6 +1822,7 @@ export function useSessionPaneScrollState({
       if (command.kind === "boundary") {
         scrollMessageStackToBoundary(
           command.direction === "up" ? "top" : "bottom",
+          resolveMessageStackInputTimestamp(event),
         );
         return;
       }
@@ -1453,7 +1842,10 @@ export function useSessionPaneScrollState({
           true,
         );
       }
-      scrollSessionMessageStackByPageJump(command.direction === "up" ? -1 : 1);
+      scrollSessionMessageStackByPageJump(
+        command.direction === "up" ? -1 : 1,
+        resolveMessageStackInputTimestamp(event),
+      );
     },
   );
 
@@ -1496,6 +1888,7 @@ export function useSessionPaneScrollState({
         event.preventDefault();
         scrollMessageStackToBoundary(
           paneCommand.direction === "up" ? "top" : "bottom",
+          resolveMessageStackInputTimestamp(event),
         );
         return;
       }
@@ -1523,6 +1916,7 @@ export function useSessionPaneScrollState({
         );
         scrollSessionMessageStackByPageJump(
           paneCommand.direction === "up" ? -1 : 1,
+          publication.inputTimestamp,
         );
         return;
       }
@@ -1537,7 +1931,11 @@ export function useSessionPaneScrollState({
           keyboardIntent.direction === "up"
             ? -SESSION_ARROW_SCROLL_STEP_PX
             : SESSION_ARROW_SCROLL_STEP_PX,
-          { scrollKind: "incremental" },
+          {
+            keyboardDirection: keyboardIntent.direction,
+            keyboardInputTimestamp: publication.inputTimestamp,
+            scrollKind: "incremental",
+          },
         );
         return;
       }
@@ -1559,6 +1957,8 @@ export function useSessionPaneScrollState({
       // never degrade into the ordinary user-intent pagination seam.
       return {
         detachFromBottomAtBoundary: false,
+        direction: keyboardIntent.direction,
+        inputTimestamp: resolveMessageStackInputTimestamp(sourceKeyboardEvent),
         shouldTakeAuthority: false,
       };
     }
@@ -1587,16 +1987,24 @@ export function useSessionPaneScrollState({
     });
     return {
       detachFromBottomAtBoundary,
+      direction: keyboardIntent.direction,
+      inputTimestamp: resolveMessageStackInputTimestamp(sourceKeyboardEvent),
       shouldTakeAuthority: viewportCanMove || detachFromBottomAtBoundary,
     };
   }
 
-  function takeMessageStackUserScrollAuthority(node: HTMLElement | null) {
+  function takeMessageStackUserScrollAuthority(
+    node: HTMLElement | null,
+    direction: "down" | "up" | null = null,
+  ) {
     if (node) {
       cancelConversationMessageEntryReveals(node);
     }
+    clearLateBottomTickRejections();
     cancelDetachedMessageStackRestore(scrollStateKey);
-    cancelPaneProgrammaticBottomFollow();
+    cancelPaneProgrammaticBottomFollow({
+      rejectLateFrame: direction === "up",
+    });
     if (!hasDetachedTailFollowAuthority() || getTailFollowIntent()) {
       markTailFollowDetachedByUser();
     }
@@ -1606,6 +2014,8 @@ export function useSessionPaneScrollState({
     node: HTMLElement,
     publication: {
       detachFromBottomAtBoundary: boolean;
+      direction: "down" | "up";
+      inputTimestamp: number;
       shouldTakeAuthority: boolean;
     },
     hasImmediateScrollWrite = false,
@@ -1615,11 +2025,23 @@ export function useSessionPaneScrollState({
         ? publication.detachFromBottomAtBoundary
         : publication.shouldTakeAuthority;
     if (shouldTakeAuthority) {
+      if (!hasImmediateScrollWrite && publication.shouldTakeAuthority) {
+        updateWheelBurstAuthorityForKeyboard(
+          node,
+          publication.direction,
+          publication.inputTimestamp,
+        );
+        claimMessageStackNativeScrollOwnership(
+          node,
+          { direction: publication.direction, owner: "keyboard" },
+          MESSAGE_STACK_KEYBOARD_OWNERSHIP_MS,
+        );
+      }
       // Immediate Arrow/Page commands normally transfer authority through the
       // deterministic delta write. The one exception is an immovable upward
       // boundary whose older history will hydrate; there is no write in that
       // case, so detach before the prepend arrives.
-      takeMessageStackUserScrollAuthority(node);
+      takeMessageStackUserScrollAuthority(node, publication.direction);
     }
   }
 
@@ -1830,9 +2252,18 @@ export function useSessionPaneScrollState({
 
   function handleMessageStackTouchStart(event: ReactTouchEvent<HTMLElement>) {
     paneLastTouchClientYRef.current = event.touches[0]?.clientY ?? null;
+    const node = messageStackRef.current;
+    if (node) {
+      clearPendingKeyboardWheelGuard();
+      claimMessageStackNativeScrollOwnership(
+        node,
+        { direction: null, owner: "touch" },
+        MESSAGE_STACK_BOTTOM_FOLLOW_SCROLL_MS,
+      );
+    }
   }
 
-  function isManualMessageStackScrollInput(
+  function claimManualMessageStackScrollInput(
     event:
       | ReactWheelEvent<HTMLElement>
       | ReactTouchEvent<HTMLElement>
@@ -1841,19 +2272,40 @@ export function useSessionPaneScrollState({
   ) {
     const node = messageStackRef.current;
     if (event.type === "wheel" && "deltaY" in event) {
-      return Boolean(
+      if (!node) {
+        return false;
+      }
+      const { deltaY } = resolveMessageStackWheelRouting(
+        event.nativeEvent,
+        node,
+      );
+      const canMove =
+        !isMessageStackWheelEventSuppressed(event.nativeEvent) &&
         !event.defaultPrevented &&
-        node &&
         canMoveMessageStackByDelta(
           node.scrollTop,
           node.scrollHeight,
           node.clientHeight,
-          event.deltaY,
-        ),
-      );
+          deltaY,
+        );
+      if (canMove && Math.abs(deltaY) >= 0.5) {
+        clearPendingKeyboardWheelGuard();
+        claimMessageStackNativeScrollOwnership(
+          node,
+          {
+            direction: deltaY < 0 ? "up" : "down",
+            owner: "wheel",
+          },
+          MESSAGE_STACK_WHEEL_OWNERSHIP_MS,
+        );
+      }
+      return canMove;
     }
 
     if (event.type === "touchmove" && "touches" in event) {
+      if (!node) {
+        return false;
+      }
       const currentTouchClientY = event.touches[0]?.clientY ?? null;
       const previousTouchClientY = paneLastTouchClientYRef.current;
       paneLastTouchClientYRef.current = currentTouchClientY;
@@ -1861,24 +2313,44 @@ export function useSessionPaneScrollState({
         currentTouchClientY !== null && previousTouchClientY !== null
           ? previousTouchClientY - currentTouchClientY
           : 0;
-      return Boolean(
-        node &&
-        canMoveMessageStackByDelta(
-          node.scrollTop,
-          node.scrollHeight,
-          node.clientHeight,
-          deltaY,
-        ),
+      const canMove = canMoveMessageStackByDelta(
+        node.scrollTop,
+        node.scrollHeight,
+        node.clientHeight,
+        deltaY,
       );
+      if (canMove && Math.abs(deltaY) >= 0.5) {
+        clearPendingKeyboardWheelGuard();
+        claimMessageStackNativeScrollOwnership(
+          node,
+          { direction: deltaY < 0 ? "up" : "down", owner: "touch" },
+          MESSAGE_STACK_BOTTOM_FOLLOW_SCROLL_MS,
+        );
+      }
+      return canMove;
     }
 
     if (event.type === "keydown" && "key" in event) {
-      return Boolean(
+      const ownsKeyboardScroll = Boolean(
         node && resolveMessageStackKeyboardScrollIntent(event, node) !== null,
       );
+      if (ownsKeyboardScroll && node) {
+        clearMessageStackNativeScrollOwnership(node);
+      }
+      return ownsKeyboardScroll;
     }
 
-    return event.type === "mousedown" && event.target === event.currentTarget;
+    const ownsPointerScroll =
+      event.type === "mousedown" && event.target === event.currentTarget;
+    if (ownsPointerScroll) {
+      clearPendingKeyboardWheelGuard();
+      claimMessageStackNativeScrollOwnership(
+        event.currentTarget,
+        { direction: null, owner: "pointer" },
+        MESSAGE_STACK_POINTER_OWNERSHIP_MS,
+      );
+    }
+    return ownsPointerScroll;
   }
 
   function handleMessageStackUserScrollIntent(
@@ -1895,13 +2367,20 @@ export function useSessionPaneScrollState({
     const node = messageStackRef.current;
     if (
       event.type === "wheel" &&
-      "deltaY" in event &&
-      node &&
-      canNestedScrollableConsumeWheel(event.target, node, event.deltaY)
+      isMessageStackWheelEventSuppressed(event.nativeEvent)
     ) {
       return;
     }
-    if (!isManualMessageStackScrollInput(event)) {
+    if (
+      event.type === "wheel" &&
+      "deltaY" in event &&
+      node &&
+      resolveMessageStackWheelRouting(event.nativeEvent, node)
+        .nestedScrollableConsumes
+    ) {
+      return;
+    }
+    if (!claimManualMessageStackScrollInput(event)) {
       return;
     }
     if (node) {
@@ -1962,7 +2441,11 @@ export function useSessionPaneScrollState({
               keyboardIntent.direction === "up"
                 ? -SESSION_ARROW_SCROLL_STEP_PX
                 : SESSION_ARROW_SCROLL_STEP_PX,
-              { scrollKind: "incremental" },
+              {
+                keyboardDirection: keyboardIntent.direction,
+                keyboardInputTimestamp: publication.inputTimestamp,
+                scrollKind: "incremental",
+              },
             );
             return;
           }
@@ -1972,17 +2455,45 @@ export function useSessionPaneScrollState({
       }
     }
     beginMessageStackManualNavigation();
-    takeMessageStackUserScrollAuthority(node);
+    const inputDirection =
+      event.type === "wheel" && "deltaY" in event
+        ? event.deltaY < 0
+          ? "up"
+          : "down"
+        : node
+          ? peekMessageStackNativeScrollOwnership(node)?.direction ?? null
+          : null;
+    takeMessageStackUserScrollAuthority(node, inputDirection);
   }
 
   function handleMessageStackFocusCapture(event: ReactFocusEvent<HTMLElement>) {
     if (event.target === event.currentTarget) {
       return;
     }
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) {
+      return;
+    }
+    const nodeRect = event.currentTarget.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    const focusMayMoveViewport =
+      targetRect.top < nodeRect.top - 1 ||
+      targetRect.bottom > nodeRect.bottom + 1;
+    if (!focusMayMoveViewport) {
+      return;
+    }
     // Keyboard focus inside the transcript can make the browser call
     // scrollIntoView without a wheel/key scroll event. That navigation owns
     // the viewport and must not be reverted by a pending detached restore.
     beginMessageStackManualNavigation();
+    claimMessageStackNativeScrollOwnership(
+      event.currentTarget,
+      {
+        direction: targetRect.bottom > nodeRect.bottom + 1 ? "down" : "up",
+        owner: "focus",
+      },
+      MESSAGE_STACK_FOCUS_OWNERSHIP_MS,
+    );
     cancelDetachedMessageStackRestore(scrollStateKey);
   }
 
@@ -1994,19 +2505,24 @@ export function useSessionPaneScrollState({
         node,
         publishSavedTarget: (targetTop) => {
           setTailFollowIntent(false, { preserveDetachedRestore: true });
-          paneScrollPositions[scrollStateKey] =
+          paneScrollPositions[scrollStateKey] = recordPaneScrollGeometry(
+            node,
             preserveDetachedPaneScrollAnchor(
               paneScrollPositions[scrollStateKey],
               targetTop,
-            );
+            ),
+          );
           if (hasUnloadedNewerHistory) {
             setNewResponseIndicator(scrollStateKey, true);
           }
         },
       })
     ) {
+      clearMessageStackVirtualizerPositionCorrection(node);
       return;
     }
+    const isVirtualizerPositionCorrection =
+      consumeMessageStackVirtualizerPositionCorrection(node);
     const previousScrollPosition = paneScrollPositions[scrollStateKey];
     const previousTop = previousScrollPosition?.top;
     const previousGeometry = previousScrollPosition
@@ -2023,6 +2539,8 @@ export function useSessionPaneScrollState({
               )
             : undefined
           : previousTop;
+    const nativeScrollOwnership =
+      peekMessageStackNativeScrollOwnership(node);
     const contentDidNotShrink =
       previousGeometry !== undefined &&
       node.scrollHeight >= previousGeometry.scrollHeight;
@@ -2030,7 +2548,15 @@ export function useSessionPaneScrollState({
       contentDidNotShrink &&
       typeof recordedTop === "number" &&
       node.scrollTop < recordedTop - 1;
+    const movedDownFromRecordedPosition =
+      messageStackNativeScrollOwnershipMovesTowardBottom(
+        nativeScrollOwnership,
+      ) &&
+      typeof recordedTop === "number" &&
+      node.scrollTop > recordedTop + 1;
     const hasDetachedTailFollow = hasDetachedTailFollowAuthority();
+    const tailFollowIsDetached =
+      hasDetachedTailFollow || !getTailFollowIntent();
     const movedUpAfterUserEscape =
       hasDetachedTailFollow &&
       typeof recordedTop === "number" &&
@@ -2043,12 +2569,46 @@ export function useSessionPaneScrollState({
       node.scrollHeight,
       node.clientHeight,
     );
+    const inputTimestamp = resolveMessageStackInputTimestamp(event.nativeEvent);
+    const wallClockNow = performance.now();
+    const supersededWheelBottomTick = supersededWheelBottomTickRef.current;
+    const cancelledBottomFollowTick = cancelledBottomFollowTickRef.current;
+    const matchesSupersededWheelBottomTick = Boolean(
+      supersededWheelBottomTick &&
+        supersededWheelBottomTick.key === scrollStateKey &&
+        supersededWheelBottomTick.node === node &&
+        supersededWheelBottomTick.expiresAt >= inputTimestamp &&
+        Math.abs(node.scrollTop - supersededWheelBottomTick.targetTop) <=
+          SESSION_PHYSICAL_BOTTOM_TOLERANCE_PX,
+    );
+    const matchesCancelledBottomFollowTick = Boolean(
+      cancelledBottomFollowTick &&
+        cancelledBottomFollowTick.key === scrollStateKey &&
+        cancelledBottomFollowTick.node === node &&
+        cancelledBottomFollowTick.expiresAt >= wallClockNow &&
+        Math.abs(
+          node.scrollTop - Math.max(node.scrollHeight - node.clientHeight, 0),
+        ) <=
+          SESSION_PHYSICAL_BOTTOM_TOLERANCE_PX,
+    );
+    if (
+      supersededWheelBottomTick &&
+      supersededWheelBottomTick.expiresAt < inputTimestamp
+    ) {
+      supersededWheelBottomTickRef.current = null;
+    }
+    if (
+      cancelledBottomFollowTick &&
+      cancelledBottomFollowTick.expiresAt < wallClockNow
+    ) {
+      cancelledBottomFollowTickRef.current = null;
+    }
     if (hasUnloadedNewerHistory) {
       cancelPaneProgrammaticBottomFollow();
       cancelSettledScrollToBottom();
       setTailFollowIntent(false);
       paneScrollPositions[scrollStateKey] =
-        captureDetachedPaneScrollPosition(node);
+        captureRecordedDetachedPaneScrollPosition(node);
       setNewResponseIndicator(scrollStateKey, true);
       return;
     }
@@ -2074,7 +2634,18 @@ export function useSessionPaneScrollState({
       // Bottom-follow writes only move toward the tail. An upward frame with
       // non-shrinking content is therefore reader movement, even while the
       // short programmatic ownership window is active.
-      cancelPaneProgrammaticBottomFollow();
+      cancelPaneProgrammaticBottomFollow({ rejectLateFrame: true });
+    }
+    if (hasDetachedTailFollow && isVirtualizerPositionCorrection) {
+      // The virtualizer preserved the visible message anchor after a page-
+      // height, prepend, or mounted-range correction. It owns this one native
+      // scroll event, but it does not own tail-follow: persist the corrected
+      // geometry while keeping the reader detached.
+      paneScrollPositions[scrollStateKey] =
+        captureRecordedDetachedPaneScrollPosition(node);
+      setTailFollowIntent(false);
+      cancelSettledScrollToBottom();
+      return;
     }
     if (movedUpAfterUserEscape || movedUpFromRecordedPosition) {
       // Intent listeners normally transfer ownership before Blink's first
@@ -2097,23 +2668,52 @@ export function useSessionPaneScrollState({
           scrollKind: "incremental",
           viewportCanMove: true,
         });
-        takeMessageStackUserScrollAuthority(node);
+        takeMessageStackUserScrollAuthority(node, "up");
       }
       paneScrollPositions[scrollStateKey] =
-        captureDetachedPaneScrollPosition(node);
+        captureRecordedDetachedPaneScrollPosition(node);
       setTailFollowIntent(false);
       cancelSettledScrollToBottom();
-    } else if (hasDetachedTailFollow && !isAtPhysicalBottom) {
+    } else if (
+      hasDetachedTailFollow &&
+      typeof recordedTop === "number" &&
+      node.scrollTop > recordedTop + 1 &&
+      nativeScrollOwnership === null &&
+      (matchesSupersededWheelBottomTick ||
+        matchesCancelledBottomFollowTick) &&
+      isAtPhysicalBottom
+    ) {
+      // Only two explicit producers may rewind a detached bottom landing: a
+      // wheel generation superseded by the newer key, or a bottom-follow that
+      // the reader just cancelled. Natural touch/pointer/focus movement and
+      // unowned movement after either bounded token expires may reattach.
+      writeMessageStackScrollTopImmediately(node, recordedTop);
+      notifyMessageStackScrollWrite(node, {
+        scrollKind: "position_restore",
+      });
+      paneScrollPositions[scrollStateKey] =
+        captureRecordedDetachedPaneScrollPosition(node, recordedTop);
+      setTailFollowIntent(false);
+      cancelSettledScrollToBottom();
+    } else if (tailFollowIsDetached && !isAtPhysicalBottom) {
       // A manual gesture owns the viewport until it reaches the real bottom.
       // The wider sticky-bottom band is useful for absorbing layout jitter
       // while attached, but must never re-enable bottom-follow intent after a
       // small deliberate scroll away from the tail.
       paneScrollPositions[scrollStateKey] =
-        captureDetachedPaneScrollPosition(node);
+        captureRecordedDetachedPaneScrollPosition(node);
       setTailFollowIntent(false);
       cancelSettledScrollToBottom();
-    } else if (shouldStick) {
-      // Reaching the physical bottom is the natural reattachment action.
+    } else if (
+      (!tailFollowIsDetached && shouldStick) ||
+      (tailFollowIsDetached &&
+        isAtPhysicalBottom &&
+        movedDownFromRecordedPosition)
+    ) {
+      // Reaching the physical bottom through a real downward reader movement
+      // is the natural reattachment action. A shrink can make an unchanged
+      // detached position become the physical bottom; that geometry change
+      // must not manufacture bottom-follow authority and replay a later pin.
       paneScrollPositions[scrollStateKey] = recordPaneScrollGeometry(node, {
         top: node.scrollTop,
         shouldStick: true,
@@ -2122,7 +2722,7 @@ export function useSessionPaneScrollState({
       setNewResponseIndicator(scrollStateKey, false);
     } else if (hasDetachedTailFollow || !getTailFollowIntent()) {
       paneScrollPositions[scrollStateKey] =
-        captureDetachedPaneScrollPosition(node);
+        captureRecordedDetachedPaneScrollPosition(node);
       setTailFollowIntent(false);
       cancelSettledScrollToBottom();
     } else {
@@ -2145,17 +2745,25 @@ export function useSessionPaneScrollState({
         },
         publishReachablePosition: (top) => {
           setTailFollowIntent(false, { preserveDetachedRestore: true });
-          paneScrollPositions[restoreKey] = preserveDetachedPaneScrollAnchor(
+          const currentNode = messageStackRef.current;
+          const position = preserveDetachedPaneScrollAnchor(
             paneScrollPositions[restoreKey],
             top,
           );
+          paneScrollPositions[restoreKey] = currentNode
+            ? recordPaneScrollGeometry(currentNode, position)
+            : position;
         },
         publishSavedTarget: (top) => {
           setTailFollowIntent(false, { preserveDetachedRestore: true });
-          paneScrollPositions[restoreKey] = preserveDetachedPaneScrollAnchor(
+          const currentNode = messageStackRef.current;
+          const position = preserveDetachedPaneScrollAnchor(
             paneScrollPositions[restoreKey],
             top,
           );
+          paneScrollPositions[restoreKey] = currentNode
+            ? recordPaneScrollGeometry(currentNode, position)
+            : position;
         },
         publishUnloadedNewerHistory: () => {
           if (hasUnloadedNewerHistory) {
@@ -2222,11 +2830,11 @@ export function useSessionPaneScrollState({
           virtualizerHandleRef.current?.restoreViewportAnchor(saved.anchor) ===
             true;
         if (restoredAnchor) {
-          paneScrollPositions[scrollStateKey] = {
+          paneScrollPositions[scrollStateKey] = recordPaneScrollGeometry(node, {
             anchor: saved.anchor,
             shouldStick: false,
             top: node.scrollTop,
-          };
+          });
         } else {
           restoreCleanup = scheduleDetachedMessageStackRestore(saved.top);
         }
@@ -2241,10 +2849,10 @@ export function useSessionPaneScrollState({
       writeMessageStackScrollTopImmediately(node, 0);
       notifyMessageStackScrollWrite(node);
       setTailFollowIntent(false);
-      paneScrollPositions[scrollStateKey] = {
+      paneScrollPositions[scrollStateKey] = recordPaneScrollGeometry(node, {
         top: 0,
         shouldStick: false,
-      };
+      });
     }
 
     return () => {
@@ -2326,10 +2934,10 @@ export function useSessionPaneScrollState({
     }
     notifyMessageStackScrollWrite(container);
 
-    paneScrollPositions[scrollStateKey] = {
+    paneScrollPositions[scrollStateKey] = recordPaneScrollGeometry(container, {
       top: container.scrollTop,
       shouldStick: false,
-    };
+    });
     setNewResponseIndicator(scrollStateKey, false);
   }, [
     activeSessionSearchMatch,
@@ -2528,8 +3136,7 @@ export function useSessionPaneScrollState({
     // Sending starts new activity, but it is not a navigation command. A
     // reader who moved away from the tail keeps the same viewport and gets an
     // indicator instead of being pulled away from the text they are reading.
-    followLatestMessageForPromptSend();
-    return undefined;
+    return followLatestMessageForPromptSend();
   }, [isSending, paneViewMode, scrollStateKey]);
 
   return {

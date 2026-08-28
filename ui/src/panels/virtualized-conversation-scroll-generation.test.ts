@@ -2,15 +2,22 @@
 // and delayed mounted-range restores.
 // Does not own React event wiring, page measurement, or rendered scroll bands.
 
-import { describe, expect, it } from "vitest";
+import { renderHook } from "@testing-library/react";
+import type { MutableRefObject } from "react";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   mountedPrependRestoreIsCurrent,
   type MountedPrependRestore,
 } from "./virtualized-conversation-mounted-range";
+import type { PendingVisibleMessageAnchor } from "./virtualized-conversation-measurement";
+import { useVirtualizedConversationPrependEffects } from "./virtualized-conversation-prepend";
 import {
   nativeScrollAdvancesUserScrollGeneration,
   nativeScrollKeepsPassiveTailFollow,
+  pendingPrependNativeReflowMatches,
+  resolveStableHeightNativeUserMovement,
+  resolveVirtualizedInputMovementAuthority,
 } from "./virtualized-conversation-scroll-events";
 
 function restoreAtGeneration(
@@ -44,9 +51,98 @@ describe("mounted prepend restore generation", () => {
     );
   });
 
+  it("rejects a pending visible anchor after newer user navigation", () => {
+    let scrollTop = 860;
+    const scrollWrites: number[] = [];
+    const scrollNode = document.createElement("div");
+    Object.defineProperty(scrollNode, "clientHeight", {
+      configurable: true,
+      value: 100,
+    });
+    Object.defineProperty(scrollNode, "scrollTop", {
+      configurable: true,
+      get: () => scrollTop,
+      set: (nextValue: number) => {
+        scrollTop = nextValue;
+        scrollWrites.push(nextValue);
+      },
+    });
+    scrollNode.getBoundingClientRect = () =>
+      ({ top: 0, bottom: 100 } as DOMRect);
+
+    const renderedList = document.createElement("div");
+    const anchorSlot = document.createElement("div");
+    anchorSlot.className = "virtualized-message-slot";
+    anchorSlot.dataset.messageId = "message-anchor";
+    anchorSlot.getBoundingClientRect = () =>
+      ({ top: 40, bottom: 120 } as DOMRect);
+    renderedList.append(anchorSlot);
+
+    const pendingPrependedMessageAnchorRef: MutableRefObject<
+      PendingVisibleMessageAnchor | null
+    > = {
+      current: {
+        messageId: "message-anchor",
+        remainingAttempts: 3,
+        userScrollGeneration: 7,
+        viewportOffsetPx: 0,
+      },
+    };
+    const hookArgs = {
+      applyMountedPageRange: vi.fn(),
+      buildWorkingMountedRangeForScrollTop: vi.fn(() => ({
+        endIndex: 0,
+        startIndex: 0,
+      })),
+      clearPendingDeferredLayoutTimer: vi.fn(),
+      estimateMessageHeight: vi.fn(() => 80),
+      getUserScrollGeneration: () => 8,
+      hasUserScrollInteractionRef: { current: true },
+      isActive: true,
+      isDetachedFromBottomRef: { current: true },
+      lastNativeScrollTopRef: { current: scrollTop },
+      latestVisibleMessageAnchorRef: { current: null },
+      layoutVersion: 1,
+      messageLocationById: new Map(),
+      messages: [],
+      mountedPageRange: { endIndex: 0, startIndex: 0 },
+      mountedPageRangeRef: { current: { endIndex: 0, startIndex: 0 } },
+      pageLayout: { tops: [], totalHeight: 0 },
+      pages: [],
+      pendingMountedPrependRestoreRef: { current: null },
+      pendingPrependedBottomGapRef: { current: null },
+      pendingPrependedMessageAnchorRef,
+      pendingPrependedTopBoundaryRef: { current: false },
+      previousMessageWindowRef: {
+        current: { ids: [], sessionId: "session-a" },
+      },
+      renderedListRef: { current: renderedList },
+      scrollContainerRef: { current: scrollNode },
+      sessionId: "session-a",
+      shouldKeepBottomAfterLayoutRef: { current: false },
+      skipNextMountedPrependRestoreRef: { current: false },
+      viewportHeight: 100,
+      writeScrollTopAndSyncViewport: (
+        node: HTMLElement,
+        nextScrollTop: number,
+      ) => {
+        node.scrollTop = nextScrollTop;
+      },
+    };
+
+    const { unmount } = renderHook(() =>
+      useVirtualizedConversationPrependEffects(hookArgs),
+    );
+
+    expect(pendingPrependedMessageAnchorRef.current).toBeNull();
+    expect(scrollWrites).toEqual([]);
+    expect(scrollTop).toBe(860);
+    unmount();
+  });
+
   it("does not treat a height-changing prepend reflow as user navigation", () => {
     expect(
-      nativeScrollAdvancesUserScrollGeneration({
+      resolveStableHeightNativeUserMovement({
         currentScrollHeight: 12_000,
         previousScrollHeight: 2_000,
         scrollDelta: 600,
@@ -56,7 +152,7 @@ describe("mounted prepend restore generation", () => {
 
   it("recognizes native thumb or inertia movement when layout height is stable", () => {
     expect(
-      nativeScrollAdvancesUserScrollGeneration({
+      resolveStableHeightNativeUserMovement({
         currentScrollHeight: 12_000,
         previousScrollHeight: 12_000,
         scrollDelta: -600,
@@ -64,8 +160,107 @@ describe("mounted prepend restore generation", () => {
     ).toBe(true);
   });
 
+  it("advances the generation for prelude-less native reader movement", () => {
+    expect(
+      nativeScrollAdvancesUserScrollGeneration({
+        isExpectedPrependNativeReflow: false,
+        isNativeUserMovement: true,
+        isProgrammaticNavigation: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("preserves the generation for the exact one-shot prepend reflow", () => {
+    const node = document.createElement("div");
+    Object.defineProperties(node, {
+      scrollHeight: { configurable: true, value: 1_240 },
+      scrollTop: { configurable: true, value: 440 },
+    });
+
+    const isExpectedPrependNativeReflow =
+      pendingPrependNativeReflowMatches({
+        currentUserScrollGeneration: 7,
+        node,
+        token: {
+          expectedScrollHeight: 1_240,
+          expectedScrollTop: 440,
+          userScrollGeneration: 7,
+        },
+      });
+
+    expect(isExpectedPrependNativeReflow).toBe(true);
+    expect(
+      nativeScrollAdvancesUserScrollGeneration({
+        isExpectedPrependNativeReflow,
+        isNativeUserMovement: true,
+        isProgrammaticNavigation: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("does not let a prepend token mask newer or geometrically different movement", () => {
+    const node = document.createElement("div");
+    Object.defineProperties(node, {
+      scrollHeight: { configurable: true, value: 1_260 },
+      scrollTop: { configurable: true, value: 420 },
+    });
+    const token = {
+      expectedScrollHeight: 1_240,
+      expectedScrollTop: 440,
+      userScrollGeneration: 7,
+    };
+
+    expect(
+      pendingPrependNativeReflowMatches({
+        currentUserScrollGeneration: 8,
+        node,
+        token,
+      }),
+    ).toBe(false);
+    expect(
+      pendingPrependNativeReflowMatches({
+        currentUserScrollGeneration: 7,
+        node,
+        token,
+      }),
+    ).toBe(false);
+  });
+
+  it("preserves prepend authority for an immovable downward boundary input", () => {
+    expect(
+      resolveVirtualizedInputMovementAuthority({
+        bottomGapBeforeInput: 0,
+        inputScrollDeltaY: 40,
+        isDetachedFromBottom: false,
+        scrollTop: 900,
+        shouldKeepBottom: true,
+      }),
+    ).toEqual({
+      inputCanMoveViewport: false,
+      invalidatesPrependAuthority: false,
+      isAttachedDownwardBoundaryInput: true,
+    });
+  });
+
+  it("invalidates prepend authority when explicit keyboard intent can move", () => {
+    expect(
+      resolveVirtualizedInputMovementAuthority({
+        bottomGapBeforeInput: 0,
+        explicitViewportCanMove: true,
+        inputScrollDeltaY: null,
+        isDetachedFromBottom: false,
+        scrollTop: 900,
+        shouldKeepBottom: true,
+      }),
+    ).toEqual({
+      inputCanMoveViewport: true,
+      invalidatesPrependAuthority: true,
+      isAttachedDownwardBoundaryInput: false,
+    });
+  });
+
   it("keeps tail-follow authority when content shrink clamps scrollTop upward", () => {
-    const isNativeUserMovement = nativeScrollAdvancesUserScrollGeneration({
+    const isNativeUserMovement = resolveStableHeightNativeUserMovement({
       currentScrollHeight: 11_998,
       previousScrollHeight: 12_000,
       scrollDelta: -2,
@@ -86,7 +281,7 @@ describe("mounted prepend restore generation", () => {
   });
 
   it("transfers tail-follow authority for stable-height upward native movement", () => {
-    const isNativeUserMovement = nativeScrollAdvancesUserScrollGeneration({
+    const isNativeUserMovement = resolveStableHeightNativeUserMovement({
       currentScrollHeight: 12_000,
       previousScrollHeight: 12_000,
       scrollDelta: -2,
@@ -107,7 +302,7 @@ describe("mounted prepend restore generation", () => {
   });
 
   it("transfers tail-follow authority when an upward frame follows content growth", () => {
-    const isNativeUserMovement = nativeScrollAdvancesUserScrollGeneration({
+    const isNativeUserMovement = resolveStableHeightNativeUserMovement({
       currentScrollHeight: 12_040,
       previousScrollHeight: 12_000,
       scrollDelta: -40,

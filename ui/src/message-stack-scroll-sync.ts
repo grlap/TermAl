@@ -1,8 +1,13 @@
-// Owns the message-stack DOM event seam and browser keyboard-scroll semantics.
-// Does not own pane tail-follow policy, virtualizer reconciliation, or history
-// loading; those consumers subscribe to the normalized events defined here.
+// Owns the message-stack DOM event seam, browser keyboard-scroll semantics, and
+// the short-lived DOM authority metadata shared by the pane and virtualizer.
+// Does not decide pane tail-follow policy, virtualizer reconciliation, or
+// history loading; those consumers interpret the normalized events and leases.
 
 import { detectBrowserPlatform, isApplePlatform } from "./browser-platform";
+import {
+  canNestedScrollableConsumeWheel,
+  normalizeWheelDelta,
+} from "./app-utils";
 
 export const MESSAGE_STACK_SCROLL_WRITE_EVENT =
   "termal:message-stack-scroll-write";
@@ -12,6 +17,219 @@ export const MESSAGE_STACK_USER_SCROLL_INTENT_EVENT =
   "termal:message-stack-user-scroll-intent";
 
 export const MESSAGE_STACK_BOTTOM_FOLLOW_SCROLL_MS = 1200;
+export const MESSAGE_STACK_FOCUS_OWNERSHIP_MS = 400;
+export const MESSAGE_STACK_KEYBOARD_OWNERSHIP_MS =
+  MESSAGE_STACK_BOTTOM_FOLLOW_SCROLL_MS;
+export const MESSAGE_STACK_POINTER_OWNERSHIP_MS = 5_000;
+export const MESSAGE_STACK_WHEEL_OWNERSHIP_MS = 120;
+
+// Some browsers make later WheelEvents in one gesture non-cancelable. The
+// pane capture arbiter still needs to revoke those stale events before any
+// bubble-phase pane, React, or virtualizer consumer mutates scroll authority.
+// A WeakSet carries that same-event decision without retaining the event.
+const suppressedMessageStackWheelEvents = new WeakSet<Event>();
+
+type MessageStackWheelRouting = {
+  container: HTMLElement;
+  deltaY: number;
+  nestedScrollableConsumes: boolean;
+};
+
+const messageStackWheelRoutingByEvent = new WeakMap<
+  WheelEvent,
+  MessageStackWheelRouting
+>();
+
+// Capture, bubble, React, and virtualizer listeners all inspect the same native
+// WheelEvent. Cache the layout-sensitive nested-scroller walk on that event so
+// every consumer reaches one classification without repeating style reads.
+export function resolveMessageStackWheelRouting(
+  event: WheelEvent,
+  container: HTMLElement,
+) {
+  const cached = messageStackWheelRoutingByEvent.get(event);
+  if (cached?.container === container) {
+    return cached;
+  }
+  const deltaY = normalizeWheelDelta(event, container);
+  const routing = {
+    container,
+    deltaY,
+    nestedScrollableConsumes:
+      Math.abs(deltaY) >= 0.5 &&
+      canNestedScrollableConsumeWheel(event.target, container, deltaY),
+  };
+  messageStackWheelRoutingByEvent.set(event, routing);
+  return routing;
+}
+
+export function markMessageStackWheelEventSuppressed(event: WheelEvent) {
+  suppressedMessageStackWheelEvents.add(event);
+}
+
+export function isMessageStackWheelEventSuppressed(event: Event) {
+  return suppressedMessageStackWheelEvents.has(event);
+}
+
+export type MessageStackNativeScrollOwner =
+  | "focus"
+  | "keyboard"
+  | "pointer"
+  | "touch"
+  | "wheel";
+
+export type MessageStackNativeScrollOwnership = {
+  direction: "down" | "up" | null;
+  owner: MessageStackNativeScrollOwner;
+};
+
+type MessageStackNativeScrollOwnershipLease =
+  MessageStackNativeScrollOwnership & {
+    expiresAt: number;
+  };
+
+const messageStackNativeScrollOwnership = new WeakMap<
+  HTMLElement,
+  MessageStackNativeScrollOwnershipLease
+>();
+
+type MessageStackPointerReleaseObserver = {
+  cleanup: () => void;
+  subscribers: number;
+};
+
+const messageStackPointerReleaseObservers = new WeakMap<
+  HTMLElement,
+  MessageStackPointerReleaseObserver
+>();
+
+function messageStackScrollNow() {
+  return globalThis.performance?.now() ?? Date.now();
+}
+
+export function claimMessageStackNativeScrollOwnership(
+  node: HTMLElement,
+  ownership: MessageStackNativeScrollOwnership,
+  durationMs: number,
+) {
+  messageStackNativeScrollOwnership.set(node, {
+    ...ownership,
+    expiresAt: messageStackScrollNow() + Math.max(durationMs, 0),
+  });
+}
+
+export function clearMessageStackNativeScrollOwnership(
+  node: HTMLElement,
+  owner?: MessageStackNativeScrollOwner,
+) {
+  const current = messageStackNativeScrollOwnership.get(node);
+  if (!current || (owner !== undefined && current.owner !== owner)) {
+    return;
+  }
+  messageStackNativeScrollOwnership.delete(node);
+}
+
+// Pointer ownership can survive React listener re-registration while a
+// scrollbar drag is still in flight. Keep one node-scoped release observer and
+// reference-count its consumers so rerenders cannot manufacture a lost mouseup.
+export function observeMessageStackPointerOwnershipRelease(
+  node: HTMLElement,
+) {
+  let observer = messageStackPointerReleaseObservers.get(node);
+  if (!observer) {
+    const ownerDocument = node.ownerDocument;
+    const ownerWindow = ownerDocument.defaultView;
+    const release = () => {
+      clearMessageStackNativeScrollOwnership(node, "pointer");
+    };
+    node.addEventListener("lostpointercapture", release);
+    ownerDocument.addEventListener("mouseup", release);
+    ownerDocument.addEventListener("pointerup", release);
+    ownerDocument.addEventListener("pointercancel", release);
+    ownerWindow?.addEventListener("blur", release);
+    observer = {
+      cleanup: () => {
+        node.removeEventListener("lostpointercapture", release);
+        ownerDocument.removeEventListener("mouseup", release);
+        ownerDocument.removeEventListener("pointerup", release);
+        ownerDocument.removeEventListener("pointercancel", release);
+        ownerWindow?.removeEventListener("blur", release);
+      },
+      subscribers: 0,
+    };
+    messageStackPointerReleaseObservers.set(node, observer);
+  }
+  observer.subscribers += 1;
+
+  let active = true;
+  return () => {
+    if (!active) {
+      return;
+    }
+    active = false;
+    const current = messageStackPointerReleaseObservers.get(node);
+    if (!current) {
+      return;
+    }
+    current.subscribers -= 1;
+    if (current.subscribers <= 0) {
+      current.cleanup();
+      messageStackPointerReleaseObservers.delete(node);
+    }
+  };
+}
+
+export function peekMessageStackNativeScrollOwnership(
+  node: HTMLElement,
+): MessageStackNativeScrollOwnership | null {
+  const current = messageStackNativeScrollOwnership.get(node);
+  if (!current) {
+    return null;
+  }
+  if (current.expiresAt < messageStackScrollNow()) {
+    messageStackNativeScrollOwnership.delete(node);
+    return null;
+  }
+  return {
+    direction: current.direction,
+    owner: current.owner,
+  };
+}
+
+// The virtualizer native listener owns the true per-tick delta. It is the only
+// consumer allowed to revoke a lease for directional conflict; pane and input
+// observers only peek, so listener order cannot make them delete shared state.
+export function revokeMessageStackNativeScrollOwnershipOnConflict(
+  node: HTMLElement,
+  scrollDelta: number,
+) {
+  const current = peekMessageStackNativeScrollOwnership(node);
+  if (!current) {
+    return false;
+  }
+  const observedDirection =
+    scrollDelta < -0.5 ? "up" : scrollDelta > 0.5 ? "down" : null;
+  if (
+    current.direction !== null &&
+    observedDirection !== null &&
+    current.direction !== observedDirection
+  ) {
+    messageStackNativeScrollOwnership.delete(node);
+    return true;
+  }
+  return false;
+}
+
+export function messageStackNativeScrollOwnershipMovesTowardBottom(
+  ownership: MessageStackNativeScrollOwnership | null,
+) {
+  return Boolean(
+    ownership &&
+      (ownership.direction === "down" ||
+        ownership.owner === "pointer" ||
+        ownership.owner === "touch"),
+  );
+}
 
 export type MessageStackScrollWriteKind =
   | "incremental"
@@ -28,6 +246,49 @@ export type MessageStackScrollWriteDetail = {
   scrollKind?: MessageStackScrollWriteKind;
   scrollSource?: MessageStackScrollWriteSource;
 };
+
+const pendingVirtualizerPositionCorrections = new WeakMap<
+  HTMLElement,
+  number
+>();
+
+// Virtualized height/anchor reconciliation can legitimately change scrollTop
+// while pane tail-follow remains detached. Mark that one pending native scroll
+// so the pane does not confuse it with a late tick from a canceled smooth
+// bottom-follow animation and rewind the corrected visible anchor.
+export function markMessageStackVirtualizerPositionCorrection(
+  node: HTMLElement,
+  targetScrollTop: number,
+) {
+  if (!Number.isFinite(targetScrollTop)) {
+    pendingVirtualizerPositionCorrections.delete(node);
+    return;
+  }
+  pendingVirtualizerPositionCorrections.set(
+    node,
+    Math.max(targetScrollTop, 0),
+  );
+}
+
+export function clearMessageStackVirtualizerPositionCorrection(
+  node: HTMLElement,
+) {
+  pendingVirtualizerPositionCorrections.delete(node);
+}
+
+export function consumeMessageStackVirtualizerPositionCorrection(
+  node: HTMLElement,
+) {
+  const targetScrollTop = pendingVirtualizerPositionCorrections.get(node);
+  if (targetScrollTop === undefined) {
+    return false;
+  }
+  // A marker owns at most the first native frame after its write. If the
+  // browser coalesced or clamped that write, a later reader scroll must not be
+  // reclassified merely because it happens to land on the stale target.
+  pendingVirtualizerPositionCorrections.delete(node);
+  return Math.abs(node.scrollTop - targetScrollTop) < 1;
+}
 
 export type MessageStackBottomRepinRequestDetail = {
   authorityPresent: boolean;
