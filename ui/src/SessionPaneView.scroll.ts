@@ -96,6 +96,7 @@ export {
 
 const SESSION_PAGE_SCROLL_VIEWPORT_FACTOR = 0.85;
 const SESSION_PAGE_SCROLL_MINIMUM_PX = 160;
+const SESSION_ARROW_SCROLL_STEP_PX = 40;
 const SESSION_BOTTOM_FOLLOW_STABLE_MS =
   SESSION_BOTTOM_FOLLOW_REFERENCE_FRAME_MS * 2;
 
@@ -1092,7 +1093,7 @@ export function useSessionPaneScrollState({
 
     beginMessageStackManualNavigation();
 
-    // Page controls and normalized wheel/touch paths are explicit navigation.
+    // Arrow/Page controls and normalized wheel/touch paths are explicit navigation.
     // They must take authority before any write, including when a retained
     // detached-restore frame has already been dequeued by the browser.
     cancelDetachedMessageStackRestore(scrollStateKey);
@@ -1118,8 +1119,8 @@ export function useSessionPaneScrollState({
       node.clientHeight,
     );
     if (!landsAtPhysicalBottom) {
-      // This is the shared first-write path for native wheel/trackpad input
-      // and explicit page controls. React's delegated wheel handler observes
+      // This is the shared first-write path for app-owned Arrow/Page input and
+      // native wheel/trackpad input. React's delegated wheel handler observes
       // the native listener only after it has called preventDefault(), so
       // transfer scroll authority here before the first write. LIVE TURN is
       // already in the transcript's coordinate system and needs no separate
@@ -1130,8 +1131,8 @@ export function useSessionPaneScrollState({
       markTailFollowDetachedByUser();
     }
     cancelPaneProgrammaticBottomFollow();
-    // A pane-owned PageUp/PageDown or wheel delta must also abort any native
-    // smooth bottom-follow animation already running in Blink. The old stale
+    // A pane-owned Arrow/Page or wheel delta must also abort any native smooth
+    // bottom-follow animation already running in Blink. The old stale
     // prepend restore used to cancel that animation as an accidental side
     // effect; generation-based stale-restore rejection correctly performs no
     // DOM write, so ownership transfer must be explicit at the input writer.
@@ -1449,7 +1450,7 @@ export function useSessionPaneScrollState({
         takeMessageStackKeyboardPublicationAuthority(
           node,
           publication,
-          command.kind,
+          true,
         );
       }
       scrollSessionMessageStackByPageJump(command.direction === "up" ? -1 : 1);
@@ -1518,7 +1519,7 @@ export function useSessionPaneScrollState({
         takeMessageStackKeyboardPublicationAuthority(
           node,
           publication,
-          paneCommand.kind,
+          true,
         );
         scrollSessionMessageStackByPageJump(
           paneCommand.direction === "up" ? -1 : 1,
@@ -1526,13 +1527,24 @@ export function useSessionPaneScrollState({
         return;
       }
 
-      // Chromium can keep keyboard-scroll ownership on the transcript after a
-      // click on non-focusable message content even though document.body is the
-      // key event target. React's message-stack onKeyDown never sees that path,
-      // so claim detached authority before the browser emits its first animated
-      // upward scroll frame. Otherwise that frame is recorded as attached and
-      // an A -> B -> A tab switch restores the live bottom instead of the
-      // reader's anchored offset.
+      if (
+        keyboardIntent.scrollKind === "incremental" &&
+        (event.key === "ArrowUp" || event.key === "ArrowDown")
+      ) {
+        event.preventDefault();
+        takeMessageStackKeyboardPublicationAuthority(node, publication, true);
+        scrollMessageStackByDelta(
+          keyboardIntent.direction === "up"
+            ? -SESSION_ARROW_SCROLL_STEP_PX
+            : SESSION_ARROW_SCROLL_STEP_PX,
+          { scrollKind: "incremental" },
+        );
+        return;
+      }
+
+      // Space remains browser-owned after a click on non-focusable transcript
+      // content, even when document.body is the key event target. Claim
+      // detached authority before its first native scroll frame.
       takeMessageStackKeyboardPublicationAuthority(node, publication);
     },
   );
@@ -1596,17 +1608,17 @@ export function useSessionPaneScrollState({
       detachFromBottomAtBoundary: boolean;
       shouldTakeAuthority: boolean;
     },
-    paneCommandKind?: "page",
+    hasImmediateScrollWrite = false,
   ) {
     const shouldTakeAuthority =
-      paneCommandKind === "page"
+      hasImmediateScrollWrite
         ? publication.detachFromBottomAtBoundary
         : publication.shouldTakeAuthority;
     if (shouldTakeAuthority) {
-      // Page commands normally transfer authority through the deterministic
-      // delta write. The one exception is an immovable upward boundary whose
-      // older history will hydrate; there is no write in that case, so detach
-      // before the prepend arrives. Both keyboard producers use this rule.
+      // Immediate Arrow/Page commands normally transfer authority through the
+      // deterministic delta write. The one exception is an immovable upward
+      // boundary whose older history will hydrate; there is no write in that
+      // case, so detach before the prepend arrives.
       takeMessageStackUserScrollAuthority(node);
     }
   }
@@ -1932,7 +1944,25 @@ export function useSessionPaneScrollState({
             takeMessageStackKeyboardPublicationAuthority(
               node,
               publication,
-              paneCommand.kind,
+              true,
+            );
+            return;
+          }
+          if (
+            keyboardIntent.scrollKind === "incremental" &&
+            (event.key === "ArrowUp" || event.key === "ArrowDown")
+          ) {
+            event.preventDefault();
+            takeMessageStackKeyboardPublicationAuthority(
+              node,
+              publication,
+              true,
+            );
+            scrollMessageStackByDelta(
+              keyboardIntent.direction === "up"
+                ? -SESSION_ARROW_SCROLL_STEP_PX
+                : SESSION_ARROW_SCROLL_STEP_PX,
+              { scrollKind: "incremental" },
             );
             return;
           }

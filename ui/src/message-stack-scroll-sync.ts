@@ -426,10 +426,10 @@ export function notifyMessageStackScrollWrite(
   );
 }
 
-// Keyboard scrolling can remain browser-owned by a transcript even when the
-// key event itself targets document.body. Publish that pre-scroll intent on the
-// real scroll node so pane persistence and virtualized layout arbitration drop
-// bottom authority before Blink emits its first animated native-scroll frame.
+// Keyboard ownership can remain with a transcript even when the key event
+// itself targets document.body. Publish that intent on the real scroll node so
+// pane persistence and virtualized layout arbitration observe it before the
+// pane's immediate Arrow/Page write or any remaining browser-owned Space motion.
 // History demand defers any resulting page request until a microtask, after all
 // synchronous listeners (including virtualized layout arbitration) have seen
 // this event. Listener registration order is therefore not an authority rule.

@@ -275,6 +275,58 @@ describe("session pane historical-window tail state", () => {
     }
   });
 
+  it("owns body-targeted ArrowUp with one immediate transcript write", () => {
+    const scrollNode = document.createElement("section");
+    const messageCard = document.createElement("article");
+    scrollNode.append(messageCard);
+    document.body.append(scrollNode);
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 1_000 },
+      scrollTop: { configurable: true, writable: true, value: 800 },
+    });
+    const intentListener = vi.fn();
+    const writeListener = vi.fn();
+    scrollNode.addEventListener(
+      MESSAGE_STACK_USER_SCROLL_INTENT_EVENT,
+      intentListener,
+    );
+    scrollNode.addEventListener(MESSAGE_STACK_SCROLL_WRITE_EVENT, writeListener);
+    const hook = renderHook(() =>
+      useSessionPaneScrollState({
+        ...params(session(false)),
+        isActive: true,
+        isSessionTabActive: true,
+      }),
+    );
+    hook.result.current.messageStackRef.current = scrollNode;
+
+    try {
+      const keyEvent = new KeyboardEvent("keydown", {
+        bubbles: true,
+        cancelable: true,
+        key: "ArrowUp",
+      });
+      act(() => {
+        fireEvent.mouseDown(messageCard);
+        document.body.dispatchEvent(keyEvent);
+      });
+
+      expect(keyEvent.defaultPrevented).toBe(true);
+      expect(scrollNode.scrollTop).toBe(760);
+      expect(intentListener).toHaveBeenCalledTimes(1);
+      expect(writeListener).toHaveBeenCalledTimes(1);
+      expect((writeListener.mock.calls[0]?.[0] as CustomEvent).detail).toEqual({
+        scrollKind: "incremental",
+        scrollSource: "user",
+      });
+      expect(hook.result.current.liveTailPinned).toBe(false);
+    } finally {
+      hook.unmount();
+      scrollNode.remove();
+    }
+  });
+
   it("keeps body-keyboard ownership exclusive when an inactive pane is activated", () => {
     const liveSession = session(false);
     const firstNode = document.createElement("section");
@@ -1596,10 +1648,24 @@ describe("session pane historical-window tail state", () => {
     );
     hook.result.current.messageStackRef.current = scrollNode;
 
+    const preventDefault = vi.fn();
     act(() => {
-      hook.result.current.scrollMessageStackByPage(-1);
+      hook.result.current.handleMessageStackUserScrollIntent({
+        altKey: false,
+        ctrlKey: false,
+        currentTarget: scrollNode,
+        defaultPrevented: false,
+        key: "ArrowUp",
+        metaKey: false,
+        preventDefault,
+        shiftKey: false,
+        target: scrollNode,
+        type: "keydown",
+      } as unknown as ReactKeyboardEvent<HTMLElement>);
     });
     drainAnimationFrames();
+    expect(preventDefault).toHaveBeenCalledTimes(1);
+    expect(scrollNode.scrollTop).toBe(760);
     expect(hook.result.current.liveTailPinned).toBe(false);
     expect(hook.result.current.showNewResponseIndicator).toBe(false);
 
@@ -3104,7 +3170,7 @@ describe("session pane historical-window tail state", () => {
     expect(hook.result.current.liveTailPinned).toBe(false);
   });
 
-  it("keeps the first ArrowUp animation frame detached inside the physical-bottom tolerance", () => {
+  it("owns direct ArrowUp with one immediate detached transcript write", () => {
     vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
     vi.stubGlobal("cancelAnimationFrame", vi.fn());
     const activeSession = session(false);
@@ -3148,6 +3214,9 @@ describe("session pane historical-window tail state", () => {
       return state;
     });
 
+    const preventDefault = vi.fn();
+    const writeListener = vi.fn();
+    scrollNode.addEventListener(MESSAGE_STACK_SCROLL_WRITE_EVENT, writeListener);
     act(() => {
       hook.result.current.handleMessageStackUserScrollIntent({
         altKey: false,
@@ -3156,34 +3225,25 @@ describe("session pane historical-window tail state", () => {
         defaultPrevented: false,
         key: "ArrowUp",
         metaKey: false,
+        preventDefault,
+        shiftKey: false,
         target: scrollNode,
         type: "keydown",
       } as unknown as ReactKeyboardEvent<HTMLElement>);
     });
+    expect(preventDefault).toHaveBeenCalledTimes(1);
+    expect(scrollNode.scrollTop).toBe(760);
+    expect(writeListener).toHaveBeenCalledTimes(1);
+    expect((writeListener.mock.calls[0]?.[0] as CustomEvent).detail).toEqual({
+      scrollKind: "incremental",
+      scrollSource: "user",
+    });
     expect(paneScrollPositions[scrollStateKey]).toEqual({
       anchor: {
         messageId: "message-visible",
         viewportOffsetPx: 24,
       },
-      top: 800,
-      shouldStick: false,
-    });
-
-    act(() => {
-      // Native keyboard scrolling eases away from the boundary. The first
-      // frame is still within the shared 4 px physical-bottom tolerance.
-      scrollNode.scrollTop = 799.5;
-      hook.result.current.handleMessageStackScroll({
-        currentTarget: scrollNode,
-      } as ReactUIEvent<HTMLElement>);
-    });
-
-    expect(paneScrollPositions[scrollStateKey]).toEqual({
-      anchor: {
-        messageId: "message-visible",
-        viewportOffsetPx: 24,
-      },
-      top: 799.5,
+      top: 760,
       shouldStick: false,
     });
     expect(paneShouldStickToBottomRef.current[scrollStateKey]).toBe(false);
@@ -3438,6 +3498,7 @@ describe("session pane historical-window tail state", () => {
         defaultPrevented: false,
         key: "ArrowUp",
         metaKey: false,
+        preventDefault: vi.fn(),
         shiftKey: false,
         target: anchor,
         type: "keydown",

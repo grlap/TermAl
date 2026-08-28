@@ -396,6 +396,9 @@ Ownership split:
   emits `MESSAGE_STACK_SCROLL_WRITE_EVENT` with `scrollSource: "user"` plus
   explicit `scrollKind` metadata. The virtualizer has no independent keydown
   listener; adding a second producer would double-detach and double-request.
+- Plain `ArrowUp` / `ArrowDown` use the same app-owned write path with one
+  immediate 40 px step. The pane prevents Blink's native multi-frame keyboard
+  animation so page measurement cannot repin between animation frames.
 - Pane boundary commands (`Home` / `End`, macOS `Command+ArrowUp/ArrowDown`,
   and Windows/Linux control-key shortcuts) own
   their single bounded start/tail request and publish the user-owned seek write,

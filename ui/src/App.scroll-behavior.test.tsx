@@ -3980,9 +3980,10 @@ describe("App scroll behaviour", () => {
 
   it("detaches live-turn bottom follow on explicit transcript navigation", async () => {
     await withVerifiedNoReactActWarnings(async () => {
+      let scrollHeight = 1000;
       const restoreScrollGeometry = stubElementScrollGeometry({
         clientHeight: 200,
-        scrollHeight: 1000,
+        scrollHeight: () => scrollHeight,
       });
       const context = await renderAppWithProjectAndSession();
 
@@ -4095,19 +4096,92 @@ describe("App scroll behaviour", () => {
         });
         expect(liveTail).toHaveAttribute("data-tail-follow", "attached");
 
-        act(() => {
-          fireEvent.keyDown(messageStack, { key: "ArrowUp" });
+        const arrowUpEvent = new KeyboardEvent("keydown", {
+          bubbles: true,
+          cancelable: true,
+          key: "ArrowUp",
         });
-        // This is the production React onKeyDown -> normalized intent ->
-        // virtualizer bridge. Detachment must happen before the browser's first
-        // animated native scroll frame.
+        act(() => {
+          messageStack.dispatchEvent(arrowUpEvent);
+        });
+        // This is the production React onKeyDown -> normalized intent -> one
+        // app-owned incremental write. Blink must not start a second animated
+        // native scroll after the synchronous 40 px step.
+        expect(arrowUpEvent.defaultPrevented).toBe(true);
+        expect(messageStack.scrollTop).toBe(760);
         expect(liveTail).toHaveAttribute("data-tail-follow", "detached");
-        messageStack.scrollTop = 800;
         await act(async () => {
           fireEvent.scroll(messageStack);
           await flushUiWork();
         });
+        expect(liveTail).toHaveAttribute("data-tail-follow", "detached");
+
+        scrollHeight = 1120;
+        await dispatchStateEvent(latestEventSource(), {
+          revision: 3,
+          projects: [
+            {
+              id: "project-termal",
+              name: "TermAl",
+              rootPath: "/projects/termal",
+            },
+          ],
+          sessions: [
+            makeSession("session-1", {
+              name: "Session 1",
+              projectId: "project-termal",
+              workdir: "/projects/termal",
+              status: "active",
+              preview: "New response after ArrowUp.",
+              messages: [
+                {
+                  id: "message-user-1",
+                  type: "text",
+                  timestamp: "10:00",
+                  author: "you",
+                  text: "Current prompt",
+                },
+                {
+                  id: "message-assistant-1",
+                  type: "text",
+                  timestamp: "10:01",
+                  author: "assistant",
+                  text: "Current turn partial.",
+                },
+                {
+                  id: "message-assistant-2",
+                  type: "text",
+                  timestamp: "10:02",
+                  author: "assistant",
+                  text: "New response after ArrowUp.",
+                },
+              ],
+            }),
+          ],
+        });
+        await settleAsyncUi();
+
+        expect(messageStack.scrollTop).toBeLessThan(920);
+        expect(liveTail).toHaveAttribute("data-tail-follow", "detached");
+        expect(
+          await screen.findByRole("button", { name: "New response" }),
+        ).toBeInTheDocument();
+
+        messageStack.scrollTop = 880;
+        const arrowDownEvent = new KeyboardEvent("keydown", {
+          bubbles: true,
+          cancelable: true,
+          key: "ArrowDown",
+        });
+        act(() => {
+          messageStack.dispatchEvent(arrowDownEvent);
+        });
+        expect(arrowDownEvent.defaultPrevented).toBe(true);
+        expect(messageStack.scrollTop).toBe(920);
         expect(liveTail).toHaveAttribute("data-tail-follow", "attached");
+        expect(
+          screen.queryByRole("button", { name: "New response" }),
+        ).not.toBeInTheDocument();
 
         // Any deliberate transcript navigation switches LIVE TURN back to
         // normal flow before the custom non-passive wheel writer moves the
