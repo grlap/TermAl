@@ -646,7 +646,9 @@ impl AppState {
     ///
     /// All three paths honour `runtime_reset_required` by tearing down
     /// the current runtime before refreshing. Remote-hosted sessions
-    /// proxy the entire call unchanged.
+    /// proxy the entire call unchanged. Local sessions return `409 Conflict`
+    /// while Active/Approval or while a Stop/revocation owner holds the runtime
+    /// fence, preventing refresh from replacing a runtime being torn down.
     fn refresh_session_model_options(
         &self,
         session_id: &str,
@@ -658,9 +660,19 @@ impl AppState {
         let index = inner
             .find_visible_session_index(session_id)
             .ok_or_else(|| ApiError::not_found("session not found"))?;
+        if inner.sessions[index].runtime_stop_in_progress
+            || matches!(
+                inner.sessions[index].session.status,
+                SessionStatus::Active | SessionStatus::Approval
+            )
+        {
+            return Err(ApiError::conflict(
+                "session model options cannot be refreshed while the session is active or stopping",
+            ));
+        }
         let agent = inner.sessions[index].session.agent;
         let engram_mcp = if agent == Agent::Claude {
-            engram_mcp_stdio_config_for_session_locked(&inner, session_id)
+            engram_mcp_runtime_config_for_session_locked(&inner, session_id)
         } else {
             None
         };
@@ -676,10 +688,10 @@ impl AppState {
                         ))
                     })?;
                 }
-                record.runtime = SessionRuntime::None;
+                record.clear_runtime();
                 record.pending_claude_approvals.clear();
                 record.pending_claude_user_inputs.clear();
-                record.runtime_reset_required = false;
+                record.clear_runtime_reset();
             }
 
             match &record.runtime {
@@ -699,7 +711,7 @@ impl AppState {
                             "failed to restart Claude session runtime: {err:#}"
                         ))
                     })?;
-                    record.runtime = SessionRuntime::None;
+                    record.clear_runtime();
                     record.pending_claude_approvals.clear();
                     record.pending_claude_user_inputs.clear();
                 }
@@ -711,7 +723,7 @@ impl AppState {
             let delegation_mcp_config = self
                 .termal_delegation_mcp_claude_config_json_with_engram(
                     session_id,
-                    engram_mcp.as_ref(),
+                    engram_mcp.as_ref().map(|config| &config.stdio),
                 )
                 .map_err(|err| {
                     ApiError::internal(format!(
@@ -741,6 +753,7 @@ impl AppState {
                 ))
             })?;
             record.runtime = SessionRuntime::Claude(handle);
+            record.engram_mcp_installed = engram_mcp.map(|config| config.installed);
             drop(inner);
 
             let model_options = match response_rx.recv_timeout(Duration::from_secs(30)) {
@@ -782,12 +795,12 @@ impl AppState {
                         })?;
                     }
                 }
-                record.runtime = SessionRuntime::None;
+                record.clear_runtime();
                 record.pending_codex_approvals.clear();
                 record.pending_codex_user_inputs.clear();
                 record.pending_codex_mcp_elicitations.clear();
                 record.pending_codex_app_requests.clear();
-                record.runtime_reset_required = false;
+                record.clear_runtime_reset();
             }
 
             let handle = match &record.runtime {
@@ -881,10 +894,10 @@ impl AppState {
                     ))
                 })?;
             }
-            record.runtime = SessionRuntime::None;
+            record.clear_runtime();
             record.pending_acp_approvals.clear();
             record.pending_acp_approval_order.clear();
-            record.runtime_reset_required = false;
+            record.clear_runtime_reset();
         }
 
         // ACP has no standalone "get config options" request. For OpenCode,
@@ -901,7 +914,7 @@ impl AppState {
                             "failed to restart OpenCode session runtime for model refresh: {err:#}"
                         ))
                     })?;
-                    record.runtime = SessionRuntime::None;
+                    record.clear_runtime();
                     record.pending_acp_approvals.clear();
                     record.pending_acp_approval_order.clear();
                 }

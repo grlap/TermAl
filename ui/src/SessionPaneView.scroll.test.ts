@@ -3053,6 +3053,247 @@ describe("session pane historical-window tail state", () => {
   );
 
   it.each([
+    ["a real recorded bottom", false],
+    ["the pinned-bottom sentinel", true],
+  ])(
+    "keeps tail-follow attached when a taller viewport clamps scrollTop below %s",
+    (_recordedPosition, usePinnedBottomSentinel) => {
+      vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
+      vi.stubGlobal("cancelAnimationFrame", vi.fn());
+      const activeSession = session(false);
+      const scrollStateKey = "pane-1:session-history";
+      const paneScrollPositions = {
+        [scrollStateKey]: { top: 800, shouldStick: true },
+      };
+      const paneShouldStickToBottomRef = {
+        current: { [scrollStateKey]: true },
+      };
+      const scrollNode = document.createElement("section");
+      Object.defineProperties(scrollNode, {
+        clientHeight: { configurable: true, writable: true, value: 200 },
+        scrollHeight: { configurable: true, value: 1_000 },
+        scrollTop: { configurable: true, writable: true, value: 800 },
+      });
+      Object.defineProperty(scrollNode, "scrollTo", {
+        configurable: true,
+        value: vi.fn((options: ScrollToOptions) => {
+          if (typeof options.top === "number") {
+            scrollNode.scrollTop = options.top;
+          }
+        }),
+      });
+      const userScrollIntents: Array<Record<string, unknown>> = [];
+      scrollNode.addEventListener(
+        MESSAGE_STACK_USER_SCROLL_INTENT_EVENT,
+        (event) => {
+          userScrollIntents.push(
+            (event as CustomEvent<Record<string, unknown>>).detail,
+          );
+        },
+      );
+
+      const hook = renderHook(() => {
+        const state = useSessionPaneScrollState({
+          ...params(activeSession),
+          isSessionTabActive: true,
+          paneScrollPositions,
+          paneShouldStickToBottomRef,
+          scrollStateKey,
+        });
+        state.messageStackRef.current = scrollNode;
+        return state;
+      });
+
+      act(() => {
+        // Prime an attached bottom frame with the smaller viewport.
+        hook.result.current.handleMessageStackScroll({
+          currentTarget: scrollNode,
+        } as ReactUIEvent<HTMLElement>);
+      });
+      if (usePinnedBottomSentinel) {
+        paneScrollPositions[scrollStateKey].top = Number.MAX_SAFE_INTEGER;
+      }
+
+      act(() => {
+        // The composer or a pending card shrank: the viewport grew by 60px
+        // and the browser clamped scrollTop to the new maximum. No reader
+        // input preceded this native frame.
+        Object.defineProperty(scrollNode, "clientHeight", {
+          configurable: true,
+          writable: true,
+          value: 260,
+        });
+        scrollNode.scrollTop = 740;
+        hook.result.current.handleMessageStackScroll({
+          currentTarget: scrollNode,
+        } as ReactUIEvent<HTMLElement>);
+      });
+
+      expect(paneShouldStickToBottomRef.current[scrollStateKey]).toBe(true);
+      expect(paneScrollPositions[scrollStateKey].shouldStick).toBe(true);
+      expect(hook.result.current.liveTailPinned).toBe(true);
+      expect(userScrollIntents).toEqual([]);
+    },
+  );
+
+  it("keeps tail-follow attached when a one-pixel drop still lands at the physical bottom", () => {
+    // Observed in a real browser: the footer height jittered by one pixel
+    // between two frames, the browser clamped scrollTop from 2550 to 2549 and
+    // reported the same content height and viewport height again. The
+    // recorded geometry cannot witness that jitter, so the frame must be
+    // classified by where it lands, not by the sub-pixel epsilon.
+    vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    const activeSession = session(false);
+    const scrollStateKey = "pane-1:session-history";
+    const paneScrollPositions = {
+      [scrollStateKey]: { top: 2_550, shouldStick: true },
+    };
+    const paneShouldStickToBottomRef = {
+      current: { [scrollStateKey]: true },
+    };
+    const scrollNode = document.createElement("section");
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 574 },
+      scrollHeight: { configurable: true, value: 3_124 },
+      scrollTop: { configurable: true, writable: true, value: 2_550 },
+    });
+    Object.defineProperty(scrollNode, "scrollTo", {
+      configurable: true,
+      value: vi.fn((options: ScrollToOptions) => {
+        if (typeof options.top === "number") {
+          scrollNode.scrollTop = options.top;
+        }
+      }),
+    });
+    const userScrollIntents: Array<Record<string, unknown>> = [];
+    scrollNode.addEventListener(
+      MESSAGE_STACK_USER_SCROLL_INTENT_EVENT,
+      (event) => {
+        userScrollIntents.push(
+          (event as CustomEvent<Record<string, unknown>>).detail,
+        );
+      },
+    );
+
+    const hook = renderHook(() => {
+      const state = useSessionPaneScrollState({
+        ...params(activeSession),
+        isSessionTabActive: true,
+        paneScrollPositions,
+        paneShouldStickToBottomRef,
+        scrollStateKey,
+      });
+      state.messageStackRef.current = scrollNode;
+      return state;
+    });
+
+    act(() => {
+      // Prime an attached bottom frame with a real recorded top.
+      hook.result.current.handleMessageStackScroll({
+        currentTarget: scrollNode,
+      } as ReactUIEvent<HTMLElement>);
+    });
+    expect(paneScrollPositions[scrollStateKey]).toEqual({
+      top: 2_550,
+      shouldStick: true,
+    });
+
+    act(() => {
+      scrollNode.scrollTop = 2_549;
+      hook.result.current.handleMessageStackScroll({
+        currentTarget: scrollNode,
+      } as ReactUIEvent<HTMLElement>);
+    });
+
+    expect(paneShouldStickToBottomRef.current[scrollStateKey]).toBe(true);
+    expect(paneScrollPositions[scrollStateKey].shouldStick).toBe(true);
+    expect(hook.result.current.liveTailPinned).toBe(true);
+    expect(userScrollIntents).toEqual([]);
+  });
+
+  it("keeps tail-follow attached when sending a draft grows the viewport past the recorded height", () => {
+    // The reader was attached while a multi-line draft kept the composer tall
+    // (recorded at a 574px viewport). Sending the draft collapses the composer
+    // to one line: the viewport grows to 640px and the browser clamps
+    // scrollTop down by that growth without any reader input. The frame lands
+    // at the physical bottom and must keep the reader attached.
+    vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    const activeSession = session(false);
+    const scrollStateKey = "pane-1:session-history";
+    const paneScrollPositions = {
+      [scrollStateKey]: { top: 2_550, shouldStick: true },
+    };
+    const paneShouldStickToBottomRef = {
+      current: { [scrollStateKey]: true },
+    };
+    const scrollNode = document.createElement("section");
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, writable: true, value: 574 },
+      scrollHeight: { configurable: true, value: 3_124 },
+      scrollTop: { configurable: true, writable: true, value: 2_550 },
+    });
+    Object.defineProperty(scrollNode, "scrollTo", {
+      configurable: true,
+      value: vi.fn((options: ScrollToOptions) => {
+        if (typeof options.top === "number") {
+          scrollNode.scrollTop = options.top;
+        }
+      }),
+    });
+    const userScrollIntents: Array<Record<string, unknown>> = [];
+    scrollNode.addEventListener(
+      MESSAGE_STACK_USER_SCROLL_INTENT_EVENT,
+      (event) => {
+        userScrollIntents.push(
+          (event as CustomEvent<Record<string, unknown>>).detail,
+        );
+      },
+    );
+
+    const hook = renderHook(() => {
+      const state = useSessionPaneScrollState({
+        ...params(activeSession),
+        isSessionTabActive: true,
+        paneScrollPositions,
+        paneShouldStickToBottomRef,
+        scrollStateKey,
+      });
+      state.messageStackRef.current = scrollNode;
+      return state;
+    });
+
+    act(() => {
+      // Attached bottom frame recorded while the tall draft kept the viewport
+      // at 574px.
+      hook.result.current.handleMessageStackScroll({
+        currentTarget: scrollNode,
+      } as ReactUIEvent<HTMLElement>);
+    });
+
+    act(() => {
+      // The draft is sent: the composer collapses, the viewport grows to
+      // 640px, and the browser clamps scrollTop from 2550 down to the new
+      // maximum 2484 in one native frame.
+      Object.defineProperty(scrollNode, "clientHeight", {
+        configurable: true,
+        writable: true,
+        value: 640,
+      });
+      scrollNode.scrollTop = 2_484;
+      hook.result.current.handleMessageStackScroll({
+        currentTarget: scrollNode,
+      } as ReactUIEvent<HTMLElement>);
+    });
+
+    expect(paneShouldStickToBottomRef.current[scrollStateKey]).toBe(true);
+    expect(paneScrollPositions[scrollStateKey].shouldStick).toBe(true);
+    expect(hook.result.current.liveTailPinned).toBe(true);
+    expect(userScrollIntents).toEqual([]);
+  });
+
+  it.each([
     ["upward", 1_040, 800, 810, false],
     ["downward", 1_080, 850, 880, true],
   ] as const)(
@@ -4208,7 +4449,7 @@ describe("session pane historical-window tail state", () => {
     expect(hook.result.current.liveTailPinned).toBe(true);
   });
 
-  it("keeps a shrink detached but accepts later forward movement to the physical bottom", () => {
+  it("keeps a shrink detached but accepts a fractional forward movement to the physical bottom", () => {
     vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
     vi.stubGlobal("cancelAnimationFrame", vi.fn());
     const activeSession = session(false);
@@ -4286,10 +4527,27 @@ describe("session pane historical-window tail state", () => {
     expect(hook.result.current.liveTailPinned).toBe(false);
 
     act(() => {
+      // A smaller pointer-owned clamp is still fractional geometry noise and
+      // must not manufacture reader authority merely because it lands at the
+      // reachable bottom.
+      scrollHeight = 960.125;
+      claimMessageStackNativeScrollOwnership(
+        scrollNode,
+        { direction: null, owner: "pointer" },
+        MESSAGE_STACK_POINTER_OWNERSHIP_MS,
+      );
+      scrollNode.scrollTop = 760.125;
+      hook.result.current.handleMessageStackScroll({
+        currentTarget: scrollNode,
+      } as ReactUIEvent<HTMLElement>);
+    });
+    expect(hook.result.current.liveTailPinned).toBe(false);
+
+    act(() => {
       // Once geometry stabilizes, a real scrollbar-owned forward movement to
       // the physical bottom reattaches. Ownerless bottom landings remain
       // detached so a late producer cannot manufacture bottom authority.
-      scrollHeight = 1_000;
+      scrollHeight = 960.5;
       hook.result.current.handleMessageStackScroll({
         currentTarget: scrollNode,
       } as ReactUIEvent<HTMLElement>);
@@ -4298,13 +4556,13 @@ describe("session pane historical-window tail state", () => {
         { direction: null, owner: "pointer" },
         MESSAGE_STACK_POINTER_OWNERSHIP_MS,
       );
-      scrollNode.scrollTop = 800;
+      scrollNode.scrollTop = 760.5;
       hook.result.current.handleMessageStackScroll({
         currentTarget: scrollNode,
       } as ReactUIEvent<HTMLElement>);
     });
 
-    expect(scrollNode.scrollTop).toBe(800);
+    expect(scrollNode.scrollTop).toBe(760.5);
     expect(paneScrollPositions[scrollStateKey]?.shouldStick).toBe(true);
     expect(hook.result.current.liveTailPinned).toBe(true);
   });

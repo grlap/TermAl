@@ -164,7 +164,7 @@ impl PersistedState {
         let mut inner = StateInner {
             codex: self.codex,
             engram_host_adapter: Arc::new(EngramHostAdapter::default()),
-            engram_project_resets: HashSet::new(),
+            engram_project_resets: EngramProjectResetFences::default(),
             preferences,
             revision: self.revision,
             next_project_number: self.next_project_number,
@@ -421,7 +421,9 @@ impl PersistedSessionRecord {
             remote_id: self.remote_id,
             remote_session_id: self.remote_session_id,
             runtime: SessionRuntime::None,
+            engram_mcp_installed: None,
             runtime_reset_required: false,
+            engram_mcp_runtime_quarantined: false,
             orchestrator_auto_dispatch_blocked: self.orchestrator_auto_dispatch_blocked,
             engram: EngramSessionState {
                 routing_token: self.engram_routing_token.clone(),
@@ -430,6 +432,9 @@ impl PersistedSessionRecord {
                 ..EngramSessionState::default()
             },
             runtime_stop_in_progress: false,
+            runtime_stop_owner: None,
+            runtime_stop_generation: 0,
+            engram_mcp_revocation_pending: false,
             deferred_stop_callbacks: Vec::new(),
             hidden: false,
             // Freshly loaded records start unstamped; nothing has changed

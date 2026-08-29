@@ -12,6 +12,7 @@
 // Split out of: ui/src/App.tsx (Slice 14 of docs/app-split-plan.md).
 
 import {
+  ApiRequestError,
   cancelQueuedPrompt,
   createProject,
   createSession,
@@ -95,6 +96,8 @@ import type {
   Project,
   SandboxMode,
   Session,
+  SessionModelOptionsRefreshOptions,
+  SessionModelOptionsRefreshOutcome,
   SessionSettingsField,
   SessionSettingsValue,
 } from "./types";
@@ -1315,15 +1318,15 @@ export function useAppSessionActions(
 
   async function handleRefreshSessionModelOptions(
     sessionId: string,
-    options?: { reportGlobalError?: boolean },
-  ) {
+    options?: SessionModelOptionsRefreshOptions,
+  ): Promise<SessionModelOptionsRefreshOutcome> {
     if (!isMountedRef.current) {
-      return;
+      return "skipped";
     }
     const previousSession =
       sessionsRef.current.find((entry) => entry.id === sessionId) ?? null;
     if (refreshingSessionModelOptionIdsRef.current[sessionId]) {
-      return;
+      return "skipped";
     }
     const nextRefreshingSessionIds = setSessionFlag(
       refreshingSessionModelOptionIdsRef.current,
@@ -1346,11 +1349,11 @@ export function useAppSessionActions(
     try {
       const state = await refreshSessionModelOptions(sessionId);
       if (!isMountedRef.current) {
-        return;
+        return "skipped";
       }
       const adoptionOutcome = adoptSessionActionState(sessionId, state);
       if (!isSuccessfulAdoptActionStateOutcome(adoptionOutcome)) {
-        return;
+        return "skipped";
       }
       if (previousSession?.agent === "Codex") {
         const refreshedSession = sessionAfterActionStateOutcome(
@@ -1372,9 +1375,18 @@ export function useAppSessionActions(
         }
       }
       setRequestError(null);
+      return "refreshed";
     } catch (error) {
       if (!isMountedRef.current) {
-        return;
+        return "skipped";
+      }
+      // A local runtime cannot refresh its model catalog while an active turn
+      // or Stop/revocation owner controls it. The settings card waits for Idle
+      // before auto-requesting, but a state transition can still race the HTTP
+      // request. Treat that conflict as a benign deferral instead of presenting
+      // it as an application failure.
+      if (error instanceof ApiRequestError && error.status === 409) {
+        return "deferred";
       }
       const rawMessage = getErrorMessage(error);
       const session =
@@ -1393,17 +1405,17 @@ export function useAppSessionActions(
       if (options?.reportGlobalError !== false) {
         reportRequestError(error, { message });
       }
+      return "failed";
     } finally {
-      if (!isMountedRef.current) {
-        return;
+      if (isMountedRef.current) {
+        const nextRefreshingSessionIds = setSessionFlag(
+          refreshingSessionModelOptionIdsRef.current,
+          sessionId,
+          false,
+        );
+        refreshingSessionModelOptionIdsRef.current = nextRefreshingSessionIds;
+        setRefreshingSessionModelOptionIds(nextRefreshingSessionIds);
       }
-      const nextRefreshingSessionIds = setSessionFlag(
-        refreshingSessionModelOptionIdsRef.current,
-        sessionId,
-        false,
-      );
-      refreshingSessionModelOptionIdsRef.current = nextRefreshingSessionIds;
-      setRefreshingSessionModelOptionIds(nextRefreshingSessionIds);
     }
   }
 

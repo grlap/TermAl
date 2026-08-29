@@ -45,6 +45,10 @@ import {
   type SlashPaletteItem,
 } from "./session-slash-palette";
 import { useComposerSessionSnapshot } from "../session-store";
+import {
+  SESSION_MODEL_OPTIONS_DEFERRED_RETRY_LIMIT,
+  sessionModelOptionsDeferredRetryDelay,
+} from "../session-model-refresh-retry";
 import { useComposerAutoResize } from "./useComposerAutoResize";
 import {
   ComposerActionSplitButton,
@@ -110,6 +114,7 @@ export const SessionComposer = memo(function SessionComposer({
   isSessionBusy,
   isUpdating,
   isRefreshingModelOptions,
+  isEngramMcpRevocationPending,
   modelOptionsError,
   agentCommands,
   hasLoadedAgentCommands,
@@ -142,6 +147,14 @@ export const SessionComposer = memo(function SessionComposer({
   const committedDraftsRef = useRef<Record<string, string>>({});
   const onDraftCommitRef = useRef(onDraftCommit);
   const requestedSlashModelOptionsRef = useRef<string | null>(null);
+  const slashModelOptionsDeferredRetryTimerRef = useRef<
+    ReturnType<typeof setTimeout> | null
+  >(null);
+  const slashModelOptionsDeferredRetryAttemptRef = useRef(0);
+  const slashModelOptionsDeferredRetryKeyRef = useRef<string | null>(null);
+  const previousSlashModelOptionsBlockedRef = useRef(
+    isSessionBusy || isEngramMcpRevocationPending,
+  );
   const requestedSlashAgentCommandsRef = useRef<string | null>(null);
   const codexMcpNextRequestGenerationRef = useRef(0);
   const codexMcpRequestGenerationRef = useRef<Record<string, number>>({});
@@ -175,6 +188,8 @@ export const SessionComposer = memo(function SessionComposer({
     Record<string, PromptHistoryState | undefined>
   >({});
   const [slashActiveIndex, setSlashActiveIndex] = useState(0);
+  const [slashModelOptionsRetryGeneration, setSlashModelOptionsRetryGeneration] =
+    useState(0);
   const [slashNavModality, setSlashNavModality] = useState<"keyboard" | "mouse">("keyboard");
   const [isAgentCommandResolving, setIsAgentCommandResolving] = useState(false);
   const isAgentCommandResolvingRef = useRef(false);
@@ -282,7 +297,13 @@ export const SessionComposer = memo(function SessionComposer({
   const slashPaletteRequiresModelRefresh =
     slashPalette.kind === "choice" && slashPalette.requiresLiveRefresh;
   const slashModelOptionsRequestKey = session
-    ? `${session.id}:${session.model}`
+    ? `${session.id}:${session.model}:${
+        isEngramMcpRevocationPending
+          ? "pending"
+          : isSessionBusy
+            ? "busy"
+            : "ready"
+      }`
     : null;
   const slashPaletteSupportsAgentRefresh =
     slashPalette.kind === "command" && Boolean(slashPalette.supportsRefresh);
@@ -502,8 +523,43 @@ export const SessionComposer = memo(function SessionComposer({
   }, [activeSessionId, slashPaletteResetKey]);
 
   useEffect(() => {
+    requestedSlashModelOptionsRef.current = null;
+    slashModelOptionsDeferredRetryAttemptRef.current = 0;
+    slashModelOptionsDeferredRetryKeyRef.current = null;
+    previousSlashModelOptionsBlockedRef.current = false;
+    if (slashModelOptionsDeferredRetryTimerRef.current !== null) {
+      clearTimeout(slashModelOptionsDeferredRetryTimerRef.current);
+      slashModelOptionsDeferredRetryTimerRef.current = null;
+    }
+    return () => {
+      if (slashModelOptionsDeferredRetryTimerRef.current !== null) {
+        clearTimeout(slashModelOptionsDeferredRetryTimerRef.current);
+        slashModelOptionsDeferredRetryTimerRef.current = null;
+      }
+    };
+  }, [activeSessionId]);
+
+  useEffect(() => {
+    const blocked = isSessionBusy || isEngramMcpRevocationPending;
+    const wasBlocked = previousSlashModelOptionsBlockedRef.current;
+    previousSlashModelOptionsBlockedRef.current = blocked;
+    if (blocked || !wasBlocked) {
+      return;
+    }
+    requestedSlashModelOptionsRef.current = null;
+    slashModelOptionsDeferredRetryAttemptRef.current = 0;
+    slashModelOptionsDeferredRetryKeyRef.current = null;
+    if (slashModelOptionsDeferredRetryTimerRef.current !== null) {
+      clearTimeout(slashModelOptionsDeferredRetryTimerRef.current);
+      slashModelOptionsDeferredRetryTimerRef.current = null;
+    }
+  }, [isEngramMcpRevocationPending, isSessionBusy]);
+
+  useEffect(() => {
     if (
       !session ||
+      isSessionBusy ||
+      isEngramMcpRevocationPending ||
       slashPalette.kind !== "choice" ||
       !slashPaletteSupportsModelRefresh ||
       !supportsLiveSessionModelOptions(session)
@@ -535,6 +591,7 @@ export const SessionComposer = memo(function SessionComposer({
     slashPaletteRequiresModelRefresh,
     slashPaletteSupportsModelRefresh,
     slashModelOptionsRequestKey,
+    slashModelOptionsRetryGeneration,
   ]);
 
   useEffect(() => {
@@ -774,19 +831,77 @@ export const SessionComposer = memo(function SessionComposer({
   }
 
   function requestSlashModelOptions(force = false) {
-    if (!session || !supportsLiveSessionModelOptions(session)) {
-      return;
-    }
-
     if (
-      !force &&
-      requestedSlashModelOptionsRef.current === slashModelOptionsRequestKey
+      !session ||
+      isSessionBusy ||
+      isEngramMcpRevocationPending ||
+      !slashModelOptionsRequestKey ||
+      !supportsLiveSessionModelOptions(session)
     ) {
       return;
     }
 
-    requestedSlashModelOptionsRef.current = slashModelOptionsRequestKey;
-    void onRefreshSessionModelOptions(session.id);
+    if (slashModelOptionsDeferredRetryKeyRef.current !== slashModelOptionsRequestKey) {
+      slashModelOptionsDeferredRetryKeyRef.current = slashModelOptionsRequestKey;
+      slashModelOptionsDeferredRetryAttemptRef.current = 0;
+    }
+
+    if (
+      !force &&
+      (requestedSlashModelOptionsRef.current === slashModelOptionsRequestKey ||
+        slashModelOptionsDeferredRetryAttemptRef.current >=
+          SESSION_MODEL_OPTIONS_DEFERRED_RETRY_LIMIT)
+    ) {
+      return;
+    }
+
+    const requestKey = slashModelOptionsRequestKey;
+    const requestSessionId = session.id;
+    if (force) {
+      slashModelOptionsDeferredRetryAttemptRef.current = 0;
+    }
+    requestedSlashModelOptionsRef.current = requestKey;
+    void Promise.resolve(onRefreshSessionModelOptions(requestSessionId))
+      .then((outcome) => {
+        if (
+          !isMountedRef.current ||
+          activeSessionIdRef.current !== requestSessionId ||
+          requestedSlashModelOptionsRef.current !== requestKey
+        ) {
+          return;
+        }
+        if (outcome !== "deferred") {
+          slashModelOptionsDeferredRetryAttemptRef.current = 0;
+          return;
+        }
+        if (
+          slashModelOptionsDeferredRetryAttemptRef.current >=
+          SESSION_MODEL_OPTIONS_DEFERRED_RETRY_LIMIT
+        ) {
+          return;
+        }
+        const retryAttempt = slashModelOptionsDeferredRetryAttemptRef.current;
+        slashModelOptionsDeferredRetryAttemptRef.current += 1;
+        if (slashModelOptionsDeferredRetryTimerRef.current !== null) {
+          clearTimeout(slashModelOptionsDeferredRetryTimerRef.current);
+        }
+        slashModelOptionsDeferredRetryTimerRef.current = setTimeout(() => {
+          slashModelOptionsDeferredRetryTimerRef.current = null;
+          if (
+            !isMountedRef.current ||
+            activeSessionIdRef.current !== requestSessionId ||
+            slashModelOptionsDeferredRetryKeyRef.current !== requestKey ||
+            requestedSlashModelOptionsRef.current !== requestKey
+          ) {
+            return;
+          }
+          requestedSlashModelOptionsRef.current = null;
+          setSlashModelOptionsRetryGeneration((current) => current + 1);
+        }, sessionModelOptionsDeferredRetryDelay(retryAttempt));
+      })
+      .catch(() => {
+        slashModelOptionsDeferredRetryAttemptRef.current = 0;
+      });
   }
 
   function requestSlashAgentCommands(force = false) {
@@ -1472,7 +1587,9 @@ export const SessionComposer = memo(function SessionComposer({
                   }}
                   disabled={
                     (slashPalette.kind === "choice"
-                      ? isRefreshingModelOptions
+                      ? isRefreshingModelOptions ||
+                        isSessionBusy ||
+                        isEngramMcpRevocationPending
                       : slashPalette.kind === "mcp"
                         ? activeCodexMcpRequestState.status === "loading"
                         : isRefreshingAgentCommands) || isUpdating
@@ -1619,6 +1736,8 @@ export const SessionComposer = memo(function SessionComposer({
   previous.isSessionBusy === next.isSessionBusy &&
   previous.isUpdating === next.isUpdating &&
   previous.isRefreshingModelOptions === next.isRefreshingModelOptions &&
+  previous.isEngramMcpRevocationPending ===
+    next.isEngramMcpRevocationPending &&
   previous.modelOptionsError === next.modelOptionsError &&
   previous.agentCommands === next.agentCommands &&
   previous.hasLoadedAgentCommands === next.hasLoadedAgentCommands &&

@@ -4224,7 +4224,40 @@ describe("App scroll behaviour", () => {
           await screen.findByRole("button", { name: "New response" }),
         ).toBeInTheDocument();
 
-        messageStack.scrollTop = 880;
+        await act(async () => {
+          // A layout clamp can leave a detached pane half a CSS pixel from the
+          // exact maximum while already inside the physical-bottom tolerance.
+          // That ownerless geometry update must remain detached.
+          messageStack.scrollTop = 919.5;
+          fireEvent.scroll(messageStack);
+          await flushUiWork();
+        });
+        expect(liveTail).toHaveAttribute("data-tail-follow", "detached");
+        expect(
+          screen.getByRole("button", { name: "New response" }),
+        ).toBeInTheDocument();
+
+        await act(async () => {
+          // The final input-owned 0.5px step is still real reader movement. It
+          // reaches the bottom, reattaches live follow, and removes the stale
+          // overlay from the fully visible LIVE TURN card.
+          fireEvent.mouseDown(messageStack);
+          messageStack.scrollTop = 920;
+          fireEvent.scroll(messageStack);
+          fireEvent.mouseUp(document);
+          await flushUiWork();
+        });
+        expect(liveTail).toHaveAttribute("data-tail-follow", "attached");
+        expect(
+          screen.queryByRole("button", { name: "New response" }),
+        ).not.toBeInTheDocument();
+
+        act(() => {
+          fireEvent.wheel(messageStack, { deltaY: -40 });
+        });
+        expect(messageStack.scrollTop).toBe(880);
+        expect(liveTail).toHaveAttribute("data-tail-follow", "detached");
+
         const arrowDownEvent = new KeyboardEvent("keydown", {
           bubbles: true,
           cancelable: true,
@@ -4423,6 +4456,119 @@ describe("App scroll behaviour", () => {
           expect(filterScrollToCallsAt(scrollToMock, 800, "auto")).toHaveLength(
             1,
           );
+        } finally {
+          teardown();
+        }
+      } finally {
+        restoreScrollGeometry();
+      }
+    });
+  });
+
+  it("keeps following the live tail after the new-response button jumps to the bottom of a growing turn", async () => {
+    await withVerifiedNoReactActWarnings(async () => {
+      let scrollHeight = 1000;
+      const restoreScrollGeometry = stubElementScrollGeometry({
+        clientHeight: 200,
+        scrollHeight: () => scrollHeight,
+      });
+      const scrollToMock = mockScrollToAndApplyTop();
+      const projects = [
+        {
+          id: "project-termal",
+          name: "TermAl",
+          rootPath: "/projects/termal",
+        },
+      ];
+      const assistantMessages = (count: number): Session["messages"] =>
+        Array.from({ length: count }, (_, index) => ({
+          id: `message-assistant-${index + 1}`,
+          type: "text",
+          timestamp: "10:01",
+          author: "assistant",
+          text: `Fresh assistant response ${index + 1}.`,
+        }));
+      const liveSession = (count: number) =>
+        makeSession("session-1", {
+          name: "Session 1",
+          projectId: "project-termal",
+          workdir: "/projects/termal",
+          status: "active",
+          preview: `Fresh assistant response ${count}.`,
+          messages: assistantMessages(count),
+        });
+      const queryTailIndicator = () =>
+        screen.queryByRole("button", { name: /New response|New activity/ });
+
+      try {
+        const { cleanup: teardown } = await renderAppWithProjectAndSession();
+        try {
+          for (let iteration = 0; iteration < 10; iteration += 1) {
+            await settleAsyncUi();
+          }
+
+          const messageStack = document.querySelector(
+            ".workspace-pane.active .message-stack",
+          );
+          if (!(messageStack instanceof HTMLElement)) {
+            throw new Error("Message stack not found");
+          }
+
+          // The reader scrolled away from the tail before the turn produced
+          // more output, so the first indicator is legitimate.
+          messageStack.scrollTop = 0;
+          await act(async () => {
+            fireEvent.scroll(messageStack);
+            await flushUiWork();
+          });
+
+          await dispatchStateEvent(latestEventSource(), {
+            revision: 2,
+            projects,
+            sessions: [liveSession(90)],
+          });
+          for (let iteration = 0; iteration < 10; iteration += 1) {
+            await settleAsyncUi();
+          }
+          const scrollToLatestButton = await screen.findByRole("button", {
+            name: "New response",
+          });
+
+          // Clicking it is an explicit return to the live tail: the reader
+          // now expects to stay attached while the turn keeps growing.
+          scrollToMock.mockClear();
+          await clickAndSettle(scrollToLatestButton);
+          for (let iteration = 0; iteration < 10; iteration += 1) {
+            await settleAsyncUi();
+          }
+          expect(messageStack.scrollTop).toBe(800);
+          expect(queryTailIndicator()).toBeNull();
+
+          // The turn keeps streaming: two more commits grow the transcript.
+          scrollHeight = 1120;
+          await dispatchStateEvent(latestEventSource(), {
+            revision: 3,
+            projects,
+            sessions: [liveSession(92)],
+          });
+          for (let iteration = 0; iteration < 10; iteration += 1) {
+            await settleAsyncUi();
+          }
+          expect(screen.getByText("Live turn")).toBeInTheDocument();
+          expect(messageStack.scrollTop).toBe(920);
+          expect(queryTailIndicator()).toBeNull();
+
+          scrollHeight = 1240;
+          await dispatchStateEvent(latestEventSource(), {
+            revision: 4,
+            projects,
+            sessions: [liveSession(94)],
+          });
+          for (let iteration = 0; iteration < 10; iteration += 1) {
+            await settleAsyncUi();
+          }
+          expect(messageStack.scrollTop).toBe(1040);
+          expect(queryTailIndicator()).toBeNull();
         } finally {
           teardown();
         }

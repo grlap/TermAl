@@ -1410,6 +1410,17 @@ impl AppState {
         self.snapshot_from_inner_with_agent_readiness(inner, self.cached_agent_readiness())
     }
 
+    fn pending_engram_mcp_revocation_session_ids(inner: &StateInner) -> Vec<String> {
+        let mut session_ids = inner
+            .sessions
+            .iter()
+            .filter(|record| record.engram_mcp_revocation_pending)
+            .map(|record| record.session.id.clone())
+            .collect::<Vec<_>>();
+        session_ids.sort();
+        session_ids
+    }
+
     fn snapshot_from_inner_with_agent_readiness(
         &self,
         inner: &StateInner,
@@ -1436,6 +1447,8 @@ impl AppState {
                 .map(delegation_state_summary_from_record)
                 .collect(),
             delegation_waits: inner.delegation_waits.clone(),
+            pending_engram_mcp_revocation_session_ids:
+                Self::pending_engram_mcp_revocation_session_ids(inner),
         }
     }
 
@@ -1472,6 +1485,8 @@ impl AppState {
                 .map(delegation_state_summary_from_record)
                 .collect(),
             delegation_waits: inner.delegation_waits.clone(),
+            pending_engram_mcp_revocation_session_ids:
+                Self::pending_engram_mcp_revocation_session_ids(inner),
         }
     }
 
@@ -1507,6 +1522,8 @@ impl AppState {
                 .map(delegation_state_summary_from_record)
                 .collect(),
             delegation_waits: inner.delegation_waits.clone(),
+            pending_engram_mcp_revocation_session_ids:
+                Self::pending_engram_mcp_revocation_session_ids(inner),
         }
     }
 
@@ -1575,16 +1592,17 @@ impl AppState {
             .expect("session index should be valid");
         let had_changes = !matches!(record.runtime, SessionRuntime::None)
             || record.runtime_reset_required
+            || record.engram_mcp_runtime_quarantined
             || record.runtime_stop_in_progress
             || has_pending_requests(record);
         if !had_changes {
             return Ok(());
         }
 
-        record.runtime = SessionRuntime::None;
-        record.runtime_reset_required = false;
+        record.clear_runtime();
+        record.clear_runtime_reset();
         record.orchestrator_auto_dispatch_blocked = false;
-        record.runtime_stop_in_progress = false;
+        record.clear_runtime_stop();
         record.deferred_stop_callbacks.clear();
         clear_active_turn_file_change_tracking(record);
         clear_all_pending_requests(record);

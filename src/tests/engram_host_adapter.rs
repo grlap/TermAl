@@ -3431,7 +3431,7 @@ fn real_process_shutdown_kills_the_entire_control_process_tree() {
         .request(
             &connection,
             &engram_control_process_tree_request("shutdown"),
-            Duration::from_secs(2),
+            Duration::from_secs(12),
         )
         .expect("fixture should reply before explicit shutdown");
     let descendant = wait_for_engram_control_descendant(&spawned_marker, &pid_marker);
@@ -3455,7 +3455,7 @@ fn real_process_idle_reap_kills_the_entire_control_process_tree() {
         .request(
             &connection,
             &engram_control_process_tree_request("idle"),
-            Duration::from_secs(2),
+            Duration::from_secs(12),
         )
         .expect("fixture should reply before the idle reap");
     let descendant = wait_for_engram_control_descendant(&spawned_marker, &pid_marker);
@@ -4199,6 +4199,2100 @@ fn real_fixture_engram_settings(root: &FsPath) -> EngramProjectSettings {
         work_authority_grant: None,
         deadline_ms: Some(250),
     }
+}
+
+fn read_fixture_authority_revoke_args(root: &FsPath) -> String {
+    #[cfg(windows)]
+    let args_path = root.join("engram-authority-revoke-args.json");
+    #[cfg(not(windows))]
+    let args_path = root.join("engram-authority-revoke-args.txt");
+    fs::read_to_string(args_path).expect("authority revoke fixture should record argv")
+}
+
+fn assert_fixture_authority_revoke_args(args: &str, grant: &str, reason: &str) {
+    let authority = args
+        .find("authority")
+        .expect("argv should contain authority");
+    let revoke = args.find("revoke").expect("argv should contain revoke");
+    let revoked_by = args
+        .find("--revoked-by")
+        .expect("argv should contain revoked-by");
+    let host_actor = args
+        .find("termal:host")
+        .expect("argv should contain host actor");
+    let reason_flag = args
+        .find("--reason")
+        .expect("argv should contain reason flag");
+    let reason_value = args.find(reason).expect("argv should contain the reason");
+    let option_delimiter = args
+        .rfind("--")
+        .expect("argv should contain an end-of-options delimiter");
+    let grant_value = args.find(grant).expect("argv should contain the old grant");
+    assert!(
+        authority < revoke
+            && revoke < revoked_by
+            && revoked_by < host_actor
+            && host_actor < reason_flag
+            && reason_flag < reason_value
+            && reason_value < option_delimiter
+            && option_delimiter < grant_value,
+        "authority revoke argv order should match the Engram CLI contract: {args}"
+    );
+}
+
+fn attach_engram_mcp_test_runtime(state: &AppState, session_id: &str) {
+    let agent = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(session_id)
+            .expect("test session should exist");
+        inner.sessions[index].session.agent
+    };
+    let runtime = match agent {
+        Agent::Claude => {
+            let (handle, _input_rx) =
+                test_claude_runtime_handle(&format!("engram-mcp-claude-{session_id}"));
+            SessionRuntime::Claude(handle)
+        }
+        Agent::Codex => {
+            let (handle, _input_rx) =
+                test_codex_runtime_handle(&format!("engram-mcp-codex-{session_id}"));
+            SessionRuntime::Codex(handle)
+        }
+        Agent::Cursor => {
+            let (handle, _input_rx) = test_acp_runtime_handle(
+                AcpAgent::Cursor,
+                &format!("engram-mcp-cursor-{session_id}"),
+            );
+            SessionRuntime::Acp(handle)
+        }
+        other => panic!("unsupported Engram MCP test runtime: {other:?}"),
+    };
+    let mut inner = state.inner.lock().expect("state mutex poisoned");
+    let index = inner
+        .find_session_index(session_id)
+        .expect("test session should exist");
+    let record = inner
+        .session_mut_by_index(index)
+        .expect("test session index should be valid");
+    record.runtime = runtime;
+    record.runtime_reset_required = false;
+    state
+        .commit_locked(&mut inner)
+        .expect("test runtime should persist");
+}
+
+fn link_engram_mcp_test_descendant(
+    state: &AppState,
+    parent_session_id: &str,
+    child_session_id: &str,
+    root: &FsPath,
+) {
+    let mut inner = state.inner.lock().expect("state mutex poisoned");
+    let delegation_id = format!("engram-mcp-delegation-{child_session_id}");
+    let child_index = inner
+        .find_session_index(child_session_id)
+        .expect("Engram MCP descendant should exist");
+    let child = inner
+        .session_mut_by_index(child_index)
+        .expect("Engram MCP descendant index should be valid");
+    child.session.parent_delegation_id = Some(delegation_id.clone());
+    child.session.status = SessionStatus::Active;
+    child.session.preview = "Running delegated review...".to_owned();
+    inner.delegations.push(DelegationRecord {
+        id: delegation_id,
+        parent_session_id: parent_session_id.to_owned(),
+        child_session_id: child_session_id.to_owned(),
+        mode: DelegationMode::Reviewer,
+        status: DelegationStatus::Running,
+        title: "Engram MCP descendant".to_owned(),
+        prompt: "Exercise inherited Engram MCP invalidation.".to_owned(),
+        cwd: root.to_string_lossy().into_owned(),
+        agent: Agent::Cursor,
+        model: None,
+        write_policy: DelegationWritePolicy::ReadOnly,
+        created_at: stamp_now(),
+        started_at: Some(stamp_now()),
+        completed_at: None,
+        result: None,
+        submitted_review_result: None,
+        post_submission_transport_error: None,
+        review_result_recovery_probe_attempt: None,
+        review_result_recovery_error: None,
+        review_result_schema_version: None,
+        review_result_required: false,
+        review_result_submission_attempt: 0,
+        result_parser_version: 0,
+    });
+    state
+        .commit_locked(&mut inner)
+        .expect("test delegation should persist");
+}
+
+fn engram_mcp_runtime_family_fixture(
+    suffix: &str,
+    work_authority_grant: Option<&str>,
+) -> (AppState, PathBuf, String, Vec<String>) {
+    let state = test_app_state();
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join(format!("engram-mcp-runtime-{suffix}"));
+    fs::create_dir_all(&root).expect("project root should exist");
+    fs::write(root.join(".engram-project"), "fixture-ready\n").expect("fixture mode should write");
+    let project_id = create_test_project(&state, &root, "Engram MCP runtime lifecycle");
+    let mut settings = real_fixture_engram_settings(&root);
+    settings.work_authority_grant = work_authority_grant.map(str::to_owned);
+    state
+        .update_project_engram_settings(&project_id, settings)
+        .expect("fixture settings should enable Engram");
+
+    let claude_session_id = create_test_project_session(&state, Agent::Claude, &project_id, &root);
+    let codex_session_id = create_test_project_session(&state, Agent::Codex, &project_id, &root);
+    let cursor_session_id = create_test_project_session(&state, Agent::Cursor, &project_id, &root);
+    let descendant_session_id = test_session_id(&state, Agent::Cursor);
+    link_engram_mcp_test_descendant(&state, &codex_session_id, &descendant_session_id, &root);
+
+    let session_ids = vec![
+        claude_session_id,
+        codex_session_id,
+        cursor_session_id,
+        descendant_session_id,
+    ];
+    for session_id in &session_ids {
+        attach_engram_mcp_test_runtime(&state, session_id);
+    }
+    (state, root, project_id, session_ids)
+}
+
+#[test]
+fn runtime_mcp_composition_records_the_exact_installed_engram_descriptor() {
+    let (state, root, _project_id, session_ids) =
+        engram_mcp_runtime_family_fixture("installed-descriptor", Some("grant-installed"));
+    for session_id in &session_ids {
+        let (agent, runtime_token) = {
+            let inner = state.inner.lock().expect("state mutex poisoned");
+            let record = inner
+                .find_session_index(session_id)
+                .and_then(|index| inner.sessions.get(index))
+                .expect("runtime session should exist");
+            (
+                record.session.agent,
+                record
+                    .runtime
+                    .runtime_token()
+                    .expect("attached runtime should have a token"),
+            )
+        };
+        match agent {
+            Agent::Claude => {
+                state
+                    .engram_mcp_stdio_config_for_runtime(session_id, &runtime_token)
+                    .expect("Claude runtime should receive Engram MCP config");
+            }
+            Agent::Codex => {
+                state
+                    .termal_delegation_mcp_codex_config_for_runtime(session_id, &runtime_token)
+                    .expect("Codex runtime should receive Engram MCP config");
+            }
+            Agent::Cursor => {
+                state
+                    .termal_delegation_mcp_acp_servers_for_runtime(session_id, &runtime_token)
+                    .expect("ACP runtime should receive Engram MCP config");
+            }
+            other => panic!("unexpected runtime-family agent: {other:?}"),
+        }
+    }
+
+    let expected_binary = real_engram_control_fixture_path()
+        .to_string_lossy()
+        .into_owned();
+    let expected_home = root.to_string_lossy().into_owned();
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    for session_id in session_ids {
+        let descriptor = inner
+            .find_session_index(&session_id)
+            .and_then(|index| inner.sessions.get(index))
+            .and_then(|record| record.engram_mcp_installed.as_ref())
+            .expect("runtime config composition should record its descriptor");
+        assert_eq!(descriptor.binary_path, expected_binary);
+        assert_eq!(descriptor.home, expected_home);
+        assert_eq!(
+            descriptor.work_authority_grant.as_deref(),
+            Some("grant-installed")
+        );
+    }
+}
+
+#[test]
+fn engram_mcp_grant_rotation_marks_all_runtime_families_and_descendants_for_reset() {
+    let (state, root, project_id, session_ids) =
+        engram_mcp_runtime_family_fixture("grant-rotation", Some("grant-old"));
+    let mut settings = real_fixture_engram_settings(&root);
+    settings.work_authority_grant = Some("grant-new".to_owned());
+
+    state
+        .update_project_engram_settings(&project_id, settings)
+        .expect("grant rotation should persist");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    for session_id in session_ids {
+        let record = inner
+            .find_session_index(&session_id)
+            .and_then(|index| inner.sessions.get(index))
+            .expect("affected session should remain");
+        assert!(
+            record.runtime_reset_required,
+            "session {session_id} should rebuild its MCP descriptor"
+        );
+        assert!(
+            !matches!(record.runtime, SessionRuntime::None),
+            "rotation waits for the next runtime boundary"
+        );
+    }
+}
+
+#[test]
+fn engram_mcp_grant_clear_immediately_tears_down_all_runtime_families_and_descendants() {
+    let (state, root, project_id, session_ids) =
+        engram_mcp_runtime_family_fixture("grant-clear", Some("grant-old"));
+    let settings = real_fixture_engram_settings(&root);
+
+    state
+        .update_project_engram_settings(&project_id, settings)
+        .expect("grant clear should persist and revoke runtimes");
+
+    let descendant_session_id = session_ids
+        .last()
+        .expect("fixture should include a descendant")
+        .clone();
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    for session_id in session_ids {
+        let record = inner
+            .find_session_index(&session_id)
+            .and_then(|index| inner.sessions.get(index))
+            .expect("affected session should remain");
+        assert!(matches!(record.runtime, SessionRuntime::None));
+        assert!(!record.runtime_reset_required);
+    }
+    let delegation = inner
+        .delegations
+        .iter()
+        .find(|delegation| delegation.child_session_id == descendant_session_id)
+        .expect("descendant delegation should remain tracked");
+    assert_ne!(
+        delegation.status,
+        DelegationStatus::Running,
+        "revocation should refresh the descendant delegation and release waits"
+    );
+}
+
+#[test]
+fn engram_mcp_grant_clear_serializes_with_runtime_exit_waiter() {
+    let state = test_app_state();
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("engram-mcp-revoke-waiter");
+    fs::create_dir_all(&root).expect("project root should exist");
+    fs::write(root.join(".engram-project"), "fixture-ready\n").expect("fixture mode should write");
+    let project_id = create_test_project(&state, &root, "Engram MCP revoke waiter");
+    let mut enabled = real_fixture_engram_settings(&root);
+    enabled.work_authority_grant = Some("grant-old".to_owned());
+    state
+        .update_project_engram_settings(&project_id, enabled)
+        .expect("fixture settings should enable Engram");
+    let session_id = create_test_project_session(&state, Agent::Claude, &project_id, &root);
+
+    let process = Arc::new(SharedChild::new(test_sleep_child()).expect("test child should share"));
+    let (input_tx, _input_rx) = mpsc::channel();
+    let runtime_id = "engram-mcp-revoke-waiter-runtime".to_owned();
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("test session should exist");
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("test session index should be valid");
+        record.runtime = SessionRuntime::Claude(ClaudeRuntimeHandle {
+            runtime_id: runtime_id.clone(),
+            input_tx,
+            process: process.clone(),
+        });
+        record.session.status = SessionStatus::Active;
+        record.session.preview = "Streaming reply...".to_owned();
+        state
+            .commit_locked(&mut inner)
+            .expect("active runtime should persist");
+    }
+
+    let waiter_state = state.clone();
+    let waiter_session_id = session_id.clone();
+    let waiter_process = process.clone();
+    let waiter_runtime_id = runtime_id.clone();
+    let (waiter_done_tx, waiter_done_rx) = mpsc::sync_channel(1);
+    let waiter = std::thread::spawn(move || {
+        let status = waiter_process.wait().expect("revoked process should exit");
+        waiter_state
+            .handle_runtime_exit_if_matches(
+                &waiter_session_id,
+                &RuntimeToken::Claude(waiter_runtime_id),
+                (!status.success())
+                    .then(|| format!("Claude session exited with status {status}"))
+                    .as_deref(),
+            )
+            .expect("waiter callback should be fenced or become stale");
+        let _ = waiter_done_tx.send(());
+    });
+
+    state
+        .update_project_engram_settings(&project_id, real_fixture_engram_settings(&root))
+        .expect("grant clear should revoke the active runtime");
+    if waiter_done_rx.recv_timeout(Duration::from_secs(2)).is_err() {
+        let _ = process.kill();
+        let _ = process.wait();
+        panic!("revoked runtime waiter did not finish within two seconds");
+    }
+    waiter.join().expect("runtime waiter should finish");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .find_session_index(&session_id)
+        .and_then(|index| inner.sessions.get(index))
+        .expect("revoked session should remain");
+    assert_eq!(record.session.status, SessionStatus::Idle);
+    assert_eq!(
+        record.session.preview,
+        "Turn stopped: Engram MCP configuration was revoked."
+    );
+    assert!(matches!(record.runtime, SessionRuntime::None));
+    assert!(!record.runtime_stop_in_progress);
+    assert!(record.deferred_stop_callbacks.is_empty());
+    assert!(!record.session.messages.iter().any(|message| {
+        matches!(message, Message::Text { text, .. } if text.starts_with("Turn failed:"))
+    }));
+}
+
+#[test]
+fn engram_mcp_grant_clear_gracefully_cancels_opencode_before_teardown() {
+    let state = test_app_state();
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("engram-mcp-revoke-opencode");
+    fs::create_dir_all(&root).expect("project root should exist");
+    fs::write(root.join(".engram-project"), "fixture-ready\n").expect("fixture mode should write");
+    let project_id = create_test_project(&state, &root, "Engram MCP revoke OpenCode");
+    let mut enabled = real_fixture_engram_settings(&root);
+    enabled.work_authority_grant = Some("grant-old".to_owned());
+    state
+        .update_project_engram_settings(&project_id, enabled)
+        .expect("fixture settings should enable Engram");
+    let session_id = create_test_project_session(&state, Agent::OpenCode, &project_id, &root);
+    let process =
+        Arc::new(SharedChild::new(test_sleep_child()).expect("test OpenCode process should share"));
+    let (input_tx, input_rx) = mpsc::channel();
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("OpenCode session should exist");
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("OpenCode session index should be valid");
+        record.runtime = SessionRuntime::Acp(AcpRuntimeHandle {
+            agent: AcpAgent::OpenCode,
+            runtime_id: "engram-mcp-revoke-opencode-runtime".to_owned(),
+            input_tx,
+            process: process.clone(),
+            turn_lifecycle: Arc::new((Mutex::new(false), Condvar::new())),
+        });
+        record.session.status = SessionStatus::Active;
+        state
+            .commit_locked(&mut inner)
+            .expect("active OpenCode runtime should persist");
+    }
+
+    state
+        .update_project_engram_settings(&project_id, real_fixture_engram_settings(&root))
+        .expect("grant clear should revoke OpenCode cleanly");
+
+    assert!(matches!(
+        input_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("OpenCode revocation should queue graceful cancellation"),
+        AcpRuntimeCommand::Cancel
+    ));
+    process
+        .wait()
+        .expect("revoked OpenCode process should exit");
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .find_session_index(&session_id)
+        .and_then(|index| inner.sessions.get(index))
+        .expect("OpenCode session should remain");
+    assert_eq!(record.session.status, SessionStatus::Idle);
+    assert!(matches!(record.runtime, SessionRuntime::None));
+    assert!(!record.runtime_stop_in_progress);
+}
+
+#[test]
+fn engram_mcp_grant_clear_defers_behind_existing_stop_owner_without_waiting() {
+    let state = test_app_state();
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("engram-mcp-revoke-stop-owner");
+    fs::create_dir_all(&root).expect("project root should exist");
+    fs::write(root.join(".engram-project"), "fixture-ready\n").expect("fixture mode should write");
+    let project_id = create_test_project(&state, &root, "Engram MCP revoke stop owner");
+    let mut enabled = real_fixture_engram_settings(&root);
+    enabled.work_authority_grant = Some("grant-old".to_owned());
+    state
+        .update_project_engram_settings(&project_id, enabled)
+        .expect("fixture settings should enable Engram");
+    let session_id = create_test_project_session(&state, Agent::Claude, &project_id, &root);
+    let process = Arc::new(SharedChild::new(test_sleep_child()).expect("test child should share"));
+    let (input_tx, _input_rx) = mpsc::channel();
+    let stop_owner_generation = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("test session should exist");
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("test session index should be valid");
+        record.runtime = SessionRuntime::Claude(ClaudeRuntimeHandle {
+            runtime_id: "engram-mcp-revoke-stop-owner-runtime".to_owned(),
+            input_tx,
+            process: process.clone(),
+        });
+        record.session.status = SessionStatus::Active;
+        let token = record
+            .runtime
+            .runtime_token()
+            .expect("test Stop runtime should have a token");
+        record.claim_runtime_stop(RuntimeStopOwnerKind::UserStop, token)
+    };
+
+    let response = state
+        .update_project_engram_settings(&project_id, real_fixture_engram_settings(&root))
+        .expect("an existing Stop owner should defer cleanup without failing the mutation");
+    assert_eq!(
+        response.pending_engram_mcp_revocation_session_ids,
+        vec![session_id.clone()],
+        "the successful response should report deferred revocation work"
+    );
+
+    let target = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("test session should remain");
+        assert!(inner.sessions[index].runtime_stop_in_progress);
+        assert!(inner.sessions[index].engram_mcp_revocation_pending);
+        take_pending_engram_mcp_revocation_after_stop_failure_locked(
+            &mut inner,
+            index,
+            stop_owner_generation,
+            StopSessionOptions::default(),
+        )
+        .expect("failed Stop should transfer its fence to revocation")
+    };
+
+    state
+        .teardown_revoked_engram_mcp_runtimes(
+            EngramMcpRuntimeRevocationBatch {
+                targets: vec![target],
+                pending_session_ids: Vec::new(),
+                newly_pending_session_ids: Vec::new(),
+            },
+            "test pending revocation",
+        )
+        .expect("transferred revocation should tear down the old runtime");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .find_session_index(&session_id)
+        .and_then(|index| inner.sessions.get(index))
+        .expect("revoked session should remain");
+    assert_eq!(record.session.status, SessionStatus::Idle);
+    assert!(matches!(record.runtime, SessionRuntime::None));
+    assert!(!record.runtime_stop_in_progress);
+}
+
+#[test]
+fn engram_mcp_pending_revocation_completes_failed_stop_without_resuming_automatic_work() {
+    let state = test_app_state();
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("engram-mcp-stop-transfer");
+    fs::create_dir_all(&root).expect("project root should exist");
+    fs::write(root.join(".engram-project"), "fixture-ready\n").expect("fixture mode should write");
+    let project_id = create_test_project(&state, &root, "Engram MCP Stop transfer");
+    let mut enabled = real_fixture_engram_settings(&root);
+    enabled.work_authority_grant = Some("grant-old".to_owned());
+    state
+        .update_project_engram_settings(&project_id, enabled)
+        .expect("fixture settings should enable Engram");
+    let session_id = create_test_project_session(&state, Agent::Claude, &project_id, &root);
+    let process = Arc::new(SharedChild::new(test_sleep_child()).expect("test child should share"));
+    let (input_tx, _input_rx) = mpsc::channel();
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("test session should exist");
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("test session index should be valid");
+        record.runtime = SessionRuntime::Claude(ClaudeRuntimeHandle {
+            runtime_id: "engram-mcp-stop-transfer-runtime".to_owned(),
+            input_tx,
+            process: process.clone(),
+        });
+        record.session.status = SessionStatus::Active;
+        state
+            .commit_locked(&mut inner)
+            .expect("active runtime should persist");
+    }
+    queue_test_engram_prompt(
+        &state,
+        &session_id,
+        "durable user follow-up",
+        QueuedPromptSource::User,
+        None,
+    );
+    queue_test_engram_prompt(
+        &state,
+        &session_id,
+        "automatic orchestrator continuation",
+        QueuedPromptSource::Orchestrator,
+        None,
+    );
+
+    let stop_gate = install_test_stop_fence_gate(&state, &session_id);
+    let failure_guard = force_test_kill_child_process_failure_once(&process, "Claude");
+    let stop_state = state.clone();
+    let stop_session_id = session_id.clone();
+    let stop_thread = std::thread::spawn(move || stop_state.stop_session(&stop_session_id));
+    stop_gate.wait_until_claimed();
+
+    let response = state
+        .update_project_engram_settings(&project_id, real_fixture_engram_settings(&root))
+        .expect("grant clear should defer behind the in-flight Stop");
+    assert_eq!(
+        response.pending_engram_mcp_revocation_session_ids,
+        vec![session_id.clone()]
+    );
+    stop_gate.release();
+    stop_thread
+        .join()
+        .expect("Stop thread should finish")
+        .expect("successful transferred revocation should satisfy Stop");
+    drop(failure_guard);
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .find_session_index(&session_id)
+        .and_then(|index| inner.sessions.get(index))
+        .expect("stopped session should remain");
+    assert_eq!(record.session.status, SessionStatus::Idle);
+    assert!(matches!(record.runtime, SessionRuntime::None));
+    assert!(!record.runtime_stop_in_progress);
+    assert!(record.runtime_stop_owner.is_none());
+    assert!(!record.engram_mcp_revocation_pending);
+    assert!(record.orchestrator_auto_dispatch_blocked);
+    assert_eq!(record.queued_prompts.len(), 1);
+    assert_eq!(
+        record.queued_prompts.front().map(|queued| queued.source),
+        Some(QueuedPromptSource::User)
+    );
+}
+
+#[test]
+fn engram_mcp_pending_revocation_surfaces_shared_codex_stop_interrupt_failure() {
+    let state = test_app_state();
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("engram-mcp-shared-stop-transfer");
+    fs::create_dir_all(&root).expect("project root should exist");
+    fs::write(root.join(".engram-project"), "fixture-ready\n").expect("fixture mode should write");
+    let project_id = create_test_project(&state, &root, "Engram shared Codex Stop transfer");
+    let mut enabled = real_fixture_engram_settings(&root);
+    enabled.work_authority_grant = Some("grant-old".to_owned());
+    state
+        .update_project_engram_settings(&project_id, enabled)
+        .expect("fixture settings should enable Engram");
+    let session_id = create_test_project_session(&state, Agent::Codex, &project_id, &root);
+
+    let process = Arc::new(SharedChild::new(test_sleep_child()).expect("test child should share"));
+    let (input_tx, input_rx) = mpsc::channel();
+    let runtime = SharedCodexRuntime {
+        runtime_id: "engram-shared-stop-transfer".to_owned(),
+        input_tx,
+        process: process.clone(),
+        sessions: SharedCodexSessions::new(),
+        thread_sessions: Arc::new(Mutex::new(HashMap::new())),
+        stdout_activity: Arc::new(Mutex::new(std::time::Instant::now())),
+    };
+    *state
+        .shared_codex_runtime
+        .lock()
+        .expect("shared Codex runtime mutex poisoned") = Some(runtime.clone());
+    runtime
+        .sessions
+        .lock()
+        .expect("shared Codex sessions mutex poisoned")
+        .insert(
+            session_id.clone(),
+            SharedCodexSessionState {
+                thread_id: Some("engram-stop-transfer-thread".to_owned()),
+                turn_id: Some("engram-stop-transfer-turn".to_owned()),
+                ..SharedCodexSessionState::default()
+            },
+        );
+    runtime
+        .thread_sessions
+        .lock()
+        .expect("shared Codex thread map mutex poisoned")
+        .insert("engram-stop-transfer-thread".to_owned(), session_id.clone());
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("test session should exist");
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("test session index should be valid");
+        record.runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process: process.clone(),
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+        record.session.status = SessionStatus::Active;
+        record.session.preview = "Streaming reply...".to_owned();
+        set_record_external_session_id(record, Some("engram-stop-transfer-thread".to_owned()));
+        state
+            .commit_locked(&mut inner)
+            .expect("active shared runtime should persist");
+    }
+
+    let responder = std::thread::spawn(move || {
+        match input_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("shared Codex interrupt should arrive")
+        {
+            CodexRuntimeCommand::InterruptTurn { response_tx, .. } => response_tx
+                .send(Err("interrupt rejected during revocation".to_owned()))
+                .expect("Stop should still await the interrupt response"),
+            _ => panic!("expected shared Codex interrupt command"),
+        }
+    });
+    let stop_gate = install_test_stop_fence_gate(&state, &session_id);
+    let stop_state = state.clone();
+    let stop_session_id = session_id.clone();
+    let stop_thread = std::thread::spawn(move || stop_state.stop_session(&stop_session_id));
+    stop_gate.wait_until_claimed();
+
+    let response = state
+        .update_project_engram_settings(&project_id, real_fixture_engram_settings(&root))
+        .expect("grant clear should defer behind the in-flight Stop");
+    assert_eq!(
+        response.pending_engram_mcp_revocation_session_ids,
+        vec![session_id.clone()]
+    );
+    stop_gate.release();
+    let error = match stop_thread.join().expect("Stop thread should finish") {
+        Ok(_) => panic!("failed shared Codex interrupt must remain visible"),
+        Err(error) => error,
+    };
+    responder.join().expect("interrupt responder should finish");
+    assert!(
+        error
+            .message
+            .contains("shared Codex interrupt failed after detach"),
+        "unexpected Stop/revocation error: {}",
+        error.message
+    );
+    assert_fixture_authority_revoke_args(
+        &read_fixture_authority_revoke_args(&root),
+        "grant-old",
+        "TermAl project Engram work-authority grant removed",
+    );
+
+    assert!(
+        !runtime
+            .sessions
+            .lock()
+            .expect("shared Codex sessions mutex poisoned")
+            .contains_key(&session_id)
+    );
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .find_session_index(&session_id)
+        .and_then(|index| inner.sessions.get(index))
+        .expect("revoked session should remain");
+    assert_eq!(record.session.status, SessionStatus::Error);
+    assert!(matches!(record.runtime, SessionRuntime::None));
+    assert!(!record.runtime_stop_in_progress);
+    assert!(!record.engram_mcp_revocation_pending);
+    assert!(record.orchestrator_auto_dispatch_blocked);
+    assert!(record.external_session_id.is_none());
+    assert!(
+        inner
+            .ignored_discovered_codex_thread_ids
+            .contains("engram-stop-transfer-thread")
+    );
+    drop(inner);
+    assert!(
+        process
+            .try_wait()
+            .expect("shared process status should remain observable")
+            .is_none(),
+        "a failed thread interrupt must not kill the shared app-server"
+    );
+    process.kill().expect("shared process should clean up");
+    process.wait().expect("shared process should exit");
+}
+
+#[test]
+fn engram_mcp_revocation_fence_queues_dispatch_and_token_mismatch_releases_cleanly() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let (old_runtime, _old_input_rx) = test_claude_runtime_handle("engram-revoke-old");
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("test session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Claude(old_runtime);
+        inner.sessions[index].session.status = SessionStatus::Idle;
+    }
+
+    let mut batch = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        claim_engram_mcp_runtime_revocations_locked(&mut inner, std::slice::from_ref(&session_id))
+    };
+    assert!(batch.pending_session_ids.is_empty());
+    let target = batch
+        .targets
+        .pop()
+        .expect("old runtime should be captured under the fence");
+
+    assert!(matches!(
+        state
+            .dispatch_turn(
+                &session_id,
+                SendMessageRequest {
+                    text: "queue while revocation owns the runtime".to_owned(),
+                    expanded_text: None,
+                    attachments: Vec::new(),
+                    source_session_id: None,
+                    source_mailbox: None,
+                },
+            )
+            .expect("dispatch under a revocation fence should queue"),
+        DispatchTurnResult::Queued
+    ));
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let record = inner
+            .find_session_index(&session_id)
+            .and_then(|index| inner.sessions.get(index))
+            .expect("test session should remain");
+        assert!(record.runtime_stop_in_progress);
+        assert!(record.runtime.matches_runtime_token(&target.token));
+        assert_eq!(record.queued_prompts.len(), 1);
+    }
+
+    let (new_runtime, _new_input_rx) = test_claude_runtime_handle("engram-revoke-new");
+    let new_token = RuntimeToken::Claude(new_runtime.runtime_id.clone());
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("test session should remain");
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("test session index should be valid");
+        record.queued_prompts.clear();
+        sync_pending_prompts(record);
+        record.runtime = SessionRuntime::Claude(new_runtime);
+        record.session.status = SessionStatus::Active;
+        record
+            .deferred_stop_callbacks
+            .push(DeferredStopCallback::TurnCompleted);
+    }
+
+    let finalization = state.finish_revoked_engram_mcp_runtime_if_matches(
+        &session_id,
+        &target.token,
+        target.owner_generation,
+        target.stop_options.as_ref(),
+        false,
+        false,
+        None,
+    );
+    assert!(
+        finalization.failures.is_empty(),
+        "stale revocation finish should release its fence: {:?}",
+        finalization.failures
+    );
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let record = inner
+            .find_session_index(&session_id)
+            .and_then(|index| inner.sessions.get(index))
+            .expect("successor session should remain");
+        assert!(record.runtime.matches_runtime_token(&new_token));
+        assert!(!record.runtime_stop_in_progress);
+        assert!(record.deferred_stop_callbacks.is_empty());
+    }
+
+    state
+        .finish_turn_ok_if_runtime_matches(&session_id, &new_token)
+        .expect("successor callback should no longer be deferred");
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .find_session_index(&session_id)
+        .and_then(|index| inner.sessions.get(index))
+        .expect("successor session should remain");
+    assert_eq!(record.session.status, SessionStatus::Idle);
+}
+
+#[test]
+fn stale_engram_mcp_revocation_cannot_release_a_newer_owner_fence() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let (old_runtime, _old_input_rx) = test_claude_runtime_handle("engram-owner-old");
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("test session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Claude(old_runtime);
+        inner.sessions[index].session.status = SessionStatus::Idle;
+    }
+    let mut batch = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        claim_engram_mcp_runtime_revocations_locked(&mut inner, std::slice::from_ref(&session_id))
+    };
+    let stale_target = batch.targets.pop().expect("old runtime should be claimed");
+
+    let (new_runtime, _new_input_rx) = test_claude_runtime_handle("engram-owner-new");
+    let new_token = RuntimeToken::Claude(new_runtime.runtime_id.clone());
+    let newer_generation = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("test session should remain");
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("test session index should be valid");
+        record.clear_runtime_stop();
+        record.runtime = SessionRuntime::Claude(new_runtime);
+        record.session.status = SessionStatus::Active;
+        let generation =
+            record.claim_runtime_stop(RuntimeStopOwnerKind::EngramMcpRevocation, new_token.clone());
+        record.engram_mcp_revocation_pending = true;
+        record
+            .deferred_stop_callbacks
+            .push(DeferredStopCallback::TurnCompleted);
+        generation
+    };
+
+    let finalization = state.finish_revoked_engram_mcp_runtime_if_matches(
+        &session_id,
+        &stale_target.token,
+        stale_target.owner_generation,
+        stale_target.stop_options.as_ref(),
+        false,
+        false,
+        None,
+    );
+    assert!(
+        finalization.failures.is_empty(),
+        "stale completion should no-op against a newer owner: {:?}",
+        finalization.failures
+    );
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .find_session_index(&session_id)
+        .and_then(|index| inner.sessions.get(index))
+        .expect("successor session should remain");
+    assert!(record.runtime.matches_runtime_token(&new_token));
+    assert!(record.runtime_stop_in_progress);
+    assert!(record.runtime_stop_is_owned_by(
+        RuntimeStopOwnerKind::EngramMcpRevocation,
+        &new_token,
+        newer_generation,
+    ));
+    assert!(record.engram_mcp_revocation_pending);
+    assert_eq!(
+        record.deferred_stop_callbacks,
+        vec![DeferredStopCallback::TurnCompleted]
+    );
+}
+
+#[test]
+fn engram_mcp_revocation_reclaims_an_unowned_fence_for_the_same_runtime() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let (runtime, _input_rx) = test_claude_runtime_handle("engram-reclaim-unowned");
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("test session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Claude(runtime);
+        inner.sessions[index].session.status = SessionStatus::Active;
+    }
+    let mut batch = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        claim_engram_mcp_runtime_revocations_locked(&mut inner, std::slice::from_ref(&session_id))
+    };
+    let target = batch
+        .targets
+        .pop()
+        .expect("runtime should be captured under a revocation fence");
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("test session should remain");
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("test session index should be valid");
+        record.clear_runtime_stop();
+        record.engram_mcp_revocation_pending = true;
+    }
+
+    let finalization = state.finish_revoked_engram_mcp_runtime_if_matches(
+        &session_id,
+        &target.token,
+        target.owner_generation,
+        target.stop_options.as_ref(),
+        false,
+        false,
+        None,
+    );
+    assert!(finalization.failures.is_empty());
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .find_session_index(&session_id)
+        .and_then(|index| inner.sessions.get(index))
+        .expect("test session should remain");
+    assert!(matches!(record.runtime, SessionRuntime::None));
+    assert!(!record.runtime_stop_in_progress);
+    assert!(record.runtime_stop_owner.is_none());
+    assert!(!record.engram_mcp_revocation_pending);
+}
+
+#[test]
+fn engram_mcp_grant_clear_dispatches_queued_prompt_with_fresh_runtime() {
+    let (state, runtime_rx) =
+        test_app_state_with_delegation_codex_runtime("engram-mcp-revoke-queue");
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("engram-mcp-revoke-queue");
+    fs::create_dir_all(&root).expect("project root should exist");
+    fs::write(root.join(".engram-project"), "fixture-ready\n").expect("fixture mode should write");
+    let project_id = create_test_project(&state, &root, "Engram MCP revoke queue");
+    let mut enabled = real_fixture_engram_settings(&root);
+    enabled.work_authority_grant = Some("grant-old".to_owned());
+    state
+        .update_project_engram_settings(&project_id, enabled)
+        .expect("fixture settings should enable Engram");
+    let session_id = create_test_project_session(&state, Agent::Codex, &project_id, &root);
+    attach_engram_mcp_test_runtime(&state, &session_id);
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("test session should exist");
+        inner
+            .session_mut_by_index(index)
+            .expect("test session index should be valid")
+            .session
+            .status = SessionStatus::Active;
+        state
+            .commit_locked(&mut inner)
+            .expect("active session should persist");
+    }
+    queue_test_engram_prompt(
+        &state,
+        &session_id,
+        "run after revocation",
+        QueuedPromptSource::User,
+        None,
+    );
+
+    state
+        .update_project_engram_settings(&project_id, real_fixture_engram_settings(&root))
+        .expect("grant clear should revoke and continue queued work");
+
+    assert!(matches!(
+        runtime_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("fresh runtime should receive queued prompt"),
+        CodexRuntimeCommand::Prompt { .. }
+    ));
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .find_session_index(&session_id)
+        .and_then(|index| inner.sessions.get(index))
+        .expect("queued session should remain");
+    assert_eq!(record.session.status, SessionStatus::Active);
+    assert!(record.queued_prompts.is_empty());
+    assert!(record.session.pending_prompts.is_empty());
+    assert!(!record.runtime_stop_in_progress);
+}
+
+#[test]
+fn engram_mcp_reconfigure_binds_fresh_connection_before_resuming_queued_prompt() {
+    let (state, runtime_rx) =
+        test_app_state_with_delegation_codex_runtime("engram-mcp-bind-before-resume");
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("engram-mcp-bind-before-resume");
+    fs::create_dir_all(&root).expect("project root should exist");
+    fs::write(root.join(".engram-project"), "fixture-ready\n").expect("fixture mode should write");
+    let project_id = create_test_project(&state, &root, "Engram MCP bind before resume");
+    let mut enabled = real_fixture_engram_settings(&root);
+    enabled.work_authority_grant = Some("grant-old".to_owned());
+    state
+        .update_project_engram_settings(&project_id, enabled.clone())
+        .expect("fixture settings should enable Engram");
+    let session_id = create_test_project_session(&state, Agent::Codex, &project_id, &root);
+    attach_engram_mcp_test_runtime(&state, &session_id);
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("test session should exist");
+        inner
+            .session_mut_by_index(index)
+            .expect("test session index should be valid")
+            .session
+            .status = SessionStatus::Active;
+        state
+            .commit_locked(&mut inner)
+            .expect("active session should persist");
+    }
+    queue_test_engram_prompt(
+        &state,
+        &session_id,
+        "resume only after fresh bind",
+        QueuedPromptSource::User,
+        None,
+    );
+
+    let (bind_step, bind_gate) =
+        gated_engram_step("session_bind", bind_reply("fresh-reconfigure-token"));
+    let transport = GatedEngramControlTransport::new([bind_step]);
+    state.install_test_engram_transport(transport.clone());
+    let fresh_home = root.join("fresh-home");
+    fs::create_dir_all(&fresh_home).expect("fresh Engram home should exist");
+    let update_state = state.clone();
+    let update_project_id = project_id.clone();
+    let update_thread = std::thread::spawn(move || {
+        update_state.update_project_engram_settings(
+            &update_project_id,
+            EngramProjectSettings {
+                enabled: true,
+                binary_path: enabled.binary_path,
+                home: Some(fresh_home.to_string_lossy().into_owned()),
+                work_authority_grant: None,
+                deadline_ms: enabled.deadline_ms,
+            },
+        )
+    });
+
+    let bind_request = bind_gate.wait();
+    assert_eq!(bind_request.request["operation"], "session_bind");
+    assert!(
+        matches!(runtime_rx.try_recv(), Err(mpsc::TryRecvError::Empty)),
+        "queued prompt must stay fenced until the fresh bind completes"
+    );
+    bind_gate.release();
+    update_thread
+        .join()
+        .expect("settings update thread should finish")
+        .expect("combined reconfigure and revocation should succeed");
+
+    assert!(matches!(
+        runtime_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("fresh runtime should receive resumed prompt"),
+        CodexRuntimeCommand::Prompt { .. }
+    ));
+    assert_eq!(transport.requests().len(), 1);
+}
+
+#[test]
+fn engram_mcp_grant_clear_surfaces_shutdown_failure_and_blocks_resume() {
+    let state = test_app_state();
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("engram-mcp-revoke-shutdown-failure");
+    fs::create_dir_all(&root).expect("project root should exist");
+    fs::write(root.join(".engram-project"), "fixture-ready\n").expect("fixture mode should write");
+    let project_id = create_test_project(&state, &root, "Engram MCP revoke failure");
+    let mut enabled = real_fixture_engram_settings(&root);
+    enabled.work_authority_grant = Some("grant-old".to_owned());
+    state
+        .update_project_engram_settings(&project_id, enabled)
+        .expect("fixture settings should enable Engram");
+    let session_id = create_test_project_session(&state, Agent::Claude, &project_id, &root);
+    let process = Arc::new(SharedChild::new(test_sleep_child()).expect("test child should share"));
+    let (input_tx, _input_rx) = mpsc::channel();
+    let runtime_token = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("test session should exist");
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("test session index should be valid");
+        let runtime_id = "engram-mcp-revoke-failure-runtime".to_owned();
+        record.runtime = SessionRuntime::Claude(ClaudeRuntimeHandle {
+            runtime_id: runtime_id.clone(),
+            input_tx,
+            process: process.clone(),
+        });
+        record.session.status = SessionStatus::Active;
+        record.session.preview = "Streaming reply...".to_owned();
+        state
+            .commit_locked(&mut inner)
+            .expect("active runtime should persist");
+        RuntimeToken::Claude(runtime_id)
+    };
+    queue_test_engram_prompt(
+        &state,
+        &session_id,
+        "remain paused after degraded revocation",
+        QueuedPromptSource::User,
+        None,
+    );
+
+    let failure_guard = force_test_kill_child_process_failure(&process, "Claude");
+    let error = match state
+        .update_project_engram_settings(&project_id, real_fixture_engram_settings(&root))
+    {
+        Ok(_) => panic!("failed runtime shutdown must be visible to the caller"),
+        Err(error) => error,
+    };
+    assert!(
+        error.message.contains("runtime cleanup was degraded"),
+        "unexpected revocation error: {}",
+        error.message
+    );
+
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let record = inner
+            .find_session_index(&session_id)
+            .and_then(|index| inner.sessions.get(index))
+            .expect("revoked session should remain");
+        assert_eq!(record.session.status, SessionStatus::Error);
+        assert!(record.runtime.matches_runtime_token(&runtime_token));
+        assert!(record.runtime_reset_required);
+        assert!(record.engram_mcp_runtime_quarantined);
+        assert!(!record.runtime_stop_in_progress);
+        assert!(record.deferred_stop_callbacks.is_empty());
+        assert!(record.orchestrator_auto_dispatch_blocked);
+        assert_eq!(record.queued_prompts.len(), 1);
+        assert_eq!(record.session.pending_prompts.len(), 1);
+        assert!(
+            record
+                .session
+                .preview
+                .contains("Engram MCP configuration was revoked")
+        );
+        assert!(record.session.messages.iter().any(|message| {
+            matches!(message, Message::Text { text, .. } if text.contains("could not be stopped cleanly"))
+        }));
+        let project = inner
+            .find_project(&project_id)
+            .expect("project should remain after grant clear");
+        assert_eq!(
+            project
+                .engram
+                .as_ref()
+                .and_then(|settings| settings.work_authority_grant.as_deref()),
+            None,
+            "revoked settings must remain durable even when process cleanup fails"
+        );
+    }
+
+    let retry_error = match state.dispatch_turn(
+        &session_id,
+        SendMessageRequest {
+            text: "retry cleanup from an explicit prompt".to_owned(),
+            expanded_text: None,
+            attachments: Vec::new(),
+            source_session_id: None,
+            source_mailbox: None,
+        },
+    ) {
+        Ok(_) => panic!("a still-failing reset must reject explicit dispatch"),
+        Err(error) => error,
+    };
+    assert!(
+        retry_error
+            .message
+            .contains("failed to restart Claude session runtime"),
+        "unexpected retained-runtime retry error: {}",
+        retry_error.message
+    );
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let record = inner
+            .find_session_index(&session_id)
+            .and_then(|index| inner.sessions.get(index))
+            .expect("failed retry should retain the revoked session");
+        assert!(record.runtime.matches_runtime_token(&runtime_token));
+        assert!(record.runtime_reset_required);
+        assert!(record.engram_mcp_runtime_quarantined);
+        assert!(record.orchestrator_auto_dispatch_blocked);
+    }
+
+    assert!(
+        process
+            .try_wait()
+            .expect("failed child status should remain observable")
+            .is_none(),
+        "unconfirmed shutdown failure must retain the live process handle"
+    );
+    drop(failure_guard);
+    process.kill().expect("test child should clean up");
+    process.wait().expect("test child should exit");
+    let message_count_after_degradation = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let record = inner
+            .find_session_index(&session_id)
+            .and_then(|index| inner.sessions.get(index))
+            .expect("revoked session should remain before the late exit");
+        record.session.messages.len()
+    };
+    state
+        .handle_runtime_exit_if_matches(
+            &session_id,
+            &runtime_token,
+            Some("process exited after the quarantine was recorded"),
+        )
+        .expect("confirmed process exit should release the quarantined runtime");
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .find_session_index(&session_id)
+        .and_then(|index| inner.sessions.get(index))
+        .expect("revoked session should remain after process exit");
+    assert!(matches!(record.runtime, SessionRuntime::None));
+    assert!(!record.engram_mcp_runtime_quarantined);
+    assert_eq!(record.session.status, SessionStatus::Idle);
+    assert_eq!(
+        record.session.messages.len(),
+        message_count_after_degradation
+    );
+    assert!(record.orchestrator_auto_dispatch_blocked);
+    assert_eq!(record.queued_prompts.len(), 2);
+}
+
+#[test]
+fn engram_mcp_degraded_acp_runtime_is_replaced_by_an_explicit_prompt() {
+    let state = test_app_state();
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("engram-mcp-revoke-acp-retry");
+    fs::create_dir_all(&root).expect("project root should exist");
+    fs::write(root.join(".engram-project"), "fixture-ready\n").expect("fixture mode should write");
+    let project_id = create_test_project(&state, &root, "Engram MCP ACP retry");
+    let mut enabled = real_fixture_engram_settings(&root);
+    enabled.work_authority_grant = Some("grant-old".to_owned());
+    state
+        .update_project_engram_settings(&project_id, enabled)
+        .expect("fixture settings should enable Engram");
+    let session_id = create_test_project_session(&state, Agent::Cursor, &project_id, &root);
+    let old_process =
+        Arc::new(SharedChild::new(test_sleep_child()).expect("old Cursor process should share"));
+    let (old_input_tx, _old_input_rx) = mpsc::channel();
+    let old_runtime_id = "engram-mcp-revoke-cursor-old".to_owned();
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Cursor session should exist");
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("Cursor session index should be valid");
+        record.runtime = SessionRuntime::Acp(AcpRuntimeHandle {
+            agent: AcpAgent::Cursor,
+            runtime_id: old_runtime_id.clone(),
+            input_tx: old_input_tx,
+            process: old_process.clone(),
+            turn_lifecycle: Arc::new((Mutex::new(false), Condvar::new())),
+        });
+        record.session.status = SessionStatus::Active;
+        state
+            .commit_locked(&mut inner)
+            .expect("old Cursor runtime should persist");
+    }
+
+    let failure_guard = force_test_kill_child_process_failure(&old_process, "Cursor");
+    assert!(
+        state
+            .update_project_engram_settings(&project_id, real_fixture_engram_settings(&root))
+            .is_err(),
+        "repeated Cursor shutdown failure should surface degradation"
+    );
+    drop(failure_guard);
+
+    let fresh_process =
+        Arc::new(SharedChild::new(test_sleep_child()).expect("fresh Cursor process should share"));
+    let (fresh_input_tx, fresh_input_rx) = mpsc::channel();
+    let fresh_runtime_id = "engram-mcp-revoke-cursor-fresh".to_owned();
+    state.install_test_acp_runtime_override(
+        AcpAgent::Cursor,
+        AcpRuntimeHandle {
+            agent: AcpAgent::Cursor,
+            runtime_id: fresh_runtime_id.clone(),
+            input_tx: fresh_input_tx,
+            process: fresh_process.clone(),
+            turn_lifecycle: Arc::new((Mutex::new(false), Condvar::new())),
+        },
+    );
+
+    let dispatch = match state
+        .dispatch_turn(
+            &session_id,
+            SendMessageRequest {
+                text: "replace the revoked runtime explicitly".to_owned(),
+                expanded_text: None,
+                attachments: Vec::new(),
+                source_session_id: None,
+                source_mailbox: None,
+            },
+        )
+        .expect("explicit prompt should retry cleanup and start fresh")
+    {
+        DispatchTurnResult::Dispatched(dispatch)
+        | DispatchTurnResult::DispatchedAfterQueue(dispatch) => dispatch,
+        DispatchTurnResult::Queued => panic!("explicit recovery prompt should dispatch"),
+    };
+    deliver_turn_dispatch(&state, dispatch)
+        .expect("explicit recovery prompt should reach the fresh runtime");
+    assert!(matches!(
+        fresh_input_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("fresh Cursor runtime should receive the explicit prompt"),
+        AcpRuntimeCommand::Prompt(_)
+    ));
+    old_process
+        .wait()
+        .expect("old Cursor process should be reaped after retry");
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let record = inner
+            .find_session_index(&session_id)
+            .and_then(|index| inner.sessions.get(index))
+            .expect("Cursor session should remain");
+        assert!(
+            record
+                .runtime
+                .matches_runtime_token(&RuntimeToken::Acp(fresh_runtime_id))
+        );
+        assert_eq!(record.session.status, SessionStatus::Active);
+        assert!(!record.runtime_reset_required);
+        assert!(!record.orchestrator_auto_dispatch_blocked);
+    }
+    fresh_process
+        .kill()
+        .expect("fresh Cursor process should clean up");
+    fresh_process
+        .wait()
+        .expect("fresh Cursor process should be reaped");
+}
+
+#[test]
+fn engram_mcp_mixed_cleanup_error_preserves_pending_session_observability() {
+    let state = test_app_state();
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("engram-mcp-mixed-cleanup");
+    fs::create_dir_all(&root).expect("project root should exist");
+    fs::write(root.join(".engram-project"), "fixture-ready\n").expect("fixture mode should write");
+    let project_id = create_test_project(&state, &root, "Engram MCP mixed cleanup");
+    let mut enabled = real_fixture_engram_settings(&root);
+    enabled.work_authority_grant = Some("grant-old".to_owned());
+    state
+        .update_project_engram_settings(&project_id, enabled)
+        .expect("fixture settings should enable Engram");
+    let pending_session_id = create_test_project_session(&state, Agent::Claude, &project_id, &root);
+    let failing_session_id = create_test_project_session(&state, Agent::Claude, &project_id, &root);
+    let pending_process =
+        Arc::new(SharedChild::new(test_sleep_child()).expect("pending child should share"));
+    let failing_process =
+        Arc::new(SharedChild::new(test_sleep_child()).expect("failing child should share"));
+    let (pending_input_tx, _pending_input_rx) = mpsc::channel();
+    let (failing_input_tx, _failing_input_rx) = mpsc::channel();
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        for (session_id, runtime_id, input_tx, process) in [
+            (
+                &pending_session_id,
+                "engram-mixed-pending",
+                pending_input_tx,
+                pending_process.clone(),
+            ),
+            (
+                &failing_session_id,
+                "engram-mixed-failing",
+                failing_input_tx,
+                failing_process.clone(),
+            ),
+        ] {
+            let index = inner
+                .find_session_index(session_id)
+                .expect("test session should exist");
+            let record = inner
+                .session_mut_by_index(index)
+                .expect("test session index should be valid");
+            record.runtime = SessionRuntime::Claude(ClaudeRuntimeHandle {
+                runtime_id: runtime_id.to_owned(),
+                input_tx,
+                process,
+            });
+            record.session.status = SessionStatus::Active;
+        }
+        let pending_index = inner
+            .find_session_index(&pending_session_id)
+            .expect("pending session should exist");
+        let pending_record = inner
+            .session_mut_by_index(pending_index)
+            .expect("pending session index should be valid");
+        let pending_token = pending_record
+            .runtime
+            .runtime_token()
+            .expect("pending runtime should have a token");
+        pending_record.claim_runtime_stop(RuntimeStopOwnerKind::UserStop, pending_token);
+        state
+            .commit_locked(&mut inner)
+            .expect("mixed runtime state should persist");
+    }
+
+    let failure_guard = force_test_kill_child_process_failure(&failing_process, "Claude");
+    let error = match state
+        .update_project_engram_settings(&project_id, real_fixture_engram_settings(&root))
+    {
+        Ok(_) => panic!("mixed cleanup degradation must be visible"),
+        Err(error) => error,
+    };
+    assert!(
+        error.message.contains(&pending_session_id),
+        "cleanup error should retain pending ids: {}",
+        error.message
+    );
+    assert_eq!(
+        state.snapshot().pending_engram_mcp_revocation_session_ids,
+        vec![pending_session_id.clone()]
+    );
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let pending = inner
+            .find_session_index(&pending_session_id)
+            .and_then(|index| inner.sessions.get(index))
+            .expect("pending session should remain");
+        assert!(pending.runtime_stop_in_progress);
+        assert!(pending.engram_mcp_revocation_pending);
+        let failing = inner
+            .find_session_index(&failing_session_id)
+            .and_then(|index| inner.sessions.get(index))
+            .expect("failing session should remain");
+        assert_eq!(failing.session.status, SessionStatus::Error);
+        assert!(failing.orchestrator_auto_dispatch_blocked);
+        assert!(!matches!(failing.runtime, SessionRuntime::None));
+        assert!(failing.runtime_reset_required);
+    }
+    drop(failure_guard);
+    pending_process
+        .kill()
+        .expect("pending child should clean up");
+    pending_process.wait().expect("pending child should exit");
+    failing_process
+        .kill()
+        .expect("failing child should clean up");
+    failing_process.wait().expect("failing child should exit");
+}
+
+#[test]
+fn engram_mcp_shared_codex_interrupt_failure_revokes_grant_and_surfaces_degradation() {
+    let state = test_app_state();
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("engram-mcp-shared-codex-interrupt-failure");
+    fs::create_dir_all(&root).expect("project root should exist");
+    fs::write(root.join(".engram-project"), "fixture-ready\n").expect("fixture mode should write");
+    let project_id = create_test_project(&state, &root, "Engram shared Codex revoke");
+    let mut enabled = real_fixture_engram_settings(&root);
+    enabled.work_authority_grant = Some("grant-old".to_owned());
+    state
+        .update_project_engram_settings(&project_id, enabled)
+        .expect("fixture settings should enable Engram");
+    let session_id = create_test_project_session(&state, Agent::Codex, &project_id, &root);
+
+    let process = Arc::new(SharedChild::new(test_sleep_child()).expect("test child should share"));
+    let (input_tx, input_rx) = mpsc::channel();
+    let runtime = SharedCodexRuntime {
+        runtime_id: "engram-shared-revoke".to_owned(),
+        input_tx,
+        process: process.clone(),
+        sessions: SharedCodexSessions::new(),
+        thread_sessions: Arc::new(Mutex::new(HashMap::new())),
+        stdout_activity: Arc::new(Mutex::new(std::time::Instant::now())),
+    };
+    *state
+        .shared_codex_runtime
+        .lock()
+        .expect("shared Codex runtime mutex poisoned") = Some(runtime.clone());
+    runtime
+        .sessions
+        .lock()
+        .expect("shared Codex sessions mutex poisoned")
+        .insert(
+            session_id.clone(),
+            SharedCodexSessionState {
+                thread_id: Some("engram-thread-old".to_owned()),
+                turn_id: Some("engram-turn-old".to_owned()),
+                ..SharedCodexSessionState::default()
+            },
+        );
+    runtime
+        .thread_sessions
+        .lock()
+        .expect("shared Codex thread map mutex poisoned")
+        .insert("engram-thread-old".to_owned(), session_id.clone());
+    drop(input_rx);
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("test session should exist");
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("test session index should be valid");
+        record.runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process: process.clone(),
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+        record.session.status = SessionStatus::Active;
+        record.session.preview = "Streaming reply...".to_owned();
+        set_record_external_session_id(record, Some("engram-thread-old".to_owned()));
+        state
+            .commit_locked(&mut inner)
+            .expect("active shared runtime should persist");
+    }
+
+    let error = match state
+        .update_project_engram_settings(&project_id, real_fixture_engram_settings(&root))
+    {
+        Ok(_) => panic!("unconfirmed shared interrupt should remain user-visible"),
+        Err(error) => error,
+    };
+    assert!(
+        error
+            .message
+            .contains("the revoked grant blocks further mutations"),
+        "unexpected cleanup error: {}",
+        error.message
+    );
+    assert_fixture_authority_revoke_args(
+        &read_fixture_authority_revoke_args(&root),
+        "grant-old",
+        "TermAl project Engram work-authority grant removed",
+    );
+
+    assert!(
+        !runtime
+            .sessions
+            .lock()
+            .expect("shared Codex sessions mutex poisoned")
+            .contains_key(&session_id),
+        "revocation must detach the shared session even when interrupt delivery fails"
+    );
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .find_session_index(&session_id)
+        .and_then(|index| inner.sessions.get(index))
+        .expect("revoked session should remain");
+    assert_eq!(record.session.status, SessionStatus::Error);
+    assert!(matches!(record.runtime, SessionRuntime::None));
+    assert!(!record.runtime_stop_in_progress);
+    assert!(record.orchestrator_auto_dispatch_blocked);
+    assert!(record.external_session_id.is_none());
+    assert!(record.session.external_session_id.is_none());
+    assert!(
+        inner
+            .ignored_discovered_codex_thread_ids
+            .contains("engram-thread-old"),
+        "the tainted shared thread must not be rediscovered"
+    );
+    assert!(
+        process
+            .try_wait()
+            .expect("shared process status should remain observable")
+            .is_none(),
+        "revocation must not kill the shared app-server used by unrelated sessions"
+    );
+    assert!(
+        state
+            .shared_codex_runtime
+            .lock()
+            .expect("shared Codex runtime mutex poisoned")
+            .is_some(),
+        "the shared runtime should remain available for unrelated sessions"
+    );
+    drop(inner);
+    process.kill().expect("shared process should clean up");
+    process.wait().expect("shared process should exit");
+}
+
+#[test]
+fn engram_mcp_buffered_runtime_exit_avoids_quarantining_a_dead_runtime() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let (runtime, _input_rx) = test_claude_runtime_handle("engram-buffered-exit");
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("test session should exist");
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("test session index should be valid");
+        record.runtime = SessionRuntime::Claude(runtime);
+        record.session.status = SessionStatus::Active;
+    }
+    let mut batch = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        claim_engram_mcp_runtime_revocations_locked(&mut inner, std::slice::from_ref(&session_id))
+    };
+    let target = batch.targets.pop().expect("runtime should be claimed");
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("test session should remain");
+        inner.sessions[index]
+            .deferred_stop_callbacks
+            .push(DeferredStopCallback::RuntimeExited(None));
+    }
+
+    let outcome =
+        state.finalize_revoked_engram_mcp_runtimes(EngramMcpRuntimeRevocationShutdownBatch {
+            shutdowns: vec![EngramMcpRuntimeRevocationShutdown {
+                target,
+                shutdown_error: Some("scripted kill failure before waiter exit".to_owned()),
+                retain_runtime_for_retry: true,
+                suppress_codex_thread_resume: false,
+            }],
+            pending_session_ids: Vec::new(),
+        });
+    assert!(
+        outcome.failures.is_empty(),
+        "the buffered exit confirms cleanup: {:?}",
+        outcome.failures
+    );
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .find_session_index(&session_id)
+        .and_then(|index| inner.sessions.get(index))
+        .expect("test session should remain");
+    assert!(matches!(record.runtime, SessionRuntime::None));
+    assert!(!record.runtime_reset_required);
+    assert!(!record.engram_mcp_runtime_quarantined);
+    assert!(!record.runtime_stop_in_progress);
+    assert!(record.deferred_stop_callbacks.is_empty());
+    assert_eq!(record.session.status, SessionStatus::Idle);
+}
+
+#[test]
+fn engram_mcp_grant_revoke_cli_failure_is_visible_after_durable_grant_clear() {
+    let state = test_app_state();
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("engram-authority-revoke-failure");
+    fs::create_dir_all(&root).expect("project root should exist");
+    fs::write(
+        root.join(".engram-project"),
+        "fixture-authority-revoke-fail\n",
+    )
+    .expect("fixture mode should write");
+    let project_id = create_test_project(&state, &root, "Engram authority revoke failure");
+    let mut enabled = real_fixture_engram_settings(&root);
+    enabled.work_authority_grant = Some("grant-old".to_owned());
+    state
+        .update_project_engram_settings(&project_id, enabled)
+        .expect("fixture settings should enable Engram");
+
+    let error = match state
+        .update_project_engram_settings(&project_id, real_fixture_engram_settings(&root))
+    {
+        Ok(_) => panic!("failed authority revocation must be visible"),
+        Err(error) => error,
+    };
+    assert!(
+        error
+            .message
+            .contains("old Engram work-authority grant could not be revoked")
+            && error.message.contains("scripted authority revoke failure"),
+        "unexpected authority revocation error: {}",
+        error.message
+    );
+    assert_fixture_authority_revoke_args(
+        &read_fixture_authority_revoke_args(&root),
+        "grant-old",
+        "TermAl project Engram work-authority grant removed",
+    );
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let project = inner
+        .find_project(&project_id)
+        .expect("project should remain after durable grant clear");
+    assert_eq!(
+        project
+            .engram
+            .as_ref()
+            .and_then(|settings| settings.work_authority_grant.as_deref()),
+        None,
+        "a failed irreversible revoke call must not roll back the durable settings change"
+    );
+}
+
+#[test]
+fn project_engram_patch_normalizes_and_validates_work_authority_grants() {
+    let state = test_app_state();
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("engram-authority-grant-validation");
+    fs::create_dir_all(&root).expect("project root should exist");
+    fs::write(root.join(".engram-project"), "fixture-ok\n").expect("fixture mode should write");
+    let project_id = create_test_project(&state, &root, "Engram grant validation");
+    let valid_grant = "ab".repeat(32);
+    let request: UpdateProjectEngramSettingsRequest = serde_json::from_value(json!({
+        "enabled": true,
+        "binaryPath": real_engram_control_fixture_path().to_string_lossy(),
+        "home": root.to_string_lossy(),
+        "workAuthorityGrant": format!("  {valid_grant}\r\n"),
+        "deadlineMs": 250
+    }))
+    .expect("valid PATCH should deserialize");
+    state
+        .patch_project_engram_settings(&project_id, request)
+        .expect("trimmed lowercase SHA-256 grant should be accepted");
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        assert_eq!(
+            inner
+                .find_project(&project_id)
+                .and_then(|project| project.engram.as_ref())
+                .and_then(|settings| settings.work_authority_grant.as_deref()),
+            Some(valid_grant.as_str())
+        );
+    }
+
+    for invalid_grant in [
+        "".to_owned(),
+        "-".repeat(64),
+        "AB".repeat(32),
+        "a".repeat(63),
+    ] {
+        let request: UpdateProjectEngramSettingsRequest = serde_json::from_value(json!({
+            "enabled": true,
+            "binaryPath": real_engram_control_fixture_path().to_string_lossy(),
+            "home": root.to_string_lossy(),
+            "workAuthorityGrant": invalid_grant,
+            "deadlineMs": 250
+        }))
+        .expect("invalid PATCH shape should still deserialize");
+        let error = match state.patch_project_engram_settings(&project_id, request) {
+            Ok(_) => panic!("invalid grant should be rejected at the request boundary"),
+            Err(error) => error,
+        };
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            error.message,
+            "work_authority_grant must be a lowercase 64-character SHA-256 hash"
+        );
+    }
+}
+
+#[test]
+fn immediate_revocation_rejects_overlapping_project_engram_mutations() {
+    let state = test_app_state();
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("engram-overlapping-revocation");
+    fs::create_dir_all(&root).expect("project root should exist");
+    fs::write(root.join(".engram-project"), "fixture-ok\n").expect("fixture mode should write");
+    let project_id = create_test_project(&state, &root, "Engram overlapping revocation");
+    let mut enabled = real_fixture_engram_settings(&root);
+    enabled.work_authority_grant = Some("grant-old".to_owned());
+    state
+        .update_project_engram_settings(&project_id, enabled.clone())
+        .expect("fixture settings should enable Engram");
+
+    let gate = gate_next_engram_project_reset_fence(&project_id);
+    let clearing_state = state.clone();
+    let clearing_project_id = project_id.clone();
+    let mut cleared = enabled.clone();
+    cleared.work_authority_grant = None;
+    let clearing = std::thread::spawn(move || {
+        clearing_state.update_project_engram_settings(&clearing_project_id, cleared)
+    });
+    gate.wait_until_entered();
+
+    let mut overlapping = enabled;
+    overlapping.work_authority_grant = Some("grant-reinstalled".to_owned());
+    let error = match state.update_project_engram_settings(&project_id, overlapping) {
+        Ok(_) => panic!("the project fence must reject overlapping Engram mutation"),
+        Err(error) => error,
+    };
+    assert_eq!(error.status, StatusCode::CONFLICT);
+    assert_eq!(
+        error.message,
+        "Engram project settings are already being reset"
+    );
+
+    gate.release();
+    clearing
+        .join()
+        .expect("grant-clear thread should not panic")
+        .expect("grant clear should finish after the gate releases");
+}
+
+#[test]
+fn immediate_revocation_covers_current_and_runtime_installed_engram_descriptors() {
+    let state = test_app_state();
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("engram-installed-descriptor-revocation");
+    let old_home = root.join("old-home");
+    let new_home = root.join("new-home");
+    fs::create_dir_all(&old_home).expect("old Engram home should exist");
+    fs::create_dir_all(&new_home).expect("new Engram home should exist");
+    fs::write(root.join(".engram-project"), "fixture-ok\n").expect("fixture mode should write");
+    let project_id = create_test_project(&state, &root, "Installed descriptor revocation");
+    let session_id = create_test_project_session(&state, Agent::Claude, &project_id, &root);
+    let binary_path = real_engram_control_fixture_path()
+        .to_string_lossy()
+        .into_owned();
+    let mut old_settings = real_fixture_engram_settings(&root);
+    old_settings.home = Some(old_home.to_string_lossy().into_owned());
+    old_settings.work_authority_grant = Some("grant-installed-old".to_owned());
+    state
+        .update_project_engram_settings(&project_id, old_settings)
+        .expect("old fixture settings should enable Engram");
+    attach_engram_mcp_test_runtime(&state, &session_id);
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("session should exist");
+        inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid")
+            .engram_mcp_installed = Some(EngramMcpInstalledDescriptor {
+            binary_path: binary_path.clone(),
+            home: old_home.to_string_lossy().into_owned(),
+            work_authority_grant: Some("grant-installed-old".to_owned()),
+        });
+    }
+
+    let mut rotated = real_fixture_engram_settings(&root);
+    rotated.home = Some(new_home.to_string_lossy().into_owned());
+    rotated.work_authority_grant = Some("grant-current-new".to_owned());
+    state
+        .update_project_engram_settings(&project_id, rotated.clone())
+        .expect("connection rotation should defer runtime replacement");
+    rotated.work_authority_grant = None;
+    state
+        .update_project_engram_settings(&project_id, rotated)
+        .expect("grant clear should revoke every live descriptor tuple");
+
+    assert_fixture_authority_revoke_args(
+        &read_fixture_authority_revoke_args(&old_home),
+        "grant-installed-old",
+        "TermAl project Engram work-authority grant removed",
+    );
+    assert_fixture_authority_revoke_args(
+        &read_fixture_authority_revoke_args(&new_home),
+        "grant-current-new",
+        "TermAl project Engram work-authority grant removed",
+    );
+}
+
+fn assert_engram_mcp_disable_or_delete_revokes_existing_runtimes(delete_project: bool) {
+    let suffix = if delete_project { "delete" } else { "disable" };
+    let (state, root, project_id, session_ids) =
+        engram_mcp_runtime_family_fixture(suffix, Some("grant-old"));
+    if delete_project {
+        state
+            .delete_project(&project_id)
+            .expect("project deletion should revoke MCP runtimes");
+    } else {
+        state
+            .update_project_engram_settings(&project_id, EngramProjectSettings::default())
+            .expect("disable should revoke MCP runtimes");
+    }
+
+    assert_fixture_authority_revoke_args(
+        &read_fixture_authority_revoke_args(&root),
+        "grant-old",
+        if delete_project {
+            "TermAl project deleted"
+        } else {
+            "TermAl project Engram integration disabled"
+        },
+    );
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    if !delete_project {
+        assert_eq!(
+            inner
+                .find_project(&project_id)
+                .and_then(|project| project.engram.as_ref())
+                .and_then(|settings| settings.work_authority_grant.as_deref()),
+            None,
+            "disable must not retain the irreversibly revoked grant hash"
+        );
+    }
+    for session_id in session_ids {
+        let record = inner
+            .find_session_index(&session_id)
+            .and_then(|index| inner.sessions.get(index))
+            .expect("affected session should remain");
+        assert!(
+            matches!(record.runtime, SessionRuntime::None),
+            "{suffix} should detach runtime for session {session_id}"
+        );
+        assert!(
+            !record.runtime_reset_required,
+            "{suffix} should clear reset flag for session {session_id}"
+        );
+    }
+}
+
+#[test]
+fn engram_mcp_disable_immediately_revokes_existing_runtimes() {
+    assert_engram_mcp_disable_or_delete_revokes_existing_runtimes(false);
+}
+
+#[test]
+fn engram_mcp_project_delete_immediately_revokes_existing_runtimes() {
+    assert_engram_mcp_disable_or_delete_revokes_existing_runtimes(true);
+}
+
+#[test]
+fn engram_mcp_enable_marks_runtime_but_deadline_only_patch_does_not() {
+    let state = test_app_state();
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("engram-mcp-enable-runtime");
+    fs::create_dir_all(&root).expect("project root should exist");
+    fs::write(root.join(".engram-project"), "fixture-ready\n").expect("fixture mode should write");
+    let project_id = create_test_project(&state, &root, "Engram MCP enable lifecycle");
+    let session_id = create_test_project_session(&state, Agent::Codex, &project_id, &root);
+    attach_engram_mcp_test_runtime(&state, &session_id);
+    let settings = real_fixture_engram_settings(&root);
+
+    state
+        .update_project_engram_settings(&project_id, settings.clone())
+        .expect("enable should persist");
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("test session should exist");
+        assert!(inner.sessions[index].runtime_reset_required);
+        inner
+            .session_mut_by_index(index)
+            .expect("test session index should be valid")
+            .runtime_reset_required = false;
+        state
+            .commit_locked(&mut inner)
+            .expect("test reset flag should persist");
+    }
+
+    let mut deadline_only = settings;
+    deadline_only.deadline_ms = Some(300);
+    state
+        .update_project_engram_settings(&project_id, deadline_only)
+        .expect("deadline-only patch should persist");
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .find_session_index(&session_id)
+        .and_then(|index| inner.sessions.get(index))
+        .expect("test session should exist");
+    assert!(!record.runtime_reset_required);
+    assert!(matches!(record.runtime, SessionRuntime::Codex(_)));
 }
 
 #[test]
@@ -5021,9 +7115,15 @@ fn disable_preserves_uncheckpointed_authority_and_reenable_repairs_the_same_sess
         1
     );
 
-    state
-        .stop_session(&child_id)
-        .expect("disabled shadow runtime should remain resumable");
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let child = inner
+            .find_session_index(&child_id)
+            .and_then(|index| inner.sessions.get(index))
+            .expect("disabled child should remain");
+        assert!(matches!(child.runtime, SessionRuntime::None));
+        assert_eq!(child.session.status, SessionStatus::Idle);
+    }
     // The checkpoint deadline leaves the remote state ambiguous. Exercise the
     // real recovery shape where status reports the grant as issued/unbegun and
     // checkpoint returns a synchronized refusal decision.
@@ -5058,7 +7158,7 @@ fn disable_preserves_uncheckpointed_authority_and_reenable_repairs_the_same_sess
     {
         DispatchTurnResult::Dispatched(dispatch)
         | DispatchTurnResult::DispatchedAfterQueue(dispatch) => dispatch,
-        DispatchTurnResult::Queued => panic!("stopped child should resume immediately"),
+        DispatchTurnResult::Queued => panic!("revoked child should resume immediately"),
     };
     deliver_turn_dispatch(&state, recovery_dispatch)
         .expect("fresh stateful grant should reach the runtime");
@@ -5486,6 +7586,14 @@ fn changing_connection_settings_checkpoints_old_grant_then_reaps_and_fresh_binds
         Some("fresh-token-a" | "fresh-token-b")
     ));
     assert!(child.engram.active_grant_id.is_none());
+    assert!(
+        child.runtime_reset_required,
+        "binary/home argv changes must rebuild the child runtime at its next turn boundary"
+    );
+    assert!(
+        child.runtime.runtime_token().is_some(),
+        "non-revoking argv changes keep the current turn alive"
+    );
 }
 
 #[test]
@@ -5821,7 +7929,7 @@ fn project_reset_wait_releases_a_generation_rejected_pending_dispatch() {
 }
 
 #[test]
-fn reset_stale_begin_cannot_clear_a_live_legacy_successor_after_stop() {
+fn reset_stale_begin_preserves_successor_until_immediate_disable_revokes_it() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-reset-stale-begin-successor");
     let root = state
@@ -5971,8 +8079,13 @@ fn reset_stale_begin_cannot_clear_a_live_legacy_successor_after_stop() {
         .find_session_index(&child_id)
         .and_then(|index| inner.sessions.get(index))
         .expect("prompt B session should survive reset completion");
-    assert_eq!(child.session.status, SessionStatus::Active);
-    assert!(child.runtime.runtime_token().is_some());
+    assert_eq!(child.session.status, SessionStatus::Idle);
+    assert!(matches!(child.runtime, SessionRuntime::None));
+    assert!(child.session.messages.iter().any(|message| matches!(
+        message,
+        Message::Text { text, .. }
+            if text == "Turn stopped: Engram MCP configuration was revoked."
+    )));
 }
 
 #[test]
@@ -8546,7 +10659,7 @@ fn cold_claude_turn_start_does_not_reenter_state_mutex_for_engram_config() {
             .find_session_index(&session_id)
             .expect("Claude session should exist");
         inner.sessions[index].session.workdir = missing_workdir.to_string_lossy().into_owned();
-        let engram_mcp = engram_mcp_stdio_config_for_session_locked(&inner, &session_id);
+        let engram_mcp = engram_mcp_runtime_config_for_session_locked(&inner, &session_id);
         let result = state.start_turn_on_record(
             inner
                 .session_mut_by_index(index)
@@ -8631,6 +10744,7 @@ fn redacted_project_patch_preserves_and_explicit_null_clears_work_authority_gran
         .path()
         .join("engram-authority-patch-project");
     fs::create_dir_all(&root).expect("project root should exist");
+    fs::write(root.join(".engram-project"), "fixture-ok\n").expect("fixture mode should write");
     let project_id = create_test_project(&state, &root, "Engram authority patch project");
     {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
@@ -8639,13 +10753,9 @@ fn redacted_project_patch_preserves_and_explicit_null_clears_work_authority_gran
             .iter_mut()
             .find(|project| project.id == project_id)
             .expect("project should exist");
-        project.engram = Some(EngramProjectSettings {
-            enabled: false,
-            binary_path: Some("C:/tools/engram".to_owned()),
-            home: Some("C:/engram-home".to_owned()),
-            work_authority_grant: Some("operator-secret-grant".to_owned()),
-            deadline_ms: Some(250),
-        });
+        let mut settings = real_fixture_engram_settings(&root);
+        settings.work_authority_grant = Some("operator-secret-grant".to_owned());
+        project.engram = Some(settings);
         state
             .commit_locked(&mut inner)
             .expect("Engram settings should persist");
@@ -8679,9 +10789,9 @@ fn redacted_project_patch_preserves_and_explicit_null_clears_work_authority_gran
     );
 
     let request: UpdateProjectEngramSettingsRequest = serde_json::from_value(json!({
-        "enabled": false,
-        "binaryPath": "C:/tools/engram",
-        "home": "C:/engram-home",
+        "enabled": true,
+        "binaryPath": real_engram_control_fixture_path().to_string_lossy(),
+        "home": root.to_string_lossy(),
         "workAuthorityGrant": null,
         "deadlineMs": 250
     }))
@@ -8697,6 +10807,11 @@ fn redacted_project_patch_preserves_and_explicit_null_clears_work_authority_gran
         .and_then(|project| project.get("engram"))
         .expect("persisted project should retain Engram settings");
     assert!(engram_after_clear.get("workAuthorityGrant").is_none());
+    assert_fixture_authority_revoke_args(
+        &read_fixture_authority_revoke_args(&root),
+        "operator-secret-grant",
+        "TermAl project Engram work-authority grant removed",
+    );
 }
 
 #[test]

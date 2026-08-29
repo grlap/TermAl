@@ -772,6 +772,28 @@ describe("useAppSessionActions", () => {
     expect(reportRequestError).toHaveBeenCalledWith(originalError);
   });
 
+  it("treats a model refresh conflict as a benign lifecycle deferral", async () => {
+    vi.spyOn(api, "refreshSessionModelOptions").mockRejectedValue(
+      new api.ApiRequestError(
+        "request-failed",
+        "session model options cannot be refreshed while the session is active or stopping",
+        { status: 409 },
+      ),
+    );
+    const reportRequestError = vi.fn();
+    const params = makeSessionActionsParams({ reportRequestError });
+    const actions = useAppSessionActions(params);
+
+    await expect(
+      actions.handleRefreshSessionModelOptions("session-1"),
+    ).resolves.toBe("deferred");
+
+    expect(reportRequestError).not.toHaveBeenCalled();
+    expect(params.setters.setRequestError).not.toHaveBeenCalledWith(
+      expect.any(String),
+    );
+  });
+
   it("creates checkpoint markers and updates the local session slice", async () => {
     const marker: ConversationMarker = {
       id: "marker-1",

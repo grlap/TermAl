@@ -109,6 +109,24 @@ export type SessionModelOption = {
   serviceTiers?: SessionModelServiceTier[];
 };
 
+export type SessionModelOptionsRefreshOutcome =
+  | "deferred"
+  | "failed"
+  | "refreshed"
+  | "skipped";
+
+export type SessionModelOptionsRefreshOptions = {
+  reportGlobalError?: boolean;
+};
+
+export type SessionModelOptionsRefreshRequest = (
+  sessionId: string,
+  options?: SessionModelOptionsRefreshOptions,
+) =>
+  | SessionModelOptionsRefreshOutcome
+  | Promise<SessionModelOptionsRefreshOutcome | void>
+  | void;
+
 export type ConversationMarkerKind =
   | "checkpoint"
   | "decision"

@@ -139,6 +139,7 @@ import { requestResponseBoardSourceNavigation } from "./response-board-navigatio
 
 const NOOP_OPEN_RESPONSE_BOARD_TAB = () => {};
 const NOOP_SET_RESPONSE_BOARD_WORKSPACE_STATE = () => {};
+const EMPTY_SESSION_ID_SET: ReadonlySet<string> = new Set();
 
 export function SessionPaneView({
   pane,
@@ -154,6 +155,7 @@ export function SessionPaneView({
   isKilling,
   isUpdating,
   isRefreshingModelOptions,
+  pendingEngramMcpRevocationSessionIds = EMPTY_SESSION_ID_SET,
   modelOptionsError,
   agentCommands,
   hasLoadedAgentCommands,
@@ -241,6 +243,9 @@ export function SessionPaneView({
     firstAvailableSessionTabId ??
     pane.activeSessionId ??
     firstSessionTabId;
+  const isEngramMcpRevocationPending = activeSessionSnapshotId
+    ? pendingEngramMcpRevocationSessionIds.has(activeSessionSnapshotId)
+    : false;
   // The session store can receive an eager active-session update before the
   // broader `sessions` prop is reconciled. Use that fresher record for active
   // pane derivation while keeping the prop-backed lookup for unrelated sessions.
@@ -1078,6 +1083,7 @@ export function SessionPaneView({
     editorAppearance,
     getConnectionRetryDisplayState,
     isRefreshingModelOptions,
+    isEngramMcpRevocationPending,
     latestAssistantMessageId,
     streamingAssistantTextMessageId,
     modelOptionsError,
@@ -2008,6 +2014,7 @@ export function SessionPaneView({
           onDraftCommit={handleDraftCommitFromFooter}
           onDraftAttachmentRemove={handleDraftAttachmentRemoveFromFooter}
           isRefreshingModelOptions={isRefreshingModelOptions}
+          isEngramMcpRevocationPending={isEngramMcpRevocationPending}
           modelOptionsError={modelOptionsError}
           agentCommands={agentCommands}
           hasLoadedAgentCommands={hasLoadedAgentCommands}

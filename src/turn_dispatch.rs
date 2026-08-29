@@ -26,10 +26,11 @@
 //
 // Runtime reset. `record.runtime_reset_required` signals that the
 // session's long-lived runtime handle must be torn down and respawned
-// before the next turn. `start_turn_on_record` honors it for Claude
-// and ACP — kills the existing handle, clears pending approvals, and
-// spawns a fresh one. Codex cannot be reset this way since it is
-// shared across all Codex sessions (see `shared_codex_mgr.rs`).
+// before the next turn. `start_turn_on_record` honors it for every
+// local runtime family: Claude and ACP kill their dedicated handle;
+// Codex detaches the logical session from its shared app-server handle.
+// Each path clears protocol-specific pending interactions before the
+// next turn attaches or spawns a fresh session runtime.
 
 struct StartedTurn {
     dispatch: TurnDispatch,
@@ -184,6 +185,15 @@ impl AppState {
         allow_blocked_dispatch: bool,
         pending_engram: Option<EngramPendingDispatch>,
     ) -> Result<Option<StartedTurn>> {
+        if inner.sessions[index].runtime_stop_in_progress {
+            abandon_engram_pending_dispatch(
+                inner
+                    .session_mut_by_index(index)
+                    .expect("session index should be valid"),
+                pending_engram,
+            );
+            return Ok(None);
+        }
         if inner.sessions[index].orchestrator_auto_dispatch_blocked && !allow_blocked_dispatch {
             abandon_engram_pending_dispatch(
                 inner
@@ -207,7 +217,7 @@ impl AppState {
         let pending_engram_for_abandon = pending_engram.clone();
         let session_id = inner.sessions[index].session.id.clone();
         let engram_mcp = if inner.sessions[index].session.agent == Agent::Claude {
-            engram_mcp_stdio_config_for_session_locked(inner, &session_id)
+            engram_mcp_runtime_config_for_session_locked(inner, &session_id)
         } else {
             None
         };
@@ -256,9 +266,9 @@ impl AppState {
     ///
     /// - Reject remote-proxy records (they have to go through the
     ///   remote backend — see `remote_routes.rs`).
-    /// - Honor `record.runtime_reset_required` for Claude/ACP: kill
-    ///   the existing handle, clear pending approvals, and force a
-    ///   fresh spawn on this turn.
+    /// - Honor `record.runtime_reset_required` for Claude, Codex, and ACP:
+    ///   kill or detach the existing handle, clear pending interactions,
+    ///   and force a fresh session runtime on this turn.
     /// - Route to the right spawn helper based on `record.session.agent`:
     ///   `spawn_claude_runtime`, the shared Codex runtime (see
     ///   [`Self::shared_codex_runtime`]), or `spawn_acp_runtime`.
@@ -280,8 +290,11 @@ impl AppState {
         expanded_prompt: Option<String>,
         source: Option<MessageSource>,
         mut pending_engram: Option<EngramPendingDispatch>,
-        engram_mcp: Option<TermalDelegationMcpStdioConfig>,
+        engram_mcp: Option<EngramMcpRuntimeConfig>,
     ) -> std::result::Result<StartedTurn, ApiError> {
+        if record.runtime_stop_in_progress {
+            return Err(ApiError::conflict("session is stopping"));
+        }
         match record.remote_proxy_identity() {
             Ok(None) => {}
             Ok(Some(_)) => {
@@ -339,10 +352,10 @@ impl AppState {
                             ))
                         })?;
                     }
-                    record.runtime = SessionRuntime::None;
+                    record.clear_runtime();
                     record.pending_claude_approvals.clear();
                     record.pending_claude_user_inputs.clear();
-                    record.runtime_reset_required = false;
+                    record.clear_runtime_reset();
                 }
 
                 let handle = match &record.runtime {
@@ -361,7 +374,7 @@ impl AppState {
                         let delegation_mcp_config = self
                             .termal_delegation_mcp_claude_config_json_with_engram(
                                 &record.session.id,
-                                engram_mcp.as_ref(),
+                                engram_mcp.as_ref().map(|config| &config.stdio),
                             )
                             .map_err(|err| {
                                 ApiError::internal(format!(
@@ -391,6 +404,8 @@ impl AppState {
                             ))
                         })?;
                         record.runtime = SessionRuntime::Claude(handle.clone());
+                        record.engram_mcp_installed =
+                            engram_mcp.map(|config| config.installed);
                         handle
                     }
                 };
@@ -420,12 +435,12 @@ impl AppState {
                             })?;
                         }
                     }
-                    record.runtime = SessionRuntime::None;
+                    record.clear_runtime();
                     record.pending_codex_approvals.clear();
                     record.pending_codex_user_inputs.clear();
                     record.pending_codex_mcp_elicitations.clear();
                     record.pending_codex_app_requests.clear();
-                    record.runtime_reset_required = false;
+                    record.clear_runtime_reset();
                 }
 
                 let handle = match &record.runtime {
@@ -495,10 +510,10 @@ impl AppState {
                             ))
                         })?;
                     }
-                    record.runtime = SessionRuntime::None;
+                    record.clear_runtime();
                     record.pending_acp_approvals.clear();
                     record.pending_acp_approval_order.clear();
-                    record.runtime_reset_required = false;
+                    record.clear_runtime_reset();
                 }
 
                 let expected_acp_agent = agent
@@ -838,6 +853,9 @@ impl AppState {
             };
             if !Self::engram_child_requires_dispatch_card_locked(&inner, session_id) {
                 let record = &inner.sessions[index];
+                if record.runtime_stop_in_progress {
+                    return Ok(None);
+                }
                 if record.orchestrator_auto_dispatch_blocked && !allow_blocked_dispatch {
                     return Ok(None);
                 }
@@ -888,6 +906,9 @@ impl AppState {
                     return Ok(None);
                 };
                 let record = &inner.sessions[index];
+                if record.runtime_stop_in_progress {
+                    return Ok(None);
+                }
                 if record.orchestrator_auto_dispatch_blocked && !allow_blocked_dispatch {
                     return Ok(None);
                 }
@@ -948,7 +969,8 @@ impl AppState {
                 && !matches!(
                     inner.sessions[index].session.status,
                     SessionStatus::Active | SessionStatus::Approval
-                );
+                )
+                && !inner.sessions[index].runtime_stop_in_progress;
             if !unchanged {
                 let record = inner
                     .session_mut_by_index(index)
@@ -1082,7 +1104,7 @@ impl AppState {
         let session_is_busy = matches!(
             inner.sessions[index].session.status,
             SessionStatus::Active | SessionStatus::Approval
-        );
+        ) || inner.sessions[index].runtime_stop_in_progress;
         let has_queued_prompts = !inner.sessions[index].queued_prompts.is_empty();
         let blocked_queue_contains_user_prompt = inner.sessions[index]
             .queued_prompts
@@ -1263,7 +1285,7 @@ impl AppState {
             if prioritize_manual_dispatch_over_blocked_queue {
                 let message_id = inner.next_message_id();
                 let engram_mcp = if inner.sessions[index].session.agent == Agent::Claude {
-                    engram_mcp_stdio_config_for_session_locked(&inner, session_id)
+                    engram_mcp_runtime_config_for_session_locked(&inner, session_id)
                 } else {
                     None
                 };
@@ -1337,7 +1359,7 @@ impl AppState {
 
             let message_id = inner.next_message_id();
             let engram_mcp = if inner.sessions[index].session.agent == Agent::Claude {
-                engram_mcp_stdio_config_for_session_locked(&inner, session_id)
+                engram_mcp_runtime_config_for_session_locked(&inner, session_id)
             } else {
                 None
             };

@@ -248,6 +248,7 @@ export function VirtualizedConversationMessageList({
   const pendingAggressiveIdleCompactionRef = useRef(false);
   const lastNativeScrollTopRef = useRef(0);
   const lastNativeScrollHeightRef = useRef(0);
+  const lastNativeClientHeightRef = useRef(0);
   const userScrollGenerationRef = useRef(0);
   const pendingPrependNativeReflowRef =
     useRef<PendingPrependNativeReflow | null>(null);
@@ -2005,6 +2006,7 @@ export function VirtualizedConversationMessageList({
     isMeasuringPostActivation,
     lastNativeScrollTopRef,
     lastNativeScrollHeightRef,
+    lastNativeClientHeightRef,
     lastTouchClientYRef,
     lastUserScrollInputTimeRef,
     lastUserScrollKindRef,

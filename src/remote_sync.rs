@@ -477,8 +477,9 @@ fn apply_remote_session_to_record(
         .session
         .sandbox_mode
         .unwrap_or_else(default_codex_sandbox_mode);
-    record.runtime = SessionRuntime::None;
-    record.runtime_reset_required = false;
+    record.clear_runtime();
+    record.clear_runtime_reset();
+    record.clear_runtime_stop();
     clear_all_pending_requests(record);
     record.message_positions = build_message_positions(&record.session.messages);
 }
@@ -565,9 +566,14 @@ fn upsert_remote_proxy_session_record(
         remote_id: Some(remote_id.to_owned()),
         remote_session_id: Some(remote_session.id.clone()),
         runtime: SessionRuntime::None,
+        engram_mcp_installed: None,
         runtime_reset_required: false,
+        engram_mcp_runtime_quarantined: false,
         orchestrator_auto_dispatch_blocked: false,
         runtime_stop_in_progress: false,
+        runtime_stop_owner: None,
+        runtime_stop_generation: 0,
+        engram_mcp_revocation_pending: false,
         deferred_stop_callbacks: Vec::new(),
         engram: EngramSessionState::default(),
         hidden: false,

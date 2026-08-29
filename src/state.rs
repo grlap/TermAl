@@ -426,6 +426,7 @@ mod state_broadcast_mailbox_tests {
             sessions: Vec::new(),
             delegations: Vec::new(),
             delegation_waits: Vec::new(),
+            pending_engram_mcp_revocation_session_ids: Vec::new(),
         }
     }
 
@@ -1029,6 +1030,20 @@ struct StopSessionOptions {
     pause_automatic_resumes_on_success: bool,
     orchestrator_stop_instance_id: Option<String>,
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RuntimeStopOwnerKind {
+    UserStop,
+    EngramMcpRevocation,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct RuntimeStopOwner {
+    kind: RuntimeStopOwnerKind,
+    token: RuntimeToken,
+    generation: u64,
+}
+
 impl Default for StopSessionOptions {
     /// Builds the default value.
     fn default() -> Self {
@@ -1201,6 +1216,40 @@ fn collect_workspace_layout_summaries<'a>(
     workspaces
 }
 
+#[derive(Default)]
+struct EngramProjectResetFences {
+    next_generation: u64,
+    owners: HashMap<String, u64>,
+}
+
+impl EngramProjectResetFences {
+    fn contains(&self, project_id: &str) -> bool {
+        self.owners.contains_key(project_id)
+    }
+
+    fn claim(&mut self, project_id: &str) -> Option<u64> {
+        if self.contains(project_id) {
+            return None;
+        }
+        self.next_generation = self.next_generation.wrapping_add(1).max(1);
+        let generation = self.next_generation;
+        self.owners.insert(project_id.to_owned(), generation);
+        Some(generation)
+    }
+
+    fn is_owned_by(&self, project_id: &str, generation: u64) -> bool {
+        self.owners.get(project_id).copied() == Some(generation)
+    }
+
+    fn release(&mut self, project_id: &str, generation: u64) -> bool {
+        if !self.is_owned_by(project_id, generation) {
+            return false;
+        }
+        self.owners.remove(project_id);
+        true
+    }
+}
+
 /// Represents state inner.
 struct StateInner {
     codex: CodexState,
@@ -1211,7 +1260,7 @@ struct StateInner {
     /// Runtime-only project fence used while Engram connection settings drain
     /// the old sidecars. It prevents newly-created delegations from binding to
     /// the old connection between the reset snapshot and commit.
-    engram_project_resets: HashSet<String>,
+    engram_project_resets: EngramProjectResetFences,
     preferences: AppPreferences,
     /// Runtime retry marker for settings mutations that changed memory but
     /// failed synchronous persistence. An identical request must retry the
@@ -1305,7 +1354,7 @@ impl StateInner {
         Self {
             codex: CodexState::default(),
             engram_host_adapter: Arc::new(EngramHostAdapter::default()),
-            engram_project_resets: HashSet::new(),
+            engram_project_resets: EngramProjectResetFences::default(),
             preferences: AppPreferences::default(),
             settings_persist_dirty: false,
             remote_settings_persist_dirty: false,
@@ -1435,6 +1484,47 @@ impl StateInner {
 }
 
 
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct EngramMcpInstalledDescriptor {
+    binary_path: String,
+    home: String,
+    work_authority_grant: Option<String>,
+}
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct EngramAuthorityRevocationTarget {
+    binary_path: String,
+    home: String,
+    project_root: String,
+    work_authority_grant: String,
+}
+
+impl std::fmt::Debug for EngramAuthorityRevocationTarget {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("EngramAuthorityRevocationTarget")
+            .field("binary_path", &self.binary_path)
+            .field("home", &self.home)
+            .field("project_root", &self.project_root)
+            .field("work_authority_grant", &"[REDACTED]")
+            .finish()
+    }
+}
+
+impl std::fmt::Debug for EngramMcpInstalledDescriptor {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("EngramMcpInstalledDescriptor")
+            .field("binary_path", &self.binary_path)
+            .field("home", &self.home)
+            .field(
+                "work_authority_grant",
+                &self.work_authority_grant.as_ref().map(|_| "[REDACTED]"),
+            )
+            .finish()
+    }
+}
+
 /// Represents a session record.
 #[derive(Clone)]
 struct SessionRecord {
@@ -1478,12 +1568,32 @@ struct SessionRecord {
     remote_id: Option<String>,
     remote_session_id: Option<String>,
     runtime: SessionRuntime,
+    /// Descriptor actually installed into the currently attached local agent
+    /// runtime/thread. This process-local capability record is deliberately
+    /// omitted from persistence and wire snapshots; it exists so a later
+    /// clear/disable/delete can revoke a superseded grant against the binary
+    /// and home that received it.
+    engram_mcp_installed: Option<EngramMcpInstalledDescriptor>,
     runtime_reset_required: bool,
+    /// A stale Engram MCP runtime whose process termination failed and whose
+    /// handle is retained for retry. Unlike an ordinary settings reset, its
+    /// natural exit must preserve the automatic-resume safety latch.
+    engram_mcp_runtime_quarantined: bool,
     /// Persisted explicit-resume guard. User Stop and failed stop persistence
     /// both block mailbox/workflow auto-dispatch until a manual user turn
     /// resets the latch in `start_turn_on_record`.
     orchestrator_auto_dispatch_blocked: bool,
     runtime_stop_in_progress: bool,
+    /// Token-scoped owner for the runtime callback fence. The generation
+    /// prevents a stale Stop/revocation completion from releasing a newer
+    /// owner's fence after the runtime has been replaced.
+    runtime_stop_owner: Option<RuntimeStopOwner>,
+    runtime_stop_generation: u64,
+    /// An immediate Engram MCP revocation arrived while an ordinary Stop owned
+    /// the runtime callback fence. Stop completion consumes this marker: a
+    /// successful Stop has no runtime left to revoke, while a failed Stop
+    /// transfers its fence directly to the revocation teardown.
+    engram_mcp_revocation_pending: bool,
     /// Terminal callbacks deferred while `runtime_stop_in_progress` was true. Replayed in arrival
     /// order on dedicated stop failure so the session doesn't get stuck in a stale Active state or
     /// reconstruct the wrong terminal sequence when completion/error and runtime-exit both land
@@ -1509,6 +1619,49 @@ struct SessionRecord {
 }
 
 impl SessionRecord {
+    fn clear_runtime(&mut self) {
+        self.runtime = SessionRuntime::None;
+        self.engram_mcp_installed = None;
+    }
+
+    fn clear_runtime_reset(&mut self) {
+        self.runtime_reset_required = false;
+        self.engram_mcp_runtime_quarantined = false;
+    }
+
+    fn claim_runtime_stop(
+        &mut self,
+        kind: RuntimeStopOwnerKind,
+        token: RuntimeToken,
+    ) -> u64 {
+        self.runtime_stop_generation = self.runtime_stop_generation.wrapping_add(1).max(1);
+        let generation = self.runtime_stop_generation;
+        self.runtime_stop_in_progress = true;
+        self.runtime_stop_owner = Some(RuntimeStopOwner {
+            kind,
+            token,
+            generation,
+        });
+        generation
+    }
+
+    fn clear_runtime_stop(&mut self) {
+        self.runtime_stop_in_progress = false;
+        self.runtime_stop_owner = None;
+        self.engram_mcp_revocation_pending = false;
+    }
+
+    fn runtime_stop_is_owned_by(
+        &self,
+        kind: RuntimeStopOwnerKind,
+        token: &RuntimeToken,
+        generation: u64,
+    ) -> bool {
+        self.runtime_stop_owner.as_ref().is_some_and(|owner| {
+            owner.kind == kind && owner.token == *token && owner.generation == generation
+        })
+    }
+
     /// Returns the paired remote identity when this record is a valid proxy.
     fn remote_proxy_identity(&self) -> Result<Option<(&str, &str)>> {
         validate_remote_proxy_identity(

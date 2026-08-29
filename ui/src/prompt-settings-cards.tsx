@@ -30,6 +30,10 @@ import {
   codexFastServiceTier,
   matchingSessionModelOption,
 } from "./session-model-options";
+import {
+  SESSION_MODEL_OPTIONS_DEFERRED_RETRY_LIMIT,
+  sessionModelOptionsDeferredRetryDelay,
+} from "./session-model-refresh-retry";
 import type {
   AgentType,
   ApprovalPolicy,
@@ -41,6 +45,7 @@ import type {
   SandboxMode,
   Session,
   SessionModelOption,
+  SessionModelOptionsRefreshRequest,
   SessionSettingsField,
   SessionSettingsValue,
 } from "./types";
@@ -50,6 +55,7 @@ export function CodexPromptSettingsCard({
   session,
   isUpdating,
   isRefreshingModelOptions,
+  isEngramMcpRevocationPending = false,
   modelOptionsError,
   sessionNotice,
   onArchiveThread,
@@ -64,12 +70,13 @@ export function CodexPromptSettingsCard({
   session: Session;
   isUpdating: boolean;
   isRefreshingModelOptions: boolean;
+  isEngramMcpRevocationPending?: boolean;
   modelOptionsError: string | null;
   sessionNotice: string | null;
   onArchiveThread: (sessionId: string) => void;
   onCompactThread: (sessionId: string) => void;
   onForkThread: (sessionId: string, preferredPaneId: string | null) => void;
-  onRequestModelOptions: (sessionId: string) => void;
+  onRequestModelOptions: SessionModelOptionsRefreshRequest;
   onRollbackThread: (sessionId: string, numTurns: number) => void;
   onSessionSettingsChange: (
     sessionId: string,
@@ -81,6 +88,7 @@ export function CodexPromptSettingsCard({
   const [rollbackTurnsText, setRollbackTurnsText] = useState("1");
 
   useSessionModelOptionsAutoRefresh({
+    isEngramMcpRevocationPending,
     isRefreshingModelOptions,
     onRequestModelOptions,
     session,
@@ -140,7 +148,12 @@ export function CodexPromptSettingsCard({
             onChange={(nextValue) => void onSessionSettingsChange(session.id, "model", nextValue)}
           />
           <SessionModelRefreshAction
-            disabled={isUpdating || isRefreshingModelOptions}
+            disabled={
+              isUpdating ||
+              isRefreshingModelOptions ||
+              sessionBusy ||
+              isEngramMcpRevocationPending
+            }
             isRefreshing={isRefreshingModelOptions}
             sessionId={session.id}
             onRequestModelOptions={onRequestModelOptions}
@@ -336,6 +349,7 @@ export function ClaudePromptSettingsCard({
   session,
   isUpdating,
   isRefreshingModelOptions,
+  isEngramMcpRevocationPending = false,
   modelOptionsError,
   onRequestModelOptions,
   onSessionSettingsChange,
@@ -344,8 +358,9 @@ export function ClaudePromptSettingsCard({
   session: Session;
   isUpdating: boolean;
   isRefreshingModelOptions: boolean;
+  isEngramMcpRevocationPending?: boolean;
   modelOptionsError: string | null;
-  onRequestModelOptions: (sessionId: string) => void;
+  onRequestModelOptions: SessionModelOptionsRefreshRequest;
   onSessionSettingsChange: (
     sessionId: string,
     field: SessionSettingsField,
@@ -353,12 +368,14 @@ export function ClaudePromptSettingsCard({
   ) => void;
 }) {
   useSessionModelOptionsAutoRefresh({
+    isEngramMcpRevocationPending,
     isRefreshingModelOptions,
     onRequestModelOptions,
     session,
   });
 
   const modelOptions = sessionModelComboboxOptions(session.modelOptions, session.model);
+  const sessionBusy = session.status === "active" || session.status === "approval";
   const currentModelOption = currentSessionModelOption(session);
   const currentClaudeEffortValue = currentClaudeEffort(session);
   const claudeEffortOptions = claudeEffortComboboxOptions(session);
@@ -382,7 +399,12 @@ export function ClaudePromptSettingsCard({
             onChange={(nextValue) => void onSessionSettingsChange(session.id, "model", nextValue)}
           />
           <SessionModelRefreshAction
-            disabled={isUpdating || isRefreshingModelOptions}
+            disabled={
+              isUpdating ||
+              isRefreshingModelOptions ||
+              sessionBusy ||
+              isEngramMcpRevocationPending
+            }
             isRefreshing={isRefreshingModelOptions}
             sessionId={session.id}
             onRequestModelOptions={onRequestModelOptions}
@@ -452,28 +474,139 @@ export function ClaudePromptSettingsCard({
 }
 
 function useSessionModelOptionsAutoRefresh({
+  isEngramMcpRevocationPending,
   isRefreshingModelOptions,
   onRequestModelOptions,
   session,
 }: {
+  isEngramMcpRevocationPending: boolean;
   isRefreshingModelOptions: boolean;
-  onRequestModelOptions: (sessionId: string) => void;
+  onRequestModelOptions: SessionModelOptionsRefreshRequest;
   session: Session;
 }) {
   const requestedSessionIdRef = useRef<string | null>(null);
+  const deferredRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const deferredRetryAttemptRef = useRef(0);
+  const liveSessionIdRef = useRef<string | null>(session.id);
+  const previousSessionBusyRef = useRef(false);
+  const previousRevocationPendingRef = useRef(false);
+  const lastOutcomeWasDeferredRef = useRef(false);
+  const [deferredRetryGeneration, setDeferredRetryGeneration] = useState(0);
 
   useEffect(() => {
-    if (session.modelOptions?.length) {
-      requestedSessionIdRef.current = session.id;
+    liveSessionIdRef.current = session.id;
+    deferredRetryAttemptRef.current = 0;
+    previousSessionBusyRef.current = false;
+    previousRevocationPendingRef.current = false;
+    lastOutcomeWasDeferredRef.current = false;
+    return () => {
+      if (liveSessionIdRef.current === session.id) {
+        liveSessionIdRef.current = null;
+      }
+      if (deferredRetryTimerRef.current !== null) {
+        clearTimeout(deferredRetryTimerRef.current);
+        deferredRetryTimerRef.current = null;
+      }
+    };
+  }, [session.id]);
+
+  useEffect(() => {
+    const sessionBusy = session.status === "active" || session.status === "approval";
+    const wasBusy = previousSessionBusyRef.current;
+    const wasRevocationPending = previousRevocationPendingRef.current;
+    previousSessionBusyRef.current = sessionBusy;
+    previousRevocationPendingRef.current = isEngramMcpRevocationPending;
+    if (sessionBusy || isEngramMcpRevocationPending) {
+      if (deferredRetryTimerRef.current !== null) {
+        clearTimeout(deferredRetryTimerRef.current);
+        deferredRetryTimerRef.current = null;
+      }
+      // Preserve a completed request latch across ordinary turns. Only a
+      // concrete lifecycle 409 rearms automatic refresh; otherwise a broken
+      // catalog would restart Claude after every Active -> Idle transition.
       return;
     }
-    if (isRefreshingModelOptions || requestedSessionIdRef.current === session.id) {
+    if (
+      lastOutcomeWasDeferredRef.current &&
+      ((wasBusy && !sessionBusy) ||
+        (wasRevocationPending && !isEngramMcpRevocationPending))
+    ) {
+      requestedSessionIdRef.current = null;
+      deferredRetryAttemptRef.current = 0;
+      lastOutcomeWasDeferredRef.current = false;
+    }
+    if (session.modelOptions?.length) {
+      requestedSessionIdRef.current = session.id;
+      deferredRetryAttemptRef.current = 0;
+      lastOutcomeWasDeferredRef.current = false;
+      return;
+    }
+    if (
+      isRefreshingModelOptions ||
+      requestedSessionIdRef.current === session.id ||
+      deferredRetryAttemptRef.current >=
+        SESSION_MODEL_OPTIONS_DEFERRED_RETRY_LIMIT
+    ) {
       return;
     }
 
-    requestedSessionIdRef.current = session.id;
-    void onRequestModelOptions(session.id);
-  }, [isRefreshingModelOptions, onRequestModelOptions, session.id, session.modelOptions]);
+    const requestSessionId = session.id;
+    requestedSessionIdRef.current = requestSessionId;
+    void Promise.resolve(onRequestModelOptions(requestSessionId))
+      .then((outcome) => {
+        if (
+          liveSessionIdRef.current !== requestSessionId ||
+          requestedSessionIdRef.current !== requestSessionId
+        ) {
+          return;
+        }
+        if (outcome !== "deferred") {
+          deferredRetryAttemptRef.current = 0;
+          lastOutcomeWasDeferredRef.current = false;
+          return;
+        }
+        lastOutcomeWasDeferredRef.current = true;
+        if (
+          deferredRetryAttemptRef.current >=
+          SESSION_MODEL_OPTIONS_DEFERRED_RETRY_LIMIT
+        ) {
+          return;
+        }
+        const retryAttempt = deferredRetryAttemptRef.current;
+        deferredRetryAttemptRef.current += 1;
+        if (deferredRetryTimerRef.current !== null) {
+          clearTimeout(deferredRetryTimerRef.current);
+        }
+        deferredRetryTimerRef.current = setTimeout(() => {
+          deferredRetryTimerRef.current = null;
+          if (
+            liveSessionIdRef.current !== requestSessionId ||
+            requestedSessionIdRef.current !== requestSessionId
+          ) {
+            return;
+          }
+          requestedSessionIdRef.current = null;
+          setDeferredRetryGeneration((current) => current + 1);
+        }, sessionModelOptionsDeferredRetryDelay(retryAttempt));
+      })
+      .catch(() => {
+        // The production request reports ordinary failures through its own
+        // session error channel. Keep the completed latch and merely prevent
+        // an unhandled rejection from custom/test request implementations.
+        deferredRetryAttemptRef.current = 0;
+        lastOutcomeWasDeferredRef.current = false;
+      });
+  }, [
+    deferredRetryGeneration,
+    isEngramMcpRevocationPending,
+    isRefreshingModelOptions,
+    onRequestModelOptions,
+    session.id,
+    session.modelOptions,
+    session.status,
+  ]);
 }
 
 function SessionModelRefreshAction({
@@ -485,7 +618,7 @@ function SessionModelRefreshAction({
   disabled: boolean;
   isRefreshing: boolean;
   sessionId: string;
-  onRequestModelOptions: (sessionId: string) => void;
+  onRequestModelOptions: SessionModelOptionsRefreshRequest;
 }) {
   return (
     <button
@@ -662,6 +795,7 @@ export function CursorPromptSettingsCard({
   session,
   isUpdating,
   isRefreshingModelOptions,
+  isEngramMcpRevocationPending = false,
   modelOptionsError,
   onRequestModelOptions,
   onSessionSettingsChange,
@@ -670,8 +804,9 @@ export function CursorPromptSettingsCard({
   session: Session;
   isUpdating: boolean;
   isRefreshingModelOptions: boolean;
+  isEngramMcpRevocationPending?: boolean;
   modelOptionsError: string | null;
-  onRequestModelOptions: (sessionId: string) => void;
+  onRequestModelOptions: SessionModelOptionsRefreshRequest;
   onSessionSettingsChange: (
     sessionId: string,
     field: SessionSettingsField,
@@ -679,6 +814,7 @@ export function CursorPromptSettingsCard({
   ) => void;
 }) {
   useSessionModelOptionsAutoRefresh({
+    isEngramMcpRevocationPending,
     isRefreshingModelOptions,
     onRequestModelOptions,
     session,
@@ -687,6 +823,7 @@ export function CursorPromptSettingsCard({
   const modelOptions = sessionModelComboboxOptions(session.modelOptions, session.model);
   const canChangeModel = (session.modelOptions?.length ?? 0) > 0;
   const currentModelOption = currentSessionModelOption(session);
+  const sessionBusy = session.status === "active" || session.status === "approval";
 
   return (
     <article className="message-card prompt-settings-card">
@@ -708,7 +845,12 @@ export function CursorPromptSettingsCard({
             }
           />
           <SessionModelRefreshAction
-            disabled={isUpdating || isRefreshingModelOptions}
+            disabled={
+              isUpdating ||
+              isRefreshingModelOptions ||
+              sessionBusy ||
+              isEngramMcpRevocationPending
+            }
             isRefreshing={isRefreshingModelOptions}
             sessionId={session.id}
             onRequestModelOptions={onRequestModelOptions}
@@ -760,6 +902,7 @@ export function GeminiPromptSettingsCard({
   session,
   isUpdating,
   isRefreshingModelOptions,
+  isEngramMcpRevocationPending = false,
   modelOptionsError,
   onRequestModelOptions,
   onSessionSettingsChange,
@@ -768,8 +911,9 @@ export function GeminiPromptSettingsCard({
   session: Session;
   isUpdating: boolean;
   isRefreshingModelOptions: boolean;
+  isEngramMcpRevocationPending?: boolean;
   modelOptionsError: string | null;
-  onRequestModelOptions: (sessionId: string) => void;
+  onRequestModelOptions: SessionModelOptionsRefreshRequest;
   onSessionSettingsChange: (
     sessionId: string,
     field: SessionSettingsField,
@@ -777,6 +921,7 @@ export function GeminiPromptSettingsCard({
   ) => void;
 }) {
   useSessionModelOptionsAutoRefresh({
+    isEngramMcpRevocationPending,
     isRefreshingModelOptions,
     onRequestModelOptions,
     session,
@@ -785,6 +930,7 @@ export function GeminiPromptSettingsCard({
   const modelOptions = sessionModelComboboxOptions(session.modelOptions, session.model);
   const canChangeModel = (session.modelOptions?.length ?? 0) > 0;
   const currentModelOption = currentSessionModelOption(session);
+  const sessionBusy = session.status === "active" || session.status === "approval";
 
   return (
     <article className="message-card prompt-settings-card">
@@ -806,7 +952,12 @@ export function GeminiPromptSettingsCard({
             }
           />
           <SessionModelRefreshAction
-            disabled={isUpdating || isRefreshingModelOptions}
+            disabled={
+              isUpdating ||
+              isRefreshingModelOptions ||
+              sessionBusy ||
+              isEngramMcpRevocationPending
+            }
             isRefreshing={isRefreshingModelOptions}
             sessionId={session.id}
             onRequestModelOptions={onRequestModelOptions}
@@ -862,6 +1013,7 @@ export function OpenCodePromptSettingsCard({
   session,
   isUpdating,
   isRefreshingModelOptions,
+  isEngramMcpRevocationPending = false,
   modelOptionsError,
   onRequestModelOptions,
   onSessionSettingsChange,
@@ -870,8 +1022,9 @@ export function OpenCodePromptSettingsCard({
   session: Session;
   isUpdating: boolean;
   isRefreshingModelOptions: boolean;
+  isEngramMcpRevocationPending?: boolean;
   modelOptionsError: string | null;
-  onRequestModelOptions: (sessionId: string) => void;
+  onRequestModelOptions: SessionModelOptionsRefreshRequest;
   onSessionSettingsChange: (
     sessionId: string,
     field: SessionSettingsField,
@@ -879,6 +1032,7 @@ export function OpenCodePromptSettingsCard({
   ) => void;
 }) {
   useSessionModelOptionsAutoRefresh({
+    isEngramMcpRevocationPending,
     isRefreshingModelOptions,
     onRequestModelOptions,
     session,
@@ -914,6 +1068,7 @@ export function OpenCodePromptSettingsCard({
         description: option.description ?? undefined,
       })),
   ];
+  const sessionBusy = session.status === "active" || session.status === "approval";
 
   return (
     <article className="message-card prompt-settings-card">
@@ -935,7 +1090,12 @@ export function OpenCodePromptSettingsCard({
             }
           />
           <SessionModelRefreshAction
-            disabled={isUpdating || isRefreshingModelOptions}
+            disabled={
+              isUpdating ||
+              isRefreshingModelOptions ||
+              sessionBusy ||
+              isEngramMcpRevocationPending
+            }
             isRefreshing={isRefreshingModelOptions}
             sessionId={session.id}
             onRequestModelOptions={onRequestModelOptions}

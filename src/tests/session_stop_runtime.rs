@@ -739,6 +739,122 @@ fn stop_session_pauses_queued_prompt_after_shared_codex_interrupt_failure() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
+// A Stop owns a token-scoped fence while process shutdown runs off-lock. If a
+// lower-level teardown clears that owner and a successor starts before Stop
+// reacquires state, the stale Stop must not overwrite the successor runtime or
+// consume its durable queue.
+#[test]
+fn stop_session_losing_ownership_preserves_successor_runtime_and_queue() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Cursor);
+    let original_process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let (original_input_tx, _original_input_rx) = mpsc::channel();
+    let original_runtime = AcpRuntimeHandle {
+        agent: AcpAgent::Cursor,
+        runtime_id: "cursor-stop-owner-original".to_owned(),
+        input_tx: original_input_tx,
+        process: original_process.clone(),
+        turn_lifecycle: Arc::new((Mutex::new(false), Condvar::new())),
+    };
+    let successor_process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let (successor_input_tx, successor_input_rx) = mpsc::channel();
+    let successor_runtime = AcpRuntimeHandle {
+        agent: AcpAgent::Cursor,
+        runtime_id: "cursor-stop-owner-successor".to_owned(),
+        input_tx: successor_input_tx,
+        process: successor_process.clone(),
+        turn_lifecycle: Arc::new((Mutex::new(false), Condvar::new())),
+    };
+    let successor_token = RuntimeToken::Acp(successor_runtime.runtime_id.clone());
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Cursor session should exist");
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("Cursor session index should be valid");
+        record.runtime = SessionRuntime::Acp(original_runtime);
+        record.session.status = SessionStatus::Active;
+        record.queued_prompts.push_back(QueuedPromptRecord {
+            source: QueuedPromptSource::User,
+            attachments: Vec::new(),
+            pending_prompt: PendingPrompt {
+                attachments: Vec::new(),
+                id: "queued-after-stale-stop".to_owned(),
+                timestamp: stamp_now(),
+                text: "keep this queued prompt".to_owned(),
+                expanded_text: None,
+                source: None,
+            },
+        });
+        sync_pending_prompts(record);
+        state
+            .commit_locked(&mut inner)
+            .expect("original runtime should persist");
+    }
+
+    let stop_gate = install_test_stop_fence_gate(&state, &session_id);
+    let stop_state = state.clone();
+    let stop_session_id = session_id.clone();
+    let stop_thread = std::thread::spawn(move || {
+        stop_state.stop_session_with_options(
+            &stop_session_id,
+            StopSessionOptions {
+                dispatch_queued_prompts_on_success: true,
+                pause_automatic_resumes_on_success: false,
+                orchestrator_stop_instance_id: None,
+            },
+        )
+    });
+    stop_gate.wait_until_claimed();
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Cursor session should remain");
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("Cursor session index should be valid");
+        record.clear_runtime_stop();
+        record.runtime = SessionRuntime::Acp(successor_runtime);
+        record.session.status = SessionStatus::Active;
+        state
+            .commit_locked(&mut inner)
+            .expect("successor runtime should persist");
+    }
+    stop_gate.release();
+    stop_thread
+        .join()
+        .expect("Stop thread should finish")
+        .expect("stale Stop should return the current snapshot");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .find_session_index(&session_id)
+        .and_then(|index| inner.sessions.get(index))
+        .expect("successor session should remain");
+    assert!(record.runtime.matches_runtime_token(&successor_token));
+    assert_eq!(record.session.status, SessionStatus::Active);
+    assert_eq!(record.queued_prompts.len(), 1);
+    assert!(!record.runtime_stop_in_progress);
+    assert!(matches!(
+        successor_input_rx.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
+    drop(inner);
+
+    original_process
+        .wait()
+        .expect("the original process should be reaped");
+    successor_process
+        .kill()
+        .expect("the successor process should clean up");
+    successor_process
+        .wait()
+        .expect("the successor process should be reaped");
+}
+
 // A failed persistence commit happens after the queued successor was prepared
 // but before its dispatch was delivered. The speculative runtime and user
 // message must be removed while the coherent post-stop Idle record, including
@@ -1690,6 +1806,88 @@ fn runtime_exit_clears_active_turn_file_tracking_when_persist_fails() {
     assert!(record.active_turn_start_message_count.is_none());
     assert!(record.active_turn_file_changes.is_empty());
     assert!(record.active_turn_file_change_grace_deadline.is_none());
+    drop(inner);
+
+    let _ = fs::remove_dir_all(failing_persistence_path);
+}
+
+#[test]
+fn engram_mcp_revocation_publishes_terminal_state_when_persist_fails() {
+    let mut state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let (runtime, _input_rx) =
+        test_claude_runtime_handle("claude-engram-revocation-persist-failure");
+    let failing_persistence_path = std::env::temp_dir().join(format!(
+        "termal-engram-revocation-persist-failure-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&failing_persistence_path)
+        .expect("failing persistence directory should exist");
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Claude session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Claude(runtime);
+        inner.sessions[index].session.status = SessionStatus::Active;
+        inner.sessions[index].session.preview = "Streaming reply...".to_owned();
+    }
+    let mut batch = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        claim_engram_mcp_runtime_revocations_locked(&mut inner, std::slice::from_ref(&session_id))
+    };
+    assert!(batch.pending_session_ids.is_empty());
+    let target = batch
+        .targets
+        .pop()
+        .expect("Claude runtime should be claimable");
+
+    state.shutdown_persist_blocking();
+    state.persistence_path = Arc::new(failing_persistence_path.clone());
+    let mut state_events = state.subscribe_events();
+
+    let finalization = state.finish_revoked_engram_mcp_runtime_if_matches(
+        &session_id,
+        &target.token,
+        target.owner_generation,
+        target.stop_options.as_ref(),
+        false,
+        false,
+        None,
+    );
+    let error = finalization.failures.join("; ");
+    assert!(
+        error.contains("failed to persist revocation state"),
+        "unexpected revocation error: {error}"
+    );
+
+    let published: StateResponse = serde_json::from_str(
+        &state_events
+            .try_recv()
+            .expect("persist failure should publish the in-memory terminal state"),
+    )
+    .expect("published revocation snapshot should decode");
+    let published_session = published
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("published session should remain");
+    assert_eq!(published_session.status, SessionStatus::Idle);
+    assert_eq!(
+        published_session.preview,
+        "Turn stopped: Engram MCP configuration was revoked."
+    );
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("Claude session should remain");
+    assert!(matches!(record.runtime, SessionRuntime::None));
+    assert!(!record.runtime_stop_in_progress);
+    assert!(record.orchestrator_auto_dispatch_blocked);
     drop(inner);
 
     let _ = fs::remove_dir_all(failing_persistence_path);

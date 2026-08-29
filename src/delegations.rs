@@ -3308,9 +3308,9 @@ fn detach_delegation_child_runtime_locked(
         SessionRuntime::Acp(handle) => Some(KillableRuntime::Acp(handle.clone())),
         SessionRuntime::None => None,
     };
-    child.runtime = SessionRuntime::None;
-    child.runtime_reset_required = false;
-    child.runtime_stop_in_progress = false;
+    child.clear_runtime();
+    child.clear_runtime_reset();
+    child.clear_runtime_stop();
     child.deferred_stop_callbacks.clear();
     child.active_turn_start_message_count = None;
     child.active_turn_file_changes.clear();

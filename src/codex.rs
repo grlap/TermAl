@@ -1100,7 +1100,10 @@ fn handle_shared_codex_prompt_command(
     let setup_guard = PendingCodexThreadSetupGuard::new(sessions, session_id, &request_id);
 
     let mcp_config = state
-        .termal_delegation_mcp_codex_config(session_id)
+        .termal_delegation_mcp_codex_config_for_runtime(
+            session_id,
+            &RuntimeToken::Codex(runtime_id.to_owned()),
+        )
         .context("failed to build Codex delegation MCP config")?;
 
     // The command itself now lives in the setup slot; the request is built from the

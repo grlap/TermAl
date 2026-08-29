@@ -26,6 +26,8 @@ import type {
   McpElicitationAction,
   Project,
   Session,
+  SessionModelOptionsRefreshOptions,
+  SessionModelOptionsRefreshOutcome,
   SessionSettingsField,
   SessionSettingsValue,
 } from "./types";
@@ -215,8 +217,8 @@ export type UseAppSessionActionsReturn = {
   ) => Promise<void>;
   handleRefreshSessionModelOptions: (
     sessionId: string,
-    options?: { reportGlobalError?: boolean },
-  ) => Promise<void>;
+    options?: SessionModelOptionsRefreshOptions,
+  ) => Promise<SessionModelOptionsRefreshOutcome>;
   handleForkCodexThread: (
     sessionId: string,
     preferredPaneId: string | null,

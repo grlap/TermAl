@@ -253,6 +253,7 @@ export const AgentSessionPanelFooter = memo(function AgentSessionPanelFooter({
   onDraftCommit,
   onDraftAttachmentRemove,
   isRefreshingModelOptions,
+  isEngramMcpRevocationPending = false,
   modelOptionsError,
   agentCommands,
   hasLoadedAgentCommands,
@@ -285,6 +286,7 @@ export const AgentSessionPanelFooter = memo(function AgentSessionPanelFooter({
         onDraftCommit={onDraftCommit}
         onDraftAttachmentRemove={onDraftAttachmentRemove}
         isRefreshingModelOptions={isRefreshingModelOptions}
+        isEngramMcpRevocationPending={isEngramMcpRevocationPending}
         modelOptionsError={modelOptionsError}
         agentCommands={agentCommands}
         hasLoadedAgentCommands={hasLoadedAgentCommands}

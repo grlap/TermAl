@@ -27,6 +27,7 @@ import type {
   SandboxMode,
   Session,
   SessionLiveActivity,
+  SessionModelOptionsRefreshRequest,
 } from "../types";
 import type { PaneViewMode } from "../workspace";
 import type {
@@ -227,12 +228,13 @@ export type AgentSessionPanelFooterProps = {
   onDraftCommit: (sessionId: string, nextValue: string) => void;
   onDraftAttachmentRemove: (sessionId: string, attachmentId: string) => void;
   isRefreshingModelOptions: boolean;
+  isEngramMcpRevocationPending?: boolean;
   modelOptionsError: string | null;
   agentCommands: AgentCommand[];
   hasLoadedAgentCommands: boolean;
   isRefreshingAgentCommands: boolean;
   agentCommandsError: string | null;
-  onRefreshSessionModelOptions: (sessionId: string) => void;
+  onRefreshSessionModelOptions: SessionModelOptionsRefreshRequest;
   onRefreshAgentCommands: (sessionId: string) => void;
   onSend: (
     sessionId: string,
@@ -260,6 +262,7 @@ export type SessionComposerProps = {
   isSessionBusy: boolean;
   isUpdating: boolean;
   isRefreshingModelOptions: boolean;
+  isEngramMcpRevocationPending: boolean;
   modelOptionsError: string | null;
   agentCommands: AgentCommand[];
   hasLoadedAgentCommands: boolean;
@@ -271,7 +274,7 @@ export type SessionComposerProps = {
   onScrollToLatest: () => void;
   onDraftCommit: (sessionId: string, nextValue: string) => void;
   onDraftAttachmentRemove: (sessionId: string, attachmentId: string) => void;
-  onRefreshSessionModelOptions: (sessionId: string) => void;
+  onRefreshSessionModelOptions: SessionModelOptionsRefreshRequest;
   onRefreshAgentCommands: (sessionId: string) => void;
   onSend: (
     sessionId: string,

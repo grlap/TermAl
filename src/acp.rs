@@ -206,12 +206,13 @@ fn spawn_acp_runtime(
                         command,
                         response_tx,
                     } => {
-                        let refresh_result = handle_acp_session_config_refresh(
+                        let refresh_result = handle_acp_session_config_refresh_for_runtime(
                             &mut stdin,
                             &writer_pending_requests,
                             &writer_state,
                             &writer_session_id,
                             &writer_runtime_state,
+                            &writer_runtime_token,
                             agent,
                             command,
                         )
@@ -564,12 +565,13 @@ fn handle_acp_prompt_command(
     agent: AcpAgent,
     command: AcpPromptCommand,
 ) -> Result<()> {
-    let external_session_id = match ensure_acp_session_ready(
+    let external_session_id = match ensure_acp_session_ready_for_runtime(
         writer,
         pending_requests,
         state,
         session_id,
         runtime_state,
+        runtime_token,
         agent,
         &command,
     ) {
@@ -704,12 +706,57 @@ fn wait_for_acp_turn_settle(turn_lifecycle: &AcpTurnLifecycle, timeout: Duration
 }
 
 /// Handles ACP session config refresh.
+fn handle_acp_session_config_refresh_for_runtime(
+    writer: &mut impl Write,
+    pending_requests: &AcpPendingRequestMap,
+    state: &AppState,
+    session_id: &str,
+    runtime_state: &Arc<Mutex<AcpRuntimeState>>,
+    runtime_token: &RuntimeToken,
+    agent: AcpAgent,
+    command: AcpPromptCommand,
+) -> Result<()> {
+    handle_acp_session_config_refresh_inner(
+        writer,
+        pending_requests,
+        state,
+        session_id,
+        runtime_state,
+        Some(runtime_token),
+        agent,
+        command,
+    )
+}
+
+#[cfg(test)]
 fn handle_acp_session_config_refresh(
     writer: &mut impl Write,
     pending_requests: &AcpPendingRequestMap,
     state: &AppState,
     session_id: &str,
     runtime_state: &Arc<Mutex<AcpRuntimeState>>,
+    agent: AcpAgent,
+    command: AcpPromptCommand,
+) -> Result<()> {
+    handle_acp_session_config_refresh_inner(
+        writer,
+        pending_requests,
+        state,
+        session_id,
+        runtime_state,
+        None,
+        agent,
+        command,
+    )
+}
+
+fn handle_acp_session_config_refresh_inner(
+    writer: &mut impl Write,
+    pending_requests: &AcpPendingRequestMap,
+    state: &AppState,
+    session_id: &str,
+    runtime_state: &Arc<Mutex<AcpRuntimeState>>,
+    runtime_token: Option<&RuntimeToken>,
     agent: AcpAgent,
     command: AcpPromptCommand,
 ) -> Result<()> {
@@ -730,12 +777,13 @@ fn handle_acp_session_config_refresh(
             agent.label()
         );
     }
-    ensure_acp_session_ready(
+    ensure_acp_session_ready_inner(
         writer,
         pending_requests,
         state,
         session_id,
         runtime_state,
+        runtime_token,
         agent,
         &command,
     )?;
@@ -743,12 +791,57 @@ fn handle_acp_session_config_refresh(
 }
 
 /// Ensures ACP session ready.
+fn ensure_acp_session_ready_for_runtime(
+    writer: &mut impl Write,
+    pending_requests: &AcpPendingRequestMap,
+    state: &AppState,
+    session_id: &str,
+    runtime_state: &Arc<Mutex<AcpRuntimeState>>,
+    runtime_token: &RuntimeToken,
+    agent: AcpAgent,
+    command: &AcpPromptCommand,
+) -> Result<String> {
+    ensure_acp_session_ready_inner(
+        writer,
+        pending_requests,
+        state,
+        session_id,
+        runtime_state,
+        Some(runtime_token),
+        agent,
+        command,
+    )
+}
+
+#[cfg(test)]
 fn ensure_acp_session_ready(
     writer: &mut impl Write,
     pending_requests: &AcpPendingRequestMap,
     state: &AppState,
     session_id: &str,
     runtime_state: &Arc<Mutex<AcpRuntimeState>>,
+    agent: AcpAgent,
+    command: &AcpPromptCommand,
+) -> Result<String> {
+    ensure_acp_session_ready_inner(
+        writer,
+        pending_requests,
+        state,
+        session_id,
+        runtime_state,
+        None,
+        agent,
+        command,
+    )
+}
+
+fn ensure_acp_session_ready_inner(
+    writer: &mut impl Write,
+    pending_requests: &AcpPendingRequestMap,
+    state: &AppState,
+    session_id: &str,
+    runtime_state: &Arc<Mutex<AcpRuntimeState>>,
+    runtime_token: Option<&RuntimeToken>,
     agent: AcpAgent,
     command: &AcpPromptCommand,
 ) -> Result<String> {
@@ -775,7 +868,11 @@ fn ensure_acp_session_ready(
     if let Some(existing_session_id) = existing_session_id {
         return Ok(existing_session_id);
     }
-    let mcp_servers = state.termal_delegation_mcp_acp_servers(session_id)?;
+    let mcp_servers = if let Some(runtime_token) = runtime_token {
+        state.termal_delegation_mcp_acp_servers_for_runtime(session_id, runtime_token)?
+    } else {
+        state.termal_delegation_mcp_acp_servers(session_id)?
+    };
 
     let resume_session_id = command.resume_session_id.as_deref();
     let session_result = if let Some(resume_session_id) =

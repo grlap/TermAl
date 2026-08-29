@@ -1988,6 +1988,12 @@ struct StateResponse {
     delegations: Vec<DelegationStateSummary>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     delegation_waits: Vec<DelegationWaitRecord>,
+    /// Sessions whose stale Engram MCP runtime will be revoked by the Stop
+    /// operation that already owns their runtime fence. Normal snapshots and
+    /// SSE state events preserve this durable-in-memory pending state so a
+    /// mixed cleanup failure cannot hide the sessions still awaiting Stop.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pending_engram_mcp_revocation_session_ids: Vec<String>,
 }
 
 /// Represents one bounded session-tail response payload.

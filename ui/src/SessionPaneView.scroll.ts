@@ -65,6 +65,7 @@ import {
   type MessageStackKeyboardScrollIntent,
   type MessageStackScrollWriteKind,
 } from "./message-stack-scroll-sync";
+import { isViewportGrowthBottomClamp } from "./message-stack-viewport-clamp";
 import { resolvePaneScrollCommand } from "./pane-keyboard";
 import type { PaneScrollPosition } from "./pane-scroll-position-migration";
 import {
@@ -114,6 +115,18 @@ export {
 const SESSION_PAGE_SCROLL_VIEWPORT_FACTOR = 0.85;
 const SESSION_PAGE_SCROLL_MINIMUM_PX = 160;
 const SESSION_ARROW_SCROLL_STEP_PX = 40;
+const SESSION_INPUT_MOVEMENT_EPSILON_PX = 0.25;
+// Opt-in scroll diagnostics: `localStorage.termalScrollTrace = "1"` makes every
+// tail-follow detach log its call stack and geometry to the console. Off by
+// default; storage access can throw in restricted contexts, so read defensively.
+const SCROLL_TRACE_STORAGE_KEY = "termalScrollTrace";
+function isScrollTraceEnabled() {
+  try {
+    return window.localStorage.getItem(SCROLL_TRACE_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
 const SESSION_WHEEL_BURST_QUIET_MS = 48;
 const SESSION_BOTTOM_FOLLOW_STABLE_MS =
   SESSION_BOTTOM_FOLLOW_REFERENCE_FRAME_MS * 2;
@@ -586,6 +599,16 @@ export function useSessionPaneScrollState({
     options: { preserveDetachedRestore?: boolean } = {},
   ) {
     paneShouldStickToBottomRef.current[scrollStateKey] = nextValue;
+    if (!nextValue && isScrollTraceEnabled()) {
+      // Opt-in diagnostics: every path that drops tail-follow intent reports
+      // its call stack and the viewport geometry so a silent detach observed
+      // in a real browser can be attributed without guessing.
+      const traceNode = messageStackRef.current;
+      console.debug(
+        `[termal-scroll-trace] tail-follow detached key=${scrollStateKey} scrollTop=${traceNode?.scrollTop} scrollHeight=${traceNode?.scrollHeight} clientHeight=${traceNode?.clientHeight}`,
+        new Error("tail-follow detached").stack,
+      );
+    }
     if (nextValue) {
       cancelDetachedMessageStackRestore(scrollStateKey);
       delete paneTailFollowDetachedByKeyRef.current[scrollStateKey];
@@ -2558,16 +2581,43 @@ export function useSessionPaneScrollState({
     const contentDidNotShrink =
       previousGeometry !== undefined &&
       node.scrollHeight >= previousGeometry.scrollHeight;
+    // A taller viewport (composer or pending card shrinking, a panel
+    // collapsing) clamps scrollTop below the recorded bottom without any
+    // reader input. The reader is still at the physical bottom, so that frame
+    // is not an upward escape and must keep tail-follow attached.
+    const isViewportGrowthClamp =
+      previousGeometry !== undefined &&
+      typeof recordedTop === "number" &&
+      isViewportGrowthBottomClamp({
+        previousScrollTop: recordedTop,
+        previousScrollHeight: previousGeometry.scrollHeight,
+        previousClientHeight: previousGeometry.clientHeight,
+        currentScrollTop: node.scrollTop,
+        currentScrollHeight: node.scrollHeight,
+        currentClientHeight: node.clientHeight,
+      });
+    const isAtPhysicalBottom = isMessageStackAtPhysicalBottom(
+      node.scrollTop,
+      node.scrollHeight,
+      node.clientHeight,
+    );
+    // A genuine upward reader movement can never end at the physical bottom
+    // while content did not shrink. A drop that still lands there is a browser
+    // clamp or sub-pixel viewport jitter (for example the footer changing
+    // height by one pixel between two frames), which the recorded geometry
+    // cannot always witness; such a frame must not detach tail-follow.
     const movedUpFromRecordedPosition =
       contentDidNotShrink &&
+      !isViewportGrowthClamp &&
+      !isAtPhysicalBottom &&
       typeof recordedTop === "number" &&
-      node.scrollTop < recordedTop - 1;
+      node.scrollTop < recordedTop - SESSION_INPUT_MOVEMENT_EPSILON_PX;
     const movedDownFromRecordedPosition =
       messageStackNativeScrollOwnershipMovesTowardBottom(
         nativeScrollOwnership,
       ) &&
       typeof recordedTop === "number" &&
-      node.scrollTop > recordedTop + 1;
+      node.scrollTop > recordedTop + SESSION_INPUT_MOVEMENT_EPSILON_PX;
     const hasDetachedTailFollow = hasDetachedTailFollowAuthority();
     const tailFollowIsDetached =
       hasDetachedTailFollow || !getTailFollowIntent();
@@ -2578,11 +2628,6 @@ export function useSessionPaneScrollState({
     const shouldStick =
       node.scrollHeight - node.scrollTop - node.clientHeight <
       SESSION_STICKY_BOTTOM_BAND_PX;
-    const isAtPhysicalBottom = isMessageStackAtPhysicalBottom(
-      node.scrollTop,
-      node.scrollHeight,
-      node.clientHeight,
-    );
     const inputTimestamp = resolveMessageStackInputTimestamp(event.nativeEvent);
     const wallClockNow = performance.now();
     const supersededWheelBottomTick = supersededWheelBottomTickRef.current;
@@ -2728,6 +2773,8 @@ export function useSessionPaneScrollState({
       // is the natural reattachment action. A shrink can make an unchanged
       // detached position become the physical bottom; that geometry change
       // must not manufacture bottom-follow authority and replay a later pin.
+      // Do not require a whole CSS pixel here: fractional zoom can leave only
+      // a 0.5px input-owned step to the reachable bottom.
       paneScrollPositions[scrollStateKey] = recordPaneScrollGeometry(node, {
         top: node.scrollTop,
         shouldStick: true,

@@ -31,6 +31,7 @@ import type {
   DiffMessage,
   Message,
   Session,
+  SessionModelOptionsRefreshRequest,
   SessionSettingsField,
   SessionSettingsValue,
 } from "./types";
@@ -123,6 +124,7 @@ type UseSessionRenderCallbacksParams = {
     messageId: string,
   ) => ConnectionRetryDisplayState | undefined;
   isRefreshingModelOptions: boolean;
+  isEngramMcpRevocationPending?: boolean;
   latestAssistantMessageId: string | null;
   streamingAssistantTextMessageId: string | null;
   modelOptionsError: string | null;
@@ -165,7 +167,7 @@ type UseSessionRenderCallbacksParams = {
     prompt: string,
   ) => void;
   onComposerError?: (message: string | null) => void;
-  onRefreshSessionModelOptions: (sessionId: string) => void;
+  onRefreshSessionModelOptions: SessionModelOptionsRefreshRequest;
   onRollbackCodexThread: (sessionId: string, numTurns: number) => void;
   onUnarchiveCodexThread: (sessionId: string) => void;
   paneId: string;
@@ -203,6 +205,7 @@ export function useSessionRenderCallbacks({
   editorAppearance,
   getConnectionRetryDisplayState,
   isRefreshingModelOptions,
+  isEngramMcpRevocationPending = false,
   latestAssistantMessageId,
   streamingAssistantTextMessageId,
   modelOptionsError,
@@ -595,6 +598,7 @@ export function useSessionRenderCallbacks({
             session={session}
             isUpdating={panelIsUpdating}
             isRefreshingModelOptions={isRefreshingModelOptions}
+            isEngramMcpRevocationPending={isEngramMcpRevocationPending}
             modelOptionsError={modelOptionsError}
             sessionNotice={
               session.id === activeSession?.id ? sessionSettingNotice : null
@@ -617,6 +621,7 @@ export function useSessionRenderCallbacks({
             session={session}
             isUpdating={panelIsUpdating}
             isRefreshingModelOptions={isRefreshingModelOptions}
+            isEngramMcpRevocationPending={isEngramMcpRevocationPending}
             modelOptionsError={modelOptionsError}
             onRequestModelOptions={onRefreshSessionModelOptions}
             onSessionSettingsChange={handleSettingsChange}
@@ -631,6 +636,7 @@ export function useSessionRenderCallbacks({
             session={session}
             isUpdating={panelIsUpdating}
             isRefreshingModelOptions={isRefreshingModelOptions}
+            isEngramMcpRevocationPending={isEngramMcpRevocationPending}
             modelOptionsError={modelOptionsError}
             onRequestModelOptions={onRefreshSessionModelOptions}
             onSessionSettingsChange={handleSettingsChange}
@@ -645,6 +651,7 @@ export function useSessionRenderCallbacks({
             session={session}
             isUpdating={panelIsUpdating}
             isRefreshingModelOptions={isRefreshingModelOptions}
+            isEngramMcpRevocationPending={isEngramMcpRevocationPending}
             modelOptionsError={modelOptionsError}
             onRequestModelOptions={onRefreshSessionModelOptions}
             onSessionSettingsChange={handleSettingsChange}
@@ -659,6 +666,7 @@ export function useSessionRenderCallbacks({
             session={session}
             isUpdating={panelIsUpdating}
             isRefreshingModelOptions={isRefreshingModelOptions}
+            isEngramMcpRevocationPending={isEngramMcpRevocationPending}
             modelOptionsError={modelOptionsError}
             onRequestModelOptions={onRefreshSessionModelOptions}
             onSessionSettingsChange={handleSettingsChange}
@@ -671,6 +679,7 @@ export function useSessionRenderCallbacks({
     [
       activeSession?.id,
       isRefreshingModelOptions,
+      isEngramMcpRevocationPending,
       modelOptionsError,
       onArchiveCodexThread,
       onCompactCodexThread,

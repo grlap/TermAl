@@ -23,6 +23,7 @@ import {
   type MessageStackScrollWriteDetail,
   type MessageStackUserScrollIntentDetail,
 } from "../message-stack-scroll-sync";
+import { isViewportGrowthBottomClamp } from "../message-stack-viewport-clamp";
 import {
   DEFAULT_VIRTUALIZED_VIEWPORT_HEIGHT,
   getScrollContainerBottomGap,
@@ -77,6 +78,7 @@ export function resolveStableHeightNativeUserMovement({
 
 export function nativeScrollKeepsPassiveTailFollow({
   hadUserScrollInteraction,
+  isBottomLandingClamp,
   isDetachedFromBottom,
   isNativeUserMovement,
   isProgrammaticNavigation,
@@ -85,6 +87,11 @@ export function nativeScrollKeepsPassiveTailFollow({
   tailFollowIntent,
 }: {
   hadUserScrollInteraction: boolean;
+  // A scrollTop drop that still lands at the physical bottom with
+  // non-shrinking content: a viewport-growth clamp or sub-pixel jitter, never
+  // reader movement, so it keeps an attached reader attached even after an
+  // earlier interaction.
+  isBottomLandingClamp: boolean;
   isDetachedFromBottom: boolean;
   isNativeUserMovement: boolean;
   isProgrammaticNavigation: boolean;
@@ -92,6 +99,13 @@ export function nativeScrollKeepsPassiveTailFollow({
   scrollHeightDelta: number;
   tailFollowIntent: boolean;
 }) {
+  if (
+    isBottomLandingClamp &&
+    tailFollowIntent &&
+    !isDetachedFromBottom
+  ) {
+    return true;
+  }
   return (
     tailFollowIntent &&
     !hadUserScrollInteraction &&
@@ -200,6 +214,7 @@ export function useVirtualizedConversationScrollEvents({
   isMeasuringPostActivation,
   lastNativeScrollTopRef,
   lastNativeScrollHeightRef,
+  lastNativeClientHeightRef,
   lastTouchClientYRef,
   lastUserScrollInputTimeRef,
   lastUserScrollKindRef,
@@ -252,6 +267,7 @@ export function useVirtualizedConversationScrollEvents({
   isMeasuringPostActivation: boolean;
   lastNativeScrollTopRef: MutableRefObject<number>;
   lastNativeScrollHeightRef: MutableRefObject<number>;
+  lastNativeClientHeightRef: MutableRefObject<number>;
   lastTouchClientYRef: MutableRefObject<number | null>;
   lastUserScrollInputTimeRef: MutableRefObject<number>;
   lastUserScrollKindRef: MutableRefObject<UserScrollKind>;
@@ -355,6 +371,8 @@ export function useVirtualizedConversationScrollEvents({
           });
         const previousNativeScrollHeight = lastNativeScrollHeightRef.current;
         lastNativeScrollHeightRef.current = node.scrollHeight;
+        const previousNativeClientHeight = lastNativeClientHeightRef.current;
+        lastNativeClientHeightRef.current = node.clientHeight;
         const pendingProgrammaticScrollTop =
           pendingProgrammaticScrollTopRef.current;
         const isProgrammaticScrollEvent =
@@ -378,7 +396,8 @@ export function useVirtualizedConversationScrollEvents({
           // separately governed by bottom authority.
           clearPendingDeferredLayoutTimer();
           pendingDeferredLayoutAnchorRef.current = null;
-          const scrollDelta = node.scrollTop - lastNativeScrollTopRef.current;
+          const previousNativeScrollTop = lastNativeScrollTopRef.current;
+          const scrollDelta = node.scrollTop - previousNativeScrollTop;
           const scrollHeightDelta =
             node.scrollHeight - previousNativeScrollHeight;
           lastNativeScrollTopRef.current = node.scrollTop;
@@ -393,13 +412,36 @@ export function useVirtualizedConversationScrollEvents({
               previousScrollHeight: previousNativeScrollHeight,
               scrollDelta,
             });
+          // When the viewport grows under a bottom-pinned reader (a composer
+          // or pending card shrinking, a panel collapsing), the browser clamps
+          // scrollTop down to the new maximum. The reader did not move and is
+          // still at the bottom, so that frame must not read as an escape.
+          const isViewportGrowthClamp = isViewportGrowthBottomClamp({
+            previousScrollTop: previousNativeScrollTop,
+            previousScrollHeight: previousNativeScrollHeight,
+            previousClientHeight: previousNativeClientHeight,
+            currentScrollTop: node.scrollTop,
+            currentScrollHeight: node.scrollHeight,
+            currentClientHeight: node.clientHeight,
+          });
+          // The recorded client height cannot witness every viewport change:
+          // a sub-pixel footer jitter between two native frames drops
+          // scrollTop by a pixel while the reader is still at the physical
+          // bottom. No genuine upward movement ends there with non-shrinking
+          // content, so treat every such landing like the growth clamp.
+          const isBottomLandingClamp =
+            isViewportGrowthClamp ||
+            (scrollDelta < 0 &&
+              scrollHeightDelta >= 0 &&
+              isScrollContainerAtPhysicalBottom(node));
           // A deferred mount or remeasurement can increase content height
           // between native scroll events. An upward scrollTop delta across
           // non-shrinking content is still reader movement; prepend/compaction
           // restores move with their height delta and shrink clamps are below.
           const isNativeUserMovement =
-            isStableHeightNativeUserMovement ||
-            (scrollDelta < 0 && scrollHeightDelta >= 0);
+            !isBottomLandingClamp &&
+            (isStableHeightNativeUserMovement ||
+              (scrollDelta < 0 && scrollHeightDelta >= 0));
           if (
             nativeScrollAdvancesUserScrollGeneration({
               isExpectedPrependNativeReflow,
@@ -412,11 +454,12 @@ export function useVirtualizedConversationScrollEvents({
             // token may preserve the generation across such a native frame.
             advanceUserScrollGeneration();
           }
-          if (Math.abs(scrollDelta) >= 0.5) {
+          if (!isBottomLandingClamp && Math.abs(scrollDelta) >= 0.5) {
             pendingPrependedBottomGapRef.current = null;
           }
           const isPassiveTailFollowScroll = nativeScrollKeepsPassiveTailFollow({
             hadUserScrollInteraction,
+            isBottomLandingClamp,
             isDetachedFromBottom: isDetachedFromBottomRef.current,
             isNativeUserMovement,
             isProgrammaticNavigation,
@@ -424,7 +467,10 @@ export function useVirtualizedConversationScrollEvents({
             scrollHeightDelta,
             tailFollowIntent,
           });
-          if (lastUserScrollKindRef.current === null) {
+          if (
+            !isBottomLandingClamp &&
+            lastUserScrollKindRef.current === null
+          ) {
             lastUserScrollKindRef.current = resolveNativeScrollKind(
               lastUserScrollKindRef.current,
               scrollDelta,
@@ -1005,6 +1051,7 @@ export function useVirtualizedConversationScrollEvents({
     syncViewport();
     lastNativeScrollTopRef.current = node.scrollTop;
     lastNativeScrollHeightRef.current = node.scrollHeight;
+    lastNativeClientHeightRef.current = node.clientHeight;
     const onNativeScroll = () => {
       syncViewport({ isNativeScrollEvent: true });
     };

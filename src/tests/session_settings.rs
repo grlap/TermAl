@@ -200,6 +200,143 @@ fn opencode_model_refresh_restarts_ready_runtime_before_handshake() {
 }
 
 #[test]
+fn model_refresh_rejects_active_or_runtime_stop_owned_sessions_without_replacing_runtime() {
+    for (agent, runtime) in [
+        {
+            let (runtime, _rx) = test_claude_runtime_handle("refresh-fence-claude");
+            (Agent::Claude, SessionRuntime::Claude(runtime))
+        },
+        {
+            let (runtime, _rx) = test_codex_runtime_handle("refresh-fence-codex");
+            (Agent::Codex, SessionRuntime::Codex(runtime))
+        },
+        {
+            let (runtime, _rx) = test_acp_runtime_handle(AcpAgent::Cursor, "refresh-fence-cursor");
+            (Agent::Cursor, SessionRuntime::Acp(runtime))
+        },
+    ] {
+        let state = test_app_state();
+        let session_id = test_session_id(&state, agent);
+        let token = runtime
+            .runtime_token()
+            .expect("test runtime should have a token");
+        {
+            let mut inner = state.inner.lock().expect("state mutex poisoned");
+            let index = inner
+                .find_session_index(&session_id)
+                .expect("test session should exist");
+            let record = inner
+                .session_mut_by_index(index)
+                .expect("test session index should be valid");
+            record.runtime = runtime;
+            record.session.status = SessionStatus::Active;
+        }
+
+        let active_error = match state.refresh_session_model_options(&session_id) {
+            Ok(_) => panic!("active refresh must not replace a live runtime"),
+            Err(error) => error,
+        };
+        assert_eq!(active_error.status, StatusCode::CONFLICT, "{agent:?}");
+        {
+            let mut inner = state.inner.lock().expect("state mutex poisoned");
+            let index = inner
+                .find_session_index(&session_id)
+                .expect("test session should remain");
+            let record = inner
+                .session_mut_by_index(index)
+                .expect("test session index should be valid");
+            assert!(record.runtime.matches_runtime_token(&token), "{agent:?}");
+            record.session.status = SessionStatus::Idle;
+            record.claim_runtime_stop(RuntimeStopOwnerKind::EngramMcpRevocation, token.clone());
+        }
+
+        let fenced_error = match state.refresh_session_model_options(&session_id) {
+            Ok(_) => panic!("owned runtime stop fence must block model refresh"),
+            Err(error) => error,
+        };
+        assert_eq!(fenced_error.status, StatusCode::CONFLICT, "{agent:?}");
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let record = inner
+            .find_session_index(&session_id)
+            .and_then(|index| inner.sessions.get(index))
+            .expect("test session should remain");
+        assert!(record.runtime.matches_runtime_token(&token), "{agent:?}");
+        assert!(record.runtime_stop_in_progress, "{agent:?}");
+    }
+}
+
+#[test]
+fn model_refresh_clears_engram_quarantine_before_attaching_successor_runtime() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Cursor);
+    let (stale_runtime, _stale_input_rx) =
+        test_acp_runtime_handle(AcpAgent::Cursor, "quarantined-cursor-refresh-old");
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Cursor session should exist");
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("Cursor session index should be valid");
+        record.session.status = SessionStatus::Error;
+        record.runtime = SessionRuntime::Acp(stale_runtime);
+        record.runtime_reset_required = true;
+        record.engram_mcp_runtime_quarantined = true;
+        record.orchestrator_auto_dispatch_blocked = true;
+    }
+
+    let (fresh_runtime, fresh_input_rx) =
+        test_acp_runtime_handle(AcpAgent::Cursor, "quarantined-cursor-refresh-fresh");
+    state.install_test_acp_runtime_override(AcpAgent::Cursor, fresh_runtime);
+    let responder = std::thread::spawn(move || {
+        match fresh_input_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("fresh Cursor runtime should receive config refresh")
+        {
+            AcpRuntimeCommand::RefreshSessionConfig { response_tx, .. } => response_tx
+                .send(Ok(()))
+                .expect("refresh result receiver should remain live"),
+            _ => panic!("expected ACP config refresh command"),
+        }
+    });
+
+    state
+        .refresh_session_model_options(&session_id)
+        .expect("model refresh should replace the quarantined runtime");
+    responder.join().expect("refresh responder should finish");
+
+    let successor_token = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let record = inner
+            .find_session_index(&session_id)
+            .and_then(|index| inner.sessions.get(index))
+            .expect("Cursor session should remain");
+        assert!(matches!(
+            &record.runtime,
+            SessionRuntime::Acp(handle)
+                if handle.runtime_id == "quarantined-cursor-refresh-fresh"
+        ));
+        assert!(!record.runtime_reset_required);
+        assert!(!record.engram_mcp_runtime_quarantined);
+        record
+            .runtime
+            .runtime_token()
+            .expect("successor runtime should have a token")
+    };
+
+    state
+        .handle_runtime_exit_if_matches(&session_id, &successor_token, None)
+        .expect("successor runtime exit should reconcile normally");
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .find_session_index(&session_id)
+        .and_then(|index| inner.sessions.get(index))
+        .expect("Cursor session should remain after successor exit");
+    assert!(!record.orchestrator_auto_dispatch_blocked);
+}
+
+#[test]
 fn offline_opencode_effort_and_mode_changes_do_not_claim_agent_effective_state() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::OpenCode);

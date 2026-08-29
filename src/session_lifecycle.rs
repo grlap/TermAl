@@ -36,6 +36,97 @@
 // `proxy_remote_cancel_queued_prompt`, `proxy_remote_stop_session` in
 // `src/remote.rs`) and never touches a local runtime.
 
+#[cfg(test)]
+struct TestStopFenceGate {
+    claimed_tx: std::sync::mpsc::Sender<()>,
+    release_rx: std::sync::mpsc::Receiver<()>,
+}
+
+#[cfg(test)]
+type TestStopFenceGateKey = (usize, String);
+
+#[cfg(test)]
+static TEST_STOP_FENCE_GATES: std::sync::LazyLock<
+    std::sync::Mutex<HashMap<TestStopFenceGateKey, TestStopFenceGate>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(HashMap::new()));
+
+#[cfg(test)]
+struct TestStopFenceGateControl {
+    key: TestStopFenceGateKey,
+    claimed_rx: std::sync::mpsc::Receiver<()>,
+    release_tx: std::sync::mpsc::Sender<()>,
+}
+
+#[cfg(test)]
+impl TestStopFenceGateControl {
+    fn wait_until_claimed(&self) {
+        self.claimed_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("Stop should claim its callback fence");
+    }
+
+    fn release(&self) {
+        self.release_tx
+            .send(())
+            .expect("Stop gate should remain connected");
+    }
+}
+
+#[cfg(test)]
+impl Drop for TestStopFenceGateControl {
+    fn drop(&mut self) {
+        TEST_STOP_FENCE_GATES
+            .lock()
+            .expect("test Stop fence gate mutex poisoned")
+            .remove(&self.key);
+    }
+}
+
+#[cfg(test)]
+fn test_stop_fence_gate_key(state: &AppState, session_id: &str) -> TestStopFenceGateKey {
+    (Arc::as_ptr(&state.inner) as usize, session_id.to_owned())
+}
+
+#[cfg(test)]
+fn install_test_stop_fence_gate(
+    state: &AppState,
+    session_id: &str,
+) -> TestStopFenceGateControl {
+    let (claimed_tx, claimed_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let key = test_stop_fence_gate_key(state, session_id);
+    TEST_STOP_FENCE_GATES
+        .lock()
+        .expect("test Stop fence gate mutex poisoned")
+        .insert(
+            key.clone(),
+            TestStopFenceGate {
+                claimed_tx,
+                release_rx,
+            },
+        );
+    TestStopFenceGateControl {
+        key,
+        claimed_rx,
+        release_tx,
+    }
+}
+
+#[cfg(test)]
+fn wait_at_test_stop_fence_gate(state: &AppState, session_id: &str) {
+    let gate = TEST_STOP_FENCE_GATES
+        .lock()
+        .expect("test Stop fence gate mutex poisoned")
+        .remove(&test_stop_fence_gate_key(state, session_id));
+    if let Some(gate) = gate {
+        gate.claimed_tx
+            .send(())
+            .expect("test Stop fence observer should remain connected");
+        gate.release_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("test Stop fence gate should be released");
+    }
+}
 impl AppState {
     /// Destructively removes a session: tears down its runtime (kill
     /// child process for Claude/ACP, `turn/interrupt` + detach for shared
@@ -256,7 +347,7 @@ impl AppState {
         if self.remote_session_target(session_id)?.is_some() {
             return self.proxy_remote_stop_session(session_id);
         }
-        let (runtime_to_stop, stop_failure_is_best_effort) = {
+        let (runtime_to_stop, stop_failure_is_best_effort, stop_token, stop_owner_generation) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_visible_session_index(session_id)
@@ -285,41 +376,135 @@ impl AppState {
                 }
             };
             let stop_failure_is_best_effort = runtime.stop_failure_is_best_effort();
+            let stop_token = record
+                .runtime
+                .runtime_token()
+                .expect("killable runtime should have a token");
 
             // Preserve the public session status until the stop succeeds so borrowed state reads
             // never observe a contradictory transient Idle snapshot while shutdown is still pending.
             // `deferred_stop_callbacks` is guaranteed to be empty here because the guard above
             // already returned if `runtime_stop_in_progress` was true (and callbacks can only
             // defer when that flag is set).
-            record.runtime_stop_in_progress = true;
+            let stop_owner_generation = record.claim_runtime_stop(
+                RuntimeStopOwnerKind::UserStop,
+                stop_token.clone(),
+            );
 
-            (runtime, stop_failure_is_best_effort)
+            (
+                runtime,
+                stop_failure_is_best_effort,
+                stop_token,
+                stop_owner_generation,
+            )
         };
+
+        #[cfg(test)]
+        wait_at_test_stop_fence_gate(self, session_id);
 
         let clear_external_session_id =
             match shutdown_stopped_runtime(runtime_to_stop, &format!("session `{session_id}`")) {
                 Ok(()) => false,
-            Err(err) => {
+                Err(err) => {
                 if stop_failure_is_best_effort {
+                    let pending_revocation_target = {
+                        let mut inner = self.inner.lock().expect("state mutex poisoned");
+                        let index = inner
+                            .find_visible_session_index(session_id)
+                            .ok_or_else(|| ApiError::not_found("session not found"))?;
+                        take_pending_engram_mcp_revocation_after_stop_failure_locked(
+                            &mut inner,
+                            index,
+                            stop_owner_generation,
+                            options.clone(),
+                        )
+                    };
+                    if let Some(target) = pending_revocation_target {
+                        // A shared Codex interrupt failure already detached the
+                        // session. Finalize that exact failure under the
+                        // transferred revocation fence instead of retrying an
+                        // interrupt that can only no-op after detachment.
+                        let mut outcome = self.finalize_revoked_engram_mcp_runtimes(
+                            EngramMcpRuntimeRevocationShutdownBatch {
+                                shutdowns: vec![EngramMcpRuntimeRevocationShutdown {
+                                    target,
+                                    shutdown_error: Some(format!(
+                                        "shared Codex interrupt failed after detach; the revoked grant blocks further mutations, but the old thread may still read until Codex unloads it: {err:#}"
+                                    )),
+                                    retain_runtime_for_retry: false,
+                                    suppress_codex_thread_resume: true,
+                                }],
+                                pending_session_ids: Vec::new(),
+                            },
+                        );
+                        self.resume_revoked_engram_mcp_sessions(&mut outcome);
+                        return match self.finish_revoked_engram_mcp_runtime_outcome(outcome) {
+                            Ok(_) => Err(ApiError::internal(format!(
+                                "failed to stop session `{session_id}` cleanly after shared Codex detach: {err:#}"
+                            ))),
+                            Err(cleanup_error) => Err(ApiError::internal(format!(
+                                "failed to stop session `{session_id}` cleanly: {err:#}; {}",
+                                cleanup_error.message
+                            ))),
+                        };
+                    }
                     eprintln!(
                         "session cleanup warning> failed to stop session `{session_id}` cleanly: {err:#}"
                     );
                     true
                 } else {
-                    let (mut deferred_callbacks, token) = {
+                    let (mut deferred_callbacks, token, pending_revocation_target) = {
                         let mut inner = self.inner.lock().expect("state mutex poisoned");
                         let index = inner
                             .find_visible_session_index(session_id)
                             .ok_or_else(|| ApiError::not_found("session not found"))?;
-                        let record = inner
-                            .session_mut_by_index(index)
-                            .expect("session index should be valid");
-                        record.runtime_stop_in_progress = false;
-                        let deferred_callbacks =
-                            std::mem::take(&mut record.deferred_stop_callbacks);
-                        let token = record.runtime.runtime_token();
-                        (deferred_callbacks, token)
+                        let pending_revocation_target =
+                            take_pending_engram_mcp_revocation_after_stop_failure_locked(
+                                &mut inner,
+                                index,
+                                stop_owner_generation,
+                                options.clone(),
+                            );
+                        if pending_revocation_target.is_some() {
+                            (Vec::new(), None, pending_revocation_target)
+                        } else {
+                            let record = inner
+                                .session_mut_by_index(index)
+                                .expect("session index should be valid");
+                            if !record.runtime_stop_is_owned_by(
+                                RuntimeStopOwnerKind::UserStop,
+                                &stop_token,
+                                stop_owner_generation,
+                            ) {
+                                return Err(ApiError::internal(format!(
+                                    "failed to stop session `{session_id}` cleanly after stop ownership changed: {err:#}"
+                                )));
+                            }
+                            record.clear_runtime_stop();
+                            let deferred_callbacks =
+                                std::mem::take(&mut record.deferred_stop_callbacks);
+                            let token = record.runtime.runtime_token();
+                            (deferred_callbacks, token, None)
+                        }
                     };
+
+                    if let Some(target) = pending_revocation_target {
+                        let cleanup_result = self.teardown_revoked_engram_mcp_runtimes(
+                            EngramMcpRuntimeRevocationBatch {
+                                targets: vec![target],
+                                pending_session_ids: Vec::new(),
+                                newly_pending_session_ids: Vec::new(),
+                            },
+                            "pending Engram MCP revocation after failed Stop",
+                        );
+                        return match cleanup_result {
+                            Ok(_) => Ok(self.snapshot()),
+                            Err(cleanup_error) => Err(ApiError::internal(format!(
+                                "failed to stop session `{session_id}` cleanly: {err:#}; pending Engram MCP revocation also degraded: {}",
+                                cleanup_error.message
+                            ))),
+                        };
+                    }
 
                     // Replay any terminal callbacks that arrived during the failed shutdown window.
                     // The flag is now cleared so the callback methods will proceed normally.
@@ -372,6 +557,34 @@ impl AppState {
             let index = inner
                 .find_visible_session_index(session_id)
                 .ok_or_else(|| ApiError::not_found("session not found"))?;
+            if !inner.sessions[index].runtime_stop_is_owned_by(
+                RuntimeStopOwnerKind::UserStop,
+                &stop_token,
+                stop_owner_generation,
+            ) {
+                let pending_engram = prepared_queued_turn
+                    .as_ref()
+                    .and_then(|prepared| prepared.pending_engram.clone());
+                if abandon_engram_pending_dispatch(
+                    inner
+                        .session_mut_by_index(index)
+                        .expect("session index should be valid"),
+                    pending_engram,
+                ) {
+                    if let Err(error) = self.commit_locked(&mut inner) {
+                        inner
+                            .session_mut_by_index(index)
+                            .expect("session index should be valid")
+                            .orchestrator_auto_dispatch_blocked = true;
+                        self.publish_state_locked(&inner);
+                        return Err(ApiError::internal(format!(
+                            "failed to persist abandoned queued dispatch after Stop ownership changed: {error:#}"
+                        )));
+                    }
+                }
+                drop(inner);
+                return Ok(self.snapshot());
+            }
             let message_id = inner.next_message_id();
             let file_change_message_id =
                 (!inner.sessions[index].active_turn_file_changes.is_empty())
@@ -382,9 +595,9 @@ impl AppState {
                     .session_mut_by_index(index)
                     .expect("session index should be valid");
                 take_and_abandon_engram_pending_dispatch(record);
-                record.runtime = SessionRuntime::None;
-                record.runtime_reset_required = false;
-                record.runtime_stop_in_progress = false;
+                record.clear_runtime();
+                record.clear_runtime_reset();
+                record.clear_runtime_stop();
                 record.deferred_stop_callbacks.clear();
                 if suppress_automatic_resume {
                     record.orchestrator_auto_dispatch_blocked = true;

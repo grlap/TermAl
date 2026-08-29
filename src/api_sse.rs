@@ -53,6 +53,7 @@ fn empty_state_events_response() -> StateResponse {
         sessions: Vec::new(),
         delegations: Vec::new(),
         delegation_waits: Vec::new(),
+        pending_engram_mcp_revocation_session_ids: Vec::new(),
     }
 }
 

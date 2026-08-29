@@ -1192,6 +1192,7 @@ fn sample_remote_orchestrator_state(
         sessions,
         delegations: Vec::new(),
         delegation_waits: Vec::new(),
+        pending_engram_mcp_revocation_session_ids: Vec::new(),
     }
 }
 
@@ -1280,6 +1281,17 @@ fn force_test_kill_child_process_failure(
         .lock()
         .expect("test kill-child-process failure mutex poisoned");
     set_test_kill_child_process_failure(Some(label), Some(process));
+    TestKillChildProcessFailureGuard { _scope: scope }
+}
+
+fn force_test_kill_child_process_failure_once(
+    process: &Arc<SharedChild>,
+    label: &str,
+) -> TestKillChildProcessFailureGuard {
+    let scope = TEST_KILL_CHILD_PROCESS_FAILURE_MUTEX
+        .lock()
+        .expect("test kill-child-process failure mutex poisoned");
+    set_test_kill_child_process_failure_count(label, process, 1);
     TestKillChildProcessFailureGuard { _scope: scope }
 }
 

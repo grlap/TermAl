@@ -248,6 +248,7 @@ export function useAppLiveState(
     setOrchestrators,
     setDelegationWaits,
     setDelegationChildSessionIds,
+    setPendingEngramMcpRevocationSessionIds = () => undefined,
     setWorkspaceSummaries,
     setDraftsBySessionId,
     setDraftAttachmentsBySessionId,
@@ -1530,6 +1531,18 @@ export function useAppLiveState(
       setContainsOnlyValuesFrom(current, nextDelegationChildSessionIds)
         ? current
         : nextDelegationChildSessionIds,
+    );
+    const nextPendingEngramMcpRevocationSessionIds = new Set(
+      nextState.pendingEngramMcpRevocationSessionIds ?? [],
+    );
+    setPendingEngramMcpRevocationSessionIds((current) =>
+      current.size === nextPendingEngramMcpRevocationSessionIds.size &&
+      setContainsOnlyValuesFrom(
+        current,
+        nextPendingEngramMcpRevocationSessionIds,
+      )
+        ? current
+        : nextPendingEngramMcpRevocationSessionIds,
     );
     if (adoptedStateSlices.workspaces !== currentWorkspaceSummaries) {
       workspaceSummariesRef.current = adoptedStateSlices.workspaces;

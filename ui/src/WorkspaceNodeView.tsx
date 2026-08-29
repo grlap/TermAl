@@ -59,6 +59,7 @@ import type {
   Project,
   RemoteConfig,
   Session,
+  SessionModelOptionsRefreshRequest,
   SessionSettingsField,
   SessionSettingsValue,
   WorkspaceFilesChangedEvent,
@@ -96,6 +97,7 @@ export function WorkspaceNodeView({
   killingSessionIds,
   updatingSessionIds,
   refreshingSessionModelOptionIds,
+  pendingEngramMcpRevocationSessionIds,
   sessionModelOptionErrors,
   agentCommandsBySessionId,
   refreshingAgentCommandSessionIds,
@@ -182,6 +184,7 @@ export function WorkspaceNodeView({
   killingSessionIds: SessionFlagMap;
   updatingSessionIds: SessionFlagMap;
   refreshingSessionModelOptionIds: SessionFlagMap;
+  pendingEngramMcpRevocationSessionIds: ReadonlySet<string>;
   sessionModelOptionErrors: Record<string, string | undefined>;
   agentCommandsBySessionId: SessionAgentCommandMap;
   refreshingAgentCommandSessionIds: SessionFlagMap;
@@ -365,7 +368,7 @@ export function WorkspaceNodeView({
     sessionId: string,
     preferredPaneId: string | null,
   ) => void;
-  onRefreshSessionModelOptions: (sessionId: string) => void;
+  onRefreshSessionModelOptions: SessionModelOptionsRefreshRequest;
   onRefreshAgentCommands: (sessionId: string) => void;
   onCreateConversationMarker: (
     sessionId: string,
@@ -429,6 +432,9 @@ export function WorkspaceNodeView({
           pane.activeSessionId
             ? Boolean(refreshingSessionModelOptionIds[pane.activeSessionId])
             : false
+        }
+        pendingEngramMcpRevocationSessionIds={
+          pendingEngramMcpRevocationSessionIds
         }
         modelOptionsError={
           pane.activeSessionId
@@ -593,6 +599,9 @@ export function WorkspaceNodeView({
           killingSessionIds={killingSessionIds}
           updatingSessionIds={updatingSessionIds}
           refreshingSessionModelOptionIds={refreshingSessionModelOptionIds}
+          pendingEngramMcpRevocationSessionIds={
+            pendingEngramMcpRevocationSessionIds
+          }
           sessionModelOptionErrors={sessionModelOptionErrors}
           agentCommandsBySessionId={agentCommandsBySessionId}
           refreshingAgentCommandSessionIds={refreshingAgentCommandSessionIds}
@@ -691,6 +700,9 @@ export function WorkspaceNodeView({
           killingSessionIds={killingSessionIds}
           updatingSessionIds={updatingSessionIds}
           refreshingSessionModelOptionIds={refreshingSessionModelOptionIds}
+          pendingEngramMcpRevocationSessionIds={
+            pendingEngramMcpRevocationSessionIds
+          }
           sessionModelOptionErrors={sessionModelOptionErrors}
           agentCommandsBySessionId={agentCommandsBySessionId}
           refreshingAgentCommandSessionIds={refreshingAgentCommandSessionIds}

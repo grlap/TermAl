@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -8,6 +8,10 @@ import {
   GeminiPromptSettingsCard,
   OpenCodePromptSettingsCard,
 } from "./prompt-settings-cards";
+import {
+  SESSION_MODEL_OPTIONS_DEFERRED_RETRY_LIMIT,
+  sessionModelOptionsDeferredRetryDelay,
+} from "./session-model-refresh-retry";
 import type { Session } from "./types";
 
 function makeSession(id: string, overrides?: Partial<Session>): Session {
@@ -66,6 +70,295 @@ describe("session model refresh controls", () => {
     expect(
       screen.getByRole("button", { name: "Refresh models" }),
     ).toBeInTheDocument();
+  });
+
+  it("defers automatic model refresh until an active session returns idle", async () => {
+    const onRequestModelOptions = vi.fn();
+    const activeSession = makeSession("codex-active", {
+      agent: "Codex",
+      approvalPolicy: "never",
+      reasoningEffort: "medium",
+      sandboxMode: "workspace-write",
+      model: "gpt-5.4",
+      status: "active",
+    });
+    const { rerender } = render(
+      <CodexPromptSettingsCard
+        paneId="pane-codex-active"
+        session={activeSession}
+        isUpdating={false}
+        isRefreshingModelOptions={false}
+        modelOptionsError={null}
+        sessionNotice={null}
+        onArchiveThread={noopArchiveThread}
+        onCompactThread={noopCompactThread}
+        onForkThread={noopForkThread}
+        onRequestModelOptions={onRequestModelOptions}
+        onRollbackThread={noopRollbackThread}
+        onSessionSettingsChange={() => {}}
+        onUnarchiveThread={noopUnarchiveThread}
+      />,
+    );
+
+    expect(onRequestModelOptions).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Refresh models" })).toBeDisabled();
+
+    rerender(
+      <CodexPromptSettingsCard
+        paneId="pane-codex-active"
+        session={{ ...activeSession, status: "idle" }}
+        isUpdating={false}
+        isRefreshingModelOptions={false}
+        modelOptionsError={null}
+        sessionNotice={null}
+        onArchiveThread={noopArchiveThread}
+        onCompactThread={noopCompactThread}
+        onForkThread={noopForkThread}
+        onRequestModelOptions={onRequestModelOptions}
+        onRollbackThread={noopRollbackThread}
+        onSessionSettingsChange={() => {}}
+        onUnarchiveThread={noopUnarchiveThread}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(onRequestModelOptions).toHaveBeenCalledWith("codex-active");
+    });
+    expect(onRequestModelOptions).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "Refresh models" })).toBeEnabled();
+  });
+
+  it("waits for pending Engram revocation and rearms after that lifecycle fence clears", async () => {
+    vi.useFakeTimers();
+    try {
+      const onRequestModelOptions = vi
+        .fn()
+        .mockResolvedValueOnce("deferred")
+        .mockResolvedValueOnce("refreshed");
+      const idleSession = makeSession("codex-pending-revocation", {
+        agent: "Codex",
+        approvalPolicy: "never",
+        reasoningEffort: "medium",
+        sandboxMode: "workspace-write",
+        model: "gpt-5.4",
+      });
+      const renderCard = (isEngramMcpRevocationPending: boolean) => (
+        <CodexPromptSettingsCard
+          paneId="pane-codex-pending-revocation"
+          session={idleSession}
+          isUpdating={false}
+          isRefreshingModelOptions={false}
+          isEngramMcpRevocationPending={isEngramMcpRevocationPending}
+          modelOptionsError={null}
+          sessionNotice={null}
+          onArchiveThread={noopArchiveThread}
+          onCompactThread={noopCompactThread}
+          onForkThread={noopForkThread}
+          onRequestModelOptions={onRequestModelOptions}
+          onRollbackThread={noopRollbackThread}
+          onSessionSettingsChange={() => {}}
+          onUnarchiveThread={noopUnarchiveThread}
+        />
+      );
+      const { rerender } = render(renderCard(false));
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(onRequestModelOptions).toHaveBeenCalledTimes(1);
+
+      rerender(renderCard(true));
+      expect(screen.getByRole("button", { name: "Refresh models" })).toBeDisabled();
+      await act(async () => {
+        vi.runAllTimers();
+        await Promise.resolve();
+      });
+      expect(onRequestModelOptions).toHaveBeenCalledTimes(1);
+
+      rerender(renderCard(false));
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(onRequestModelOptions).toHaveBeenCalledTimes(2);
+      expect(screen.getByRole("button", { name: "Refresh models" })).toBeEnabled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("retries an idle lifecycle conflict without rearming ordinary failures after every turn", async () => {
+    vi.useFakeTimers();
+    try {
+      const onRequestModelOptions = vi
+        .fn()
+        .mockResolvedValueOnce("deferred")
+        .mockResolvedValue("failed");
+      const idleSession = makeSession("codex-retry", {
+        agent: "Codex",
+        approvalPolicy: "never",
+        reasoningEffort: "medium",
+        sandboxMode: "workspace-write",
+        model: "gpt-5.4",
+      });
+      const renderCard = (session: Session) => (
+        <CodexPromptSettingsCard
+          paneId="pane-codex-retry"
+          session={session}
+          isUpdating={false}
+          isRefreshingModelOptions={false}
+          modelOptionsError={null}
+          sessionNotice={null}
+          onArchiveThread={noopArchiveThread}
+          onCompactThread={noopCompactThread}
+          onForkThread={noopForkThread}
+          onRequestModelOptions={onRequestModelOptions}
+          onRollbackThread={noopRollbackThread}
+          onSessionSettingsChange={() => {}}
+          onUnarchiveThread={noopUnarchiveThread}
+        />
+      );
+      const { rerender } = render(renderCard(idleSession));
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(onRequestModelOptions).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        vi.advanceTimersByTime(500);
+        await Promise.resolve();
+      });
+      expect(onRequestModelOptions).toHaveBeenCalledTimes(2);
+
+      rerender(renderCard({ ...idleSession, status: "active" }));
+      rerender(renderCard(idleSession));
+      rerender(renderCard({ ...idleSession, status: "active" }));
+      rerender(renderCard(idleSession));
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      expect(onRequestModelOptions).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not schedule a deferred retry after the settings card unmounts", async () => {
+    vi.useFakeTimers();
+    try {
+      let resolveRefresh: ((outcome: "deferred") => void) | null = null;
+      const onRequestModelOptions = vi.fn(
+        () =>
+          new Promise<"deferred">((resolve) => {
+            resolveRefresh = resolve;
+          }),
+      );
+      const { unmount } = render(
+        <CodexPromptSettingsCard
+          paneId="pane-codex-unmount"
+          session={makeSession("codex-unmount", {
+            agent: "Codex",
+            approvalPolicy: "never",
+            reasoningEffort: "medium",
+            sandboxMode: "workspace-write",
+            model: "gpt-5.4",
+          })}
+          isUpdating={false}
+          isRefreshingModelOptions={false}
+          modelOptionsError={null}
+          sessionNotice={null}
+          onArchiveThread={noopArchiveThread}
+          onCompactThread={noopCompactThread}
+          onForkThread={noopForkThread}
+          onRequestModelOptions={onRequestModelOptions}
+          onRollbackThread={noopRollbackThread}
+          onSessionSettingsChange={() => {}}
+          onUnarchiveThread={noopUnarchiveThread}
+        />,
+      );
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(onRequestModelOptions).toHaveBeenCalledTimes(1);
+
+      unmount();
+      await act(async () => {
+        resolveRefresh?.("deferred");
+        await Promise.resolve();
+      });
+      expect(vi.getTimerCount()).toBe(0);
+      await act(async () => {
+        vi.runAllTimers();
+      });
+      expect(onRequestModelOptions).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stays exhausted after the bounded deferred retry sequence rerenders", async () => {
+    vi.useFakeTimers();
+    try {
+      const onRequestModelOptions = vi.fn().mockResolvedValue("deferred");
+      const idleSession = makeSession("codex-exhausted", {
+        agent: "Codex",
+        approvalPolicy: "never",
+        reasoningEffort: "medium",
+        sandboxMode: "workspace-write",
+        model: "gpt-5.4",
+      });
+      const renderCard = (isRefreshingModelOptions: boolean) => (
+        <CodexPromptSettingsCard
+          paneId="pane-codex-exhausted"
+          session={idleSession}
+          isUpdating={false}
+          isRefreshingModelOptions={isRefreshingModelOptions}
+          modelOptionsError={null}
+          sessionNotice={null}
+          onArchiveThread={noopArchiveThread}
+          onCompactThread={noopCompactThread}
+          onForkThread={noopForkThread}
+          onRequestModelOptions={onRequestModelOptions}
+          onRollbackThread={noopRollbackThread}
+          onSessionSettingsChange={() => {}}
+          onUnarchiveThread={noopUnarchiveThread}
+        />
+      );
+      const { rerender } = render(renderCard(false));
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+      for (
+        let attempt = 0;
+        attempt < SESSION_MODEL_OPTIONS_DEFERRED_RETRY_LIMIT;
+        attempt += 1
+      ) {
+        await act(async () => {
+          vi.advanceTimersByTime(
+            sessionModelOptionsDeferredRetryDelay(attempt),
+          );
+          await Promise.resolve();
+        });
+      }
+      expect(onRequestModelOptions).toHaveBeenCalledTimes(
+        SESSION_MODEL_OPTIONS_DEFERRED_RETRY_LIMIT,
+      );
+
+      // Production request state toggles around every HTTP call. Exhaustion
+      // must remain a latch when the final true -> false transition rerenders.
+      rerender(renderCard(true));
+      rerender(renderCard(false));
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(onRequestModelOptions).toHaveBeenCalledTimes(
+        SESSION_MODEL_OPTIONS_DEFERRED_RETRY_LIMIT,
+      );
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("limits Codex reasoning effort choices to the selected model capabilities", () => {

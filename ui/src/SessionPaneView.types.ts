@@ -14,6 +14,7 @@ import type {
   Project,
   RemoteConfig,
   Session,
+  SessionModelOptionsRefreshRequest,
   SessionSettingsField,
   SessionSettingsValue,
   WorkspaceFilesChangedEvent,
@@ -51,6 +52,7 @@ export type SessionPaneViewProps = {
   isKilling: boolean;
   isUpdating: boolean;
   isRefreshingModelOptions: boolean;
+  pendingEngramMcpRevocationSessionIds?: ReadonlySet<string>;
   modelOptionsError: string | null;
   agentCommands: AgentCommand[];
   hasLoadedAgentCommands: boolean;
@@ -230,7 +232,7 @@ export type SessionPaneViewProps = {
     sessionId: string,
     preferredPaneId: string | null,
   ) => void;
-  onRefreshSessionModelOptions: (sessionId: string) => void;
+  onRefreshSessionModelOptions: SessionModelOptionsRefreshRequest;
   onRefreshAgentCommands: (sessionId: string) => void;
   onCreateConversationMarker: (
     sessionId: string,

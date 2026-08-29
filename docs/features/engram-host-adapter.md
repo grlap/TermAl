@@ -432,6 +432,9 @@ guards are what make the shadow phase safe to leave on.
   more.
 - Work-authority grants (`engram authority grant`) are installed by the
   operator per project; the grant hash is `Project.engram.work_authority_grant`.
+  PATCH input is trimmed and must be a lowercase 64-character SHA-256 hash;
+  blank, uppercase, short, or option-shaped values are rejected before any
+  project mutation.
   `Project` is served on `/api/state` to every client, so `Project.engram`
   is visible to anyone who can see the project: `binary_path` and `home` are
   acceptable there; the grant hash is a capability under asserted identity and
@@ -451,6 +454,62 @@ guards are what make the shadow phase safe to leave on.
   also get the Engram MCP server for the work protocol receive it through the
   per-session MCP configuration TermAl already writes at spawn, with
   `--work-authority-grant` fixed by TermAl, not by the agent.
+- The MCP descriptor is invalidated from the same spawn-visible inputs that
+  construct it: runtime eligibility, local-vs-remote placement, `binary_path`,
+  `home`, and `work_authority_grant`. Binary/home changes, enablement, and grant
+  rotation mark every affected local runtime (including delegation descendants)
+  for rebuild at the next turn boundary, allowing the already-authorized turn
+  to finish. Clearing a grant, disabling Engram, or deleting the project is an
+  immediate revocation: after the settings/project mutation is durable and
+  before process teardown, TermAl invokes `engram authority revoke` against the
+  current project tuple and every distinct binary/home/grant tuple recorded on
+  a still-live runtime. This runtime-only installed-descriptor record is made
+  at the exact point the agent configuration is composed, is cleared with the
+  runtime handle, is redacted from debug output, and is neither persisted nor
+  exposed on the wire. It ensures that a later clear/disable/delete also
+  revokes a stale descriptor left behind by an earlier deferred connection or
+  grant rotation. Engram revalidates that grant inside every mutation
+  transaction, so a residual MCP child cannot add, claim, note, or complete
+  work after a successful revoke even when its agent interrupt is unconfirmed.
+  Read-only MCP operations can remain available until Codex unloads the thread
+  or the dedicated process exits. TermAl also fences runtime callbacks,
+  checkpoints with exit intent, terminates or detaches the live
+  Claude/Codex/ACP runtime, and resumes durable queued work only after a fresh
+  runtime can be constructed and, on a connection reconfiguration, after the
+  fresh Engram bind completes. Grant rotation remains deferred and does not
+  irreversibly revoke the old hash during the already-authorized turn. The
+  stale runtime set is fenced in the same commit as the settings change. Fence
+  ownership also remains on the project, by generation, through off-lock
+  authority revocation, runtime teardown, and any required fresh bind; an
+  overlapping Engram settings mutation returns conflict instead of revoking a
+  newer successful configuration. Runtime fence
+  ownership carries the runtime token plus a monotonic generation, so a stale
+  teardown completion cannot release a newer Stop/revocation owner; live model
+  refresh is rejected while a turn or runtime-stop owner is active for the same
+  reason. If an ordinary Stop or an earlier revocation already owns a session's
+  fence, the mutation succeeds without waiting and normal snapshots retain the
+  session ids whose revocation remains pending. Stop success leaves no runtime
+  to revoke, while Stop failure transfers the existing fence directly to
+  revocation cleanup and preserves the user's queue/pause policy. A cleanup
+  failure does not roll back the already-persisted revocation: the API reports
+  degraded cleanup (including any other pending session ids), the stale handle
+  stays quarantined when a dedicated process has not confirmed exit, the
+  session moves to Error, and automatic workflow dispatch remains blocked. A
+  later explicit action can retry termination, and a natural process-exit
+  callback releases the retained handle without resuming queued work. Shared
+  Codex interruption errors are likewise surfaced as degraded after the
+  logical session has been detached; they are never hidden by a post-detach
+  no-op retry, and the shared app-server is preserved for unrelated sessions.
+  If the irreversible grant-revoke command itself fails, teardown still runs
+  and the API explicitly warns that the residual MCP child may continue
+  mutating until it exits; the durable settings change is not rolled back.
+  OpenCode revocation uses the same bounded graceful ACP cancel as an ordinary
+  Stop before local process teardown. Runtime handles are
+  process-local and are not persisted, so a TermAl host restart has the same
+  pre-existing orphan-process limitation as other dedicated agent runtimes;
+  restored records still require a fresh runtime. `root_path` is intentionally
+  absent from the mutable fingerprint because project roots do not change after
+  creation.
 - An agent that can bypass TermAl's dispatch (a shell it spawns itself, a
   direct API call) is outside this boundary. The card says `advisory` or
   `turn_gated`; it never says more than the host actually mediates.

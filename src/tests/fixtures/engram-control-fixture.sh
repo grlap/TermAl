@@ -4,6 +4,7 @@ set -eu
 project_file=""
 engram_home=""
 is_doctor=0
+original_args=$*
 while [ "$#" -gt 0 ]; do
   if [ "$1" = "--project-file" ]; then
     project_file="$2"
@@ -22,6 +23,19 @@ while [ "$#" -gt 0 ]; do
 done
 [ -n "$project_file" ] || exit 2
 [ -n "$engram_home" ] || exit 2
+
+case " $original_args " in
+  *" authority revoke "*)
+    printf '%s\n' "$original_args" > "$engram_home/engram-authority-revoke-args.txt"
+    mode=$(tr -d '\r\n' < "$project_file")
+    if [ "$mode" = "fixture-authority-revoke-fail" ]; then
+      printf '%s\n' 'scripted authority revoke failure' >&2
+      exit 9
+    fi
+    printf '%s\n' 'fixture-revocation-hash'
+    exit 0
+    ;;
+esac
 
 if [ "$is_doctor" -eq 1 ]; then
   mode=$(tr -d '\r\n' < "$project_file")

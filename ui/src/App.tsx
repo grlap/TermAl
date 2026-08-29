@@ -271,6 +271,10 @@ export default function App() {
   const [delegationChildSessionIds, setDelegationChildSessionIds] = useState<
     Set<string>
   >(() => new Set());
+  const [
+    pendingEngramMcpRevocationSessionIds,
+    setPendingEngramMcpRevocationSessionIds,
+  ] = useState<Set<string>>(() => new Set());
   const [codexState, setCodexState] = useState<CodexState>({});
   const [agentReadiness, setAgentReadiness] = useState<AgentReadiness[]>([]);
   const initialWorkspaceBootstrapRef = useRef<ReturnType<
@@ -912,6 +916,7 @@ export default function App() {
       setOrchestrators,
       setDelegationWaits,
       setDelegationChildSessionIds,
+      setPendingEngramMcpRevocationSessionIds,
       setWorkspaceSummaries,
       setDraftsBySessionId,
       setDraftAttachmentsBySessionId,
@@ -2220,6 +2225,9 @@ export default function App() {
               onCompactCodexThread={handleCompactCodexThread}
               onForkCodexThread={handleForkCodexThread}
               onRefreshSessionModelOptions={handleRefreshSessionModelOptions}
+              pendingEngramMcpRevocationSessionIds={
+                pendingEngramMcpRevocationSessionIds
+              }
               onRefreshAgentCommands={handleRefreshAgentCommands}
               onCreateConversationMarker={handleCreateConversationMarker}
               onDeleteConversationMarker={handleDeleteConversationMarker}

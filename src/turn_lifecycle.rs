@@ -41,7 +41,534 @@
 // `src/tests/session_stop.rs` + `src/tests/session_stop_runtime.rs`
 // (invariant pins for deferred replay + stop lifecycle).
 
+struct EngramMcpRuntimeRevocationTarget {
+    session_id: String,
+    token: RuntimeToken,
+    runtime: KillableRuntime,
+    owner_generation: u64,
+    stop_options: Option<StopSessionOptions>,
+}
+
+#[derive(Default)]
+struct EngramMcpRuntimeRevocationBatch {
+    targets: Vec<EngramMcpRuntimeRevocationTarget>,
+    pending_session_ids: Vec<String>,
+    newly_pending_session_ids: Vec<String>,
+}
+
+#[derive(Debug, Default)]
+struct EngramMcpRuntimeRevocationCompletion {
+    session_id: String,
+    should_dispatch_next: bool,
+    should_refresh_delegation: bool,
+    should_resume_orchestrator_transitions: bool,
+    orchestrator_stop_instance_id: Option<String>,
+}
+
+#[derive(Debug, Default)]
+struct EngramMcpRuntimeRevocationFinalization {
+    completion: Option<EngramMcpRuntimeRevocationCompletion>,
+    failures: Vec<String>,
+}
+
+struct EngramMcpRuntimeRevocationShutdown {
+    target: EngramMcpRuntimeRevocationTarget,
+    shutdown_error: Option<String>,
+    retain_runtime_for_retry: bool,
+    suppress_codex_thread_resume: bool,
+}
+
+#[derive(Default)]
+struct EngramMcpRuntimeRevocationShutdownBatch {
+    shutdowns: Vec<EngramMcpRuntimeRevocationShutdown>,
+    pending_session_ids: Vec<String>,
+}
+
+#[derive(Default)]
+struct EngramMcpRuntimeRevocationOutcome {
+    completions: Vec<EngramMcpRuntimeRevocationCompletion>,
+    pending_session_ids: Vec<String>,
+    failures: Vec<String>,
+}
+
+/// Captures every stale runtime while the settings mutation still owns the
+/// state lock. The settings update and these fences are committed together, so
+/// a new descriptor can never be mistaken for part of the stale batch.
+fn claim_engram_mcp_runtime_revocations_locked(
+    inner: &mut StateInner,
+    session_ids: &[String],
+) -> EngramMcpRuntimeRevocationBatch {
+    let mut batch = EngramMcpRuntimeRevocationBatch::default();
+    for session_id in session_ids {
+        let Some(index) = inner.find_session_index(session_id) else {
+            continue;
+        };
+        let record = &inner.sessions[index];
+        if !record.is_local_session() {
+            continue;
+        }
+        let Some(token) = record.runtime.runtime_token() else {
+            continue;
+        };
+        if record.runtime_stop_in_progress {
+            let was_already_pending = record.engram_mcp_revocation_pending;
+            let record = inner
+                .session_mut_by_index(index)
+                .expect("session index should be valid");
+            record.engram_mcp_revocation_pending = true;
+            batch.pending_session_ids.push(session_id.clone());
+            if !was_already_pending {
+                batch.newly_pending_session_ids.push(session_id.clone());
+            }
+            continue;
+        }
+        let runtime = match &record.runtime {
+            SessionRuntime::Claude(handle) => KillableRuntime::Claude(handle.clone()),
+            SessionRuntime::Codex(handle) => KillableRuntime::Codex(handle.clone()),
+            SessionRuntime::Acp(handle) => KillableRuntime::Acp(handle.clone()),
+            SessionRuntime::None => continue,
+        };
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
+        debug_assert!(record.deferred_stop_callbacks.is_empty());
+        let owner_generation = record.claim_runtime_stop(
+            RuntimeStopOwnerKind::EngramMcpRevocation,
+            token.clone(),
+        );
+        record.engram_mcp_revocation_pending = false;
+        batch.targets.push(EngramMcpRuntimeRevocationTarget {
+            session_id: session_id.clone(),
+            token,
+            runtime,
+            owner_generation,
+            stop_options: None,
+        });
+    }
+    batch
+}
+
+/// Restores claims that were never made visible because their enclosing
+/// settings/delete commit failed under the same state lock.
+fn rollback_engram_mcp_runtime_revocations_locked(
+    inner: &mut StateInner,
+    batch: &EngramMcpRuntimeRevocationBatch,
+) {
+    for target in &batch.targets {
+        let Some(index) = inner.find_session_index(&target.session_id) else {
+            continue;
+        };
+        if inner.sessions[index].runtime.matches_runtime_token(&target.token)
+            && inner.sessions[index].runtime_stop_is_owned_by(
+                RuntimeStopOwnerKind::EngramMcpRevocation,
+                &target.token,
+                target.owner_generation,
+            )
+        {
+            inner
+                .session_mut_by_index(index)
+                .expect("session index should be valid")
+                .clear_runtime_stop();
+        }
+    }
+    for session_id in &batch.newly_pending_session_ids {
+        if let Some(index) = inner.find_session_index(session_id) {
+            inner
+                .session_mut_by_index(index)
+                .expect("session index should be valid")
+                .engram_mcp_revocation_pending = false;
+        }
+    }
+}
+
+/// Transfers a failed ordinary Stop's existing callback fence to the pending
+/// revocation without a lock gap in which a queued prompt could run.
+fn take_pending_engram_mcp_revocation_after_stop_failure_locked(
+    inner: &mut StateInner,
+    index: usize,
+    stop_owner_generation: u64,
+    stop_options: StopSessionOptions,
+) -> Option<EngramMcpRuntimeRevocationTarget> {
+    let record = &inner.sessions[index];
+    if !record.engram_mcp_revocation_pending || !record.runtime_stop_in_progress {
+        return None;
+    }
+    let token = record.runtime.runtime_token()?;
+    if !record.runtime_stop_owner.as_ref().is_some_and(|owner| {
+        owner.kind == RuntimeStopOwnerKind::UserStop
+            && owner.token == token
+            && owner.generation == stop_owner_generation
+    }) {
+        return None;
+    }
+    let runtime = match &record.runtime {
+        SessionRuntime::Claude(handle) => KillableRuntime::Claude(handle.clone()),
+        SessionRuntime::Codex(handle) => KillableRuntime::Codex(handle.clone()),
+        SessionRuntime::Acp(handle) => KillableRuntime::Acp(handle.clone()),
+        SessionRuntime::None => return None,
+    };
+    let session_id = record.session.id.clone();
+    let record = inner
+        .session_mut_by_index(index)
+        .expect("session index should be valid");
+    record.engram_mcp_revocation_pending = false;
+    let owner_generation = record.claim_runtime_stop(
+        RuntimeStopOwnerKind::EngramMcpRevocation,
+        token.clone(),
+    );
+    Some(EngramMcpRuntimeRevocationTarget {
+        session_id,
+        token,
+        runtime,
+        owner_generation,
+        stop_options: Some(stop_options),
+    })
+}
+
 impl AppState {
+    /// Releases the fence owned by a revocation target when its token was
+    /// replaced by a lower-level teardown path. Dispatch never crosses this
+    /// fence, so any callbacks buffered for the stale token are discarded.
+    fn release_engram_mcp_revocation_fence_after_token_mismatch(
+        &self,
+        session_id: &str,
+        token: &RuntimeToken,
+        owner_generation: u64,
+    ) -> Result<()> {
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let Some(index) = inner.find_session_index(session_id) else {
+            return Ok(());
+        };
+        if !inner.sessions[index].runtime_stop_is_owned_by(
+            RuntimeStopOwnerKind::EngramMcpRevocation,
+            token,
+            owner_generation,
+        ) {
+            return Ok(());
+        }
+        if inner.sessions[index].runtime.matches_runtime_token(token) {
+            return Err(anyhow!(
+                "Engram MCP revocation token unexpectedly became current again"
+            ));
+        }
+        {
+            let record = inner
+                .session_mut_by_index(index)
+                .expect("session index should be valid");
+            record.engram_mcp_runtime_quarantined = false;
+            record.clear_runtime_stop();
+            record.deferred_stop_callbacks.clear();
+        }
+        self.commit_locked(&mut inner).map_err(|error| {
+            self.publish_state_locked(&inner);
+            anyhow!("failed to persist released revocation fence: {error:#}")
+        })?;
+        Ok(())
+    }
+
+    /// Completes an Engram MCP revocation while owning the stop fence claimed
+    /// above. Busy state is sampled in the same critical section as the
+    /// terminal mutation. Successful revocation resumes queued work against a
+    /// fresh descriptor; degraded process cleanup leaves the session in Error
+    /// with automatic dispatch blocked and reports the failure to the caller.
+    fn finish_revoked_engram_mcp_runtime_if_matches(
+        &self,
+        session_id: &str,
+        token: &RuntimeToken,
+        owner_generation: u64,
+        stop_options: Option<&StopSessionOptions>,
+        suppress_codex_thread_resume: bool,
+        retain_runtime_for_retry: bool,
+        shutdown_error: Option<&str>,
+    ) -> EngramMcpRuntimeRevocationFinalization {
+        let (
+            revision,
+            pending_interaction_updates,
+            created_messages,
+            should_dispatch_next,
+            should_refresh_delegation,
+            stopped_wait_refresh,
+            persist_error,
+            effective_shutdown_error,
+        ) = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let Some(index) = inner.find_session_index(session_id) else {
+                return EngramMcpRuntimeRevocationFinalization::default();
+            };
+            if !inner.sessions[index].runtime.matches_runtime_token(token) {
+                drop(inner);
+                let failure = self
+                    .release_engram_mcp_revocation_fence_after_token_mismatch(
+                    session_id,
+                    token,
+                    owner_generation,
+                )
+                    .err()
+                    .map(|error| format!("failed to release stale revocation fence: {error:#}"));
+                return EngramMcpRuntimeRevocationFinalization {
+                    completion: None,
+                    failures: failure.into_iter().collect(),
+                };
+            }
+            if !inner.sessions[index].runtime_stop_is_owned_by(
+                RuntimeStopOwnerKind::EngramMcpRevocation,
+                token,
+                owner_generation,
+            ) {
+                if !inner.sessions[index].runtime_stop_in_progress
+                    && inner.sessions[index].runtime_stop_owner.is_none()
+                {
+                    // A lower-level cleanup path can clear this owner without
+                    // replacing the runtime. Reclaim the fence under the same
+                    // lock so a live stale descriptor is never left pending
+                    // with nobody scheduled to finish its revocation.
+                    inner
+                        .session_mut_by_index(index)
+                        .expect("session index should be valid")
+                        .claim_runtime_stop(
+                            RuntimeStopOwnerKind::EngramMcpRevocation,
+                            token.clone(),
+                        );
+                } else {
+                    return EngramMcpRuntimeRevocationFinalization {
+                        completion: None,
+                        failures: vec![
+                            "Engram MCP revocation lost its runtime stop fence to another owner"
+                                .to_owned(),
+                        ],
+                    };
+                }
+            }
+
+            // A dedicated runtime can exit in the narrow interval after the
+            // off-lock exit probe reported it live and before finalization
+            // retakes the state lock. Its waiter buffers RuntimeExited behind
+            // this fence. Treat that callback as confirmed cleanup instead of
+            // discarding it and quarantining an already-dead handle. Shared
+            // Codex exit callbacks can also be synthesized by the deliberate
+            // whole-app-server escalation, so only dedicated handles provide
+            // this confirmation.
+            let is_shared_codex_runtime = matches!(
+                &inner.sessions[index].runtime,
+                SessionRuntime::Codex(handle) if handle.shared_session.is_some()
+            );
+            let runtime_exit_was_buffered = inner.sessions[index]
+                .deferred_stop_callbacks
+                .iter()
+                .any(|callback| matches!(callback, DeferredStopCallback::RuntimeExited(_)));
+            let buffered_exit_confirms_cleanup = retain_runtime_for_retry
+                && !is_shared_codex_runtime
+                && runtime_exit_was_buffered;
+            let retain_runtime_for_retry =
+                retain_runtime_for_retry && !buffered_exit_confirms_cleanup;
+            let shutdown_error = if buffered_exit_confirms_cleanup {
+                None
+            } else {
+                shutdown_error
+            };
+
+            let was_busy = matches!(
+                inner.sessions[index].session.status,
+                SessionStatus::Active | SessionStatus::Approval
+            );
+            let preserve_delegation_for_rebind = inner.sessions[index].engram.rebind_required
+                && inner.sessions[index].engram.active_grant_id.is_some()
+                && engram_project_for_session_locked(&inner, session_id).is_some();
+            let should_write_message = was_busy || shutdown_error.is_some();
+            let message_id = should_write_message.then(|| inner.next_message_id());
+            let file_change_message_id =
+                (!inner.sessions[index].active_turn_file_changes.is_empty())
+                    .then(|| inner.next_message_id());
+            let suppress_automatic_resume = stop_options
+                .is_some_and(|options| options.pause_automatic_resumes_on_success);
+            let dispatch_queued_prompts = stop_options
+                .map_or(true, |options| options.dispatch_queued_prompts_on_success);
+            let mut thread_id_to_suppress = None;
+            let (has_queued_prompts, pending_interaction_updates, created_messages) = {
+                let record = inner
+                    .session_mut_by_index(index)
+                    .expect("session index should be valid");
+                take_and_abandon_engram_pending_dispatch(record);
+                if retain_runtime_for_retry {
+                    // Termination failed and process exit was not confirmed.
+                    // Keep the only application-owned handle quarantined so a
+                    // later explicit user action can retry teardown. The reset
+                    // flag makes every such action kill this stale descriptor
+                    // before a fresh runtime can be constructed.
+                    record.runtime_reset_required = true;
+                    record.engram_mcp_runtime_quarantined = true;
+                } else {
+                    record.clear_runtime();
+                    record.clear_runtime_reset();
+                }
+                record.clear_runtime_stop();
+                record.deferred_stop_callbacks.clear();
+                record.orchestrator_auto_dispatch_blocked |=
+                    shutdown_error.is_some() || suppress_automatic_resume;
+                if suppress_automatic_resume {
+                    clear_queued_prompts_by_source(record, QueuedPromptSource::Orchestrator);
+                }
+                if suppress_codex_thread_resume {
+                    thread_id_to_suppress = record.external_session_id.clone();
+                    set_record_external_session_id(record, None);
+                }
+                let pending_interaction_indices =
+                    cancel_pending_interaction_messages(&mut record.session.messages);
+                clear_all_pending_requests(record);
+                let mut created_message_indices = Vec::new();
+                if let Some(message_id) = message_id {
+                    let detail = match shutdown_error {
+                        Some(error) => format!(
+                            "Engram MCP configuration was revoked, but the old agent runtime could not be stopped cleanly: {error}"
+                        ),
+                        None => "Turn stopped: Engram MCP configuration was revoked.".to_owned(),
+                    };
+                    let message_index = record.session.messages.len();
+                    record.session.messages.push(Message::Text {
+                        attachments: Vec::new(),
+                        id: message_id,
+                        timestamp: stamp_now(),
+                        author: Author::Assistant,
+                        text: detail.clone(),
+                        expanded_text: None,
+                        source: None,
+                    });
+                    created_message_indices.push(message_index);
+                    record.session.status = if shutdown_error.is_some() {
+                        SessionStatus::Error
+                    } else {
+                        SessionStatus::Idle
+                    };
+                    record.session.preview = make_preview(&detail);
+                }
+                if let Some(message_id) = file_change_message_id {
+                    let file_change_message_index = record.session.messages.len();
+                    if push_active_turn_file_changes_on_record(record, message_id) {
+                        created_message_indices.push(file_change_message_index);
+                    }
+                }
+                finish_active_turn_file_change_tracking(record);
+                (
+                    !record.queued_prompts.is_empty(),
+                    message_updated_delta_parts_for_indices(
+                        record,
+                        pending_interaction_indices,
+                    ),
+                    message_created_delta_parts_for_indices(record, created_message_indices),
+                )
+            };
+
+            if let Some(ref thread_id) = thread_id_to_suppress {
+                inner.ignore_discovered_codex_thread(Some(thread_id));
+            }
+
+            let delegation_waits_before_stop =
+                suppress_automatic_resume.then(|| inner.delegation_waits.clone());
+            let stopped_wait_refresh = if suppress_automatic_resume {
+                consume_delegation_waits_for_stopped_parent_locked(&mut inner, session_id)
+            } else {
+                DelegationWaitRefresh::default()
+            };
+
+            let mut stopped_orchestrator_instance_index = None;
+            let mut added_stopped_session_id = false;
+            if let Some(orchestrator_instance_id) = stop_options
+                .and_then(|options| options.orchestrator_stop_instance_id.as_deref())
+            {
+                if let Some(instance_index) = inner
+                    .orchestrator_instances
+                    .iter()
+                    .position(|instance| instance.id == orchestrator_instance_id)
+                {
+                    stopped_orchestrator_instance_index = Some(instance_index);
+                    let stopped_session_ids = &mut inner.orchestrator_instances[instance_index]
+                        .stopped_session_ids_during_stop;
+                    if !stopped_session_ids.iter().any(|candidate| candidate == session_id) {
+                        stopped_session_ids.push(session_id.to_owned());
+                        stopped_session_ids.sort();
+                        added_stopped_session_id = true;
+                    }
+                }
+            }
+
+            match self.commit_locked(&mut inner) {
+                Ok(revision) => (
+                    Some(revision),
+                    pending_interaction_updates,
+                    created_messages,
+                    shutdown_error.is_none()
+                        && !suppress_automatic_resume
+                        && dispatch_queued_prompts
+                        && has_queued_prompts,
+                    should_write_message && !preserve_delegation_for_rebind,
+                    stopped_wait_refresh,
+                    None,
+                    shutdown_error.map(str::to_owned),
+                ),
+                Err(error) => {
+                    if let Some(delegation_waits_before_stop) = delegation_waits_before_stop {
+                        inner.delegation_waits = delegation_waits_before_stop;
+                    }
+                    if added_stopped_session_id {
+                        if let Some(instance_index) = stopped_orchestrator_instance_index {
+                            inner.orchestrator_instances[instance_index]
+                                .stopped_session_ids_during_stop
+                                .retain(|candidate| candidate != session_id);
+                        }
+                    }
+                    let detail = format!("{error:#}");
+                    inner
+                        .session_mut_by_index(index)
+                        .expect("session index should be valid")
+                        .orchestrator_auto_dispatch_blocked = true;
+                    self.publish_state_locked(&inner);
+                    (
+                        None,
+                        Vec::new(),
+                        Vec::new(),
+                        false,
+                        should_write_message && !preserve_delegation_for_rebind,
+                        DelegationWaitRefresh::default(),
+                        Some(detail),
+                        shutdown_error.map(str::to_owned),
+                    )
+                }
+            }
+        };
+
+        if let Some(revision) = revision {
+            self.publish_message_created_delta_parts(revision, created_messages);
+            self.publish_message_updated_delta_parts(revision, pending_interaction_updates);
+            self.publish_delegation_wait_consumed_deltas(
+                revision,
+                &stopped_wait_refresh.consumed_waits,
+            );
+        }
+
+        let mut failures = Vec::new();
+        if let Some(error) = effective_shutdown_error {
+            failures.push(format!("runtime shutdown failed: {error}"));
+        }
+        let persist_succeeded = persist_error.is_none();
+        if let Some(error) = persist_error {
+            failures.push(format!("failed to persist revocation state: {error}"));
+        }
+        EngramMcpRuntimeRevocationFinalization {
+            completion: Some(EngramMcpRuntimeRevocationCompletion {
+                session_id: session_id.to_owned(),
+                should_dispatch_next,
+                should_refresh_delegation,
+                should_resume_orchestrator_transitions: persist_succeeded
+                    && stop_options.is_none_or(|options| {
+                        !options.pause_automatic_resumes_on_success
+                    }),
+                orchestrator_stop_instance_id: stop_options
+                    .and_then(|options| options.orchestrator_stop_instance_id.clone()),
+            }),
+            failures,
+        }
+    }
+
     /// Active/Approval -> Idle with `SessionStatus::Error`. Runtime-token
     /// guarded: stale tokens silently no-op. If `runtime_stop_in_progress`,
     /// buffers a `DeferredStopCallback::TurnFailed` for replay instead of
@@ -441,11 +968,23 @@ impl AppState {
         token: &RuntimeToken,
         error_message: Option<&str>,
     ) -> Result<()> {
-        self.checkpoint_engram_turn_off_lock(
-            session_id,
-            Some(token),
-            EngramNextIntent::Wait,
-        );
+        let is_quarantined_exit = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            inner
+                .find_session_index(session_id)
+                .and_then(|index| inner.sessions.get(index))
+                .is_some_and(|record| {
+                    record.runtime.matches_runtime_token(token)
+                        && record.engram_mcp_runtime_quarantined
+                })
+        };
+        if !is_quarantined_exit {
+            self.checkpoint_engram_turn_off_lock(
+                session_id,
+                Some(token),
+                EngramNextIntent::Wait,
+            );
+        }
         let cleaned = error_message.map(str::trim).unwrap_or("");
         let (should_dispatch_next, pending_interaction_updates, created_messages, revision) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
@@ -470,8 +1009,15 @@ impl AppState {
                 inner.sessions[index].session.status,
                 SessionStatus::Active | SessionStatus::Approval
             );
-            let message_id = (was_busy || !cleaned.is_empty()).then(|| inner.next_message_id());
-            let detail = if !cleaned.is_empty() || was_busy {
+            let preserve_automatic_resume_block =
+                inner.sessions[index].engram_mcp_runtime_quarantined
+                    && inner.sessions[index].orchestrator_auto_dispatch_blocked;
+            let quarantined_exit = inner.sessions[index].engram_mcp_runtime_quarantined;
+            let message_id = (!quarantined_exit && (was_busy || !cleaned.is_empty()))
+                .then(|| inner.next_message_id());
+            let detail = if quarantined_exit {
+                None
+            } else if !cleaned.is_empty() || was_busy {
                 Some(if !cleaned.is_empty() {
                     cleaned.to_owned()
                 } else {
@@ -498,11 +1044,18 @@ impl AppState {
                     .session_mut_by_index(index)
                     .expect("session index should be valid");
                 take_and_abandon_engram_pending_dispatch(record);
-                record.runtime = SessionRuntime::None;
-                record.runtime_reset_required = false;
-                record.orchestrator_auto_dispatch_blocked = false;
-                record.runtime_stop_in_progress = false;
+                record.clear_runtime();
+                record.clear_runtime_reset();
+                record.orchestrator_auto_dispatch_blocked = preserve_automatic_resume_block;
+                record.clear_runtime_stop();
                 record.deferred_stop_callbacks.clear();
+                if quarantined_exit {
+                    // This is the delayed success condition for a runtime that
+                    // earlier failed revocation teardown. Keep the explicit
+                    // automatic-resume latch, but do not turn the expected exit
+                    // into a second failure message.
+                    record.session.status = SessionStatus::Idle;
+                }
                 let pending_interaction_indices =
                     cancel_pending_interaction_messages(&mut record.session.messages);
                 let mut created_message_indices = Vec::new();
@@ -532,7 +1085,7 @@ impl AppState {
                 }
                 finish_active_turn_file_change_tracking(record);
                 (
-                    !record.queued_prompts.is_empty(),
+                    !preserve_automatic_resume_block && !record.queued_prompts.is_empty(),
                     message_updated_delta_parts_for_indices(record, pending_interaction_indices),
                     message_created_delta_parts_for_indices(record, created_message_indices),
                 )

@@ -265,6 +265,43 @@ fn runtime_exit_is_suppressed_while_stop_is_in_progress() {
 }
 
 #[test]
+fn ordinary_runtime_reset_does_not_preserve_the_revocation_quarantine_latch_on_exit() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let (runtime, _input_rx) = test_claude_runtime_handle("claude-ordinary-reset-exit");
+    let runtime_token = RuntimeToken::Claude(runtime.runtime_id.clone());
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Claude session should exist");
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("Claude session index should be valid");
+        record.runtime = SessionRuntime::Claude(runtime);
+        record.runtime_reset_required = true;
+        record.engram_mcp_runtime_quarantined = false;
+        record.orchestrator_auto_dispatch_blocked = true;
+    }
+
+    state
+        .handle_runtime_exit_if_matches(&session_id, &runtime_token, None)
+        .expect("ordinary reset runtime exit should succeed");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("Claude session should remain");
+    assert!(matches!(record.runtime, SessionRuntime::None));
+    assert!(!record.runtime_reset_required);
+    assert!(!record.engram_mcp_runtime_quarantined);
+    assert!(!record.orchestrator_auto_dispatch_blocked);
+}
+
+#[test]
 fn runtime_exit_publishes_message_updated_for_canceled_pending_interactions() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Claude);

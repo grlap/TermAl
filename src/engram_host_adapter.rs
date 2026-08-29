@@ -9,6 +9,9 @@
 const ENGRAM_CONTROL_SCHEMA_VERSION: u16 = 1;
 const ENGRAM_CAPABILITY_MAP_REVISION: i64 = 1;
 const ENGRAM_DEFAULT_CALL_TIMEOUT_MS: u64 = 250;
+/// Engram control calls are bounded to ten seconds. Lifecycle arbitration gets
+/// one additional second for the owning callback to publish its terminal state.
+const ENGRAM_CONTROL_SETTLE_TIMEOUT: Duration = Duration::from_secs(11);
 const ENGRAM_DISPATCH_BUDGET_MS: u64 = 600;
 // Engram's current store-open path may wait up to five seconds on SQLite's
 // writer lock. Bound each command in the two-command focus read above that
@@ -1356,6 +1359,151 @@ fn run_engram_json_command_with_lock_retry(
     }
 }
 
+/// Irreversibly revokes a project work-authority grant through Engram's CLI.
+/// Engram re-resolves the grant on every mutation, so this is the fail-closed
+/// boundary for MCP children that outlive an unconfirmed agent interruption.
+/// The command follows the one-retry SQLite lock policy used by the work-
+/// binding reader; process teardown remains independent and always continues.
+fn revoke_engram_project_work_authority(
+    target: &EngramAuthorityRevocationTarget,
+    reason: &str,
+) -> std::result::Result<(), EngramTransportError> {
+    let binary_path = PathBuf::from(&target.binary_path);
+    let home = PathBuf::from(&target.home);
+    let project_root = PathBuf::from(&target.project_root);
+    let project_file = project_root.join(".engram-project");
+
+    let run = || {
+        run_engram_authority_revoke_command(
+            &binary_path,
+            &project_file,
+            &home,
+            &project_root,
+            &target.work_authority_grant,
+            reason,
+            ENGRAM_WORK_BINDING_COMMAND_TIMEOUT,
+        )
+    };
+    let first = run();
+    match first {
+        Err(error)
+            if error.kind == EngramTransportErrorKind::Transport
+                && error
+                    .message
+                    .to_ascii_lowercase()
+                    .contains("database is locked") =>
+        {
+            std::thread::sleep(ENGRAM_WORK_BINDING_LOCK_RETRY_DELAY);
+            run()
+        }
+        result => result,
+    }
+}
+
+fn run_engram_authority_revoke_command(
+    binary_path: &FsPath,
+    project_file: &FsPath,
+    home: &FsPath,
+    project_root: &FsPath,
+    grant: &str,
+    reason: &str,
+    timeout: Duration,
+) -> std::result::Result<(), EngramTransportError> {
+    let mut command = engram_command(binary_path);
+    configure_terminal_process_tree(&mut command);
+    let mut child = command
+        .arg("--project-file")
+        .arg(project_file)
+        .arg("--home")
+        .arg(home)
+        .args([
+            "authority",
+            "revoke",
+            "--revoked-by",
+            "termal:host",
+            "--reason",
+            reason,
+            "--",
+            grant,
+        ])
+        .current_dir(project_root)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| {
+            EngramTransportError::transport(format!(
+                "failed spawning Engram authority revocation: {error}"
+            ))
+        })?;
+    let stdout = child.stdout.take().ok_or_else(|| {
+        EngramTransportError::transport("Engram authority revocation stdout is unavailable")
+    })?;
+    let stderr = child.stderr.take().ok_or_else(|| {
+        EngramTransportError::transport("Engram authority revocation stderr is unavailable")
+    })?;
+    let process = Arc::new(SharedChild::new(child).map_err(|error| {
+        EngramTransportError::transport(format!(
+            "failed sharing Engram authority revocation process: {error}"
+        ))
+    })?);
+    let process_tree = EngramProcessTree::attach(&process).map_err(|error| {
+        let _ = kill_child_process(&process, "Engram authority revocation");
+        let _ = process.wait();
+        EngramTransportError::transport(format!(
+            "failed preparing Engram authority revocation process tree: {error:#}"
+        ))
+    })?;
+    process_tree.resume_after_attach(&process).map_err(|error| {
+        let _ = process_tree.terminate(&process);
+        let _ = process.wait();
+        EngramTransportError::transport(format!(
+            "failed resuming Engram authority revocation: {error:#}"
+        ))
+    })?;
+    let stdout_reader = std::thread::spawn(move || read_engram_cli_output(stdout));
+    let stderr_reader = std::thread::spawn(move || read_engram_cli_output(stderr));
+    let deadline = std::time::Instant::now() + timeout;
+    let status = loop {
+        match process.try_wait() {
+            Ok(Some(status)) => break Ok(status),
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            Ok(None) => {
+                let _ = process_tree.terminate(&process);
+                let _ = process.wait();
+                break Err(EngramTransportError::deadline(format!(
+                    "Engram authority revocation exceeded {} ms",
+                    timeout.as_millis()
+                )));
+            }
+            Err(error) => {
+                let _ = process_tree.terminate(&process);
+                let _ = process.wait();
+                break Err(EngramTransportError::transport(format!(
+                    "failed waiting for Engram authority revocation: {error}"
+                )));
+            }
+        }
+    };
+    let stdout = join_engram_cli_output(stdout_reader, "stdout")?;
+    let stderr = join_engram_cli_output(stderr_reader, "stderr")?;
+    let status = status?;
+    if status.success() {
+        return Ok(());
+    }
+    let detail = String::from_utf8_lossy(&stderr).trim().to_owned();
+    let fallback = String::from_utf8_lossy(&stdout).trim().to_owned();
+    Err(EngramTransportError::transport(if !detail.is_empty() {
+        format!("Engram authority revocation failed: {detail}")
+    } else if !fallback.is_empty() {
+        format!("Engram authority revocation failed: {fallback}")
+    } else {
+        format!("Engram authority revocation exited with {status}")
+    }))
+}
+
 fn run_engram_json_command(
     connection: &EngramConnectionConfig,
     args: &[&str],
@@ -2032,6 +2180,7 @@ struct EngramBindingTarget {
     connection: EngramConnectionConfig,
     settings: EngramProjectSettings,
     project_id: String,
+    project_reset_owner_generation: Option<u64>,
     external_ref: String,
     title: String,
     effects: Vec<EngramEffect>,
@@ -2142,18 +2291,55 @@ impl AppState {
         session_id: &str,
         require_child_runtime_enabled: bool,
     ) -> std::result::Result<Option<EngramBindingTarget>, String> {
+        Self::engram_binding_target_for_session_shape_with_reset_access_locked(
+            inner,
+            session_id,
+            require_child_runtime_enabled,
+            None,
+        )
+    }
+
+    /// Builds the post-reconfigure binding target while the caller still owns
+    /// the project reset fence. The caller must validate that exact fence
+    /// generation before using this escape hatch; ordinary dispatch/bind paths
+    /// continue to observe the reset as unavailable.
+    fn engram_binding_target_for_session_shape_during_project_reset_locked(
+        inner: &StateInner,
+        session_id: &str,
+        require_child_runtime_enabled: bool,
+        owner_generation: u64,
+    ) -> std::result::Result<Option<EngramBindingTarget>, String> {
+        Self::engram_binding_target_for_session_shape_with_reset_access_locked(
+            inner,
+            session_id,
+            require_child_runtime_enabled,
+            Some(owner_generation),
+        )
+    }
+
+    fn engram_binding_target_for_session_shape_with_reset_access_locked(
+        inner: &StateInner,
+        session_id: &str,
+        require_child_runtime_enabled: bool,
+        project_reset_owner_generation: Option<u64>,
+    ) -> std::result::Result<Option<EngramBindingTarget>, String> {
         if Self::engram_session_has_child_binding_shape_locked(inner, session_id) {
             // A delegation child has a narrower authority shape than its
             // parent. Its durable marker remains authoritative if the
             // delegation row is missing, so child-target failure must not
             // fall back to a parent-shaped project session.
-            Self::engram_binding_target_for_child_locked(
+            Self::engram_binding_target_for_child_with_reset_access_locked(
                 inner,
                 session_id,
                 require_child_runtime_enabled,
+                project_reset_owner_generation,
             )
         } else {
-            Self::engram_binding_target_for_parent_locked(inner, session_id)
+            Self::engram_binding_target_for_parent_with_reset_access_locked(
+                inner,
+                session_id,
+                project_reset_owner_generation,
+            )
         }
     }
 
@@ -2538,7 +2724,7 @@ impl AppState {
     /// Control calls are deadline-bounded to at most ten seconds, so this
     /// off-lock poll is finite and only exercised by that rare race.
     fn wait_for_engram_checkpoint_completion(&self, session_id: &str) {
-        let deadline = std::time::Instant::now() + Duration::from_secs(11);
+        let deadline = std::time::Instant::now() + ENGRAM_CONTROL_SETTLE_TIMEOUT;
         loop {
             let in_progress = {
                 let inner = self.inner.lock().expect("state mutex poisoned");
@@ -3202,10 +3388,10 @@ impl AppState {
                 .session_mut_by_index(index)
                 .expect("session index should be valid");
             record.engram.pending_dispatch = None;
-            record.runtime = SessionRuntime::None;
-            record.runtime_reset_required = false;
+            record.clear_runtime();
+            record.clear_runtime_reset();
             record.orchestrator_auto_dispatch_blocked = false;
-            record.runtime_stop_in_progress = false;
+            record.clear_runtime_stop();
             record.deferred_stop_callbacks.clear();
             clear_active_turn_file_change_tracking(record);
             clear_all_pending_requests(record);
@@ -3243,7 +3429,7 @@ impl AppState {
         session_id: &str,
         dispatch_generation: u64,
     ) -> bool {
-        let deadline = std::time::Instant::now() + Duration::from_secs(11);
+        let deadline = std::time::Instant::now() + ENGRAM_CONTROL_SETTLE_TIMEOUT;
         loop {
             let still_waiting = {
                 let inner = self.inner.lock().expect("state mutex poisoned");
@@ -3277,6 +3463,20 @@ impl AppState {
         session_id: &str,
         require_runtime_enabled: bool,
     ) -> std::result::Result<Option<EngramBindingTarget>, String> {
+        Self::engram_binding_target_for_child_with_reset_access_locked(
+            inner,
+            session_id,
+            require_runtime_enabled,
+            None,
+        )
+    }
+
+    fn engram_binding_target_for_child_with_reset_access_locked(
+        inner: &StateInner,
+        session_id: &str,
+        require_runtime_enabled: bool,
+        project_reset_owner_generation: Option<u64>,
+    ) -> std::result::Result<Option<EngramBindingTarget>, String> {
         let Some(delegation) = inner
             .delegations
             .iter()
@@ -3299,7 +3499,8 @@ impl AppState {
         let Some(settings) = project.engram.as_ref() else {
             return Ok(None);
         };
-        if inner.engram_project_resets.contains(&project.id)
+        if (project_reset_owner_generation.is_none()
+            && inner.engram_project_resets.contains(&project.id))
             || project.remote_id != LOCAL_REMOTE_ID
             || (require_runtime_enabled && child.engram.disabled_reason.is_some())
             || (require_runtime_enabled && !settings.is_runtime_enabled())
@@ -3329,6 +3530,7 @@ impl AppState {
             },
             settings: settings.clone(),
             project_id: project.id.clone(),
+            project_reset_owner_generation,
             external_ref: format!("termal:delegation:{}", delegation.id),
             title: delegation.title.clone(),
             effects: engram_effects_for_write_policy(&delegation.write_policy),
@@ -3343,6 +3545,18 @@ impl AppState {
     fn engram_binding_target_for_parent_locked(
         inner: &StateInner,
         parent_session_id: &str,
+    ) -> std::result::Result<Option<EngramBindingTarget>, String> {
+        Self::engram_binding_target_for_parent_with_reset_access_locked(
+            inner,
+            parent_session_id,
+            None,
+        )
+    }
+
+    fn engram_binding_target_for_parent_with_reset_access_locked(
+        inner: &StateInner,
+        parent_session_id: &str,
+        project_reset_owner_generation: Option<u64>,
     ) -> std::result::Result<Option<EngramBindingTarget>, String> {
         let parent = inner
             .find_session_index(parent_session_id)
@@ -3360,7 +3574,8 @@ impl AppState {
         let Some(settings) = project.engram.as_ref() else {
             return Ok(None);
         };
-        if inner.engram_project_resets.contains(&project.id)
+        if (project_reset_owner_generation.is_none()
+            && inner.engram_project_resets.contains(&project.id))
             || project.remote_id != LOCAL_REMOTE_ID
             || parent.engram.disabled_reason.is_some()
             || !settings.is_runtime_enabled()
@@ -3390,6 +3605,7 @@ impl AppState {
             },
             settings: settings.clone(),
             project_id: project.id.clone(),
+            project_reset_owner_generation,
             external_ref: format!("termal:session:{parent_session_id}"),
             title: parent.session.name.clone(),
             effects: vec![EngramEffect::Observe, EngramEffect::Communicate],
@@ -3456,7 +3672,12 @@ impl AppState {
                 project.id == target.project_id
                     && project.remote_id == LOCAL_REMOTE_ID
                     && project.engram.as_ref() == Some(&target.settings)
-                    && !inner.engram_project_resets.contains(&project.id)
+                    && match target.project_reset_owner_generation {
+                        Some(owner_generation) => inner
+                            .engram_project_resets
+                            .is_owned_by(&project.id, owner_generation),
+                        None => !inner.engram_project_resets.contains(&project.id),
+                    }
             });
             if !target_is_current {
                 return Err(EngramTransportError::backoff(
@@ -3502,7 +3723,12 @@ impl AppState {
                 .filter(|project| {
                     project.remote_id == LOCAL_REMOTE_ID
                         && project.engram.as_ref() == Some(&target.settings)
-                        && !inner.engram_project_resets.contains(&project.id)
+                        && match target.project_reset_owner_generation {
+                            Some(owner_generation) => inner
+                                .engram_project_resets
+                                .is_owned_by(&project.id, owner_generation),
+                            None => !inner.engram_project_resets.contains(&project.id),
+                        }
                 })
                 .and_then(|project| project.engram.as_ref())
                 .is_some_and(EngramProjectSettings::is_runtime_enabled)
@@ -3707,7 +3933,12 @@ impl AppState {
             let binding_still_enabled = inner
                 .find_project(&target.project_id)
                 .filter(|project| project.remote_id == LOCAL_REMOTE_ID)
-                .filter(|project| !inner.engram_project_resets.contains(&project.id))
+                .filter(|project| match target.project_reset_owner_generation {
+                    Some(owner_generation) => inner
+                        .engram_project_resets
+                        .is_owned_by(&project.id, owner_generation),
+                    None => !inner.engram_project_resets.contains(&project.id),
+                })
                 .and_then(|project| project.engram.as_ref())
                 .is_some_and(EngramProjectSettings::is_runtime_enabled);
             if !binding_still_enabled {

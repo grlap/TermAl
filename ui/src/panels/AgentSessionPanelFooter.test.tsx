@@ -56,6 +56,7 @@ import type {
   DiffMessage,
   Message,
   Session,
+  SessionModelOptionsRefreshRequest,
 } from "../types";
 
 function makeSession(id: string, overrides?: Partial<Session>): Session {
@@ -370,6 +371,7 @@ function renderFooter({
   isStopping = false,
   isSessionBusy = false,
   isUpdating = false,
+  isEngramMcpRevocationPending = false,
   onDraftCommit = vi.fn(),
   modelOptionsError = null,
   agentCommands = EMPTY_AGENT_COMMANDS,
@@ -394,6 +396,7 @@ function renderFooter({
   isStopping?: boolean;
   isSessionBusy?: boolean;
   isUpdating?: boolean;
+  isEngramMcpRevocationPending?: boolean;
   onDraftCommit?: (sessionId: string, nextValue: string) => void;
   modelOptionsError?: string | null;
   agentCommands?: {
@@ -407,7 +410,7 @@ function renderFooter({
   hasLoadedAgentCommands?: boolean;
   isRefreshingAgentCommands?: boolean;
   agentCommandsError?: string | null;
-  onRefreshSessionModelOptions?: (sessionId: string) => void;
+  onRefreshSessionModelOptions?: SessionModelOptionsRefreshRequest;
   onRefreshAgentCommands?: (sessionId: string) => void;
   onSend?: (sessionId: string, draftText?: string, expandedText?: string | null) => boolean;
   canSpawnDelegation?: boolean;
@@ -442,6 +445,7 @@ function renderFooter({
       onDraftCommit={onDraftCommit}
       onDraftAttachmentRemove={onDraftAttachmentRemove}
       isRefreshingModelOptions={false}
+      isEngramMcpRevocationPending={isEngramMcpRevocationPending}
       modelOptionsError={modelOptionsError}
       agentCommands={agentCommands}
       hasLoadedAgentCommands={hasLoadedAgentCommands}
@@ -4850,6 +4854,121 @@ Please add tests.`,
     await waitFor(() => {
       expect(onRefreshSessionModelOptions).toHaveBeenCalledWith("session-a");
     });
+  });
+
+  it("waits for an active session to become idle before refreshing /model", async () => {
+    const onRefreshSessionModelOptions = vi.fn().mockResolvedValue("refreshed");
+    const activeSession = makeSession("session-a", {
+      agent: "Cursor",
+      cursorMode: "agent",
+      model: "auto",
+      modelOptions: undefined,
+      status: "active",
+    });
+    const { rerender } = render(
+      renderFooter({
+        isSessionBusy: true,
+        onRefreshSessionModelOptions,
+        session: activeSession,
+      }),
+    );
+
+    fireEvent.change(screen.getByLabelText("Message session-a"), {
+      target: { value: "/model" },
+    });
+    expect(onRefreshSessionModelOptions).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Refresh live models" })).toBeDisabled();
+
+    rerender(
+      renderFooter({
+        isSessionBusy: false,
+        onRefreshSessionModelOptions,
+        session: { ...activeSession, status: "idle" },
+      }),
+    );
+    await waitFor(() => {
+      expect(onRefreshSessionModelOptions).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("waits for pending Engram revocation before refreshing /model", async () => {
+    const onRefreshSessionModelOptions = vi.fn().mockResolvedValue("refreshed");
+    const idleSession = makeSession("session-a", {
+      agent: "Cursor",
+      cursorMode: "agent",
+      model: "auto",
+      modelOptions: undefined,
+    });
+    const { rerender } = render(
+      renderFooter({
+        isEngramMcpRevocationPending: true,
+        onRefreshSessionModelOptions,
+        session: idleSession,
+      }),
+    );
+
+    fireEvent.change(screen.getByLabelText("Message session-a"), {
+      target: { value: "/model" },
+    });
+    expect(onRefreshSessionModelOptions).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Refresh live models" })).toBeDisabled();
+
+    rerender(
+      renderFooter({
+        isEngramMcpRevocationPending: false,
+        onRefreshSessionModelOptions,
+        session: idleSession,
+      }),
+    );
+    await waitFor(() => {
+      expect(onRefreshSessionModelOptions).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("preserves /model deferred backoff across unrelated rerenders", async () => {
+    vi.useFakeTimers();
+    try {
+      const onRefreshSessionModelOptions = vi
+        .fn()
+        .mockResolvedValueOnce("deferred")
+        .mockResolvedValueOnce("refreshed");
+      const idleSession = makeSession("session-a", {
+        agent: "Cursor",
+        cursorMode: "agent",
+        model: "auto",
+        modelOptions: undefined,
+      });
+      const { rerender } = render(
+        renderFooter({ onRefreshSessionModelOptions, session: idleSession }),
+      );
+
+      fireEvent.change(screen.getByLabelText("Message session-a"), {
+        target: { value: "/model" },
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(onRefreshSessionModelOptions).toHaveBeenCalledTimes(1);
+
+      rerender(
+        renderFooter({
+          onRefreshSessionModelOptions,
+          session: { ...idleSession, preview: "SSE update" },
+        }),
+      );
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(onRefreshSessionModelOptions).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        vi.advanceTimersByTime(500);
+        await Promise.resolve();
+      });
+      expect(onRefreshSessionModelOptions).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("shows inline model refresh errors and retries from the slash menu", () => {

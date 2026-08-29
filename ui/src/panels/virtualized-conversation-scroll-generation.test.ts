@@ -273,6 +273,7 @@ describe("mounted prepend restore generation", () => {
         isDetachedFromBottom: false,
         isNativeUserMovement,
         isProgrammaticNavigation: false,
+        isBottomLandingClamp: false,
         scrollDelta: -2,
         scrollHeightDelta: -2,
         tailFollowIntent: true,
@@ -294,6 +295,7 @@ describe("mounted prepend restore generation", () => {
         isDetachedFromBottom: false,
         isNativeUserMovement,
         isProgrammaticNavigation: false,
+        isBottomLandingClamp: false,
         scrollDelta: -2,
         scrollHeightDelta: 0,
         tailFollowIntent: true,
@@ -315,6 +317,7 @@ describe("mounted prepend restore generation", () => {
         isDetachedFromBottom: false,
         isNativeUserMovement,
         isProgrammaticNavigation: false,
+        isBottomLandingClamp: false,
         scrollDelta: -40,
         scrollHeightDelta: 40,
         tailFollowIntent: true,
@@ -329,10 +332,56 @@ describe("mounted prepend restore generation", () => {
         isDetachedFromBottom: false,
         isNativeUserMovement: true,
         isProgrammaticNavigation: true,
+        isBottomLandingClamp: false,
         scrollDelta: -600,
         scrollHeightDelta: 0,
         tailFollowIntent: true,
       }),
     ).toBe(true);
+  });
+
+  it("keeps a viewport-growth bottom clamp passive after prior user interaction", () => {
+    expect(
+      nativeScrollKeepsPassiveTailFollow({
+        hadUserScrollInteraction: true,
+        isDetachedFromBottom: false,
+        isNativeUserMovement: false,
+        isProgrammaticNavigation: false,
+        isBottomLandingClamp: true,
+        scrollDelta: -40,
+        scrollHeightDelta: 0,
+        tailFollowIntent: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("does not let a viewport-growth clamp override detached reader authority", () => {
+    expect(
+      nativeScrollKeepsPassiveTailFollow({
+        hadUserScrollInteraction: true,
+        isDetachedFromBottom: true,
+        isNativeUserMovement: false,
+        isProgrammaticNavigation: false,
+        isBottomLandingClamp: true,
+        scrollDelta: -40,
+        scrollHeightDelta: 0,
+        tailFollowIntent: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("does not manufacture tail-follow intent from a viewport-growth clamp", () => {
+    expect(
+      nativeScrollKeepsPassiveTailFollow({
+        hadUserScrollInteraction: false,
+        isDetachedFromBottom: false,
+        isNativeUserMovement: false,
+        isProgrammaticNavigation: false,
+        isBottomLandingClamp: true,
+        scrollDelta: -40,
+        scrollHeightDelta: 0,
+        tailFollowIntent: false,
+      }),
+    ).toBe(false);
   });
 });

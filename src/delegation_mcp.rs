@@ -289,7 +289,7 @@ impl AppState {
             .unwrap_or_else(default_termal_http_base_url)
     }
 
-    #[cfg(test)]
+    #[allow(dead_code)]
     fn termal_delegation_mcp_claude_config_json(&self, parent_session_id: &str) -> Result<String> {
         let engram = self.engram_mcp_stdio_config_for_session(parent_session_id);
         self.termal_delegation_mcp_claude_config_json_with_engram(
@@ -329,14 +329,37 @@ impl AppState {
         Ok(config.to_string())
     }
 
+    #[allow(dead_code)]
     fn termal_delegation_mcp_acp_servers(&self, parent_session_id: &str) -> Result<Value> {
+        self.termal_delegation_mcp_acp_servers_with_engram(
+            parent_session_id,
+            self.engram_mcp_stdio_config_for_session(parent_session_id),
+        )
+    }
+
+    fn termal_delegation_mcp_acp_servers_for_runtime(
+        &self,
+        parent_session_id: &str,
+        runtime_token: &RuntimeToken,
+    ) -> Result<Value> {
+        self.termal_delegation_mcp_acp_servers_with_engram(
+            parent_session_id,
+            self.engram_mcp_stdio_config_for_runtime(parent_session_id, runtime_token),
+        )
+    }
+
+    fn termal_delegation_mcp_acp_servers_with_engram(
+        &self,
+        parent_session_id: &str,
+        engram: Option<TermalDelegationMcpStdioConfig>,
+    ) -> Result<Value> {
         let command = termal_delegation_mcp_current_exe()?;
         let mut servers = termal_delegation_mcp_acp_servers_with_command(
             &command,
             parent_session_id,
             &self.local_http_base_url(),
         );
-        let Some(engram) = self.engram_mcp_stdio_config_for_session(parent_session_id) else {
+        let Some(engram) = engram else {
             return Ok(servers);
         };
         servers
@@ -349,14 +372,37 @@ impl AppState {
         Ok(servers)
     }
 
+    #[cfg(test)]
     fn termal_delegation_mcp_codex_config(&self, parent_session_id: &str) -> Result<Value> {
+        self.termal_delegation_mcp_codex_config_with_engram(
+            parent_session_id,
+            self.engram_mcp_stdio_config_for_session(parent_session_id),
+        )
+    }
+
+    fn termal_delegation_mcp_codex_config_for_runtime(
+        &self,
+        parent_session_id: &str,
+        runtime_token: &RuntimeToken,
+    ) -> Result<Value> {
+        self.termal_delegation_mcp_codex_config_with_engram(
+            parent_session_id,
+            self.engram_mcp_stdio_config_for_runtime(parent_session_id, runtime_token),
+        )
+    }
+
+    fn termal_delegation_mcp_codex_config_with_engram(
+        &self,
+        parent_session_id: &str,
+        engram: Option<TermalDelegationMcpStdioConfig>,
+    ) -> Result<Value> {
         let command = termal_delegation_mcp_current_exe()?;
         let mut config = termal_delegation_mcp_codex_config_with_command(
             &command,
             parent_session_id,
             &self.local_http_base_url(),
         );
-        let Some(engram) = self.engram_mcp_stdio_config_for_session(parent_session_id) else {
+        let Some(engram) = engram else {
             return Ok(config);
         };
         config

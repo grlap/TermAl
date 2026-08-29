@@ -80,6 +80,8 @@ export type StateResponse = {
   sessions: Session[];
   delegations?: DelegationStateSummary[];
   delegationWaits?: DelegationWaitRecord[];
+  /** Sessions whose current Stop owner will finish an Engram MCP revocation. */
+  pendingEngramMcpRevocationSessionIds?: string[];
 };
 
 export type DelegationStateSummary = Pick<

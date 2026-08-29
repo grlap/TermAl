@@ -6,7 +6,13 @@
 
 const ENGRAM_MCP_SERVER_NAME: &str = "engram";
 
+struct EngramMcpRuntimeConfig {
+    stdio: TermalDelegationMcpStdioConfig,
+    installed: EngramMcpInstalledDescriptor,
+}
+
 impl AppState {
+    #[allow(dead_code)]
     fn engram_mcp_stdio_config_for_session(
         &self,
         session_id: &str,
@@ -14,12 +20,41 @@ impl AppState {
         let inner = self.inner.lock().expect("state mutex poisoned");
         engram_mcp_stdio_config_for_session_locked(&inner, session_id)
     }
+
+    fn engram_mcp_stdio_config_for_runtime(
+        &self,
+        session_id: &str,
+        runtime_token: &RuntimeToken,
+    ) -> Option<TermalDelegationMcpStdioConfig> {
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let runtime_config = engram_mcp_runtime_config_for_session_locked(&inner, session_id)?;
+        let index = inner.find_session_index(session_id)?;
+        if !inner.sessions[index]
+            .runtime
+            .matches_runtime_token(runtime_token)
+        {
+            return None;
+        }
+        inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid")
+            .engram_mcp_installed = Some(runtime_config.installed);
+        Some(runtime_config.stdio)
+    }
 }
 
+#[allow(dead_code)]
 fn engram_mcp_stdio_config_for_session_locked(
     inner: &StateInner,
     session_id: &str,
 ) -> Option<TermalDelegationMcpStdioConfig> {
+    engram_mcp_runtime_config_for_session_locked(inner, session_id).map(|config| config.stdio)
+}
+
+fn engram_mcp_runtime_config_for_session_locked(
+    inner: &StateInner,
+    session_id: &str,
+) -> Option<EngramMcpRuntimeConfig> {
     let session = inner
         .find_session_index(session_id)
         .and_then(|index| inner.sessions.get(index))?;
@@ -54,9 +89,17 @@ fn engram_mcp_stdio_config_for_session_locked(
             grant.to_owned(),
         ]);
     }
-    Some(TermalDelegationMcpStdioConfig {
-        command,
-        args,
-        env: BTreeMap::new(),
+    let installed = EngramMcpInstalledDescriptor {
+        binary_path: command.clone(),
+        home: home.to_owned(),
+        work_authority_grant: settings.work_authority_grant.clone(),
+    };
+    Some(EngramMcpRuntimeConfig {
+        stdio: TermalDelegationMcpStdioConfig {
+            command,
+            args,
+            env: BTreeMap::new(),
+        },
+        installed,
     })
 }

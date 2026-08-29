@@ -14,6 +14,17 @@ if (-not $projectFile -or -not $engramHome) {
     exit 2
 }
 
+if (($args -contains "authority") -and ($args -contains "revoke")) {
+    $mode = (Get-Content -LiteralPath $projectFile -Raw).Trim()
+    $args | ConvertTo-Json -Compress | Set-Content -LiteralPath (Join-Path $engramHome "engram-authority-revoke-args.json")
+    if ($mode -eq "fixture-authority-revoke-fail") {
+        [Console]::Error.WriteLine("scripted authority revoke failure")
+        exit 9
+    }
+    [Console]::Out.WriteLine("fixture-revocation-hash")
+    exit 0
+}
+
 if ($args -contains "doctor") {
     $mode = (Get-Content -LiteralPath $projectFile -Raw).Trim()
     switch ($mode) {

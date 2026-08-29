@@ -377,6 +377,20 @@ impl KillableRuntime {
     fn stop_failure_is_best_effort(&self) -> bool {
         matches!(self, Self::Codex(handle) if handle.shared_session.is_some())
     }
+
+    /// Confirms whether the owned subprocess has exited. Cleanup callers must
+    /// retain a dedicated runtime handle when termination failed and this
+    /// probe cannot prove exit, otherwise the stale MCP-bearing process loses
+    /// its only retry handle.
+    fn process_has_exited(&self) -> Result<bool> {
+        match self {
+            Self::Claude(handle) => shared_child_has_exited(&handle.process, "Claude runtime"),
+            Self::Codex(handle) => shared_child_has_exited(&handle.process, "Codex runtime"),
+            Self::Acp(handle) => {
+                shared_child_has_exited(&handle.process, &format!("{} runtime", handle.agent.label()))
+            }
+        }
+    }
 }
 
 /// Shuts down removed runtime.
@@ -482,7 +496,7 @@ enum DeferredStopCallback {
 }
 
 /// Defines the runtime token variants.
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum RuntimeToken {
     Claude(String),
     Codex(String),
@@ -525,6 +539,7 @@ impl SessionRuntime {
 struct ForcedKillChildProcessFailure {
     label: String,
     process_ptr: usize,
+    remaining_failures: Option<usize>,
 }
 
 /// Returns the forced kill child process failure.
@@ -545,25 +560,50 @@ fn set_test_kill_child_process_failure(label: Option<&str>, process: Option<&Arc
         (Some(label), Some(process)) => Some(ForcedKillChildProcessFailure {
             label: label.to_owned(),
             process_ptr: Arc::as_ptr(process) as usize,
+            remaining_failures: None,
         }),
         _ => None,
     };
+}
+
+#[cfg(test)]
+fn set_test_kill_child_process_failure_count(
+    label: &str,
+    process: &Arc<SharedChild>,
+    remaining_failures: usize,
+) {
+    *forced_kill_child_process_failure()
+        .lock()
+        .expect("forced kill-child-process failure mutex poisoned") =
+        Some(ForcedKillChildProcessFailure {
+            label: label.to_owned(),
+            process_ptr: Arc::as_ptr(process) as usize,
+            remaining_failures: Some(remaining_failures),
+        });
 }
 
 /// Kills child process.
 fn kill_child_process(process: &Arc<SharedChild>, label: &str) -> Result<()> {
     #[cfg(test)]
     {
-        let forced_failure = forced_kill_child_process_failure()
+        let mut forced_failure = forced_kill_child_process_failure()
             .lock()
-            .expect("forced kill-child-process failure mutex poisoned")
-            .clone();
-        if let Some(forced_failure) = forced_failure {
-            if forced_failure.label == label
-                && forced_failure.process_ptr == Arc::as_ptr(process) as usize
-            {
-                return Err(anyhow!("forced {label} kill failure"));
+            .expect("forced kill-child-process failure mutex poisoned");
+        let matches_forced_failure = forced_failure.as_ref().is_some_and(|failure| {
+            failure.label == label && failure.process_ptr == Arc::as_ptr(process) as usize
+        });
+        if matches_forced_failure {
+            let should_clear = forced_failure
+                .as_mut()
+                .and_then(|failure| failure.remaining_failures.as_mut())
+                .is_some_and(|remaining_failures| {
+                    *remaining_failures = remaining_failures.saturating_sub(1);
+                    *remaining_failures == 0
+                });
+            if should_clear {
+                *forced_failure = None;
             }
+            return Err(anyhow!("forced {label} kill failure"));
         }
     }
 

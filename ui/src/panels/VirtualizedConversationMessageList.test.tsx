@@ -37,6 +37,7 @@ import {
   MESSAGE_STACK_FOCUS_OWNERSHIP_MS,
   MESSAGE_STACK_KEYBOARD_OWNERSHIP_MS,
   MESSAGE_STACK_SCROLL_WRITE_EVENT,
+  MESSAGE_STACK_USER_SCROLL_INTENT_EVENT,
   claimMessageStackNativeScrollOwnership,
   markMessageStackWheelEventSuppressed,
   notifyMessageStackScrollWrite,
@@ -149,7 +150,7 @@ type VirtualizedSearchOptions = Pick<
 >;
 
 function renderVirtualizedHarness({
-  clientHeight = 500,
+  clientHeight: initialClientHeight = 500,
   clientWidth = 1000,
   initialScrollTop = 0,
   messageStartIndex = 0,
@@ -167,6 +168,7 @@ function renderVirtualizedHarness({
   tailFollowIntent = false,
   virtualizerHandleRef,
 }: VirtualizedHarnessOptions) {
+  let clientHeight = initialClientHeight;
   const OriginalResizeObserver = window.ResizeObserver;
   const originalRequestAnimationFrame = window.requestAnimationFrame;
   const originalCancelAnimationFrame = window.cancelAnimationFrame;
@@ -382,6 +384,9 @@ function renderVirtualizedHarness({
     rerenderWithSearch(nextSearchOptions: VirtualizedSearchOptions) {
       result.rerender(renderList(nextSearchOptions));
     },
+    setClientHeight(nextValue: number) {
+      clientHeight = nextValue;
+    },
     setScrollTop(nextValue: number) {
       scrollTop = nextValue;
     },
@@ -462,6 +467,78 @@ describe("VirtualizedConversationMessageList foundation", () => {
         peekMessageStackNativeScrollOwnership(harness.scrollNode),
       ).toEqual({ direction: "up", owner: "wheel" });
     } finally {
+      harness.unmount();
+      harness.restore();
+    }
+  });
+
+  it("keeps tail-follow passive when viewport growth clamps a wheel-returned bottom", async () => {
+    let currentScrollHeight = 1_000;
+    const virtualizerHandleRef: VirtualizedConversationMessageListHandleRef = {
+      current: null,
+    };
+    const harness = renderVirtualizedHarness({
+      clientHeight: 100,
+      initialScrollTop: 900,
+      messages: makeTextMessages(24),
+      scrollHeight: () => currentScrollHeight,
+      tailFollowIntent: true,
+      virtualizerHandleRef,
+    });
+
+    try {
+      await waitFor(() => expect(virtualizerHandleRef.current).not.toBeNull());
+      vi.useFakeTimers();
+
+      act(() => {
+        fireEvent.wheel(harness.scrollNode, { deltaY: -100 });
+        harness.setScrollTop(800);
+        fireEvent.scroll(harness.scrollNode);
+        fireEvent.wheel(harness.scrollNode, { deltaY: 100 });
+        harness.setScrollTop(900);
+        fireEvent.scroll(harness.scrollNode);
+      });
+      await advanceIdleMountedRangeCompaction();
+
+      const generationAtBottom =
+        virtualizerHandleRef.current!.getUserScrollGeneration();
+      const userIntentEvents = vi.fn();
+      harness.scrollNode.addEventListener(
+        MESSAGE_STACK_USER_SCROLL_INTENT_EVENT,
+        userIntentEvents,
+      );
+      const timerCountAtBottom = vi.getTimerCount();
+
+      act(() => {
+        harness.setClientHeight(140);
+        harness.setScrollTop(860);
+        fireEvent.scroll(harness.scrollNode);
+      });
+
+      expect(
+        virtualizerHandleRef.current!.getUserScrollGeneration(),
+      ).toBe(generationAtBottom);
+      expect(userIntentEvents).not.toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(timerCountAtBottom);
+
+      harness.scrollWrites.length = 0;
+      act(() => {
+        currentScrollHeight = 1_100;
+        harness.rerenderWithMessages([
+          ...makeTextMessages(24),
+          {
+            author: "assistant",
+            id: "message-25",
+            text: "Streaming tail after the viewport clamp",
+            timestamp: "10:25",
+            type: "text",
+          },
+        ]);
+      });
+
+      expect(harness.scrollWrites).toContain(960);
+    } finally {
+      vi.useRealTimers();
       harness.unmount();
       harness.restore();
     }
