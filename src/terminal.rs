@@ -692,16 +692,7 @@ struct TerminalProcessTree {
 
 #[cfg(windows)]
 struct TerminalJobObject {
-    handle: windows_sys::Win32::Foundation::HANDLE,
-}
-
-#[cfg(windows)]
-impl Drop for TerminalJobObject {
-    fn drop(&mut self) {
-        unsafe {
-            let _ = windows_sys::Win32::Foundation::CloseHandle(self.handle);
-        }
-    }
+    handle: std::os::windows::io::OwnedHandle,
 }
 
 #[cfg(windows)]
@@ -718,6 +709,10 @@ impl TerminalProcessTree {
         kill_child_process(process, label)
     }
 
+    fn kill_before_reap(&self, process: &Arc<SharedChild>, label: &str) -> Result<()> {
+        self.kill(process, label)
+    }
+
     fn resume_after_attach(&self, process: &Arc<SharedChild>) -> Result<()> {
         resume_terminal_process_threads(process.id())
             .context("failed to resume suspended terminal process")
@@ -730,8 +725,14 @@ impl TerminalProcessTree {
 
 #[cfg(windows)]
 fn terminate_terminal_job(job: &TerminalJobObject, label: &str) -> Result<()> {
+    use std::os::windows::io::AsRawHandle;
+
     unsafe {
-        if windows_sys::Win32::System::JobObjects::TerminateJobObject(job.handle, 1) != 0 {
+        if windows_sys::Win32::System::JobObjects::TerminateJobObject(
+            job.handle.as_raw_handle(),
+            1,
+        ) != 0
+        {
             return Ok(());
         }
     }
@@ -898,6 +899,16 @@ impl TerminalProcessTree {
         kill_child_process(process, label)
     }
 
+    fn kill_before_reap(&self, process: &Arc<SharedChild>, label: &str) -> Result<()> {
+        // Engram's worker calls this before its only `wait`, including after
+        // EOF. The unreaped process retains its PID, so its process-group id
+        // cannot be recycled between this signal and the later reap. This is
+        // intentionally stronger than terminal clean-exit cleanup, which is
+        // invoked only after the shell has already been reaped.
+        terminate_terminal_process_group(terminal_process_group_id(process.id(), label)?, label)?;
+        kill_child_process(process, label)
+    }
+
     fn resume_after_attach(&self, _process: &Arc<SharedChild>) -> Result<()> {
         Ok(())
     }
@@ -1034,6 +1045,7 @@ fn configure_terminal_process_tree(command: &mut Command) {
 #[cfg(windows)]
 fn create_terminal_job_object() -> io::Result<TerminalJobObject> {
     use std::mem::size_of;
+    use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
     use std::ptr;
     use windows_sys::Win32::System::JobObjects::{
         CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
@@ -1045,18 +1057,18 @@ fn create_terminal_job_object() -> io::Result<TerminalJobObject> {
         if handle.is_null() {
             return Err(io::Error::last_os_error());
         }
+        let handle = OwnedHandle::from_raw_handle(handle);
 
         let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
         info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
         if SetInformationJobObject(
-            handle,
+            handle.as_raw_handle(),
             JobObjectExtendedLimitInformation,
             &info as *const _ as *const std::ffi::c_void,
             size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
         ) == 0
         {
             let err = io::Error::last_os_error();
-            let _ = windows_sys::Win32::Foundation::CloseHandle(handle);
             return Err(err);
         }
 
@@ -1069,6 +1081,7 @@ fn assign_terminal_process_to_job(
     job: &TerminalJobObject,
     process: &Arc<SharedChild>,
 ) -> io::Result<()> {
+    use std::os::windows::io::AsRawHandle;
     use windows_sys::Win32::Foundation::CloseHandle;
     use windows_sys::Win32::System::JobObjects::AssignProcessToJobObject;
     use windows_sys::Win32::System::Threading::{
@@ -1102,7 +1115,7 @@ fn assign_terminal_process_to_job(
             return Err(io::Error::last_os_error());
         }
 
-        let assigned = AssignProcessToJobObject(job.handle, process_handle);
+        let assigned = AssignProcessToJobObject(job.handle.as_raw_handle(), process_handle);
         let assign_error = if assigned == 0 {
             Some(io::Error::last_os_error())
         } else {

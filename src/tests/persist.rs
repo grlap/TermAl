@@ -682,6 +682,24 @@ fn project_deletion_outbox_survives_deferred_worker_cleanup_and_fences_across_re
 }
 
 #[test]
+fn explicit_state_paths_isolate_telegram_data_dir_from_process_home() {
+    let state_root = PersistTestRoot::new("telegram-data-dir");
+    let state = AppState::new_with_paths(
+        state_root.path().to_string_lossy().into_owned(),
+        state_root.path().join("termal.sqlite"),
+        state_root.path().join("orchestrators.json"),
+    )
+    .expect("AppState should boot from explicit test paths");
+
+    assert_eq!(
+        state.telegram_data_dir(),
+        state_root.path().join(".termal"),
+        "an explicitly rooted test state must not depend on process-global HOME"
+    );
+    state.shutdown_persist_blocking();
+}
+
+#[test]
 fn project_deletion_does_not_cleanup_board_before_a_queued_persist_is_durable() {
     let state_root = PersistTestRoot::new("board-cleanup-queued");
     let (base, persist_rx) = test_app_state_with_live_persist_channel();
@@ -954,7 +972,6 @@ fn app_state_new_with_paths_normalizes_verbatim_bootstrap_workdirs() {
     state.shutdown_persist_blocking();
 
     let _ = fs::remove_dir_all(project_root);
-    let _ = fs::remove_dir_all(state_root);
 }
 
 #[cfg(windows)]

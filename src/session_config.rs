@@ -658,10 +658,15 @@ impl AppState {
         let index = inner
             .find_visible_session_index(session_id)
             .ok_or_else(|| ApiError::not_found("session not found"))?;
+        let agent = inner.sessions[index].session.agent;
+        let engram_mcp = if agent == Agent::Claude {
+            engram_mcp_stdio_config_for_session_locked(&inner, session_id)
+        } else {
+            None
+        };
         let record = inner
             .session_mut_by_index(index)
             .expect("session index should be valid");
-        let agent = record.session.agent;
         if agent == Agent::Claude {
             if record.runtime_reset_required {
                 if let SessionRuntime::Claude(handle) = &record.runtime {
@@ -703,6 +708,16 @@ impl AppState {
 
             let (response_tx, response_rx) =
                 mpsc::channel::<std::result::Result<Vec<SessionModelOption>, String>>();
+            let delegation_mcp_config = self
+                .termal_delegation_mcp_claude_config_json_with_engram(
+                    session_id,
+                    engram_mcp.as_ref(),
+                )
+                .map_err(|err| {
+                    ApiError::internal(format!(
+                        "failed to build Claude delegation MCP config: {err:#}"
+                    ))
+                })?;
             let handle = spawn_claude_runtime(
                 self.clone(),
                 record.session.id.clone(),
@@ -717,6 +732,7 @@ impl AppState {
                     .claude_effort
                     .unwrap_or_else(default_claude_effort),
                 record.external_session_id.clone(),
+                delegation_mcp_config,
                 Some(response_tx),
             )
             .map_err(|err| {

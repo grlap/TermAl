@@ -176,7 +176,7 @@ struct TermalDelegationAcpEnvVariable<'a> {
 
 #[derive(Debug, Serialize)]
 struct TermalDelegationAcpMcpServer<'a> {
-    name: &'static str,
+    name: &'a str,
     command: &'a str,
     args: &'a [String],
     env: Vec<TermalDelegationAcpEnvVariable<'a>>,
@@ -233,8 +233,15 @@ fn termal_delegation_mcp_acp_servers_with_command(
 fn termal_delegation_mcp_acp_server_from_stdio_config(
     server: &TermalDelegationMcpStdioConfig,
 ) -> TermalDelegationAcpMcpServer<'_> {
+    mcp_acp_server_from_stdio_config(TERMAL_DELEGATION_MCP_SERVER_NAME, server)
+}
+
+fn mcp_acp_server_from_stdio_config<'a>(
+    name: &'a str,
+    server: &'a TermalDelegationMcpStdioConfig,
+) -> TermalDelegationAcpMcpServer<'a> {
     TermalDelegationAcpMcpServer {
-        name: TERMAL_DELEGATION_MCP_SERVER_NAME,
+        name,
         command: &server.command,
         args: &server.args,
         // ACP McpServer.env is an array of EnvVariable objects. Claude and
@@ -282,31 +289,86 @@ impl AppState {
             .unwrap_or_else(default_termal_http_base_url)
     }
 
+    #[cfg(test)]
     fn termal_delegation_mcp_claude_config_json(&self, parent_session_id: &str) -> Result<String> {
+        let engram = self.engram_mcp_stdio_config_for_session(parent_session_id);
+        self.termal_delegation_mcp_claude_config_json_with_engram(
+            parent_session_id,
+            engram.as_ref(),
+        )
+    }
+
+    /// Composes Claude's MCP configuration from a caller-owned Engram
+    /// descriptor. Runtime startup invokes this while it already owns the
+    /// global state mutex, so this helper must not look up session state.
+    fn termal_delegation_mcp_claude_config_json_with_engram(
+        &self,
+        parent_session_id: &str,
+        engram: Option<&TermalDelegationMcpStdioConfig>,
+    ) -> Result<String> {
         let command = termal_delegation_mcp_current_exe()?;
-        Ok(termal_delegation_mcp_claude_config_json_with_command(
+        let baseline = termal_delegation_mcp_claude_config_json_with_command(
             &command,
             parent_session_id,
             &self.local_http_base_url(),
-        ))
+        );
+        let Some(engram) = engram else {
+            return Ok(baseline);
+        };
+        let mut config: Value = serde_json::from_str(&baseline)
+            .context("TermAl Claude delegation MCP baseline should be valid JSON")?;
+        config
+            .get_mut("mcpServers")
+            .and_then(Value::as_object_mut)
+            .context("TermAl Claude delegation MCP baseline should contain mcpServers")?
+            .insert(
+                ENGRAM_MCP_SERVER_NAME.to_owned(),
+                serde_json::to_value(engram)
+                    .context("Engram Claude MCP descriptor should serialize")?,
+            );
+        Ok(config.to_string())
     }
 
     fn termal_delegation_mcp_acp_servers(&self, parent_session_id: &str) -> Result<Value> {
         let command = termal_delegation_mcp_current_exe()?;
-        Ok(termal_delegation_mcp_acp_servers_with_command(
+        let mut servers = termal_delegation_mcp_acp_servers_with_command(
             &command,
             parent_session_id,
             &self.local_http_base_url(),
-        ))
+        );
+        let Some(engram) = self.engram_mcp_stdio_config_for_session(parent_session_id) else {
+            return Ok(servers);
+        };
+        servers
+            .as_array_mut()
+            .context("TermAl ACP delegation MCP baseline should be an array")?
+            .push(json!(mcp_acp_server_from_stdio_config(
+                ENGRAM_MCP_SERVER_NAME,
+                &engram,
+            )));
+        Ok(servers)
     }
 
     fn termal_delegation_mcp_codex_config(&self, parent_session_id: &str) -> Result<Value> {
         let command = termal_delegation_mcp_current_exe()?;
-        Ok(termal_delegation_mcp_codex_config_with_command(
+        let mut config = termal_delegation_mcp_codex_config_with_command(
             &command,
             parent_session_id,
             &self.local_http_base_url(),
-        ))
+        );
+        let Some(engram) = self.engram_mcp_stdio_config_for_session(parent_session_id) else {
+            return Ok(config);
+        };
+        config
+            .get_mut("mcp_servers")
+            .and_then(Value::as_object_mut)
+            .context("TermAl Codex delegation MCP baseline should contain mcp_servers")?
+            .insert(
+                ENGRAM_MCP_SERVER_NAME.to_owned(),
+                serde_json::to_value(engram)
+                    .context("Engram Codex MCP descriptor should serialize")?,
+            );
+        Ok(config)
     }
 }
 

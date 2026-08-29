@@ -647,6 +647,7 @@ include!("test_temp_root.rs");
 include!("state.rs");
 include!("engram_host_adapter.rs");
 include!("delegation_mcp.rs");
+include!("engram_mcp_config.rs");
 include!("session_runtime.rs");
 include!("session_interaction.rs");
 include!("messages.rs");

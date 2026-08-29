@@ -1100,7 +1100,7 @@ async fn delete_project(
     Ok(Json(response))
 }
 
-/// Replaces a project's Engram host-adapter settings after validating the
+/// Patches a project's Engram host-adapter settings after validating the
 /// external installation without holding TermAl's global state mutex.
 async fn update_project_engram_settings(
     AxumPath(project_id): AxumPath<String>,
@@ -1108,7 +1108,7 @@ async fn update_project_engram_settings(
     Json(request): Json<UpdateProjectEngramSettingsRequest>,
 ) -> Result<Json<StateResponse>, ApiError> {
     let response = run_blocking_api(move || {
-        state.update_project_engram_settings(&project_id, request.settings)
+        state.patch_project_engram_settings(&project_id, request)
     })
     .await?;
     Ok(Json(response))

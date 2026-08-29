@@ -10,6 +10,12 @@ const ENGRAM_CONTROL_SCHEMA_VERSION: u16 = 1;
 const ENGRAM_CAPABILITY_MAP_REVISION: i64 = 1;
 const ENGRAM_DEFAULT_CALL_TIMEOUT_MS: u64 = 250;
 const ENGRAM_DISPATCH_BUDGET_MS: u64 = 600;
+// Engram's current store-open path may wait up to five seconds on SQLite's
+// writer lock. Bound each command in the two-command focus read above that
+// healthy contention window; a timeout or lock error remains an error, never
+// `None`.
+const ENGRAM_WORK_BINDING_COMMAND_TIMEOUT: Duration = Duration::from_secs(6);
+const ENGRAM_WORK_BINDING_LOCK_RETRY_DELAY: Duration = Duration::from_millis(250);
 const ENGRAM_BOOT_RECOVERY_CONCURRENCY: usize = 8;
 const ENGRAM_CONTROL_MAX_FRAME_BYTES: usize = 256 * 1_024;
 const ENGRAM_CIRCUIT_BREAKER_FAILURES: u8 = 3;
@@ -283,6 +289,8 @@ enum EngramControlRequest {
         assurance: String,
         mediated_effects: Vec<EngramEffect>,
         capability_map_revision: i64,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        work_binding: Option<EngramControlWorkBinding>,
         idempotency_key: String,
     },
     SessionStatus {
@@ -306,8 +314,47 @@ enum EngramControlRequest {
         routing_token: String,
         grant_id: String,
         next_intent: EngramNextIntent,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        observations: Vec<EngramExecutionObservationInput>,
         idempotency_key: String,
     },
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+struct EngramControlWorkBinding {
+    root_execution_id: String,
+    work_id: String,
+    run_id: String,
+    work_revision: i64,
+    claim_id: String,
+    claim_fence: i64,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+struct EngramExecutionObservationInput {
+    observation_id: String,
+    action_fingerprint: String,
+    effect: EngramEffect,
+    outcome: EngramExecutionOutcome,
+    source_changed: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source_basis: Option<EngramExecutionSourceBasis>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    observed_at: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum EngramExecutionOutcome {
+    Succeeded,
+    Failed,
+    Unknown,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+struct EngramExecutionSourceBasis {
+    workspace_id: String,
+    source_revision: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -486,6 +533,7 @@ impl EngramTransportError {
                             | "store_corrupt"
                             | "unknown_control_schema"
                             | "control_policy_missing"
+                            | "work_claim_mismatch"
                     )
                 ))
     }
@@ -519,6 +567,14 @@ trait EngramControlTransport: Send + Sync {
         timeout: Duration,
     ) -> std::result::Result<Value, EngramTransportError>;
 
+    fn read_work_binding(
+        &self,
+        _connection: &EngramConnectionConfig,
+        _timeout: Duration,
+    ) -> std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError> {
+        Ok(None)
+    }
+
     fn shutdown_session(&self, session_id: &str);
 }
 
@@ -546,6 +602,11 @@ enum ScriptedEngramControlResponse {
 struct ScriptedEngramControlTransport {
     requests: Mutex<Vec<RecordedEngramControlRequest>>,
     responses: Mutex<VecDeque<ScriptedEngramControlResponse>>,
+    work_bindings: Mutex<
+        VecDeque<
+            std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError>,
+        >,
+    >,
     shutdowns: Mutex<Vec<String>>,
 }
 
@@ -555,6 +616,24 @@ impl ScriptedEngramControlTransport {
         Arc::new(Self {
             requests: Mutex::new(Vec::new()),
             responses: Mutex::new(responses.into_iter().collect()),
+            work_bindings: Mutex::new(VecDeque::new()),
+            shutdowns: Mutex::new(Vec::new()),
+        })
+    }
+
+    fn new_with_work_bindings(
+        responses: impl IntoIterator<Item = ScriptedEngramControlResponse>,
+        work_bindings: impl IntoIterator<
+            Item = std::result::Result<
+                Option<EngramControlWorkBinding>,
+                EngramTransportError,
+            >,
+        >,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            requests: Mutex::new(Vec::new()),
+            responses: Mutex::new(responses.into_iter().collect()),
+            work_bindings: Mutex::new(work_bindings.into_iter().collect()),
             shutdowns: Mutex::new(Vec::new()),
         })
     }
@@ -603,6 +682,18 @@ impl EngramControlTransport for ScriptedEngramControlTransport {
         reply
     }
 
+    fn read_work_binding(
+        &self,
+        _connection: &EngramConnectionConfig,
+        _timeout: Duration,
+    ) -> std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError> {
+        self.work_bindings
+            .lock()
+            .expect("scripted Engram work bindings mutex poisoned")
+            .pop_front()
+            .unwrap_or(Ok(None))
+    }
+
     fn shutdown_session(&self, session_id: &str) {
         self.shutdowns
             .lock()
@@ -631,6 +722,8 @@ struct StatefulEngramControlTransport {
 #[derive(Default)]
 struct StatefulEngramControlState {
     sessions: HashMap<String, StatefulEngramControlSession>,
+    seen_binds:
+        HashMap<(String, String), (String, std::result::Result<Value, EngramTransportError>)>,
     requests: Vec<RecordedEngramControlRequest>,
     shutdowns: Vec<String>,
     next_routing_token: u64,
@@ -644,8 +737,10 @@ struct StatefulEngramControlSession {
     issued_grant_id: Option<String>,
     begun_grant_id: Option<String>,
     first_begin_refusal_used: bool,
+    known_grant_ids: HashSet<String>,
     seen_evaluates: HashMap<String, (String, std::result::Result<Value, EngramTransportError>)>,
     seen_begins: HashMap<String, (String, std::result::Result<Value, EngramTransportError>)>,
+    seen_checkpoints: HashMap<String, (String, std::result::Result<Value, EngramTransportError>)>,
 }
 
 #[cfg(test)]
@@ -730,16 +825,41 @@ impl StatefulEngramControlTransport {
     }
 
     fn idempotency_conflict(operation: &str) -> EngramTransportError {
-        let code = if operation == "turn_evaluate" {
-            "turn_idempotency_conflict"
-        } else {
-            "control_operation_idempotency_conflict"
+        let code = match operation {
+            "session_bind" => "control_session_bind_conflict",
+            "turn_evaluate" => "turn_idempotency_conflict",
+            _ => "control_operation_idempotency_conflict",
         };
         Self::remote_error(
             code,
             format!("{operation} idempotency key was reused for a different intent"),
         )
     }
+
+    fn request_intent_without_auth_and_idempotency(request: &EngramControlRequest) -> String {
+        let mut value = serde_json::to_value(request).expect("Engram request should serialize");
+        let object = value
+            .as_object_mut()
+            .expect("Engram request should serialize as an object");
+        object.remove("routing_token");
+        object.remove("idempotency_key");
+        serde_json::to_string(&value).expect("Engram request intent should serialize")
+    }
+}
+
+#[cfg(test)]
+fn stateful_engram_begin_refusal_expires_grant(code: &str) -> bool {
+    // This is the fake's independent model of Engram's external contract.
+    // Do not call the adapter policy helper here: tests must detect drift in
+    // either implementation instead of allowing both sides to move together.
+    matches!(
+        code,
+        "grant_expired"
+            | "policy_epoch_changed"
+            | "task_admission_epoch_changed"
+            | "delta_required"
+            | "stale_fence"
+    )
 }
 
 #[cfg(test)]
@@ -761,7 +881,17 @@ impl EngramControlTransport for StatefulEngramControlTransport {
         let session_id = connection.session_id.clone();
 
         match request {
-            EngramControlRequest::SessionBind { .. } => {
+            EngramControlRequest::SessionBind {
+                idempotency_key, ..
+            } => {
+                let intent = Self::request_intent_without_auth_and_idempotency(request);
+                let receipt_key = (session_id.clone(), idempotency_key.clone());
+                if let Some((seen_intent, response)) = state.seen_binds.get(&receipt_key) {
+                    if seen_intent != &intent {
+                        return Err(Self::idempotency_conflict("session_bind"));
+                    }
+                    return response.clone();
+                }
                 if state
                     .sessions
                     .get(&session_id)
@@ -779,13 +909,17 @@ impl EngramControlTransport for StatefulEngramControlTransport {
                 let session = state.sessions.entry(session_id).or_default();
                 session.routing_token = Some(routing_token.clone());
                 session.issued_grant_id = None;
-                Ok(json!({
+                let response = Ok(json!({
                     "routing_token": routing_token,
                     "status": {
                         "phase": "sync_required",
                         "confirmed_cursor": 0
                     }
-                }))
+                }));
+                state
+                    .seen_binds
+                    .insert(receipt_key, (intent, response.clone()));
+                response
             }
             EngramControlRequest::SessionStatus { routing_token } => {
                 let session = state.sessions.get(&session_id);
@@ -858,6 +992,7 @@ impl EngramControlTransport for StatefulEngramControlTransport {
                     .sessions
                     .get_mut(&session_id)
                     .expect("validated Engram session should remain present");
+                session.known_grant_ids.insert(grant_id.clone());
                 session.issued_grant_id = Some(grant_id);
                 session.seen_evaluates.insert(
                     idempotency_key.clone(),
@@ -868,6 +1003,7 @@ impl EngramControlTransport for StatefulEngramControlTransport {
             EngramControlRequest::TurnBegin {
                 routing_token,
                 grant_id,
+                delivery_tokens,
                 idempotency_key,
                 ..
             } => {
@@ -875,24 +1011,37 @@ impl EngramControlTransport for StatefulEngramControlTransport {
                 let session = state.sessions.get_mut(&session_id);
                 Self::validate_routing_token(session.as_deref(), routing_token)?;
                 let session = session.expect("validated Engram session should exist");
-                if let Some((seen_grant_id, response)) = session.seen_begins.get(idempotency_key) {
-                    if seen_grant_id != grant_id {
+                let intent = serde_json::to_string(&(grant_id, delivery_tokens))
+                    .expect("Engram begin intent should serialize");
+                if let Some((seen_intent, response)) = session.seen_begins.get(idempotency_key) {
+                    if seen_intent != &intent {
                         return Err(Self::idempotency_conflict("turn_begin"));
                     }
                     return response.clone();
                 }
-                if session.issued_grant_id.as_deref() != Some(grant_id.as_str()) {
+                if !session.known_grant_ids.contains(grant_id) {
                     return Err(Self::remote_error(
-                        "grant_scope_mismatch",
-                        "turn_begin grant is not the currently issued grant",
+                        "turn_grant_not_found",
+                        "turn_begin grant does not exist",
                     ));
+                }
+                if session.issued_grant_id.as_deref() != Some(grant_id.as_str()) {
+                    let response = Ok(json!({
+                        "decision": "refuse",
+                        "code": "grant_scope_mismatch"
+                    }));
+                    session.seen_begins.insert(
+                        idempotency_key.clone(),
+                        (intent, response.clone()),
+                    );
+                    return response;
                 }
 
                 let response = if let Some(code) = refusal_code
                     && !session.first_begin_refusal_used
                 {
                     session.first_begin_refusal_used = true;
-                    if engram_begin_refusal_allows_reevaluation(&code) {
+                    if stateful_engram_begin_refusal_expires_grant(&code) {
                         session.issued_grant_id = None;
                     }
                     Ok(json!({ "decision": "refuse", "code": code }))
@@ -909,39 +1058,59 @@ impl EngramControlTransport for StatefulEngramControlTransport {
                 };
                 session.seen_begins.insert(
                     idempotency_key.clone(),
-                    (grant_id.clone(), response.clone()),
+                    (intent, response.clone()),
                 );
                 response
             }
             EngramControlRequest::TurnCheckpoint {
                 routing_token,
                 grant_id,
+                idempotency_key,
                 ..
             } => {
                 let session = state.sessions.get_mut(&session_id);
                 Self::validate_routing_token(session.as_deref(), routing_token)?;
                 let session = session.expect("validated Engram session should exist");
-                if session.issued_grant_id.as_deref() == Some(grant_id.as_str()) {
-                    return Ok(json!({
+                let intent = Self::request_intent_without_auth_and_idempotency(request);
+                if let Some((seen_intent, response)) =
+                    session.seen_checkpoints.get(idempotency_key)
+                {
+                    if seen_intent != &intent {
+                        return Err(Self::idempotency_conflict("turn_checkpoint"));
+                    }
+                    return response.clone();
+                }
+                if !session.known_grant_ids.contains(grant_id) {
+                    return Err(Self::remote_error(
+                        "turn_grant_not_found",
+                        "turn_checkpoint grant does not exist",
+                    ));
+                }
+                if session.begun_grant_id.as_deref() != Some(grant_id.as_str()) {
+                    let response = Ok(json!({
                         "decision": "refuse",
                         "code": "grant_scope_mismatch"
                     }));
-                }
-                if session.begun_grant_id.as_deref() != Some(grant_id.as_str()) {
-                    return Err(Self::remote_error(
-                        "grant_scope_mismatch",
-                        "turn_checkpoint grant is not the currently begun grant",
-                    ));
+                    session.seen_checkpoints.insert(
+                        idempotency_key.clone(),
+                        (intent, response.clone()),
+                    );
+                    return response;
                 }
                 session.begun_grant_id = None;
-                Ok(json!({
+                let response = Ok(json!({
                     "decision": "checkpointed",
                     "receipt": {
                         "grant_id": grant_id,
                         "cursor": 0,
                         "confirmed_cursor": 0
                     }
-                }))
+                }));
+                session.seen_checkpoints.insert(
+                    idempotency_key.clone(),
+                    (intent, response.clone()),
+                );
+                response
             }
         }
     }
@@ -960,10 +1129,55 @@ struct EngramProcessRequest {
     reply: mpsc::Sender<std::result::Result<Value, EngramTransportError>>,
 }
 
+struct EngramProcessTree {
+    inner: TerminalProcessTree,
+    terminated: Mutex<bool>,
+}
+
+impl EngramProcessTree {
+    fn attach(process: &Arc<SharedChild>) -> Result<Self> {
+        Ok(Self {
+            inner: TerminalProcessTree::attach(process)?,
+            terminated: Mutex::new(false),
+        })
+    }
+
+    fn terminate(&self, process: &Arc<SharedChild>) -> Result<()> {
+        let mut terminated = self
+            .terminated
+            .lock()
+            .expect("Engram process-tree mutex poisoned");
+        if *terminated {
+            return Ok(());
+        }
+        *terminated = true;
+        self.inner.kill_before_reap(process, "Engram control")
+    }
+
+    fn resume_after_attach(&self, process: &Arc<SharedChild>) -> Result<()> {
+        self.inner.resume_after_attach(process)
+    }
+}
+
 struct EngramControlProcess {
     config: EngramConnectionConfig,
     process: Arc<SharedChild>,
+    process_tree: Arc<EngramProcessTree>,
     requests: mpsc::Sender<EngramProcessRequest>,
+    worker_finished: Arc<AtomicBool>,
+}
+
+impl EngramControlProcess {
+    fn terminate(&self) {
+        let _ = self.process_tree.terminate(&self.process);
+        let _ = self.process.wait();
+    }
+}
+
+impl Drop for EngramControlProcess {
+    fn drop(&mut self) {
+        self.terminate();
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -972,10 +1186,20 @@ struct EngramControlStartupHandshake {
     timeout: Duration,
 }
 
-#[derive(Default)]
 struct ProcessEngramControlTransport {
     processes: Mutex<HashMap<String, Arc<EngramControlProcess>>>,
     startup_handshake: Option<EngramControlStartupHandshake>,
+    idle_timeout: Duration,
+}
+
+impl Default for ProcessEngramControlTransport {
+    fn default() -> Self {
+        Self {
+            processes: Mutex::new(HashMap::new()),
+            startup_handshake: None,
+            idle_timeout: ENGRAM_CONTROL_IDLE_TIMEOUT,
+        }
+    }
 }
 
 impl ProcessEngramControlTransport {
@@ -987,6 +1211,23 @@ impl ProcessEngramControlTransport {
                 expected_line,
                 timeout,
             }),
+            idle_timeout: ENGRAM_CONTROL_IDLE_TIMEOUT,
+        }
+    }
+
+    #[cfg(test)]
+    fn with_startup_handshake_and_idle_timeout(
+        expected_line: &'static str,
+        startup_timeout: Duration,
+        idle_timeout: Duration,
+    ) -> Self {
+        Self {
+            processes: Mutex::new(HashMap::new()),
+            startup_handshake: Some(EngramControlStartupHandshake {
+                expected_line,
+                timeout: startup_timeout,
+            }),
+            idle_timeout,
         }
     }
 
@@ -994,33 +1235,50 @@ impl ProcessEngramControlTransport {
         &self,
         connection: &EngramConnectionConfig,
     ) -> std::result::Result<Arc<EngramControlProcess>, EngramTransportError> {
-        let mut processes = self
-            .processes
-            .lock()
-            .expect("Engram process registry mutex poisoned");
-        if let Some(existing) = processes.get(&connection.session_id).cloned() {
-            let still_running = existing
-                .process
-                .try_wait()
-                .map_err(|err| {
-                    EngramTransportError::transport(format!(
-                        "failed checking Engram control process: {err}"
-                    ))
-                })?
-                .is_none();
-            if existing.config == *connection && still_running {
-                return Ok(existing);
+        let stale = {
+            let mut processes = self
+                .processes
+                .lock()
+                .expect("Engram process registry mutex poisoned");
+            if let Some(existing) = processes.get(&connection.session_id).cloned() {
+                if existing.config == *connection
+                    && !existing.worker_finished.load(Ordering::Acquire)
+                {
+                    return Ok(existing);
+                }
+                processes.remove(&connection.session_id)
+            } else {
+                None
             }
-            let _ = existing.process.kill();
-            processes.remove(&connection.session_id);
+        };
+        if let Some(stale) = stale {
+            stale.terminate();
         }
 
         let process = Arc::new(spawn_engram_control_process(
             connection,
             self.startup_handshake,
+            self.idle_timeout,
         )?);
-        processes.insert(connection.session_id.clone(), process.clone());
-        Ok(process)
+        let (selected, displaced) = {
+            let mut processes = self
+                .processes
+                .lock()
+                .expect("Engram process registry mutex poisoned");
+            if let Some(existing) = processes.get(&connection.session_id).cloned()
+                && existing.config == *connection
+                && !existing.worker_finished.load(Ordering::Acquire)
+            {
+                (existing, Some(process))
+            } else {
+                let displaced = processes.insert(connection.session_id.clone(), process.clone());
+                (process, displaced)
+            }
+        };
+        if let Some(displaced) = displaced {
+            displaced.terminate();
+        }
+        Ok(selected)
     }
 
     fn discard_process(&self, session_id: &str, expected: &Arc<EngramControlProcess>) {
@@ -1037,10 +1295,190 @@ impl ProcessEngramControlTransport {
                 .flatten()
         };
         if let Some(process) = removed {
-            let _ = process.process.kill();
-            let _ = process.process.wait();
+            process.terminate();
         }
     }
+}
+
+fn read_engram_work_binding_from_cli(
+    connection: &EngramConnectionConfig,
+    timeout: Duration,
+) -> std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError> {
+    let next = run_engram_json_command_with_lock_retry(
+        connection,
+        &["work", "--actor-id", &connection.actor_id, "--session-id", &connection.session_id, "next", "--sections", "focus"],
+        timeout,
+    )?;
+    let Some(work_id) = next
+        .get("focus")
+        .and_then(|focus| focus.get("status"))
+        .and_then(|status| status.get("work"))
+        .and_then(|work| work.get("work_id"))
+        .and_then(Value::as_str)
+    else {
+        return Ok(None);
+    };
+    let focus = run_engram_json_command_with_lock_retry(
+        connection,
+        &["work", "--actor-id", &connection.actor_id, "--session-id", &connection.session_id, "focus", work_id],
+        timeout,
+    )?;
+    focus
+        .get("control_binding")
+        .cloned()
+        .map(serde_json::from_value)
+        .transpose()
+        .map_err(|error| {
+            EngramTransportError::protocol(format!(
+                "invalid Engram work control_binding: {error}"
+            ))
+        })
+}
+
+fn run_engram_json_command_with_lock_retry(
+    connection: &EngramConnectionConfig,
+    args: &[&str],
+    timeout: Duration,
+) -> std::result::Result<Value, EngramTransportError> {
+    let first = run_engram_json_command(connection, args, timeout);
+    match first {
+        Err(error)
+            if error.kind == EngramTransportErrorKind::Transport
+                && error
+                    .message
+                    .to_ascii_lowercase()
+                    .contains("database is locked") =>
+        {
+            std::thread::sleep(ENGRAM_WORK_BINDING_LOCK_RETRY_DELAY);
+            run_engram_json_command(connection, args, timeout)
+        }
+        result => result,
+    }
+}
+
+fn run_engram_json_command(
+    connection: &EngramConnectionConfig,
+    args: &[&str],
+    timeout: Duration,
+) -> std::result::Result<Value, EngramTransportError> {
+    let mut command = engram_command(&connection.binary_path);
+    configure_terminal_process_tree(&mut command);
+    let mut child = command
+        .arg("--project-file")
+        .arg(&connection.project_file)
+        .arg("--home")
+        .arg(&connection.home)
+        .args(args)
+        .current_dir(&connection.project_root)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| {
+            EngramTransportError::transport(format!(
+                "failed spawning Engram work-binding reader: {error}"
+            ))
+        })?;
+    let stdout = child.stdout.take().ok_or_else(|| {
+        EngramTransportError::transport("Engram work-binding reader stdout is unavailable")
+    })?;
+    let stderr = child.stderr.take().ok_or_else(|| {
+        EngramTransportError::transport("Engram work-binding reader stderr is unavailable")
+    })?;
+    let process = Arc::new(SharedChild::new(child).map_err(|error| {
+        EngramTransportError::transport(format!(
+            "failed sharing Engram work-binding reader: {error}"
+        ))
+    })?);
+    let process_tree = EngramProcessTree::attach(&process).map_err(|error| {
+        let _ = kill_child_process(&process, "Engram work-binding reader");
+        let _ = process.wait();
+        EngramTransportError::transport(format!(
+            "failed preparing Engram work-binding reader process tree: {error:#}"
+        ))
+    })?;
+    process_tree.resume_after_attach(&process).map_err(|error| {
+        let _ = process_tree.terminate(&process);
+        let _ = process.wait();
+        EngramTransportError::transport(format!(
+            "failed resuming Engram work-binding reader: {error:#}"
+        ))
+    })?;
+    let stdout_reader = std::thread::spawn(move || read_engram_cli_output(stdout));
+    let stderr_reader = std::thread::spawn(move || read_engram_cli_output(stderr));
+    let deadline = std::time::Instant::now() + timeout;
+    let status = loop {
+        match process.try_wait() {
+            Ok(Some(status)) => break Ok(status),
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            Ok(None) => {
+                let _ = process_tree.terminate(&process);
+                let _ = process.wait();
+                break Err(EngramTransportError::deadline(format!(
+                    "Engram work-binding read exceeded {} ms",
+                    timeout.as_millis()
+                )));
+            }
+            Err(error) => {
+                let _ = process_tree.terminate(&process);
+                let _ = process.wait();
+                break Err(EngramTransportError::transport(format!(
+                    "failed waiting for Engram work-binding reader: {error}"
+                )));
+            }
+        }
+    };
+    let stdout = join_engram_cli_output(stdout_reader, "stdout")?;
+    let stderr = join_engram_cli_output(stderr_reader, "stderr")?;
+    let status = status?;
+    if !status.success() {
+        let detail = String::from_utf8_lossy(&stderr).trim().to_owned();
+        return Err(EngramTransportError::transport(if detail.is_empty() {
+            format!("Engram work-binding reader exited with {status}")
+        } else {
+            format!("Engram work-binding reader failed: {detail}")
+        }));
+    }
+    serde_json::from_slice(&stdout).map_err(|error| {
+        EngramTransportError::protocol(format!(
+            "invalid Engram work-binding response: {error}"
+        ))
+    })
+}
+
+fn read_engram_cli_output(
+    reader: impl std::io::Read,
+) -> std::io::Result<Vec<u8>> {
+    let mut output = Vec::new();
+    std::io::Read::take(reader, (ENGRAM_CONTROL_MAX_FRAME_BYTES + 1) as u64)
+        .read_to_end(&mut output)?;
+    if output.len() > ENGRAM_CONTROL_MAX_FRAME_BYTES {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "Engram command output exceeds the maximum control frame",
+        ));
+    }
+    Ok(output)
+}
+
+fn join_engram_cli_output(
+    reader: std::thread::JoinHandle<std::io::Result<Vec<u8>>>,
+    stream: &str,
+) -> std::result::Result<Vec<u8>, EngramTransportError> {
+    reader
+        .join()
+        .map_err(|_| {
+            EngramTransportError::transport(format!(
+                "Engram work-binding {stream} reader panicked"
+            ))
+        })?
+        .map_err(|error| {
+            EngramTransportError::transport(format!(
+                "failed reading Engram work-binding {stream}: {error}"
+            ))
+        })
 }
 
 impl EngramControlTransport for ProcessEngramControlTransport {
@@ -1101,6 +1539,14 @@ impl EngramControlTransport for ProcessEngramControlTransport {
         }
     }
 
+    fn read_work_binding(
+        &self,
+        connection: &EngramConnectionConfig,
+        timeout: Duration,
+    ) -> std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError> {
+        read_engram_work_binding_from_cli(connection, timeout)
+    }
+
     fn shutdown_session(&self, session_id: &str) {
         let process = self
             .processes
@@ -1108,8 +1554,7 @@ impl EngramControlTransport for ProcessEngramControlTransport {
             .expect("Engram process registry mutex poisoned")
             .remove(session_id);
         if let Some(process) = process {
-            let _ = process.process.kill();
-            let _ = process.process.wait();
+            process.terminate();
         }
     }
 }
@@ -1117,8 +1562,10 @@ impl EngramControlTransport for ProcessEngramControlTransport {
 fn spawn_engram_control_process(
     connection: &EngramConnectionConfig,
     startup_handshake: Option<EngramControlStartupHandshake>,
+    idle_timeout: Duration,
 ) -> std::result::Result<EngramControlProcess, EngramTransportError> {
     let mut command = engram_command(&connection.binary_path);
+    configure_terminal_process_tree(&mut command);
     let mut child = command
         .arg("--project-file")
         .arg(&connection.project_file)
@@ -1148,7 +1595,17 @@ fn spawn_engram_control_process(
     let process = Arc::new(SharedChild::new(child).map_err(|err| {
         EngramTransportError::transport(format!("failed sharing Engram control child: {err}"))
     })?);
+    let process_tree = Arc::new(EngramProcessTree::attach(&process).map_err(|err| {
+        let _ = kill_child_process(&process, "Engram control");
+        let _ = process.wait();
+        EngramTransportError::transport(format!(
+            "failed preparing Engram control process tree: {err:#}"
+        ))
+    })?);
     let worker_process = process.clone();
+    let worker_process_tree = process_tree.clone();
+    let worker_finished = Arc::new(AtomicBool::new(false));
+    let worker_finished_signal = worker_finished.clone();
     let (request_tx, request_rx) = mpsc::channel::<EngramProcessRequest>();
     let (startup_tx, startup_rx) = mpsc::sync_channel(1);
     std::thread::Builder::new()
@@ -1160,13 +1617,14 @@ fn spawn_engram_control_process(
                 let startup_failed = startup_result.is_err();
                 let _ = startup_tx.send(startup_result);
                 if startup_failed {
-                    let _ = worker_process.kill();
+                    worker_finished_signal.store(true, Ordering::Release);
+                    let _ = worker_process_tree.terminate(&worker_process);
                     let _ = worker_process.wait();
                     return;
                 }
             }
             loop {
-                match request_rx.recv_timeout(ENGRAM_CONTROL_IDLE_TIMEOUT) {
+                match request_rx.recv_timeout(idle_timeout) {
                     Ok(request) => {
                         let result = exchange_engram_control_frame(
                             &mut stdin,
@@ -1179,23 +1637,36 @@ fn spawn_engram_control_process(
                         let is_terminal = result
                             .as_ref()
                             .is_err_and(|error| !error.keeps_control_process_alive());
+                        if is_terminal {
+                            worker_finished_signal.store(true, Ordering::Release);
+                        }
                         let _ = request.reply.send(result);
                         if is_terminal {
                             break;
                         }
                     }
                     Err(mpsc::RecvTimeoutError::Timeout | mpsc::RecvTimeoutError::Disconnected) => {
+                        worker_finished_signal.store(true, Ordering::Release);
                         break;
                     }
                 }
             }
-            let _ = worker_process.kill();
+            let _ = worker_process_tree.terminate(&worker_process);
             let _ = worker_process.wait();
         })
         .map_err(|err| {
-            let _ = process.kill();
+            let _ = process_tree.terminate(&process);
+            let _ = process.wait();
             EngramTransportError::transport(format!("failed spawning Engram control worker: {err}"))
         })?;
+
+    if let Err(err) = process_tree.resume_after_attach(&process) {
+        let _ = process_tree.terminate(&process);
+        let _ = process.wait();
+        return Err(EngramTransportError::transport(format!(
+            "failed resuming Engram control process: {err:#}"
+        )));
+    }
 
     if let Some(handshake) = startup_handshake {
         let startup_result = match startup_rx.recv_timeout(handshake.timeout) {
@@ -1209,7 +1680,7 @@ fn spawn_engram_control_process(
             )),
         };
         if let Err(error) = startup_result {
-            let _ = process.kill();
+            let _ = process_tree.terminate(&process);
             let _ = process.wait();
             return Err(error);
         }
@@ -1218,7 +1689,9 @@ fn spawn_engram_control_process(
     Ok(EngramControlProcess {
         config: connection.clone(),
         process,
+        process_tree,
         requests: request_tx,
+        worker_finished,
     })
 }
 
@@ -1301,6 +1774,14 @@ impl EngramHostAdapter {
         timeout: Duration,
     ) -> std::result::Result<Value, EngramTransportError> {
         self.transport.request(connection, request, timeout)
+    }
+
+    fn read_work_binding(
+        &self,
+        connection: &EngramConnectionConfig,
+        timeout: Duration,
+    ) -> std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError> {
+        self.transport.read_work_binding(connection, timeout)
     }
 
     fn shutdown_session(&self, session_id: &str) {
@@ -1581,9 +2062,13 @@ impl EngramBindingTarget {
                 routing_token: routing_token.clone(),
                 grant_id: grant_id.clone(),
                 next_intent: EngramNextIntent::Exit,
-                idempotency_key: format!(
-                    "termal-project-reset-checkpoint:{}:{}",
-                    self.connection.session_id, grant_id
+                observations: Vec::new(),
+                idempotency_key: engram_checkpoint_idempotency_key(
+                    format!(
+                        "termal-project-reset-checkpoint:{}:{}",
+                        self.connection.session_id, grant_id
+                    ),
+                    &[],
                 ),
             },
             self.settings.call_timeout(),
@@ -1966,11 +2451,15 @@ impl AppState {
                             routing_token: routing_token.clone(),
                             grant_id: grant_id.clone(),
                             next_intent,
-                            idempotency_key: format!(
-                                "termal-checkpoint:{}:{}:{}",
-                                session_id,
-                                grant_id,
-                                next_intent.as_idempotency_component()
+                            observations: Vec::new(),
+                            idempotency_key: engram_checkpoint_idempotency_key(
+                                format!(
+                                    "termal-checkpoint:{}:{}:{}",
+                                    session_id,
+                                    grant_id,
+                                    next_intent.as_idempotency_component()
+                                ),
+                                &[],
                             ),
                         },
                         target.settings.call_timeout(),
@@ -2164,11 +2653,12 @@ impl AppState {
                 .flatten();
             (pending, target)
         };
-        let (pending, target) = snapshot;
+        let (pending, mut binding_target) = snapshot;
         let mut evaluation = pending.evaluated.clone();
         let mut evaluate_latency_ms = pending.evaluate_latency_ms;
         let mut begin_latency_ms = None;
         let mut retry_used = false;
+        let mut dispatch_budget_started_at = pending.started_at;
         let mut active_grant_id = None;
         // Engram records an issued grant before `turn_begin`. If TermAl can no
         // longer deliver this dispatch before begin succeeds, that grant
@@ -2184,7 +2674,7 @@ impl AppState {
                     delivered_range,
                 } => {
                     issued_unbegun_grant_id = Some(grant_id.clone());
-                    let Some(target) = target.as_ref() else {
+                    let Some(target) = binding_target.as_ref() else {
                         break (
                             EngramControlCardDecision::Degraded,
                             Some("binding_unavailable".to_owned()),
@@ -2203,7 +2693,7 @@ impl AppState {
                         );
                     };
                     let Some(timeout) = engram_remaining_dispatch_timeout(
-                        pending.started_at,
+                        dispatch_budget_started_at,
                         target.settings.call_timeout(),
                     ) else {
                         break (
@@ -2262,9 +2752,50 @@ impl AppState {
                             // grant. Only a subsequent re-evaluate grant needs
                             // orphan recovery if begin cannot complete.
                             issued_unbegun_grant_id = None;
+                            let reevaluate_target = if code == "stale_fence" {
+                                self.mark_engram_rebind_required(session_id, Some(target));
+                                match self.ensure_engram_child_bound_off_lock(session_id) {
+                                    Ok(Some(refreshed)) => refreshed,
+                                    Ok(None) => {
+                                        break (
+                                            EngramControlCardDecision::Degraded,
+                                            Some("binding_unavailable".to_owned()),
+                                            Vec::new(),
+                                            delivered_range,
+                                            EngramControlFailMode::Degraded,
+                                        );
+                                    }
+                                    Err(error) => {
+                                        self.record_engram_transport_failure(session_id, &error);
+                                        let code =
+                                            self.engram_failure_card_code(session_id, &error);
+                                        break (
+                                            EngramControlCardDecision::Degraded,
+                                            Some(code),
+                                            Vec::new(),
+                                            delivered_range,
+                                            EngramControlFailMode::Degraded,
+                                        );
+                                    }
+                                }
+                            } else {
+                                target.clone()
+                            };
+                            let reevaluate_routing_token = reevaluate_target
+                                .routing_token
+                                .clone()
+                                .expect("re-evaluation target should carry a routing token");
+                            if code == "stale_fence" {
+                                binding_target = Some(reevaluate_target.clone());
+                                // The stale recovery bind may perform a
+                                // separately bounded work-focus process read.
+                                // Start the one allowed re-evaluate/begin hot
+                                // budget only after the refreshed bind exists.
+                                dispatch_budget_started_at = std::time::Instant::now();
+                            }
                             let Some(timeout) = engram_remaining_dispatch_timeout(
-                                pending.started_at,
-                                target.settings.call_timeout(),
+                                dispatch_budget_started_at,
+                                reevaluate_target.settings.call_timeout(),
                             ) else {
                                 break (
                                     EngramControlCardDecision::Degraded,
@@ -2275,12 +2806,12 @@ impl AppState {
                                 );
                             };
                             let reevaluate_started = std::time::Instant::now();
-                            let reevaluated = target
+                            let reevaluated = reevaluate_target
                                 .adapter
                                 .request(
-                                    &target.connection,
+                                    &reevaluate_target.connection,
                                     &EngramControlRequest::TurnEvaluate {
-                                        routing_token: routing_token.clone(),
+                                        routing_token: reevaluate_routing_token,
                                         idempotency_key: format!(
                                             "termal-reevaluate:{}:{}:{}",
                                             session_id,
@@ -2289,7 +2820,7 @@ impl AppState {
                                         ),
                                         intent_fingerprint: pending.intent_fingerprint.clone(),
                                         purpose: "ordinary".to_owned(),
-                                        requested_effects: target.effects.clone(),
+                                        requested_effects: reevaluate_target.effects.clone(),
                                         resource_intents: Vec::new(),
                                     },
                                     timeout,
@@ -2321,7 +2852,10 @@ impl AppState {
                                 Ok(EngramTurnDecisionResponse::Refuse { directive }) => {
                                     self.record_engram_transport_success(session_id);
                                     if engram_evaluation_refusal_requires_rebind(&directive.code) {
-                                        self.mark_engram_rebind_required(session_id, Some(target));
+                                        self.mark_engram_rebind_required(
+                                            session_id,
+                                            Some(&reevaluate_target),
+                                        );
                                     }
                                     EngramDispatchEvaluation::Refuse {
                                         directive: EngramControlDirectiveCard {
@@ -2485,10 +3019,10 @@ impl AppState {
             // plus a dispatch whose shared evaluate/begin budget expired before
             // begin. Engram rejects checkpointing such a grant; force the next
             // attempt through status + fresh bind instead.
-            self.mark_engram_rebind_required(session_id, target.as_ref());
+            self.mark_engram_rebind_required(session_id, binding_target.as_ref());
         }
         if preparation != EngramTurnDeliveryPreparation::Ready
-            && let (Some(grant_id), Some(target)) = (active_grant_id, target)
+            && let (Some(grant_id), Some(target)) = (active_grant_id, binding_target)
             && let Some(routing_token) = target.routing_token.as_ref()
         {
             // The begin happened against this captured connection. Even if the
@@ -2501,8 +3035,10 @@ impl AppState {
                     routing_token: routing_token.clone(),
                     grant_id: grant_id.clone(),
                     next_intent: EngramNextIntent::Exit,
-                    idempotency_key: format!(
-                        "termal-stale-begin-checkpoint:{session_id}:{grant_id}"
+                    observations: Vec::new(),
+                    idempotency_key: engram_checkpoint_idempotency_key(
+                        format!("termal-stale-begin-checkpoint:{session_id}:{grant_id}"),
+                        &[],
                     ),
                 },
                 target.settings.call_timeout(),
@@ -2755,9 +3291,11 @@ impl AppState {
         if !child.is_local_session() {
             return Ok(None);
         }
-        let project = engram_project_for_session_locked(inner, session_id).ok_or_else(|| {
-            format!("delegation ancestry for session `{session_id}` is not attached to a project")
-        })?;
+        let Some(project) = engram_project_for_session_locked(inner, session_id) else {
+            // Engram is configured per project, so a projectless delegation
+            // is an ordinary disabled path rather than an adapter failure.
+            return Ok(None);
+        };
         let Some(settings) = project.engram.as_ref() else {
             return Ok(None);
         };
@@ -2982,12 +3520,15 @@ impl AppState {
                 remaining.as_millis()
             )));
         }
-        let started_at = std::time::Instant::now();
+        let recovery_started_at = std::time::Instant::now();
         let was_rebind = target.rebind_required || target.circuit_open;
         if target.rebind_required || target.circuit_open {
             if let Some(routing_token) = target.routing_token.clone() {
                 let timeout =
-                    engram_remaining_dispatch_timeout(started_at, target.settings.call_timeout())
+                    engram_remaining_dispatch_timeout(
+                        recovery_started_at,
+                        target.settings.call_timeout(),
+                    )
                         .ok_or_else(|| {
                         EngramTransportError::deadline("Engram rebind budget exhausted")
                     })?;
@@ -3026,7 +3567,7 @@ impl AppState {
                     }
                     if let Some(grant_id) = status.open_grant_id.as_deref() {
                         let timeout = engram_remaining_dispatch_timeout(
-                            started_at,
+                            recovery_started_at,
                             target.settings.call_timeout(),
                         )
                         .ok_or_else(|| {
@@ -3038,9 +3579,13 @@ impl AppState {
                                 routing_token: routing_token.clone(),
                                 grant_id: grant_id.to_owned(),
                                 next_intent: EngramNextIntent::Wait,
-                                idempotency_key: format!(
-                                    "termal-restart-checkpoint:{}:{}",
-                                    target.connection.session_id, grant_id
+                                observations: Vec::new(),
+                                idempotency_key: engram_checkpoint_idempotency_key(
+                                    format!(
+                                        "termal-restart-checkpoint:{}:{}",
+                                        target.connection.session_id, grant_id
+                                    ),
+                                    &[],
                                 ),
                             },
                             timeout,
@@ -3110,25 +3655,46 @@ impl AppState {
             return Ok(routing_token.to_owned());
         }
 
-        let timeout = engram_remaining_dispatch_timeout(started_at, target.settings.call_timeout())
-            .ok_or_else(|| EngramTransportError::deadline("Engram bind budget exhausted"))?;
-        let result = target.adapter.request(
-            &target.connection,
-            &EngramControlRequest::SessionBind {
-                external_ref: target.external_ref,
-                title: target.title,
-                assurance: "advisory".to_owned(),
-                mediated_effects: target.effects,
-                capability_map_revision: ENGRAM_CAPABILITY_MAP_REVISION,
-                idempotency_key: format!(
-                    "termal-bind:{}:{}",
-                    target.connection.session_id,
-                    Uuid::new_v4()
-                ),
-            },
-            timeout,
-        )?;
-        let binding: EngramSessionBindingResponse = parse_engram_result(result)?;
+        let mut stale_retry_used = false;
+        let binding = loop {
+            let work_binding = target
+                .adapter
+                .read_work_binding(&target.connection, ENGRAM_WORK_BINDING_COMMAND_TIMEOUT)?;
+            // Work-focus CLI reads launch separate Engram processes and have
+            // no contractual sub-600ms latency bound. Keep that bounded read
+            // outside the hot JSON-lines bind budget. A stale-fence retry
+            // repeats this shape exactly once.
+            // The hot JSON-lines budget deliberately starts fresh after the
+            // bounded CLI reader completes. A stale-fence retry performs a
+            // fresh reader and receives the same fresh bind budget.
+            let timeout = target.settings.call_timeout();
+            let result = target.adapter.request(
+                &target.connection,
+                &EngramControlRequest::SessionBind {
+                    external_ref: target.external_ref.clone(),
+                    title: target.title.clone(),
+                    assurance: "advisory".to_owned(),
+                    mediated_effects: target.effects.clone(),
+                    capability_map_revision: ENGRAM_CAPABILITY_MAP_REVISION,
+                    work_binding,
+                    idempotency_key: format!(
+                        "termal-bind:{}:{}",
+                        target.connection.session_id,
+                        Uuid::new_v4()
+                    ),
+                },
+                timeout,
+            );
+            match result {
+                Err(error) if !stale_retry_used && engram_error_is_stale_fence(&error) => {
+                    stale_retry_used = true;
+                }
+                Err(error) => return Err(error),
+                Ok(result) => {
+                    break parse_engram_result::<EngramSessionBindingResponse>(result)?;
+                }
+            }
+        };
         if was_rebind && binding.status.phase != "sync_required" {
             return Err(EngramTransportError::protocol(format!(
                 "Engram rebind returned phase `{}` instead of `sync_required`",
@@ -3268,7 +3834,7 @@ impl AppState {
         &self,
         intent: &EngramTurnIntentSnapshot,
     ) -> Option<EngramPendingDispatch> {
-        let started_at = std::time::Instant::now();
+        let mut started_at = std::time::Instant::now();
         let disabled_reason = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             inner
@@ -3291,7 +3857,7 @@ impl AppState {
                 awaiting_runtime_stop_resolution: false,
             });
         }
-        let target = match self.ensure_engram_child_bound_off_lock(&intent.session_id) {
+        let mut target = match self.ensure_engram_child_bound_off_lock(&intent.session_id) {
             Ok(Some(target)) => target,
             Ok(None) => return None,
             Err(error) => {
@@ -3310,42 +3876,45 @@ impl AppState {
                 });
             }
         };
-        let routing_token = target
-            .routing_token
-            .clone()
-            .expect("ensured Engram target should carry a routing token");
-        let request = EngramControlRequest::TurnEvaluate {
-            routing_token,
-            idempotency_key: format!(
-                "termal-evaluate:{}:{}:{}",
-                intent.session_id, intent.dispatch_generation, intent.intent_fingerprint
-            ),
-            intent_fingerprint: intent.intent_fingerprint.clone(),
-            purpose: "ordinary".to_owned(),
-            requested_effects: target.effects.clone(),
-            resource_intents: Vec::new(),
-        };
-        let Some(timeout) =
-            engram_remaining_dispatch_timeout(started_at, target.settings.call_timeout())
-        else {
-            return Some(EngramPendingDispatch {
-                dispatch_generation: intent.dispatch_generation,
+        // Initial binding may include a separately bounded work-focus CLI
+        // read. Start the hot evaluate/begin budget after the routing token is
+        // established instead of charging process startup against 600 ms.
+        started_at = std::time::Instant::now();
+        let mut stale_retry_used = false;
+        let evaluated = loop {
+            let routing_token = target
+                .routing_token
+                .clone()
+                .expect("ensured Engram target should carry a routing token");
+            let request = EngramControlRequest::TurnEvaluate {
+                routing_token,
+                idempotency_key: format!(
+                    "termal-{}evaluate:{}:{}:{}",
+                    if stale_retry_used { "stale-re" } else { "" },
+                    intent.session_id,
+                    intent.dispatch_generation,
+                    intent.intent_fingerprint
+                ),
                 intent_fingerprint: intent.intent_fingerprint.clone(),
-                evaluated: EngramDispatchEvaluation::Degraded {
+                purpose: "ordinary".to_owned(),
+                requested_effects: target.effects.clone(),
+                resource_intents: Vec::new(),
+            };
+            let Some(timeout) =
+                engram_remaining_dispatch_timeout(started_at, target.settings.call_timeout())
+            else {
+                break EngramDispatchEvaluation::Degraded {
                     code: "dispatch_budget_exhausted".to_owned(),
-                    detail: "Engram evaluate/begin dispatch budget was exhausted before evaluate"
-                        .to_owned(),
-                },
-                evaluate_latency_ms: duration_millis(started_at.elapsed()),
-                started_at,
-                awaiting_runtime_stop_resolution: false,
-            });
-        };
-        let evaluated = match target
-            .adapter
-            .request(&target.connection, &request, timeout)
-            .and_then(parse_engram_result::<EngramTurnDecisionResponse>)
-        {
+                    detail:
+                        "Engram evaluate/begin dispatch budget was exhausted before evaluate"
+                            .to_owned(),
+                };
+            };
+            match target
+                .adapter
+                .request(&target.connection, &request, timeout)
+                .and_then(parse_engram_result::<EngramTurnDecisionResponse>)
+            {
             Ok(EngramTurnDecisionResponse::Grant { grant }) => {
                 let delivered_range =
                     grant
@@ -3362,10 +3931,40 @@ impl AppState {
                     .map(|delivery| delivery.page.delivery_token.clone())
                     .collect();
                 self.record_engram_transport_success(&intent.session_id);
-                EngramDispatchEvaluation::Grant {
+                break EngramDispatchEvaluation::Grant {
                     grant_id: grant.grant_id,
                     delivery_tokens,
                     delivered_range,
+                };
+            }
+            Ok(EngramTurnDecisionResponse::Refuse { directive })
+                if directive.code == "stale_fence" && !stale_retry_used =>
+            {
+                self.record_engram_transport_success(&intent.session_id);
+                self.mark_engram_rebind_required(&intent.session_id, Some(&target));
+                match self.ensure_engram_child_bound_off_lock(&intent.session_id) {
+                    Ok(Some(refreshed)) => {
+                        target = refreshed;
+                        // stale-fence recovery performs its bounded work-focus
+                        // reread outside the hot evaluate/begin budget.
+                        started_at = std::time::Instant::now();
+                        stale_retry_used = true;
+                    }
+                    Ok(None) => {
+                        break EngramDispatchEvaluation::Degraded {
+                            code: "binding_unavailable".to_owned(),
+                            detail: "Engram binding disappeared during stale-fence recovery"
+                                .to_owned(),
+                        };
+                    }
+                    Err(error) => {
+                        self.record_engram_transport_failure(&intent.session_id, &error);
+                        let code = self.engram_failure_card_code(&intent.session_id, &error);
+                        break EngramDispatchEvaluation::Degraded {
+                            code,
+                            detail: error.message,
+                        };
+                    }
                 }
             }
             Ok(EngramTurnDecisionResponse::Refuse { directive }) => {
@@ -3373,30 +3972,31 @@ impl AppState {
                 if engram_evaluation_refusal_requires_rebind(&directive.code) {
                     self.mark_engram_rebind_required(&intent.session_id, Some(&target));
                 }
-                EngramDispatchEvaluation::Refuse {
+                break EngramDispatchEvaluation::Refuse {
                     directive: EngramControlDirectiveCard {
                         directive_id: directive.directive_id,
                         kind: directive.code,
                         audience: directive.target,
                         satisfaction: directive.satisfaction,
                     },
-                }
+                };
             }
             Ok(EngramTurnDecisionResponse::Defer { deferral }) => {
                 self.record_engram_transport_success(&intent.session_id);
-                EngramDispatchEvaluation::Defer {
+                break EngramDispatchEvaluation::Defer {
                     code: deferral.code,
                     retry_after_ms: deferral.retry_after_ms,
                     wake_condition: deferral.wake_condition,
-                }
+                };
             }
             Err(error) => {
                 self.record_engram_transport_failure(&intent.session_id, &error);
                 let code = self.engram_failure_card_code(&intent.session_id, &error);
-                EngramDispatchEvaluation::Degraded {
+                break EngramDispatchEvaluation::Degraded {
                     code,
                     detail: error.message,
-                }
+                };
+            }
             }
         };
         Some(EngramPendingDispatch {
@@ -3502,6 +4102,18 @@ fn duration_millis(duration: Duration) -> u64 {
     u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
 }
 
+fn engram_checkpoint_idempotency_key(
+    base: String,
+    observations: &[EngramExecutionObservationInput],
+) -> String {
+    if observations.is_empty() {
+        return base;
+    }
+    let encoded = serde_json::to_vec(observations)
+        .expect("Engram execution observation serialization should be infallible");
+    format!("{base}:observations:{}", sha256_hex(&encoded))
+}
+
 fn engram_bind_retry_delay(failure_count: u8) -> Duration {
     Duration::from_secs(match failure_count {
         0 | 1 => 1,
@@ -3533,6 +4145,10 @@ fn engram_begin_refusal_allows_reevaluation(code: &str) -> bool {
 
 fn engram_evaluation_refusal_requires_rebind(code: &str) -> bool {
     code == "turn_already_open"
+}
+
+fn engram_error_is_stale_fence(error: &EngramTransportError) -> bool {
+    error.kind == EngramTransportErrorKind::Remote && error.code.as_deref() == Some("stale_fence")
 }
 
 fn engram_status_error_requires_fresh_bind(error: &EngramTransportError) -> bool {

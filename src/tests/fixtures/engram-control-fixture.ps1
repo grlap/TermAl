@@ -1,13 +1,16 @@
 $ErrorActionPreference = "Stop"
 
 $projectFile = $null
+$engramHome = $null
 for ($index = 0; $index -lt $args.Count - 1; $index += 1) {
     if ($args[$index] -eq "--project-file") {
         $projectFile = $args[$index + 1]
-        break
+    }
+    if ($args[$index] -eq "--home") {
+        $engramHome = $args[$index + 1]
     }
 }
-if (-not $projectFile) {
+if (-not $projectFile -or -not $engramHome) {
     exit 2
 }
 
@@ -43,6 +46,24 @@ $seenBeginDecisions = @{}
 $seenBeginCodes = @{}
 $seenEvaluateIntents = @{}
 $seenEvaluateGrants = @{}
+$seenEvaluateDecisions = @{}
+$seenEvaluateCodes = @{}
+$seenBindIntents = @{}
+$seenBindTokens = @{}
+$seenCheckpointIntents = @{}
+$seenCheckpointDecisions = @{}
+$seenCheckpointCodes = @{}
+$knownGrants = @{}
+
+function Get-RequestIntent($request) {
+    $intent = [ordered]@{}
+    foreach ($property in $request.PSObject.Properties) {
+        if ($property.Name -ne "routing_token" -and $property.Name -ne "idempotency_key") {
+            $intent[$property.Name] = $property.Value
+        }
+    }
+    return ($intent | ConvertTo-Json -Compress -Depth 10)
+}
 
 function Write-Result($result) {
     [Console]::Out.WriteLine((@{ status = "ok"; result = $result } | ConvertTo-Json -Compress -Depth 10))
@@ -81,6 +102,50 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
         Start-Sleep -Seconds 30
         continue
     }
+    if ($mode.StartsWith("fixture-tree-")) {
+        $descendantPath = Join-Path $engramHome "engram-descendant.ps1"
+        if ($mode -eq "fixture-tree-eof") {
+            Start-Process -FilePath "powershell.exe" -ArgumentList @(
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-File",
+                $descendantPath
+            ) -WindowStyle Hidden
+        } else {
+            $processInfo = [System.Diagnostics.ProcessStartInfo]::new()
+            $processInfo.FileName = "powershell.exe"
+            $processInfo.Arguments = "-NoLogo -NoProfile -NonInteractive -File `"$descendantPath`""
+            $processInfo.UseShellExecute = $false
+            $processInfo.CreateNoWindow = $true
+            [System.Diagnostics.Process]::Start($processInfo) | Out-Null
+        }
+        $spawnedPath = Join-Path $engramHome "engram-descendant-spawned"
+        $spawnDeadline = [DateTime]::UtcNow.AddSeconds(10)
+        while (-not (Test-Path -LiteralPath $spawnedPath) -and [DateTime]::UtcNow -lt $spawnDeadline) {
+            Start-Sleep -Milliseconds 10
+        }
+        if (-not (Test-Path -LiteralPath $spawnedPath)) {
+            exit 3
+        }
+        if ($mode -eq "fixture-tree-eof") {
+            $releasePath = Join-Path $engramHome "engram-eof-release"
+            $releaseDeadline = [DateTime]::UtcNow.AddSeconds(10)
+            while (-not (Test-Path -LiteralPath $releasePath) -and [DateTime]::UtcNow -lt $releaseDeadline) {
+                Start-Sleep -Milliseconds 10
+            }
+            if (-not (Test-Path -LiteralPath $releasePath)) {
+                exit 4
+            }
+            exit 0
+        }
+        if ($mode -eq "fixture-tree-reply") {
+            Write-Result @{ routing_token = $routingToken; status = @{ phase = "ready" } }
+            continue
+        }
+        Start-Sleep -Seconds 30
+        continue
+    }
     if ($mode -eq "fixture-malformed") {
         [Console]::Out.WriteLine('{"status":')
         [Console]::Out.Flush()
@@ -103,6 +168,16 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
 
     switch ($request.operation) {
         "session_bind" {
+            $key = [string] $request.idempotency_key
+            $intent = Get-RequestIntent $request
+            if ($seenBindIntents.ContainsKey($key)) {
+                if ($seenBindIntents[$key] -ne $intent) {
+                    Write-ControlError "control_session_bind_conflict" "session_bind idempotency key was reused for a different intent"
+                } else {
+                    Write-Result @{ routing_token = $seenBindTokens[$key]; status = @{ phase = "sync_required" } }
+                }
+                continue
+            }
             if ($begunGrant) {
                 Write-ControlError "invalid_control_session" "a begun grant must be checkpointed before bind"
                 continue
@@ -112,6 +187,8 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
             $issuedGrant = $null
             $bindCount += 1
             $routingToken = "fixture-token-$bindCount"
+            $seenBindIntents[$key] = $intent
+            $seenBindTokens[$key] = $routingToken
             Write-Result @{ routing_token = $routingToken; status = @{ phase = "sync_required" } }
         }
         "session_status" {
@@ -131,13 +208,20 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
                     Write-ControlError "turn_idempotency_conflict" "idempotency key was reused with a different intent fingerprint"
                     continue
                 }
-                Write-Result @{
-                    decision = "grant"
-                    grant = @{ grant_id = $seenEvaluateGrants[$key] }
+                if ($seenEvaluateDecisions[$key] -eq "refuse") {
+                    Write-EvaluationRefusal $seenEvaluateCodes[$key]
+                } else {
+                    Write-Result @{
+                        decision = "grant"
+                        grant = @{ grant_id = $seenEvaluateGrants[$key] }
+                    }
                 }
                 continue
             }
             if ($issuedGrant -or $begunGrant) {
+                $seenEvaluateIntents[$key] = $fingerprint
+                $seenEvaluateDecisions[$key] = "refuse"
+                $seenEvaluateCodes[$key] = "turn_already_open"
                 Write-EvaluationRefusal "turn_already_open"
                 continue
             }
@@ -145,6 +229,8 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
             $issuedGrant = "fixture-grant-$grantCounter"
             $seenEvaluateIntents[$key] = $fingerprint
             $seenEvaluateGrants[$key] = $issuedGrant
+            $seenEvaluateDecisions[$key] = "grant"
+            $knownGrants[$issuedGrant] = $true
             Write-Result @{
                 decision = "grant"
                 grant = @{ grant_id = $issuedGrant }
@@ -153,7 +239,9 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
         "turn_begin" {
             $key = [string] $request.idempotency_key
             $grant = [string] $request.grant_id
-            if ($seenBeginIntents.ContainsKey($key) -and $seenBeginIntents[$key] -ne $grant) {
+            $deliveryTokens = @($request.delivery_tokens) | ConvertTo-Json -Compress -Depth 10
+            $intent = "$grant|$deliveryTokens"
+            if ($seenBeginIntents.ContainsKey($key) -and $seenBeginIntents[$key] -ne $intent) {
                 Write-ControlError "control_operation_idempotency_conflict" "idempotency key was reused with a different grant"
                 continue
             }
@@ -165,11 +253,18 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
                 }
                 continue
             }
-            if ($grant -ne $issuedGrant) {
-                Write-ControlError "grant_scope_mismatch" "grant is not the currently issued grant"
+            if (-not $knownGrants.ContainsKey($grant)) {
+                Write-ControlError "turn_grant_not_found" "grant does not exist"
                 continue
             }
-            $seenBeginIntents[$key] = $grant
+            if ($grant -ne $issuedGrant) {
+                $seenBeginIntents[$key] = $intent
+                $seenBeginDecisions[$key] = "refuse"
+                $seenBeginCodes[$key] = "grant_scope_mismatch"
+                Write-Result @{ decision = "refuse"; code = "grant_scope_mismatch" }
+                continue
+            }
+            $seenBeginIntents[$key] = $intent
             if ($mode -eq "fixture-stateful-stale-begin" -and $grantCounter -eq 1) {
                 $issuedGrant = $null
                 $seenBeginDecisions[$key] = "refuse"
@@ -200,16 +295,36 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
         }
         "turn_checkpoint" {
             $grant = [string] $request.grant_id
-            if ($issuedGrant -and $grant -eq $issuedGrant) {
-                Write-Result @{ decision = "refuse"; code = "grant_scope_mismatch" }
+            $key = [string] $request.idempotency_key
+            $intent = Get-RequestIntent $request
+            if ($seenCheckpointIntents.ContainsKey($key)) {
+                if ($seenCheckpointIntents[$key] -ne $intent) {
+                    Write-ControlError "control_operation_idempotency_conflict" "turn_checkpoint idempotency key was reused for a different intent"
+                } elseif ($seenCheckpointDecisions[$key] -eq "refuse") {
+                    Write-Result @{ decision = "refuse"; code = $seenCheckpointCodes[$key] }
+                } else {
+                    Write-Result @{
+                        decision = "checkpointed"
+                        receipt = @{ grant_id = $grant; cursor = 1; confirmed_cursor = 1 }
+                    }
+                }
+                continue
+            }
+            if (-not $knownGrants.ContainsKey($grant)) {
+                Write-ControlError "turn_grant_not_found" "grant does not exist"
                 continue
             }
             if (-not $begunGrant -or $grant -ne $begunGrant) {
-                Write-ControlError "grant_scope_mismatch" "only a begun grant can be checkpointed"
+                $seenCheckpointIntents[$key] = $intent
+                $seenCheckpointDecisions[$key] = "refuse"
+                $seenCheckpointCodes[$key] = "grant_scope_mismatch"
+                Write-Result @{ decision = "refuse"; code = "grant_scope_mismatch" }
                 continue
             }
             $issuedGrant = $null
             $begunGrant = $null
+            $seenCheckpointIntents[$key] = $intent
+            $seenCheckpointDecisions[$key] = "checkpointed"
             Write-Result @{
                 decision = "checkpointed"
                 receipt = @{ grant_id = $grant; cursor = 1; confirmed_cursor = 1 }

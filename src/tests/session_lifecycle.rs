@@ -185,6 +185,7 @@ fn lightweight_test_state_rejects_direct_claude_runtime_spawning() {
         ClaudeApprovalMode::Ask,
         ClaudeEffortLevel::Default,
         None,
+        String::new(),
         None,
     );
 

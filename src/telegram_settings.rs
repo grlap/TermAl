@@ -114,6 +114,10 @@ impl AppState {
         if let Some(root) = self.test_temp_root_path() {
             return root.join(".termal");
         }
+        #[cfg(test)]
+        if let Some(root) = self.persistence_path.parent() {
+            return root.join(".termal");
+        }
         resolve_termal_data_dir(&self.default_workdir)
     }
 

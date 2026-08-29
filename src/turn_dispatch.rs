@@ -205,6 +205,12 @@ impl AppState {
         };
 
         let pending_engram_for_abandon = pending_engram.clone();
+        let session_id = inner.sessions[index].session.id.clone();
+        let engram_mcp = if inner.sessions[index].session.agent == Agent::Claude {
+            engram_mcp_stdio_config_for_session_locked(inner, &session_id)
+        } else {
+            None
+        };
         let mut started = match self.start_turn_on_record(
                 inner
                     .session_mut_by_index(index)
@@ -215,6 +221,7 @@ impl AppState {
                 queued.pending_prompt.expanded_text.clone(),
                 queued.pending_prompt.source.clone(),
                 pending_engram,
+                engram_mcp,
             ) {
             Ok(started) => started,
             Err(error) => {
@@ -273,6 +280,7 @@ impl AppState {
         expanded_prompt: Option<String>,
         source: Option<MessageSource>,
         mut pending_engram: Option<EngramPendingDispatch>,
+        engram_mcp: Option<TermalDelegationMcpStdioConfig>,
     ) -> std::result::Result<StartedTurn, ApiError> {
         match record.remote_proxy_identity() {
             Ok(None) => {}
@@ -350,6 +358,16 @@ impl AppState {
                         ));
                     }
                     SessionRuntime::None => {
+                        let delegation_mcp_config = self
+                            .termal_delegation_mcp_claude_config_json_with_engram(
+                                &record.session.id,
+                                engram_mcp.as_ref(),
+                            )
+                            .map_err(|err| {
+                                ApiError::internal(format!(
+                                    "failed to build Claude delegation MCP config: {err:#}"
+                                ))
+                            })?;
                         let handle = spawn_claude_runtime(
                             self.clone(),
                             record.session.id.clone(),
@@ -364,6 +382,7 @@ impl AppState {
                                 .claude_effort
                                 .unwrap_or_else(default_claude_effort),
                             record.external_session_id.clone(),
+                            delegation_mcp_config,
                             None,
                         )
                         .map_err(|err| {
@@ -1243,6 +1262,11 @@ impl AppState {
 
             if prioritize_manual_dispatch_over_blocked_queue {
                 let message_id = inner.next_message_id();
+                let engram_mcp = if inner.sessions[index].session.agent == Agent::Claude {
+                    engram_mcp_stdio_config_for_session_locked(&inner, session_id)
+                } else {
+                    None
+                };
                 let started = self.start_turn_on_record(
                     inner
                         .session_mut_by_index(index)
@@ -1253,6 +1277,7 @@ impl AppState {
                     expanded_prompt,
                     source,
                     None,
+                    engram_mcp,
                 )?;
                 let revision = self
                     .commit_persisted_delta_locked(&mut inner)
@@ -1311,6 +1336,11 @@ impl AppState {
             }
 
             let message_id = inner.next_message_id();
+            let engram_mcp = if inner.sessions[index].session.agent == Agent::Claude {
+                engram_mcp_stdio_config_for_session_locked(&inner, session_id)
+            } else {
+                None
+            };
             let started = self.start_turn_on_record(
                 inner
                     .session_mut_by_index(index)
@@ -1321,6 +1351,7 @@ impl AppState {
                 expanded_prompt,
                 source,
                 None,
+                engram_mcp,
             )?;
             let revision = self
                 .commit_persisted_delta_locked(&mut inner)

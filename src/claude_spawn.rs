@@ -268,6 +268,7 @@ fn spawn_claude_runtime(
     approval_mode: ClaudeApprovalMode,
     effort: ClaudeEffortLevel,
     resume_session_id: Option<String>,
+    delegation_mcp_config: String,
     model_options_tx: Option<Sender<std::result::Result<Vec<SessionModelOption>, String>>>,
 ) -> Result<ClaudeRuntimeHandle> {
     if !state.agent_runtime_spawning_enabled {
@@ -286,11 +287,7 @@ fn spawn_claude_runtime(
         effort,
         resume_session_id.as_deref(),
     ));
-    command.arg("--mcp-config").arg(
-        state
-            .termal_delegation_mcp_claude_config_json(&session_id)
-            .context("failed to build Claude delegation MCP config")?,
-    );
+    command.arg("--mcp-config").arg(delegation_mcp_config);
     command.env("CLAUDE_CODE_ENTRYPOINT", "termal");
 
     let mut child = command

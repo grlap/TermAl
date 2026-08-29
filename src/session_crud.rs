@@ -125,6 +125,15 @@ fn project_engram_session_ids_locked(inner: &StateInner, project_id: &str) -> Ve
     session_ids.into_iter().collect()
 }
 
+fn project_matches_engram_reset_snapshot(project: &Project, snapshot: &Project) -> bool {
+    project.id == snapshot.id
+        && project.name == snapshot.name
+        && project.root_path == snapshot.root_path
+        && project.remote_id == snapshot.remote_id
+        && project.remote_project_id == snapshot.remote_project_id
+        && project.engram == snapshot.engram
+}
+
 fn project_engram_binding_target_locked(
     inner: &StateInner,
     session_id: &str,
@@ -162,10 +171,38 @@ impl AppState {
     /// Updates the optional Engram adapter for one local project. Filesystem
     /// checks and `engram doctor` run off-lock; the project identity/root are
     /// fenced before the validated settings are committed.
+    #[cfg(test)]
     fn update_project_engram_settings(
         &self,
         project_id: &str,
+        settings: EngramProjectSettings,
+    ) -> Result<StateResponse, ApiError> {
+        let work_authority_grant_update = Some(settings.work_authority_grant.clone());
+        self.update_project_engram_settings_with_grant(
+            project_id,
+            settings,
+            work_authority_grant_update,
+        )
+    }
+
+    fn patch_project_engram_settings(
+        &self,
+        project_id: &str,
+        request: UpdateProjectEngramSettingsRequest,
+    ) -> Result<StateResponse, ApiError> {
+        let (settings, work_authority_grant_update) = request.into_settings();
+        self.update_project_engram_settings_with_grant(
+            project_id,
+            settings,
+            work_authority_grant_update,
+        )
+    }
+
+    fn update_project_engram_settings_with_grant(
+        &self,
+        project_id: &str,
         mut settings: EngramProjectSettings,
+        work_authority_grant_update: Option<Option<String>>,
     ) -> Result<StateResponse, ApiError> {
         let project_id = normalize_optional_identifier(Some(project_id))
             .ok_or_else(|| ApiError::bad_request("project id is required"))?
@@ -189,6 +226,12 @@ impl AppState {
             return Err(ApiError::bad_request(
                 "Engram host control is available only for local projects",
             ));
+        }
+        if work_authority_grant_update.is_none() {
+            settings.work_authority_grant = project_snapshot
+                .engram
+                .as_ref()
+                .and_then(|current| current.work_authority_grant.clone());
         }
         if !settings.enabled
             && let Some(current) = project_snapshot.engram.as_ref()
@@ -1217,7 +1260,25 @@ impl AppState {
     /// from a local project-list action.
     fn delete_project(&self, project_id: &str) -> Result<StateResponse, ApiError> {
         let project_id = normalize_optional_identifier(Some(project_id))
-            .ok_or_else(|| ApiError::bad_request("project id is required"))?;
+            .ok_or_else(|| ApiError::bad_request("project id is required"))?
+            .to_owned();
+        let project_snapshot = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            inner
+                .find_project(&project_id)
+                .cloned()
+                .ok_or_else(|| ApiError::not_found("project not found"))?
+        };
+        if project_snapshot.remote_id == LOCAL_REMOTE_ID && project_snapshot.engram.is_some() {
+            return self.delete_project_with_engram_reset(project_id, project_snapshot);
+        }
+        self.delete_project_without_engram_reset(&project_id)
+    }
+
+    fn delete_project_without_engram_reset(
+        &self,
+        project_id: &str,
+    ) -> Result<StateResponse, ApiError> {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let Some(project_index) = inner
             .projects
@@ -1284,6 +1345,300 @@ impl AppState {
         // cleanup here. Thread-handle presence is not a durability signal
         // (test and shutdown states can keep a connected sender without a
         // running handle).
+        self.finish_project_deletion(project_id, persist_dispatch)
+    }
+
+    fn delete_project_with_engram_reset(
+        &self,
+        project_id: String,
+        project_snapshot: Project,
+    ) -> Result<StateResponse, ApiError> {
+        let (session_ids, reset_target_candidates) = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let project = inner
+                .find_project(&project_id)
+                .ok_or_else(|| ApiError::not_found("project not found"))?;
+            if !project_matches_engram_reset_snapshot(project, &project_snapshot) {
+                return Err(ApiError::conflict(
+                    "project changed while Engram deletion was being prepared",
+                ));
+            }
+            let session_ids = project_engram_session_ids_locked(&inner, &project_id);
+            let reset_target_candidates = session_ids
+                .iter()
+                .map(|session_id| {
+                    let has_durable_control_authority = inner
+                        .find_session_index(session_id)
+                        .and_then(|index| inner.sessions.get(index))
+                        .is_some_and(|record| {
+                            record.engram.routing_token.is_some()
+                                || record.engram.active_grant_id.is_some()
+                        });
+                    if !has_durable_control_authority {
+                        // Project deletion has nothing to drain for this
+                        // session. In particular, a never-enabled project may
+                        // intentionally omit Engram binary and home settings.
+                        return Ok(None);
+                    }
+                    project_engram_binding_target_locked(&inner, session_id).map_err(|error| {
+                        ApiError::internal(format!(
+                            "failed snapshotting deleted-project Engram binding: {error}"
+                        ))
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>();
+            if !inner.engram_project_resets.insert(project_id.clone()) {
+                return Err(ApiError::conflict(
+                    "Engram project settings are already being reset",
+                ));
+            }
+            for session_id in &session_ids {
+                if let Some(index) = inner.find_session_index(session_id) {
+                    let record = inner
+                        .session_mut_by_index(index)
+                        .expect("session index should be valid");
+                    record.engram.project_reset_in_progress = true;
+                    record.engram.dispatch_generation =
+                        record.engram.dispatch_generation.saturating_add(1);
+                }
+            }
+            (session_ids, reset_target_candidates)
+        };
+        #[cfg(test)]
+        notify_engram_project_reset_fenced(&project_id);
+        if let Err(error) = self.wait_for_engram_project_reset_quiescence(&session_ids) {
+            self.release_engram_project_reset_fence(&project_id, &session_ids);
+            return Err(error);
+        }
+
+        let reset_targets_result = (|| -> Result<Vec<EngramBindingTarget>, ApiError> {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let project = inner
+                .find_project(&project_id)
+                .ok_or_else(|| ApiError::not_found("project not found"))?;
+            if !project_matches_engram_reset_snapshot(project, &project_snapshot)
+                || !inner.engram_project_resets.contains(&project_id)
+            {
+                return Err(ApiError::conflict(
+                    "project changed while Engram deletion was being fenced",
+                ));
+            }
+            let mut targets = Vec::new();
+            for mut target in reset_target_candidates {
+                let Some(record) = inner
+                    .find_session_index(&target.connection.session_id)
+                    .and_then(|index| inner.sessions.get(index))
+                else {
+                    continue;
+                };
+                target.routing_token = record.engram.routing_token.clone();
+                target.active_grant_id = record.engram.active_grant_id.clone();
+                if target.active_grant_id.is_none() {
+                    continue;
+                }
+                targets.push(target);
+            }
+            for target in &targets {
+                if let Some(index) = inner.find_session_index(&target.connection.session_id) {
+                    inner
+                        .session_mut_by_index(index)
+                        .expect("session index should be valid")
+                        .engram
+                        .checkpoint_in_progress = true;
+                }
+            }
+            Ok(targets)
+        })();
+        let reset_targets = match reset_targets_result {
+            Ok(targets) => targets,
+            Err(error) => {
+                self.release_engram_project_reset_fence(&project_id, &session_ids);
+                return Err(error);
+            }
+        };
+
+        let mut checkpointed = Vec::new();
+        let mut checkpoint_failures = Vec::new();
+        for target in &reset_targets {
+            match target.checkpoint_for_project_reset_off_lock() {
+                Ok(()) => checkpointed.push((
+                    target.connection.session_id.clone(),
+                    target
+                        .active_grant_id
+                        .clone()
+                        .expect("reset target should carry an active grant"),
+                )),
+                Err(error) => checkpoint_failures.push(format!(
+                    "session {}: {}",
+                    target.connection.session_id, error
+                )),
+            }
+        }
+        if !checkpoint_failures.is_empty() {
+            self.abort_engram_project_reset(&project_id, &session_ids, &checkpointed)?;
+            return Err(ApiError::conflict(format!(
+                "project was not deleted because Engram checkpointing failed: {}",
+                checkpoint_failures.join("; ")
+            )));
+        }
+
+        let (adapter, final_session_ids, persist_dispatch) = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let Some(project_index) = inner
+                .projects
+                .iter()
+                .position(|project| project.id == project_id)
+            else {
+                drop(inner);
+                self.abort_engram_project_reset(&project_id, &session_ids, &checkpointed)?;
+                return Err(ApiError::not_found("project not found"));
+            };
+            if !project_matches_engram_reset_snapshot(
+                &inner.projects[project_index],
+                &project_snapshot,
+            )
+                || !inner.engram_project_resets.contains(&project_id)
+            {
+                drop(inner);
+                self.abort_engram_project_reset(&project_id, &session_ids, &checkpointed)?;
+                return Err(ApiError::conflict(
+                    "project changed while Engram deletion was being committed",
+                ));
+            }
+
+            let final_session_ids = project_engram_session_ids_locked(&inner, &project_id);
+            let previous_session_states = final_session_ids
+                .iter()
+                .filter_map(|session_id| {
+                    inner
+                        .find_session_index(session_id)
+                        .and_then(|index| inner.sessions.get(index))
+                        .map(|record| {
+                            (
+                                session_id.clone(),
+                                record.session.project_id.clone(),
+                                record.engram.clone(),
+                            )
+                        })
+                })
+                .collect::<Vec<_>>();
+            let previous_orchestrator_projects = inner
+                .orchestrator_instances
+                .iter()
+                .enumerate()
+                .filter(|(_, instance)| instance.project_id == project_id)
+                .map(|(index, instance)| (index, instance.project_id.clone()))
+                .collect::<Vec<_>>();
+            let coordination_scope_was_pending = inner
+                .pending_coordination_scope_deletions
+                .contains(&project_id);
+            let previous_response_detachment = inner
+                .pending_response_board_project_detachments
+                .get(&project_id)
+                .cloned();
+            let removed_project = inner.projects.remove(project_index);
+            for session_id in &final_session_ids {
+                if let Some(index) = inner.find_session_index(session_id) {
+                    let dispatch_generation = inner.sessions[index].engram.dispatch_generation;
+                    let record = inner
+                        .session_mut_by_index(index)
+                        .expect("session index should be valid");
+                    if record.session.project_id.as_deref() == Some(project_id.as_str()) {
+                        record.session.project_id = None;
+                    }
+                    record.engram = EngramSessionState::default();
+                    record.engram.dispatch_generation = dispatch_generation;
+                }
+            }
+            for instance in &mut inner.orchestrator_instances {
+                if instance.project_id == project_id {
+                    instance.project_id.clear();
+                }
+            }
+            inner
+                .pending_coordination_scope_deletions
+                .insert(project_id.clone());
+            inner.pending_response_board_project_detachments.insert(
+                project_id.clone(),
+                removed_project.name.clone(),
+            );
+            inner.engram_project_resets.remove(&project_id);
+
+            let persist_dispatch = match self.commit_locked_with_persist_dispatch(&mut inner) {
+                Ok((_, persist_dispatch)) => persist_dispatch,
+                Err(error) => {
+                    inner.projects.insert(project_index, removed_project);
+                    for (session_id, previous_project_id, mut previous_engram) in
+                        previous_session_states
+                    {
+                        if let Some((_, checkpointed_grant_id)) = checkpointed
+                            .iter()
+                            .find(|(checkpointed_session_id, _)| {
+                                checkpointed_session_id == &session_id
+                            })
+                            && previous_engram.active_grant_id.as_deref()
+                                == Some(checkpointed_grant_id.as_str())
+                        {
+                            previous_engram.active_grant_id = None;
+                            previous_engram.rebind_required = true;
+                        }
+                        previous_engram.project_reset_in_progress = false;
+                        previous_engram.checkpoint_in_progress = false;
+                        if let Some(index) = inner.find_session_index(&session_id) {
+                            let record = inner
+                                .session_mut_by_index(index)
+                                .expect("session index should be valid");
+                            record.session.project_id = previous_project_id;
+                            record.engram = previous_engram;
+                        }
+                    }
+                    for (index, previous_project_id) in previous_orchestrator_projects {
+                        if let Some(instance) = inner.orchestrator_instances.get_mut(index) {
+                            instance.project_id = previous_project_id;
+                        }
+                    }
+                    if !coordination_scope_was_pending {
+                        inner.pending_coordination_scope_deletions.remove(&project_id);
+                    }
+                    match previous_response_detachment {
+                        Some(previous) => {
+                            inner
+                                .pending_response_board_project_detachments
+                                .insert(project_id.clone(), previous);
+                        }
+                        None => {
+                            inner
+                                .pending_response_board_project_detachments
+                                .remove(&project_id);
+                        }
+                    }
+                    inner.engram_project_resets.remove(&project_id);
+                    return Err(ApiError::internal(format!(
+                        "failed to remove project after draining Engram: {error:#}"
+                    )));
+                }
+            };
+            (
+                inner.engram_host_adapter.clone(),
+                final_session_ids,
+                persist_dispatch,
+            )
+        };
+
+        for session_id in &final_session_ids {
+            adapter.shutdown_session(session_id);
+        }
+        self.finish_project_deletion(&project_id, persist_dispatch)
+    }
+
+    fn finish_project_deletion(
+        &self,
+        project_id: &str,
+        persist_dispatch: PersistDispatch,
+    ) -> Result<StateResponse, ApiError> {
         if persist_dispatch == PersistDispatch::Synchronous {
             self.replay_pending_coordination_scope_deletions()
                 .map_err(|err| {
@@ -1294,7 +1649,7 @@ impl AppState {
             self.replay_pending_response_board_project_detachments();
         }
 
-        self.prune_telegram_config_for_deleted_project(&project_id)?;
+        self.prune_telegram_config_for_deleted_project(project_id)?;
 
         Ok(self.snapshot())
     }

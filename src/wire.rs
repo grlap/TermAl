@@ -1460,14 +1460,41 @@ struct CreateProjectRequest {
     remote_id: String,
 }
 
-/// Replaces one project's Engram host-adapter configuration. The route is
+/// Patches one project's Engram host-adapter configuration. The route is
 /// intentionally project-scoped: Phase 0 never enables Engram globally by
 /// accident, and a project can be disabled immediately without a restart.
+/// The authority grant follows the API's tri-state secret convention: an
+/// omitted field preserves the saved credential, `null` clears it, and a
+/// string replaces it.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct UpdateProjectEngramSettingsRequest {
-    #[serde(flatten)]
-    settings: EngramProjectSettings,
+    #[serde(default)]
+    enabled: bool,
+    #[serde(default)]
+    binary_path: Option<String>,
+    #[serde(default)]
+    home: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_nullable_marker_field")]
+    work_authority_grant: Option<Option<String>>,
+    #[serde(default)]
+    deadline_ms: Option<u64>,
+}
+
+impl UpdateProjectEngramSettingsRequest {
+    fn into_settings(self) -> (EngramProjectSettings, Option<Option<String>>) {
+        let work_authority_grant_update = self.work_authority_grant;
+        (
+            EngramProjectSettings {
+                enabled: self.enabled,
+                binary_path: self.binary_path,
+                home: self.home,
+                work_authority_grant: work_authority_grant_update.clone().flatten(),
+                deadline_ms: self.deadline_ms,
+            },
+            work_authority_grant_update,
+        )
+    }
 }
 
 /// Represents the update app settings request payload.
