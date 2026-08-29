@@ -186,7 +186,7 @@ function getMountedMessageSlots(virtualizedListRoot: ParentNode | null) {
   }
   return Array.from(
     virtualizedListRoot.querySelectorAll<HTMLElement>(
-      ".virtualized-message-slot[data-message-id]",
+      ".virtualized-message-slot[data-message-id], .message-slot[data-message-id]",
     ),
   );
 }

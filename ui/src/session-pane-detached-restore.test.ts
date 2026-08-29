@@ -86,6 +86,27 @@ describe("detached message-stack restore controller", () => {
     });
   });
 
+  it("captures the exact reading point inside a long non-virtualized message", () => {
+    const { node } = createScrollNode({ scrollTop: 2_400 });
+    const longMessage = document.createElement("div");
+    longMessage.className = "message-slot";
+    longMessage.dataset.messageId = "message-long";
+    node.append(longMessage);
+    node.getBoundingClientRect = () =>
+      ({ top: 100, bottom: 300 } as DOMRect);
+    longMessage.getBoundingClientRect = () =>
+      ({ top: -1_700, bottom: 900 } as DOMRect);
+
+    expect(captureDetachedPaneScrollPosition(node)).toEqual({
+      anchor: {
+        messageId: "message-long",
+        viewportOffsetPx: -1_800,
+      },
+      shouldStick: false,
+      top: 2_400,
+    });
+  });
+
   it("preserves an existing anchor while absolute restore convergence advances", () => {
     expect(
       preserveDetachedPaneScrollAnchor(

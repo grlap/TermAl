@@ -5310,6 +5310,103 @@ describe("session pane historical-window tail state", () => {
     });
   });
 
+  it("restores a long non-virtualized message anchor and keeps it fixed through late layout", () => {
+    const resizeCallbacks = new Set<ResizeObserverCallback>();
+    class ResizeObserverHarness {
+      constructor(callback: ResizeObserverCallback) {
+        resizeCallbacks.add(callback);
+      }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+    vi.stubGlobal(
+      "ResizeObserver",
+      ResizeObserverHarness as unknown as typeof ResizeObserver,
+    );
+    vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    const liveSession = session(false);
+    const scrollStateKey = "pane-1:session-detached";
+    const paneScrollPositions = {
+      [scrollStateKey]: {
+        anchor: {
+          messageId: "message-long",
+          viewportOffsetPx: -1_200,
+        },
+        top: 2_000,
+        shouldStick: false,
+      },
+    };
+    const paneShouldStickToBottomRef = {
+      current: { [scrollStateKey]: false },
+    };
+    const scrollNode = document.createElement("section");
+    const page = document.createElement("div");
+    page.className = "session-conversation-page";
+    const longMessage = document.createElement("div");
+    longMessage.className = "message-slot";
+    longMessage.dataset.messageId = "message-long";
+    page.append(longMessage);
+    scrollNode.append(page);
+    let pageHeight = 4_000;
+    let messageDocumentTop = 1_000;
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, get: () => pageHeight },
+      scrollTop: { configurable: true, writable: true, value: 800 },
+    });
+    scrollNode.getBoundingClientRect = () =>
+      ({ top: 100, bottom: 300 } as DOMRect);
+    page.getBoundingClientRect = () =>
+      ({ height: pageHeight } as DOMRect);
+    longMessage.getBoundingClientRect = () => {
+      const top = 100 + messageDocumentTop - scrollNode.scrollTop;
+      return { top, bottom: top + 3_000 } as DOMRect;
+    };
+    const hook = renderHook(
+      ({ isSessionTabActive, activeScrollStateKey }) =>
+        useSessionPaneScrollState({
+          ...params(liveSession),
+          isActive: true,
+          isSessionTabActive,
+          paneScrollPositions,
+          paneShouldStickToBottomRef,
+          scrollStateKey: activeScrollStateKey,
+        }),
+      {
+        initialProps: {
+          isSessionTabActive: false,
+          activeScrollStateKey: "pane-1:control-panel",
+        },
+      },
+    );
+    hook.result.current.messageStackRef.current = scrollNode;
+    hook.rerender({
+      isSessionTabActive: true,
+      activeScrollStateKey: scrollStateKey,
+    });
+    expect(scrollNode.scrollTop).toBe(2_200);
+
+    messageDocumentTop += 300;
+    pageHeight += 300;
+    act(() => {
+      resizeCallbacks.forEach((callback) =>
+        callback([], {} as ResizeObserver),
+      );
+    });
+
+    expect(scrollNode.scrollTop).toBe(2_500);
+    expect(paneScrollPositions[scrollStateKey]).toEqual({
+      anchor: {
+        messageId: "message-long",
+        viewportOffsetPx: -1_200,
+      },
+      top: 2_500,
+      shouldStick: false,
+    });
+  });
+
   it("retains an out-of-range detached target until virtualized geometry catches up", () => {
     let nextAnimationFrameId = 1;
     const animationFrames = new Map<number, FrameRequestCallback>();

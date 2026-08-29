@@ -54,13 +54,7 @@ export function captureDetachedPaneScrollPosition(
   node: HTMLElement,
   top = node.scrollTop,
 ): PaneScrollPosition {
-  const virtualizedList = node.querySelector<HTMLElement>(
-    ".virtualized-message-list",
-  );
-  const anchor = captureFirstVisibleMountedMessageAnchor(
-    virtualizedList,
-    node,
-  );
+  const anchor = captureFirstVisibleMountedMessageAnchor(node, node);
   return {
     ...(anchor ? { anchor } : {}),
     shouldStick: false,

@@ -119,26 +119,31 @@ export function MessageAttachmentList({
 export function MessageSlot({
   children,
   itemKey,
+  messageId,
   isSearchMatch = false,
   isSearchActive = false,
   onSearchItemMount,
 }: {
   children: ReactNode;
   itemKey?: string;
+  messageId?: string;
   isSearchMatch?: boolean;
   isSearchActive?: boolean;
   onSearchItemMount?: (itemKey: string, node: HTMLElement | null) => void;
 }) {
-  if (!itemKey) {
+  if (!itemKey && !messageId) {
     return <>{children}</>;
   }
 
   return (
     <div
       className={`message-slot${isSearchMatch ? " session-search-hit" : ""}${isSearchActive ? " session-search-hit-active" : ""}`}
+      data-message-id={messageId}
       data-session-search-item-key={itemKey}
       ref={(node) => {
-        onSearchItemMount?.(itemKey, node);
+        if (itemKey) {
+          onSearchItemMount?.(itemKey, node);
+        }
       }}
     >
       {children}

@@ -1424,6 +1424,7 @@ function ConversationMessageList({
           <MessageSlot
             key={message.id}
             itemKey={isActive ? `message:${message.id}` : undefined}
+            messageId={isActive ? message.id : undefined}
             isSearchMatch={conversationSearchMatchedItemKeys.has(
               `message:${message.id}`,
             )}

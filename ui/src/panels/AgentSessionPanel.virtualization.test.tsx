@@ -729,6 +729,9 @@ describe("AgentSessionPanel virtualization", () => {
         ".session-conversation-page.has-conversation-overview-scroll",
       ),
     ).toBeNull();
+    expect(
+      container.querySelectorAll(".message-slot[data-message-id]"),
+    ).toHaveLength(29);
   });
 
   it("never restores the native scrollbar during a large-session switch", async () => {

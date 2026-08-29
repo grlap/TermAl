@@ -672,6 +672,7 @@ fn remote_session_persist_failure_still_claims_the_current_event_bridge() {
 
 #[test]
 fn remote_session_create_publishes_prior_dirty_localization_recovery() {
+    let persistence_root = TestTempRoot::create("termal-remote-session-dirty-recovery");
     let mut state = test_app_state();
     let original_persistence_path = state.persistence_path.clone();
     let remote = remote_config("remote-session-dirty-recovery");
@@ -700,10 +701,7 @@ fn remote_session_create_publishes_prior_dirty_localization_recovery() {
         spawn_remote_create_response_server("POST /api/sessions ", response_body, || {});
     insert_test_remote_connection(&state, &remote, port, TestRemoteBridgeOwnership::Claimed);
 
-    let failing_persistence_path = std::env::temp_dir().join(format!(
-        "termal-remote-session-dirty-recovery-{}",
-        Uuid::new_v4()
-    ));
+    let failing_persistence_path = persistence_root.path().join("state.json");
     fs::create_dir_all(&failing_persistence_path)
         .expect("a directory at the persistence path should force failure");
     state.shutdown_persist_blocking();

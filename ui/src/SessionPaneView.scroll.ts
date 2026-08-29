@@ -33,6 +33,10 @@ import {
 } from "./app-utils";
 import { cancelConversationMessageEntryReveals } from "./panels/conversation-message-reveal";
 import type { VirtualizedConversationMessageListHandle } from "./panels/VirtualizedConversationMessageList";
+import {
+  findMountedMessageSlotById,
+  getMountedSlotViewportOffsetPx,
+} from "./panels/virtualized-conversation-measurement";
 import { useCommittedRef } from "./panels/use-committed-ref";
 import { useStableEvent } from "./panels/use-stable-event";
 import {
@@ -1081,10 +1085,20 @@ export function useSessionPaneScrollState({
       if (!resizeMeasurement.shouldRepin) {
         return;
       }
-      if (
-        currentScrollStateKeyRef.current !== scrollStateKey ||
-        !getTailFollowIntent()
-      ) {
+      if (currentScrollStateKeyRef.current !== scrollStateKey) {
+        return;
+      }
+      if (!getTailFollowIntent()) {
+        const saved = paneScrollPositions[scrollStateKey];
+        if (
+          !node.querySelector(".virtualized-message-list") &&
+          saved?.anchor
+        ) {
+          // Rich cards and Markdown can finish measuring after a short,
+          // non-virtualized transcript becomes active. Keep the saved point
+          // inside the message fixed while that late layout settles.
+          restoreMountedDetachedMessageAnchor(node, saved);
+        }
         return;
       }
       // ResizeObserver runs before paint. During attached live flow every
@@ -2776,6 +2790,36 @@ export function useSessionPaneScrollState({
     });
   }
 
+  function restoreMountedDetachedMessageAnchor(
+    node: HTMLElement,
+    saved: PaneScrollPosition,
+  ) {
+    if (!saved.anchor) {
+      return false;
+    }
+    const slot = findMountedMessageSlotById(node, saved.anchor.messageId);
+    if (!slot) {
+      return false;
+    }
+    const targetTop = Math.max(
+      node.scrollTop +
+        getMountedSlotViewportOffsetPx(node, slot) -
+        saved.anchor.viewportOffsetPx,
+      0,
+    );
+    writeMessageStackScrollTopImmediately(node, targetTop);
+    notifyMessageStackScrollWrite(node, {
+      scrollKind: "position_restore",
+    });
+    setTailFollowIntent(false, { preserveDetachedRestore: true });
+    paneScrollPositions[scrollStateKey] = recordPaneScrollGeometry(node, {
+      anchor: saved.anchor,
+      shouldStick: false,
+      top: node.scrollTop,
+    });
+    return true;
+  }
+
   function restorePinnedMessageStackBeforePaint(node: HTMLElement) {
     // A tab switch reuses the pane's scroll container. Waiting until the first
     // animation frame would paint the newly active transcript at the previous
@@ -2835,6 +2879,10 @@ export function useSessionPaneScrollState({
             shouldStick: false,
             top: node.scrollTop,
           });
+        } else if (restoreMountedDetachedMessageAnchor(node, saved)) {
+          // Short conversations do not mount the virtualizer. Their ordinary
+          // message slots still preserve the exact reading point inside a
+          // long response instead of relying on a reflow-sensitive scrollTop.
         } else {
           restoreCleanup = scheduleDetachedMessageStackRestore(saved.top);
         }
