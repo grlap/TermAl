@@ -1576,40 +1576,4 @@ impl AppState {
             .is_some_and(|record| record.runtime.matches_runtime_token(token))
     }
 
-    /// Zeros out the session's runtime state — drops the
-    /// `SessionRuntime` handle, clears pending approvals / user
-    /// inputs / file-change tracking / deferred stop callbacks —
-    /// leaving the session at a clean `SessionStatus::Idle`. Invoked
-    /// when a runtime exit has been fully processed and nothing
-    /// should remain bound to the dead process.
-    fn clear_runtime(&self, session_id: &str) -> Result<()> {
-        let mut inner = self.inner.lock().expect("state mutex poisoned");
-        let index = inner
-            .find_session_index(session_id)
-            .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
-        let record = inner
-            .session_mut_by_index(index)
-            .expect("session index should be valid");
-        let had_changes = !matches!(record.runtime, SessionRuntime::None)
-            || record.runtime_reset_required
-            || record.engram_mcp_runtime_quarantined
-            || record.runtime_stop_in_progress
-            || has_pending_requests(record);
-        if !had_changes {
-            return Ok(());
-        }
-
-        record.clear_runtime();
-        record.clear_runtime_reset();
-        record.orchestrator_auto_dispatch_blocked = false;
-        record.clear_runtime_stop();
-        record.deferred_stop_callbacks.clear();
-        clear_active_turn_file_change_tracking(record);
-        clear_all_pending_requests(record);
-        self.commit_locked(&mut inner)?;
-        Ok(())
-    }
-
-
-
 }

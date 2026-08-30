@@ -320,6 +320,12 @@ struct Project {
     remote_project_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     engram: Option<EngramProjectSettings>,
+    /// Durable, redacted operator warning for Engram cleanup that completed
+    /// only partially. Stored on the project so the condition remains visible
+    /// even when the project has no local sessions to receive a transcript
+    /// notice.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    engram_cleanup_warning: Option<String>,
 }
 
 /// Serializes projects for client-facing state snapshots without exposing the

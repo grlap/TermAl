@@ -656,6 +656,612 @@ fn idle_blocked_receiver_coalesces_repeated_mailbox_wakes() {
     assert_eq!(source.unread_count, 2);
 }
 
+// Reproduces the user-visible failure where Stop completed after the shared
+// runtime had already disappeared, then the queued mailbox wake immediately
+// started another turn. Explicit Stop must leave that durable wake queued and
+// engage the automatic-resume latch even on the missing-runtime recovery path.
+#[test]
+fn stop_with_missing_runtime_keeps_the_mailbox_wake_paused() {
+    let (state, sender_id, target_id) = mailbox_test_state();
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let target_index = inner
+            .find_session_index(&target_id)
+            .expect("target should exist");
+        let target = inner
+            .session_mut_by_index(target_index)
+            .expect("target should exist");
+        target.session.status = SessionStatus::Active;
+        target.runtime = SessionRuntime::None;
+        target.orchestrator_auto_dispatch_blocked = false;
+    }
+
+    let stop_gate = install_test_stop_fence_gate(&state, &target_id);
+    let stop_state = state.clone();
+    let stop_session_id = target_id.clone();
+    let stop_thread = std::thread::spawn(move || stop_state.stop_session(&stop_session_id));
+    stop_gate.wait_until_claimed();
+
+    let mut request = mailbox_send_request(&target_id);
+    request.idempotency_key = "stop-missing-runtime-mailbox-pause".to_owned();
+    let receipt = state
+        .append_mailbox_message_and_notify(&sender_id, request)
+        .expect("mailbox message should remain durable while Stop owns the fence");
+    assert_eq!(receipt.notification_disposition, "queuedBehindActiveTurn");
+
+    stop_gate.release();
+    stop_thread
+        .join()
+        .expect("Stop thread should finish")
+        .expect("Stop should recover the active session with no runtime");
+    assert!(
+        state
+            .dispatch_next_queued_turn(&target_id, false)
+            .expect("blocked queue inspection should succeed")
+            .is_none(),
+        "automatic queue drain after Stop must not start the mailbox turn"
+    );
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let target = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == target_id)
+        .expect("target should remain present");
+    assert_eq!(target.session.status, SessionStatus::Idle);
+    assert!(target.orchestrator_auto_dispatch_blocked);
+    assert_eq!(target.queued_prompts.len(), 1);
+    assert_eq!(target.queued_prompts[0].source, QueuedPromptSource::Mailbox);
+    assert_eq!(target.session.pending_prompts.len(), 1);
+}
+
+// A failed accepted mailbox wake is restored durably, but it must not be
+// dispatched again in the same terminalization cycle. Otherwise a poisoned
+// wake loops forever at the queue head and starves every prompt behind it.
+#[test]
+fn failed_mailbox_turn_is_requeued_once_and_pauses_automatic_dispatch() {
+    let (state, sender_id, target_id) = mailbox_test_state();
+    let first = state
+        .append_mailbox_message_and_notify(&sender_id, mailbox_send_request(&target_id))
+        .expect("first mailbox wake should queue");
+    let (runtime, input_rx) = test_claude_runtime_handle("mailbox-failure-successor-runtime");
+    let runtime_token = RuntimeToken::Claude(runtime.runtime_id.clone());
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let target_index = inner
+            .find_session_index(&target_id)
+            .expect("target should exist");
+        let target = inner
+            .session_mut_by_index(target_index)
+            .expect("target should exist");
+        target.session.status = SessionStatus::Idle;
+        target.runtime = SessionRuntime::Claude(runtime);
+    }
+    let first_dispatch = state
+        .dispatch_next_queued_turn(&target_id, false)
+        .expect("first queue drain should succeed")
+        .expect("first mailbox wake should dispatch");
+    deliver_turn_dispatch(&state, first_dispatch).expect("first wake should reach the runtime");
+    assert!(matches!(
+        input_rx.recv_timeout(Duration::from_secs(1)),
+        Ok(ClaudeRuntimeCommand::Prompt(_))
+    ));
+    assert_eq!(
+        state
+            .mailbox_store
+            .read_message(&target_id, &first.message_id)
+            .expect("first delivery state should read")
+            .notification_state,
+        "deliveredToIdleSession"
+    );
+
+    let mut second_request = mailbox_send_request(&target_id);
+    second_request.idempotency_key = "mailbox-failure-successor-2".to_owned();
+    let second = state
+        .append_mailbox_message_and_notify(&sender_id, second_request)
+        .expect("second mailbox wake should queue behind the active turn");
+    assert_eq!(second.notification_disposition, "queuedBehindActiveTurn");
+
+    state
+        .fail_turn_if_runtime_matches(&target_id, &runtime_token, "accepted mailbox turn failed")
+        .expect("failure should recover only the active mailbox delivery");
+    assert!(matches!(
+        input_rx.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let target = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == target_id)
+        .expect("target should remain present");
+    assert!(target.orchestrator_auto_dispatch_blocked);
+    assert_eq!(target.session.status, SessionStatus::Error);
+    assert_eq!(target.queued_prompts.len(), 1);
+    assert_eq!(target.queued_prompts[0].source, QueuedPromptSource::Mailbox);
+    let queued_mailbox = target.queued_prompts[0]
+        .pending_prompt
+        .source
+        .as_ref()
+        .and_then(|source| source.mailbox.as_ref())
+        .expect("restored wake should retain exact mailbox metadata");
+    assert_eq!(queued_mailbox.message_id, second.message_id);
+    assert_eq!(queued_mailbox.sequence, second.sequence);
+    drop(inner);
+    assert_eq!(
+        state
+            .mailbox_store
+            .read_message(&target_id, &first.message_id)
+            .expect("failed delivery state should read")
+            .notification_state,
+        "recoveredWake"
+    );
+}
+
+// Recovery belongs to the failed delivery boundary, not to whichever unread
+// row is newest by the time the terminal callback runs. A newer successor wake
+// already active on the same mailbox covers the old boundary and must not be
+// queued a second time.
+#[test]
+fn failed_mailbox_recovery_does_not_duplicate_a_newer_active_wake() {
+    let (state, sender_id, target_id) = mailbox_test_state();
+    let first = state
+        .append_mailbox_message_and_notify(&sender_id, mailbox_send_request(&target_id))
+        .expect("first mailbox wake should queue");
+    let mut second_request = mailbox_send_request(&target_id);
+    second_request.idempotency_key = "mailbox-boundary-successor-2".to_owned();
+    second_request.message = "A newer wake already belongs to the successor turn.".to_owned();
+    let second = state
+        .append_mailbox_message_and_notify(&sender_id, second_request)
+        .expect("second mailbox wake should coalesce");
+    state
+        .mailbox_store
+        .set_notification_state(&first.message_id, "deliveredToIdleSession")
+        .expect("test should model the failed accepted delivery");
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&target_id)
+            .expect("target should exist");
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("target index should be valid");
+        record.queued_prompts.clear();
+        sync_pending_prompts(record);
+        record.active_turn_mailbox_notification = Some(MailboxNotificationDelivery {
+            mailbox_id: second.mailbox_id.clone(),
+            session_id: target_id.clone(),
+            through_sequence: second.sequence,
+        });
+    }
+
+    assert!(
+        !state
+            .requeue_rejected_mailbox_notification(&MailboxNotificationDelivery {
+                mailbox_id: first.mailbox_id.clone(),
+                session_id: target_id.clone(),
+                through_sequence: first.sequence,
+            })
+            .expect("failed delivery recovery should succeed")
+    );
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let target = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == target_id)
+        .expect("target should remain present");
+    assert!(target.queued_prompts.is_empty());
+    assert_eq!(target.session.pending_prompts.len(), 0);
+    assert_eq!(
+        target
+            .active_turn_mailbox_notification
+            .as_ref()
+            .map(|notification| notification.through_sequence),
+        Some(second.sequence)
+    );
+    drop(inner);
+    assert_eq!(
+        state
+            .mailbox_store
+            .read_message(&target_id, &first.message_id)
+            .expect("failed delivery state should read")
+            .notification_state,
+        "recoveredWake"
+    );
+    assert_eq!(
+        state
+            .mailbox_store
+            .read_message(&target_id, &second.message_id)
+            .expect("successor delivery state should read")
+            .notification_state,
+        "queuedBehindActiveTurn"
+    );
+}
+
+#[test]
+fn failed_mailbox_recovery_moves_a_covering_newer_wake_ahead_of_successors() {
+    let (state, sender_id, target_id) = mailbox_test_state();
+    let first = state
+        .append_mailbox_message_and_notify(&sender_id, mailbox_send_request(&target_id))
+        .expect("first mailbox wake should queue");
+    let mut second_request = mailbox_send_request(&target_id);
+    second_request.idempotency_key = "mailbox-covering-successor-2".to_owned();
+    second_request.message = "The newer mailbox boundary covers the failed wake.".to_owned();
+    let second = state
+        .append_mailbox_message_and_notify(&sender_id, second_request)
+        .expect("second mailbox wake should coalesce");
+    state
+        .mailbox_store
+        .set_notification_state(&first.message_id, "deliveredToIdleSession")
+        .expect("test should model the failed accepted delivery");
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&target_id)
+            .expect("target should exist");
+        let prompt_id = inner.next_message_id();
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("target index should be valid");
+        record.queued_prompts.push_front(QueuedPromptRecord {
+            source: QueuedPromptSource::User,
+            attachments: Vec::new(),
+            pending_prompt: PendingPrompt {
+                attachments: Vec::new(),
+                id: prompt_id,
+                timestamp: stamp_now(),
+                text: "successor user prompt".to_owned(),
+                expanded_text: None,
+                source: None,
+            },
+        });
+        sync_pending_prompts(record);
+        assert_eq!(record.queued_prompts[0].source, QueuedPromptSource::User);
+        assert_eq!(record.queued_prompts[1].source, QueuedPromptSource::Mailbox);
+    }
+
+    assert!(
+        state
+            .requeue_rejected_mailbox_notification(&MailboxNotificationDelivery {
+                mailbox_id: first.mailbox_id.clone(),
+                session_id: target_id.clone(),
+                through_sequence: first.sequence,
+            })
+            .expect("failed delivery recovery should succeed")
+    );
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let target = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == target_id)
+        .expect("target should remain present");
+    assert_eq!(target.queued_prompts.len(), 2);
+    assert_eq!(target.queued_prompts[0].source, QueuedPromptSource::Mailbox);
+    assert_eq!(target.queued_prompts[1].source, QueuedPromptSource::User);
+    let queued_mailbox = target.queued_prompts[0]
+        .pending_prompt
+        .source
+        .as_ref()
+        .and_then(|source| source.mailbox.as_ref())
+        .expect("the restored head should retain mailbox metadata");
+    assert_eq!(queued_mailbox.sequence, second.sequence);
+    assert_eq!(queued_mailbox.message_id, second.message_id);
+}
+
+#[test]
+fn failed_mailbox_recovery_does_not_mark_an_ineligible_target_recovered() {
+    let (state, sender_id, target_id) = mailbox_test_state();
+    let receipt = state
+        .append_mailbox_message_and_notify(&sender_id, mailbox_send_request(&target_id))
+        .expect("mailbox wake should queue");
+    state
+        .mailbox_store
+        .set_notification_state(&receipt.message_id, "deliveredToIdleSession")
+        .expect("test should model an accepted delivery");
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&target_id)
+            .expect("target should exist");
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("target index should be valid");
+        record.session.parent_delegation_id = Some("delegation-after-delivery".to_owned());
+        record.queued_prompts.clear();
+        sync_pending_prompts(record);
+    }
+
+    assert!(
+        !state
+            .requeue_rejected_mailbox_notification(&MailboxNotificationDelivery {
+                mailbox_id: receipt.mailbox_id.clone(),
+                session_id: target_id.clone(),
+                through_sequence: receipt.sequence,
+            })
+            .expect("ineligible recovery should no-op")
+    );
+    assert_eq!(
+        state
+            .mailbox_store
+            .read_message(&target_id, &receipt.message_id)
+            .expect("delivery state should remain readable")
+            .notification_state,
+        "deliveredToIdleSession"
+    );
+}
+
+// The atomic rejected-delivery transition mutates memory before its primary
+// state commit can fail. Even in that error case the dispatch still owns the
+// exact mailbox boundary and must put it back in the in-process queue. SQLite
+// intentionally remains deliveredToIdleSession so the boot-wide recovery pass
+// is the durable fallback if the primary state remains unwritable.
+#[test]
+fn rejected_delivery_persistence_failure_still_requeues_the_mailbox_wake() {
+    let (mut state, sender_id, target_id) = mailbox_test_state();
+    let receipt = state
+        .append_mailbox_message_and_notify(&sender_id, mailbox_send_request(&target_id))
+        .expect("mailbox wake should queue");
+    state
+        .mailbox_store
+        .set_notification_state(&receipt.message_id, "deliveredToIdleSession")
+        .expect("test should model an accepted delivery");
+    let (runtime, _input_rx) = test_claude_runtime_handle("mailbox-rejected-persist-failure");
+    let runtime_token = RuntimeToken::Claude(runtime.runtime_id.clone());
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&target_id)
+            .expect("target should exist");
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("target index should be valid");
+        record.queued_prompts.clear();
+        sync_pending_prompts(record);
+        record.runtime = SessionRuntime::Claude(runtime);
+        record.active_turn_generation = 1;
+        record.active_turn_mailbox_notification = Some(MailboxNotificationDelivery {
+            mailbox_id: receipt.mailbox_id.clone(),
+            session_id: target_id.clone(),
+            through_sequence: receipt.sequence,
+        });
+        record.session.status = SessionStatus::Active;
+        record.session.preview = "MAILBOX TURN".to_owned();
+    }
+
+    let failing_persistence_path = std::env::temp_dir().join(format!(
+        "termal-mailbox-rejected-persist-failure-{}",
+        uuid::Uuid::new_v4()
+    ));
+    fs::create_dir_all(&failing_persistence_path)
+        .expect("failing persistence directory should exist");
+    state.shutdown_persist_blocking();
+    state.persistence_path = Arc::new(failing_persistence_path.clone());
+
+    assert!(record_rejected_turn_dispatch(
+        &state,
+        &target_id,
+        "runtime command channel rejected the mailbox turn",
+        Some(&MailboxNotificationDelivery {
+            mailbox_id: receipt.mailbox_id.clone(),
+            session_id: target_id.clone(),
+            through_sequence: receipt.sequence,
+        }),
+        None,
+        &runtime_token,
+        1,
+    ));
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let target = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == target_id)
+        .expect("target should remain present");
+    assert_eq!(target.session.status, SessionStatus::Error);
+    assert!(target.active_turn_mailbox_notification.is_none());
+    assert_eq!(target.queued_prompts.len(), 1);
+    assert_eq!(
+        target.queued_prompts[0]
+            .pending_prompt
+            .source
+            .as_ref()
+            .and_then(|source| source.mailbox.as_ref())
+            .map(|mailbox| mailbox.sequence),
+        Some(receipt.sequence)
+    );
+    drop(inner);
+    assert_eq!(
+        state
+            .mailbox_store
+            .read_message(&target_id, &receipt.message_id)
+            .expect("delivery state should remain readable")
+            .notification_state,
+        "deliveredToIdleSession"
+    );
+
+    let _ = fs::remove_dir_all(failing_persistence_path);
+}
+
+// Engram settings rotation owns runtime teardown outside the ordinary turn
+// failure path. The exact mailbox delivery still has to be restored before the
+// replacement runtime is allowed to drain the queue.
+#[test]
+fn engram_runtime_revocation_restores_the_active_mailbox_wake() {
+    let (state, sender_id, target_id) = mailbox_test_state();
+    let receipt = state
+        .append_mailbox_message_and_notify(&sender_id, mailbox_send_request(&target_id))
+        .expect("mailbox wake should queue");
+    let (runtime, input_rx) = test_claude_runtime_handle("engram-mailbox-revocation-runtime");
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&target_id)
+            .expect("target should exist");
+        inner.sessions[index].runtime = SessionRuntime::Claude(runtime);
+        inner.sessions[index].session.status = SessionStatus::Idle;
+    }
+    let dispatch = state
+        .dispatch_next_queued_turn(&target_id, false)
+        .expect("mailbox queue drain should succeed")
+        .expect("mailbox wake should dispatch");
+    deliver_turn_dispatch(&state, dispatch).expect("runtime should accept the mailbox wake");
+    assert!(matches!(
+        input_rx.recv_timeout(Duration::from_secs(1)),
+        Ok(ClaudeRuntimeCommand::Prompt(_))
+    ));
+
+    let mut batch = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        claim_engram_mcp_runtime_revocations_locked(&mut inner, std::slice::from_ref(&target_id))
+    };
+    let target = batch.targets.pop().expect("runtime should be claimable");
+    let finalization = state.finish_revoked_engram_mcp_runtime_if_matches(
+        &target_id,
+        &target.token,
+        target.owner_generation,
+        target.stop_options.as_ref(),
+        false,
+        false,
+        None,
+    );
+    assert!(finalization.failures.is_empty());
+    assert!(
+        finalization
+            .completion
+            .as_ref()
+            .is_some_and(|completion| completion.should_dispatch_next),
+        "successful revocation should allow the restored wake on a replacement runtime"
+    );
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let target = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == target_id)
+        .expect("target should remain present");
+    assert!(target.active_turn_mailbox_notification.is_none());
+    assert_eq!(target.queued_prompts.len(), 1);
+    assert_eq!(target.queued_prompts[0].source, QueuedPromptSource::Mailbox);
+    assert!(matches!(target.runtime, SessionRuntime::None));
+    drop(inner);
+    assert_eq!(
+        state
+            .mailbox_store
+            .read_message(&target_id, &receipt.message_id)
+            .expect("recovered delivery should remain readable")
+            .notification_state,
+        "recoveredWake"
+    );
+}
+
+#[test]
+fn errored_mailbox_turn_is_restored_without_immediate_redispatch() {
+    let (state, sender_id, target_id) = mailbox_test_state();
+    let receipt = state
+        .append_mailbox_message_and_notify(&sender_id, mailbox_send_request(&target_id))
+        .expect("mailbox wake should queue");
+    let (runtime, input_rx) = test_claude_runtime_handle("errored-mailbox-runtime");
+    let runtime_token = RuntimeToken::Claude(runtime.runtime_id.clone());
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&target_id)
+            .expect("target should exist");
+        inner.sessions[index].runtime = SessionRuntime::Claude(runtime);
+        inner.sessions[index].session.status = SessionStatus::Idle;
+    }
+    let dispatch = state
+        .dispatch_next_queued_turn(&target_id, false)
+        .expect("mailbox queue drain should succeed")
+        .expect("mailbox wake should dispatch");
+    deliver_turn_dispatch(&state, dispatch).expect("runtime should accept the mailbox wake");
+    assert!(matches!(
+        input_rx.recv_timeout(Duration::from_secs(1)),
+        Ok(ClaudeRuntimeCommand::Prompt(_))
+    ));
+
+    state
+        .mark_turn_error_if_runtime_matches(&target_id, &runtime_token, "agent error")
+        .expect("turn error should restore its mailbox wake");
+    assert!(matches!(
+        input_rx.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let target = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == target_id)
+        .expect("target should remain present");
+    assert_eq!(target.session.status, SessionStatus::Error);
+    assert!(target.orchestrator_auto_dispatch_blocked);
+    assert_eq!(target.queued_prompts.len(), 1);
+    assert_eq!(target.queued_prompts[0].source, QueuedPromptSource::Mailbox);
+    drop(inner);
+    assert_eq!(
+        state
+            .mailbox_store
+            .read_message(&target_id, &receipt.message_id)
+            .expect("recovered delivery should remain readable")
+            .notification_state,
+        "recoveredWake"
+    );
+}
+
+#[test]
+fn runtime_exit_restores_the_mailbox_wake_and_pauses_automatic_dispatch() {
+    let (state, sender_id, target_id) = mailbox_test_state();
+    let receipt = state
+        .append_mailbox_message_and_notify(&sender_id, mailbox_send_request(&target_id))
+        .expect("mailbox wake should queue");
+    let (runtime, input_rx) = test_claude_runtime_handle("exited-mailbox-runtime");
+    let runtime_token = RuntimeToken::Claude(runtime.runtime_id.clone());
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&target_id)
+            .expect("target should exist");
+        inner.sessions[index].runtime = SessionRuntime::Claude(runtime);
+        inner.sessions[index].session.status = SessionStatus::Idle;
+    }
+    let dispatch = state
+        .dispatch_next_queued_turn(&target_id, false)
+        .expect("mailbox queue drain should succeed")
+        .expect("mailbox wake should dispatch");
+    deliver_turn_dispatch(&state, dispatch).expect("runtime should accept the mailbox wake");
+    assert!(matches!(
+        input_rx.recv_timeout(Duration::from_secs(1)),
+        Ok(ClaudeRuntimeCommand::Prompt(_))
+    ));
+
+    state
+        .handle_runtime_exit_if_matches(&target_id, &runtime_token, Some("mailbox runtime exited"))
+        .expect("runtime exit should restore its mailbox wake");
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let target = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == target_id)
+        .expect("target should remain present");
+    assert_eq!(target.session.status, SessionStatus::Error);
+    assert!(target.orchestrator_auto_dispatch_blocked);
+    assert_eq!(target.queued_prompts.len(), 1);
+    assert_eq!(target.queued_prompts[0].source, QueuedPromptSource::Mailbox);
+    drop(inner);
+    assert_eq!(
+        state
+            .mailbox_store
+            .read_message(&target_id, &receipt.message_id)
+            .expect("recovered delivery should remain readable")
+            .notification_state,
+        "recoveredWake"
+    );
+}
+
 #[test]
 fn idle_blocked_receiver_queues_its_first_mailbox_wake_without_reactivation() {
     let (state, codex_id, claude_id) = mailbox_test_state();

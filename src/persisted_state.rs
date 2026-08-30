@@ -408,6 +408,8 @@ impl PersistedSessionRecord {
             active_codex_approval_policy: self.active_codex_approval_policy,
             active_codex_reasoning_effort: self.active_codex_reasoning_effort,
             active_codex_sandbox_mode: self.active_codex_sandbox_mode,
+            active_turn_generation: 0,
+            active_turn_mailbox_notification: None,
             active_turn_start_message_count: None,
             active_turn_file_changes: BTreeMap::new(),
             active_turn_file_change_grace_deadline: None,

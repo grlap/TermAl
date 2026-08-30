@@ -292,6 +292,11 @@ fn clear_shared_codex_completed_turn_state_fields(
 fn clear_shared_codex_turn_session_state(session_state: &mut SharedCodexSessionState) {
     session_state.pending_thread_setup = None;
     session_state.pending_turn_start_request_id = None;
+    if let Some(cancel_tx) = session_state.turn_started_watchdog_cancel_tx.take() {
+        let _ = cancel_tx.send(());
+    }
+    session_state.turn_started_before_response = false;
+    session_state.active_turn_generation = None;
     session_state.turn_id = None;
     session_state.turn_started = false;
     clear_shared_codex_completed_turn_state_fields(

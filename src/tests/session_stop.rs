@@ -255,10 +255,210 @@ fn runtime_exit_is_suppressed_while_stop_is_in_progress() {
     assert!(record.runtime_stop_in_progress);
     assert_eq!(
         record.deferred_stop_callbacks,
-        vec![DeferredStopCallback::RuntimeExited(Some(
-            "runtime exited".to_owned()
-        ))]
+        vec![DeferredStopCallback::RuntimeExited {
+            active_turn_generation: 0,
+            message: Some("runtime exited".to_owned()),
+        }]
     );
+    drop(inner);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// A runtime can disappear after a turn was committed Active but before the
+// user reaches Stop. Stop is the last recovery affordance in that state, so it
+// must terminalize the turn instead of returning the same "not running"
+// conflict used for genuinely idle sessions.
+#[test]
+fn stop_session_recovers_an_active_session_with_no_runtime() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::None;
+        inner.sessions[index].session.status = SessionStatus::Active;
+        inner.sessions[index].session.preview = "LIVE TURN".to_owned();
+        for (source, id, text) in [
+            (
+                QueuedPromptSource::Mailbox,
+                "mailbox-after-stop",
+                "[TermAl mailbox notification] durable wake",
+            ),
+            (
+                QueuedPromptSource::Orchestrator,
+                "orchestrator-after-stop",
+                "automatic workflow continuation",
+            ),
+        ] {
+            inner.sessions[index]
+                .queued_prompts
+                .push_back(QueuedPromptRecord {
+                    source,
+                    attachments: Vec::new(),
+                    pending_prompt: PendingPrompt {
+                        attachments: Vec::new(),
+                        id: id.to_owned(),
+                        timestamp: stamp_now(),
+                        text: text.to_owned(),
+                        expanded_text: None,
+                        source: None,
+                    },
+                });
+        }
+        sync_pending_prompts(&mut inner.sessions[index]);
+    }
+
+    let snapshot = state
+        .stop_session(&session_id)
+        .expect("Stop should recover an active session whose runtime vanished");
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("recovered session should remain visible");
+    assert_eq!(session.status, SessionStatus::Idle);
+    assert_eq!(session.preview, SESSION_STOPPED_BY_USER_MESSAGE);
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("Codex session should exist");
+    assert!(matches!(record.runtime, SessionRuntime::None));
+    assert!(!record.runtime_stop_in_progress);
+    assert!(record.deferred_stop_callbacks.is_empty());
+    assert!(record.orchestrator_auto_dispatch_blocked);
+    assert_eq!(record.queued_prompts.len(), 1);
+    assert_eq!(record.queued_prompts[0].source, QueuedPromptSource::Mailbox);
+    assert_eq!(record.session.pending_prompts.len(), 1);
+    assert_eq!(record.session.pending_prompts[0].id, "mailbox-after-stop");
+    assert!(matches!(
+        record.session.messages.last(),
+        Some(Message::Text { text, .. })
+            if text == SESSION_STOPPED_BY_USER_MESSAGE
+    ));
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// A rejected runtime-channel handoff must clear the dead runtime and record
+// the terminal turn failure in one state transaction. Separate commits leave
+// a crash-recoverable Active+None snapshot between those operations.
+#[test]
+fn rejected_turn_delivery_is_one_atomic_terminal_transition() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let (runtime, input_rx) = test_claude_runtime_handle("atomic-rejected-delivery");
+    let runtime_token = RuntimeToken::Claude(runtime.runtime_id.clone());
+    drop(input_rx);
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Claude session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Claude(runtime);
+        inner.sessions[index].active_turn_generation = 1;
+        inner.sessions[index].session.status = SessionStatus::Active;
+        inner.sessions[index].session.preview = "LIVE TURN".to_owned();
+    }
+
+    let baseline_revision = state.full_snapshot().revision;
+    assert!(record_rejected_turn_dispatch(
+        &state,
+        &session_id,
+        "runtime command channel rejected the queued prompt",
+        None,
+        None,
+        &runtime_token,
+        1,
+    ));
+
+    let snapshot = state.full_snapshot();
+    assert_eq!(snapshot.revision, baseline_revision + 1);
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("failed session should remain visible");
+    assert_eq!(session.status, SessionStatus::Error);
+    assert_eq!(
+        session.preview,
+        "runtime command channel rejected the queued prompt"
+    );
+    assert!(matches!(
+        session.messages.last(),
+        Some(Message::Text { text, .. })
+            if text == "Turn failed: runtime command channel rejected the queued prompt"
+    ));
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("Claude session should exist");
+    assert!(matches!(record.runtime, SessionRuntime::None));
+    assert!(!record.runtime_stop_in_progress);
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// A runtime-channel rejection belongs to the exact dispatch generation that
+// attempted the send. If a runtime-exit callback has already attached a
+// successor, the unwinding rejection must not clear or terminalize it.
+#[test]
+fn stale_rejected_turn_delivery_does_not_touch_a_successor_runtime() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let (stale_runtime, _stale_rx) = test_claude_runtime_handle("stale-rejected-delivery");
+    let stale_token = RuntimeToken::Claude(stale_runtime.runtime_id.clone());
+    let (successor_runtime, _successor_rx) =
+        test_claude_runtime_handle("successor-after-rejected-delivery");
+    let successor_token = RuntimeToken::Claude(successor_runtime.runtime_id.clone());
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Claude session should exist");
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("Claude session index should be valid");
+        record.runtime = SessionRuntime::Claude(successor_runtime);
+        record.active_turn_generation = 2;
+        record.session.status = SessionStatus::Active;
+        record.session.preview = "successor turn".to_owned();
+    }
+    let baseline_revision = state.full_snapshot().revision;
+
+    assert!(!record_rejected_turn_dispatch(
+        &state,
+        &session_id,
+        "stale runtime command rejection",
+        None,
+        None,
+        &stale_token,
+        1,
+    ));
+
+    assert_eq!(state.full_snapshot().revision, baseline_revision);
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("Claude session should remain present");
+    assert!(record.runtime.matches_runtime_token(&successor_token));
+    assert_eq!(record.active_turn_generation, 2);
+    assert_eq!(record.session.status, SessionStatus::Active);
+    assert_eq!(record.session.preview, "successor turn");
+    assert!(!record.runtime_stop_in_progress);
     drop(inner);
 
     let _ = fs::remove_file(state.persistence_path.as_path());
@@ -565,7 +765,9 @@ fn successful_stop_discards_deferred_callbacks() {
         inner.sessions[index].runtime = SessionRuntime::Claude(runtime);
         inner.sessions[index].session.status = SessionStatus::Active;
         inner.sessions[index].session.preview = "Streaming reply...".to_owned();
-        inner.sessions[index].deferred_stop_callbacks = vec![DeferredStopCallback::TurnCompleted];
+        inner.sessions[index].deferred_stop_callbacks = vec![DeferredStopCallback::TurnCompleted {
+            active_turn_generation: 0,
+        }];
     }
 
     let snapshot = state.stop_session(&session_id).unwrap();
@@ -942,7 +1144,9 @@ fn failed_dedicated_stop_replays_deferred_turn_completion() {
         let index = inner
             .find_session_index(&session_id)
             .expect("Claude session should exist");
-        inner.sessions[index].deferred_stop_callbacks = vec![DeferredStopCallback::TurnCompleted];
+        inner.sessions[index].deferred_stop_callbacks = vec![DeferredStopCallback::TurnCompleted {
+            active_turn_generation: 0,
+        }];
     }
 
     let _failure_guard = force_test_kill_child_process_failure(&process, "Claude");
@@ -1004,9 +1208,10 @@ fn failed_dedicated_stop_replays_deferred_runtime_exit() {
         let index = inner
             .find_session_index(&session_id)
             .expect("Claude session should exist");
-        inner.sessions[index].deferred_stop_callbacks = vec![DeferredStopCallback::RuntimeExited(
-            Some("process crashed".to_owned()),
-        )];
+        inner.sessions[index].deferred_stop_callbacks = vec![DeferredStopCallback::RuntimeExited {
+            active_turn_generation: 0,
+            message: Some("process crashed".to_owned()),
+        }];
     }
 
     let _failure_guard = force_test_kill_child_process_failure(&process, "Claude");
@@ -1137,8 +1342,13 @@ fn failed_dedicated_stop_replays_multiple_deferred_callbacks_in_order() {
             source: None,
         });
         inner.sessions[index].deferred_stop_callbacks = vec![
-            DeferredStopCallback::TurnCompleted,
-            DeferredStopCallback::RuntimeExited(None),
+            DeferredStopCallback::TurnCompleted {
+                active_turn_generation: 0,
+            },
+            DeferredStopCallback::RuntimeExited {
+                active_turn_generation: 0,
+                message: None,
+            },
         ];
     }
 
@@ -1274,8 +1484,13 @@ fn failed_dedicated_stop_replays_runtime_exit_last_even_when_it_arrives_first() 
             source: None,
         });
         inner.sessions[index].deferred_stop_callbacks = vec![
-            DeferredStopCallback::RuntimeExited(None),
-            DeferredStopCallback::TurnCompleted,
+            DeferredStopCallback::RuntimeExited {
+                active_turn_generation: 0,
+                message: None,
+            },
+            DeferredStopCallback::TurnCompleted {
+                active_turn_generation: 0,
+            },
         ];
     }
 

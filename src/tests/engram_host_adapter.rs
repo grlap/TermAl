@@ -1039,9 +1039,18 @@ struct EngramControlGate {
 
 impl EngramControlGate {
     fn wait(&self) -> RecordedEngramControlRequest {
-        self.entered
-            .recv_timeout(Duration::from_secs(2))
-            .expect("gated Engram request should arrive")
+        self.wait_with_timeout(
+            Duration::from_secs(30),
+            "gated Engram request should arrive",
+        )
+    }
+
+    fn wait_with_timeout(
+        &self,
+        timeout: Duration,
+        failure_message: &'static str,
+    ) -> RecordedEngramControlRequest {
+        self.entered.recv_timeout(timeout).expect(failure_message)
     }
 
     fn release(self) {
@@ -4523,10 +4532,81 @@ fn engram_mcp_grant_rotation_marks_all_runtime_families_and_descendants_for_rese
     }
 }
 
-#[test]
-fn engram_mcp_successful_rotation_replays_a_turn_completion_deferred_by_the_revoke_fence() {
+fn assert_engram_mcp_quarantine_transition_is_replanned_before_commit(
+    label: &str,
+    initially_quarantined: bool,
+    finally_quarantined: bool,
+) {
     let (state, root, project_id, session_ids) =
-        engram_mcp_runtime_family_fixture("grant-rotation-deferred-callback", Some("grant-old"));
+        engram_mcp_runtime_family_fixture(label, Some("grant-old"));
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_ids[0])
+            .expect("quarantine transition session should exist");
+        inner
+            .session_mut_by_index(index)
+            .expect("quarantine transition session index should be valid")
+            .engram_mcp_runtime_quarantined = initially_quarantined;
+    }
+    set_next_engram_quarantine_precommit_transition(
+        &project_id,
+        &session_ids[0],
+        finally_quarantined,
+    );
+    let mut rotated = real_fixture_engram_settings(&root);
+    rotated.work_authority_grant = Some("grant-new".to_owned());
+    state
+        .update_project_engram_settings(&project_id, rotated)
+        .expect("grant rotation should re-plan the final quarantine state");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    for session_id in session_ids {
+        let record = inner
+            .find_session_index(&session_id)
+            .and_then(|index| inner.sessions.get(index))
+            .expect("affected session should remain");
+        if finally_quarantined {
+            assert!(
+                matches!(record.runtime, SessionRuntime::None),
+                "one final quarantined runtime must escalate the rotation to immediate project-wide cleanup for {session_id}"
+            );
+            assert!(!record.runtime_reset_required);
+        } else {
+            assert!(
+                !matches!(record.runtime, SessionRuntime::None),
+                "an exited quarantine must not tear down healthy runtime {session_id}"
+            );
+            assert!(record.runtime_reset_required);
+        }
+        assert!(!record.engram_mcp_runtime_quarantined);
+    }
+}
+
+#[test]
+fn engram_mcp_quarantine_appearing_during_validation_escalates_rotation_cleanup() {
+    assert_engram_mcp_quarantine_transition_is_replanned_before_commit(
+        "quarantine-appears-before-commit",
+        false,
+        true,
+    );
+}
+
+#[test]
+fn engram_mcp_quarantine_disappearing_during_validation_preserves_deferred_rotation() {
+    assert_engram_mcp_quarantine_transition_is_replanned_before_commit(
+        "quarantine-exits-before-commit",
+        true,
+        false,
+    );
+}
+
+fn assert_engram_mcp_successful_rotation_releases_fences_atomically(
+    label: &str,
+    rotate_home: bool,
+) {
+    let (state, root, project_id, session_ids) =
+        engram_mcp_runtime_family_fixture(label, Some("grant-old"));
     let session_id = session_ids[0].clone();
     let runtime_token = {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
@@ -4544,8 +4624,21 @@ fn engram_mcp_successful_rotation_replays_a_turn_completion_deferred_by_the_revo
     let rotating_project_id = project_id.clone();
     let mut rotated = real_fixture_engram_settings(&root);
     rotated.work_authority_grant = Some("grant-new".to_owned());
+    if rotate_home {
+        let next_home = root.join("next-home");
+        fs::create_dir_all(&next_home).expect("next Engram home should exist");
+        rotated.home = Some(next_home.to_string_lossy().into_owned());
+    }
     let rotating = std::thread::spawn(move || {
-        rotating_state.update_project_engram_settings(&rotating_project_id, rotated)
+        let result = rotating_state.update_project_engram_settings(&rotating_project_id, rotated);
+        abort_engram_project_reset_release_gate(
+            &rotating_project_id,
+            match &result {
+                Ok(_) => "settings update returned without visiting the atomic release gate",
+                Err(error) => &error.message,
+            },
+        );
+        result
     });
     gate.wait_until_entered();
 
@@ -4556,14 +4649,25 @@ fn engram_mcp_successful_rotation_replays_a_turn_completion_deferred_by_the_revo
             .and_then(|index| inner.sessions.get(index))
             .expect("session should remain at the release-order gate");
         assert!(
-            !inner.engram_project_resets.contains(&project_id),
-            "project reset must be released before runtime callbacks are unfenced"
+            inner.engram_project_resets.contains(&project_id),
+            "the project fence must remain owned until the atomic release"
         );
         assert!(
             record.runtime_stop_in_progress,
             "runtime callbacks must remain fenced until the project reset is released"
         );
     }
+    let mut overlapping = real_fixture_engram_settings(&root);
+    overlapping.work_authority_grant = Some("grant-overlap".to_owned());
+    let error = match state.update_project_engram_settings(&project_id, overlapping) {
+        Ok(_) => panic!("an overlapping mutation must not enter between the two fence releases"),
+        Err(error) => error,
+    };
+    assert_eq!(error.status, StatusCode::CONFLICT);
+    assert_eq!(
+        error.message,
+        "Engram project settings are already being reset"
+    );
     state
         .finish_turn_ok_if_runtime_matches(&session_id, &runtime_token)
         .expect("turn completion should defer behind the authority fence");
@@ -4578,7 +4682,7 @@ fn engram_mcp_successful_rotation_replays_a_turn_completion_deferred_by_the_revo
             record
                 .deferred_stop_callbacks
                 .iter()
-                .any(|callback| matches!(callback, DeferredStopCallback::TurnCompleted))
+                .any(|callback| matches!(callback, DeferredStopCallback::TurnCompleted { .. }))
         );
     }
     gate.release();
@@ -4597,6 +4701,110 @@ fn engram_mcp_successful_rotation_replays_a_turn_completion_deferred_by_the_revo
     assert!(record.deferred_stop_callbacks.is_empty());
     assert!(record.runtime_reset_required);
     assert!(!matches!(record.runtime, SessionRuntime::None));
+}
+
+#[test]
+fn engram_mcp_successful_rotation_releases_project_and_runtime_fences_atomically() {
+    assert_engram_mcp_successful_rotation_releases_fences_atomically(
+        "grant-rotation-atomic-release",
+        false,
+    );
+}
+
+#[test]
+fn engram_mcp_reset_required_rotation_releases_project_and_runtime_fences_atomically() {
+    assert_engram_mcp_successful_rotation_releases_fences_atomically(
+        "home-rotation-atomic-release",
+        true,
+    );
+}
+
+// The settings commit precedes fence release. Losing the project generation at
+// that final bookkeeping step must therefore report a persisted degradation,
+// not return 500 for a mutation that already landed successfully.
+#[test]
+fn engram_mcp_committed_rotation_reports_project_fence_release_degradation_as_success() {
+    let (state, root, project_id, session_ids) = engram_mcp_runtime_family_fixture(
+        "grant-rotation-project-fence-release-degraded",
+        Some("grant-old"),
+    );
+    let gate = gate_next_engram_project_reset_release(&project_id);
+    let rotating_state = state.clone();
+    let rotating_project_id = project_id.clone();
+    let mut rotated = real_fixture_engram_settings(&root);
+    rotated.work_authority_grant = Some("grant-new".to_owned());
+    let rotating = std::thread::spawn(move || {
+        rotating_state.update_project_engram_settings(&rotating_project_id, rotated)
+    });
+    gate.wait_until_entered();
+
+    let newer_generation = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let current_generation = inner
+            .engram_project_resets
+            .owners
+            .get(&project_id)
+            .copied()
+            .expect("rotation should own the project fence at the release gate");
+        assert!(
+            inner
+                .engram_project_resets
+                .release(&project_id, current_generation)
+        );
+        inner
+            .engram_project_resets
+            .claim(&project_id)
+            .expect("test should install a newer project fence generation")
+    };
+    gate.release();
+    let _snapshot = rotating
+        .join()
+        .expect("rotation thread should not panic")
+        .expect("the already-committed rotation should still return success");
+    let internal_sessions = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        inner
+            .sessions
+            .iter()
+            .filter(|record| session_ids.contains(&record.session.id))
+            .map(|record| {
+                (
+                    record.session.id.clone(),
+                    record.session.project_id.clone(),
+                    record.is_local_session(),
+                    record.session.messages.clone(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+
+    assert!(
+        internal_sessions.iter().any(|(_, _, _, messages)| {
+            messages.iter().any(|message| {
+                matches!(message, Message::Text { text, .. }
+                    if text == ENGRAM_PROJECT_FENCE_RELEASE_DEGRADED_NOTICE)
+            })
+        }),
+        "persisted sessions did not include the degraded cleanup notice: {internal_sessions:?}"
+    );
+    let mut inner = state.inner.lock().expect("state mutex poisoned");
+    assert!(
+        inner
+            .engram_project_resets
+            .is_owned_by(&project_id, newer_generation)
+    );
+    for session_id in &session_ids {
+        let record = inner
+            .find_session_index(session_id)
+            .and_then(|index| inner.sessions.get(index))
+            .expect("affected session should remain");
+        assert!(!record.runtime_stop_in_progress);
+    }
+    assert!(
+        inner
+            .engram_project_resets
+            .release(&project_id, newer_generation)
+    );
 }
 
 #[test]
@@ -5454,6 +5662,7 @@ fn engram_mcp_grant_clear_waits_for_a_lifecycle_checkpoint_before_teardown() {
         checkpoint_state.checkpoint_engram_turn_off_lock(
             &checkpoint_session_id,
             None,
+            None,
             EngramNextIntent::Wait,
             None,
         );
@@ -5525,6 +5734,7 @@ fn project_reset_release_does_not_clear_a_lifecycle_owned_checkpoint() {
         checkpoint_state.checkpoint_engram_turn_off_lock(
             &checkpoint_session_id,
             None,
+            None,
             EngramNextIntent::Wait,
             None,
         );
@@ -5562,7 +5772,13 @@ fn project_reset_release_does_not_clear_a_lifecycle_owned_checkpoint() {
         assert!(record.engram.checkpoint_owner_generation.is_none());
         assert!(!record.engram.project_reset_in_progress);
     }
-    state.checkpoint_engram_turn_off_lock(&child_session_id, None, EngramNextIntent::Wait, None);
+    state.checkpoint_engram_turn_off_lock(
+        &child_session_id,
+        None,
+        None,
+        EngramNextIntent::Wait,
+        None,
+    );
     assert_eq!(transport.requests().len(), 1);
 
     checkpoint_gate.release();
@@ -6365,7 +6581,10 @@ fn engram_mcp_pending_revocation_surfaces_shared_codex_stop_interrupt_failure() 
 
     let responder = std::thread::spawn(move || {
         match input_rx
-            .recv_timeout(Duration::from_secs(2))
+            // The Stop thread is deliberately held behind a fence while a
+            // settings subprocess runs. Under full-suite load that setup can
+            // exceed a small local timeout before the interrupt is emitted.
+            .recv_timeout(Duration::from_secs(30))
             .expect("shared Codex interrupt should arrive")
         {
             CodexRuntimeCommand::InterruptTurn { response_tx, .. } => response_tx
@@ -6507,7 +6726,9 @@ fn engram_mcp_revocation_fence_queues_dispatch_and_token_mismatch_releases_clean
         record.session.status = SessionStatus::Active;
         record
             .deferred_stop_callbacks
-            .push(DeferredStopCallback::TurnCompleted);
+            .push(DeferredStopCallback::TurnCompleted {
+                active_turn_generation: record.active_turn_generation,
+            });
     }
 
     let finalization = state.finish_revoked_engram_mcp_runtime_if_matches(
@@ -6583,7 +6804,9 @@ fn stale_engram_mcp_revocation_cannot_release_a_newer_owner_fence() {
         record.engram_mcp_revocation_pending = true;
         record
             .deferred_stop_callbacks
-            .push(DeferredStopCallback::TurnCompleted);
+            .push(DeferredStopCallback::TurnCompleted {
+                active_turn_generation: record.active_turn_generation,
+            });
         generation
     };
 
@@ -6617,8 +6840,80 @@ fn stale_engram_mcp_revocation_cannot_release_a_newer_owner_fence() {
     assert!(record.engram_mcp_revocation_pending);
     assert_eq!(
         record.deferred_stop_callbacks,
-        vec![DeferredStopCallback::TurnCompleted]
+        vec![DeferredStopCallback::TurnCompleted {
+            active_turn_generation: record.active_turn_generation,
+        }]
     );
+}
+
+#[test]
+fn lost_project_reset_generation_still_releases_exact_runtime_revocation_fences() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let project_id = "engram-runtime-release-after-project-generation-loss".to_owned();
+    let (runtime, _input_rx) = test_claude_runtime_handle("engram-project-generation-old");
+    let (old_project_generation, newer_project_generation, batch) = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("test session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Claude(runtime);
+        inner.sessions[index].session.status = SessionStatus::Active;
+        let old_project_generation = inner
+            .engram_project_resets
+            .claim(&project_id)
+            .expect("old project reset generation should be claimed");
+        let batch = claim_engram_mcp_runtime_revocations_locked(
+            &mut inner,
+            std::slice::from_ref(&session_id),
+        );
+        assert!(
+            inner
+                .engram_project_resets
+                .release(&project_id, old_project_generation)
+        );
+        let newer_project_generation = inner
+            .engram_project_resets
+            .claim(&project_id)
+            .expect("new project reset generation should be claimed");
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("test session index should remain valid");
+        record.engram.project_reset_in_progress = true;
+        record
+            .deferred_stop_callbacks
+            .push(DeferredStopCallback::TurnCompleted {
+                active_turn_generation: record.active_turn_generation,
+            });
+        (old_project_generation, newer_project_generation, batch)
+    };
+
+    let release = state.release_engram_project_and_runtime_revocation_fences(
+        &project_id,
+        old_project_generation,
+        std::slice::from_ref(&session_id),
+        batch,
+    );
+    assert!(release.project_fence_release_failed);
+    assert_eq!(release.deferred_callbacks.len(), 1);
+    assert_eq!(release.deferred_callbacks[0].0, session_id);
+    assert_eq!(release.deferred_callbacks[0].2.len(), 1);
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert!(
+        inner
+            .engram_project_resets
+            .is_owned_by(&project_id, newer_project_generation),
+        "the newer project fence must remain owned"
+    );
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("test session should remain");
+    assert!(!record.runtime_stop_in_progress);
+    assert!(record.runtime_stop_owner.is_none());
+    assert!(record.engram.project_reset_in_progress);
 }
 
 #[test]
@@ -6801,7 +7096,14 @@ fn engram_mcp_reconfigure_binds_fresh_connection_before_resuming_queued_prompt()
         )
     });
 
-    let bind_request = bind_gate.wait();
+    // This gate is reached only after validation, reset checkpoint arbitration,
+    // authority revocation, and fresh binding setup. Keep a finite deadlock
+    // guard, but size it for the complete reconfiguration path rather than the
+    // two-second budget used by direct transport-gate tests.
+    let bind_request = bind_gate.wait_with_timeout(
+        Duration::from_secs(30),
+        "fresh reconfiguration bind request should arrive",
+    );
     assert_eq!(bind_request.request["operation"], "session_bind");
     assert!(
         matches!(runtime_rx.try_recv(), Err(mpsc::TryRecvError::Empty)),
@@ -7398,9 +7700,13 @@ fn engram_mcp_buffered_runtime_exit_avoids_quarantining_a_dead_runtime() {
         let index = inner
             .find_session_index(&session_id)
             .expect("test session should remain");
+        let active_turn_generation = inner.sessions[index].active_turn_generation;
         inner.sessions[index]
             .deferred_stop_callbacks
-            .push(DeferredStopCallback::RuntimeExited(None));
+            .push(DeferredStopCallback::RuntimeExited {
+                active_turn_generation,
+                message: None,
+            });
     }
 
     let outcome =
@@ -7841,6 +8147,7 @@ fn failed_background_authority_retry_does_not_fail_an_unrelated_settings_edit() 
     )
     .expect("fixture mode should write");
     let project_id = create_test_project(&state, &root, "Engram background authority retry");
+    let session_id = create_test_project_session(&state, Agent::Claude, &project_id, &root);
     let mut grant_a = real_fixture_engram_settings(&root);
     grant_a.work_authority_grant = Some("grant-background-a".to_owned());
     state
@@ -7859,17 +8166,27 @@ fn failed_background_authority_retry_does_not_fail_an_unrelated_settings_edit() 
     state
         .update_project_engram_settings(&project_id, grant_b)
         .expect("an older failed retry must not fail the unrelated durable edit");
+    let mut repeated_edit = real_fixture_engram_settings(&root);
+    repeated_edit.work_authority_grant = Some("grant-background-b".to_owned());
+    repeated_edit.deadline_ms = Some(4_322);
+    state
+        .update_project_engram_settings(&project_id, repeated_edit)
+        .expect("a repeated failed retry must remain best-effort");
 
     let inner = state.inner.lock().expect("state mutex poisoned");
     let project = inner
         .find_project(&project_id)
         .expect("project should remain after the settings edit");
     assert_eq!(
+        project.engram_cleanup_warning.as_deref(),
+        Some(ENGRAM_BACKGROUND_REVOCATION_DEGRADED_NOTICE)
+    );
+    assert_eq!(
         project
             .engram
             .as_ref()
             .and_then(|settings| settings.deadline_ms),
-        Some(4_321)
+        Some(4_322)
     );
     assert!(!inner.engram_project_resets.contains(&project_id));
     assert!(
@@ -7878,6 +8195,258 @@ fn failed_background_authority_retry_does_not_fail_an_unrelated_settings_edit() 
             .iter()
             .any(|entry| { entry.grant_hash == "grant-background-a" && !entry.revoke_confirmed })
     );
+    let record = inner
+        .find_session_index(&session_id)
+        .and_then(|index| inner.sessions.get(index))
+        .expect("project session should retain the cleanup warning");
+    let warnings = record
+        .session
+        .messages
+        .iter()
+        .filter_map(|message| match message {
+            Message::Text { text, .. } if text.starts_with("Engram cleanup warning:") => Some(text),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(warnings.len(), 1, "repeated retry failures must not spam");
+    assert!(warnings[0].contains("could not confirm revocation"));
+    assert!(!warnings[0].contains("grant-background-a"));
+    assert!(!warnings[0].contains("grant-background-b"));
+}
+
+#[test]
+fn engram_cleanup_degradation_persists_for_a_project_without_sessions() {
+    let state = test_app_state();
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("engram-cleanup-warning-without-sessions");
+    fs::create_dir_all(&root).expect("project root should exist");
+    let project_id = create_test_project(&state, &root, "Engram cleanup warning only");
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        assert!(
+            project_engram_session_ids_locked(&inner, &project_id).is_empty(),
+            "the warning must not depend on a project session"
+        );
+    }
+
+    state.note_engram_background_authority_revocation_degraded(&project_id);
+
+    let snapshot = state.full_snapshot();
+    let project = snapshot
+        .projects
+        .iter()
+        .find(|project| project.id == project_id)
+        .expect("project should remain in the client snapshot");
+    assert_eq!(
+        project.engram_cleanup_warning.as_deref(),
+        Some(ENGRAM_BACKGROUND_REVOCATION_DEGRADED_NOTICE)
+    );
+    assert!(
+        snapshot
+            .sessions
+            .iter()
+            .all(|session| session.project_id.as_deref() != Some(&project_id))
+    );
+}
+
+#[test]
+fn successful_authority_cleanup_clears_the_matching_project_warning_durably() {
+    let state = test_app_state();
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("engram-cleanup-warning-cleared");
+    let home = root.join("home");
+    fs::create_dir_all(&home).expect("Engram home should exist");
+    fs::write(root.join(".engram-project"), "fixture-ready\n")
+        .expect("Engram project identity should exist");
+    let project_id = create_test_project(&state, &root, "Engram cleanup warning cleared");
+    let target = EngramAuthorityRevocationTarget {
+        binary_path: "engram".to_owned(),
+        home: home.to_string_lossy().into_owned(),
+        project_root: root.to_string_lossy().into_owned(),
+        work_authority_grant: "grant-cleanup-warning-cleared".to_owned(),
+    };
+    {
+        let entries = retired_engram_work_authority_grants_for_targets(
+            None,
+            std::slice::from_ref(&target),
+            Some("test pending revocation"),
+        );
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        merge_retired_engram_work_authority_grants(
+            &mut inner.engram_retired_work_authority_grants,
+            entries,
+        )
+        .expect("pending authority should enter the durable ledger");
+        state
+            .commit_locked(&mut inner)
+            .expect("pending authority should persist");
+    }
+    state.note_engram_background_authority_revocation_degraded(&project_id);
+
+    assert_eq!(
+        state.finish_engram_authority_revocation_attempts(EngramAuthorityRevocationAttempts {
+            confirmed_targets: vec![target],
+            failure: None,
+        }),
+        None
+    );
+
+    let reloaded = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let encoded = serde_json::to_vec(&PersistedState::from_inner(&inner))
+            .expect("cleanup result should serialize");
+        serde_json::from_slice::<PersistedState>(&encoded)
+            .expect("cleanup result should deserialize")
+            .into_inner()
+            .expect("cleanup result should rehydrate")
+    };
+    let project = reloaded
+        .find_project(&project_id)
+        .expect("project should survive the round trip");
+    assert!(
+        project.engram_cleanup_warning.is_none(),
+        "a successful matching retry must clear the durable degradation"
+    );
+    assert!(
+        reloaded
+            .engram_retired_work_authority_grants
+            .iter()
+            .any(|entry| {
+                entry.grant_hash == "grant-cleanup-warning-cleared" && entry.revoke_confirmed
+            })
+    );
+}
+
+#[test]
+fn unrelated_authority_success_keeps_warning_until_every_project_retirement_is_confirmed() {
+    let state = test_app_state();
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("engram-cleanup-warning-all-project-retirements");
+    let home_a = root.join("home-a");
+    let home_b = root.join("home-b");
+    fs::create_dir_all(&home_a).expect("first Engram home should exist");
+    fs::create_dir_all(&home_b).expect("second Engram home should exist");
+    fs::write(root.join(".engram-project"), "fixture-ready\n")
+        .expect("Engram project identity should exist");
+    let project_id = create_test_project(&state, &root, "Engram cleanup warning all grants");
+    let target_a = EngramAuthorityRevocationTarget {
+        binary_path: "engram".to_owned(),
+        home: home_a.to_string_lossy().into_owned(),
+        project_root: root.to_string_lossy().into_owned(),
+        work_authority_grant: "grant-cleanup-warning-a".to_owned(),
+    };
+    let target_b = EngramAuthorityRevocationTarget {
+        binary_path: "engram".to_owned(),
+        home: home_b.to_string_lossy().into_owned(),
+        project_root: root.to_string_lossy().into_owned(),
+        work_authority_grant: "grant-cleanup-warning-b".to_owned(),
+    };
+    {
+        let entries = retired_engram_work_authority_grants_for_targets(
+            None,
+            &[target_a.clone(), target_b.clone()],
+            Some("test pending revocations"),
+        );
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        merge_retired_engram_work_authority_grants(
+            &mut inner.engram_retired_work_authority_grants,
+            entries,
+        )
+        .expect("pending authorities should enter the durable ledger");
+        state
+            .commit_locked(&mut inner)
+            .expect("pending authorities should persist");
+    }
+    state.note_engram_background_authority_revocation_degraded(&project_id);
+
+    assert_eq!(
+        state.finish_engram_authority_revocation_attempts(EngramAuthorityRevocationAttempts {
+            confirmed_targets: vec![target_a],
+            failure: None,
+        }),
+        None
+    );
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let project = inner
+            .find_project(&project_id)
+            .expect("project should remain");
+        assert!(engram_cleanup_warning_contains(
+            project.engram_cleanup_warning.as_deref(),
+            ENGRAM_BACKGROUND_REVOCATION_DEGRADED_NOTICE,
+        ));
+        assert!(
+            inner
+                .engram_retired_work_authority_grants
+                .iter()
+                .any(|entry| {
+                    entry.grant_hash == "grant-cleanup-warning-b" && !entry.revoke_confirmed
+                })
+        );
+    }
+
+    assert_eq!(
+        state.finish_engram_authority_revocation_attempts(EngramAuthorityRevocationAttempts {
+            confirmed_targets: vec![target_b],
+            failure: None,
+        }),
+        None
+    );
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert!(
+        inner
+            .find_project(&project_id)
+            .and_then(|project| project.engram_cleanup_warning.as_ref())
+            .is_none(),
+        "the warning should clear only after every project retirement is confirmed"
+    );
+}
+
+#[test]
+fn successful_cleanup_without_remaining_tombstones_clears_only_its_warning_kind() {
+    let state = test_app_state();
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("engram-cleanup-warning-kinds");
+    fs::create_dir_all(&root).expect("project root should exist");
+    let project_id = create_test_project(&state, &root, "Engram cleanup warning kinds");
+    state.note_engram_background_authority_revocation_degraded(&project_id);
+    state.note_engram_project_fence_release_degraded(&project_id);
+
+    assert_eq!(
+        state.finish_engram_authority_revocation_attempts(EngramAuthorityRevocationAttempts {
+            confirmed_targets: Vec::new(),
+            failure: None,
+        }),
+        None
+    );
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let warning = inner
+        .find_project(&project_id)
+        .and_then(|project| project.engram_cleanup_warning.as_deref());
+    assert!(!engram_cleanup_warning_contains(
+        warning,
+        ENGRAM_BACKGROUND_REVOCATION_DEGRADED_NOTICE,
+    ));
+    assert!(engram_cleanup_warning_contains(
+        warning,
+        ENGRAM_PROJECT_FENCE_RELEASE_DEGRADED_NOTICE,
+    ));
 }
 
 #[test]
@@ -8509,14 +9078,20 @@ fn assert_terminal_case_checkpoints_once(case: EngramTerminationCase, label: &st
         CodexRuntimeCommand::Prompt { .. }
     ));
     let child_id = created.delegation.child_session_id;
-    let runtime_token = {
+    let (runtime_token, active_turn_generation) = {
         let inner = state.inner.lock().expect("state mutex poisoned");
-        inner
+        let record = inner
             .sessions
             .iter()
             .find(|record| record.session.id == child_id)
-            .and_then(|record| record.runtime.runtime_token())
-            .expect("child runtime should be active")
+            .expect("child runtime should be active");
+        (
+            record
+                .runtime
+                .runtime_token()
+                .expect("child runtime should be active"),
+            record.active_turn_generation,
+        )
     };
 
     match case {
@@ -8528,7 +9103,12 @@ fn assert_terminal_case_checkpoints_once(case: EngramTerminationCase, label: &st
         }
         EngramTerminationCase::FailTurn => {
             state
-                .fail_turn(&child_id, "test delivery failure")
+                .fail_rejected_turn_delivery(
+                    &child_id,
+                    &runtime_token,
+                    active_turn_generation,
+                    "test delivery failure",
+                )
                 .expect("fail turn should succeed");
         }
         EngramTerminationCase::MarkError => {
@@ -10418,6 +10998,8 @@ fn api_rejection_guard_ignores_a_dispatch_marker_replaced_after_finish() {
         "turn dispatch was invalidated before Engram begin completed",
         None,
         Some(stale_generation),
+        &runtime_token,
+        0,
     );
     assert!(!rejected);
 

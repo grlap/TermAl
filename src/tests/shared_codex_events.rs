@@ -32,6 +32,432 @@
 
 use super::*;
 
+// A late thread-level notification must not disarm the turn-level watchdog.
+// The turn/start response and thread/started notification are independent, and
+// only the matching turn/started event proves that the accepted turn began.
+#[test]
+fn late_thread_started_preserves_the_armed_watchdog_and_live_turn_identity() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, _input_rx, process) =
+        test_shared_codex_runtime("shared-codex-late-thread-started");
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process,
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+        inner.sessions[index].session.status = SessionStatus::Active;
+    }
+    let (cancel_tx, cancel_rx) = mpsc::channel();
+    runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned")
+        .insert(
+            session_id.clone(),
+            SharedCodexSessionState {
+                pending_turn_start_request_id: Some("turn-start-late-thread".to_owned()),
+                turn_started_watchdog_cancel_tx: Some(cancel_tx),
+                active_turn_generation: Some(0),
+                thread_id: Some("thread-late".to_owned()),
+                turn_id: Some("turn-awaiting-started".to_owned()),
+                turn_started: false,
+                ..SharedCodexSessionState::default()
+            },
+        );
+    runtime
+        .thread_sessions
+        .lock()
+        .expect("shared Codex thread mutex poisoned")
+        .insert("thread-late".to_owned(), session_id.clone());
+
+    handle_shared_codex_app_server_message(
+        &json!({
+            "method": "thread/started",
+            "params": { "thread": { "id": "thread-late" } }
+        }),
+        &state,
+        &runtime.runtime_id,
+        &Arc::new(Mutex::new(HashMap::new())),
+        &runtime.sessions,
+        &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
+    )
+    .expect("late thread/started should route");
+
+    let sessions = runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned");
+    let session = sessions
+        .get(&session_id)
+        .expect("shared Codex session should remain registered");
+    assert_eq!(
+        session.pending_turn_start_request_id.as_deref(),
+        Some("turn-start-late-thread")
+    );
+    assert_eq!(session.turn_id.as_deref(), Some("turn-awaiting-started"));
+    assert!(session.turn_started_watchdog_cancel_tx.is_some());
+    assert!(matches!(
+        cancel_rx.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
+    drop(sessions);
+
+    {
+        let mut sessions = runtime
+            .sessions
+            .lock()
+            .expect("shared Codex session mutex poisoned");
+        let session = sessions
+            .get_mut(&session_id)
+            .expect("shared Codex session should remain registered");
+        session.pending_turn_start_request_id = None;
+        session.turn_started_watchdog_cancel_tx = None;
+        session.turn_id = Some("turn-live".to_owned());
+        session.turn_started = true;
+    }
+    handle_shared_codex_app_server_message(
+        &json!({
+            "method": "thread/started",
+            "params": { "thread": { "id": "thread-late" } }
+        }),
+        &state,
+        &runtime.runtime_id,
+        &Arc::new(Mutex::new(HashMap::new())),
+        &runtime.sessions,
+        &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
+    )
+    .expect("late thread/started should not erase a live turn");
+
+    let sessions = runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned");
+    let session = sessions
+        .get(&session_id)
+        .expect("shared Codex session should remain registered");
+    assert_eq!(session.turn_id.as_deref(), Some("turn-live"));
+    assert!(session.turn_started);
+}
+
+// A stale turn/started event must not prove that the accepted turn began.
+// Keep the exact request watchdog armed until a matching turn arrives.
+#[test]
+fn mismatched_turn_started_preserves_the_exact_watchdog() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, _input_rx, process) =
+        test_shared_codex_runtime("shared-codex-invalid-turn-started");
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process,
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+        inner.sessions[index].session.status = SessionStatus::Active;
+    }
+    let (cancel_tx, cancel_rx) = mpsc::channel();
+    runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned")
+        .insert(
+            session_id.clone(),
+            SharedCodexSessionState {
+                pending_turn_start_request_id: Some("turn-start-exact".to_owned()),
+                turn_started_watchdog_cancel_tx: Some(cancel_tx),
+                active_turn_generation: Some(7),
+                thread_id: Some("thread-exact".to_owned()),
+                turn_id: Some("turn-exact".to_owned()),
+                turn_started: false,
+                ..SharedCodexSessionState::default()
+            },
+        );
+    runtime
+        .thread_sessions
+        .lock()
+        .expect("shared Codex thread mutex poisoned")
+        .insert("thread-exact".to_owned(), session_id.clone());
+
+    let pending_requests = Arc::new(Mutex::new(HashMap::new()));
+    let input_tx = mpsc::channel::<CodexRuntimeCommand>().0;
+    let invalid = json!({
+        "method": "turn/started",
+        "params": {
+            "threadId": "thread-exact",
+            "turn": { "id": "turn-stale" }
+        }
+    });
+    handle_shared_codex_app_server_message(
+        &invalid,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+        &input_tx,
+    )
+    .expect("invalid turn/started should be ignored");
+    let sessions = runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned");
+    let session = sessions
+        .get(&session_id)
+        .expect("shared Codex session should remain registered");
+    assert_eq!(
+        session.pending_turn_start_request_id.as_deref(),
+        Some("turn-start-exact")
+    );
+    assert_eq!(session.turn_id.as_deref(), Some("turn-exact"));
+    assert!(!session.turn_started);
+    assert!(session.turn_started_watchdog_cancel_tx.is_some());
+    drop(sessions);
+    assert!(matches!(
+        cancel_rx.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
+
+    handle_shared_codex_app_server_message(
+        &json!({
+            "method": "turn/started",
+            "params": {
+                "threadId": "thread-exact",
+                "turn": { "id": "turn-exact" }
+            }
+        }),
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+        &input_tx,
+    )
+    .expect("matching turn/started should be accepted");
+
+    let sessions = runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned");
+    let session = sessions
+        .get(&session_id)
+        .expect("shared Codex session should remain registered");
+    assert_eq!(session.pending_turn_start_request_id, None);
+    assert!(session.turn_started_watchdog_cancel_tx.is_none());
+    assert!(session.turn_started);
+    drop(sessions);
+    assert_eq!(
+        cancel_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("matching turn/started should cancel the watchdog"),
+        ()
+    );
+}
+
+// The turn/start response is the exact identity fallback when the matching
+// turn/started notification omits its id. There can be only one armed request
+// per session, so accepting this shape is safe and avoids interrupting a live
+// streaming turn solely because two protocol versions encode the event
+// differently.
+#[test]
+fn turn_started_without_event_id_uses_the_armed_response_turn_id() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, _input_rx, process) =
+        test_shared_codex_runtime("shared-codex-turn-started-response-id-fallback");
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process,
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+        inner.sessions[index].session.status = SessionStatus::Active;
+    }
+    let (cancel_tx, cancel_rx) = mpsc::channel();
+    runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned")
+        .insert(
+            session_id.clone(),
+            SharedCodexSessionState {
+                pending_turn_start_request_id: Some("turn-start-fallback".to_owned()),
+                turn_started_watchdog_cancel_tx: Some(cancel_tx),
+                active_turn_generation: Some(8),
+                thread_id: Some("thread-fallback".to_owned()),
+                turn_id: Some("turn-from-response".to_owned()),
+                turn_started: false,
+                ..SharedCodexSessionState::default()
+            },
+        );
+    runtime
+        .thread_sessions
+        .lock()
+        .expect("shared Codex thread mutex poisoned")
+        .insert("thread-fallback".to_owned(), session_id.clone());
+
+    handle_shared_codex_app_server_message(
+        &json!({
+            "method": "turn/started",
+            "params": { "threadId": "thread-fallback", "turn": {} }
+        }),
+        &state,
+        &runtime.runtime_id,
+        &Arc::new(Mutex::new(HashMap::new())),
+        &runtime.sessions,
+        &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
+    )
+    .expect("missing event id should use the armed response identity");
+
+    let sessions = runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned");
+    let session = sessions
+        .get(&session_id)
+        .expect("shared Codex session should remain registered");
+    assert_eq!(session.pending_turn_start_request_id, None);
+    assert_eq!(session.turn_id.as_deref(), Some("turn-from-response"));
+    assert!(session.turn_started);
+    assert!(session.turn_started_watchdog_cancel_tx.is_none());
+    drop(sessions);
+    assert_eq!(
+        cancel_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("fallback turn/started should cancel the watchdog"),
+        ()
+    );
+}
+
+#[test]
+fn fully_idless_turn_started_cancels_the_armed_watchdog_and_completes() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, _input_rx, process) = test_shared_codex_runtime("shared-codex-fully-idless-turn");
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process,
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+        inner.sessions[index].session.status = SessionStatus::Active;
+    }
+    let (cancel_tx, cancel_rx) = mpsc::channel();
+    runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned")
+        .insert(
+            session_id.clone(),
+            SharedCodexSessionState {
+                pending_turn_start_request_id: Some("turn-start-fully-idless".to_owned()),
+                turn_started_watchdog_cancel_tx: Some(cancel_tx),
+                active_turn_generation: Some(9),
+                thread_id: Some("thread-fully-idless".to_owned()),
+                turn_id: None,
+                turn_started: false,
+                ..SharedCodexSessionState::default()
+            },
+        );
+    runtime
+        .thread_sessions
+        .lock()
+        .expect("shared Codex thread mutex poisoned")
+        .insert("thread-fully-idless".to_owned(), session_id.clone());
+    let pending_requests = Arc::new(Mutex::new(HashMap::new()));
+    let input_tx = mpsc::channel::<CodexRuntimeCommand>().0;
+
+    handle_shared_codex_app_server_message(
+        &json!({
+            "method": "turn/started",
+            "params": { "threadId": "thread-fully-idless", "turn": {} }
+        }),
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+        &input_tx,
+    )
+    .expect("the id-less notification should prove the armed turn started");
+    assert_eq!(
+        cancel_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("id-less turn/started should cancel the armed watchdog"),
+        ()
+    );
+    {
+        let sessions = runtime
+            .sessions
+            .lock()
+            .expect("shared Codex session mutex poisoned");
+        let session = sessions
+            .get(&session_id)
+            .expect("shared Codex session should remain registered");
+        assert!(session.pending_turn_start_request_id.is_none());
+        assert!(session.turn_started);
+        assert!(session.turn_id.is_none());
+        assert!(session.turn_started_watchdog_cancel_tx.is_none());
+    }
+
+    handle_shared_codex_app_server_message(
+        &json!({
+            "method": "turn/completed",
+            "params": { "threadId": "thread-fully-idless", "turn": {} }
+        }),
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+        &input_tx,
+    )
+    .expect("a fully id-less active turn should complete");
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("Codex session should remain");
+    assert_eq!(record.session.status, SessionStatus::Idle);
+}
+
 // Pins that a subagent task_complete summary is buffered until typed
 // item/completed lands, then inserted BEFORE the final assistant text.
 // Guards against surfacing the subagent result out of narrative order
@@ -307,6 +733,7 @@ fn shared_codex_turn_completed_without_thread_id_routes_by_active_turn_id() {
         inner.sessions[index].session.status = SessionStatus::Active;
     }
 
+    let (cancel_tx, cancel_rx) = mpsc::channel();
     runtime
         .sessions
         .lock()
@@ -314,6 +741,8 @@ fn shared_codex_turn_completed_without_thread_id_routes_by_active_turn_id() {
         .insert(
             session_id.clone(),
             SharedCodexSessionState {
+                pending_turn_start_request_id: Some("turn-start-no-thread-id".to_owned()),
+                turn_started_watchdog_cancel_tx: Some(cancel_tx),
                 thread_id: Some("conversation-123".to_owned()),
                 turn_id: Some("turn-no-thread-id".to_owned()),
                 turn_started: true,
@@ -374,6 +803,108 @@ fn shared_codex_turn_completed_without_thread_id_routes_by_active_turn_id() {
     assert_eq!(session.status, SessionStatus::Idle);
     assert_eq!(session.preview, "Ready for a prompt.");
     assert!(session.messages.is_empty());
+    assert_eq!(
+        cancel_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("turn/completed should cancel an armed watchdog"),
+        ()
+    );
+}
+
+fn assert_shared_codex_turn_completed_uses_available_identity(
+    test_name: &str,
+    active_turn_id: Option<&str>,
+    event_turn_id: Option<&str>,
+) {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, _input_rx, process) = test_shared_codex_runtime(test_name);
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process: process.clone(),
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+        inner.sessions[index].session.status = SessionStatus::Active;
+    }
+    runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned")
+        .insert(
+            session_id.clone(),
+            SharedCodexSessionState {
+                thread_id: Some("thread-terminal-fallback".to_owned()),
+                turn_id: active_turn_id.map(str::to_owned),
+                turn_started: true,
+                ..SharedCodexSessionState::default()
+            },
+        );
+    runtime
+        .thread_sessions
+        .lock()
+        .expect("shared Codex thread mutex poisoned")
+        .insert("thread-terminal-fallback".to_owned(), session_id.clone());
+
+    let mut turn = json!({ "error": null });
+    if let Some(event_turn_id) = event_turn_id {
+        turn["id"] = Value::String(event_turn_id.to_owned());
+    }
+    handle_shared_codex_app_server_message(
+        &json!({
+            "method": "turn/completed",
+            "params": {
+                "threadId": "thread-terminal-fallback",
+                "turn": turn
+            }
+        }),
+        &state,
+        &runtime.runtime_id,
+        &Arc::new(Mutex::new(HashMap::new())),
+        &runtime.sessions,
+        &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
+    )
+    .expect("turn/completed should use the available active or event identity");
+
+    let snapshot = state.full_snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("updated session should be present");
+    assert_eq!(session.status, SessionStatus::Idle);
+    assert_eq!(session.preview, "Ready for a prompt.");
+
+    let _ = process.kill();
+    let _ = process.wait();
+}
+
+#[test]
+fn shared_codex_turn_completed_recovers_event_identity_when_active_id_is_missing() {
+    assert_shared_codex_turn_completed_uses_available_identity(
+        "shared-codex-completed-event-identity-fallback",
+        None,
+        Some("turn-terminal-event"),
+    );
+}
+
+#[test]
+fn shared_codex_turn_completed_recovers_active_identity_when_event_id_is_missing() {
+    assert_shared_codex_turn_completed_uses_available_identity(
+        "shared-codex-completed-active-identity-fallback",
+        Some("turn-terminal-active"),
+        None,
+    );
 }
 
 // Legacy terminal task_complete is ignored entirely; typed turn/completed
@@ -2857,6 +3388,111 @@ fn shared_codex_previous_turn_message_is_ignored_after_next_turn_starts() {
     assert!(session.messages.is_empty());
 }
 
+// A terminal notification is scoped to the exact active turn, not merely the
+// reused Codex thread. After recovery dispatches a successor on that thread, a
+// late success or error completion from the prior turn must be a complete
+// no-op: it cannot clear successor routing, cancel its lifecycle, or flip the
+// durable session out of Active.
+#[test]
+fn shared_codex_previous_turn_completion_does_not_terminalize_a_successor() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, _input_rx, process) =
+        test_shared_codex_runtime("shared-codex-late-previous-turn-completion");
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process: process.clone(),
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+        inner.sessions[index].session.status = SessionStatus::Active;
+        inner.sessions[index].session.preview = "SUCCESSOR TURN".to_owned();
+        inner.sessions[index].active_turn_generation = 2;
+    }
+    runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned")
+        .insert(
+            session_id.clone(),
+            SharedCodexSessionState {
+                active_turn_generation: Some(2),
+                thread_id: Some("conversation-reused".to_owned()),
+                turn_id: Some("turn-successor".to_owned()),
+                turn_started: true,
+                ..SharedCodexSessionState::default()
+            },
+        );
+    runtime
+        .thread_sessions
+        .lock()
+        .expect("shared Codex thread mutex poisoned")
+        .insert("conversation-reused".to_owned(), session_id.clone());
+
+    let pending_requests = Arc::new(Mutex::new(HashMap::new()));
+    for error in [Value::Null, json!({ "message": "late old-turn failure" })] {
+        handle_shared_codex_app_server_message(
+            &json!({
+                "method": "turn/completed",
+                "params": {
+                    "threadId": "conversation-reused",
+                    "turn": {
+                        "id": "turn-previous",
+                        "error": error
+                    }
+                }
+            }),
+            &state,
+            &runtime.runtime_id,
+            &pending_requests,
+            &runtime.sessions,
+            &runtime.thread_sessions,
+            &mpsc::channel::<CodexRuntimeCommand>().0,
+        )
+        .expect("stale turn/completed should be ignored");
+    }
+
+    let sessions = runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned");
+    let session_state = sessions
+        .get(&session_id)
+        .expect("successor routing should remain");
+    assert_eq!(session_state.turn_id.as_deref(), Some("turn-successor"));
+    assert!(session_state.turn_started);
+    assert_eq!(session_state.active_turn_generation, Some(2));
+    drop(sessions);
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("Codex session should remain");
+    assert_eq!(record.session.status, SessionStatus::Active);
+    assert_eq!(record.session.preview, "SUCCESSOR TURN");
+    assert_eq!(record.active_turn_generation, 2);
+    assert!(
+        record
+            .runtime
+            .matches_runtime_token(&RuntimeToken::Codex(runtime.runtime_id.clone()))
+    );
+    drop(inner);
+
+    let _ = process.kill();
+    let _ = process.wait();
+}
+
 // Pins that an item/completed of type "agentMessage" arriving after
 // turn/completed still records the final assistant text during the
 // grace-period window — the app-server path mirrors codex/event handling.
@@ -3599,6 +4235,7 @@ fn shared_codex_turn_completed_error_clears_recorder_state() {
         inner.sessions[index].session.status = SessionStatus::Active;
     }
 
+    let (cancel_tx, cancel_rx) = mpsc::channel();
     runtime
         .sessions
         .lock()
@@ -3608,6 +4245,9 @@ fn shared_codex_turn_completed_error_clears_recorder_state() {
             SharedCodexSessionState {
                 pending_thread_setup: Some(test_pending_codex_thread_setup("thread-start-1")),
                 pending_turn_start_request_id: Some("turn-start-1".to_owned()),
+                turn_started_watchdog_cancel_tx: Some(cancel_tx),
+                turn_started_before_response: false,
+                active_turn_generation: None,
                 recorder: SessionRecorderState {
                     command_messages: HashMap::from([(
                         "search".to_owned(),
@@ -3684,6 +4324,12 @@ fn shared_codex_turn_completed_error_clears_recorder_state() {
         .find(|session| session.id == session_id)
         .expect("updated session should be present");
     assert_eq!(session.status, SessionStatus::Error);
+    assert_eq!(
+        cancel_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("turn/completed error should cancel an armed watchdog"),
+        ()
+    );
 }
 
 // Pins recovery after Codex reports a retryable response-stream disconnect.
@@ -3902,6 +4548,7 @@ fn shared_codex_error_notification_clears_recorder_state() {
         inner.sessions[index].session.status = SessionStatus::Active;
     }
 
+    let (cancel_tx, cancel_rx) = mpsc::channel();
     runtime
         .sessions
         .lock()
@@ -3911,6 +4558,9 @@ fn shared_codex_error_notification_clears_recorder_state() {
             SharedCodexSessionState {
                 pending_thread_setup: Some(test_pending_codex_thread_setup("thread-start-1")),
                 pending_turn_start_request_id: Some("turn-start-1".to_owned()),
+                turn_started_watchdog_cancel_tx: Some(cancel_tx),
+                turn_started_before_response: false,
+                active_turn_generation: None,
                 recorder: SessionRecorderState {
                     command_messages: HashMap::from([(
                         "search".to_owned(),
@@ -3983,4 +4633,10 @@ fn shared_codex_error_notification_clears_recorder_state() {
         .find(|session| session.id == session_id)
         .expect("updated session should be present");
     assert_eq!(session.status, SessionStatus::Error);
+    assert_eq!(
+        cancel_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("fatal error should cancel an armed watchdog"),
+        ()
+    );
 }

@@ -463,6 +463,11 @@ guards are what make the shadow phase safe to leave on.
   and reset flags roll back together if the settings commit fails.
   Clearing a grant, disabling Engram, or deleting the project additionally tears
   down the runtime immediately and does not emit that deferred-rebuild notice.
+  A still-live runtime quarantined by an earlier failed teardown also promotes a
+  later settings mutation to immediate project-wide cleanup: every affected
+  runtime is stopped so the project cannot retain a mixed stale/healthy runtime
+  family around an unresolved capability owner. The quarantine predicate is
+  re-evaluated under the final settings commit lock after off-lock validation.
   Before teardown, TermAl invokes `engram authority revoke` against the current
   project tuple and every distinct binary/home/grant tuple recorded on a
   still-live runtime. This runtime-only installed-descriptor record is made at
@@ -479,11 +484,14 @@ guards are what make the shadow phase safe to leave on.
   Claude/Codex/ACP runtime, and resumes durable queued work only after a fresh
   runtime can be constructed and, on a connection reconfiguration, after the
   fresh Engram bind completes. The stale runtime set is fenced in the same
-  commit as the settings change. Fence
-  ownership also remains on the project, by generation, through off-lock
-  authority revocation, runtime teardown, and any required fresh bind; an
-  overlapping Engram settings mutation returns conflict instead of revoking a
-  newer successful configuration. Runtime fence ownership carries the runtime
+  commit as the settings change. For authority retirement initiated by the
+  current mutation, fence ownership also remains on the project, by generation,
+  through off-lock authority revocation, runtime teardown, and any required fresh
+  bind; an overlapping Engram settings mutation returns conflict instead of
+  revoking a newer successful configuration. Backlog-only retries of older
+  unconfirmed tombstones deliberately do not claim that project fence: duplicate
+  revoke commands are idempotent and targets are filtered away from the authority
+  made current by the committed edit. Runtime fence ownership carries the runtime
   token plus a monotonic generation, so a stale
   teardown completion cannot release a newer Stop/revocation owner; live model
   refresh is rejected while a turn or runtime-stop owner is active for the same
@@ -515,14 +523,30 @@ guards are what make the shadow phase safe to leave on.
   revocation as degraded, and blocks the hash immediately. Each entry records
   whether the revoke command was confirmed. An unconfirmed entry is retried on
   a later same-home settings mutation once the binary/project identity is
-  available; startup itself does not launch a retrying subprocess. The exact
+  available; startup itself does not launch a retrying subprocess. Failure of
+  that backlog repair leaves the entry unconfirmed for another retry but does not
+  turn an unrelated, already-committed settings edit into an error. Durable,
+  redacted operator reporting for persistent retry failure is part of the same
+  cleanup contract: the project record carries `engramCleanupWarning` even
+  when the project has no session, and each existing local project session
+  receives a de-duplicated transcript notice. Grant material is never
+  included. The project field is currently an API/state-snapshot signal; the
+  transcript notice is the rendered in-product surface. A later successful
+  retry clears the background-revocation warning durably only after no
+  unconfirmed retirement remains for that project. Independent cleanup
+  warning kinds share the project field without overwriting one another and
+  clear independently, while transcript notices remain as historical audit
+  context. The exact
   store key is the canonical
   `<home>/projects/<sha256(trimmed .engram-project id)>/engram.db` path plus that
   trimmed project id. When the database is not present yet, comparison falls
-  back to absolute lexical home normalization; the operator's original `home`
-  spelling is still preserved in project settings and passed to Engram. Every
-  supplied home is trimmed for validation and must be non-empty and absolute;
-  it must already exist when Engram is enabled or a grant is present. Missing
+  back to absolute lexical home normalization. `binaryPath` and `home` are both
+  trimmed once at settings ingress; the normalized values are used consistently
+  for persistence, validation, runtime argv, revoke targets, and store identity.
+  Empty-after-trim values become absent. On a disabled patch, an absent value
+  inherits the stored binary/home so a failed cleanup remains addressable; when
+  Engram is enabled or a grant is present, home must be non-empty, absolute, and
+  already exist. Missing
   store identities are never considered equal merely because both failed to
   resolve.
   TermAl rejects both reuse of a retired hash and simultaneous configuration of

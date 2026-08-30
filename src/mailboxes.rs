@@ -136,6 +136,12 @@ struct MailboxUnreadWakeup {
     sender_name: String,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct MailboxWakeQueueOutcome {
+    accepted: bool,
+    changed: bool,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum MailboxWakeupRecovery {
     NeverWoken,
@@ -571,17 +577,27 @@ impl AppState {
         &self,
         notification: &MailboxNotificationDelivery,
     ) -> Result<bool> {
-        let Some(wakeup) = self.mailbox_store.unread_wakeup_for_mailbox(
+        let Some(wakeup) = self.mailbox_store.unread_wakeup_for_mailbox_through(
             &notification.session_id,
             &notification.mailbox_id,
+            notification.through_sequence,
         )? else {
             return Ok(false);
         };
-        self.queue_mailbox_wakeups_for_session(
+        let outcome = self.queue_mailbox_wakeups_for_session_outcome(
             &notification.session_id,
             vec![wakeup],
             MailboxWakeupRecovery::NeverWoken,
-        )
+            true,
+        )?;
+        if outcome.accepted {
+            self.mailbox_store.mark_failed_delivery_recovered_through(
+                &notification.session_id,
+                &notification.mailbox_id,
+                notification.through_sequence,
+            )?;
+        }
+        Ok(outcome.changed)
     }
 
     fn queue_mailbox_wakeups_for_session(
@@ -590,13 +606,25 @@ impl AppState {
         wakeups: Vec<MailboxUnreadWakeup>,
         recovery: MailboxWakeupRecovery,
     ) -> Result<bool> {
+        Ok(self
+            .queue_mailbox_wakeups_for_session_outcome(session_id, wakeups, recovery, false)?
+            .changed)
+    }
+
+    fn queue_mailbox_wakeups_for_session_outcome(
+        &self,
+        session_id: &str,
+        wakeups: Vec<MailboxUnreadWakeup>,
+        recovery: MailboxWakeupRecovery,
+        promote_existing_to_front: bool,
+    ) -> Result<MailboxWakeQueueOutcome> {
         if wakeups.is_empty() {
-            return Ok(false);
+            return Ok(MailboxWakeQueueOutcome::default());
         }
 
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let Some(index) = inner.find_visible_session_index(session_id) else {
-            return Ok(false);
+            return Ok(MailboxWakeQueueOutcome::default());
         };
         if !inner.sessions[index].is_local_session()
             || inner.sessions[index].session.parent_delegation_id.is_some()
@@ -604,13 +632,26 @@ impl AppState {
                 .find_delegation_index_by_child_session_id(session_id)
                 .is_some()
         {
-            return Ok(false);
+            return Ok(MailboxWakeQueueOutcome::default());
         }
 
         let mut changed = false;
         let mut recovered_through = Vec::with_capacity(wakeups.len());
         for wakeup in wakeups {
             recovered_through.push((wakeup.mailbox_id.clone(), wakeup.sequence));
+            if inner.sessions[index]
+                .active_turn_mailbox_notification
+                .as_ref()
+                .is_some_and(|active| {
+                    active.mailbox_id == wakeup.mailbox_id
+                        && active.through_sequence >= wakeup.sequence
+                })
+            {
+                // A successor turn already owns this mailbox boundary. The
+                // failed delivery is covered, but queuing it again would
+                // duplicate the live wake after the terminal transition.
+                continue;
+            }
             let text = mailbox_notification_text(
                 &wakeup.mailbox_id,
                 wakeup.unread_count,
@@ -630,7 +671,7 @@ impl AppState {
             let record = inner
                 .session_mut_by_index(index)
                 .expect("session index should be valid");
-            if let Some(existing) = record.queued_prompts.iter_mut().find(|queued| {
+            if let Some(existing_index) = record.queued_prompts.iter().position(|queued| {
                 queued
                     .pending_prompt
                     .source
@@ -638,6 +679,10 @@ impl AppState {
                     .and_then(|candidate| candidate.mailbox.as_ref())
                     .is_some_and(|mailbox| mailbox.mailbox_id == wakeup.mailbox_id)
             }) {
+                let mut existing = record
+                    .queued_prompts
+                    .remove(existing_index)
+                    .expect("queued mailbox index should remain valid");
                 let existing_sequence = existing
                     .pending_prompt
                     .source
@@ -649,15 +694,19 @@ impl AppState {
                     // never-woken row while a newer wake is already queued.
                     // The existing wake covers that row; never regress the
                     // prompt's receipt metadata to the older sequence.
-                    continue;
-                }
-                if existing.pending_prompt.text != text
+                } else if existing.pending_prompt.text != text
                     || existing.pending_prompt.source.as_ref() != Some(&source)
                 {
                     existing.pending_prompt.timestamp = stamp_now();
                     existing.pending_prompt.text = text;
                     existing.pending_prompt.source = Some(source);
                     changed = true;
+                }
+                if promote_existing_to_front {
+                    record.queued_prompts.push_front(existing);
+                    changed |= existing_index != 0;
+                } else {
+                    record.queued_prompts.insert(existing_index, existing);
                 }
                 continue;
             }
@@ -696,7 +745,10 @@ impl AppState {
                 recovery,
             )?;
         }
-        Ok(changed)
+        Ok(MailboxWakeQueueOutcome {
+            accepted: true,
+            changed,
+        })
     }
 
     fn reconcile_never_woken_mailbox_notifications_for_session(
@@ -1731,6 +1783,37 @@ impl MailboxStore {
         Ok(updated)
     }
 
+    /// Marks only the delivered boundary owned by the turn that actually
+    /// failed. This is deliberately not a session-wide recovery scan: a newer
+    /// accepted mailbox turn may already exist on the same session.
+    fn mark_failed_delivery_recovered_through(
+        &self,
+        session_id: &str,
+        mailbox_id: &str,
+        through_sequence: u64,
+    ) -> Result<usize> {
+        let _write_guard = self.lock_writer("recovering a failed mailbox delivery")?;
+        let connection = self.connection()?;
+        connection
+            .execute(
+                "UPDATE mailbox_messages
+                 SET notification_disposition = 'recoveredWake'
+                 WHERE mailbox_id = ?1
+                   AND target_session_id = ?2
+                   AND sequence <= ?3
+                   AND sequence > COALESCE((
+                     SELECT processed_through
+                     FROM mailbox_participants
+                     WHERE mailbox_id = ?1
+                       AND session_id = ?2
+                       AND left_at IS NULL
+                   ), 0)
+                   AND notification_disposition = 'deliveredToIdleSession'",
+                rusqlite::params![mailbox_id, session_id, through_sequence],
+            )
+            .context("failed to mark the failed mailbox delivery recovered")
+    }
+
     fn mark_session_left(&self, session_id: &str) -> Result<()> {
         let _write_guard = self.lock_internal_writer();
         let Some(connection) = self.connection_if_enabled() else {
@@ -1904,6 +1987,69 @@ impl MailboxStore {
         }
     }
 
+    /// Reconstructs only the unread wake covered by one failed delivery.
+    /// Newer mailbox rows must not be folded into this recovery because they
+    /// may already belong to a successor active or queued turn.
+    fn unread_wakeup_for_mailbox_through(
+        &self,
+        session_id: &str,
+        mailbox_id: &str,
+        through_sequence: u64,
+    ) -> Result<Option<MailboxUnreadWakeup>> {
+        let Some(connection) = self.connection_if_enabled() else {
+            return Ok(None);
+        };
+        let result = connection.query_row(
+            "SELECT message.id, message.sequence,
+                    (
+                      SELECT COUNT(*)
+                      FROM mailbox_messages unread
+                      WHERE unread.mailbox_id = mine.mailbox_id
+                        AND unread.target_session_id = ?1
+                        AND unread.sequence > mine.processed_through
+                        AND unread.sequence <= ?3
+                        AND COALESCE(unread.topic, '') != ?4
+                    ),
+                    message.sender_session_id, message.sender_name
+             FROM mailbox_participants mine
+             JOIN mailbox_messages message
+               ON message.mailbox_id = mine.mailbox_id
+              AND message.sequence = (
+                SELECT MAX(candidate.sequence)
+                FROM mailbox_messages candidate
+                WHERE candidate.mailbox_id = mine.mailbox_id
+                  AND candidate.sequence > mine.processed_through
+                  AND candidate.sequence <= ?3
+                  AND candidate.target_session_id = ?1
+                  AND COALESCE(candidate.topic, '') != ?4
+              )
+             WHERE mine.session_id = ?1
+               AND mine.mailbox_id = ?2
+               AND mine.left_at IS NULL",
+            rusqlite::params![
+                session_id,
+                mailbox_id,
+                through_sequence,
+                DELEGATION_REVIEW_RESULT_TOPIC
+            ],
+            |row| {
+                Ok(MailboxUnreadWakeup {
+                    mailbox_id: mailbox_id.to_owned(),
+                    message_id: row.get(0)?,
+                    sequence: row.get(1)?,
+                    unread_count: row.get(2)?,
+                    sender_session_id: row.get(3)?,
+                    sender_name: row.get(4)?,
+                })
+            },
+        );
+        match result {
+            Ok(wakeup) => Ok(Some(wakeup)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(err) => Err(anyhow!(err).context("failed to query failed mailbox wake-up")),
+        }
+    }
+
     fn wakeups_for_session(
         &self,
         session_id: &str,
@@ -1913,8 +2059,10 @@ impl MailboxStore {
         // transport, not as an edge-triggered prompt. Excluding that one
         // versioned topic keeps both ordinary and boot recovery from racing
         // the delegation wait that owns parent fan-in.
-        let include_all_unread =
-            i64::from(recovery == MailboxWakeupRecovery::AllUnreadAfterBoot);
+        let recovery_mode = match recovery {
+            MailboxWakeupRecovery::NeverWoken => 0_i64,
+            MailboxWakeupRecovery::AllUnreadAfterBoot => 1_i64,
+        };
         let Some(connection) = self.connection_if_enabled() else {
             return Ok(Vec::new());
         };
@@ -1946,7 +2094,7 @@ impl MailboxStore {
                       AND COALESCE(candidate.topic, '') != ?3
                       AND (
                         ?2 = 1
-                        OR candidate.notification_disposition = 'durableButNotWoken'
+                        OR (?2 = 0 AND candidate.notification_disposition = 'durableButNotWoken')
                       )
                  )
                  WHERE message.sequence IS NOT NULL
@@ -1958,7 +2106,7 @@ impl MailboxStore {
             .query_map(
                 rusqlite::params![
                     session_id,
-                    include_all_unread,
+                    recovery_mode,
                     DELEGATION_REVIEW_RESULT_TOPIC
                 ],
                 |row| {

@@ -5241,6 +5241,13 @@ fn completed_delegation_refresh_detaches_and_kills_child_runtime() {
         &state,
         &created.delegation.child_session_id,
     );
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let child_index = inner
+            .find_session_index(&created.delegation.child_session_id)
+            .expect("delegation child should exist");
+        inner.sessions[child_index].active_turn_generation = 41;
+    }
 
     finish_delegation_child_with_assistant_text(
         &state,
@@ -5260,6 +5267,10 @@ fn completed_delegation_refresh_detaches_and_kills_child_runtime() {
     assert!(
         matches!(child.runtime, SessionRuntime::None),
         "terminal delegation child should not keep a runtime handle"
+    );
+    assert_eq!(
+        child.active_turn_generation, 41,
+        "detach must not recycle the process-local turn generation"
     );
     drop(inner);
     assert!(
@@ -6167,7 +6178,9 @@ fn removing_delegation_parent_deletes_child_runtime_and_session() {
             },
         });
         sync_pending_prompts(child);
-        child.deferred_stop_callbacks = vec![DeferredStopCallback::TurnCompleted];
+        child.deferred_stop_callbacks = vec![DeferredStopCallback::TurnCompleted {
+            active_turn_generation: child.active_turn_generation,
+        }];
         pending_message_id
     };
     while delta_events.try_recv().is_ok() {}

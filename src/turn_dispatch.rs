@@ -313,6 +313,8 @@ impl AppState {
             .iter()
             .map(|attachment| attachment.metadata.clone())
             .collect::<Vec<_>>();
+        record.active_turn_generation = record.active_turn_generation.wrapping_add(1).max(1);
+        let active_turn_generation = record.active_turn_generation;
         record.active_turn_start_message_count = Some(record.session.messages.len());
         let expanded_prompt = expanded_prompt
             .as_deref()
@@ -338,6 +340,7 @@ impl AppState {
                 session_id: record.session.id.clone(),
                 through_sequence: mailbox.sequence,
             });
+        record.active_turn_mailbox_notification = mailbox_notification.clone();
         let engram_dispatch_generation = pending_engram
             .as_ref()
             .map(|_| record.engram.dispatch_generation.saturating_add(1));
@@ -411,6 +414,7 @@ impl AppState {
                 };
 
                 TurnDispatch::PersistentClaude {
+                    active_turn_generation,
                     command: ClaudePromptCommand {
                         attachments: attachments.clone(),
                         replay_generation: Uuid::new_v4().to_string(),
@@ -418,6 +422,10 @@ impl AppState {
                     },
                     engram_dispatch_generation,
                     mailbox_notification: mailbox_notification.clone(),
+                    runtime_token: record
+                        .runtime
+                        .runtime_token()
+                        .expect("dispatched Claude turn must retain its runtime token"),
                     sender: handle.input_tx,
                     session_id: record.session.id.clone(),
                 }
@@ -472,7 +480,9 @@ impl AppState {
                 };
 
                 TurnDispatch::PersistentCodex {
+                    active_turn_generation,
                     command: CodexPromptCommand {
+                        active_turn_generation,
                         approval_policy: record.codex_approval_policy,
                         attachments,
                         cwd: record.session.workdir.clone(),
@@ -489,6 +499,10 @@ impl AppState {
                     },
                     engram_dispatch_generation,
                     mailbox_notification: mailbox_notification.clone(),
+                    runtime_token: record
+                        .runtime
+                        .runtime_token()
+                        .expect("dispatched Codex turn must retain its runtime token"),
                     sender: handle.input_tx,
                     session_id: record.session.id.clone(),
                 }
@@ -558,6 +572,7 @@ impl AppState {
                 };
 
                 TurnDispatch::PersistentAcp {
+                    active_turn_generation,
                     command: AcpPromptCommand {
                         cwd: record.session.workdir.clone(),
                         cursor_mode: record.session.cursor_mode,
@@ -573,6 +588,10 @@ impl AppState {
                     },
                     engram_dispatch_generation,
                     mailbox_notification,
+                    runtime_token: record
+                        .runtime
+                        .runtime_token()
+                        .expect("dispatched ACP turn must retain its runtime token"),
                     sender: handle.input_tx,
                     session_id: record.session.id.clone(),
                     turn_lifecycle: handle.turn_lifecycle,

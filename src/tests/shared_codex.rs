@@ -54,6 +54,7 @@ fn prompt_during_codex_thread_setup_does_not_start_a_second_thread() {
     let mut writer = Vec::new();
 
     let prompt_command = |prompt: &str| CodexPromptCommand {
+        active_turn_generation: 0,
         approval_policy: CodexApprovalPolicy::Never,
         attachments: Vec::new(),
         cwd: "/tmp".to_owned(),
@@ -196,6 +197,7 @@ fn detach_removes_the_in_flight_thread_setup_so_the_next_prompt_starts_fresh() {
     let mut writer = Vec::new();
 
     let prompt_command = |prompt: &str, resume: Option<&str>| CodexPromptCommand {
+        active_turn_generation: 0,
         approval_policy: CodexApprovalPolicy::Never,
         attachments: Vec::new(),
         cwd: "/tmp".to_owned(),
@@ -360,6 +362,7 @@ fn prompt_resuming_the_thread_its_own_setup_just_started_parks_instead_of_supers
     let mut writer = Vec::new();
 
     let prompt_command = |prompt: &str, resume: Option<&str>| CodexPromptCommand {
+        active_turn_generation: 0,
         approval_policy: CodexApprovalPolicy::Never,
         attachments: Vec::new(),
         cwd: "/tmp".to_owned(),
@@ -484,6 +487,7 @@ fn failed_thread_setup_write_releases_the_setup_slot() {
         None,
         &session_id,
         CodexPromptCommand {
+            active_turn_generation: 0,
             approval_policy: CodexApprovalPolicy::Never,
             attachments: Vec::new(),
             cwd: "/tmp".to_owned(),
@@ -748,32 +752,6 @@ fn shared_codex_prompt_dispatch_clears_stale_command_state_before_turn_started_n
         .insert("conversation-123".to_owned(), session_id.clone());
 
     let pending_requests: CodexPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
-    let pending_requests_for_response = pending_requests.clone();
-    let response_thread = std::thread::spawn(move || {
-        for _ in 0..100 {
-            let sender = {
-                let mut pending = pending_requests_for_response
-                    .lock()
-                    .expect("Codex pending requests mutex poisoned");
-                if let Some(request_id) = pending.keys().next().cloned() {
-                    pending.remove(&request_id)
-                } else {
-                    None
-                }
-            };
-            if let Some(sender) = sender {
-                let _ = sender.send(Ok(json!({
-                    "turn": {
-                        "id": "turn-new"
-                    }
-                })));
-                return;
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        panic!("turn/start request should be pending");
-    });
-
     let mut writer = Vec::new();
     // The session already has a thread_id so the fast path is taken and
     // input_tx is unused, but the parameter is still required.
@@ -789,6 +767,7 @@ fn shared_codex_prompt_dispatch_clears_stale_command_state_before_turn_started_n
         None,
         &session_id,
         CodexPromptCommand {
+            active_turn_generation: 0,
             approval_policy: CodexApprovalPolicy::Never,
             attachments: Vec::new(),
             cwd: "/tmp".to_owned(),
@@ -801,9 +780,26 @@ fn shared_codex_prompt_dispatch_clears_stale_command_state_before_turn_started_n
         },
     )
     .unwrap();
-    response_thread
-        .join()
-        .expect("turn/start response thread should join cleanly");
+    let response_sender = {
+        let mut pending = pending_requests
+            .lock()
+            .expect("Codex pending requests mutex poisoned");
+        let request_id = pending
+            .keys()
+            .next()
+            .cloned()
+            .expect("fire-and-forget turn/start request should be pending after dispatch");
+        pending
+            .remove(&request_id)
+            .expect("pending turn/start response sender should exist")
+    };
+    response_sender
+        .send(Ok(json!({
+            "turn": {
+                "id": "turn-new"
+            }
+        })))
+        .expect("turn/start waiter should accept the scripted response");
 
     let item_started = json!({
         "method": "item/started",
@@ -1020,10 +1016,13 @@ fn shared_codex_turn_started_notification_does_not_restore_pending_state() {
         &state,
         &runtime.runtime_id,
         &runtime.sessions,
+        &runtime.thread_sessions,
         None,
         &session_id,
         "conversation-123",
+        None,
         CodexPromptCommand {
+            active_turn_generation: 0,
             approval_policy: CodexApprovalPolicy::Never,
             attachments: Vec::new(),
             cwd: "/tmp".to_owned(),
@@ -1099,10 +1098,13 @@ fn shared_codex_standard_turn_start_serializes_explicit_null_service_tier() {
         &state,
         &runtime.runtime_id,
         &runtime.sessions,
+        &runtime.thread_sessions,
         None,
         &session_id,
         "conversation-standard",
+        None,
         CodexPromptCommand {
+            active_turn_generation: 0,
             approval_policy: CodexApprovalPolicy::Never,
             attachments: Vec::new(),
             cwd: "/tmp".to_owned(),
@@ -1172,6 +1174,7 @@ fn shared_codex_thread_start_includes_delegation_mcp_config() {
         None,
         &session_id,
         CodexPromptCommand {
+            active_turn_generation: 0,
             approval_policy: CodexApprovalPolicy::Never,
             attachments: Vec::new(),
             cwd: "/tmp".to_owned(),
@@ -1274,6 +1277,7 @@ fn shared_codex_thread_setup_handoff_failure_rolls_back_registration() {
         None,
         &session_id,
         CodexPromptCommand {
+            active_turn_generation: 0,
             approval_policy: CodexApprovalPolicy::Never,
             attachments: Vec::new(),
             cwd: "/tmp".to_owned(),
@@ -1402,6 +1406,7 @@ fn shared_codex_thread_setup_persist_failure_does_not_tear_down_runtime() {
         None,
         &session_id,
         CodexPromptCommand {
+            active_turn_generation: 0,
             approval_policy: CodexApprovalPolicy::Never,
             attachments: Vec::new(),
             cwd: "/tmp".to_owned(),
@@ -1528,6 +1533,7 @@ fn shared_codex_stale_start_turn_handoff_skips_runtime_config_persistence() {
     let session_id = test_session_id(&state, Agent::Codex);
     let (other_runtime, _other_input_rx) = test_codex_runtime_handle("other-runtime");
     let sessions = SharedCodexSessions::new();
+    let thread_sessions: SharedCodexThreadMap = Arc::new(Mutex::new(HashMap::new()));
     let pending_requests: CodexPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
     let mut writer = Vec::new();
 
@@ -1548,10 +1554,13 @@ fn shared_codex_stale_start_turn_handoff_skips_runtime_config_persistence() {
         &state,
         "stale-runtime",
         &sessions,
+        &thread_sessions,
         None,
         &session_id,
         "conversation-stale",
+        None,
         CodexPromptCommand {
+            active_turn_generation: 0,
             approval_policy: CodexApprovalPolicy::OnRequest,
             attachments: Vec::new(),
             cwd: "/tmp".to_owned(),
@@ -1613,6 +1622,7 @@ fn stale_start_turn_handoff_leaves_the_setup_that_re_armed_the_session_alone() {
     let session_id = test_session_id(&state, Agent::Codex);
     let (runtime_handle, _runtime_input_rx) = test_codex_runtime_handle("shared-app-server");
     let sessions = SharedCodexSessions::new();
+    let thread_sessions: SharedCodexThreadMap = Arc::new(Mutex::new(HashMap::new()));
     let pending_requests: CodexPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
     let mut writer = Vec::new();
 
@@ -1637,6 +1647,7 @@ fn stale_start_turn_handoff_leaves_the_setup_that_re_armed_the_session_alone() {
         session_state.pending_thread_setup = Some(PendingCodexThreadSetup {
             request_id: "setup-b".to_owned(),
             command: CodexPromptCommand {
+                active_turn_generation: 0,
                 approval_policy: CodexApprovalPolicy::Never,
                 attachments: Vec::new(),
                 cwd: "/tmp".to_owned(),
@@ -1657,10 +1668,13 @@ fn stale_start_turn_handoff_leaves_the_setup_that_re_armed_the_session_alone() {
         &state,
         "shared-app-server",
         &sessions,
+        &thread_sessions,
         None,
         &session_id,
         "thread-from-the-detached-attachment",
+        None,
         CodexPromptCommand {
+            active_turn_generation: 0,
             approval_policy: CodexApprovalPolicy::Never,
             attachments: Vec::new(),
             cwd: "/tmp".to_owned(),
@@ -1781,6 +1795,7 @@ fn record_codex_runtime_config_if_runtime_matches_reports_persist_failure() {
     let result = state.record_codex_runtime_config_if_runtime_matches(
         &session_id,
         &RuntimeToken::Codex("persist-runtime-config-runtime".to_owned()),
+        0,
         CodexSandboxMode::WorkspaceWrite,
         CodexApprovalPolicy::Never,
         CodexReasoningEffort::Medium,
@@ -1836,10 +1851,13 @@ fn shared_codex_start_turn_persist_failure_does_not_tear_down_runtime() {
         &state,
         &runtime.runtime_id,
         &runtime.sessions,
+        &runtime.thread_sessions,
         None,
         &session_id,
         "conversation-123",
+        None,
         CodexPromptCommand {
+            active_turn_generation: 0,
             approval_policy: CodexApprovalPolicy::Never,
             attachments: Vec::new(),
             cwd: "/tmp".to_owned(),
@@ -2315,10 +2333,12 @@ fn shared_codex_prompt_command_keeps_writer_loop_responsive_while_turn_start_is_
                     session_id,
                     command,
                 } => {
+                    let active_turn_generation = command.active_turn_generation;
                     handle_shared_codex_prompt_command_result(
                         &thread_state,
                         &session_id,
                         &runtime_token,
+                        active_turn_generation,
                         handle_shared_codex_prompt_command(
                             &mut stdin,
                             &thread_pending_requests,
@@ -2339,19 +2359,23 @@ fn shared_codex_prompt_command_keeps_writer_loop_responsive_while_turn_start_is_
                     thread_id,
                     command,
                 } => {
+                    let active_turn_generation = command.active_turn_generation;
                     handle_shared_codex_prompt_command_result(
                         &thread_state,
                         &session_id,
                         &runtime_token,
+                        active_turn_generation,
                         handle_shared_codex_start_turn(
                             &mut stdin,
                             &thread_pending_requests,
                             &thread_state,
                             &thread_runtime.runtime_id,
                             &thread_runtime.sessions,
+                            &thread_runtime.thread_sessions,
                             None,
                             &session_id,
                             &thread_id,
+                            None,
                             command,
                         ),
                     )
@@ -2373,6 +2397,7 @@ fn shared_codex_prompt_command_keeps_writer_loop_responsive_while_turn_start_is_
         .send(CodexRuntimeCommand::Prompt {
             session_id: session_id.clone(),
             command: CodexPromptCommand {
+                active_turn_generation: 0,
                 approval_policy: CodexApprovalPolicy::Never,
                 attachments: Vec::new(),
                 cwd: "/tmp".to_owned(),
@@ -2452,12 +2477,12 @@ fn shared_codex_prompt_command_keeps_writer_loop_responsive_while_turn_start_is_
                 session_state.pending_turn_start_request_id.clone(),
             )
         };
-        if turn_id.as_deref() == Some("turn-1") && pending_turn_start.is_none() {
+        if turn_id.as_deref() == Some("turn-1") && pending_turn_start.is_some() {
             break;
         }
         assert!(
             std::time::Instant::now() < deadline,
-            "turn/start waiter should record the turn id after the response arrives"
+            "turn/start waiter should record the turn id and retain its watchdog marker until turn/started arrives"
         );
         std::thread::sleep(Duration::from_millis(10));
     }
@@ -2504,6 +2529,7 @@ fn shared_codex_prompt_json_rpc_errors_fail_the_turn_without_tearing_down_runtim
         &state,
         &session_id,
         &runtime_token,
+        0,
         Err(anyhow::Error::new(CodexResponseError::JsonRpc(
             "turn/start rejected the request".to_owned(),
         ))),
@@ -2531,6 +2557,1103 @@ fn shared_codex_prompt_json_rpc_errors_fail_the_turn_without_tearing_down_runtim
         .find(|record| record.session.id == session_id)
         .expect("Codex session should exist");
     assert!(matches!(record.runtime, SessionRuntime::Codex(_)));
+}
+
+// A successful JSON-RPC response without the matching turn/started event must
+// not leave the durable turn Active forever. The watchdog is request-scoped,
+// clears the stale attachment, and records one terminal failure.
+#[test]
+fn shared_codex_turn_started_watchdog_terminalizes_its_current_request() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, input_rx, process) =
+        test_shared_codex_runtime("shared-codex-turn-started-watchdog");
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process: process.clone(),
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+        inner.sessions[index].session.status = SessionStatus::Active;
+        inner.sessions[index].session.preview = "LIVE TURN".to_owned();
+    }
+    runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned")
+        .insert(
+            session_id.clone(),
+            SharedCodexSessionState {
+                pending_turn_start_request_id: Some("turn-start-watchdog".to_owned()),
+                active_turn_generation: Some(0),
+                thread_id: Some("thread-watchdog".to_owned()),
+                turn_id: Some("turn-watchdog".to_owned()),
+                ..SharedCodexSessionState::default()
+            },
+        );
+    runtime
+        .thread_sessions
+        .lock()
+        .expect("shared Codex thread mutex poisoned")
+        .insert("thread-watchdog".to_owned(), session_id.clone());
+
+    let interrupt = std::thread::spawn(move || {
+        let command = input_rx
+            .recv_timeout(Duration::from_secs(30))
+            .expect("watchdog should interrupt the accepted turn before terminalizing it");
+        match command {
+            CodexRuntimeCommand::InterruptTurn {
+                response_tx,
+                thread_id,
+                turn_id,
+            } => {
+                assert_eq!(thread_id, "thread-watchdog");
+                assert_eq!(turn_id, "turn-watchdog");
+                response_tx
+                    .send(Ok(()))
+                    .expect("watchdog interrupt acknowledgement should be received");
+            }
+            _ => panic!("watchdog should issue an exact turn interrupt"),
+        }
+    });
+
+    assert!(handle_shared_codex_turn_started_watchdog_expiry(
+        &state,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+        &runtime.runtime_id,
+        &session_id,
+        "turn-start-watchdog",
+        SHARED_CODEX_TURN_STARTED_EVENT_TIMEOUT,
+    ));
+    interrupt
+        .join()
+        .expect("watchdog interrupt responder should finish");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("Codex session should exist");
+    assert_eq!(record.session.status, SessionStatus::Error);
+    assert!(record.session.preview.contains("did not emit turn/started"));
+    assert!(matches!(record.runtime, SessionRuntime::None));
+    drop(inner);
+    assert!(
+        !runtime
+            .thread_sessions
+            .lock()
+            .expect("shared Codex thread mutex poisoned")
+            .contains_key("thread-watchdog")
+    );
+
+    let _ = process.kill();
+    let _ = process.wait();
+}
+
+// A response without a turn id cannot be interrupted exactly. The app-server
+// may still be executing tools after TermAl terminalizes the durable turn, so
+// fail closed by retiring the shared runtime and every sibling attachment.
+#[test]
+fn shared_codex_turn_started_watchdog_missing_turn_id_retires_shared_runtime() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let sibling_id = test_session_id(&state, Agent::Codex);
+    let (runtime, input_rx, process) =
+        test_shared_codex_runtime("shared-codex-watchdog-missing-turn-id");
+    *state
+        .shared_codex_runtime
+        .lock()
+        .expect("shared Codex runtime mutex poisoned") = Some(runtime.clone());
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        for (id, generation, preview) in [
+            (&session_id, 1, "MISSING TURN ID"),
+            (&sibling_id, 7, "SIBLING TURN"),
+        ] {
+            let index = inner
+                .find_session_index(id)
+                .expect("Codex session should exist");
+            inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+                runtime_id: runtime.runtime_id.clone(),
+                input_tx: runtime.input_tx.clone(),
+                process: process.clone(),
+                shared_session: Some(SharedCodexSessionHandle {
+                    runtime: runtime.clone(),
+                    session_id: id.clone(),
+                }),
+            });
+            inner.sessions[index].session.status = SessionStatus::Active;
+            inner.sessions[index].session.preview = preview.to_owned();
+            inner.sessions[index].active_turn_generation = generation;
+        }
+    }
+    {
+        let mut sessions = runtime
+            .sessions
+            .lock()
+            .expect("shared Codex session mutex poisoned");
+        sessions.insert(
+            session_id.clone(),
+            SharedCodexSessionState {
+                pending_turn_start_request_id: Some("turn-start-without-id".to_owned()),
+                active_turn_generation: Some(1),
+                thread_id: Some("thread-without-turn-id".to_owned()),
+                turn_id: None,
+                ..SharedCodexSessionState::default()
+            },
+        );
+        sessions.insert(
+            sibling_id.clone(),
+            SharedCodexSessionState {
+                active_turn_generation: Some(7),
+                thread_id: Some("thread-sibling".to_owned()),
+                turn_id: Some("turn-sibling".to_owned()),
+                turn_started: true,
+                ..SharedCodexSessionState::default()
+            },
+        );
+    }
+    {
+        let mut thread_sessions = runtime
+            .thread_sessions
+            .lock()
+            .expect("shared Codex thread mutex poisoned");
+        thread_sessions.insert("thread-without-turn-id".to_owned(), session_id.clone());
+        thread_sessions.insert("thread-sibling".to_owned(), sibling_id.clone());
+    }
+
+    assert!(handle_shared_codex_turn_started_watchdog_expiry(
+        &state,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+        &runtime.runtime_id,
+        &session_id,
+        "turn-start-without-id",
+        SHARED_CODEX_TURN_STARTED_EVENT_TIMEOUT,
+    ));
+    match input_rx
+        .recv_timeout(Duration::from_secs(1))
+        .expect("runtime retirement should request graceful shutdown")
+    {
+        CodexRuntimeCommand::JsonRpcNotification { method } => {
+            assert_eq!(method, "shutdown");
+        }
+        _ => panic!("missing turn id must retire without an inexact turn interrupt"),
+    }
+    assert!(
+        state
+            .shared_codex_runtime
+            .lock()
+            .expect("shared Codex runtime mutex poisoned")
+            .is_none()
+    );
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let failed = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("affected Codex session should remain");
+    assert_eq!(failed.session.status, SessionStatus::Error);
+    assert!(failed.session.messages.iter().any(|message| {
+        matches!(message, Message::Text { text, .. }
+            if text.contains("accepted shared Codex turn has no turn id")
+                && text.contains("retiring the shared runtime"))
+    }));
+    assert!(matches!(failed.runtime, SessionRuntime::None));
+    let sibling = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == sibling_id)
+        .expect("sibling Codex session should remain");
+    assert_eq!(sibling.session.status, SessionStatus::Error);
+    assert_eq!(sibling.active_turn_generation, 7);
+    assert!(matches!(sibling.runtime, SessionRuntime::None));
+    drop(inner);
+    assert!(
+        wait_for_shared_child_exit_timeout(
+            &process,
+            Duration::from_secs(1),
+            "shared Codex runtime without a turn id",
+        )
+        .expect("shared Codex process status should be readable")
+        .is_some()
+    );
+}
+
+#[test]
+fn shared_codex_turn_started_watchdog_extends_while_stdout_is_active() {
+    let (cancel_tx, cancel_rx) = mpsc::channel();
+    let mut probes = 0usize;
+    let timed_out = wait_for_shared_codex_turn_started_or_timeout(
+        &cancel_rx,
+        SharedCodexTurnStartedWatchdogConfig {
+            silence_limit: Duration::from_millis(1),
+            max_wait_while_active: Duration::from_secs(30),
+            poll_slice: Duration::from_millis(1),
+        },
+        || {
+            probes += 1;
+            if probes == 2 {
+                cancel_tx
+                    .send(())
+                    .expect("test cancellation should reach the watchdog");
+            }
+            Some(Duration::ZERO)
+        },
+    );
+
+    assert!(!timed_out, "recent stdout must extend the silence budget");
+    assert!(
+        probes >= 2,
+        "the watchdog should survive its first silence-budget poll"
+    );
+}
+
+#[test]
+fn shared_codex_turn_started_watchdog_is_armed_by_the_real_turn_start_waiter() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, input_rx, process) =
+        test_shared_codex_runtime("shared-codex-wired-turn-started-watchdog");
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process: process.clone(),
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+        inner.sessions[index].session.status = SessionStatus::Active;
+        inner.sessions[index].active_turn_generation = 9;
+    }
+    runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned")
+        .insert(
+            session_id.clone(),
+            SharedCodexSessionState {
+                thread_id: Some("thread-wired-watchdog".to_owned()),
+                ..SharedCodexSessionState::default()
+            },
+        );
+    runtime
+        .thread_sessions
+        .lock()
+        .expect("shared Codex thread mutex poisoned")
+        .insert("thread-wired-watchdog".to_owned(), session_id.clone());
+
+    let pending_requests: CodexPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
+    handle_shared_codex_start_turn(
+        &mut Vec::new(),
+        &pending_requests,
+        &state,
+        &runtime.runtime_id,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+        None,
+        &session_id,
+        "thread-wired-watchdog",
+        Some(SharedCodexTurnStartedWatchdogConfig::fixed(
+            Duration::from_millis(25),
+        )),
+        CodexPromptCommand {
+            active_turn_generation: 9,
+            approval_policy: CodexApprovalPolicy::Never,
+            attachments: Vec::new(),
+            cwd: "/tmp".to_owned(),
+            model: "gpt-5.4".to_owned(),
+            prompt: "arm the real watchdog".to_owned(),
+            reasoning_effort: CodexReasoningEffort::Medium,
+            service_tier: None,
+            resume_thread_id: None,
+            sandbox_mode: CodexSandboxMode::WorkspaceWrite,
+        },
+    )
+    .expect("turn/start should be written");
+    let (_request_id, response_tx) =
+        take_pending_codex_request(&pending_requests, Duration::from_secs(1));
+    let interrupt = std::thread::spawn(move || {
+        let command = input_rx
+            .recv_timeout(Duration::from_secs(30))
+            .expect("wired watchdog should interrupt the accepted turn");
+        match command {
+            CodexRuntimeCommand::InterruptTurn { response_tx, .. } => response_tx
+                .send(Ok(()))
+                .expect("watchdog interrupt acknowledgement should send"),
+            _ => panic!("wired watchdog should issue an exact turn interrupt"),
+        }
+    });
+    response_tx
+        .send(Ok(json!({ "turn": { "id": "turn-wired-watchdog" } })))
+        .expect("turn/start response should send");
+
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let terminalized = {
+            let inner = state.inner.lock().expect("state mutex poisoned");
+            let record = inner
+                .sessions
+                .iter()
+                .find(|record| record.session.id == session_id)
+                .expect("Codex session should remain");
+            record.session.status == SessionStatus::Error
+                && matches!(record.runtime, SessionRuntime::None)
+        };
+        if terminalized {
+            break;
+        }
+        assert!(Instant::now() < deadline, "wired watchdog should expire");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    interrupt
+        .join()
+        .expect("watchdog interrupt responder should finish");
+    let _ = process.kill();
+    let _ = process.wait();
+}
+
+#[test]
+fn shared_codex_turn_started_event_cancels_the_real_waiter_watchdog() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, input_rx, process) =
+        test_shared_codex_runtime("shared-codex-cancelled-turn-started-watchdog");
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process: process.clone(),
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+        inner.sessions[index].session.status = SessionStatus::Active;
+        inner.sessions[index].active_turn_generation = 10;
+    }
+    runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned")
+        .insert(
+            session_id.clone(),
+            SharedCodexSessionState {
+                thread_id: Some("thread-cancelled-watchdog".to_owned()),
+                ..SharedCodexSessionState::default()
+            },
+        );
+    runtime
+        .thread_sessions
+        .lock()
+        .expect("shared Codex thread mutex poisoned")
+        .insert("thread-cancelled-watchdog".to_owned(), session_id.clone());
+
+    let pending_requests: CodexPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
+    handle_shared_codex_start_turn(
+        &mut Vec::new(),
+        &pending_requests,
+        &state,
+        &runtime.runtime_id,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+        None,
+        &session_id,
+        "thread-cancelled-watchdog",
+        Some(SharedCodexTurnStartedWatchdogConfig::fixed(
+            Duration::from_secs(30),
+        )),
+        CodexPromptCommand {
+            active_turn_generation: 10,
+            approval_policy: CodexApprovalPolicy::Never,
+            attachments: Vec::new(),
+            cwd: "/tmp".to_owned(),
+            model: "gpt-5.4".to_owned(),
+            prompt: "cancel the real watchdog".to_owned(),
+            reasoning_effort: CodexReasoningEffort::Medium,
+            service_tier: None,
+            resume_thread_id: None,
+            sandbox_mode: CodexSandboxMode::WorkspaceWrite,
+        },
+    )
+    .expect("turn/start should be written");
+    let (_request_id, response_tx) =
+        take_pending_codex_request(&pending_requests, Duration::from_secs(1));
+    response_tx
+        .send(Ok(json!({ "turn": { "id": "turn-cancelled-watchdog" } })))
+        .expect("turn/start response should send");
+    let deadline = Instant::now() + Duration::from_secs(1);
+    loop {
+        let armed = runtime
+            .sessions
+            .lock()
+            .expect("shared Codex session mutex poisoned")
+            .get(&session_id)
+            .is_some_and(|session| session.turn_started_watchdog_cancel_tx.is_some());
+        if armed {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "watchdog should arm after response"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    handle_shared_codex_app_server_message(
+        &json!({
+            "method": "turn/started",
+            "params": {
+                "threadId": "thread-cancelled-watchdog",
+                "turn": { "id": "turn-cancelled-watchdog" }
+            }
+        }),
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+        &runtime.input_tx,
+    )
+    .expect("turn/started should cancel the watchdog");
+    assert!(matches!(
+        input_rx.recv_timeout(Duration::from_millis(200)),
+        Err(mpsc::RecvTimeoutError::Timeout)
+    ));
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("Codex session should remain");
+    assert_eq!(record.session.status, SessionStatus::Active);
+    assert!(
+        record
+            .runtime
+            .matches_runtime_token(&RuntimeToken::Codex(runtime.runtime_id.clone()))
+    );
+    drop(inner);
+    let _ = process.kill();
+    let _ = process.wait();
+}
+
+#[test]
+fn idless_turn_started_before_response_reconciles_without_arming_watchdog() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, input_rx, process) =
+        test_shared_codex_runtime("shared-codex-idless-turn-started-before-response");
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process: process.clone(),
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+        inner.sessions[index].session.status = SessionStatus::Active;
+        inner.sessions[index].active_turn_generation = 11;
+    }
+    runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned")
+        .insert(
+            session_id.clone(),
+            SharedCodexSessionState {
+                thread_id: Some("thread-idless-before-response".to_owned()),
+                ..SharedCodexSessionState::default()
+            },
+        );
+    runtime
+        .thread_sessions
+        .lock()
+        .expect("shared Codex thread mutex poisoned")
+        .insert(
+            "thread-idless-before-response".to_owned(),
+            session_id.clone(),
+        );
+
+    let pending_requests: CodexPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
+    handle_shared_codex_start_turn(
+        &mut Vec::new(),
+        &pending_requests,
+        &state,
+        &runtime.runtime_id,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+        None,
+        &session_id,
+        "thread-idless-before-response",
+        Some(SharedCodexTurnStartedWatchdogConfig::fixed(
+            Duration::from_secs(30),
+        )),
+        CodexPromptCommand {
+            active_turn_generation: 11,
+            approval_policy: CodexApprovalPolicy::Never,
+            attachments: Vec::new(),
+            cwd: "/tmp".to_owned(),
+            model: "gpt-5.4".to_owned(),
+            prompt: "accept an id-less early start".to_owned(),
+            reasoning_effort: CodexReasoningEffort::Medium,
+            service_tier: None,
+            resume_thread_id: None,
+            sandbox_mode: CodexSandboxMode::WorkspaceWrite,
+        },
+    )
+    .expect("turn/start should be written");
+    let (request_id, response_tx) =
+        take_pending_codex_request(&pending_requests, Duration::from_secs(1));
+
+    handle_shared_codex_app_server_message(
+        &json!({
+            "method": "turn/started",
+            "params": {
+                "threadId": "thread-idless-before-response",
+                "turn": {}
+            }
+        }),
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+        &runtime.input_tx,
+    )
+    .expect("id-less turn/started should be retained until the response arrives");
+    {
+        let sessions = runtime
+            .sessions
+            .lock()
+            .expect("shared Codex session mutex poisoned");
+        let session = sessions
+            .get(&session_id)
+            .expect("shared Codex session should remain");
+        assert_eq!(
+            session.pending_turn_start_request_id.as_deref(),
+            Some(request_id.as_str())
+        );
+        assert!(session.turn_started_before_response);
+        assert!(session.turn_started);
+        assert!(session.turn_id.is_none());
+        assert!(session.turn_started_watchdog_cancel_tx.is_none());
+    }
+
+    response_tx
+        .send(Ok(json!({
+            "turn": { "id": "turn-idless-before-response" }
+        })))
+        .expect("turn/start response should send");
+    let deadline = Instant::now() + Duration::from_secs(1);
+    loop {
+        let reconciled = {
+            let sessions = runtime
+                .sessions
+                .lock()
+                .expect("shared Codex session mutex poisoned");
+            sessions.get(&session_id).is_some_and(|session| {
+                session.pending_turn_start_request_id.is_none()
+                    && !session.turn_started_before_response
+                    && session.turn_started
+                    && session.turn_id.as_deref() == Some("turn-idless-before-response")
+                    && session.turn_started_watchdog_cancel_tx.is_none()
+            })
+        };
+        if reconciled {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "response waiter should reconcile the early notification"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(matches!(
+        input_rx.recv_timeout(Duration::from_millis(200)),
+        Err(mpsc::RecvTimeoutError::Timeout)
+    ));
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("Codex session should remain");
+    assert_eq!(record.session.status, SessionStatus::Active);
+    drop(inner);
+    let _ = process.kill();
+    let _ = process.wait();
+}
+
+#[test]
+fn idless_turn_completed_before_response_finishes_the_armed_turn() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, input_rx, process) =
+        test_shared_codex_runtime("shared-codex-idless-completed-before-response");
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process: process.clone(),
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+        inner.sessions[index].session.status = SessionStatus::Active;
+        inner.sessions[index].active_turn_generation = 12;
+    }
+    runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned")
+        .insert(
+            session_id.clone(),
+            SharedCodexSessionState {
+                thread_id: Some("thread-idless-completed-before-response".to_owned()),
+                ..SharedCodexSessionState::default()
+            },
+        );
+    runtime
+        .thread_sessions
+        .lock()
+        .expect("shared Codex thread mutex poisoned")
+        .insert(
+            "thread-idless-completed-before-response".to_owned(),
+            session_id.clone(),
+        );
+
+    let pending_requests: CodexPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
+    handle_shared_codex_start_turn(
+        &mut Vec::new(),
+        &pending_requests,
+        &state,
+        &runtime.runtime_id,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+        None,
+        &session_id,
+        "thread-idless-completed-before-response",
+        Some(SharedCodexTurnStartedWatchdogConfig::fixed(
+            Duration::from_secs(30),
+        )),
+        CodexPromptCommand {
+            active_turn_generation: 12,
+            approval_policy: CodexApprovalPolicy::Never,
+            attachments: Vec::new(),
+            cwd: "/tmp".to_owned(),
+            model: "gpt-5.4".to_owned(),
+            prompt: "finish before the response waiter runs".to_owned(),
+            reasoning_effort: CodexReasoningEffort::Medium,
+            service_tier: None,
+            resume_thread_id: None,
+            sandbox_mode: CodexSandboxMode::WorkspaceWrite,
+        },
+    )
+    .expect("turn/start should be written");
+    let (_request_id, response_tx) =
+        take_pending_codex_request(&pending_requests, Duration::from_secs(1));
+
+    for message in [
+        json!({
+            "method": "turn/started",
+            "params": {
+                "threadId": "thread-idless-completed-before-response",
+                "turn": {}
+            }
+        }),
+        json!({
+            "method": "turn/completed",
+            "params": {
+                "threadId": "thread-idless-completed-before-response",
+                "turn": {}
+            }
+        }),
+    ] {
+        handle_shared_codex_app_server_message(
+            &message,
+            &state,
+            &runtime.runtime_id,
+            &pending_requests,
+            &runtime.sessions,
+            &runtime.thread_sessions,
+            &runtime.input_tx,
+        )
+        .expect("the early id-less lifecycle event should be accepted");
+    }
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let record = inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == session_id)
+            .expect("Codex session should remain");
+        assert_eq!(record.session.status, SessionStatus::Idle);
+    }
+    {
+        let sessions = runtime
+            .sessions
+            .lock()
+            .expect("shared Codex session mutex poisoned");
+        let session = sessions
+            .get(&session_id)
+            .expect("shared Codex session should remain registered");
+        assert!(session.pending_turn_start_request_id.is_none());
+        assert!(!session.turn_started_before_response);
+        assert!(!session.turn_started);
+        assert!(session.turn_started_watchdog_cancel_tx.is_none());
+    }
+
+    response_tx
+        .send(Ok(json!({
+            "turn": { "id": "turn-too-late-for-completed" }
+        })))
+        .expect("the late response should still release its waiter");
+    std::thread::sleep(Duration::from_millis(25));
+    assert!(matches!(
+        input_rx.recv_timeout(Duration::from_millis(200)),
+        Err(mpsc::RecvTimeoutError::Timeout)
+    ));
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("Codex session should remain");
+    assert_eq!(record.session.status, SessionStatus::Idle);
+    drop(inner);
+    let _ = process.kill();
+    let _ = process.wait();
+}
+
+// If the accepted turn cannot be interrupted, reporting Error is not enough:
+// the shared process may still be executing tools. The watchdog must retire
+// that exact runtime before it terminalizes the durable turn.
+#[test]
+fn shared_codex_turn_started_watchdog_retires_runtime_when_interrupt_fails() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, input_rx, process) =
+        test_shared_codex_runtime("shared-codex-turn-started-watchdog-interrupt-failure");
+
+    *state
+        .shared_codex_runtime
+        .lock()
+        .expect("shared Codex runtime mutex poisoned") = Some(runtime.clone());
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process: process.clone(),
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+        inner.sessions[index].session.status = SessionStatus::Active;
+        inner.sessions[index].session.preview = "LIVE TURN".to_owned();
+    }
+    runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned")
+        .insert(
+            session_id.clone(),
+            SharedCodexSessionState {
+                pending_turn_start_request_id: Some(
+                    "turn-start-watchdog-interrupt-failure".to_owned(),
+                ),
+                active_turn_generation: Some(0),
+                thread_id: Some("thread-watchdog-interrupt-failure".to_owned()),
+                turn_id: Some("turn-watchdog-interrupt-failure".to_owned()),
+                ..SharedCodexSessionState::default()
+            },
+        );
+    runtime
+        .thread_sessions
+        .lock()
+        .expect("shared Codex thread mutex poisoned")
+        .insert(
+            "thread-watchdog-interrupt-failure".to_owned(),
+            session_id.clone(),
+        );
+
+    let interrupt = std::thread::spawn(move || {
+        let command = input_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("watchdog should attempt to interrupt the accepted turn");
+        match command {
+            CodexRuntimeCommand::InterruptTurn { response_tx, .. } => {
+                response_tx
+                    .send(Err("scripted interrupt refusal".to_owned()))
+                    .expect("watchdog interrupt refusal should be received");
+            }
+            _ => panic!("watchdog should issue an exact turn interrupt"),
+        }
+    });
+
+    assert!(handle_shared_codex_turn_started_watchdog_expiry(
+        &state,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+        &runtime.runtime_id,
+        &session_id,
+        "turn-start-watchdog-interrupt-failure",
+        SHARED_CODEX_TURN_STARTED_EVENT_TIMEOUT,
+    ));
+    interrupt
+        .join()
+        .expect("watchdog interrupt responder should finish");
+
+    assert!(
+        state
+            .shared_codex_runtime
+            .lock()
+            .expect("shared Codex runtime mutex poisoned")
+            .is_none(),
+        "a failed interrupt must retire the shared runtime slot"
+    );
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("Codex session should exist");
+    assert_eq!(record.session.status, SessionStatus::Error);
+    assert!(record.session.messages.iter().any(|message| {
+        matches!(message, Message::Text { text, .. } if text.contains("interrupt failed"))
+    }));
+    assert!(matches!(record.runtime, SessionRuntime::None));
+    drop(inner);
+
+    let _ = process.kill();
+    let _ = process.wait();
+}
+
+// The request id is the watchdog generation. Once turn/started cleared it (or
+// a newer request replaced it), the old timer must not touch the live runtime.
+#[test]
+fn shared_codex_turn_started_watchdog_ignores_a_completed_or_superseded_request() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, _input_rx, process) =
+        test_shared_codex_runtime("shared-codex-turn-started-watchdog-stale");
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process: process.clone(),
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+        inner.sessions[index].session.status = SessionStatus::Active;
+    }
+    runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned")
+        .insert(
+            session_id.clone(),
+            SharedCodexSessionState {
+                pending_turn_start_request_id: Some("newer-turn-start".to_owned()),
+                active_turn_generation: Some(0),
+                thread_id: Some("thread-current".to_owned()),
+                turn_id: Some("turn-current".to_owned()),
+                turn_started: true,
+                ..SharedCodexSessionState::default()
+            },
+        );
+
+    assert!(!handle_shared_codex_turn_started_watchdog_expiry(
+        &state,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+        &runtime.runtime_id,
+        &session_id,
+        "old-turn-start",
+        SHARED_CODEX_TURN_STARTED_EVENT_TIMEOUT,
+    ));
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("Codex session should exist");
+    assert_eq!(record.session.status, SessionStatus::Active);
+    assert!(
+        record
+            .runtime
+            .matches_runtime_token(&RuntimeToken::Codex(runtime.runtime_id.clone()))
+    );
+    drop(inner);
+
+    let _ = process.kill();
+    let _ = process.wait();
+}
+
+// A shared app-server runtime id identifies the process, not a particular
+// logical turn. A watchdog that armed for generation N must not terminalize a
+// successor turn N+1 merely because both use the same shared process.
+#[test]
+fn shared_codex_turn_started_watchdog_ignores_a_successor_on_the_same_runtime() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, input_rx, process) =
+        test_shared_codex_runtime("shared-codex-turn-started-watchdog-successor");
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process: process.clone(),
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+        inner.sessions[index].session.status = SessionStatus::Active;
+        inner.sessions[index].session.preview = "SUCCESSOR TURN".to_owned();
+        inner.sessions[index].active_turn_generation = 2;
+    }
+    runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned")
+        .insert(
+            session_id.clone(),
+            SharedCodexSessionState {
+                pending_turn_start_request_id: Some("old-turn-start".to_owned()),
+                active_turn_generation: Some(1),
+                thread_id: Some("thread-old".to_owned()),
+                turn_id: Some("turn-old".to_owned()),
+                ..SharedCodexSessionState::default()
+            },
+        );
+
+    assert!(!handle_shared_codex_turn_started_watchdog_expiry(
+        &state,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+        &runtime.runtime_id,
+        &session_id,
+        "old-turn-start",
+        SHARED_CODEX_TURN_STARTED_EVENT_TIMEOUT,
+    ));
+    assert!(matches!(
+        input_rx.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("Codex session should exist");
+    assert_eq!(record.session.status, SessionStatus::Active);
+    assert_eq!(record.session.preview, "SUCCESSOR TURN");
+    assert_eq!(record.active_turn_generation, 2);
+    assert!(
+        record
+            .runtime
+            .matches_runtime_token(&RuntimeToken::Codex(runtime.runtime_id.clone()))
+    );
+    drop(inner);
+
+    let _ = process.kill();
+    let _ = process.wait();
+}
+
+#[test]
+fn watchdog_routing_cleanup_preserves_a_successor_turn_generation() {
+    let sessions = SharedCodexSessions::new();
+    sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned")
+        .insert(
+            "session-successor".to_owned(),
+            SharedCodexSessionState {
+                thread_id: Some("thread-shared".to_owned()),
+                active_turn_generation: Some(12),
+                turn_id: Some("turn-successor".to_owned()),
+                turn_started: true,
+                ..SharedCodexSessionState::default()
+            },
+        );
+    let thread_sessions: SharedCodexThreadMap = Arc::new(Mutex::new(HashMap::from([(
+        "thread-shared".to_owned(),
+        "session-successor".to_owned(),
+    )])));
+
+    forget_shared_codex_thread_if_generation_matches(
+        &sessions,
+        &thread_sessions,
+        "session-successor",
+        "thread-shared",
+        11,
+    );
+
+    let sessions = sessions.lock().expect("shared Codex mutex poisoned");
+    let successor = sessions
+        .get("session-successor")
+        .expect("successor attachment should remain");
+    assert_eq!(successor.active_turn_generation, Some(12));
+    assert_eq!(successor.thread_id.as_deref(), Some("thread-shared"));
+    assert_eq!(successor.turn_id.as_deref(), Some("turn-successor"));
+    drop(sessions);
+    assert_eq!(
+        thread_sessions
+            .lock()
+            .expect("shared Codex thread mutex poisoned")
+            .get("thread-shared")
+            .map(String::as_str),
+        Some("session-successor")
+    );
 }
 
 // Pins that a startup timeout against a SILENT app-server is treated as a
@@ -2598,6 +3721,7 @@ fn shared_codex_startup_timeout_on_silent_server_tears_down_runtime() {
         &state,
         &runtime.runtime_id,
         &session_id,
+        0,
         Duration::ZERO,
         CodexResponseError::Timeout(
             "timed out waiting for Codex app-server response to `turn/start`".to_owned(),
@@ -2921,6 +4045,7 @@ fn shared_codex_startup_timeout_on_active_server_fails_only_that_turn() {
         &state,
         &runtime.runtime_id,
         &session_id,
+        0,
         Duration::from_secs(120),
         CodexResponseError::Timeout(
             "timed out waiting for Codex app-server response to `turn/start`".to_owned(),

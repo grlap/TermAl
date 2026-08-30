@@ -29,6 +29,7 @@ fn acp_dispatch_publishes_queued_turn_before_writer_consumption() {
     deliver_turn_dispatch(
         &state,
         TurnDispatch::PersistentAcp {
+            active_turn_generation: 1,
             command: AcpPromptCommand {
                 cwd: "/tmp".to_owned(),
                 cursor_mode: None,
@@ -40,6 +41,7 @@ fn acp_dispatch_publishes_queued_turn_before_writer_consumption() {
             },
             engram_dispatch_generation: None,
             mailbox_notification: None,
+            runtime_token: RuntimeToken::Acp("queued-acp-runtime".to_owned()),
             sender: input_tx,
             session_id: "queued-acp-session".to_owned(),
             turn_lifecycle: turn_lifecycle.clone(),

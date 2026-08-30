@@ -91,6 +91,7 @@ impl StateInner {
             remote_id,
             remote_project_id: None,
             engram: None,
+            engram_cleanup_warning: None,
         };
         self.projects.push(project.clone());
         project
@@ -124,6 +125,8 @@ impl StateInner {
             active_codex_approval_policy: None,
             active_codex_reasoning_effort: None,
             active_codex_sandbox_mode: None,
+            active_turn_generation: 0,
+            active_turn_mailbox_notification: None,
             active_turn_start_message_count: None,
             active_turn_file_changes: BTreeMap::new(),
             active_turn_file_change_grace_deadline: None,

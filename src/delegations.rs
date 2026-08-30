@@ -3312,6 +3312,7 @@ fn detach_delegation_child_runtime_locked(
     child.clear_runtime_reset();
     child.clear_runtime_stop();
     child.deferred_stop_callbacks.clear();
+    child.active_turn_mailbox_notification = None;
     child.active_turn_start_message_count = None;
     child.active_turn_file_changes.clear();
     child.active_turn_file_change_grace_deadline = None;

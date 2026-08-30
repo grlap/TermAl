@@ -1553,15 +1553,184 @@ fn runtime_turn_callbacks_are_suppressed_while_stop_is_in_progress() {
     assert_eq!(
         record.deferred_stop_callbacks,
         vec![
-            DeferredStopCallback::TurnFailed("reader failure".to_owned()),
-            DeferredStopCallback::TurnError("runtime error".to_owned()),
-            DeferredStopCallback::TurnCompleted,
+            DeferredStopCallback::TurnFailed {
+                active_turn_generation: 0,
+                message: "reader failure".to_owned(),
+            },
+            DeferredStopCallback::TurnError {
+                active_turn_generation: 0,
+                message: "runtime error".to_owned(),
+            },
+            DeferredStopCallback::TurnCompleted {
+                active_turn_generation: 0,
+            },
         ]
     );
     drop(inner);
 
     assert!(input_rx.recv_timeout(Duration::from_millis(100)).is_err());
 
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// Shared Codex acknowledges the channel handoff before its writer receives the
+// turn/start response. If the old runtime handle disappears in between, the
+// token guard is stale but an Active+None record still belongs to that failed
+// turn and must not remain live forever.
+#[test]
+fn shared_codex_prompt_failure_terminalizes_active_session_after_runtime_loss() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let stale_runtime_token = RuntimeToken::Codex("lost-shared-runtime".to_owned());
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::None;
+        inner.sessions[index].session.status = SessionStatus::Active;
+        inner.sessions[index].session.preview = "LIVE TURN".to_owned();
+    }
+
+    handle_shared_codex_prompt_command_result(
+        &state,
+        &session_id,
+        &stale_runtime_token,
+        0,
+        Err(anyhow::Error::new(CodexResponseError::JsonRpc(
+            "turn/start rejected after runtime detach".to_owned(),
+        ))),
+    )
+    .expect("prompt failure handling should succeed");
+
+    let snapshot = state.full_snapshot();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("failed session should remain visible");
+    assert_eq!(session.status, SessionStatus::Error);
+    assert_eq!(session.preview, "turn/start rejected after runtime detach");
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// A stale failure from an old shared runtime must never terminalize a live
+// successor. The missing-runtime fallback above is intentionally narrower
+// than the ordinary token guard.
+#[test]
+fn shared_codex_prompt_failure_does_not_touch_a_successor_runtime() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let stale_runtime_token = RuntimeToken::Codex("stale-shared-runtime".to_owned());
+    let (replacement_runtime, _input_rx, process) =
+        test_shared_codex_runtime("replacement-shared-runtime");
+    let replacement_handle = CodexRuntimeHandle {
+        runtime_id: replacement_runtime.runtime_id.clone(),
+        input_tx: replacement_runtime.input_tx.clone(),
+        process: process.clone(),
+        shared_session: None,
+    };
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(replacement_handle);
+        inner.sessions[index].session.status = SessionStatus::Active;
+        inner.sessions[index].session.preview = "successor turn".to_owned();
+    }
+
+    handle_shared_codex_prompt_command_result(
+        &state,
+        &session_id,
+        &stale_runtime_token,
+        0,
+        Err(anyhow::Error::new(CodexResponseError::JsonRpc(
+            "stale turn/start rejection".to_owned(),
+        ))),
+    )
+    .expect("stale prompt failure handling should no-op");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("Codex session should exist");
+    assert_eq!(record.session.status, SessionStatus::Active);
+    assert_eq!(record.session.preview, "successor turn");
+    assert!(record.runtime.matches_runtime_token(&RuntimeToken::Codex(
+        "replacement-shared-runtime".to_owned()
+    )));
+    drop(inner);
+
+    process.kill().ok();
+    process.wait().ok();
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// Shared Codex keeps one process/runtime id across turns. Token equality alone
+// therefore cannot distinguish a late turn/start rejection from a successor
+// turn on that same app-server; the process-local turn generation must also
+// match.
+#[test]
+fn shared_codex_prompt_failure_does_not_touch_a_same_runtime_successor_generation() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, _input_rx, process) = test_shared_codex_runtime("same-shared-runtime-successor");
+    let runtime_token = RuntimeToken::Codex(runtime.runtime_id.clone());
+    let runtime_handle = CodexRuntimeHandle {
+        runtime_id: runtime.runtime_id.clone(),
+        input_tx: runtime.input_tx.clone(),
+        process: process.clone(),
+        shared_session: None,
+    };
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("Codex session index should be valid");
+        record.runtime = SessionRuntime::Codex(runtime_handle);
+        record.active_turn_generation = 2;
+        record.session.status = SessionStatus::Active;
+        record.session.preview = "same-runtime successor".to_owned();
+    }
+    let baseline_revision = state.full_snapshot().revision;
+
+    handle_shared_codex_prompt_command_result(
+        &state,
+        &session_id,
+        &runtime_token,
+        1,
+        Err(anyhow::Error::new(CodexResponseError::JsonRpc(
+            "stale rejection from prior generation".to_owned(),
+        ))),
+    )
+    .expect("stale prompt failure should no-op");
+
+    assert_eq!(state.full_snapshot().revision, baseline_revision);
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("Codex session should remain present");
+    assert!(record.runtime.matches_runtime_token(&runtime_token));
+    assert_eq!(record.active_turn_generation, 2);
+    assert_eq!(record.session.status, SessionStatus::Active);
+    assert_eq!(record.session.preview, "same-runtime successor");
+    assert!(!record.runtime_stop_in_progress);
+    drop(inner);
+
+    process.kill().ok();
+    process.wait().ok();
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
@@ -1891,6 +2060,102 @@ fn engram_mcp_revocation_publishes_terminal_state_when_persist_fails() {
     drop(inner);
 
     let _ = fs::remove_dir_all(failing_persistence_path);
+}
+
+#[test]
+fn message_less_atomic_terminalization_publishes_the_error_state() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::None;
+        inner.sessions[index].session.status = SessionStatus::Active;
+        inner.sessions[index].session.preview = "accepted turn".to_owned();
+    }
+    let mut state_events = state.subscribe_events();
+
+    assert!(
+        state
+            .fail_active_turn_if_runtime_missing(&session_id, 0, "   ")
+            .expect("missing-runtime recovery should succeed")
+    );
+
+    let published: StateResponse = serde_json::from_str(
+        &state_events
+            .try_recv()
+            .expect("message-less terminal transition should publish full state"),
+    )
+    .expect("published state should decode");
+    let session = published
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("terminalized session should be published");
+    assert_eq!(session.status, SessionStatus::Error);
+}
+
+#[test]
+fn stale_matching_terminalization_does_not_replay_into_same_token_successor() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let (runtime, _input_rx) = test_claude_runtime_handle("stale-terminalization-owner");
+    let token = RuntimeToken::Claude(runtime.runtime_id.clone());
+    let (successor_runtime, _successor_input_rx) =
+        test_claude_runtime_handle("stale-terminalization-owner");
+    let successor_token = RuntimeToken::Claude(successor_runtime.runtime_id.clone());
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Claude session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Claude(runtime);
+        inner.sessions[index].session.status = SessionStatus::Active;
+        inner.sessions[index].active_turn_generation = 7;
+    }
+    let owner_generation = state
+        .claim_turn_terminalization_if_runtime_matches(&session_id, &token, 7)
+        .expect("terminalization claim should succeed")
+        .expect("matching runtime should be claimed");
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Claude session should remain");
+        inner.sessions[index].runtime = SessionRuntime::Claude(successor_runtime);
+        inner.sessions[index].active_turn_generation = 8;
+        inner.sessions[index]
+            .deferred_stop_callbacks
+            .push(DeferredStopCallback::TurnCompleted {
+                active_turn_generation: 7,
+            });
+    }
+
+    assert!(
+        !state
+            .fail_turn_and_clear_runtime_if_owned(
+                &session_id,
+                &token,
+                7,
+                owner_generation,
+                "stale terminalization",
+            )
+            .expect("stale terminalization should no-op")
+    );
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("Claude session should remain");
+    assert!(!record.runtime_stop_in_progress);
+    assert!(record.runtime_stop_owner.is_none());
+    assert!(record.runtime.matches_runtime_token(&successor_token));
+    assert_eq!(record.active_turn_generation, 8);
+    assert_eq!(record.session.status, SessionStatus::Active);
+    assert!(record.deferred_stop_callbacks.is_empty());
 }
 
 #[test]

@@ -19,7 +19,9 @@
 // still current; they always call the guarded variant and it no-ops when
 // the token is stale. When `runtime_stop_in_progress` is set, the
 // transition is buffered onto `deferred_stop_callbacks` instead of being
-// applied, so the stop machinery finalizes session state before the
+// applied. Buffered callbacks also retain `active_turn_generation`, because
+// persistent Claude/ACP handles and shared Codex processes may reuse a token
+// for a successor turn. The stop machinery finalizes session state before the
 // callback is replayed (see `src/tests/session_stop.rs`).
 //
 // The pending-approval registers each keep a per-session map so
@@ -59,6 +61,7 @@ struct EngramMcpRuntimeRevocationBatch {
 #[derive(Default)]
 struct EngramMcpRuntimeRevocationRelease {
     deferred_callbacks: Vec<(String, RuntimeToken, Vec<DeferredStopCallback>)>,
+    project_fence_release_failed: bool,
 }
 
 #[derive(Debug, Default)]
@@ -94,6 +97,51 @@ struct EngramMcpRuntimeRevocationOutcome {
     completions: Vec<EngramMcpRuntimeRevocationCompletion>,
     pending_session_ids: Vec<String>,
     failures: Vec<String>,
+}
+
+#[derive(Clone, Copy)]
+enum AtomicTurnFailureMode<'a> {
+    RejectedDelivery {
+        token: &'a RuntimeToken,
+        active_turn_generation: u64,
+        owner_generation: u64,
+    },
+    MissingRuntime {
+        active_turn_generation: u64,
+        owner_generation: u64,
+    },
+    MatchingRuntime {
+        token: &'a RuntimeToken,
+        active_turn_generation: u64,
+        owner_generation: u64,
+        retain_runtime: bool,
+    },
+}
+
+impl<'a> AtomicTurnFailureMode<'a> {
+    fn preserves_accepted_turn_state(self) -> bool {
+        !matches!(self, Self::RejectedDelivery { .. })
+    }
+
+    fn retained_runtime_token(self) -> Option<&'a RuntimeToken> {
+        match self {
+            Self::MatchingRuntime {
+                token,
+                retain_runtime: true,
+                ..
+            } => Some(token),
+            _ => None,
+        }
+    }
+
+    fn runtime_token(self) -> Option<&'a RuntimeToken> {
+        match self {
+            Self::RejectedDelivery { token, .. } | Self::MatchingRuntime { token, .. } => {
+                Some(token)
+            }
+            Self::MissingRuntime { .. } => None,
+        }
+    }
 }
 
 /// Captures every stale runtime while the settings mutation still owns the
@@ -201,7 +249,7 @@ fn take_pending_engram_mcp_revocation_after_stop_failure_locked(
     let token = record.runtime.runtime_token()?;
     if !record.runtime_stop_owner.as_ref().is_some_and(|owner| {
         owner.kind == RuntimeStopOwnerKind::UserStop
-            && owner.token == token
+            && owner.token.as_ref() == Some(&token)
             && owner.generation == stop_owner_generation
     }) {
         return None;
@@ -230,6 +278,54 @@ fn take_pending_engram_mcp_revocation_after_stop_failure_locked(
     })
 }
 
+/// Clears exact generation-owned runtime revocation fences under an existing
+/// StateInner lock. Project settings transactions use this primitive while
+/// releasing their project-generation fence in the same critical section, so
+/// a newer mutation cannot install pending teardown state between the two.
+fn release_engram_mcp_runtime_revocations_without_teardown_locked(
+    inner: &mut StateInner,
+    batch: EngramMcpRuntimeRevocationBatch,
+) -> (EngramMcpRuntimeRevocationRelease, bool) {
+    let mut release = EngramMcpRuntimeRevocationRelease::default();
+    let mut changed = false;
+    for target in batch.targets {
+        let Some(index) = inner.find_session_index(&target.session_id) else {
+            continue;
+        };
+        if !inner.sessions[index].runtime_stop_is_owned_by(
+            RuntimeStopOwnerKind::EngramMcpRevocation,
+            &target.token,
+            target.owner_generation,
+        ) {
+            continue;
+        }
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
+        let runtime_still_matches = record.runtime.matches_runtime_token(&target.token);
+        record.clear_runtime_stop();
+        let deferred_callbacks = std::mem::take(&mut record.deferred_stop_callbacks);
+        if runtime_still_matches && !deferred_callbacks.is_empty() {
+            release
+                .deferred_callbacks
+                .push((target.session_id, target.token, deferred_callbacks));
+        }
+        changed = true;
+    }
+    for session_id in batch.newly_pending_session_ids {
+        if let Some(index) = inner.find_session_index(&session_id) {
+            let record = inner
+                .session_mut_by_index(index)
+                .expect("session index should be valid");
+            if record.engram_mcp_revocation_pending {
+                record.engram_mcp_revocation_pending = false;
+                changed = true;
+            }
+        }
+    }
+    (release, changed)
+}
+
 impl AppState {
     /// Releases a visible revocation fence after Engram confirmed that the old
     /// authority is unusable. The runtime stays alive until its normal reset
@@ -239,46 +335,9 @@ impl AppState {
         &self,
         batch: EngramMcpRuntimeRevocationBatch,
     ) -> EngramMcpRuntimeRevocationRelease {
-        let mut release = EngramMcpRuntimeRevocationRelease::default();
         let mut inner = self.inner.lock().expect("state mutex poisoned");
-        let mut changed = false;
-        for target in batch.targets {
-            let Some(index) = inner.find_session_index(&target.session_id) else {
-                continue;
-            };
-            if !inner.sessions[index].runtime_stop_is_owned_by(
-                RuntimeStopOwnerKind::EngramMcpRevocation,
-                &target.token,
-                target.owner_generation,
-            ) {
-                continue;
-            }
-            let record = inner
-                .session_mut_by_index(index)
-                .expect("session index should be valid");
-            let runtime_still_matches = record.runtime.matches_runtime_token(&target.token);
-            record.clear_runtime_stop();
-            let deferred_callbacks = std::mem::take(&mut record.deferred_stop_callbacks);
-            if runtime_still_matches && !deferred_callbacks.is_empty() {
-                release.deferred_callbacks.push((
-                    target.session_id,
-                    target.token,
-                    deferred_callbacks,
-                ));
-            }
-            changed = true;
-        }
-        for session_id in batch.newly_pending_session_ids {
-            if let Some(index) = inner.find_session_index(&session_id) {
-                let record = inner
-                    .session_mut_by_index(index)
-                    .expect("session index should be valid");
-                if record.engram_mcp_revocation_pending {
-                    record.engram_mcp_revocation_pending = false;
-                    changed = true;
-                }
-            }
-        }
+        let (release, changed) =
+            release_engram_mcp_runtime_revocations_without_teardown_locked(&mut inner, batch);
         if changed {
             self.publish_state_locked(&inner);
         }
@@ -292,23 +351,46 @@ impl AppState {
         mut deferred_callbacks: Vec<DeferredStopCallback>,
     ) {
         // Runtime exit must remain last: it removes the runtime handle that the
-        // preceding turn terminal callbacks still need to match.
+        // preceding turn terminal callbacks still need to match. Every replay
+        // also validates the callback's original active-turn generation, so a
+        // same-token successor cannot absorb a stale terminal transition after
+        // the stop fence has been released.
         deferred_callbacks.sort_by_key(|deferred| {
-            matches!(deferred, DeferredStopCallback::RuntimeExited(_))
+            matches!(deferred, DeferredStopCallback::RuntimeExited { .. })
         });
         for deferred in deferred_callbacks {
+            let active_turn_generation = deferred.active_turn_generation();
             let replay_result = match deferred {
-                DeferredStopCallback::TurnFailed(msg) => {
-                    self.fail_turn_if_runtime_matches(session_id, token, &msg)
+                DeferredStopCallback::TurnFailed { message, .. } => {
+                    self.fail_turn_if_runtime_and_generation_match(
+                        session_id,
+                        token,
+                        active_turn_generation,
+                        &message,
+                    )
                 }
-                DeferredStopCallback::TurnError(msg) => {
-                    self.mark_turn_error_if_runtime_matches(session_id, token, &msg)
+                DeferredStopCallback::TurnError { message, .. } => {
+                    self.mark_turn_error_if_runtime_and_generation_match(
+                        session_id,
+                        token,
+                        active_turn_generation,
+                        &message,
+                    )
                 }
-                DeferredStopCallback::TurnCompleted => {
-                    self.finish_turn_ok_if_runtime_matches(session_id, token)
+                DeferredStopCallback::TurnCompleted { .. } => {
+                    self.finish_turn_ok_if_runtime_and_generation_match(
+                        session_id,
+                        token,
+                        active_turn_generation,
+                    )
                 }
-                DeferredStopCallback::RuntimeExited(msg) => {
-                    self.handle_runtime_exit_if_matches(session_id, token, msg.as_deref())
+                DeferredStopCallback::RuntimeExited { message, .. } => {
+                    self.handle_runtime_exit_if_runtime_and_generation_match(
+                        session_id,
+                        token,
+                        active_turn_generation,
+                        message.as_deref(),
+                    )
                 }
             };
             if let Err(error) = replay_result {
@@ -379,6 +461,8 @@ impl AppState {
             pending_interaction_updates,
             created_messages,
             should_dispatch_next,
+            may_dispatch_requeued_mailbox,
+            failed_mailbox_notification,
             should_refresh_delegation,
             stopped_wait_refresh,
             persist_error,
@@ -448,7 +532,7 @@ impl AppState {
             let runtime_exit_was_buffered = inner.sessions[index]
                 .deferred_stop_callbacks
                 .iter()
-                .any(|callback| matches!(callback, DeferredStopCallback::RuntimeExited(_)));
+                .any(|callback| matches!(callback, DeferredStopCallback::RuntimeExited { .. }));
             let buffered_exit_confirms_cleanup = retain_runtime_for_retry
                 && !is_shared_codex_runtime
                 && runtime_exit_was_buffered;
@@ -477,10 +561,17 @@ impl AppState {
             let dispatch_queued_prompts = stop_options
                 .map_or(true, |options| options.dispatch_queued_prompts_on_success);
             let mut thread_id_to_suppress = None;
-            let (has_queued_prompts, pending_interaction_updates, created_messages) = {
+            let (
+                has_queued_prompts,
+                pending_interaction_updates,
+                created_messages,
+                failed_mailbox_notification,
+            ) = {
                 let record = inner
                     .session_mut_by_index(index)
                     .expect("session index should be valid");
+                let failed_mailbox_notification =
+                    record.active_turn_mailbox_notification.take();
                 take_and_abandon_engram_pending_dispatch(record);
                 if retain_runtime_for_retry {
                     // Termination failed and process exit was not confirmed.
@@ -548,6 +639,7 @@ impl AppState {
                         pending_interaction_indices,
                     ),
                     message_created_delta_parts_for_indices(record, created_message_indices),
+                    failed_mailbox_notification,
                 )
             };
 
@@ -593,6 +685,10 @@ impl AppState {
                         && !suppress_automatic_resume
                         && dispatch_queued_prompts
                         && has_queued_prompts,
+                    shutdown_error.is_none()
+                        && !suppress_automatic_resume
+                        && dispatch_queued_prompts,
+                    failed_mailbox_notification,
                     should_write_message && !preserve_delegation_for_rebind,
                     stopped_wait_refresh,
                     None,
@@ -619,8 +715,10 @@ impl AppState {
                         None,
                         Vec::new(),
                         Vec::new(),
-                        false,
-                        should_write_message && !preserve_delegation_for_rebind,
+                    false,
+                    false,
+                    failed_mailbox_notification,
+                    should_write_message && !preserve_delegation_for_rebind,
                         DelegationWaitRefresh::default(),
                         Some(detail),
                         shutdown_error.map(str::to_owned),
@@ -628,6 +726,21 @@ impl AppState {
                 }
             }
         };
+
+        let mailbox_requeued = failed_mailbox_notification
+            .as_ref()
+            .is_some_and(|notification| {
+                match self.requeue_rejected_mailbox_notification(notification) {
+                    Ok(changed) => changed,
+                    Err(error) => {
+                        eprintln!(
+                            "mailbox> failed restoring the Engram-revoked wake for `{}` / `{}`: {error:#}",
+                            notification.session_id, notification.mailbox_id
+                        );
+                        false
+                    }
+                }
+            });
 
         if let Some(revision) = revision {
             self.publish_message_created_delta_parts(revision, created_messages);
@@ -649,7 +762,8 @@ impl AppState {
         EngramMcpRuntimeRevocationFinalization {
             completion: Some(EngramMcpRuntimeRevocationCompletion {
                 session_id: session_id.to_owned(),
-                should_dispatch_next,
+                should_dispatch_next: should_dispatch_next
+                    || (mailbox_requeued && may_dispatch_requeued_mailbox),
                 should_refresh_delegation,
                 should_resume_orchestrator_transitions: persist_succeeded
                     && stop_options.is_none_or(|options| {
@@ -674,14 +788,47 @@ impl AppState {
         token: &RuntimeToken,
         error_message: &str,
     ) -> Result<()> {
+        self.fail_turn_if_runtime_matches_and_report(
+            session_id,
+            token,
+            None,
+            error_message,
+        )
+            .map(|_| ())
+    }
+
+    fn fail_turn_if_runtime_and_generation_match(
+        &self,
+        session_id: &str,
+        token: &RuntimeToken,
+        active_turn_generation: u64,
+        error_message: &str,
+    ) -> Result<()> {
+        self.fail_turn_if_runtime_matches_and_report(
+            session_id,
+            token,
+            Some(active_turn_generation),
+            error_message,
+        )
+        .map(|_| ())
+    }
+
+    fn fail_turn_if_runtime_matches_and_report(
+        &self,
+        session_id: &str,
+        token: &RuntimeToken,
+        expected_active_turn_generation: Option<u64>,
+        error_message: &str,
+    ) -> Result<bool> {
         self.checkpoint_engram_turn_off_lock(
             session_id,
             Some(token),
+            expected_active_turn_generation,
             EngramNextIntent::Wait,
             None,
         );
         let cleaned = error_message.trim();
-        let should_dispatch_next = {
+        let (should_dispatch_next, failed_mailbox_notification) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_session_index(session_id)
@@ -694,15 +841,31 @@ impl AppState {
                 .session_mut_by_index(index)
                 .expect("session index should be valid");
             if !record.runtime.matches_runtime_token(token) {
-                return Ok(());
+                return Ok(false);
+            }
+            if expected_active_turn_generation.is_some_and(|generation| {
+                record.active_turn_generation != generation
+            }) {
+                return Ok(false);
             }
             if record.runtime_stop_in_progress {
                 record
                     .deferred_stop_callbacks
-                    .push(DeferredStopCallback::TurnFailed(cleaned.to_owned()));
-                return Ok(());
+                    .push(DeferredStopCallback::TurnFailed {
+                        active_turn_generation: record.active_turn_generation,
+                        message: cleaned.to_owned(),
+                    });
+                return Ok(false);
             }
             take_and_abandon_engram_pending_dispatch(record);
+            let failed_mailbox_notification =
+                record.active_turn_mailbox_notification.take();
+            if failed_mailbox_notification.is_some() {
+                // Restore the durable wake below, but do not immediately run
+                // the same poisoned queue head again. An explicit resume can
+                // retry it after the operator has inspected the failure.
+                record.orchestrator_auto_dispatch_blocked = true;
+            }
 
             if let Some(message_id) = message_id {
                 record.session.messages.push(Message::Text {
@@ -736,8 +899,17 @@ impl AppState {
                     self.publish_state_locked(&inner);
                 }
             }
-            has_queued_prompts
+            (has_queued_prompts, failed_mailbox_notification)
         };
+
+        if let Some(notification) = failed_mailbox_notification.as_ref() {
+            if let Err(error) = self.requeue_rejected_mailbox_notification(notification) {
+                eprintln!(
+                    "mailbox> failed restoring the failed wake for `{}` / `{}`: {error:#}",
+                    notification.session_id, notification.mailbox_id
+                );
+            }
+        }
 
         if let Err(err) = self.refresh_delegation_for_child_session(session_id) {
             eprintln!("state warning> failed to refresh delegation after turn failure: {err:#}");
@@ -754,8 +926,489 @@ impl AppState {
             self.resume_pending_orchestrator_transitions()?;
         }
 
-        Ok(())
+        Ok(true)
     }
+
+    /// Records a rejected runtime-command delivery as one durable terminal
+    /// transition. The runtime handle, pending runtime state, failure message,
+    /// and public Error status must share one revision so restart recovery can
+    /// never observe an Active session whose dead runtime was already cleared.
+    fn fail_rejected_turn_delivery(
+        &self,
+        session_id: &str,
+        token: &RuntimeToken,
+        active_turn_generation: u64,
+        error_message: &str,
+    ) -> Result<bool> {
+        let Some(owner_generation) = self.claim_turn_terminalization_if_runtime_matches(
+            session_id,
+            token,
+            active_turn_generation,
+        )? else {
+            return Ok(false);
+        };
+        self.fail_turn_and_clear_runtime_atomically(
+            session_id,
+            error_message,
+            AtomicTurnFailureMode::RejectedDelivery {
+                token,
+                active_turn_generation,
+                owner_generation,
+            },
+        )
+    }
+
+    /// Terminalizes an Active/Approval turn only when its runtime has already
+    /// disappeared and no stop owner is coordinating callbacks. This is the
+    /// narrow recovery path for Stop and late shared-Codex turn/start errors;
+    /// a stale error cannot affect a live successor runtime.
+    fn fail_active_turn_if_runtime_missing(
+        &self,
+        session_id: &str,
+        active_turn_generation: u64,
+        error_message: &str,
+    ) -> Result<bool> {
+        let owner_generation = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let index = inner
+                .find_session_index(session_id)
+                .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
+            if !matches!(
+                inner.sessions[index].session.status,
+                SessionStatus::Active | SessionStatus::Approval
+            ) || !matches!(inner.sessions[index].runtime, SessionRuntime::None)
+                || inner.sessions[index].active_turn_generation != active_turn_generation
+                || inner.sessions[index].runtime_stop_in_progress
+            {
+                return Ok(false);
+            }
+            inner
+                .session_mut_by_index(index)
+                .expect("session index should be valid")
+                .claim_missing_runtime_stop(RuntimeStopOwnerKind::LostRuntimeTerminalization)
+        };
+        self.fail_turn_and_clear_runtime_atomically(
+            session_id,
+            error_message,
+            AtomicTurnFailureMode::MissingRuntime {
+                active_turn_generation,
+                owner_generation,
+            },
+        )
+    }
+
+    /// Claims the exact runtime before an accepted shared-Codex turn is
+    /// interrupted off-lock. The owner prevents a successor dispatch or a
+    /// terminal callback from entering between interruption and finalization.
+    fn claim_turn_terminalization_if_runtime_matches(
+        &self,
+        session_id: &str,
+        token: &RuntimeToken,
+        active_turn_generation: u64,
+    ) -> Result<Option<u64>> {
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(session_id)
+            .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
+        if !inner.sessions[index].runtime.matches_runtime_token(token)
+            || inner.sessions[index].active_turn_generation != active_turn_generation
+            || inner.sessions[index].runtime_stop_in_progress
+            || !matches!(
+                inner.sessions[index].session.status,
+                SessionStatus::Active | SessionStatus::Approval
+            )
+        {
+            return Ok(None);
+        }
+        let generation = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid")
+            .claim_runtime_stop(
+                RuntimeStopOwnerKind::LostRuntimeTerminalization,
+                token.clone(),
+            );
+        Ok(Some(generation))
+    }
+
+    /// Releases an exact lost-runtime terminalization claim when a later
+    /// shared-Codex recheck proves that `turn/started` or a successor won the
+    /// race. Deferred terminal callbacks are replayed only after the owner is
+    /// gone so none remain stranded behind a cancelled watchdog.
+    fn release_turn_terminalization_if_owned(
+        &self,
+        session_id: &str,
+        token: &RuntimeToken,
+        owner_generation: u64,
+    ) -> bool {
+        let callbacks = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let Some(index) = inner.find_session_index(session_id) else {
+                return false;
+            };
+            if !inner.sessions[index].runtime_stop_is_owned_by(
+                RuntimeStopOwnerKind::LostRuntimeTerminalization,
+                token,
+                owner_generation,
+            ) {
+                return false;
+            }
+            let record = inner
+                .session_mut_by_index(index)
+                .expect("session index should be valid");
+            record.clear_runtime_stop();
+            std::mem::take(&mut record.deferred_stop_callbacks)
+        };
+        self.replay_deferred_runtime_stop_callbacks(session_id, token, callbacks);
+        true
+    }
+
+    fn fail_turn_and_clear_runtime_if_owned(
+        &self,
+        session_id: &str,
+        token: &RuntimeToken,
+        active_turn_generation: u64,
+        owner_generation: u64,
+        error_message: &str,
+    ) -> Result<bool> {
+        self.fail_turn_and_clear_runtime_atomically(
+            session_id,
+            error_message,
+            AtomicTurnFailureMode::MatchingRuntime {
+                token,
+                active_turn_generation,
+                owner_generation,
+                retain_runtime: false,
+            },
+        )
+    }
+
+    fn fail_turn_and_retain_runtime_if_owned(
+        &self,
+        session_id: &str,
+        token: &RuntimeToken,
+        active_turn_generation: u64,
+        owner_generation: u64,
+        error_message: &str,
+    ) -> Result<bool> {
+        self.fail_turn_and_clear_runtime_atomically(
+            session_id,
+            error_message,
+            AtomicTurnFailureMode::MatchingRuntime {
+                token,
+                active_turn_generation,
+                owner_generation,
+                retain_runtime: true,
+            },
+        )
+    }
+
+    fn fail_turn_and_clear_runtime_atomically(
+        &self,
+        session_id: &str,
+        error_message: &str,
+        mode: AtomicTurnFailureMode<'_>,
+    ) -> Result<bool> {
+        // Deliberately omit the runtime token: MatchingRuntime already owns
+        // the exact stop fence, while rejected delivery and missing-runtime
+        // recovery have no live handle to match. Passing a token would make
+        // the checkpoint helper refuse the owned stop-in-progress case.
+        let checkpoint_token = None;
+        self.checkpoint_engram_turn_off_lock(
+            session_id,
+            checkpoint_token,
+            None,
+            EngramNextIntent::Wait,
+            None,
+        );
+        let cleaned = error_message.trim();
+        let preserve_accepted_turn_state = mode.preserves_accepted_turn_state();
+        let (
+            commit_result,
+            created_messages,
+            updated_messages,
+            has_queued_prompts,
+            failed_mailbox_notification,
+            deferred_stop_callbacks,
+        ) = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let index = inner
+                .find_session_index(session_id)
+                .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
+            let guard_matches = match mode {
+                AtomicTurnFailureMode::RejectedDelivery {
+                    token,
+                    active_turn_generation,
+                    owner_generation,
+                } => {
+                    inner.sessions[index].runtime.matches_runtime_token(token)
+                        && inner.sessions[index].active_turn_generation
+                            == active_turn_generation
+                        && matches!(
+                        inner.sessions[index].session.status,
+                        SessionStatus::Active | SessionStatus::Approval
+                    ) && inner.sessions[index].runtime_stop_is_owned_by(
+                        RuntimeStopOwnerKind::LostRuntimeTerminalization,
+                        token,
+                        owner_generation,
+                    )
+                }
+                AtomicTurnFailureMode::MatchingRuntime {
+                    token,
+                    active_turn_generation,
+                    owner_generation,
+                    ..
+                } => {
+                    inner.sessions[index].runtime.matches_runtime_token(token)
+                        && inner.sessions[index].active_turn_generation
+                            == active_turn_generation
+                        && matches!(
+                            inner.sessions[index].session.status,
+                            SessionStatus::Active | SessionStatus::Approval
+                        )
+                        && inner.sessions[index].runtime_stop_is_owned_by(
+                            RuntimeStopOwnerKind::LostRuntimeTerminalization,
+                            token,
+                            owner_generation,
+                        )
+                }
+                AtomicTurnFailureMode::MissingRuntime {
+                    active_turn_generation,
+                    owner_generation,
+                } => {
+                    matches!(
+                        inner.sessions[index].session.status,
+                        SessionStatus::Active | SessionStatus::Approval
+                    ) && matches!(inner.sessions[index].runtime, SessionRuntime::None)
+                        && inner.sessions[index].active_turn_generation
+                            == active_turn_generation
+                        && inner.sessions[index].missing_runtime_stop_is_owned_by(
+                            RuntimeStopOwnerKind::LostRuntimeTerminalization,
+                            owner_generation,
+                        )
+                }
+            };
+            if !guard_matches {
+                let still_owns_terminalization = match mode {
+                    AtomicTurnFailureMode::MissingRuntime {
+                        owner_generation, ..
+                    } => inner.sessions[index].missing_runtime_stop_is_owned_by(
+                            RuntimeStopOwnerKind::LostRuntimeTerminalization,
+                            owner_generation,
+                        ),
+                    AtomicTurnFailureMode::MatchingRuntime {
+                        token,
+                        owner_generation,
+                        ..
+                    } => inner.sessions[index].runtime_stop_is_owned_by(
+                        RuntimeStopOwnerKind::LostRuntimeTerminalization,
+                        token,
+                        owner_generation,
+                    ),
+                    AtomicTurnFailureMode::RejectedDelivery {
+                        token,
+                        owner_generation,
+                        ..
+                    } => inner.sessions[index].runtime_stop_is_owned_by(
+                        RuntimeStopOwnerKind::LostRuntimeTerminalization,
+                        token,
+                        owner_generation,
+                    ),
+                };
+                let deferred_stop_callbacks = if still_owns_terminalization {
+                    let record = inner
+                        .session_mut_by_index(index)
+                        .expect("session index should be valid");
+                    record.clear_runtime_stop();
+                    std::mem::take(&mut record.deferred_stop_callbacks)
+                } else {
+                    Vec::new()
+                };
+                drop(inner);
+                if let Some(token) = mode.runtime_token() {
+                    self.replay_deferred_runtime_stop_callbacks(
+                        session_id,
+                        token,
+                        deferred_stop_callbacks,
+                    );
+                }
+                return Ok(false);
+            }
+            let message_id = (!cleaned.is_empty()).then(|| inner.next_message_id());
+            let file_change_message_id = (preserve_accepted_turn_state
+                && !inner.sessions[index].active_turn_file_changes.is_empty())
+            .then(|| inner.next_message_id());
+            let (
+                created_messages,
+                updated_messages,
+                has_queued_prompts,
+                failed_mailbox_notification,
+                deferred_stop_callbacks,
+            ) = {
+                let record = inner
+                    .session_mut_by_index(index)
+                    .expect("session index should be valid");
+                let active_mailbox_notification = record.active_turn_mailbox_notification.take();
+                if active_mailbox_notification.is_some()
+                    && !matches!(mode, AtomicTurnFailureMode::RejectedDelivery { .. })
+                {
+                    // A failed mailbox turn is recoverable, but immediately
+                    // draining the restored wake would retry the same poisoned
+                    // queue head forever and starve every prompt behind it.
+                    record.orchestrator_auto_dispatch_blocked = true;
+                }
+                // Synchronous command-channel rejection is requeued by
+                // `record_rejected_turn_dispatch`, which still owns the exact
+                // dispatch metadata. Post-accept failures own the record-held
+                // delivery here.
+                let failed_mailbox_notification = (!matches!(
+                    mode,
+                    AtomicTurnFailureMode::RejectedDelivery { .. }
+                ))
+                .then_some(active_mailbox_notification)
+                .flatten();
+                take_and_abandon_engram_pending_dispatch(record);
+                let deferred_stop_callbacks = if mode.retained_runtime_token().is_some() {
+                    record.clear_runtime_stop();
+                    std::mem::take(&mut record.deferred_stop_callbacks)
+                } else {
+                    record.clear_runtime();
+                    record.clear_runtime_reset();
+                    record.clear_runtime_stop();
+                    record.deferred_stop_callbacks.clear();
+                    Vec::new()
+                };
+                let pending_interaction_indices =
+                    cancel_pending_interaction_messages(&mut record.session.messages);
+                clear_all_pending_requests(record);
+
+                let mut created_message_indices = Vec::new();
+                if let Some(message_id) = message_id {
+                    let message_index = record.session.messages.len();
+                    push_message_on_record(
+                        record,
+                        Message::Text {
+                            attachments: Vec::new(),
+                            id: message_id,
+                            timestamp: stamp_now(),
+                            author: Author::Assistant,
+                            text: format!("Turn failed: {cleaned}"),
+                            expanded_text: None,
+                            source: None,
+                        },
+                    );
+                    created_message_indices.push(message_index);
+                }
+                if let Some(message_id) = file_change_message_id {
+                    let message_index = record.session.messages.len();
+                    if push_active_turn_file_changes_on_record(record, message_id) {
+                        created_message_indices.push(message_index);
+                    }
+                }
+                record.session.status = SessionStatus::Error;
+                record.session.preview = make_preview(cleaned);
+                if preserve_accepted_turn_state {
+                    finish_active_turn_file_change_tracking(record);
+                } else {
+                    clear_active_turn_file_change_tracking(record);
+                }
+                (
+                    message_created_delta_parts_for_indices(record, created_message_indices),
+                    message_updated_delta_parts_for_indices(
+                        record,
+                        pending_interaction_indices,
+                    ),
+                    !record.queued_prompts.is_empty(),
+                    failed_mailbox_notification,
+                    deferred_stop_callbacks,
+                )
+            };
+
+            let commit_result = self.commit_persisted_delta_locked(&mut inner);
+            if commit_result.is_err() {
+                // The dead runtime cannot be restored. Keep memory
+                // authoritative and make the terminal state visible even
+                // when the persistence fallback itself failed.
+                self.publish_state_locked(&inner);
+            } else if created_messages.is_empty() && updated_messages.is_empty() {
+                // `commit_persisted_delta_locked` does not broadcast by itself.
+                // A message-less terminal transition still has to publish its
+                // Error/runtime state at the committed revision.
+                self.publish_state_locked(&inner);
+            }
+            (
+                commit_result,
+                created_messages,
+                updated_messages,
+                has_queued_prompts,
+                failed_mailbox_notification,
+                deferred_stop_callbacks,
+            )
+        };
+
+        if let Some(token) = mode.retained_runtime_token() {
+            self.replay_deferred_runtime_stop_callbacks(
+                session_id,
+                token,
+                deferred_stop_callbacks,
+            );
+        }
+        if let Some(notification) = failed_mailbox_notification.as_ref() {
+            if let Err(error) = self.requeue_rejected_mailbox_notification(notification) {
+                eprintln!(
+                    "mailbox> failed restoring the terminalized wake for `{}` / `{}`: {error:#}",
+                    notification.session_id, notification.mailbox_id
+                );
+            }
+        }
+        let revision = commit_result?;
+        self.publish_message_created_delta_parts(revision, created_messages);
+        self.publish_message_updated_delta_parts(revision, updated_messages);
+        if let Err(error) = self.refresh_delegation_for_child_session(session_id) {
+            eprintln!(
+                "state warning> failed to refresh delegation after atomic turn failure: {error:#}"
+            );
+        }
+        self.resume_pending_orchestrator_transitions()?;
+        if preserve_accepted_turn_state && has_queued_prompts {
+            if let Some(dispatch) = self.dispatch_next_queued_turn(session_id, false)? {
+                deliver_turn_dispatch(self, dispatch).map_err(|error| {
+                    anyhow!("failed to deliver queued turn dispatch: {}", error.message)
+                })?;
+            }
+        }
+        Ok(true)
+    }
+
+    /// Applies a shared-Codex failure to the matching runtime, then recovers
+    /// the same turn if the runtime handle vanished before the late response
+    /// arrived. Both guards reject a live successor runtime.
+    fn fail_turn_if_runtime_matches_or_missing(
+        &self,
+        session_id: &str,
+        token: &RuntimeToken,
+        active_turn_generation: u64,
+        error_message: &str,
+    ) -> Result<bool> {
+        if let Some(owner_generation) = self.claim_turn_terminalization_if_runtime_matches(
+            session_id,
+            token,
+            active_turn_generation,
+        )? {
+            return self.fail_turn_and_retain_runtime_if_owned(
+                session_id,
+                token,
+                active_turn_generation,
+                owner_generation,
+                error_message,
+            );
+        }
+        self.fail_active_turn_if_runtime_missing(
+            session_id,
+            active_turn_generation,
+            error_message,
+        )
+    }
+
     /// Records a retry attempt on the transcript without ending the turn.
     /// Runtime-token guarded: stale or stopping runtimes return `false`.
     /// Keeps the turn
@@ -858,14 +1511,40 @@ impl AppState {
         token: &RuntimeToken,
         error_message: &str,
     ) -> Result<()> {
+        self.mark_turn_error_if_runtime_matches_guarded(session_id, token, None, error_message)
+    }
+
+    fn mark_turn_error_if_runtime_and_generation_match(
+        &self,
+        session_id: &str,
+        token: &RuntimeToken,
+        active_turn_generation: u64,
+        error_message: &str,
+    ) -> Result<()> {
+        self.mark_turn_error_if_runtime_matches_guarded(
+            session_id,
+            token,
+            Some(active_turn_generation),
+            error_message,
+        )
+    }
+
+    fn mark_turn_error_if_runtime_matches_guarded(
+        &self,
+        session_id: &str,
+        token: &RuntimeToken,
+        expected_active_turn_generation: Option<u64>,
+        error_message: &str,
+    ) -> Result<()> {
         self.checkpoint_engram_turn_off_lock(
             session_id,
             Some(token),
+            expected_active_turn_generation,
             EngramNextIntent::Wait,
             None,
         );
         let cleaned = error_message.trim();
-        let should_dispatch_next = {
+        let (commit_result, should_dispatch_next, failed_mailbox_notification) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_session_index(session_id)
@@ -879,13 +1558,25 @@ impl AppState {
             if !record.runtime.matches_runtime_token(token) {
                 return Ok(());
             }
+            if expected_active_turn_generation.is_some_and(|generation| {
+                record.active_turn_generation != generation
+            }) {
+                return Ok(());
+            }
             if record.runtime_stop_in_progress {
                 record
                     .deferred_stop_callbacks
-                    .push(DeferredStopCallback::TurnError(cleaned.to_owned()));
+                    .push(DeferredStopCallback::TurnError {
+                        active_turn_generation: record.active_turn_generation,
+                        message: cleaned.to_owned(),
+                    });
                 return Ok(());
             }
             take_and_abandon_engram_pending_dispatch(record);
+            let failed_mailbox_notification = record.active_turn_mailbox_notification.take();
+            if failed_mailbox_notification.is_some() {
+                record.orchestrator_auto_dispatch_blocked = true;
+            }
 
             record.session.status = SessionStatus::Error;
             if !cleaned.is_empty() {
@@ -900,9 +1591,21 @@ impl AppState {
                     .expect("session index should be valid"),
             );
             let has_queued_prompts = !inner.sessions[index].queued_prompts.is_empty();
-            self.commit_locked(&mut inner)?;
-            has_queued_prompts
+            (
+                self.commit_locked(&mut inner),
+                has_queued_prompts,
+                failed_mailbox_notification,
+            )
         };
+        if let Some(notification) = failed_mailbox_notification.as_ref() {
+            if let Err(error) = self.requeue_rejected_mailbox_notification(notification) {
+                eprintln!(
+                    "mailbox> failed restoring the errored wake for `{}` / `{}`: {error:#}",
+                    notification.session_id, notification.mailbox_id
+                );
+            }
+        }
+        commit_result?;
         if let Err(err) = self.refresh_delegation_for_child_session(session_id) {
             eprintln!("state warning> failed to refresh delegation after turn error: {err:#}");
         }
@@ -930,7 +1633,33 @@ impl AppState {
         session_id: &str,
         token: &RuntimeToken,
     ) -> Result<()> {
-        self.checkpoint_successful_engram_turn_off_lock(session_id, token);
+        self.finish_turn_ok_if_runtime_matches_guarded(session_id, token, None)
+    }
+
+    fn finish_turn_ok_if_runtime_and_generation_match(
+        &self,
+        session_id: &str,
+        token: &RuntimeToken,
+        active_turn_generation: u64,
+    ) -> Result<()> {
+        self.finish_turn_ok_if_runtime_matches_guarded(
+            session_id,
+            token,
+            Some(active_turn_generation),
+        )
+    }
+
+    fn finish_turn_ok_if_runtime_matches_guarded(
+        &self,
+        session_id: &str,
+        token: &RuntimeToken,
+        expected_active_turn_generation: Option<u64>,
+    ) -> Result<()> {
+        self.checkpoint_successful_engram_turn_off_lock(
+            session_id,
+            token,
+            expected_active_turn_generation,
+        );
         let stopping_orchestrator_session_ids = self.stopping_orchestrator_session_ids_snapshot();
         let (should_dispatch_next, orchestrator_delta) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
@@ -960,6 +1689,11 @@ impl AppState {
                 }
                 return Ok(());
             }
+            if expected_active_turn_generation.is_some_and(|generation| {
+                record.active_turn_generation != generation
+            }) {
+                return Ok(());
+            }
             if record.runtime_stop_in_progress {
                 if matches!(token, RuntimeToken::Codex(_)) {
                     trace_shared_codex_event(
@@ -977,7 +1711,9 @@ impl AppState {
                 }
                 record
                     .deferred_stop_callbacks
-                    .push(DeferredStopCallback::TurnCompleted);
+                    .push(DeferredStopCallback::TurnCompleted {
+                        active_turn_generation: record.active_turn_generation,
+                    });
                 return Ok(());
             }
             take_and_abandon_engram_pending_dispatch(record);
@@ -1063,6 +1799,31 @@ impl AppState {
         token: &RuntimeToken,
         error_message: Option<&str>,
     ) -> Result<()> {
+        self.handle_runtime_exit_if_matches_guarded(session_id, token, None, error_message)
+    }
+
+    fn handle_runtime_exit_if_runtime_and_generation_match(
+        &self,
+        session_id: &str,
+        token: &RuntimeToken,
+        active_turn_generation: u64,
+        error_message: Option<&str>,
+    ) -> Result<()> {
+        self.handle_runtime_exit_if_matches_guarded(
+            session_id,
+            token,
+            Some(active_turn_generation),
+            error_message,
+        )
+    }
+
+    fn handle_runtime_exit_if_matches_guarded(
+        &self,
+        session_id: &str,
+        token: &RuntimeToken,
+        expected_active_turn_generation: Option<u64>,
+        error_message: Option<&str>,
+    ) -> Result<()> {
         let is_quarantined_exit = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             inner
@@ -1070,6 +1831,9 @@ impl AppState {
                 .and_then(|index| inner.sessions.get(index))
                 .is_some_and(|record| {
                     record.runtime.matches_runtime_token(token)
+                        && expected_active_turn_generation.is_none_or(|generation| {
+                            record.active_turn_generation == generation
+                        })
                         && record.engram_mcp_runtime_quarantined
                 })
         };
@@ -1077,12 +1841,19 @@ impl AppState {
             self.checkpoint_engram_turn_off_lock(
                 session_id,
                 Some(token),
+                expected_active_turn_generation,
                 EngramNextIntent::Wait,
                 None,
             );
         }
         let cleaned = error_message.map(str::trim).unwrap_or("");
-        let (should_dispatch_next, pending_interaction_updates, created_messages, revision) = {
+        let (
+            should_dispatch_next,
+            pending_interaction_updates,
+            created_messages,
+            exited_mailbox_notification,
+            commit_result,
+        ) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_session_index(session_id)
@@ -1091,14 +1862,21 @@ impl AppState {
             if !matches_runtime {
                 return Ok(());
             }
+            if expected_active_turn_generation.is_some_and(|generation| {
+                inner.sessions[index].active_turn_generation != generation
+            }) {
+                return Ok(());
+            }
             if inner.sessions[index].runtime_stop_in_progress {
+                let active_turn_generation = inner.sessions[index].active_turn_generation;
                 inner
                     .session_mut_by_index(index)
                     .expect("session index should be valid")
                     .deferred_stop_callbacks
-                    .push(DeferredStopCallback::RuntimeExited(
-                        error_message.map(str::to_owned),
-                    ));
+                    .push(DeferredStopCallback::RuntimeExited {
+                        active_turn_generation,
+                        message: error_message.map(str::to_owned),
+                    });
                 return Ok(());
             }
             let was_busy = matches!(
@@ -1135,14 +1913,23 @@ impl AppState {
             let file_change_message_id =
                 (!inner.sessions[index].active_turn_file_changes.is_empty())
                     .then(|| inner.next_message_id());
-            let (has_queued_prompts, pending_interaction_updates, created_messages) = {
+            let (
+                has_queued_prompts,
+                pending_interaction_updates,
+                created_messages,
+                exited_mailbox_notification,
+            ) = {
                 let record = inner
                     .session_mut_by_index(index)
                     .expect("session index should be valid");
+                let exited_mailbox_notification = was_busy
+                    .then(|| record.active_turn_mailbox_notification.take())
+                    .flatten();
                 take_and_abandon_engram_pending_dispatch(record);
                 record.clear_runtime();
                 record.clear_runtime_reset();
-                record.orchestrator_auto_dispatch_blocked = preserve_automatic_resume_block;
+                record.orchestrator_auto_dispatch_blocked =
+                    preserve_automatic_resume_block || exited_mailbox_notification.is_some();
                 record.clear_runtime_stop();
                 record.deferred_stop_callbacks.clear();
                 if quarantined_exit {
@@ -1181,29 +1968,38 @@ impl AppState {
                 }
                 finish_active_turn_file_change_tracking(record);
                 (
-                    !preserve_automatic_resume_block && !record.queued_prompts.is_empty(),
+                    !record.orchestrator_auto_dispatch_blocked
+                        && !record.queued_prompts.is_empty(),
                     message_updated_delta_parts_for_indices(record, pending_interaction_indices),
                     message_created_delta_parts_for_indices(record, created_message_indices),
+                    exited_mailbox_notification,
                 )
             };
-            let revision = match self.commit_locked(&mut inner) {
-                Ok(revision) => revision,
-                Err(err) => {
+            let commit_result = self.commit_locked(&mut inner);
+            if commit_result.is_err() {
                     let record = inner
                         .session_mut_by_index(index)
                         .expect("session index should be valid");
                     record.orchestrator_auto_dispatch_blocked = true;
                     clear_active_turn_file_change_tracking(record);
-                    return Err(err);
-                }
-            };
+            }
             (
                 has_queued_prompts,
                 pending_interaction_updates,
                 created_messages,
-                revision,
+                exited_mailbox_notification,
+                commit_result,
             )
         };
+        if let Some(notification) = exited_mailbox_notification.as_ref() {
+            if let Err(error) = self.requeue_rejected_mailbox_notification(notification) {
+                eprintln!(
+                    "mailbox> failed restoring the runtime-exited wake for `{}` / `{}`: {error:#}",
+                    notification.session_id, notification.mailbox_id
+                );
+            }
+        }
+        let revision = commit_result?;
         self.publish_message_created_delta_parts(revision, created_messages);
         self.publish_message_updated_delta_parts(revision, pending_interaction_updates);
 

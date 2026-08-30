@@ -843,62 +843,6 @@ impl AppState {
         })
     }
 
-    /// Transitions the session to `SessionStatus::Error` with an
-    /// error message. Distinct
-    /// from `fail_turn_if_runtime_matches` in `src/turn_lifecycle.rs`:
-    /// this variant fires regardless of any `RuntimeToken`, because
-    /// the error source is outside a specific runtime context (e.g.,
-    /// the submission itself failed — the runtime command channel
-    /// rejected our send, or the runtime handle was cleared before
-    /// delivery). A rejected runtime command does not recursively drain the
-    /// queue through the same failed delivery path; a later genuine activation
-    /// or lifecycle callback starts the next queued turn. The
-    /// runtime-token-guarded variant is used from the
-    /// runtime event handlers where stale tokens must silently no-op.
-    fn fail_turn(&self, session_id: &str, error_message: &str) -> Result<()> {
-        self.checkpoint_engram_turn_off_lock(
-            session_id,
-            None,
-            EngramNextIntent::Wait,
-            None,
-        );
-        let cleaned = error_message.trim();
-        if !cleaned.is_empty() {
-            self.push_message(
-                session_id,
-                Message::Text {
-                    attachments: Vec::new(),
-                    id: self.allocate_message_id(),
-                    timestamp: stamp_now(),
-                    author: Author::Assistant,
-                    text: format!("Turn failed: {cleaned}"),
-                    expanded_text: None,
-                    source: None,
-                },
-            )?;
-        }
-
-        {
-            let mut inner = self.inner.lock().expect("state mutex poisoned");
-            let index = inner
-                .find_session_index(session_id)
-                .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
-            let file_change_message_id = (!inner.sessions[index].active_turn_file_changes.is_empty())
-                .then(|| inner.next_message_id());
-            let record = inner
-            .session_mut_by_index(index)
-            .expect("session index should be valid");
-            record.session.status = SessionStatus::Error;
-            record.session.preview = make_preview(cleaned);
-            if let Some(message_id) = file_change_message_id {
-                push_active_turn_file_changes_on_record(record, message_id);
-            }
-            finish_active_turn_file_change_tracking(record);
-            self.commit_locked(&mut inner)?;
-        }
-
-        Ok(())
-    }
 }
 
 /// Maps a user decision only to an ACP option with the same authorization

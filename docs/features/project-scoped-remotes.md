@@ -116,6 +116,13 @@ Session-scoped routes resolve the session's remote mapping:
 - Codex thread actions
 - agent-command discovery
 
+Planned coordination routing (mailboxes and boards) will remain
+control-plane-owned instead of following project or session routing. It is not
+implemented yet: current mailbox eligibility is local-only and rejects
+remote-backed proxies. See
+[Durable agent mailboxes — Planned remote access](agent-mailboxes.md#planned-remote-access)
+for the future placement rule, relay transport, and recovery semantics.
+
 The UI passes canonical local project/session ids. Remote-native ids stay inside
 the backend mapping layer.
 
@@ -229,7 +236,9 @@ operations.
 ## Non-goals
 
 - Browser connections directly to remote servers
-- Multi-user collaboration semantics
+- Multi-user collaboration semantics (planned single-user cross-machine mailbox
+  coordination remains in scope — see
+  [Durable agent mailboxes — Planned remote access](agent-mailboxes.md#planned-remote-access))
 - Relay-hosted auth and machine registration
 - Cross-remote session migration
 - A global merged filesystem or git workspace across remotes

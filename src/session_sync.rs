@@ -503,6 +503,7 @@ impl AppState {
         &self,
         session_id: &str,
         token: &RuntimeToken,
+        active_turn_generation: u64,
         sandbox_mode: CodexSandboxMode,
         approval_policy: CodexApprovalPolicy,
         reasoning_effort: CodexReasoningEffort,
@@ -514,7 +515,9 @@ impl AppState {
         let record = inner
             .session_mut_by_index(index)
             .expect("session index should be valid");
-        if !record.runtime.matches_runtime_token(token) {
+        if !record.runtime.matches_runtime_token(token)
+            || record.active_turn_generation != active_turn_generation
+        {
             return Ok(RuntimeMatchOutcome::RuntimeMismatch);
         }
         record.active_codex_sandbox_mode = Some(sandbox_mode);

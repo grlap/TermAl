@@ -10,8 +10,8 @@
 // preview string is computed for the sidebar.
 //
 // Covers:
-// - Pending-request housekeeping: `has_pending_requests`,
-//   `clear_all_pending_requests`
+// - Pending-request housekeeping: production `clear_all_pending_requests`
+//   plus the test-only `has_pending_requests` assertion helper
 // - Agent command merge/dedupe: `merge_agent_commands`, `dedupe_agent_commands`
 // - Codex thread state: `normalized_codex_thread_state`,
 //   `sync_codex_thread_state`, `set_record_codex_thread_state`,
@@ -35,7 +35,8 @@
 // Extracted from state.rs so state.rs can stay focused on `StateInner`
 // + commit_locked() + SSE broadcasting.
 
-/// Returns whether pending requests.
+/// Returns whether pending requests for test assertions.
+#[cfg(test)]
 fn has_pending_requests(record: &SessionRecord) -> bool {
     !record.pending_claude_approvals.is_empty()
         || !record.pending_claude_user_inputs.is_empty()

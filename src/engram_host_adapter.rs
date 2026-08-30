@@ -17,7 +17,13 @@ const ENGRAM_DISPATCH_BUDGET_MS: u64 = 600;
 // writer lock. Bound each command in the two-command focus read above that
 // healthy contention window; a timeout or lock error remains an error, never
 // `None`.
+#[cfg(not(test))]
 const ENGRAM_WORK_BINDING_COMMAND_TIMEOUT: Duration = Duration::from_secs(6);
+// The Rust suite spawns many fixture processes concurrently. Preserve the
+// production lock-contention deadline while giving test subprocess scheduling
+// enough headroom under full-suite load.
+#[cfg(test)]
+const ENGRAM_WORK_BINDING_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 const ENGRAM_WORK_BINDING_LOCK_RETRY_DELAY: Duration = Duration::from_millis(250);
 const ENGRAM_BOOT_RECOVERY_CONCURRENCY: usize = 8;
 const ENGRAM_CONTROL_MAX_FRAME_BYTES: usize = 256 * 1_024;
@@ -2674,6 +2680,7 @@ impl AppState {
         &self,
         session_id: &str,
         runtime_token: Option<&RuntimeToken>,
+        active_turn_generation: Option<u64>,
         next_intent: EngramNextIntent,
         project_reset_owner_generation: Option<u64>,
     ) {
@@ -2685,6 +2692,11 @@ impl AppState {
             if runtime_token
                 .is_some_and(|token| !inner.sessions[index].runtime.matches_runtime_token(token))
             {
+                return;
+            }
+            if active_turn_generation.is_some_and(|generation| {
+                inner.sessions[index].active_turn_generation != generation
+            }) {
                 return;
             }
             if runtime_token.is_some() && inner.sessions[index].runtime_stop_in_progress {
@@ -2915,6 +2927,7 @@ impl AppState {
         &self,
         session_id: &str,
         runtime_token: &RuntimeToken,
+        active_turn_generation: Option<u64>,
     ) {
         let next_intent = {
             let inner = self.inner.lock().expect("state mutex poisoned");
@@ -2930,6 +2943,7 @@ impl AppState {
         self.checkpoint_engram_turn_off_lock(
             session_id,
             Some(runtime_token),
+            active_turn_generation,
             next_intent,
             None,
         );

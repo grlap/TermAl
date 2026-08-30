@@ -449,6 +449,7 @@ fn push_message_on_record(record: &mut SessionRecord, message: Message) -> usize
 
 /// Keeps a short post-turn window for watcher events that arrive after completion.
 fn finish_active_turn_file_change_tracking(record: &mut SessionRecord) {
+    record.active_turn_mailbox_notification = None;
     if record.active_turn_start_message_count.take().is_some() {
         record.active_turn_file_change_grace_deadline =
             Some(std::time::Instant::now() + ACTIVE_TURN_FILE_CHANGE_GRACE);
@@ -469,6 +470,7 @@ fn finish_active_turn_file_change_tracking(record: &mut SessionRecord) {
 /// a failed persistence step rolled back the terminal message that would have
 /// owned the summary.
 fn clear_active_turn_file_change_tracking(record: &mut SessionRecord) {
+    record.active_turn_mailbox_notification = None;
     record.active_turn_start_message_count = None;
     record.active_turn_file_changes.clear();
     record.active_turn_file_change_grace_deadline = None;

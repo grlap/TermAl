@@ -35,6 +35,8 @@ fn record_rejected_turn_dispatch(
     error_message: &str,
     mailbox_notification: Option<&MailboxNotificationDelivery>,
     engram_dispatch_generation: Option<u64>,
+    runtime_token: &RuntimeToken,
+    active_turn_generation: u64,
 ) -> bool {
     if let Some(dispatch_generation) = engram_dispatch_generation {
         match state.reject_engram_turn_delivery_if_current(
@@ -49,13 +51,28 @@ fn record_rejected_turn_dispatch(
             ),
         }
     } else {
-        if let Err(err) = state.clear_runtime(session_id) {
-            eprintln!(
-                "turn dispatch> failed clearing rejected runtime for `{session_id}`: {err:#}"
-            );
-        }
-        if let Err(err) = state.fail_turn(session_id, error_message) {
-            eprintln!("turn dispatch> failed recording rejection for `{session_id}`: {err:#}");
+        match state.fail_rejected_turn_delivery(
+            session_id,
+            runtime_token,
+            active_turn_generation,
+            error_message,
+        ) {
+            Ok(true) => {}
+            // A false guard means a newer runtime/turn or an already-claimed
+            // terminalization owns the record. That owner still holds the
+            // record's exact active mailbox boundary and is responsible for
+            // restoring it; requeueing this stale dispatch here could
+            // duplicate the successor wake.
+            Ok(false) => return false,
+            Err(err) => {
+                eprintln!("turn dispatch> failed recording rejection for `{session_id}`: {err:#}");
+                // The terminal transaction may have mutated the in-memory
+                // record before persistence failed, including taking the
+                // active mailbox boundary. The dispatch still owns its exact
+                // boundary, so restore it below just as the pre-atomic path
+                // did; boot recovery remains the durable fallback if this
+                // requeue cannot persist either.
+            }
         }
     }
     if let Some(notification) = mailbox_notification {
@@ -71,6 +88,8 @@ fn record_rejected_turn_dispatch(
 
 /// Delivers turn dispatch.
 fn deliver_turn_dispatch(state: &AppState, dispatch: TurnDispatch) -> Result<(), ApiError> {
+    let active_turn_generation = dispatch.active_turn_generation();
+    let runtime_token = dispatch.runtime_token().clone();
     if let Some(dispatch_generation) = dispatch.engram_dispatch_generation() {
         match state.prepare_engram_turn_delivery_off_lock(
             dispatch.session_id(),
@@ -88,6 +107,8 @@ fn deliver_turn_dispatch(state: &AppState, dispatch: TurnDispatch) -> Result<(),
                     error_message,
                     mailbox_notification.as_ref(),
                     Some(dispatch_generation),
+                    &runtime_token,
+                    active_turn_generation,
                 );
                 return if rejected {
                     Err(ApiError::conflict(error_message))
@@ -99,9 +120,11 @@ fn deliver_turn_dispatch(state: &AppState, dispatch: TurnDispatch) -> Result<(),
     }
     let mailbox_notification = match dispatch {
         TurnDispatch::PersistentClaude {
+            active_turn_generation: _,
             command,
             engram_dispatch_generation: _,
             mailbox_notification,
+            runtime_token: _,
             sender,
             session_id,
         } => {
@@ -112,6 +135,8 @@ fn deliver_turn_dispatch(state: &AppState, dispatch: TurnDispatch) -> Result<(),
                     &format!("failed to queue prompt for Claude session: {err}"),
                     mailbox_notification.as_ref(),
                     None,
+                    &runtime_token,
+                    active_turn_generation,
                 );
                 return Err(ApiError::internal(
                     "failed to queue prompt for Claude session",
@@ -120,9 +145,11 @@ fn deliver_turn_dispatch(state: &AppState, dispatch: TurnDispatch) -> Result<(),
             mailbox_notification
         }
         TurnDispatch::PersistentCodex {
+            active_turn_generation: _,
             command,
             engram_dispatch_generation: _,
             mailbox_notification,
+            runtime_token: _,
             sender,
             session_id,
         } => {
@@ -136,6 +163,8 @@ fn deliver_turn_dispatch(state: &AppState, dispatch: TurnDispatch) -> Result<(),
                     &format!("failed to queue prompt for Codex session: {err}"),
                     mailbox_notification.as_ref(),
                     None,
+                    &runtime_token,
+                    active_turn_generation,
                 );
                 return Err(ApiError::internal(
                     "failed to queue prompt for Codex session",
@@ -144,9 +173,11 @@ fn deliver_turn_dispatch(state: &AppState, dispatch: TurnDispatch) -> Result<(),
             mailbox_notification
         }
         TurnDispatch::PersistentAcp {
+            active_turn_generation: _,
             command,
             engram_dispatch_generation: _,
             mailbox_notification,
+            runtime_token: _,
             sender,
             session_id,
             turn_lifecycle,
@@ -164,6 +195,8 @@ fn deliver_turn_dispatch(state: &AppState, dispatch: TurnDispatch) -> Result<(),
                     &format!("failed to queue prompt for ACP session: {err}"),
                     mailbox_notification.as_ref(),
                     None,
+                    &runtime_token,
+                    active_turn_generation,
                 );
                 return Err(ApiError::internal(
                     "failed to queue prompt for agent session",

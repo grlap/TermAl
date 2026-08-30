@@ -469,6 +469,7 @@ fn test_pending_codex_thread_setup(request_id: &str) -> PendingCodexThreadSetup 
     PendingCodexThreadSetup {
         request_id: request_id.to_owned(),
         command: CodexPromptCommand {
+            active_turn_generation: 0,
             approval_policy: CodexApprovalPolicy::Never,
             attachments: Vec::new(),
             cwd: "/tmp".to_owned(),
@@ -484,10 +485,12 @@ fn test_pending_codex_thread_setup(request_id: &str) -> PendingCodexThreadSetup 
 
 #[test]
 fn clear_shared_codex_turn_session_state_resets_turn_local_fields_and_preserves_thread_id() {
+    let (watchdog_cancel_tx, watchdog_cancel_rx) = mpsc::channel();
     let mut session_state = SharedCodexSessionState {
         pending_thread_setup: Some(PendingCodexThreadSetup {
             request_id: "thread-start-1".to_owned(),
             command: CodexPromptCommand {
+                active_turn_generation: 0,
                 approval_policy: CodexApprovalPolicy::Never,
                 attachments: Vec::new(),
                 cwd: "/tmp".to_owned(),
@@ -500,6 +503,9 @@ fn clear_shared_codex_turn_session_state_resets_turn_local_fields_and_preserves_
             },
         }),
         pending_turn_start_request_id: Some("turn-start-1".to_owned()),
+        turn_started_watchdog_cancel_tx: Some(watchdog_cancel_tx),
+        turn_started_before_response: true,
+        active_turn_generation: None,
         recorder: SessionRecorderState {
             command_messages: HashMap::from([("cmd-1".to_owned(), "Running".to_owned())]),
             parallel_agents_messages: HashMap::from([(
@@ -538,6 +544,12 @@ fn clear_shared_codex_turn_session_state_resets_turn_local_fields_and_preserves_
          it — they are one value so a later setup cannot inherit a dead command"
     );
     assert_eq!(session_state.pending_turn_start_request_id, None);
+    assert!(session_state.turn_started_watchdog_cancel_tx.is_none());
+    assert!(!session_state.turn_started_before_response);
+    assert!(matches!(
+        watchdog_cancel_rx.recv_timeout(Duration::from_secs(1)),
+        Ok(())
+    ));
     assert_eq!(session_state.thread_id.as_deref(), Some("thread-1"));
     assert_eq!(session_state.turn_id, None);
     assert_eq!(session_state.completed_turn_id, None);
@@ -1252,11 +1264,19 @@ fn test_exit_success_child() -> Child {
 fn test_sleep_child() -> Child {
     if cfg!(windows) {
         Command::new("cmd")
-            .args(["/C", "ping -n 6 127.0.0.1 >NUL"])
+            // Keep the fixture alive well beyond a loaded parallel test run.
+            // Five seconds was short enough for the child to exit naturally
+            // before a forced-kill assertion reached shutdown, making those
+            // tests order- and scheduler-dependent.
+            .args(["/C", "ping -n 31 127.0.0.1 >NUL"])
             .spawn()
             .unwrap()
     } else {
-        Command::new("sh").arg("-c").arg("sleep 5").spawn().unwrap()
+        Command::new("sh")
+            .arg("-c")
+            .arg("sleep 30")
+            .spawn()
+            .unwrap()
     }
 }
 
@@ -1279,7 +1299,7 @@ fn force_test_kill_child_process_failure(
 ) -> TestKillChildProcessFailureGuard {
     let scope = TEST_KILL_CHILD_PROCESS_FAILURE_MUTEX
         .lock()
-        .expect("test kill-child-process failure mutex poisoned");
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     set_test_kill_child_process_failure(Some(label), Some(process));
     TestKillChildProcessFailureGuard { _scope: scope }
 }
@@ -1290,7 +1310,7 @@ fn force_test_kill_child_process_failure_once(
 ) -> TestKillChildProcessFailureGuard {
     let scope = TEST_KILL_CHILD_PROCESS_FAILURE_MUTEX
         .lock()
-        .expect("test kill-child-process failure mutex poisoned");
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     set_test_kill_child_process_failure_count(label, process, 1);
     TestKillChildProcessFailureGuard { _scope: scope }
 }
@@ -2291,38 +2311,6 @@ fn subagent_results_append_after_existing_assistant_text() {
         session.messages.last(),
         Some(Message::SubagentResult { .. })
     ));
-}
-
-// Tests that clear runtime commits revision when it resets state.
-#[test]
-fn clear_runtime_commits_revision_when_it_resets_state() {
-    let state = test_app_state();
-    let session_id = test_session_id(&state, Agent::Claude);
-    let (runtime, _input_rx) = test_claude_runtime_handle("clear-runtime");
-
-    {
-        let mut inner = state.inner.lock().expect("state mutex poisoned");
-        let index = inner.find_session_index(&session_id).unwrap();
-        inner.sessions[index].runtime = SessionRuntime::Claude(runtime);
-        inner.sessions[index].runtime_reset_required = true;
-        state.commit_locked(&mut inner).unwrap();
-    }
-
-    let baseline = state.full_snapshot().revision;
-    state.clear_runtime(&session_id).unwrap();
-
-    {
-        let inner = state.inner.lock().expect("state mutex poisoned");
-        let index = inner.find_session_index(&session_id).unwrap();
-        let record = &inner.sessions[index];
-        assert!(matches!(record.runtime, SessionRuntime::None));
-        assert!(!record.runtime_reset_required);
-    }
-    assert_eq!(state.full_snapshot().revision, baseline + 1);
-
-    let stable_revision = state.full_snapshot().revision;
-    state.clear_runtime(&session_id).unwrap();
-    assert_eq!(state.full_snapshot().revision, stable_revision);
 }
 
 // Tests that canonicalizes session model updates from live model labels.

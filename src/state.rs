@@ -1035,12 +1035,13 @@ struct StopSessionOptions {
 enum RuntimeStopOwnerKind {
     UserStop,
     EngramMcpRevocation,
+    LostRuntimeTerminalization,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct RuntimeStopOwner {
     kind: RuntimeStopOwnerKind,
-    token: RuntimeToken,
+    token: Option<RuntimeToken>,
     generation: u64,
 }
 
@@ -1536,6 +1537,14 @@ struct SessionRecord {
     active_codex_approval_policy: Option<CodexApprovalPolicy>,
     active_codex_reasoning_effort: Option<CodexReasoningEffort>,
     active_codex_sandbox_mode: Option<CodexSandboxMode>,
+    /// Process-local identity of the currently active turn. Incremented for
+    /// every dispatch so asynchronous callbacks cannot mistake a successor
+    /// turn on the same shared runtime for the turn that armed them.
+    active_turn_generation: u64,
+    /// Exact durable mailbox boundary represented by the active turn, if any.
+    /// Failure/Stop recovery takes this value before draining the next queued
+    /// turn so it never requeues a successor's delivery.
+    active_turn_mailbox_notification: Option<MailboxNotificationDelivery>,
     active_turn_start_message_count: Option<usize>,
     active_turn_file_changes: BTreeMap<String, WorkspaceFileChangeKind>,
     active_turn_file_change_grace_deadline: Option<std::time::Instant>,
@@ -1599,10 +1608,11 @@ struct SessionRecord {
     /// successful Stop has no runtime left to revoke, while a failed Stop
     /// transfers its fence directly to the revocation teardown.
     engram_mcp_revocation_pending: bool,
-    /// Terminal callbacks deferred while `runtime_stop_in_progress` was true. Replayed in arrival
-    /// order on dedicated stop failure so the session doesn't get stuck in a stale Active state or
-    /// reconstruct the wrong terminal sequence when completion/error and runtime-exit both land
-    /// during the shutdown window.
+    /// Terminal callbacks deferred while `runtime_stop_in_progress` was true. Each callback keeps
+    /// the active-turn generation it observed so replay cannot land on a successor turn that reused
+    /// the same persistent runtime token. Replayed in arrival order on dedicated stop failure so the
+    /// session doesn't get stuck in a stale Active state or reconstruct the wrong terminal sequence
+    /// when completion/error and runtime-exit both land during the shutdown window.
     deferred_stop_callbacks: Vec<DeferredStopCallback>,
     /// Host-private Engram binding and open-turn state. It is persisted in the
     /// session row but never copied onto the wire-level `Session`.
@@ -1644,7 +1654,22 @@ impl SessionRecord {
         self.runtime_stop_in_progress = true;
         self.runtime_stop_owner = Some(RuntimeStopOwner {
             kind,
-            token,
+            token: Some(token),
+            generation,
+        });
+        generation
+    }
+
+    /// Claims stop ownership for a session whose runtime handle has already
+    /// disappeared. The generation fences the off-lock cleanup without
+    /// fabricating an agent-specific runtime token.
+    fn claim_missing_runtime_stop(&mut self, kind: RuntimeStopOwnerKind) -> u64 {
+        self.runtime_stop_generation = self.runtime_stop_generation.wrapping_add(1).max(1);
+        let generation = self.runtime_stop_generation;
+        self.runtime_stop_in_progress = true;
+        self.runtime_stop_owner = Some(RuntimeStopOwner {
+            kind,
+            token: None,
             generation,
         });
         generation
@@ -1663,7 +1688,20 @@ impl SessionRecord {
         generation: u64,
     ) -> bool {
         self.runtime_stop_owner.as_ref().is_some_and(|owner| {
-            owner.kind == kind && owner.token == *token && owner.generation == generation
+            owner.kind == kind
+                && owner.token.as_ref() == Some(token)
+                && owner.generation == generation
+        })
+    }
+
+
+    fn missing_runtime_stop_is_owned_by(
+        &self,
+        kind: RuntimeStopOwnerKind,
+        generation: u64,
+    ) -> bool {
+        self.runtime_stop_owner.as_ref().is_some_and(|owner| {
+            owner.kind == kind && owner.token.is_none() && owner.generation == generation
         })
     }
 

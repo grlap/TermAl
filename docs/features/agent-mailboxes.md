@@ -18,6 +18,8 @@ Both durable coordination surfaces live in the isolated database described by
 a required sender-supplied `idempotencyKey`.
 
 1. TermAl resolves and validates both participants as local root sessions.
+   Remote-backed root proxies remain outside the shipped eligibility rule; see
+   [Planned remote access](#planned-remote-access).
 2. The body is committed to SQLite with the next dense mailbox sequence.
 3. Only after commit, TermAl best-effort wakes the receiver with mailbox
    metadata (mailbox id, latest sequence, and unread count).
@@ -92,7 +94,15 @@ The wake-up prompt is not the message. If wake-up fails, the committed message
 remains available and its receipt reports `durableButNotWoken`. Before ordinary
 local dispatch, TermAl restores never-woken notifications. If a materialized
 recovery wake is rejected by a runtime command channel, that exact mailbox wake
-is requeued without recursively draining the failed session's prompt queue. At
+is requeued without recursively draining the failed session's prompt queue. The
+same exact-delivery rule applies when a runtime accepts the command but the turn
+later fails or is explicitly stopped: TermAl records the mailbox boundary on
+that active turn, restores it before draining any successor prompt, and never
+uses a session-wide recovery scan that could duplicate a newer delivery. At
+that point automatic dispatch is paused until an explicit user resume or a new
+user action explicitly recovers the queue. This keeps a poisoned mailbox wake
+from looping and intentionally pauses all already-queued work behind it,
+including user prompts as well as automatic work. At
 boot, TermAl performs one broader pass over every unread inbound mailbox so a
 previously delivered notification whose agent turn died in the crash is not
 stranded.
@@ -200,6 +210,67 @@ Acknowledgement is a forward-only compare-and-swap:
   progress when the requested cursor has not already been reached. Replaying
   an acknowledgement whose `processedThrough` is already satisfied succeeds
   idempotently, which recovers a commit whose response was lost.
+
+## Planned remote access
+
+Mailboxes are control-plane state with exactly one durable authority. A
+mailbox is never duplicated, mirrored, or merged across machines: it lives in
+the `coordination.sqlite` of the control-plane host that accepted its first
+send, and every later operation — list, read, acknowledgement, recovery —
+happens against that one store.
+
+For the planned deployment shape — one control-plane host (the server the
+browser talks to) plus SSH-attached executor remotes described in
+[Project-scoped remotes](project-scoped-remotes.md) — that rule will resolve to:
+**all mailboxes live on the control-plane host**. Remote-backed sessions are
+local proxy records with local ids on that host, so participation,
+dense sequencing, idempotency, wake recovery, and the compare-and-swap cursor
+contract are unchanged; participant rows simply reference root sessions whose
+runtimes execute elsewhere.
+
+This section is a design contract, not shipped behavior. Today mailbox
+eligibility remains local-only and remote-backed proxies are rejected. The
+eligibility and relay changes below must land together before this section can
+be promoted to the runtime contract.
+
+What remote participation changes:
+
+- **Eligibility.** Root eligibility extends from local root sessions to
+  control-plane-visible root sessions, including remote-backed proxy records.
+  Delegation children remain excluded on every host. The list, read,
+  exact-message-read, and acknowledgement routes keep rejecting hidden
+  sessions and delegation children with `400`; they stop rejecting
+  remote-backed roots.
+- **Wakes.** A wake targeting a remote-backed participant travels the existing
+  session-scoped proxy route used for ordinary prompts. Wake delivery remains
+  best-effort metadata: if the remote is unreachable, the message stays
+  committed with `durableButNotWoken` and the receipt says so. Reconnecting a
+  remote runs the same recovery pass boot performs, restoring never-woken
+  wakes for that remote's proxy participants.
+- **Reads and acknowledgements from the remote side.** The agent's MCP bridge
+  keeps talking to its own local server. A remote server configured with a
+  coordination upstream relays mailbox and board routes verbatim to the
+  control-plane host instead of serving them from its own store, and holds no
+  mailbox state for relayed traffic. The control-plane host provides the
+  upstream address when it establishes the SSH connection, as a reverse
+  forward of its API port; managed startup passes that upstream to the remote
+  server. A remote server without an upstream — a standalone machine used
+  directly — keeps serving its own local mailboxes. The placement rule, not
+  special cases, decides which store owns a mailbox.
+- **Authority.** Relayed coordination requests carry the same pinned
+  remote-lease semantics as other proxied routes; a retired or replaced
+  connection rejects in-flight relays with the standard retryable `409`
+  instead of retargeting them.
+- **Trust.** This stays inside the single-user trust model: one operator's
+  machines over that operator's SSH. It is not multi-user federation. If
+  mailboxes ever cross a user boundary, the diagnostic normalization
+  requirement at the end of this document applies: missing, self, and
+  ineligible target failures must collapse into one generic error.
+
+Out of scope: hub-to-hub federation (two full control planes exchanging
+mailboxes), replication, and offline merge. A mailbox has one home; a machine
+that cannot reach it reads nothing and sends nothing until connectivity
+returns.
 
 ## Foundation scope
 

@@ -90,6 +90,7 @@ enum CodexRuntimeCommand {
 /// Represents a Codex prompt command.
 #[derive(Clone)]
 struct CodexPromptCommand {
+    active_turn_generation: u64,
     approval_policy: CodexApprovalPolicy,
     attachments: Vec<PromptImageAttachment>,
     cwd: String,
@@ -540,23 +541,29 @@ struct MailboxNotificationDelivery {
 /// Defines the turn dispatch variants.
 enum TurnDispatch {
     PersistentClaude {
+        active_turn_generation: u64,
         command: ClaudePromptCommand,
         engram_dispatch_generation: Option<u64>,
         mailbox_notification: Option<MailboxNotificationDelivery>,
+        runtime_token: RuntimeToken,
         sender: Sender<ClaudeRuntimeCommand>,
         session_id: String,
     },
     PersistentCodex {
+        active_turn_generation: u64,
         command: CodexPromptCommand,
         engram_dispatch_generation: Option<u64>,
         mailbox_notification: Option<MailboxNotificationDelivery>,
+        runtime_token: RuntimeToken,
         sender: Sender<CodexRuntimeCommand>,
         session_id: String,
     },
     PersistentAcp {
+        active_turn_generation: u64,
         command: AcpPromptCommand,
         engram_dispatch_generation: Option<u64>,
         mailbox_notification: Option<MailboxNotificationDelivery>,
+        runtime_token: RuntimeToken,
         sender: Sender<AcpRuntimeCommand>,
         session_id: String,
         turn_lifecycle: AcpTurnLifecycle,
@@ -586,6 +593,31 @@ impl TurnDispatch {
                 engram_dispatch_generation,
                 ..
             } => *engram_dispatch_generation,
+        }
+    }
+
+    fn active_turn_generation(&self) -> u64 {
+        match self {
+            Self::PersistentClaude {
+                active_turn_generation,
+                ..
+            }
+            | Self::PersistentCodex {
+                active_turn_generation,
+                ..
+            }
+            | Self::PersistentAcp {
+                active_turn_generation,
+                ..
+            } => *active_turn_generation,
+        }
+    }
+
+    fn runtime_token(&self) -> &RuntimeToken {
+        match self {
+            Self::PersistentClaude { runtime_token, .. }
+            | Self::PersistentCodex { runtime_token, .. }
+            | Self::PersistentAcp { runtime_token, .. } => runtime_token,
         }
     }
 
@@ -796,6 +828,12 @@ struct PendingCodexThreadSetup {
 struct SharedCodexSessionState {
     pending_thread_setup: Option<PendingCodexThreadSetup>,
     pending_turn_start_request_id: Option<String>,
+    turn_started_watchdog_cancel_tx: Option<mpsc::Sender<()>>,
+    /// An id-less `turn/started` can overtake the matching `turn/start`
+    /// response on the reader thread. Keep that proof until the response
+    /// waiter installs the response-derived turn id.
+    turn_started_before_response: bool,
+    active_turn_generation: Option<u64>,
     recorder: SessionRecorderState,
     thread_id: Option<String>,
     turn_id: Option<String>,

@@ -99,6 +99,19 @@ fn trace_shared_codex_event(
     );
 }
 
+/// Clears one armed turn-start marker and wakes its waiter immediately.
+/// Terminal events must not leave the waiter parked until the watchdog
+/// deadline, while retryable connectivity errors deliberately keep it armed.
+fn cancel_shared_codex_turn_started_watchdog(
+    pending_turn_start_request_id: &mut Option<String>,
+    turn_started_watchdog_cancel_tx: &mut Option<mpsc::Sender<()>>,
+) {
+    *pending_turn_start_request_id = None;
+    if let Some(cancel_tx) = turn_started_watchdog_cancel_tx.take() {
+        let _ = cancel_tx.send(());
+    }
+}
+
 fn try_auto_respond_delegation_control_plane_request(
     method: &str,
     message: &Value,
@@ -337,6 +350,9 @@ fn handle_shared_codex_app_server_message(
     let SharedCodexSessionState {
         pending_thread_setup: _,
         pending_turn_start_request_id,
+        turn_started_watchdog_cancel_tx,
+        turn_started_before_response,
+        active_turn_generation: _,
         recorder: recorder_state,
         thread_id,
         turn_id,
@@ -347,10 +363,61 @@ fn handle_shared_codex_app_server_message(
     let turn_started_turn_id = (method == "turn/started")
         .then(|| message.pointer("/params/turn/id").and_then(Value::as_str))
         .flatten();
-    if method == "turn/started" && turn_started_turn_id != turn_id.as_deref() {
+    if method == "turn/started"
+        && turn_started_turn_id.is_none()
+        && turn_id.is_none()
+        && pending_turn_start_request_id.is_none()
+    {
+        trace_shared_codex_event(
+            "drop",
+            method,
+            Some(&session_id),
+            thread_id.as_deref().or(message_thread_id),
+            None,
+            turn_id.as_deref(),
+            completed_turn_id.as_deref(),
+            Some(*turn_started),
+            pending_turn_start_request_id.as_deref(),
+            Some("turn_started_missing_turn_id"),
+        );
+        return Ok(());
+    }
+    if method != "turn/started"
+        && *turn_started_before_response
+        && turn_id.is_none()
+        && event_turn_id.is_some()
+    {
+        // The first turn-scoped event can race ahead of the response waiter
+        // too. Its id belongs to the sole armed request and is safe to adopt;
+        // doing so keeps approvals and item events routable in that window.
+        *turn_id = event_turn_id.map(str::to_owned);
+    }
+    if method == "turn/started"
+        && pending_turn_start_request_id.is_some()
+        && turn_id.is_some()
+        && turn_started_turn_id.is_some()
+        && turn_started_turn_id != turn_id.as_deref()
+    {
+        trace_shared_codex_event(
+            "drop",
+            method,
+            Some(&session_id),
+            thread_id.as_deref().or(message_thread_id),
+            turn_started_turn_id,
+            turn_id.as_deref(),
+            completed_turn_id.as_deref(),
+            Some(*turn_started),
+            pending_turn_start_request_id.as_deref(),
+            Some("turn_started_does_not_match_armed_response"),
+        );
+        return Ok(());
+    }
+    if method == "turn/started"
+        && turn_started_turn_id.is_some()
+        && turn_started_turn_id != turn_id.as_deref()
+    {
         clear_shared_codex_turn_recorder_state(recorder_state);
         clear_codex_turn_state(turn_state);
-        *pending_turn_start_request_id = None;
         *completed_turn_id = None;
         *turn_started = false;
     }
@@ -413,6 +480,8 @@ fn handle_shared_codex_app_server_message(
         completed_turn_id,
         turn_started,
         pending_turn_start_request_id,
+        turn_started_watchdog_cancel_tx,
+        turn_started_before_response,
         turn_state,
         thread_sessions,
         &mut recorder,
@@ -441,6 +510,8 @@ fn handle_shared_codex_app_server_notification(
     completed_turn_id: &mut Option<String>,
     turn_started: &mut bool,
     pending_turn_start_request_id: &mut Option<String>,
+    turn_started_watchdog_cancel_tx: &mut Option<mpsc::Sender<()>>,
+    turn_started_before_response: &mut bool,
     turn_state: &mut CodexTurnState,
     thread_sessions: &SharedCodexThreadMap,
     recorder: &mut impl TurnRecorder,
@@ -449,10 +520,16 @@ fn handle_shared_codex_app_server_notification(
         "thread/started" => {
             if let Some(thread_id) = message.pointer("/params/thread/id").and_then(Value::as_str) {
                 let previous_thread_id = session_thread_id.replace(thread_id.to_owned());
-                *turn_id = None;
-                *completed_turn_id = None;
-                *turn_started = false;
-                *pending_turn_start_request_id = None;
+                // `thread/started` and the turn/start response travel on
+                // independent app-server channels. A late thread event must
+                // not erase an already armed turn/started watchdog; only the
+                // matching `turn/started` notification proves the turn began.
+                if pending_turn_start_request_id.is_none() && !*turn_started {
+                    *turn_id = None;
+                    *completed_turn_id = None;
+                    *turn_started = false;
+                    *turn_started_before_response = false;
+                }
                 let mut thread_sessions = thread_sessions
                     .lock()
                     .expect("shared Codex thread mutex poisoned");
@@ -481,14 +558,64 @@ fn handle_shared_codex_app_server_notification(
             )?;
         }
         "turn/started" => {
-            let next_turn_id = message.pointer("/params/turn/id").and_then(Value::as_str);
-            let turn_changed = turn_id.as_deref() != next_turn_id;
+            let event_turn_id = message
+                .pointer("/params/turn/id")
+                .and_then(Value::as_str);
+            if event_turn_id.is_none()
+                && turn_id.is_none()
+                && pending_turn_start_request_id.is_some()
+            {
+                // The reader can observe this notification on either side of
+                // the waiter receiving the immediately preceding JSON-RPC
+                // response. An armed cancel sender means the response already
+                // arrived, so this notification completes the handshake now.
+                // Otherwise retain the proof for the response waiter to
+                // reconcile without losing the sole request identity.
+                *completed_turn_id = None;
+                *turn_started = true;
+                let response_already_arrived = turn_started_watchdog_cancel_tx.is_some();
+                *turn_started_before_response = !response_already_arrived;
+                if response_already_arrived {
+                    cancel_shared_codex_turn_started_watchdog(
+                        pending_turn_start_request_id,
+                        turn_started_watchdog_cancel_tx,
+                    );
+                }
+                trace_shared_codex_event(
+                    "turn_started",
+                    method,
+                    Some(session_id),
+                    session_thread_id.as_deref(),
+                    None,
+                    None,
+                    completed_turn_id.as_deref(),
+                    Some(*turn_started),
+                    pending_turn_start_request_id.as_deref(),
+                    Some(if response_already_arrived {
+                        "after_response_without_id"
+                    } else {
+                        "before_response_without_id"
+                    }),
+                );
+                return Ok(());
+            }
+            // Some app-server builds omit the id from `turn/started` after
+            // returning it in the matching `turn/start` response. There is
+            // only one armed request per session, so the response-derived id
+            // is the exact fallback. A non-empty mismatched event id was
+            // rejected above and never reaches this branch.
+            let next_turn_id = message
+                .pointer("/params/turn/id")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+                .or_else(|| turn_id.clone());
+            let turn_changed = turn_id.as_ref() != next_turn_id.as_ref();
             trace_shared_codex_event(
                 "turn_started",
                 method,
                 Some(session_id),
                 session_thread_id.as_deref(),
-                next_turn_id,
+                next_turn_id.as_deref(),
                 turn_id.as_deref(),
                 completed_turn_id.as_deref(),
                 Some(*turn_started),
@@ -499,15 +626,48 @@ fn handle_shared_codex_app_server_notification(
                     Some("same_turn")
                 },
             );
-            *turn_id = next_turn_id.map(str::to_owned);
+            *turn_id = next_turn_id;
             *completed_turn_id = None;
             *turn_started = true;
-            *pending_turn_start_request_id = None;
+            *turn_started_before_response = false;
+            cancel_shared_codex_turn_started_watchdog(
+                pending_turn_start_request_id,
+                turn_started_watchdog_cancel_tx,
+            );
             if turn_changed {
                 recorder.finish_streaming_text()?;
             }
         }
         "turn/completed" => {
+            let event_turn_id = shared_codex_event_turn_id(message);
+            let (terminal_event_matches, terminal_turn_id) =
+                match (turn_id.as_deref(), event_turn_id) {
+                    (Some(active), Some(event)) if active != event => (false, None),
+                    (Some(active), _) => (true, Some(active.to_owned())),
+                    (None, Some(event)) => (true, Some(event.to_owned())),
+                    // A turn-scoped terminal notification without an id is
+                    // unambiguous only after `turn/started` proved that the
+                    // sole armed turn is active. This covers both fully id-less
+                    // app-server builds and start+completion overtaking the
+                    // `turn/start` response waiter.
+                    (None, None) if *turn_started => (true, None),
+                    (None, None) => (false, None),
+                };
+            if !terminal_event_matches {
+                trace_shared_codex_event(
+                    "drop",
+                    method,
+                    Some(session_id),
+                    session_thread_id.as_deref(),
+                    event_turn_id,
+                    turn_id.as_deref(),
+                    completed_turn_id.as_deref(),
+                    Some(*turn_started),
+                    pending_turn_start_request_id.as_deref(),
+                    Some("turn_completed_not_active_turn"),
+                );
+                return Ok(());
+            };
             if let Some(error) = message.pointer("/params/turn/error") {
                 if !error.is_null() {
                     trace_shared_codex_event(
@@ -515,7 +675,7 @@ fn handle_shared_codex_app_server_notification(
                         method,
                         Some(session_id),
                         session_thread_id.as_deref(),
-                        shared_codex_event_turn_id(message),
+                        event_turn_id,
                         turn_id.as_deref(),
                         completed_turn_id.as_deref(),
                         Some(*turn_started),
@@ -525,7 +685,11 @@ fn handle_shared_codex_app_server_notification(
                     *turn_id = None;
                     *completed_turn_id = None;
                     *turn_started = false;
-                    *pending_turn_start_request_id = None;
+                    *turn_started_before_response = false;
+                    cancel_shared_codex_turn_started_watchdog(
+                        pending_turn_start_request_id,
+                        turn_started_watchdog_cancel_tx,
+                    );
                     clear_codex_turn_state(turn_state);
                     recorder.reset_turn_state()?;
                     state.fail_turn_if_runtime_matches(
@@ -542,22 +706,21 @@ fn handle_shared_codex_app_server_notification(
                 method,
                 Some(session_id),
                 session_thread_id.as_deref(),
-                shared_codex_event_turn_id(message),
+                event_turn_id,
                 turn_id.as_deref(),
                 completed_turn_id.as_deref(),
                 Some(*turn_started),
                 pending_turn_start_request_id.as_deref(),
                 Some("success"),
             );
-            *completed_turn_id = turn_id.clone().or_else(|| {
-                message
-                    .pointer("/params/turn/id")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned)
-            });
+            *completed_turn_id = terminal_turn_id;
             *turn_id = None;
             *turn_started = false;
-            *pending_turn_start_request_id = None;
+            *turn_started_before_response = false;
+            cancel_shared_codex_turn_started_watchdog(
+                pending_turn_start_request_id,
+                turn_started_watchdog_cancel_tx,
+            );
             flush_pending_codex_subagent_results(turn_state, recorder)?;
             // Keep the streaming text message id alive through the completed-turn
             // grace window. Codex can emit the canonical item/completed after
@@ -720,7 +883,11 @@ fn handle_shared_codex_app_server_notification(
                 *turn_id = None;
                 *completed_turn_id = None;
                 *turn_started = false;
-                *pending_turn_start_request_id = None;
+                *turn_started_before_response = false;
+                cancel_shared_codex_turn_started_watchdog(
+                    pending_turn_start_request_id,
+                    turn_started_watchdog_cancel_tx,
+                );
                 clear_codex_turn_state(turn_state);
                 recorder.reset_turn_state()?;
                 state.fail_turn_if_runtime_matches(session_id, runtime_token, &detail)?;
@@ -943,7 +1110,7 @@ fn shared_codex_app_server_event_matches_active_turn(
             Some(event) => current == event,
             None => true,
         },
-        None => false,
+        None => turn_started && event_turn_id.is_none(),
         Some(_) => false,
     }
 }

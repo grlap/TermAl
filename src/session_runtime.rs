@@ -486,13 +486,44 @@ fn shutdown_terminal_delegation_child_runtime(
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum DeferredStopCallback {
     /// `fail_turn_if_runtime_matches` was called.
-    TurnFailed(String),
+    TurnFailed {
+        active_turn_generation: u64,
+        message: String,
+    },
     /// `mark_turn_error_if_runtime_matches` was called.
-    TurnError(String),
+    TurnError {
+        active_turn_generation: u64,
+        message: String,
+    },
     /// `finish_turn_ok_if_runtime_matches` was called.
-    TurnCompleted,
+    TurnCompleted { active_turn_generation: u64 },
     /// `handle_runtime_exit_if_matches` was called.
-    RuntimeExited(Option<String>),
+    RuntimeExited {
+        active_turn_generation: u64,
+        message: Option<String>,
+    },
+}
+
+impl DeferredStopCallback {
+    fn active_turn_generation(&self) -> u64 {
+        match self {
+            Self::TurnFailed {
+                active_turn_generation,
+                ..
+            }
+            | Self::TurnError {
+                active_turn_generation,
+                ..
+            }
+            | Self::TurnCompleted {
+                active_turn_generation,
+            }
+            | Self::RuntimeExited {
+                active_turn_generation,
+                ..
+            } => *active_turn_generation,
+        }
+    }
 }
 
 /// Defines the runtime token variants.

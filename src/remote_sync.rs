@@ -531,6 +531,8 @@ fn upsert_remote_proxy_session_record(
         active_codex_approval_policy: None,
         active_codex_reasoning_effort: None,
         active_codex_sandbox_mode: None,
+        active_turn_generation: 0,
+        active_turn_mailbox_notification: None,
         active_turn_start_message_count: None,
         active_turn_file_changes: BTreeMap::new(),
         active_turn_file_change_grace_deadline: None,
