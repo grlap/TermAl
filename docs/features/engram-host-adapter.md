@@ -128,15 +128,12 @@ Binding happens at session creation for sessions in scope (see Rollout). The
 bind declares `assurance: turn_gated` only once Phase 1 enforces; in Phase 0 it
 declares `advisory`, because that is what is true.
 
-**Migration shim, stated as such.** Engram's shipped host channel binds a
-session to a *legacy task* by `external_ref`; it does not yet know
-`root_execution_id`, `work_id`, or `run_id`, and the work graph reaches a
-host session only through a task lookup. The `termal:delegation:<id>`
-external reference is therefore a bridge, not the design. When Engram
-exposes work-identity binding, the adapter binds `{root_execution_id,
-work_id, run_id}` derived from the delegation ↔ work mapping and the
-external reference is dropped. The transport trait and the single bind
-struct keep that change local; Phase 1 must not ship on the shim. `mediated_effects` is
+**External-reference binding is the current contract.** Engram's host
+channel binds a session to a task by `external_ref`; the work graph reaches a
+host session through that task lookup, and TermAl supplies
+`termal:delegation:<id>`. The transport trait and the single bind struct keep
+the binding local to the adapter, so an Engram work-identity channel
+(`root_execution_id`, `work_id`, `run_id`) would be an adapter-only change. `mediated_effects` is
 `[observe, communicate]` for read-only delegations and
 `[observe, communicate, mutate_local]` for writers. `external_ref` is the
 delegation's task reference when one exists, otherwise a TermAl-minted
@@ -282,18 +279,11 @@ restart, by Engram's design.
 
 Engram may also report an issued grant that never reached `turn_begin` as
 `open_grant_id`. Such a grant cannot be checkpointed: both `wait` and `exit`
-return `grant_scope_mismatch`. That specific recovery result means the host
+refuse with `grant_not_begun`. That specific recovery result means the host
 must drop the stale local token and continue to a fresh `session_bind`, which
 expires the issued grant. This exception does not apply to a begun grant;
-begun grants must still checkpoint before bind.
-
-Engram's planned control-hardening contract will make this distinction
-explicit: `session_status` will report `open_grant_state: issued|begun`, a
-fresh evaluate will atomically supersede an issued grant, and checkpointing an
-issued grant will refuse with `grant_not_begun` plus recovery guidance. Until
-those changes ship, Phase 0 deliberately keeps the issued -> attempted
-checkpoint -> fresh-bind recovery above; it is compatible with both the
-current and planned contract. A begun grant must never be replaced this way.
+begun grants must still checkpoint before bind, and a begun grant must never
+be replaced by a fresh bind.
 
 Boot ordering is a constraint, not a detail. `app_boot` runs
 `reconcile_unread_mailbox_wakeups_after_boot`,
@@ -345,8 +335,8 @@ and this one must not be resident for idle sessions.
 One structured card type, a typed `Message::EngramControl` variant persisted
 through the same `value_json` path as every other message, rendered at
 dispatch, at checkpoint, and at restart recovery. The UI renderer ships in
-the same change as the variant — an older UI build renders nothing for an
-unknown kind, and a shadow phase whose cards are invisible has no product.
+the same change as the variant — a shadow phase whose cards are invisible
+has no product.
 Schema v1, owned by TermAl:
 `schema_version: 1`; `stage: dispatch | checkpoint | restart`; `assurance`
 (`advisory` in Phase 0); `decision: grant | defer | refuse | degraded` — what
@@ -458,13 +448,25 @@ guards are what make the shadow phase safe to leave on.
   construct it: runtime eligibility, local-vs-remote placement, `binary_path`,
   `home`, and `work_authority_grant`. Binary/home changes, enablement, and grant
   rotation mark every affected local runtime (including delegation descendants)
-  for rebuild at the next turn boundary, allowing the already-authorized turn
-  to finish. Clearing a grant, disabling Engram, or deleting the project is an
-  immediate revocation: after the settings/project mutation is durable and
-  before process teardown, TermAl invokes `engram authority revoke` against the
-  current project tuple and every distinct binary/home/grant tuple recorded on
-  a still-live runtime. This runtime-only installed-descriptor record is made
-  at the exact point the agent configuration is composed, is cleared with the
+  for descriptor/process rebuild at the next turn boundary. Changing the grant
+  hash or moving to a different Engram home revokes the superseded store
+  authority immediately after the settings mutation is durable; a binary-only
+  change that retains the same home/grant does not revoke that still-current
+  authority. The settings commit also owns a token/generation runtime-stop fence
+  for the bounded revoke window. A successful revoke releases that fence without
+  terminating the runtime and replays any terminal callbacks that arrived while
+  it was held; a failed revoke instead tears down or quarantines the stale
+  runtime before releasing the project fence. The already-running agent may
+  finish non-mutating work after a successful revoke but cannot keep using the
+  retired authority. Each affected local runtime also receives a persisted
+  transcript notice explaining the deferred rebuild; the notice, stop claims,
+  and reset flags roll back together if the settings commit fails.
+  Clearing a grant, disabling Engram, or deleting the project additionally tears
+  down the runtime immediately and does not emit that deferred-rebuild notice.
+  Before teardown, TermAl invokes `engram authority revoke` against the current
+  project tuple and every distinct binary/home/grant tuple recorded on a
+  still-live runtime. This runtime-only installed-descriptor record is made at
+  the exact point the agent configuration is composed, is cleared with the
   runtime handle, is redacted from debug output, and is neither persisted nor
   exposed on the wire. It ensures that a later clear/disable/delete also
   revokes a stale descriptor left behind by an earlier deferred connection or
@@ -476,14 +478,13 @@ guards are what make the shadow phase safe to leave on.
   checkpoints with exit intent, terminates or detaches the live
   Claude/Codex/ACP runtime, and resumes durable queued work only after a fresh
   runtime can be constructed and, on a connection reconfiguration, after the
-  fresh Engram bind completes. Grant rotation remains deferred and does not
-  irreversibly revoke the old hash during the already-authorized turn. The
-  stale runtime set is fenced in the same commit as the settings change. Fence
+  fresh Engram bind completes. The stale runtime set is fenced in the same
+  commit as the settings change. Fence
   ownership also remains on the project, by generation, through off-lock
   authority revocation, runtime teardown, and any required fresh bind; an
   overlapping Engram settings mutation returns conflict instead of revoking a
-  newer successful configuration. Runtime fence
-  ownership carries the runtime token plus a monotonic generation, so a stale
+  newer successful configuration. Runtime fence ownership carries the runtime
+  token plus a monotonic generation, so a stale
   teardown completion cannot release a newer Stop/revocation owner; live model
   refresh is rejected while a turn or runtime-stop owner is active for the same
   reason. If an ordinary Stop or an earlier revocation already owns a session's
@@ -503,6 +504,41 @@ guards are what make the shadow phase safe to leave on.
   If the irreversible grant-revoke command itself fails, teardown still runs
   and the API explicitly warns that the residual MCP child may continue
   mutating until it exits; the durable settings change is not rolled back.
+  Authority retirement is derived from persisted project settings rather than
+  runtime eligibility, so `TERMAL_ENGRAM_DISABLED` can suppress MCP composition
+  without suppressing rotation, clear, disable, or deletion revocation. Retired
+  authority tuples are retained in a host-level persisted ledger keyed by the
+  raw home/project root, any resolved authority-store identity and project id,
+  and the grant hash, including after the project record is deleted and when
+  the revoke command reports degraded cleanup. TermAl writes the tombstone even
+  when the binary or `.engram-project` file is unavailable, reports that
+  revocation as degraded, and blocks the hash immediately. Each entry records
+  whether the revoke command was confirmed. An unconfirmed entry is retried on
+  a later same-home settings mutation once the binary/project identity is
+  available; startup itself does not launch a retrying subprocess. The exact
+  store key is the canonical
+  `<home>/projects/<sha256(trimmed .engram-project id)>/engram.db` path plus that
+  trimmed project id. When the database is not present yet, comparison falls
+  back to absolute lexical home normalization; the operator's original `home`
+  spelling is still preserved in project settings and passed to Engram. Every
+  supplied home is trimmed for validation and must be non-empty and absolute;
+  it must already exist when Engram is enabled or a grant is present. Missing
+  store identities are never considered equal merely because both failed to
+  resolve.
+  TermAl rejects both reuse of a retired hash and simultaneous configuration of
+  one active hash on multiple projects because Engram grants are unique and
+  bound to one store/project. Both checks are repeated under the final commit
+  lock, serializing installation against retirement, so one hash stays active
+  on exactly one project at all times. Engram currently exposes no status/probe
+  command that can distinguish an unknown grant from an already-revoked one, so
+  a home/store rotation also requires a newly minted grant.
+  The ledger keeps at most 64 confirmed entries per store identity; it never
+  evicts unconfirmed revocations. More than 16 unconfirmed entries for one
+  store fail the next touching mutation with conflict until the binary/home is
+  restored and TermAl can retry. Retirement times use UTC RFC3339 with fixed
+  millisecond precision. Tombstones persist across project
+  deletion, recreation, and host restart but are stripped from client snapshots
+  alongside the active grant.
   OpenCode revocation uses the same bounded graceful ACP cancel as an ordinary
   Stop before local process teardown. Runtime handles are
   process-local and are not persisted, so a TermAl host restart has the same
@@ -579,7 +615,7 @@ regardless of S1–S14.** The minimum the set must cover:
 - **S13 — issued but never begun.** If TermAl invalidates a dispatch after
   evaluate issues a grant but before begin succeeds, the row is marked
   `rebind_required`; the next turn observes the open grant, receives
-  `grant_scope_mismatch` from checkpoint, performs exactly one fresh bind,
+  `grant_not_begun` from checkpoint, performs exactly one fresh bind,
   then evaluates and begins normally. The same repair is required after a
   non-expiring begin refusal such as `lifecycle_hold`, and when a later
   evaluate reports `turn_already_open` as a refusal directive;

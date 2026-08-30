@@ -32,6 +32,14 @@ case " $original_args " in
       printf '%s\n' 'scripted authority revoke failure' >&2
       exit 9
     fi
+    if [ "$mode" = "fixture-authority-revoke-fail-once" ]; then
+      fail_once_marker="$engram_home/engram-authority-revoke-failed-once"
+      if [ ! -e "$fail_once_marker" ]; then
+        : > "$fail_once_marker"
+        printf '%s\n' 'scripted one-time authority revoke failure' >&2
+        exit 9
+      fi
+    fi
     printf '%s\n' 'fixture-revocation-hash'
     exit 0
     ;;
@@ -361,9 +369,16 @@ $key|$intent|begin|"
             continue
           fi
           if [ -z "$begun_grant" ] || [ "$grant" != "$begun_grant" ]; then
+            # Checkpointing the still-issued grant refuses grant_not_begun;
+            # checkpointing any other grant is a scope mismatch.
+            if [ -n "$issued_grant" ] && [ "$grant" = "$issued_grant" ]; then
+              refusal_code="grant_not_begun"
+            else
+              refusal_code="grant_scope_mismatch"
+            fi
             seen_checkpoint_rows="${seen_checkpoint_rows}
-$key|$intent|refuse|grant_scope_mismatch|$grant"
-            printf '%s\n' '{"status":"ok","result":{"decision":"refuse","code":"grant_scope_mismatch"}}'
+$key|$intent|refuse|$refusal_code|$grant"
+            printf '{"status":"ok","result":{"decision":"refuse","code":"%s"}}\n' "$refusal_code"
             continue
           fi
           issued_grant=""

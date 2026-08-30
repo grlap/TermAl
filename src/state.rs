@@ -1281,6 +1281,10 @@ struct StateInner {
     next_message_number: u64,
     /// Stable project records used by local and remote session routing.
     projects: Vec<Project>,
+    /// Host-level fail-closed ledger for Engram work-authority tuples that
+    /// TermAl retired. Unlike project settings, this survives project deletion
+    /// so recreating the same Engram store cannot reuse a retired credential.
+    engram_retired_work_authority_grants: Vec<EngramRetiredWorkAuthorityGrant>,
     /// Durable outbox of project scopes whose coordination-board data must be
     /// fenced and removed after the project deletion reaches termal.sqlite.
     /// The dedicated cleanup worker removes an item in memory only after the
@@ -1364,6 +1368,7 @@ impl StateInner {
             next_session_number: 1,
             next_message_number: 1,
             projects: Vec::new(),
+            engram_retired_work_authority_grants: Vec::new(),
             pending_coordination_scope_deletions: BTreeSet::new(),
             pending_response_board_project_detachments: BTreeMap::new(),
             ignored_discovered_codex_thread_ids: BTreeSet::new(),

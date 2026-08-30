@@ -652,7 +652,7 @@ fn stateful_transport_refuses_unbegun_checkpoint_and_rebind_clears_issued_grant(
         )
         .expect("an issued but unbegun grant is a synchronized refusal decision");
     assert_eq!(checkpoint_refusal["decision"], "refuse");
-    assert_eq!(checkpoint_refusal["code"], "grant_scope_mismatch");
+    assert_eq!(checkpoint_refusal["code"], "grant_not_begun");
     assert_eq!(
         transport.grant_state(&connection.session_id),
         (Some(grant_id), None),
@@ -1732,12 +1732,12 @@ fn checkpoint_observations_are_serialized_and_participate_in_idempotency() {
 
     let issued_unbegun: EngramTurnCheckpointResponse = serde_json::from_value(json!({
         "decision": "refuse",
-        "code": "grant_scope_mismatch"
+        "code": "grant_not_begun"
     }))
     .expect("issued-but-unbegun refusal should decode as a decision");
     assert!(matches!(
         issued_unbegun,
-        EngramTurnCheckpointResponse::Refuse { code } if code == "grant_scope_mismatch"
+        EngramTurnCheckpointResponse::Refuse { code } if code == "grant_not_begun"
     ));
     let observation_scope = EngramTransportError::remote(EngramControlErrorBody {
         code: "grant_scope_mismatch".to_owned(),
@@ -2548,6 +2548,20 @@ fn begin_refusal_expiry_policy_matches_the_external_engram_contract() {
             "the adapter must not re-evaluate after {code}"
         );
     }
+}
+
+#[test]
+fn issued_but_unbegun_checkpoint_matches_only_grant_not_begun() {
+    assert!(engram_grant_code_was_issued_but_not_begun("grant_not_begun"));
+    let error = EngramTransportError::remote(EngramControlErrorBody {
+        code: "grant_not_begun".to_owned(),
+        message: "issued grant was not begun".to_owned(),
+    });
+    assert!(engram_grant_was_issued_but_not_begun(&error));
+    assert!(!engram_grant_code_was_issued_but_not_begun(
+        "grant_scope_mismatch"
+    ));
+    assert!(!engram_grant_code_was_issued_but_not_begun("grant_expired"));
 }
 
 #[test]
@@ -3999,7 +4013,7 @@ fn real_process_fixture_enforces_stale_begin_and_unbegun_grant_recovery() {
         )
         .expect("an issued but unbegun grant should return a refusal decision");
     assert_eq!(unbegun_checkpoint["decision"], "refuse");
-    assert_eq!(unbegun_checkpoint["code"], "grant_scope_mismatch");
+    assert_eq!(unbegun_checkpoint["code"], "grant_not_begun");
     let status_after_refusal = transport
         .request(
             &orphan_connection,
@@ -4111,7 +4125,7 @@ fn real_process_fixture_enforces_stale_begin_and_unbegun_grant_recovery() {
         )
         .expect("an issued grant should return a checkpoint refusal decision");
     assert_eq!(refused_checkpoint["decision"], "refuse");
-    assert_eq!(refused_checkpoint["code"], "grant_scope_mismatch");
+    assert_eq!(refused_checkpoint["code"], "grant_not_begun");
 
     let (replacement_token, replacement_phase) =
         process_fixture_bind(&transport, &refusal_connection, "refusal-rebind");
@@ -4201,12 +4215,40 @@ fn real_fixture_engram_settings(root: &FsPath) -> EngramProjectSettings {
     }
 }
 
-fn read_fixture_authority_revoke_args(root: &FsPath) -> String {
+fn materialize_fixture_engram_store(
+    project_root: &FsPath,
+    home: &FsPath,
+) -> EngramAuthorityStoreKey {
+    let project_id = fs::read_to_string(project_root.join(".engram-project"))
+        .expect("fixture project id should exist")
+        .trim()
+        .to_owned();
+    let database_path = home
+        .join("projects")
+        .join(sha256_hex(project_id.as_bytes()))
+        .join("engram.db");
+    fs::create_dir_all(
+        database_path
+            .parent()
+            .expect("fixture database should have a parent"),
+    )
+    .expect("fixture store directory should exist");
+    fs::write(&database_path, b"fixture database").expect("fixture database should exist");
+    engram_store_key(&project_root.to_string_lossy(), &home.to_string_lossy())
+        .expect("materialized fixture store should have an exact key")
+}
+
+fn fixture_authority_revoke_args_path(root: &FsPath) -> PathBuf {
     #[cfg(windows)]
     let args_path = root.join("engram-authority-revoke-args.json");
     #[cfg(not(windows))]
     let args_path = root.join("engram-authority-revoke-args.txt");
-    fs::read_to_string(args_path).expect("authority revoke fixture should record argv")
+    args_path
+}
+
+fn read_fixture_authority_revoke_args(root: &FsPath) -> String {
+    fs::read_to_string(fixture_authority_revoke_args_path(root))
+        .expect("authority revoke fixture should record argv")
 }
 
 fn assert_fixture_authority_revoke_args(args: &str, grant: &str, reason: &str) {
@@ -4430,6 +4472,17 @@ fn runtime_mcp_composition_records_the_exact_installed_engram_descriptor() {
 fn engram_mcp_grant_rotation_marks_all_runtime_families_and_descendants_for_reset() {
     let (state, root, project_id, session_ids) =
         engram_mcp_runtime_family_fixture("grant-rotation", Some("grant-old"));
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let active_index = inner
+            .find_session_index(&session_ids[0])
+            .expect("fixture session should exist");
+        inner
+            .session_mut_by_index(active_index)
+            .expect("fixture session index should be valid")
+            .session
+            .status = SessionStatus::Active;
+    }
     let mut settings = real_fixture_engram_settings(&root);
     settings.work_authority_grant = Some("grant-new".to_owned());
 
@@ -4437,8 +4490,14 @@ fn engram_mcp_grant_rotation_marks_all_runtime_families_and_descendants_for_rese
         .update_project_engram_settings(&project_id, settings)
         .expect("grant rotation should persist");
 
+    assert_fixture_authority_revoke_args(
+        &read_fixture_authority_revoke_args(&root),
+        "grant-old",
+        "TermAl project Engram work-authority configuration rotated",
+    );
+
     let inner = state.inner.lock().expect("state mutex poisoned");
-    for session_id in session_ids {
+    for (position, session_id) in session_ids.into_iter().enumerate() {
         let record = inner
             .find_session_index(&session_id)
             .and_then(|index| inner.sessions.get(index))
@@ -4451,7 +4510,1314 @@ fn engram_mcp_grant_rotation_marks_all_runtime_families_and_descendants_for_rese
             !matches!(record.runtime, SessionRuntime::None),
             "rotation waits for the next runtime boundary"
         );
+        assert!(record.session.messages.iter().any(|message| matches!(
+            message,
+            Message::Text { text, .. }
+                if text.contains("TermAl is retiring this runtime's previous write authority")
+        )));
+        if position == 0 {
+            assert_eq!(record.session.status, SessionStatus::Active);
+        }
     }
+}
+
+#[test]
+fn engram_mcp_successful_rotation_replays_a_turn_completion_deferred_by_the_revoke_fence() {
+    let (state, root, project_id, session_ids) =
+        engram_mcp_runtime_family_fixture("grant-rotation-deferred-callback", Some("grant-old"));
+    let session_id = session_ids[0].clone();
+    let runtime_token = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("fixture session should exist");
+        inner.sessions[index].session.status = SessionStatus::Active;
+        inner.sessions[index]
+            .runtime
+            .runtime_token()
+            .expect("fixture runtime should have a token")
+    };
+    let gate = gate_next_engram_project_reset_fence(&project_id);
+    let rotating_state = state.clone();
+    let rotating_project_id = project_id.clone();
+    let mut rotated = real_fixture_engram_settings(&root);
+    rotated.work_authority_grant = Some("grant-new".to_owned());
+    let rotating = std::thread::spawn(move || {
+        rotating_state.update_project_engram_settings(&rotating_project_id, rotated)
+    });
+    gate.wait_until_entered();
+
+    state
+        .finish_turn_ok_if_runtime_matches(&session_id, &runtime_token)
+        .expect("turn completion should defer behind the authority fence");
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let record = inner
+            .find_session_index(&session_id)
+            .and_then(|index| inner.sessions.get(index))
+            .expect("session should remain while revoke is gated");
+        assert!(record.runtime_stop_in_progress);
+        assert!(
+            record
+                .deferred_stop_callbacks
+                .iter()
+                .any(|callback| matches!(callback, DeferredStopCallback::TurnCompleted))
+        );
+    }
+    gate.release();
+    rotating
+        .join()
+        .expect("rotation thread should not panic")
+        .expect("authority rotation should succeed");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .find_session_index(&session_id)
+        .and_then(|index| inner.sessions.get(index))
+        .expect("session should remain after rotation");
+    assert_eq!(record.session.status, SessionStatus::Idle);
+    assert!(!record.runtime_stop_in_progress);
+    assert!(record.deferred_stop_callbacks.is_empty());
+    assert!(record.runtime_reset_required);
+    assert!(!matches!(record.runtime, SessionRuntime::None));
+}
+
+#[test]
+fn engram_mcp_home_rotation_rejects_reuse_of_the_old_store_grant() {
+    let state = test_app_state();
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("engram-home-rotation");
+    let old_home = root.join("old-home");
+    let new_home = root.join("new-home");
+    fs::create_dir_all(&old_home).expect("old Engram home should exist");
+    fs::create_dir_all(&new_home).expect("new Engram home should exist");
+    fs::write(root.join(".engram-project"), "fixture-ready\n").expect("fixture mode should write");
+    let project_id = create_test_project(&state, &root, "Engram home rotation revoke");
+    let session_id = create_test_project_session(&state, Agent::Claude, &project_id, &root);
+    let mut old_settings = real_fixture_engram_settings(&root);
+    old_settings.home = Some(old_home.to_string_lossy().into_owned());
+    old_settings.work_authority_grant = Some("grant-shared".to_owned());
+    state
+        .update_project_engram_settings(&project_id, old_settings)
+        .expect("old-home settings should enable Engram");
+    attach_engram_mcp_test_runtime(&state, &session_id);
+
+    let mut new_settings = real_fixture_engram_settings(&root);
+    new_settings.home = Some(new_home.to_string_lossy().into_owned());
+    new_settings.work_authority_grant = Some("grant-shared".to_owned());
+    let error = match state.update_project_engram_settings(&project_id, new_settings) {
+        Ok(_) => panic!("home rotation must require a newly minted grant"),
+        Err(error) => error,
+    };
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert!(error.message.contains("cannot reuse the previous"));
+    assert!(
+        !fixture_authority_revoke_args_path(&old_home).exists(),
+        "a rejected rotation must leave the current store authority intact"
+    );
+    let new_home_revoke = fixture_authority_revoke_args_path(&new_home);
+    assert!(
+        !new_home_revoke.exists(),
+        "the current store must not be revoked"
+    );
+}
+
+#[test]
+fn engram_mcp_home_alias_keeps_the_current_store_authority() {
+    let state = test_app_state();
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("engram-home-alias");
+    fs::create_dir_all(&root).expect("project root should exist");
+    fs::write(root.join(".engram-project"), "  fixture-ready  \n")
+        .expect("fixture mode should write");
+    let exact_store_key = materialize_fixture_engram_store(&root, &root);
+    assert_eq!(exact_store_key.project_id, "fixture-ready");
+    let project_id = create_test_project(&state, &root, "Engram home alias");
+    let session_id = create_test_project_session(&state, Agent::Claude, &project_id, &root);
+    let mut enabled = real_fixture_engram_settings(&root);
+    enabled.work_authority_grant = Some("grant-current".to_owned());
+    state
+        .update_project_engram_settings(&project_id, enabled.clone())
+        .expect("fixture settings should enable Engram");
+    attach_engram_mcp_test_runtime(&state, &session_id);
+
+    let alias_home = root.join(".").to_string_lossy().into_owned();
+    assert_eq!(
+        engram_store_key(&root.to_string_lossy(), &alias_home),
+        Some(exact_store_key),
+        "store identity must use the trimmed project id and canonical database path"
+    );
+    enabled.home = Some(alias_home.clone());
+    state
+        .update_project_engram_settings(&project_id, enabled)
+        .expect("an alias for the same authority store should remain current");
+
+    assert!(
+        !fixture_authority_revoke_args_path(&root).exists(),
+        "the current store/grant tuple must not be revoked through a path alias"
+    );
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let persisted_home = inner
+        .find_project(&project_id)
+        .and_then(|project| project.engram.as_ref())
+        .and_then(|settings| settings.home.as_deref());
+    assert_eq!(
+        persisted_home,
+        Some(alias_home.as_str()),
+        "TermAl should preserve the operator's home spelling"
+    );
+    let record = inner
+        .find_session_index(&session_id)
+        .and_then(|index| inner.sessions.get(index))
+        .expect("session should remain");
+    assert!(!record.runtime_reset_required);
+    assert!(!record.session.messages.iter().any(|message| matches!(
+        message,
+        Message::Text { text, .. }
+            if text.contains("TermAl is retiring this runtime's previous write authority")
+    )));
+}
+
+#[test]
+fn engram_enabled_settings_reject_empty_and_relative_homes_before_store_normalization() {
+    let state = test_app_state();
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("engram-invalid-home");
+    fs::create_dir_all(&root).expect("project root should exist");
+    fs::write(root.join(".engram-project"), "fixture-ready\n").expect("fixture mode should write");
+    let project_id = create_test_project(&state, &root, "Engram invalid home");
+
+    for home in ["", "."] {
+        let mut settings = real_fixture_engram_settings(&root);
+        settings.home = Some(home.to_owned());
+        let error = match state.update_project_engram_settings(&project_id, settings) {
+            Ok(_) => panic!("enabled Engram must reject a non-absolute home"),
+            Err(error) => error,
+        };
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert!(
+            error.message.contains("non-empty absolute path"),
+            "unexpected validation error for {home:?}: {}",
+            error.message
+        );
+    }
+}
+
+#[test]
+fn engram_grant_clear_cannot_smuggle_an_unvalidated_binary_change() {
+    let state = test_app_state();
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("engram-grant-clear-invalid-binary");
+    fs::create_dir_all(&root).expect("project root should exist");
+    fs::write(root.join(".engram-project"), "fixture-ready\n").expect("fixture mode should write");
+    let project_id = create_test_project(&state, &root, "Engram invalid clear reconfigure");
+    let mut enabled = real_fixture_engram_settings(&root);
+    enabled.work_authority_grant = Some("grant-current".to_owned());
+    state
+        .update_project_engram_settings(&project_id, enabled.clone())
+        .expect("initial authority should persist");
+
+    let mut invalid_clear = enabled.clone();
+    invalid_clear.work_authority_grant = None;
+    invalid_clear.binary_path = Some(
+        root.join("missing-engram-binary")
+            .to_string_lossy()
+            .into_owned(),
+    );
+    let error = match state.update_project_engram_settings(&project_id, invalid_clear) {
+        Ok(_) => panic!("grant clear plus binary replacement must run normal validation"),
+        Err(error) => error,
+    };
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert!(
+        error
+            .message
+            .contains("binaryPath must be an existing absolute file")
+    );
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert_eq!(
+        inner
+            .find_project(&project_id)
+            .and_then(|project| project.engram.as_ref()),
+        Some(&enabled)
+    );
+    assert!(inner.engram_retired_work_authority_grants.is_empty());
+}
+
+#[test]
+fn engram_disabled_settings_reject_relative_homes_and_unresolved_stores_never_alias() {
+    let state = test_app_state();
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("engram-disabled-invalid-home");
+    fs::create_dir_all(&root).expect("project root should exist");
+    fs::write(root.join(".engram-project"), "fixture-ready\n").expect("fixture mode should write");
+    let project_id = create_test_project(&state, &root, "Engram disabled invalid home");
+
+    let mut disabled = EngramProjectSettings::default();
+    disabled.home = Some("relative/home".to_owned());
+    let error = match state.update_project_engram_settings(&project_id, disabled) {
+        Ok(_) => panic!("disabled Engram must reject a relative home"),
+        Err(error) => error,
+    };
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert!(error.message.contains("non-empty absolute path"));
+
+    let home_a = root.join("home-a").to_string_lossy().into_owned();
+    let home_b = root.join("home-b").to_string_lossy().into_owned();
+    assert!(!engram_authority_stores_match(
+        &root.to_string_lossy(),
+        &home_a,
+        &home_b,
+    ));
+
+    let unresolved = EngramRetiredWorkAuthorityGrant {
+        home: home_a.clone(),
+        project_root: root.to_string_lossy().into_owned(),
+        store_key: None,
+        project_id: "fixture-ready".to_owned(),
+        grant_hash: "grant-unresolved".to_owned(),
+        retired_at: "2026-08-30T00:00:00Z".to_owned(),
+        reason: "unresolved-store test".to_owned(),
+        revoke_confirmed: false,
+    };
+    let mut same_identity = unresolved.clone();
+    same_identity.home = format!(" {home_a} ");
+    assert!(retired_engram_authority_identities_match(
+        &unresolved,
+        &same_identity,
+    ));
+    let mut different_identity = same_identity;
+    different_identity.home = home_b;
+    assert!(!retired_engram_authority_identities_match(
+        &unresolved,
+        &different_identity,
+    ));
+}
+
+#[cfg(windows)]
+#[test]
+fn engram_unresolved_windows_store_identity_is_case_insensitive() {
+    assert!(engram_authority_stores_match(
+        r"C:\termal-missing-project",
+        r"C:\Engram\Home",
+        r"c:\engram\home",
+    ));
+    let left = EngramRetiredWorkAuthorityGrant {
+        home: r"C:\Engram\Home".to_owned(),
+        project_root: r"C:\Projects\TermAl".to_owned(),
+        store_key: None,
+        project_id: String::new(),
+        grant_hash: "grant-left".to_owned(),
+        retired_at: "2026-08-30T00:00:00.000Z".to_owned(),
+        reason: "Windows fallback".to_owned(),
+        revoke_confirmed: false,
+    };
+    let mut right = left.clone();
+    right.home = r"c:\engram\home".to_owned();
+    right.project_root = r"c:\projects\termal".to_owned();
+    right.grant_hash = "grant-right".to_owned();
+    assert!(retired_engram_authority_identities_match(&left, &right));
+}
+
+#[test]
+fn retired_engram_authority_uses_utc_rfc3339_and_evicts_only_oldest_confirmed_entries() {
+    let now = retired_engram_authority_timestamp_now();
+    let parsed =
+        chrono::DateTime::parse_from_rfc3339(&now).expect("retirement timestamps must be RFC3339");
+    assert_eq!(parsed.offset().local_minus_utc(), 0);
+    assert!(now.ends_with('Z'));
+    assert_eq!(now.split('.').nth(1).map(str::len), Some(4));
+
+    let make_entry =
+        |index: usize, confirmed: bool, retired_at: String| EngramRetiredWorkAuthorityGrant {
+            home: "C:/engram-home".to_owned(),
+            project_root: "C:/project".to_owned(),
+            store_key: None,
+            project_id: "project-id".to_owned(),
+            grant_hash: format!("grant-{index}"),
+            retired_at,
+            reason: "capacity regression".to_owned(),
+            revoke_confirmed: confirmed,
+        };
+    let mut ledger = vec![make_entry(0, false, "23:59:59".to_owned())];
+    let mut confirmed = (1..=MAX_RETIRED_ENGRAM_GRANTS_PER_STORE + 1)
+        .map(|index| {
+            let retired_at = if index == 1 {
+                "2026-08-29T23:59:59.999Z".to_owned()
+            } else if index == 2 {
+                "2026-08-30T00:00:00.000Z".to_owned()
+            } else {
+                (chrono::DateTime::parse_from_rfc3339("2026-08-30T00:00:00.000Z")
+                    .expect("fixed test time should parse")
+                    + chrono::Duration::milliseconds(index as i64))
+                .to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+            };
+            make_entry(index, true, retired_at)
+        })
+        .collect::<Vec<_>>();
+    merge_retired_engram_work_authority_grants(&mut ledger, confirmed.drain(..))
+        .expect("confirmed entries may be compacted");
+    assert_eq!(ledger.len(), MAX_RETIRED_ENGRAM_GRANTS_PER_STORE + 1);
+    assert!(ledger.iter().any(|entry| entry.grant_hash == "grant-0"));
+    assert!(!ledger.iter().any(|entry| entry.grant_hash == "grant-1"));
+    assert!(ledger.iter().any(|entry| entry.grant_hash == "grant-2"));
+}
+
+#[test]
+fn retired_engram_authority_unconfirmed_capacity_is_atomic_and_never_evicts_pending_work() {
+    let make_entry = |index: usize| EngramRetiredWorkAuthorityGrant {
+        home: "C:/engram-home".to_owned(),
+        project_root: "C:/project".to_owned(),
+        store_key: None,
+        project_id: "project-id".to_owned(),
+        grant_hash: format!("pending-{index}"),
+        retired_at: format!("2026-08-30T00:00:{index:02}.000Z"),
+        reason: "pending regression".to_owned(),
+        revoke_confirmed: false,
+    };
+    let mut ledger = Vec::new();
+    merge_retired_engram_work_authority_grants(
+        &mut ledger,
+        (0..MAX_UNCONFIRMED_RETIRED_ENGRAM_GRANTS_PER_STORE).map(make_entry),
+    )
+    .expect("the pending capacity should be accepted");
+    let before = ledger.clone();
+    let error = merge_retired_engram_work_authority_grants(
+        &mut ledger,
+        [make_entry(MAX_UNCONFIRMED_RETIRED_ENGRAM_GRANTS_PER_STORE)],
+    )
+    .expect_err("the seventeenth pending revocation must fail closed");
+    assert_eq!(error.status, StatusCode::CONFLICT);
+    assert!(
+        error
+            .message
+            .contains("unconfirmed grant revocations pending")
+    );
+    assert_eq!(ledger, before, "a rejected merge must be atomic");
+
+    merge_retired_engram_work_authority_grants(&mut ledger, [make_entry(0)])
+        .expect("a duplicate pending revocation must not consume capacity");
+    assert_eq!(ledger, before);
+}
+
+#[test]
+fn engram_mcp_rejects_reuse_of_a_revoked_grant_in_the_same_store() {
+    let (state, root, project_id, session_ids) =
+        engram_mcp_runtime_family_fixture("rotate-back", Some("grant-a"));
+    let session_id = &session_ids[0];
+    let runtime_token = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == *session_id)
+            .and_then(|record| record.runtime.runtime_token())
+            .expect("fixture runtime should have a token")
+    };
+    state
+        .engram_mcp_stdio_config_for_runtime(session_id, &runtime_token)
+        .expect("fixture runtime should record grant A as installed");
+
+    let mut grant_b = real_fixture_engram_settings(&root);
+    grant_b.work_authority_grant = Some("grant-b".to_owned());
+    state
+        .update_project_engram_settings(&project_id, grant_b)
+        .expect("A to B rotation should succeed");
+    assert_fixture_authority_revoke_args(
+        &read_fixture_authority_revoke_args(&root),
+        "grant-a",
+        "TermAl project Engram work-authority configuration rotated",
+    );
+
+    let mut grant_a = real_fixture_engram_settings(&root);
+    grant_a.work_authority_grant = Some("grant-a".to_owned());
+    let error = match state.update_project_engram_settings(&project_id, grant_a) {
+        Ok(_) => panic!("B to revoked A rotation must be rejected"),
+        Err(error) => error,
+    };
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert!(error.message.contains("was retired by TermAl"));
+    let args = read_fixture_authority_revoke_args(&root);
+    assert_fixture_authority_revoke_args(
+        &args,
+        "grant-a",
+        "TermAl project Engram work-authority configuration rotated",
+    );
+    assert!(
+        !args.contains("grant-b"),
+        "rejected grant reuse must not revoke the still-current grant B: {args}"
+    );
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let settings = inner
+        .find_project(&project_id)
+        .and_then(|project| project.engram.as_ref())
+        .expect("project settings should remain");
+    assert_eq!(settings.work_authority_grant.as_deref(), Some("grant-b"));
+    assert!(
+        inner
+            .engram_retired_work_authority_grants
+            .iter()
+            .any(|entry| {
+                entry.grant_hash == "grant-a"
+                    && entry.reason == "TermAl project Engram work-authority configuration rotated"
+                    && entry.revoke_confirmed
+            })
+    );
+}
+
+#[test]
+fn engram_mcp_rejects_a_retired_grant_across_projects_without_store_matching() {
+    let state = test_app_state();
+    let temp = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path();
+    let first_root = temp.join("engram-global-retired-first");
+    let second_root = temp.join("engram-global-retired-second");
+    for root in [&first_root, &second_root] {
+        fs::create_dir_all(root).expect("project root should exist");
+        fs::write(root.join(".engram-project"), "fixture-ready\n")
+            .expect("fixture mode should write");
+    }
+    let first_id = create_test_project(&state, &first_root, "First retired authority project");
+    let second_id = create_test_project(&state, &second_root, "Second retired authority project");
+    let mut first = real_fixture_engram_settings(&first_root);
+    first.work_authority_grant = Some("grant-global-old".to_owned());
+    state
+        .update_project_engram_settings(&first_id, first)
+        .expect("first authority should persist");
+    let mut rotated = real_fixture_engram_settings(&first_root);
+    rotated.work_authority_grant = Some("grant-global-new".to_owned());
+    state
+        .update_project_engram_settings(&first_id, rotated)
+        .expect("first authority should rotate");
+
+    fs::remove_file(second_root.join(".engram-project"))
+        .expect("second project identity should become unavailable");
+    let mut reused = real_fixture_engram_settings(&second_root);
+    reused.enabled = false;
+    reused.work_authority_grant = Some("grant-global-old".to_owned());
+    let error = match state.update_project_engram_settings(&second_id, reused) {
+        Ok(_) => panic!("a retired grant hash must be rejected globally"),
+        Err(error) => error,
+    };
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert!(error.message.contains("was retired by TermAl"));
+}
+
+#[test]
+fn engram_mcp_rejects_a_grant_that_is_active_on_another_project() {
+    let state = test_app_state();
+    let temp = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path();
+    let first_root = temp.join("engram-global-active-first");
+    let second_root = temp.join("engram-global-active-second");
+    for root in [&first_root, &second_root] {
+        fs::create_dir_all(root).expect("project root should exist");
+        fs::write(root.join(".engram-project"), "fixture-ready\n")
+            .expect("fixture mode should write");
+    }
+    let first_id = create_test_project(&state, &first_root, "First active authority project");
+    let second_id = create_test_project(&state, &second_root, "Second active authority project");
+    let mut first = real_fixture_engram_settings(&first_root);
+    first.work_authority_grant = Some("grant-active-global".to_owned());
+    state
+        .update_project_engram_settings(&first_id, first)
+        .expect("the first project should own the grant");
+
+    let mut second = real_fixture_engram_settings(&second_root);
+    second.work_authority_grant = Some("grant-active-global".to_owned());
+    let error = match state.update_project_engram_settings(&second_id, second) {
+        Ok(_) => panic!("an active grant hash must have only one project owner"),
+        Err(error) => error,
+    };
+    assert_eq!(error.status, StatusCode::CONFLICT);
+    assert!(
+        error
+            .message
+            .contains("already configured by another project")
+    );
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert_eq!(
+        inner
+            .find_project(&first_id)
+            .and_then(|project| project.engram.as_ref())
+            .and_then(|settings| settings.work_authority_grant.as_deref()),
+        Some("grant-active-global")
+    );
+    assert_eq!(
+        inner
+            .find_project(&second_id)
+            .and_then(|project| project.engram.as_ref())
+            .and_then(|settings| settings.work_authority_grant.as_deref()),
+        None
+    );
+}
+
+#[test]
+fn engram_mcp_rechecks_retired_grants_under_the_commit_lock_across_projects() {
+    let state = test_app_state();
+    let temp = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path();
+    let first_root = temp.join("engram-retired-race-first");
+    let second_root = temp.join("engram-retired-race-second");
+    let second_next_home = temp.join("engram-retired-race-second-next-home");
+    for root in [&first_root, &second_root, &second_next_home] {
+        fs::create_dir_all(root).expect("fixture directory should exist");
+    }
+    fs::write(first_root.join(".engram-project"), "fixture-ready\n")
+        .expect("first fixture mode should write");
+    fs::write(second_root.join(".engram-project"), "fixture-ready\n")
+        .expect("second fixture mode should write");
+    let first_id = create_test_project(&state, &first_root, "First retirement racer");
+    let second_id = create_test_project(&state, &second_root, "Second retirement racer");
+    let mut first = real_fixture_engram_settings(&first_root);
+    first.work_authority_grant = Some("grant-race".to_owned());
+    state
+        .update_project_engram_settings(&first_id, first)
+        .expect("first authority should persist");
+    let second_original = real_fixture_engram_settings(&second_root);
+    state
+        .update_project_engram_settings(&second_id, second_original.clone())
+        .expect("second project should enable without a grant");
+
+    let gate = gate_next_engram_project_reset_fence(&second_id);
+    let racing_state = state.clone();
+    let racing_second_id = second_id.clone();
+    let mut racing_settings = real_fixture_engram_settings(&second_root);
+    racing_settings.home = Some(second_next_home.to_string_lossy().into_owned());
+    racing_settings.work_authority_grant = Some("grant-race".to_owned());
+    let racing = std::thread::spawn(move || {
+        racing_state.update_project_engram_settings(&racing_second_id, racing_settings)
+    });
+    gate.wait_until_entered();
+
+    let mut first_rotated = real_fixture_engram_settings(&first_root);
+    first_rotated.work_authority_grant = Some("grant-race-next".to_owned());
+    state
+        .update_project_engram_settings(&first_id, first_rotated)
+        .expect("the first project should retire the raced grant");
+    gate.release();
+
+    let error = match racing
+        .join()
+        .expect("racing update thread should not panic")
+    {
+        Ok(_) => panic!("the final locked recheck must reject the retired grant"),
+        Err(error) => error,
+    };
+    assert_eq!(error.status, StatusCode::CONFLICT);
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let second = inner
+        .find_project(&second_id)
+        .and_then(|project| project.engram.as_ref())
+        .expect("second project should remain");
+    assert_eq!(second, &second_original);
+    assert!(!inner.engram_project_resets.contains(&second_id));
+}
+
+#[test]
+fn engram_mcp_rechecks_active_grant_ownership_under_the_commit_lock() {
+    let state = test_app_state();
+    let temp = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path();
+    let first_root = temp.join("engram-active-race-first");
+    let second_root = temp.join("engram-active-race-second");
+    let second_next_home = temp.join("engram-active-race-second-next-home");
+    for root in [&first_root, &second_root, &second_next_home] {
+        fs::create_dir_all(root).expect("fixture directory should exist");
+    }
+    fs::write(first_root.join(".engram-project"), "fixture-ready\n")
+        .expect("first fixture mode should write");
+    fs::write(second_root.join(".engram-project"), "fixture-ready\n")
+        .expect("second fixture mode should write");
+    let first_id = create_test_project(&state, &first_root, "First active grant racer");
+    let second_id = create_test_project(&state, &second_root, "Second active grant racer");
+    let first_original = real_fixture_engram_settings(&first_root);
+    let second_original = real_fixture_engram_settings(&second_root);
+    state
+        .update_project_engram_settings(&first_id, first_original)
+        .expect("first project should enable without a grant");
+    state
+        .update_project_engram_settings(&second_id, second_original.clone())
+        .expect("second project should enable without a grant");
+
+    let gate = gate_next_engram_project_reset_fence(&second_id);
+    let racing_state = state.clone();
+    let racing_second_id = second_id.clone();
+    let mut racing_settings = real_fixture_engram_settings(&second_root);
+    racing_settings.home = Some(second_next_home.to_string_lossy().into_owned());
+    racing_settings.work_authority_grant = Some("grant-active-race".to_owned());
+    let racing = std::thread::spawn(move || {
+        racing_state.update_project_engram_settings(&racing_second_id, racing_settings)
+    });
+    gate.wait_until_entered();
+
+    let mut first_owner = real_fixture_engram_settings(&first_root);
+    first_owner.work_authority_grant = Some("grant-active-race".to_owned());
+    state
+        .update_project_engram_settings(&first_id, first_owner)
+        .expect("the first project should win active ownership");
+    gate.release();
+
+    let error = match racing
+        .join()
+        .expect("racing update thread should not panic")
+    {
+        Ok(_) => panic!("the final locked recheck must reject another active owner"),
+        Err(error) => error,
+    };
+    assert_eq!(error.status, StatusCode::CONFLICT);
+    assert!(
+        error
+            .message
+            .contains("already configured by another project")
+    );
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert_eq!(
+        inner
+            .find_project(&first_id)
+            .and_then(|project| project.engram.as_ref())
+            .and_then(|settings| settings.work_authority_grant.as_deref()),
+        Some("grant-active-race")
+    );
+    assert_eq!(
+        inner
+            .find_project(&second_id)
+            .and_then(|project| project.engram.as_ref()),
+        Some(&second_original)
+    );
+    assert!(!inner.engram_project_resets.contains(&second_id));
+    assert!(
+        !inner
+            .engram_retired_work_authority_grants
+            .iter()
+            .any(|entry| entry.grant_hash == "grant-active-race")
+    );
+}
+
+#[test]
+fn engram_mcp_binary_only_change_neither_revokes_authority_nor_emits_rotation_notice() {
+    let state = test_app_state();
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("engram-binary-only-change");
+    fs::create_dir_all(&root).expect("project root should exist");
+    fs::write(root.join(".engram-project"), "fixture-ready\n").expect("fixture mode should write");
+    let project_id = create_test_project(&state, &root, "Engram binary-only change");
+    let session_id = create_test_project_session(&state, Agent::Claude, &project_id, &root);
+    let mut enabled = real_fixture_engram_settings(&root);
+    enabled.work_authority_grant = Some("grant-current".to_owned());
+    state
+        .update_project_engram_settings(&project_id, enabled.clone())
+        .expect("fixture settings should enable Engram");
+    attach_engram_mcp_test_runtime(&state, &session_id);
+
+    let binary_path = real_engram_control_fixture_path();
+    enabled.binary_path = Some(
+        binary_path
+            .parent()
+            .expect("fixture should have a parent")
+            .join(".")
+            .join(binary_path.file_name().expect("fixture should have a name"))
+            .to_string_lossy()
+            .into_owned(),
+    );
+    state
+        .update_project_engram_settings(&project_id, enabled)
+        .expect("binary-only settings change should succeed");
+
+    assert!(
+        !fixture_authority_revoke_args_path(&root).exists(),
+        "a binary-only change must retain the current store authority"
+    );
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .find_session_index(&session_id)
+        .and_then(|index| inner.sessions.get(index))
+        .expect("session should remain");
+    assert!(!record.session.messages.iter().any(|message| matches!(
+        message,
+        Message::Text { text, .. }
+            if text.contains("TermAl is retiring this runtime's previous write authority")
+    )));
+}
+
+#[test]
+fn engram_mcp_grant_clear_checkpoints_open_child_grant_through_owned_project_fence() {
+    let (state, root, project_id, session_ids) =
+        engram_mcp_runtime_family_fixture("grant-clear-open-checkpoint", Some("grant-old"));
+    let child_session_id = session_ids
+        .last()
+        .expect("fixture should include a delegation child")
+        .clone();
+    let transport = ScriptedEngramControlTransport::new([checkpoint_reply("grant-open")]);
+    state.install_test_engram_transport(transport.clone());
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&child_session_id)
+            .expect("delegation child should exist");
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("delegation child index should be valid");
+        record.engram.routing_token = Some("routing-open".to_owned());
+        record.engram.active_grant_id = Some("grant-open".to_owned());
+    }
+
+    state
+        .update_project_engram_settings(&project_id, real_fixture_engram_settings(&root))
+        .expect("grant clear should checkpoint the open grant and revoke runtimes");
+
+    let requests = transport.requests();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].connection.session_id, child_session_id);
+    assert_eq!(requests[0].request["operation"], "turn_checkpoint");
+    assert_eq!(requests[0].request["next_intent"], "exit");
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .find_session_index(&child_session_id)
+        .and_then(|index| inner.sessions.get(index))
+        .expect("delegation child should remain");
+    assert!(record.engram.active_grant_id.is_none());
+    assert!(!record.engram.checkpoint_in_progress);
+    assert!(record.engram.checkpoint_owner_generation.is_none());
+    assert!(!record.session.messages.iter().any(|message| matches!(
+        message,
+        Message::Text { text, .. }
+            if text.contains("TermAl is retiring this runtime's previous write authority")
+    )));
+}
+
+#[test]
+fn engram_mcp_grant_clear_waits_for_a_lifecycle_checkpoint_before_teardown() {
+    let (state, root, project_id, session_ids) =
+        engram_mcp_runtime_family_fixture("grant-clear-lifecycle-checkpoint", Some("grant-old"));
+    let child_session_id = session_ids
+        .last()
+        .expect("fixture should include a delegation child")
+        .clone();
+    let (checkpoint_step, checkpoint_gate) =
+        gated_engram_step("turn_checkpoint", checkpoint_reply("grant-open"));
+    let transport = GatedEngramControlTransport::new([checkpoint_step]);
+    state.install_test_engram_transport(transport.clone());
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&child_session_id)
+            .expect("delegation child should exist");
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("delegation child index should be valid");
+        record.engram.routing_token = Some("routing-open".to_owned());
+        record.engram.active_grant_id = Some("grant-open".to_owned());
+    }
+
+    let checkpoint_state = state.clone();
+    let checkpoint_session_id = child_session_id.clone();
+    let checkpoint_thread = std::thread::spawn(move || {
+        checkpoint_state.checkpoint_engram_turn_off_lock(
+            &checkpoint_session_id,
+            None,
+            EngramNextIntent::Wait,
+            None,
+        );
+    });
+    checkpoint_gate.wait();
+
+    let waiting = observe_next_engram_project_reset_checkpoint_wait(&state, &child_session_id);
+    let clear_state = state.clone();
+    let clear_project_id = project_id.clone();
+    let clear_thread = std::thread::spawn(move || {
+        clear_state
+            .update_project_engram_settings(&clear_project_id, real_fixture_engram_settings(&root))
+    });
+    waiting
+        .recv_timeout(Duration::from_secs(2))
+        .expect("grant clear should wait behind the lifecycle checkpoint owner");
+
+    checkpoint_gate.release();
+    checkpoint_thread
+        .join()
+        .expect("lifecycle checkpoint thread should finish");
+    clear_thread
+        .join()
+        .expect("grant-clear thread should not panic")
+        .expect("grant clear should continue after lifecycle checkpoint completion");
+
+    assert_eq!(
+        transport.requests().len(),
+        1,
+        "the completed lifecycle checkpoint already closed the grant"
+    );
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .find_session_index(&child_session_id)
+        .and_then(|index| inner.sessions.get(index))
+        .expect("delegation child should remain");
+    assert!(record.engram.active_grant_id.is_none());
+    assert!(!record.engram.checkpoint_in_progress);
+    assert!(record.engram.checkpoint_owner_generation.is_none());
+}
+
+#[test]
+fn project_reset_release_does_not_clear_a_lifecycle_owned_checkpoint() {
+    let (state, _root, project_id, session_ids) =
+        engram_mcp_runtime_family_fixture("checkpoint-owner", Some("grant-old"));
+    let child_session_id = session_ids
+        .last()
+        .expect("fixture should include a delegation child")
+        .clone();
+    let (checkpoint_step, checkpoint_gate) =
+        gated_engram_step("turn_checkpoint", checkpoint_reply("grant-open"));
+    let transport = GatedEngramControlTransport::new([checkpoint_step]);
+    state.install_test_engram_transport(transport.clone());
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&child_session_id)
+            .expect("delegation child should exist");
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("delegation child index should be valid");
+        record.engram.routing_token = Some("routing-open".to_owned());
+        record.engram.active_grant_id = Some("grant-open".to_owned());
+    }
+
+    let checkpoint_state = state.clone();
+    let checkpoint_session_id = child_session_id.clone();
+    let checkpoint_thread = std::thread::spawn(move || {
+        checkpoint_state.checkpoint_engram_turn_off_lock(
+            &checkpoint_session_id,
+            None,
+            EngramNextIntent::Wait,
+            None,
+        );
+    });
+    checkpoint_gate.wait();
+
+    let owner_generation = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let owner_generation = inner
+            .engram_project_resets
+            .claim(&project_id)
+            .expect("test should own a fresh project reset fence");
+        let index = inner
+            .find_session_index(&child_session_id)
+            .expect("delegation child should remain");
+        inner
+            .session_mut_by_index(index)
+            .expect("delegation child index should be valid")
+            .engram
+            .project_reset_in_progress = true;
+        owner_generation
+    };
+    state.release_engram_project_reset_fence(
+        &project_id,
+        owner_generation,
+        std::slice::from_ref(&child_session_id),
+    );
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let record = inner
+            .find_session_index(&child_session_id)
+            .and_then(|index| inner.sessions.get(index))
+            .expect("delegation child should remain");
+        assert!(record.engram.checkpoint_in_progress);
+        assert!(record.engram.checkpoint_owner_generation.is_none());
+        assert!(!record.engram.project_reset_in_progress);
+    }
+    state.checkpoint_engram_turn_off_lock(&child_session_id, None, EngramNextIntent::Wait, None);
+    assert_eq!(transport.requests().len(), 1);
+
+    checkpoint_gate.release();
+    checkpoint_thread
+        .join()
+        .expect("lifecycle checkpoint thread should finish");
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .find_session_index(&child_session_id)
+        .and_then(|index| inner.sessions.get(index))
+        .expect("delegation child should remain");
+    assert!(!record.engram.checkpoint_in_progress);
+    assert!(record.engram.checkpoint_owner_generation.is_none());
+}
+
+#[test]
+fn project_reset_release_clears_its_owned_checkpoint() {
+    let (state, _root, project_id, session_ids) =
+        engram_mcp_runtime_family_fixture("reset-checkpoint-owner", Some("grant-old"));
+    let session_id = session_ids[0].clone();
+    let owner_generation = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let owner_generation = inner
+            .engram_project_resets
+            .claim(&project_id)
+            .expect("test should own a fresh project reset fence");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("test session should exist");
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("test session index should be valid");
+        record.engram.project_reset_in_progress = true;
+        assert!(record.engram.begin_checkpoint(Some(owner_generation)));
+        owner_generation
+    };
+
+    state.release_engram_project_reset_fence(
+        &project_id,
+        owner_generation,
+        std::slice::from_ref(&session_id),
+    );
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .find_session_index(&session_id)
+        .and_then(|index| inner.sessions.get(index))
+        .expect("test session should remain");
+    assert!(!record.engram.project_reset_in_progress);
+    assert!(!record.engram.checkpoint_in_progress);
+    assert!(record.engram.checkpoint_owner_generation.is_none());
+}
+
+#[test]
+fn project_reset_checkpoint_claim_waits_for_a_lifecycle_owner_without_takeover() {
+    let (state, _root, project_id, session_ids) =
+        engram_mcp_runtime_family_fixture("reset-checkpoint-wait", Some("grant-old"));
+    let session_id = session_ids[0].clone();
+    let (candidate, owner_generation) = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("test session should exist");
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("test session index should be valid");
+        record.engram.routing_token = Some("routing-open".to_owned());
+        record.engram.active_grant_id = Some("grant-open".to_owned());
+        assert!(record.engram.begin_checkpoint(None));
+        let candidate = project_engram_binding_target_locked(&inner, &session_id)
+            .expect("target snapshot should succeed")
+            .expect("target should exist");
+        let owner_generation = inner
+            .engram_project_resets
+            .claim(&project_id)
+            .expect("test should own a fresh project reset fence");
+        (candidate, owner_generation)
+    };
+    let waiting = observe_next_engram_project_reset_checkpoint_wait(&state, &session_id);
+    let claiming_state = state.clone();
+    let claiming_project_id = project_id.clone();
+    let claim_thread = std::thread::spawn(move || {
+        claiming_state.claim_engram_project_reset_checkpoints(
+            &claiming_project_id,
+            owner_generation,
+            vec![candidate],
+            |project| project.id == claiming_project_id,
+            "project changed during checkpoint claim test",
+        )
+    });
+    waiting
+        .recv_timeout(Duration::from_secs(2))
+        .expect("reset claim should observe the lifecycle-owned checkpoint");
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("test session should remain");
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("test session index should be valid");
+        assert!(record.engram.checkpoint_in_progress);
+        assert!(record.engram.checkpoint_owner_generation.is_none());
+        assert!(record.engram.clear_checkpoint_if_owned_by(None));
+    }
+
+    let claims = claim_thread
+        .join()
+        .expect("checkpoint-claim thread should not panic")
+        .expect("checkpoint claim should succeed after lifecycle completion");
+    assert_eq!(claims.claimed.len(), 1);
+    assert!(claims.timed_out.is_empty());
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let record = inner
+            .find_session_index(&session_id)
+            .and_then(|index| inner.sessions.get(index))
+            .expect("test session should remain");
+        assert!(record.engram.checkpoint_in_progress);
+        assert_eq!(
+            record.engram.checkpoint_owner_generation,
+            Some(owner_generation)
+        );
+    }
+    state.release_engram_project_reset_fence(
+        &project_id,
+        owner_generation,
+        std::slice::from_ref(&session_id),
+    );
+}
+
+#[test]
+fn strict_project_reset_checkpoint_timeout_does_not_append_a_degraded_card() {
+    let (state, _root, project_id, session_ids) =
+        engram_mcp_runtime_family_fixture("reset-checkpoint-timeout", Some("grant-old"));
+    let session_id = session_ids[0].clone();
+    let (candidate, owner_generation, message_count) = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("test session should exist");
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("test session index should be valid");
+        record.engram.routing_token = Some("routing-open".to_owned());
+        record.engram.active_grant_id = Some("grant-open".to_owned());
+        assert!(record.engram.begin_checkpoint(None));
+        let message_count = record.session.messages.len();
+        let candidate = project_engram_binding_target_locked(&inner, &session_id)
+            .expect("target snapshot should succeed")
+            .expect("target should exist");
+        let owner_generation = inner
+            .engram_project_resets
+            .claim(&project_id)
+            .expect("test should own a fresh project reset fence");
+        (candidate, owner_generation, message_count)
+    };
+
+    let claims = state
+        .claim_engram_project_reset_checkpoints_until(
+            &project_id,
+            owner_generation,
+            vec![candidate],
+            |project| project.id == project_id,
+            "project changed during checkpoint timeout test",
+            std::time::Instant::now(),
+        )
+        .expect("owned reset should return its timed-out checkpoint");
+    assert!(claims.claimed.is_empty());
+    assert_eq!(claims.timed_out.len(), 1);
+    let (failures, recovery) = state.handle_timed_out_engram_project_reset_checkpoints(
+        &project_id,
+        &claims.timed_out,
+        false,
+        false,
+    );
+    assert_eq!(failures.len(), 1);
+    assert!(recovery.is_empty());
+
+    let mut inner = state.inner.lock().expect("state mutex poisoned");
+    let index = inner
+        .find_session_index(&session_id)
+        .expect("test session should remain");
+    let record = inner
+        .session_mut_by_index(index)
+        .expect("test session index should be valid");
+    assert_eq!(record.session.messages.len(), message_count);
+    assert!(record.engram.checkpoint_in_progress);
+    assert!(record.engram.checkpoint_owner_generation.is_none());
+    assert!(record.engram.clear_checkpoint_if_owned_by(None));
+    inner
+        .engram_project_resets
+        .release(&project_id, owner_generation);
+}
+
+#[test]
+fn project_reset_checkpoint_claim_drops_a_grantless_active_candidate_without_control_work() {
+    let (state, _root, project_id, session_ids) =
+        engram_mcp_runtime_family_fixture("reset-checkpoint-idle", Some("grant-old"));
+    let session_id = session_ids[0].clone();
+    let (candidate, owner_generation) = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("test session should exist");
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("test session index should be valid");
+        record.engram.routing_token = Some("routing-idle".to_owned());
+        record.engram.active_grant_id = None;
+        record.engram.bind_in_progress = false;
+        record.engram.pending_dispatch = None;
+        record.session.status = SessionStatus::Active;
+        let candidate = project_engram_binding_target_locked(&inner, &session_id)
+            .expect("target snapshot should succeed")
+            .expect("target should exist");
+        let owner_generation = inner
+            .engram_project_resets
+            .claim(&project_id)
+            .expect("test should own a fresh project reset fence");
+        (candidate, owner_generation)
+    };
+
+    let claims = state
+        .claim_engram_project_reset_checkpoints_until(
+            &project_id,
+            owner_generation,
+            vec![candidate],
+            |project| project.id == project_id,
+            "project changed during active grantless checkpoint claim test",
+            std::time::Instant::now(),
+        )
+        .expect("grantless candidate without control work should not need a checkpoint");
+    assert!(claims.claimed.is_empty());
+    assert!(claims.timed_out.is_empty());
+    state.release_engram_project_reset_fence(
+        &project_id,
+        owner_generation,
+        std::slice::from_ref(&session_id),
+    );
+}
+
+#[test]
+fn project_reset_checkpoint_claim_waits_for_bind_to_publish_its_grant() {
+    let (state, _root, project_id, session_ids) =
+        engram_mcp_runtime_family_fixture("reset-checkpoint-bind", Some("grant-old"));
+    let session_id = session_ids[0].clone();
+    let (candidate, owner_generation) = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("test session should exist");
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("test session index should be valid");
+        record.engram.routing_token = Some("routing-binding".to_owned());
+        record.engram.active_grant_id = None;
+        record.engram.bind_in_progress = true;
+        let candidate = project_engram_binding_target_locked(&inner, &session_id)
+            .expect("target snapshot should succeed")
+            .expect("target should exist");
+        let owner_generation = inner
+            .engram_project_resets
+            .claim(&project_id)
+            .expect("test should own a fresh project reset fence");
+        (candidate, owner_generation)
+    };
+    let waiting = observe_next_engram_project_reset_checkpoint_wait(&state, &session_id);
+    let claiming_state = state.clone();
+    let claiming_project_id = project_id.clone();
+    let claim_thread = std::thread::spawn(move || {
+        claiming_state.claim_engram_project_reset_checkpoints(
+            &claiming_project_id,
+            owner_generation,
+            vec![candidate],
+            |project| project.id == claiming_project_id,
+            "project changed during bind checkpoint claim test",
+        )
+    });
+    waiting
+        .recv_timeout(Duration::from_secs(2))
+        .expect("reset claim should wait for the in-flight bind");
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("test session should remain");
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("test session index should be valid");
+        record.engram.bind_in_progress = false;
+        record.engram.active_grant_id = Some("grant-from-bind".to_owned());
+    }
+    let claims = claim_thread
+        .join()
+        .expect("checkpoint-claim thread should not panic")
+        .expect("checkpoint claim should consume the published grant");
+    assert_eq!(claims.claimed.len(), 1);
+    assert!(claims.timed_out.is_empty());
+    assert_eq!(
+        claims.claimed[0].active_grant_id.as_deref(),
+        Some("grant-from-bind")
+    );
+    state.release_engram_project_reset_fence(
+        &project_id,
+        owner_generation,
+        std::slice::from_ref(&session_id),
+    );
+}
+
+#[test]
+fn project_reset_checkpoint_claim_times_out_a_stuck_bind_without_dropping_it() {
+    let (state, _root, project_id, session_ids) =
+        engram_mcp_runtime_family_fixture("reset-checkpoint-stuck-bind", Some("grant-old"));
+    let session_id = session_ids[0].clone();
+    let (candidate, owner_generation) = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("test session should exist");
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("test session index should be valid");
+        record.engram.routing_token = Some("routing-stuck-bind".to_owned());
+        record.engram.active_grant_id = None;
+        record.engram.bind_in_progress = true;
+        let candidate = project_engram_binding_target_locked(&inner, &session_id)
+            .expect("target snapshot should succeed")
+            .expect("target should exist");
+        let owner_generation = inner
+            .engram_project_resets
+            .claim(&project_id)
+            .expect("test should own a fresh project reset fence");
+        (candidate, owner_generation)
+    };
+
+    let claims = state
+        .claim_engram_project_reset_checkpoints_until(
+            &project_id,
+            owner_generation,
+            vec![candidate],
+            |project| project.id == project_id,
+            "project changed during stuck bind checkpoint test",
+            std::time::Instant::now(),
+        )
+        .expect("owned reset should return the stuck bind at its deadline");
+    assert!(claims.claimed.is_empty());
+    assert_eq!(claims.timed_out.len(), 1);
+    state.release_engram_project_reset_fence(
+        &project_id,
+        owner_generation,
+        std::slice::from_ref(&session_id),
+    );
 }
 
 #[test]
@@ -5845,9 +7211,15 @@ fn engram_mcp_shared_codex_interrupt_failure_revokes_grant_and_surfaces_degradat
     assert!(
         error
             .message
-            .contains("the revoked grant blocks further mutations"),
+            .contains("the old thread may remain alive with its prior MCP capabilities"),
         "unexpected cleanup error: {}",
         error.message
+    );
+    assert!(
+        !error
+            .message
+            .contains("the revoked grant blocks further mutations"),
+        "an unconfirmed shared-Codex interrupt must not claim fail-closed revocation"
     );
     assert_fixture_authority_revoke_args(
         &read_fixture_authority_revoke_args(&root),
@@ -6015,6 +7387,345 @@ fn engram_mcp_grant_revoke_cli_failure_is_visible_after_durable_grant_clear() {
 }
 
 #[test]
+fn engram_mcp_missing_project_identity_keeps_a_pending_tombstone_and_retries_after_repair() {
+    let state = test_app_state();
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("engram-authority-missing-project-identity");
+    fs::create_dir_all(&root).expect("project root should exist");
+    fs::write(root.join(".engram-project"), "fixture-ready\n").expect("fixture mode should write");
+    let project_id = create_test_project(&state, &root, "Engram pending identity repair");
+    let mut enabled = real_fixture_engram_settings(&root);
+    enabled.work_authority_grant = Some("grant-pending-identity".to_owned());
+    state
+        .update_project_engram_settings(&project_id, enabled.clone())
+        .expect("initial authority should persist");
+    fs::remove_file(root.join(".engram-project"))
+        .expect("project identity should become unavailable");
+
+    let mut cleared = enabled;
+    cleared.work_authority_grant = None;
+    let error = match state.update_project_engram_settings(&project_id, cleared.clone()) {
+        Ok(_) => panic!("unresolved authority revocation must remain visible"),
+        Err(error) => error,
+    };
+    assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR);
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let tombstone = inner
+            .engram_retired_work_authority_grants
+            .iter()
+            .find(|entry| entry.grant_hash == "grant-pending-identity")
+            .expect("unresolved retirement must be durable");
+        assert_eq!(tombstone.project_root, root.to_string_lossy());
+        assert!(tombstone.project_id.is_empty());
+        assert!(!tombstone.revoke_confirmed);
+        assert!(tombstone.reason.contains("project identity is unavailable"));
+    }
+
+    fs::write(root.join(".engram-project"), "fixture-ready\n")
+        .expect("project identity should be repaired");
+    state
+        .update_project_engram_settings(&project_id, cleared)
+        .expect("a same-home repair PATCH should retry the pending revoke");
+    assert_fixture_authority_revoke_args(
+        &read_fixture_authority_revoke_args(&root),
+        "grant-pending-identity",
+        "TermAl retrying a previously unconfirmed Engram authority revocation",
+    );
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let tombstone = inner
+        .engram_retired_work_authority_grants
+        .iter()
+        .find(|entry| entry.grant_hash == "grant-pending-identity")
+        .expect("pending tombstone should remain as a reuse blocker");
+    assert!(tombstone.revoke_confirmed);
+    assert!(tombstone.reason.contains("project identity is unavailable"));
+}
+
+#[test]
+fn engram_mcp_rotation_revoke_failure_keeps_new_settings_and_reset_notice() {
+    let state = test_app_state();
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("engram-authority-rotation-revoke-failure");
+    fs::create_dir_all(&root).expect("project root should exist");
+    fs::write(
+        root.join(".engram-project"),
+        "fixture-authority-revoke-fail\n",
+    )
+    .expect("fixture mode should write");
+    let project_id = create_test_project(&state, &root, "Engram rotation revoke failure");
+    let session_id = create_test_project_session(&state, Agent::Claude, &project_id, &root);
+    let mut enabled = real_fixture_engram_settings(&root);
+    enabled.work_authority_grant = Some("grant-old".to_owned());
+    state
+        .update_project_engram_settings(&project_id, enabled)
+        .expect("fixture settings should enable Engram");
+    attach_engram_mcp_test_runtime(&state, &session_id);
+
+    let mut rotated = real_fixture_engram_settings(&root);
+    rotated.work_authority_grant = Some("grant-new".to_owned());
+    let error = match state.update_project_engram_settings(&project_id, rotated) {
+        Ok(_) => panic!("failed rotation revocation must remain visible"),
+        Err(error) => error,
+    };
+    assert!(
+        error
+            .message
+            .contains("old Engram work-authority grant could not be revoked")
+    );
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let project = inner
+        .find_project(&project_id)
+        .expect("project should remain after durable rotation");
+    assert_eq!(
+        project
+            .engram
+            .as_ref()
+            .and_then(|settings| settings.work_authority_grant.as_deref()),
+        Some("grant-new")
+    );
+    let record = inner
+        .find_session_index(&session_id)
+        .and_then(|index| inner.sessions.get(index))
+        .expect("runtime session should remain");
+    assert!(matches!(record.runtime, SessionRuntime::None));
+    assert!(!record.runtime_reset_required);
+    assert!(!record.runtime_stop_in_progress);
+    assert!(record.engram_mcp_installed.is_none());
+    assert!(record.session.messages.iter().any(|message| matches!(
+        message,
+        Message::Text { text, .. }
+            if text.contains("TermAl is retiring this runtime's previous write authority")
+    )));
+    let tombstone = inner
+        .engram_retired_work_authority_grants
+        .iter()
+        .find(|entry| entry.grant_hash == "grant-old")
+        .expect("failed rotation revoke must leave a durable tombstone");
+    assert!(!tombstone.revoke_confirmed);
+}
+
+#[test]
+fn engram_mcp_home_rotation_revoke_failure_tears_down_the_old_runtime() {
+    let state = test_app_state();
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("engram-home-rotation-cli-failure");
+    let old_home = root.join("old-home");
+    let new_home = root.join("new-home");
+    fs::create_dir_all(&old_home).expect("old home should exist");
+    fs::create_dir_all(&new_home).expect("new home should exist");
+    fs::write(
+        root.join(".engram-project"),
+        "fixture-authority-revoke-fail\n",
+    )
+    .expect("fixture mode should write");
+    let project_id = create_test_project(&state, &root, "Engram home rotation failure");
+    let session_id = create_test_project_session(&state, Agent::Claude, &project_id, &root);
+    let mut enabled = real_fixture_engram_settings(&root);
+    enabled.home = Some(old_home.to_string_lossy().into_owned());
+    enabled.work_authority_grant = Some("grant-old-home".to_owned());
+    state
+        .update_project_engram_settings(&project_id, enabled)
+        .expect("initial authority should persist");
+    attach_engram_mcp_test_runtime(&state, &session_id);
+
+    let mut rotated = real_fixture_engram_settings(&root);
+    rotated.home = Some(new_home.to_string_lossy().into_owned());
+    rotated.work_authority_grant = Some("grant-new-home".to_owned());
+    let error = match state.update_project_engram_settings(&project_id, rotated) {
+        Ok(_) => panic!("failed home authority revocation must remain visible"),
+        Err(error) => error,
+    };
+    assert!(
+        error
+            .message
+            .contains("old Engram work-authority grant could not be revoked")
+    );
+    assert_fixture_authority_revoke_args(
+        &read_fixture_authority_revoke_args(&old_home),
+        "grant-old-home",
+        "TermAl project Engram work-authority configuration rotated",
+    );
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let project = inner
+        .find_project(&project_id)
+        .expect("project should remain after durable rotation");
+    let settings = project.engram.as_ref().expect("settings should remain");
+    assert_eq!(
+        settings.work_authority_grant.as_deref(),
+        Some("grant-new-home")
+    );
+    assert_eq!(
+        settings.home.as_deref(),
+        Some(new_home.to_string_lossy().as_ref())
+    );
+    let record = inner
+        .find_session_index(&session_id)
+        .and_then(|index| inner.sessions.get(index))
+        .expect("runtime session should remain");
+    assert!(matches!(record.runtime, SessionRuntime::None));
+    assert!(!record.runtime_stop_in_progress);
+    assert!(record.engram_mcp_installed.is_none());
+    assert!(!inner.engram_project_resets.contains(&project_id));
+    assert!(
+        inner
+            .engram_retired_work_authority_grants
+            .iter()
+            .any(|entry| entry.grant_hash == "grant-old-home" && !entry.revoke_confirmed)
+    );
+}
+
+#[test]
+fn engram_mcp_rotation_persist_failure_rolls_back_notice_reset_and_tombstone() {
+    let mut state = test_app_state();
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("engram-authority-rotation-persist-failure");
+    fs::create_dir_all(&root).expect("project root should exist");
+    fs::write(root.join(".engram-project"), "fixture-ready\n").expect("fixture mode should write");
+    let project_id = create_test_project(&state, &root, "Engram rotation persist failure");
+    let session_id = create_test_project_session(&state, Agent::Claude, &project_id, &root);
+    let mut enabled = real_fixture_engram_settings(&root);
+    enabled.work_authority_grant = Some("grant-old".to_owned());
+    state
+        .update_project_engram_settings(&project_id, enabled.clone())
+        .expect("fixture settings should enable Engram");
+    attach_engram_mcp_test_runtime(&state, &session_id);
+    let previous_message_count = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        inner
+            .find_session_index(&session_id)
+            .and_then(|index| inner.sessions.get(index))
+            .expect("session should exist")
+            .session
+            .messages
+            .len()
+    };
+
+    state.shutdown_persist_blocking();
+    let failing_persistence_path = root.join("termal-rotation-persist-failure.sqlite");
+    fs::create_dir_all(&failing_persistence_path)
+        .expect("a directory at the persistence path should force failure");
+    state.persistence_path = Arc::new(failing_persistence_path);
+
+    let mut rotated = enabled;
+    rotated.work_authority_grant = Some("grant-new".to_owned());
+    let error = match state.update_project_engram_settings(&project_id, rotated) {
+        Ok(_) => panic!("forced persistence failure should reject the rotation"),
+        Err(error) => error,
+    };
+    assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(
+        error
+            .message
+            .contains("failed to persist Engram project settings")
+    );
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let settings = inner
+        .find_project(&project_id)
+        .and_then(|project| project.engram.as_ref())
+        .expect("old settings should remain");
+    assert_eq!(settings.work_authority_grant.as_deref(), Some("grant-old"));
+    assert!(inner.engram_retired_work_authority_grants.is_empty());
+    assert!(!inner.engram_project_resets.contains(&project_id));
+    let record = inner
+        .find_session_index(&session_id)
+        .and_then(|index| inner.sessions.get(index))
+        .expect("session should remain");
+    assert_eq!(record.session.messages.len(), previous_message_count);
+    assert!(!record.runtime_reset_required);
+    assert!(!record.runtime_stop_in_progress);
+    assert!(
+        !matches!(record.runtime, SessionRuntime::None),
+        "persist rollback should keep the pre-rotation runtime attached"
+    );
+    assert!(record.deferred_stop_callbacks.is_empty());
+}
+
+#[test]
+fn unconfirmed_authority_revocation_retries_on_the_next_same_store_rotation() {
+    let state = test_app_state();
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("engram-authority-revoke-retry");
+    fs::create_dir_all(&root).expect("project root should exist");
+    fs::write(
+        root.join(".engram-project"),
+        "fixture-authority-revoke-fail-once\n",
+    )
+    .expect("fixture mode should write");
+    let project_id = create_test_project(&state, &root, "Engram authority retry");
+    let mut grant_a = real_fixture_engram_settings(&root);
+    grant_a.work_authority_grant = Some("grant-a".to_owned());
+    state
+        .update_project_engram_settings(&project_id, grant_a)
+        .expect("initial authority should persist");
+
+    let mut grant_b = real_fixture_engram_settings(&root);
+    grant_b.work_authority_grant = Some("grant-b".to_owned());
+    let error = match state.update_project_engram_settings(&project_id, grant_b) {
+        Ok(_) => panic!("the first scripted revocation should fail"),
+        Err(error) => error,
+    };
+    assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR);
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let grant_a_tombstone = inner
+            .engram_retired_work_authority_grants
+            .iter()
+            .find(|entry| entry.grant_hash == "grant-a")
+            .expect("failed revocation must remain durably retired");
+        assert!(!grant_a_tombstone.revoke_confirmed);
+        assert_eq!(
+            inner
+                .find_project(&project_id)
+                .and_then(|project| project.engram.as_ref())
+                .and_then(|settings| settings.work_authority_grant.as_deref()),
+            Some("grant-b")
+        );
+    }
+
+    let mut grant_c = real_fixture_engram_settings(&root);
+    grant_c.work_authority_grant = Some("grant-c".to_owned());
+    state
+        .update_project_engram_settings(&project_id, grant_c)
+        .expect("the next same-store mutation should retry A and revoke B");
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    for grant in ["grant-a", "grant-b"] {
+        let tombstone = inner
+            .engram_retired_work_authority_grants
+            .iter()
+            .find(|entry| entry.grant_hash == grant)
+            .unwrap_or_else(|| panic!("{grant} should be retained in the host ledger"));
+        assert!(
+            tombstone.revoke_confirmed,
+            "{grant} should be confirmed after the retry mutation"
+        );
+    }
+}
+
+#[test]
 fn project_engram_patch_normalizes_and_validates_work_authority_grants() {
     let state = test_app_state();
     let root = state
@@ -6123,6 +7834,59 @@ fn immediate_revocation_rejects_overlapping_project_engram_mutations() {
 }
 
 #[test]
+fn grant_rotation_fence_rejects_an_overlapping_rotation() {
+    let state = test_app_state();
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("engram-overlapping-rotation");
+    fs::create_dir_all(&root).expect("project root should exist");
+    fs::write(root.join(".engram-project"), "fixture-ready\n").expect("fixture mode should write");
+    let project_id = create_test_project(&state, &root, "Engram overlapping rotation");
+    let mut grant_a = real_fixture_engram_settings(&root);
+    grant_a.work_authority_grant = Some("grant-a".to_owned());
+    state
+        .update_project_engram_settings(&project_id, grant_a)
+        .expect("fixture settings should enable Engram");
+
+    let gate = gate_next_engram_project_reset_fence(&project_id);
+    let rotating_state = state.clone();
+    let rotating_project_id = project_id.clone();
+    let mut grant_b = real_fixture_engram_settings(&root);
+    grant_b.work_authority_grant = Some("grant-b".to_owned());
+    let rotating = std::thread::spawn(move || {
+        rotating_state.update_project_engram_settings(&rotating_project_id, grant_b)
+    });
+    gate.wait_until_entered();
+
+    let mut grant_c = real_fixture_engram_settings(&root);
+    grant_c.work_authority_grant = Some("grant-c".to_owned());
+    let error = match state.update_project_engram_settings(&project_id, grant_c) {
+        Ok(_) => panic!("the rotation fence must reject an overlapping mutation"),
+        Err(error) => error,
+    };
+    assert_eq!(error.status, StatusCode::CONFLICT);
+    assert_eq!(
+        error.message,
+        "Engram project settings are already being reset"
+    );
+
+    gate.release();
+    rotating
+        .join()
+        .expect("grant-rotation thread should not panic")
+        .expect("grant rotation should finish after the gate releases");
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let settings = inner
+        .find_project(&project_id)
+        .and_then(|project| project.engram.as_ref())
+        .expect("settings should remain");
+    assert_eq!(settings.work_authority_grant.as_deref(), Some("grant-b"));
+}
+
+#[test]
 fn immediate_revocation_covers_current_and_runtime_installed_engram_descriptors() {
     let state = test_app_state();
     let root = state
@@ -6132,8 +7896,10 @@ fn immediate_revocation_covers_current_and_runtime_installed_engram_descriptors(
         .path()
         .join("engram-installed-descriptor-revocation");
     let old_home = root.join("old-home");
+    let older_runtime_home = root.join("older-runtime-home");
     let new_home = root.join("new-home");
     fs::create_dir_all(&old_home).expect("old Engram home should exist");
+    fs::create_dir_all(&older_runtime_home).expect("older runtime home should exist");
     fs::create_dir_all(&new_home).expect("new Engram home should exist");
     fs::write(root.join(".engram-project"), "fixture-ok\n").expect("fixture mode should write");
     let project_id = create_test_project(&state, &root, "Installed descriptor revocation");
@@ -6143,7 +7909,7 @@ fn immediate_revocation_covers_current_and_runtime_installed_engram_descriptors(
         .into_owned();
     let mut old_settings = real_fixture_engram_settings(&root);
     old_settings.home = Some(old_home.to_string_lossy().into_owned());
-    old_settings.work_authority_grant = Some("grant-installed-old".to_owned());
+    old_settings.work_authority_grant = Some("grant-current-old".to_owned());
     state
         .update_project_engram_settings(&project_id, old_settings)
         .expect("old fixture settings should enable Engram");
@@ -6158,8 +7924,8 @@ fn immediate_revocation_covers_current_and_runtime_installed_engram_descriptors(
             .expect("session index should be valid")
             .engram_mcp_installed = Some(EngramMcpInstalledDescriptor {
             binary_path: binary_path.clone(),
-            home: old_home.to_string_lossy().into_owned(),
-            work_authority_grant: Some("grant-installed-old".to_owned()),
+            home: older_runtime_home.to_string_lossy().into_owned(),
+            work_authority_grant: Some("grant-runtime-older".to_owned()),
         });
     }
 
@@ -6169,6 +7935,16 @@ fn immediate_revocation_covers_current_and_runtime_installed_engram_descriptors(
     state
         .update_project_engram_settings(&project_id, rotated.clone())
         .expect("connection rotation should defer runtime replacement");
+    assert_fixture_authority_revoke_args(
+        &read_fixture_authority_revoke_args(&old_home),
+        "grant-current-old",
+        "TermAl project Engram work-authority configuration rotated",
+    );
+    assert_fixture_authority_revoke_args(
+        &read_fixture_authority_revoke_args(&older_runtime_home),
+        "grant-runtime-older",
+        "TermAl project Engram work-authority configuration rotated",
+    );
     rotated.work_authority_grant = None;
     state
         .update_project_engram_settings(&project_id, rotated)
@@ -6176,7 +7952,12 @@ fn immediate_revocation_covers_current_and_runtime_installed_engram_descriptors(
 
     assert_fixture_authority_revoke_args(
         &read_fixture_authority_revoke_args(&old_home),
-        "grant-installed-old",
+        "grant-current-old",
+        "TermAl project Engram work-authority configuration rotated",
+    );
+    assert_fixture_authority_revoke_args(
+        &read_fixture_authority_revoke_args(&older_runtime_home),
+        "grant-runtime-older",
         "TermAl project Engram work-authority grant removed",
     );
     assert_fixture_authority_revoke_args(
@@ -8024,7 +9805,7 @@ fn reset_stale_begin_preserves_successor_until_immediate_disable_revokes_it() {
     };
     assert!(
         successor.engram_dispatch_generation().is_none(),
-        "the fenced successor must use the legacy shadow path"
+        "the fenced successor must use the shadow path"
     );
     deliver_turn_dispatch(&state, successor).expect("prompt B should reach the live runtime");
     assert!(matches!(
@@ -9614,7 +11395,7 @@ fn runtime_terminal_callbacks_abandon_blocked_engram_begin_before_queue_drain() 
 struct RestartEngramControlTransport {
     child_session_id: String,
     open_grant_id: String,
-    refuse_checkpoint_as_issued: bool,
+    issued_checkpoint_refusal_code: Option<String>,
     requests: Mutex<Vec<RecordedEngramControlRequest>>,
 }
 
@@ -9623,7 +11404,7 @@ impl RestartEngramControlTransport {
         Arc::new(Self {
             child_session_id,
             open_grant_id,
-            refuse_checkpoint_as_issued: false,
+            issued_checkpoint_refusal_code: None,
             requests: Mutex::new(Vec::new()),
         })
     }
@@ -9635,7 +11416,7 @@ impl RestartEngramControlTransport {
         Arc::new(Self {
             child_session_id,
             open_grant_id,
-            refuse_checkpoint_as_issued: true,
+            issued_checkpoint_refusal_code: Some("grant_not_begun".to_owned()),
             requests: Mutex::new(Vec::new()),
         })
     }
@@ -9670,9 +11451,9 @@ impl EngramControlTransport for RestartEngramControlTransport {
                 "open_grant_id": self.open_grant_id
             })),
             Some("session_status") => Ok(json!({ "phase": "ready" })),
-            Some("turn_checkpoint") if self.refuse_checkpoint_as_issued => Ok(json!({
+            Some("turn_checkpoint") if self.issued_checkpoint_refusal_code.is_some() => Ok(json!({
                 "decision": "refuse",
-                "code": "grant_scope_mismatch"
+                "code": self.issued_checkpoint_refusal_code.as_deref()
             })),
             Some("turn_checkpoint") => Ok(json!({
                 "decision": "checkpointed",
@@ -10397,13 +12178,31 @@ fn state_snapshot_redacts_work_authority_grant_without_changing_persisted_projec
             .iter_mut()
             .find(|project| project.id == project_id)
             .expect("project should exist");
-        project.engram = Some(EngramProjectSettings {
+        let settings = EngramProjectSettings {
             enabled: true,
             binary_path: Some("C:/tools/engram".to_owned()),
             home: Some("C:/engram-home".to_owned()),
             work_authority_grant: Some("operator-secret-grant".to_owned()),
             deadline_ms: Some(250),
-        });
+        };
+        let debug = format!("{settings:?}");
+        assert!(!debug.contains("operator-secret-grant"));
+        assert!(debug.contains("[REDACTED]"));
+        let retired_debug = format!(
+            "{:?}",
+            EngramRetiredWorkAuthorityGrant {
+                home: "C:/engram-home".to_owned(),
+                project_root: String::new(),
+                store_key: None,
+                project_id: "fixture-project".to_owned(),
+                grant_hash: "revoked-secret-grant".to_owned(),
+                retired_at: "2026-08-29T00:00:00Z".to_owned(),
+                reason: "test revocation".to_owned(),
+                revoke_confirmed: false,
+            }
+        );
+        assert!(!retired_debug.contains("revoked-secret-grant"));
+        project.engram = Some(settings);
         state
             .commit_locked(&mut inner)
             .expect("Engram settings should persist");
@@ -10886,6 +12685,125 @@ fn project_deletion_checkpoints_active_engram_grants_and_reaps_sidecars() {
         assert!(!record.engram.project_reset_in_progress);
         assert!(!record.engram.checkpoint_in_progress);
     }
+}
+
+#[test]
+fn project_deletion_keeps_retired_authority_across_recreate_and_restart() {
+    for (mode, revoke_confirmed) in [
+        ("fixture-ready", true),
+        ("fixture-authority-revoke-fail", false),
+    ] {
+        let state = test_app_state();
+        let root = state
+            .test_temp_root
+            .as_ref()
+            .expect("test root should exist")
+            .path()
+            .join(format!("engram-delete-ledger-{mode}"));
+        fs::create_dir_all(&root).expect("project root should exist");
+        fs::write(root.join(".engram-project"), format!("{mode}\n"))
+            .expect("fixture mode should write");
+        let project_id = create_test_project(&state, &root, "Engram delete ledger");
+        let mut enabled = real_fixture_engram_settings(&root);
+        enabled.work_authority_grant = Some("grant-deleted".to_owned());
+        state
+            .update_project_engram_settings(&project_id, enabled.clone())
+            .expect("initial authority should persist");
+
+        let deletion = state.delete_project(&project_id);
+        if revoke_confirmed {
+            deletion.expect("successful revoke should allow clean deletion");
+        } else {
+            let error = match deletion {
+                Ok(_) => panic!("failed revoke should remain visible"),
+                Err(error) => error,
+            };
+            assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR);
+            assert!(error.message.contains("capability revocation"));
+        }
+        {
+            let inner = state.inner.lock().expect("state mutex poisoned");
+            assert!(inner.find_project(&project_id).is_none());
+            let tombstone = inner
+                .engram_retired_work_authority_grants
+                .iter()
+                .find(|entry| entry.grant_hash == "grant-deleted")
+                .expect("project deletion must leave a host-level tombstone");
+            assert_eq!(tombstone.project_id, mode);
+            assert_eq!(tombstone.revoke_confirmed, revoke_confirmed);
+        }
+
+        let reloaded = {
+            let inner = state.inner.lock().expect("state mutex poisoned");
+            let encoded = serde_json::to_vec(&PersistedState::from_inner(&inner))
+                .expect("host ledger should serialize");
+            serde_json::from_slice::<PersistedState>(&encoded)
+                .expect("host ledger should deserialize")
+                .into_inner()
+                .expect("persisted host ledger should rehydrate")
+        };
+        *state.inner.lock().expect("state mutex poisoned") = reloaded;
+
+        let recreated_project_id =
+            create_test_project(&state, &root, "Recreated Engram delete ledger");
+        let error = match state.update_project_engram_settings(&recreated_project_id, enabled) {
+            Ok(_) => panic!("recreated project must reject its retired authority"),
+            Err(error) => error,
+        };
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert!(error.message.contains("was retired by TermAl"));
+    }
+}
+
+#[test]
+fn project_deletion_without_an_engram_binary_still_persists_the_unconfirmed_grant() {
+    let state = test_app_state();
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("engram-delete-missing-binary");
+    fs::create_dir_all(&root).expect("project root should exist");
+    let project_id = create_test_project(&state, &root, "Engram delete missing binary");
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let project = inner
+            .projects
+            .iter_mut()
+            .find(|project| project.id == project_id)
+            .expect("project should exist");
+        project.engram = Some(EngramProjectSettings {
+            enabled: false,
+            binary_path: None,
+            home: Some(root.to_string_lossy().into_owned()),
+            work_authority_grant: Some("grant-without-binary".to_owned()),
+            deadline_ms: Some(250),
+        });
+        state
+            .commit_locked(&mut inner)
+            .expect("seeded unresolved authority should persist");
+    }
+
+    let error = match state.delete_project(&project_id) {
+        Ok(_) => panic!("missing binary must be reported as degraded revocation"),
+        Err(error) => error,
+    };
+    assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(
+        error
+            .message
+            .contains("binary/home/project identity is unavailable")
+    );
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert!(inner.find_project(&project_id).is_none());
+    let tombstone = inner
+        .engram_retired_work_authority_grants
+        .iter()
+        .find(|entry| entry.grant_hash == "grant-without-binary")
+        .expect("project deletion must not lose the unresolved credential");
+    assert_eq!(tombstone.project_root, root.to_string_lossy());
+    assert!(!tombstone.revoke_confirmed);
 }
 
 #[test]
@@ -11429,6 +13347,96 @@ fn dispatch_card_persist_failure_continues_fail_open_delivery_from_memory() {
 
     fs::remove_dir_all(failing_persistence_path)
         .expect("failing persistence directory should be removable");
+}
+
+#[test]
+fn global_kill_switch_does_not_suppress_authority_rotation_or_tombstones() {
+    const CHILD_MARKER: &str = "TERMAL_TEST_ENGRAM_AUTHORITY_KILL_SWITCH_CHILD";
+    if std::env::var_os(CHILD_MARKER).is_none() {
+        let status = Command::new(std::env::current_exe().expect("test binary should resolve"))
+            .arg("--exact")
+            .arg(
+                "tests::engram_host_adapter::global_kill_switch_does_not_suppress_authority_rotation_or_tombstones",
+            )
+            .arg("--nocapture")
+            .env(CHILD_MARKER, "1")
+            .env(ENGRAM_GLOBAL_DISABLE_ENV, "1")
+            .status()
+            .expect("isolated authority kill-switch test process should start");
+        assert!(
+            status.success(),
+            "isolated authority kill-switch case failed"
+        );
+        return;
+    }
+
+    assert!(engram_globally_disabled());
+    let state = test_app_state();
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("engram-authority-kill-switch");
+    fs::create_dir_all(&root).expect("project root should exist");
+    fs::write(root.join(".engram-project"), "fixture-ready\n").expect("fixture mode should write");
+    let project_id = create_test_project(&state, &root, "Engram authority kill switch");
+    let mut grant_a = real_fixture_engram_settings(&root);
+    grant_a.work_authority_grant = Some("grant-a".to_owned());
+    state
+        .update_project_engram_settings(&project_id, grant_a.clone())
+        .expect("initial authority should persist while runtime composition is disabled");
+
+    let mut grant_b = real_fixture_engram_settings(&root);
+    grant_b.work_authority_grant = Some("grant-b".to_owned());
+    state
+        .update_project_engram_settings(&project_id, grant_b)
+        .expect("rotation must revoke authority even while runtime composition is disabled");
+    assert_fixture_authority_revoke_args(
+        &read_fixture_authority_revoke_args(&root),
+        "grant-a",
+        "TermAl project Engram work-authority configuration rotated",
+    );
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        assert!(inner.sessions.iter().all(|record| {
+            record.session.project_id.as_deref() != Some(project_id.as_str())
+                || matches!(record.runtime, SessionRuntime::None)
+        }));
+        let tombstone = inner
+            .engram_retired_work_authority_grants
+            .iter()
+            .find(|entry| entry.grant_hash == "grant-a")
+            .expect("retired authority must be stored in the host ledger");
+        assert!(tombstone.revoke_confirmed);
+        assert_eq!(tombstone.project_id, "fixture-ready");
+    }
+
+    let _runtime_enabled = ScopedEnvVar::remove(ENGRAM_GLOBAL_DISABLE_ENV);
+    let error = match state.update_project_engram_settings(&project_id, grant_a) {
+        Ok(_) => panic!("retired authority must remain rejected after lifting the kill switch"),
+        Err(error) => error,
+    };
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert!(error.message.contains("was retired by TermAl"));
+
+    drop(_runtime_enabled);
+    assert!(engram_globally_disabled());
+    state
+        .delete_project(&project_id)
+        .expect("project deletion must revoke current authority under the kill switch");
+    assert_fixture_authority_revoke_args(
+        &read_fixture_authority_revoke_args(&root),
+        "grant-b",
+        "TermAl project deleted",
+    );
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let tombstone = inner
+        .engram_retired_work_authority_grants
+        .iter()
+        .find(|entry| entry.grant_hash == "grant-b")
+        .expect("deletion authority must remain in the host ledger");
+    assert!(tombstone.revoke_confirmed);
 }
 
 #[test]

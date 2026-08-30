@@ -355,3 +355,5 @@
 {"id":"int-868f7e501830313ee3e9c534259fd21e","kind":"field_change","created_at":"2026-08-28T17:43:13.6544788Z","actor":"Greg Lapinski","issue_id":"tm-gyan","extra":{"field":"status","new_value":"open","old_value":"closed"}}
 {"id":"int-cbb082ebba3fe1f259186085a53e01ed","kind":"field_change","created_at":"2026-08-28T17:50:31.6116156Z","actor":"Greg Lapinski","issue_id":"tm-gyan","extra":{"field":"status","new_value":"in_progress","old_value":"open"}}
 {"id":"int-09da1caac0118ed5aa74fbdae87b2e46","kind":"field_change","created_at":"2026-08-28T18:59:00.5720099Z","actor":"Greg Lapinski","issue_id":"tm-3g3a","extra":{"field":"priority","new_value":"1","old_value":"2"}}
+{"id":"int-7ab84c1e6fb911f1b7af6c61a79e2985","kind":"field_change","created_at":"2026-08-30T12:29:19.2577606Z","actor":"Greg Lapinski","issue_id":"tm-fpj","extra":{"field":"status","new_value":"open","old_value":"deferred"}}
+{"id":"int-c76405998367917563529e130cb8ea61","kind":"field_change","created_at":"2026-08-30T12:29:19.2577606Z","actor":"Greg Lapinski","issue_id":"tm-fpj","extra":{"field":"priority","new_value":"1","old_value":"3"}}

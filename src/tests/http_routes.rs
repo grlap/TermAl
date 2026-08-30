@@ -2763,8 +2763,12 @@ async fn codex_thread_action_routes_update_session_state() {
         .lock()
         .expect("shared Codex runtime mutex poisoned") = Some(runtime);
 
+    let (request_started_tx, request_started_rx) = mpsc::channel();
     std::thread::spawn(move || {
         for expected_method in ["thread/archive", "thread/unarchive", "thread/rollback"] {
+            request_started_rx
+                .recv()
+                .expect("matching Codex thread action request should start");
             let command = input_rx
                 .recv_timeout(Duration::from_secs(1))
                 .expect("Codex thread action should arrive");
@@ -2817,6 +2821,9 @@ async fn codex_thread_action_routes_update_session_state() {
     });
 
     let app = app_router(state.clone());
+    request_started_tx
+        .send(())
+        .expect("archive request start should be observed");
     let (archive_status, archive_response): (StatusCode, StateResponse) = request_json(
         &app,
         Request::builder()
@@ -2837,6 +2844,9 @@ async fn codex_thread_action_routes_update_session_state() {
         Some(CodexThreadState::Archived)
     );
 
+    request_started_tx
+        .send(())
+        .expect("unarchive request start should be observed");
     let (unarchive_status, unarchive_response): (StatusCode, StateResponse) = request_json(
         &app,
         Request::builder()
@@ -2857,6 +2867,9 @@ async fn codex_thread_action_routes_update_session_state() {
         Some(CodexThreadState::Active)
     );
 
+    request_started_tx
+        .send(())
+        .expect("rollback request start should be observed");
     let (rollback_status, rollback_response): (StatusCode, StateResponse) = request_json(
         &app,
         Request::builder()

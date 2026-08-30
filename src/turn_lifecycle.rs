@@ -56,6 +56,11 @@ struct EngramMcpRuntimeRevocationBatch {
     newly_pending_session_ids: Vec<String>,
 }
 
+#[derive(Default)]
+struct EngramMcpRuntimeRevocationRelease {
+    deferred_callbacks: Vec<(String, RuntimeToken, Vec<DeferredStopCallback>)>,
+}
+
 #[derive(Debug, Default)]
 struct EngramMcpRuntimeRevocationCompletion {
     session_id: String,
@@ -226,6 +231,94 @@ fn take_pending_engram_mcp_revocation_after_stop_failure_locked(
 }
 
 impl AppState {
+    /// Releases a visible revocation fence after Engram confirmed that the old
+    /// authority is unusable. The runtime stays alive until its normal reset
+    /// boundary, while terminal callbacks captured during the bounded revoke
+    /// window are returned for replay after the project fence is released.
+    fn release_engram_mcp_runtime_revocations_without_teardown(
+        &self,
+        batch: EngramMcpRuntimeRevocationBatch,
+    ) -> EngramMcpRuntimeRevocationRelease {
+        let mut release = EngramMcpRuntimeRevocationRelease::default();
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let mut changed = false;
+        for target in batch.targets {
+            let Some(index) = inner.find_session_index(&target.session_id) else {
+                continue;
+            };
+            if !inner.sessions[index].runtime_stop_is_owned_by(
+                RuntimeStopOwnerKind::EngramMcpRevocation,
+                &target.token,
+                target.owner_generation,
+            ) {
+                continue;
+            }
+            let record = inner
+                .session_mut_by_index(index)
+                .expect("session index should be valid");
+            let runtime_still_matches = record.runtime.matches_runtime_token(&target.token);
+            record.clear_runtime_stop();
+            let deferred_callbacks = std::mem::take(&mut record.deferred_stop_callbacks);
+            if runtime_still_matches && !deferred_callbacks.is_empty() {
+                release.deferred_callbacks.push((
+                    target.session_id,
+                    target.token,
+                    deferred_callbacks,
+                ));
+            }
+            changed = true;
+        }
+        for session_id in batch.newly_pending_session_ids {
+            if let Some(index) = inner.find_session_index(&session_id) {
+                let record = inner
+                    .session_mut_by_index(index)
+                    .expect("session index should be valid");
+                if record.engram_mcp_revocation_pending {
+                    record.engram_mcp_revocation_pending = false;
+                    changed = true;
+                }
+            }
+        }
+        if changed {
+            self.publish_state_locked(&inner);
+        }
+        release
+    }
+
+    fn replay_deferred_runtime_stop_callbacks(
+        &self,
+        session_id: &str,
+        token: &RuntimeToken,
+        mut deferred_callbacks: Vec<DeferredStopCallback>,
+    ) {
+        // Runtime exit must remain last: it removes the runtime handle that the
+        // preceding turn terminal callbacks still need to match.
+        deferred_callbacks.sort_by_key(|deferred| {
+            matches!(deferred, DeferredStopCallback::RuntimeExited(_))
+        });
+        for deferred in deferred_callbacks {
+            let replay_result = match deferred {
+                DeferredStopCallback::TurnFailed(msg) => {
+                    self.fail_turn_if_runtime_matches(session_id, token, &msg)
+                }
+                DeferredStopCallback::TurnError(msg) => {
+                    self.mark_turn_error_if_runtime_matches(session_id, token, &msg)
+                }
+                DeferredStopCallback::TurnCompleted => {
+                    self.finish_turn_ok_if_runtime_matches(session_id, token)
+                }
+                DeferredStopCallback::RuntimeExited(msg) => {
+                    self.handle_runtime_exit_if_matches(session_id, token, msg.as_deref())
+                }
+            };
+            if let Err(error) = replay_result {
+                eprintln!(
+                    "session cleanup warning> failed to replay deferred stop callback for session `{session_id}`: {error:#}"
+                );
+            }
+        }
+    }
+
     /// Releases the fence owned by a revocation target when its token was
     /// replaced by a lower-level teardown path. Dispatch never crosses this
     /// fence, so any callbacks buffered for the stale token are discarded.
@@ -585,6 +678,7 @@ impl AppState {
             session_id,
             Some(token),
             EngramNextIntent::Wait,
+            None,
         );
         let cleaned = error_message.trim();
         let should_dispatch_next = {
@@ -768,6 +862,7 @@ impl AppState {
             session_id,
             Some(token),
             EngramNextIntent::Wait,
+            None,
         );
         let cleaned = error_message.trim();
         let should_dispatch_next = {
@@ -983,6 +1078,7 @@ impl AppState {
                 session_id,
                 Some(token),
                 EngramNextIntent::Wait,
+                None,
             );
         }
         let cleaned = error_message.map(str::trim).unwrap_or("");

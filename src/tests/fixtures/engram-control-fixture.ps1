@@ -21,6 +21,14 @@ if (($args -contains "authority") -and ($args -contains "revoke")) {
         [Console]::Error.WriteLine("scripted authority revoke failure")
         exit 9
     }
+    if ($mode -eq "fixture-authority-revoke-fail-once") {
+        $failOnceMarker = Join-Path $engramHome "engram-authority-revoke-failed-once"
+        if (-not (Test-Path -LiteralPath $failOnceMarker)) {
+            Set-Content -LiteralPath $failOnceMarker -Value "failed"
+            [Console]::Error.WriteLine("scripted one-time authority revoke failure")
+            exit 9
+        }
+    }
     [Console]::Out.WriteLine("fixture-revocation-hash")
     exit 0
 }
@@ -326,10 +334,17 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
                 continue
             }
             if (-not $begunGrant -or $grant -ne $begunGrant) {
+                # Checkpointing the still-issued grant refuses grant_not_begun;
+                # checkpointing any other grant is a scope mismatch.
+                $code = if ($issuedGrant -and $grant -eq $issuedGrant) {
+                    "grant_not_begun"
+                } else {
+                    "grant_scope_mismatch"
+                }
                 $seenCheckpointIntents[$key] = $intent
                 $seenCheckpointDecisions[$key] = "refuse"
-                $seenCheckpointCodes[$key] = "grant_scope_mismatch"
-                Write-Result @{ decision = "refuse"; code = "grant_scope_mismatch" }
+                $seenCheckpointCodes[$key] = $code
+                Write-Result @{ decision = "refuse"; code = $code }
                 continue
             }
             $issuedGrant = $null

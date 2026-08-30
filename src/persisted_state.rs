@@ -30,6 +30,8 @@ struct PersistedState {
     next_session_number: usize,
     next_message_number: u64,
     projects: Vec<Project>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    engram_retired_work_authority_grants: Vec<EngramRetiredWorkAuthorityGrant>,
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pending_coordination_scope_deletions: BTreeSet<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -74,6 +76,9 @@ impl PersistedState {
             next_session_number: inner.next_session_number,
             next_message_number: inner.next_message_number,
             projects: inner.projects.clone(),
+            engram_retired_work_authority_grants: inner
+                .engram_retired_work_authority_grants
+                .clone(),
             pending_coordination_scope_deletions: inner
                 .pending_coordination_scope_deletions
                 .clone(),
@@ -122,6 +127,9 @@ impl PersistedState {
             next_session_number: self.next_session_number,
             next_message_number: self.next_message_number,
             projects: self.projects.clone(),
+            engram_retired_work_authority_grants: self
+                .engram_retired_work_authority_grants
+                .clone(),
             pending_coordination_scope_deletions: self
                 .pending_coordination_scope_deletions
                 .clone(),
@@ -171,6 +179,8 @@ impl PersistedState {
             next_session_number: self.next_session_number,
             next_message_number: self.next_message_number,
             projects: self.projects,
+            engram_retired_work_authority_grants: self
+                .engram_retired_work_authority_grants,
             pending_coordination_scope_deletions: self
                 .pending_coordination_scope_deletions,
             pending_response_board_project_detachments: self

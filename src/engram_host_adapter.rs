@@ -28,6 +28,49 @@ const ENGRAM_PHASE_ZERO_ASSURANCE: &str = "advisory";
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct EngramAuthorityStoreKey {
+    database_path: PathBuf,
+    project_id: String,
+}
+
+#[derive(Clone, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EngramRetiredWorkAuthorityGrant {
+    home: String,
+    /// Raw project root retained even when `.engram-project` cannot be read.
+    /// This lets a later settings repair route the pending revocation without
+    /// weakening the grant-hash ingress block.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    project_root: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    store_key: Option<EngramAuthorityStoreKey>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    project_id: String,
+    grant_hash: String,
+    retired_at: String,
+    reason: String,
+    #[serde(default)]
+    revoke_confirmed: bool,
+}
+
+impl std::fmt::Debug for EngramRetiredWorkAuthorityGrant {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("EngramRetiredWorkAuthorityGrant")
+            .field("home", &self.home)
+            .field("project_root", &self.project_root)
+            .field("store_key", &self.store_key)
+            .field("project_id", &self.project_id)
+            .field("grant_hash", &"[REDACTED]")
+            .field("retired_at", &self.retired_at)
+            .field("reason", &self.reason)
+            .field("revoke_confirmed", &self.revoke_confirmed)
+            .finish()
+    }
+}
+
+#[derive(Clone, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct EngramProjectSettings {
     #[serde(default)]
     enabled: bool,
@@ -39,6 +82,25 @@ struct EngramProjectSettings {
     work_authority_grant: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     deadline_ms: Option<u64>,
+}
+
+impl std::fmt::Debug for EngramProjectSettings {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("EngramProjectSettings")
+            .field("enabled", &self.enabled)
+            .field("binary_path", &self.binary_path)
+            .field("home", &self.home)
+            .field(
+                "work_authority_grant",
+                &self
+                    .work_authority_grant
+                    .as_ref()
+                    .map(|_| "[REDACTED]"),
+            )
+            .field("deadline_ms", &self.deadline_ms)
+            .finish()
+    }
 }
 
 impl Default for EngramProjectSettings {
@@ -1090,9 +1152,17 @@ impl EngramControlTransport for StatefulEngramControlTransport {
                     ));
                 }
                 if session.begun_grant_id.as_deref() != Some(grant_id.as_str()) {
+                    // Engram distinguishes checkpointing a grant that was
+                    // issued but never begun from checkpointing a grant that
+                    // is not the session's current authority at all.
+                    let code = if session.issued_grant_id.as_deref() == Some(grant_id.as_str()) {
+                        "grant_not_begun"
+                    } else {
+                        "grant_scope_mismatch"
+                    };
                     let response = Ok(json!({
                         "decision": "refuse",
-                        "code": "grant_scope_mismatch"
+                        "code": code
                     }));
                     session.seen_checkpoints.insert(
                         idempotency_key.clone(),
@@ -1972,6 +2042,10 @@ struct EngramSessionState {
     circuit_open: bool,
     next_bind_retry_at: Option<std::time::Instant>,
     checkpoint_in_progress: bool,
+    /// Generation of the project-reset fence that owns the checkpoint. Ordinary
+    /// turn lifecycle checkpoints use `None`, so a reset release cannot clear a
+    /// concurrent checkpoint that it did not start.
+    checkpoint_owner_generation: Option<u64>,
     bind_in_progress: bool,
     pending_dispatch: Option<EngramPendingDispatch>,
     rebind_required: bool,
@@ -1979,6 +2053,28 @@ struct EngramSessionState {
     /// shadow path while the old connection drains and checkpoints.
     project_reset_in_progress: bool,
     disabled_reason: Option<String>,
+}
+
+impl EngramSessionState {
+    fn begin_checkpoint(&mut self, owner_generation: Option<u64>) -> bool {
+        if self.checkpoint_in_progress {
+            return false;
+        }
+        self.checkpoint_in_progress = true;
+        self.checkpoint_owner_generation = owner_generation;
+        true
+    }
+
+    fn clear_checkpoint_if_owned_by(&mut self, owner_generation: Option<u64>) -> bool {
+        if !self.checkpoint_in_progress
+            || self.checkpoint_owner_generation != owner_generation
+        {
+            return false;
+        }
+        self.checkpoint_in_progress = false;
+        self.checkpoint_owner_generation = None;
+        true
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -2579,6 +2675,7 @@ impl AppState {
         session_id: &str,
         runtime_token: Option<&RuntimeToken>,
         next_intent: EngramNextIntent,
+        project_reset_owner_generation: Option<u64>,
     ) {
         let snapshot = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
@@ -2596,16 +2693,18 @@ impl AppState {
             let Some(grant_id) = inner.sessions[index].engram.active_grant_id.clone() else {
                 return;
             };
-            if inner.sessions[index].engram.checkpoint_in_progress {
-                return;
-            }
             // A global/project kill switch prevents new evaluate/bind calls, but
             // it must not strand a grant that was already begun. Resolve the
             // captured old connection even while runtime enablement is off so a
             // terminal transition can checkpoint it exactly once.
-            let target = Self::engram_binding_target_for_child_locked(&inner, session_id, false)
-                .ok()
-                .flatten();
+            let target = Self::engram_binding_target_for_child_with_reset_access_locked(
+                &inner,
+                session_id,
+                false,
+                project_reset_owner_generation,
+            )
+            .ok()
+            .flatten();
             if target
                 .as_ref()
                 .is_some_and(|target| !target.settings.enabled)
@@ -2618,11 +2717,14 @@ impl AppState {
                 // enabled in that case.
                 return;
             }
-            inner
+            if !inner
                 .session_mut_by_index(index)
                 .expect("session index should be valid")
                 .engram
-                .checkpoint_in_progress = true;
+                .begin_checkpoint(project_reset_owner_generation)
+            {
+                return;
+            }
             (grant_id, target)
         };
         let (grant_id, target) = snapshot;
@@ -2716,7 +2818,13 @@ impl AppState {
             repair_armed: false,
             next_intent: Some(next_intent),
         };
-        self.finish_engram_checkpoint_record(session_id, &grant_id, decision, card);
+        self.finish_engram_checkpoint_record(
+            session_id,
+            &grant_id,
+            decision,
+            card,
+            project_reset_owner_generation,
+        );
     }
 
     /// A destructive session removal must not tear down the sidecar while a
@@ -2752,6 +2860,7 @@ impl AppState {
         grant_id: &str,
         decision: EngramControlCardDecision,
         card: EngramControlCard,
+        project_reset_owner_generation: Option<u64>,
     ) {
         let exited = matches!(card.next_intent, Some(EngramNextIntent::Exit));
         let (revision, creates) = {
@@ -2760,14 +2869,18 @@ impl AppState {
                 return;
             };
             if inner.sessions[index].engram.active_grant_id.as_deref() != Some(grant_id) {
-                inner.sessions[index].engram.checkpoint_in_progress = false;
+                inner.sessions[index]
+                    .engram
+                    .clear_checkpoint_if_owned_by(project_reset_owner_generation);
                 return;
             }
             let message_id = inner.next_message_id();
             let record = inner
                 .session_mut_by_index(index)
                 .expect("session index should be valid");
-            record.engram.checkpoint_in_progress = false;
+            record
+                .engram
+                .clear_checkpoint_if_owned_by(project_reset_owner_generation);
             if decision == EngramControlCardDecision::Grant {
                 record.engram.active_grant_id = None;
                 if exited {
@@ -2814,7 +2927,12 @@ impl AppState {
                 EngramNextIntent::Continue
             }
         };
-        self.checkpoint_engram_turn_off_lock(session_id, Some(runtime_token), next_intent);
+        self.checkpoint_engram_turn_off_lock(
+            session_id,
+            Some(runtime_token),
+            next_intent,
+            None,
+        );
     }
 
     fn prepare_engram_turn_delivery_off_lock(
@@ -3355,7 +3473,7 @@ impl AppState {
 
     /// Rejects only the reset-invalidated dispatch that still owns its pending
     /// marker. The marker check and runtime/session teardown share one lock so
-    /// a Stop followed by a legacy-path successor cannot be cleared or failed
+    /// a Stop followed by a shadow-path successor cannot be cleared or failed
     /// in the gap after off-lock `turn_begin` completion.
     fn reject_engram_turn_delivery_if_current(
         &self,
@@ -3499,8 +3617,13 @@ impl AppState {
         let Some(settings) = project.engram.as_ref() else {
             return Ok(None);
         };
-        if (project_reset_owner_generation.is_none()
-            && inner.engram_project_resets.contains(&project.id))
+        let reset_access_allowed = match project_reset_owner_generation {
+            Some(owner_generation) => inner
+                .engram_project_resets
+                .is_owned_by(&project.id, owner_generation),
+            None => !inner.engram_project_resets.contains(&project.id),
+        };
+        if !reset_access_allowed
             || project.remote_id != LOCAL_REMOTE_ID
             || (require_runtime_enabled && child.engram.disabled_reason.is_some())
             || (require_runtime_enabled && !settings.is_runtime_enabled())
@@ -3574,8 +3697,13 @@ impl AppState {
         let Some(settings) = project.engram.as_ref() else {
             return Ok(None);
         };
-        if (project_reset_owner_generation.is_none()
-            && inner.engram_project_resets.contains(&project.id))
+        let reset_access_allowed = match project_reset_owner_generation {
+            Some(owner_generation) => inner
+                .engram_project_resets
+                .is_owned_by(&project.id, owner_generation),
+            None => !inner.engram_project_resets.contains(&project.id),
+        };
+        if !reset_access_allowed
             || project.remote_id != LOCAL_REMOTE_ID
             || parent.engram.disabled_reason.is_some()
             || !settings.is_runtime_enabled()
@@ -3825,7 +3953,7 @@ impl AppState {
                                 match checkpoint {
                                     EngramTurnCheckpointResponse::Checkpointed { .. } => Some(()),
                                     EngramTurnCheckpointResponse::Refuse { code }
-                                        if code == "grant_scope_mismatch" =>
+                                        if engram_grant_code_was_issued_but_not_begun(&code) =>
                                     {
                                         None
                                     }
@@ -3964,7 +4092,7 @@ impl AppState {
                 .expect("session index should be valid");
             record.engram.routing_token = Some(routing_token.clone());
             record.engram.active_grant_id = None;
-            record.engram.checkpoint_in_progress = false;
+            record.engram.clear_checkpoint_if_owned_by(None);
             record.engram.consecutive_transport_failures = 0;
             record.engram.circuit_open = false;
             record.engram.next_bind_retry_at = None;
@@ -4398,7 +4526,14 @@ fn engram_status_error_requires_fresh_bind(error: &EngramTransportError) -> bool
 
 fn engram_grant_was_issued_but_not_begun(error: &EngramTransportError) -> bool {
     error.kind == EngramTransportErrorKind::Remote
-        && error.code.as_deref() == Some("grant_scope_mismatch")
+        && error
+            .code
+            .as_deref()
+            .is_some_and(engram_grant_code_was_issued_but_not_begun)
+}
+
+fn engram_grant_code_was_issued_but_not_begun(code: &str) -> bool {
+    code == "grant_not_begun"
 }
 
 fn engram_turn_intent_fingerprint(

@@ -161,6 +161,7 @@ impl AppState {
                 terminating_session_id,
                 None,
                 EngramNextIntent::Exit,
+                None,
             );
             self.wait_for_engram_checkpoint_completion(terminating_session_id);
             self.shutdown_engram_session_process_if_bound(terminating_session_id);
@@ -429,7 +430,7 @@ impl AppState {
                                 shutdowns: vec![EngramMcpRuntimeRevocationShutdown {
                                     target,
                                     shutdown_error: Some(format!(
-                                        "shared Codex interrupt failed after detach; the revoked grant blocks further mutations, but the old thread may still read until Codex unloads it: {err:#}"
+                                        "shared Codex interrupt failed after detach; the old thread may remain alive with its prior MCP capabilities until Codex unloads it: {err:#}"
                                     )),
                                     retain_runtime_for_retry: false,
                                     suppress_codex_thread_resume: true,
@@ -453,7 +454,7 @@ impl AppState {
                     );
                     true
                 } else {
-                    let (mut deferred_callbacks, token, pending_revocation_target) = {
+                    let (deferred_callbacks, token, pending_revocation_target) = {
                         let mut inner = self.inner.lock().expect("state mutex poisoned");
                         let index = inner
                             .find_visible_session_index(session_id)
@@ -509,34 +510,11 @@ impl AppState {
                     // Replay any terminal callbacks that arrived during the failed shutdown window.
                     // The flag is now cleared so the callback methods will proceed normally.
                     if let Some(token) = token {
-                        deferred_callbacks.sort_by_key(|deferred| {
-                            matches!(deferred, DeferredStopCallback::RuntimeExited(_))
-                        });
-                        for deferred in deferred_callbacks {
-                            let replay_result = match deferred {
-                                DeferredStopCallback::TurnFailed(msg) => {
-                                    self.fail_turn_if_runtime_matches(session_id, &token, &msg)
-                                }
-                                DeferredStopCallback::TurnError(msg) => {
-                                    self.mark_turn_error_if_runtime_matches(session_id, &token, &msg)
-                                }
-                                DeferredStopCallback::TurnCompleted => {
-                                    self.finish_turn_ok_if_runtime_matches(session_id, &token)
-                                }
-                                DeferredStopCallback::RuntimeExited(msg) => self
-                                    .handle_runtime_exit_if_matches(
-                                        session_id,
-                                        &token,
-                                        msg.as_deref(),
-                                    ),
-                            };
-                            if let Err(replay_err) = replay_result {
-                                eprintln!(
-                                    "session cleanup warning> failed to replay deferred stop callback \
-                                     for session `{session_id}`: {replay_err:#}"
-                                );
-                            }
-                        }
+                        self.replay_deferred_runtime_stop_callbacks(
+                            session_id,
+                            &token,
+                            deferred_callbacks,
+                        );
                     }
 
                     return Err(ApiError::internal(format!(
@@ -545,7 +523,12 @@ impl AppState {
                 }
             }
         };
-        self.checkpoint_engram_turn_off_lock(session_id, None, EngramNextIntent::Wait);
+        self.checkpoint_engram_turn_off_lock(
+            session_id,
+            None,
+            EngramNextIntent::Wait,
+            None,
+        );
         let prepared_queued_turn = options
             .dispatch_queued_prompts_on_success
             .then(|| self.prepare_next_queued_turn_engram_off_lock(session_id))

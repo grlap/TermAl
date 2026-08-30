@@ -856,7 +856,12 @@ impl AppState {
     /// runtime-token-guarded variant is used from the
     /// runtime event handlers where stale tokens must silently no-op.
     fn fail_turn(&self, session_id: &str, error_message: &str) -> Result<()> {
-        self.checkpoint_engram_turn_off_lock(session_id, None, EngramNextIntent::Wait);
+        self.checkpoint_engram_turn_off_lock(
+            session_id,
+            None,
+            EngramNextIntent::Wait,
+            None,
+        );
         let cleaned = error_message.trim();
         if !cleaned.is_empty() {
             self.push_message(
