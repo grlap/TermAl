@@ -2552,7 +2552,9 @@ fn begin_refusal_expiry_policy_matches_the_external_engram_contract() {
 
 #[test]
 fn issued_but_unbegun_checkpoint_matches_only_grant_not_begun() {
-    assert!(engram_grant_code_was_issued_but_not_begun("grant_not_begun"));
+    assert!(engram_grant_code_was_issued_but_not_begun(
+        "grant_not_begun"
+    ));
     let error = EngramTransportError::remote(EngramControlErrorBody {
         code: "grant_not_begun".to_owned(),
         message: "issued grant was not begun".to_owned(),
@@ -4537,7 +4539,7 @@ fn engram_mcp_successful_rotation_replays_a_turn_completion_deferred_by_the_revo
             .runtime_token()
             .expect("fixture runtime should have a token")
     };
-    let gate = gate_next_engram_project_reset_fence(&project_id);
+    let gate = gate_next_engram_project_reset_release(&project_id);
     let rotating_state = state.clone();
     let rotating_project_id = project_id.clone();
     let mut rotated = real_fixture_engram_settings(&root);
@@ -4547,6 +4549,21 @@ fn engram_mcp_successful_rotation_replays_a_turn_completion_deferred_by_the_revo
     });
     gate.wait_until_entered();
 
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let record = inner
+            .find_session_index(&session_id)
+            .and_then(|index| inner.sessions.get(index))
+            .expect("session should remain at the release-order gate");
+        assert!(
+            !inner.engram_project_resets.contains(&project_id),
+            "project reset must be released before runtime callbacks are unfenced"
+        );
+        assert!(
+            record.runtime_stop_in_progress,
+            "runtime callbacks must remain fenced until the project reset is released"
+        );
+    }
     state
         .finish_turn_ok_if_runtime_matches(&session_id, &runtime_token)
         .expect("turn completion should defer behind the authority fence");
@@ -4699,7 +4716,10 @@ fn engram_enabled_settings_reject_empty_and_relative_homes_before_store_normaliz
     fs::write(root.join(".engram-project"), "fixture-ready\n").expect("fixture mode should write");
     let project_id = create_test_project(&state, &root, "Engram invalid home");
 
-    for home in ["", "."] {
+    for (home, expected_error) in [
+        ("", "cannot enable Engram without home"),
+        (".", "non-empty absolute path"),
+    ] {
         let mut settings = real_fixture_engram_settings(&root);
         settings.home = Some(home.to_owned());
         let error = match state.update_project_engram_settings(&project_id, settings) {
@@ -4708,11 +4728,91 @@ fn engram_enabled_settings_reject_empty_and_relative_homes_before_store_normaliz
         };
         assert_eq!(error.status, StatusCode::BAD_REQUEST);
         assert!(
-            error.message.contains("non-empty absolute path"),
+            error.message.contains(expected_error),
             "unexpected validation error for {home:?}: {}",
             error.message
         );
     }
+}
+
+#[test]
+fn engram_settings_normalize_binary_and_home_before_persisting_or_composing_runtime_argv() {
+    let state = test_app_state();
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("engram-normalized-settings-paths");
+    fs::create_dir_all(&root).expect("project root should exist");
+    fs::write(root.join(".engram-project"), "fixture-ready\n").expect("fixture mode should write");
+    let project_id = create_test_project(&state, &root, "Engram normalized settings paths");
+    let session_id = create_test_project_session(&state, Agent::Claude, &project_id, &root);
+    let expected_binary = real_engram_control_fixture_path()
+        .to_string_lossy()
+        .into_owned();
+    let expected_home = root.to_string_lossy().into_owned();
+    let mut settings = real_fixture_engram_settings(&root);
+    settings.binary_path = Some(format!("  {expected_binary}  "));
+    settings.home = Some(format!("  {expected_home}  "));
+
+    state
+        .update_project_engram_settings(&project_id, settings)
+        .expect("trimmed paths should validate and persist");
+    attach_engram_mcp_test_runtime(&state, &session_id);
+    let runtime_token = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let project_settings = inner
+            .find_project(&project_id)
+            .and_then(|project| project.engram.as_ref())
+            .expect("normalized settings should remain");
+        assert_eq!(
+            project_settings.binary_path.as_deref(),
+            Some(expected_binary.as_str())
+        );
+        assert_eq!(
+            project_settings.home.as_deref(),
+            Some(expected_home.as_str())
+        );
+        inner
+            .find_session_index(&session_id)
+            .and_then(|index| inner.sessions.get(index))
+            .and_then(|record| record.runtime.runtime_token())
+            .expect("fixture runtime should have a token")
+    };
+    let config = state
+        .engram_mcp_stdio_config_for_runtime(&session_id, &runtime_token)
+        .expect("normalized settings should compose an Engram MCP config");
+    assert_eq!(config.command, expected_binary);
+    assert_eq!(
+        config
+            .args
+            .windows(2)
+            .find(|pair| pair[0] == "--home")
+            .map(|pair| pair[1].as_str()),
+        Some(expected_home.as_str())
+    );
+
+    let mut disabled_with_blank_paths = EngramProjectSettings::default();
+    disabled_with_blank_paths.binary_path = Some("  \t  ".to_owned());
+    disabled_with_blank_paths.home = Some("   ".to_owned());
+    state
+        .update_project_engram_settings(&project_id, disabled_with_blank_paths)
+        .expect("blank disabled paths should inherit the recovery connection");
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let project_settings = inner
+        .find_project(&project_id)
+        .and_then(|project| project.engram.as_ref())
+        .expect("disabled normalized settings should remain");
+    assert!(!project_settings.enabled);
+    assert_eq!(
+        project_settings.binary_path.as_deref(),
+        Some(expected_binary.as_str())
+    );
+    assert_eq!(
+        project_settings.home.as_deref(),
+        Some(expected_home.as_str())
+    );
 }
 
 #[test]
@@ -7726,6 +7826,61 @@ fn unconfirmed_authority_revocation_retries_on_the_next_same_store_rotation() {
 }
 
 #[test]
+fn failed_background_authority_retry_does_not_fail_an_unrelated_settings_edit() {
+    let state = test_app_state();
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("engram-authority-background-retry");
+    fs::create_dir_all(&root).expect("project root should exist");
+    fs::write(
+        root.join(".engram-project"),
+        "fixture-authority-revoke-fail\n",
+    )
+    .expect("fixture mode should write");
+    let project_id = create_test_project(&state, &root, "Engram background authority retry");
+    let mut grant_a = real_fixture_engram_settings(&root);
+    grant_a.work_authority_grant = Some("grant-background-a".to_owned());
+    state
+        .update_project_engram_settings(&project_id, grant_a)
+        .expect("initial authority should persist");
+
+    let mut grant_b = real_fixture_engram_settings(&root);
+    grant_b.work_authority_grant = Some("grant-background-b".to_owned());
+    let error = match state.update_project_engram_settings(&project_id, grant_b.clone()) {
+        Ok(_) => panic!("the scripted retirement should remain unconfirmed"),
+        Err(error) => error,
+    };
+    assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR);
+
+    grant_b.deadline_ms = Some(4_321);
+    state
+        .update_project_engram_settings(&project_id, grant_b)
+        .expect("an older failed retry must not fail the unrelated durable edit");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let project = inner
+        .find_project(&project_id)
+        .expect("project should remain after the settings edit");
+    assert_eq!(
+        project
+            .engram
+            .as_ref()
+            .and_then(|settings| settings.deadline_ms),
+        Some(4_321)
+    );
+    assert!(!inner.engram_project_resets.contains(&project_id));
+    assert!(
+        inner
+            .engram_retired_work_authority_grants
+            .iter()
+            .any(|entry| { entry.grant_hash == "grant-background-a" && !entry.revoke_confirmed })
+    );
+}
+
+#[test]
 fn project_engram_patch_normalizes_and_validates_work_authority_grants() {
     let state = test_app_state();
     let root = state
@@ -8026,6 +8181,121 @@ fn engram_mcp_disable_immediately_revokes_existing_runtimes() {
 #[test]
 fn engram_mcp_project_delete_immediately_revokes_existing_runtimes() {
     assert_engram_mcp_disable_or_delete_revokes_existing_runtimes(true);
+}
+
+fn assert_engram_mcp_quarantined_runtime_retried_by_followup(delete_project: bool) {
+    let state = test_app_state();
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("engram-delete-quarantined-disabled-runtime");
+    fs::create_dir_all(&root).expect("project root should exist");
+    fs::write(root.join(".engram-project"), "fixture-ready\n").expect("fixture mode should write");
+    let project_id = create_test_project(&state, &root, "Engram delete quarantined runtime");
+    let session_id = create_test_project_session(&state, Agent::Claude, &project_id, &root);
+    let mut enabled = real_fixture_engram_settings(&root);
+    enabled.work_authority_grant = Some("grant-delete-quarantined".to_owned());
+    state
+        .update_project_engram_settings(&project_id, enabled)
+        .expect("fixture authority should persist");
+    let process = Arc::new(SharedChild::new(test_sleep_child()).expect("test child should share"));
+    let (input_tx, _input_rx) = mpsc::channel();
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("test session should exist");
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("test session index should be valid");
+        record.runtime = SessionRuntime::Claude(ClaudeRuntimeHandle {
+            runtime_id: "engram-delete-quarantined-runtime".to_owned(),
+            input_tx,
+            process: process.clone(),
+        });
+        state
+            .commit_locked(&mut inner)
+            .expect("fixture runtime should persist");
+    }
+
+    let failure_guard = force_test_kill_child_process_failure(&process, "Claude");
+    let disable_error =
+        match state.update_project_engram_settings(&project_id, EngramProjectSettings::default()) {
+            Ok(_) => panic!("failed disable teardown must remain visible"),
+            Err(error) => error,
+        };
+    assert!(
+        disable_error
+            .message
+            .contains("runtime cleanup was degraded")
+    );
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let record = inner
+            .find_session_index(&session_id)
+            .and_then(|index| inner.sessions.get(index))
+            .expect("quarantined session should remain");
+        assert!(record.engram_mcp_runtime_quarantined);
+        assert!(!matches!(record.runtime, SessionRuntime::None));
+        assert!(
+            !inner
+                .find_project(&project_id)
+                .and_then(|project| project.engram.as_ref())
+                .is_some_and(|settings| settings.enabled),
+            "the disable must remain durable despite failed process cleanup"
+        );
+    }
+    drop(failure_guard);
+
+    if delete_project {
+        state
+            .delete_project(&project_id)
+            .expect("project deletion should retry and finish quarantined cleanup");
+    } else {
+        let mut disabled_edit = EngramProjectSettings::default();
+        disabled_edit.deadline_ms = Some(987);
+        state
+            .update_project_engram_settings(&project_id, disabled_edit)
+            .expect("disabled settings edit should retry quarantined cleanup");
+    }
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert_eq!(inner.find_project(&project_id).is_none(), delete_project);
+    let record = inner
+        .find_session_index(&session_id)
+        .and_then(|index| inner.sessions.get(index))
+        .expect("session should remain after project deletion");
+    assert!(matches!(record.runtime, SessionRuntime::None));
+    assert!(!record.engram_mcp_runtime_quarantined);
+    assert_eq!(record.session.project_id.is_none(), delete_project);
+    if !delete_project {
+        assert_eq!(
+            inner
+                .find_project(&project_id)
+                .and_then(|project| project.engram.as_ref())
+                .and_then(|settings| settings.deadline_ms),
+            Some(987)
+        );
+    }
+    drop(inner);
+    assert!(
+        wait_for_shared_child_exit_timeout(&process, Duration::from_secs(1), "test Claude")
+            .expect("retried child status should remain observable")
+            .is_some(),
+        "the follow-up must not leave the quarantined process running"
+    );
+}
+
+#[test]
+fn engram_mcp_project_delete_retries_a_runtime_quarantined_by_failed_disable() {
+    assert_engram_mcp_quarantined_runtime_retried_by_followup(true);
+}
+
+#[test]
+fn engram_mcp_disabled_settings_edit_retries_a_quarantined_runtime() {
+    assert_engram_mcp_quarantined_runtime_retried_by_followup(false);
 }
 
 #[test]
