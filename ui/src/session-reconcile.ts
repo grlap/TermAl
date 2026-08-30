@@ -308,16 +308,69 @@ function reconcileSummarySession(
       hasDifferentKnownMessageCount);
   const previousResidentMessageStartIndex =
     resolveResidentMessageStartIndex(previous);
+  // A streaming summary carries only the transcript tail. When that window
+  // overlaps the hydrated resident window, adopting it must not shrink
+  // residency: keep the hydrated head and reconcile only the overlapping
+  // tail, so a detached reader's anchor (and the virtualizer's total height)
+  // survives live-turn summaries instead of collapsing to the summary window
+  // and clamping the viewport to the bottom. Replacement remains correct
+  // only when the summary window starts beyond the resident window (a real
+  // gap the resident transcript does not cover).
+  const summaryOverlapStartIndex =
+    shouldAdoptPartialMessages &&
+    next.messages.length > 0 &&
+    previous.messages.length > 0
+      ? previous.messages.findIndex(
+          (message) => message.id === next.messages[0]!.id,
+        )
+      : -1;
+  // Guard the overlap with index arithmetic and coverage of the resident
+  // tail's end: a summary whose declared window start disagrees with the id
+  // overlap, or whose window ends before the resident tail does (an interior
+  // subset — a late or raced summary), must not truncate hydrated residency
+  // from either side. Such an anomalous window contributes content updates
+  // only; the resident window shape stays.
+  const overlapIndexIsConsistent =
+    typeof next.messageStartIndex !== "number" ||
+    Math.max(0, next.messageStartIndex) ===
+      previousResidentMessageStartIndex + summaryOverlapStartIndex;
+  const summaryCoversResidentTailEnd =
+    summaryOverlapStartIndex >= 0 &&
+    next.messages.some(
+      (message) =>
+        message.id === previous.messages[previous.messages.length - 1]!.id,
+    );
+  const summaryAdoptionMode: "replace" | "preserve-head" | "content-only" =
+    summaryOverlapStartIndex < 0
+      ? "replace"
+      : overlapIndexIsConsistent && summaryCoversResidentTailEnd
+        ? "preserve-head"
+        : "content-only";
   const adoptedMessageStartIndex = shouldAdoptPartialMessages
-    ? resolveAdoptedSummaryMessageStartIndex(
-        previous,
-        next,
-        nextMessageCount,
-        previousResidentMessageStartIndex,
-      )
+    ? summaryAdoptionMode === "preserve-head"
+      ? previousResidentMessageStartIndex + summaryOverlapStartIndex
+      : summaryAdoptionMode === "content-only"
+        ? null
+        : resolveAdoptedSummaryMessageStartIndex(
+            previous,
+            next,
+            nextMessageCount,
+            previousResidentMessageStartIndex,
+          )
     : null;
   const messages = shouldAdoptPartialMessages
-    ? reconcileMessages(previous.messages, next.messages)
+    ? summaryAdoptionMode === "preserve-head"
+      ? mergePreservedHeadWithReconciledTail(
+          previous.messages,
+          summaryOverlapStartIndex,
+          reconcileMessages(
+            previous.messages.slice(summaryOverlapStartIndex),
+            next.messages,
+          ),
+        )
+      : summaryAdoptionMode === "content-only"
+        ? reconcileMessageContentsById(previous.messages, next.messages)
+        : reconcileMessages(previous.messages, next.messages)
     : previous.messages;
   // Metadata-only summaries redact prompt bodies; an empty list on that path
   // means "not included", not "the backend has no queued prompts". Targeted
@@ -361,7 +414,10 @@ function reconcileSummarySession(
     messages,
     messagesLoaded,
     messageStartIndex: shouldAdoptPartialMessages
-      ? (adoptedMessageStartIndex ?? next.messageStartIndex)
+      ? summaryAdoptionMode === "preserve-head" ||
+        summaryAdoptionMode === "content-only"
+        ? previousResidentMessageStartIndex
+        : (adoptedMessageStartIndex ?? next.messageStartIndex)
       : previous.messages.length > 0
         ? previousResidentMessageStartIndex
         : previous.messageStartIndex,
@@ -615,6 +671,60 @@ function reconcileMessages(previous: Message[], next: Message[]): Message[] {
   }
 
   return reconcileMessagesById(previous, next);
+}
+
+// Joins a preserved hydrated head with the reconciled overlapping tail while
+// keeping referential identity: when the tail came back unchanged and adds
+// nothing beyond the resident window, the previous messages array is returned
+// as-is so an overlapping summary that changed only session metadata does not
+// force a transcript rerender.
+function mergePreservedHeadWithReconciledTail(
+  previousMessages: Message[],
+  overlapStartIndex: number,
+  reconciledTail: Message[],
+): Message[] {
+  const previousTailLength = previousMessages.length - overlapStartIndex;
+  if (reconciledTail.length === previousTailLength) {
+    let identical = true;
+    for (let index = 0; index < previousTailLength; index += 1) {
+      if (reconciledTail[index] !== previousMessages[overlapStartIndex + index]) {
+        identical = false;
+        break;
+      }
+    }
+    if (identical) {
+      return previousMessages;
+    }
+  }
+  return [
+    ...previousMessages.slice(0, overlapStartIndex),
+    ...reconciledTail,
+  ];
+}
+
+// Applies per-message content updates from an anomalous summary window (an
+// interior subset or an index-inconsistent overlap) without changing the
+// resident window shape: no message is added, dropped, or reordered.
+function reconcileMessageContentsById(
+  previous: Message[],
+  next: Message[],
+): Message[] {
+  let nextById: Map<string, Message> | null = null;
+  let changed = false;
+  const merged = previous.map((previousMessage) => {
+    const nextMessage = (nextById ??= new Map(
+      next.map((message) => [message.id, message]),
+    )).get(previousMessage.id);
+    if (!nextMessage) {
+      return previousMessage;
+    }
+    const mergedMessage = reconcileMessage(previousMessage, nextMessage);
+    if (mergedMessage !== previousMessage) {
+      changed = true;
+    }
+    return mergedMessage;
+  });
+  return changed ? merged : previous;
 }
 
 function reconcileMessagesById(

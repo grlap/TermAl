@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   claimMessageStackNativeScrollOwnership,
   consumeMessageStackVirtualizerPositionCorrection,
+  isMessageStackSelectionExtensionKey,
   peekMessageStackNativeScrollOwnership,
   markMessageStackVirtualizerPositionCorrection,
   messageStackOwnsBodyKeyboardScroll,
@@ -480,5 +481,55 @@ describe("message-stack native scroll ownership", () => {
     markMessageStackVirtualizerPositionCorrection(node, 100);
     expect(consumeMessageStackVirtualizerPositionCorrection(node)).toBe(true);
     expect(consumeMessageStackVirtualizerPositionCorrection(node)).toBe(false);
+  });
+});
+
+describe("isMessageStackSelectionExtensionKey", () => {
+  const key = (overrides: {
+    ctrlKey?: boolean;
+    key: string;
+    metaKey?: boolean;
+    shiftKey?: boolean;
+  }) => ({
+    ctrlKey: false,
+    metaKey: false,
+    shiftKey: false,
+    ...overrides,
+  });
+
+  it("claims plain shifted navigation keys for browser selection extension", () => {
+    for (const name of [
+      "ArrowUp",
+      "ArrowDown",
+      "Home",
+      "End",
+      "PageUp",
+      "PageDown",
+    ]) {
+      expect(
+        isMessageStackSelectionExtensionKey(key({ key: name, shiftKey: true })),
+      ).toBe(true);
+      expect(isMessageStackSelectionExtensionKey(key({ key: name }))).toBe(
+        false,
+      );
+    }
+  });
+
+  it("releases Ctrl- and Meta-modified shifted keys to the pane boundary shortcuts", () => {
+    // Ctrl+Shift+ArrowDown must reach resolvePaneScrollCommand and jump to
+    // the transcript bottom instead of being handed to the browser as a
+    // paragraph-selection gesture.
+    for (const name of ["ArrowUp", "ArrowDown", "Home", "End"]) {
+      expect(
+        isMessageStackSelectionExtensionKey(
+          key({ ctrlKey: true, key: name, shiftKey: true }),
+        ),
+      ).toBe(false);
+      expect(
+        isMessageStackSelectionExtensionKey(
+          key({ key: name, metaKey: true, shiftKey: true }),
+        ),
+      ).toBe(false);
+    }
   });
 });

@@ -103,6 +103,24 @@ describe("resolvePaneScrollCommand", () => {
     ).toEqual({ kind: "boundary", direction: "down" });
   });
 
+  it("keeps Ctrl+Shift+ArrowDown a boundary jump on Windows/Linux", () => {
+    // The shift modifier must not demote the Ctrl boundary shortcut: the
+    // selection-extension guard owns plain shifted keys only.
+    expect(
+      resolvePaneScrollCommand(
+        {
+          altKey: false,
+          ctrlKey: true,
+          key: "ArrowDown",
+          metaKey: false,
+          shiftKey: true,
+        },
+        document.createElement("div"),
+        "Win32",
+      ),
+    ).toEqual({ kind: "boundary", direction: "down" });
+  });
+
   it("maps Ctrl+ArrowUp to a boundary jump on Windows/Linux", () => {
     expect(
       resolvePaneScrollCommand(

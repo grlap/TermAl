@@ -778,15 +778,17 @@ describe("session pane historical-window tail state", () => {
     hook.result.current.messageStackRef.current = scrollNode;
 
     try {
-      let ctrlShiftHomeContinues = false;
+      let shiftHomeContinues = false;
+      let shiftArrowUpContinues = false;
       let shiftPageUpContinues = false;
       act(() => {
         fireEvent.mouseDown(messageCard);
-        fireEvent.keyDown(document.body, { key: "Home", shiftKey: true });
-        fireEvent.keyDown(document.body, { key: "ArrowUp", shiftKey: true });
-        ctrlShiftHomeContinues = fireEvent.keyDown(document.body, {
+        shiftHomeContinues = fireEvent.keyDown(document.body, {
           key: "Home",
-          ctrlKey: true,
+          shiftKey: true,
+        });
+        shiftArrowUpContinues = fireEvent.keyDown(document.body, {
+          key: "ArrowUp",
           shiftKey: true,
         });
         shiftPageUpContinues = fireEvent.keyDown(document.body, {
@@ -794,13 +796,79 @@ describe("session pane historical-window tail state", () => {
           shiftKey: true,
         });
       });
-      expect(ctrlShiftHomeContinues).toBe(true);
+      expect(shiftHomeContinues).toBe(true);
+      expect(shiftArrowUpContinues).toBe(true);
       expect(shiftPageUpContinues).toBe(true);
       expect(intentListener).not.toHaveBeenCalled();
       expect(demands).toEqual([]);
       expect(scrollNode.scrollTop).toBe(800);
       expect(hook.result.current.liveTailPinned).toBe(true);
     } finally {
+      hook.unmount();
+      removeDemandListener();
+      scrollNode.remove();
+    }
+  });
+
+  it("routes body-owned Ctrl+Shift+Home through the bounded start demand", () => {
+    // Ctrl-modified shifted keys are pane boundary shortcuts, not selection
+    // extension: Ctrl+Shift+Home must behave exactly like plain Home here.
+    const scrollNode = document.createElement("section");
+    const messageCard = document.createElement("article");
+    scrollNode.append(messageCard);
+    document.body.append(scrollNode);
+    Object.defineProperties(scrollNode, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 1_000 },
+      scrollTop: { configurable: true, writable: true, value: 800 },
+    });
+    scrollNode.scrollTo = vi.fn(
+      (optionsOrX?: ScrollToOptions | number, y?: number) => {
+        scrollNode.scrollTop =
+          typeof optionsOrX === "number"
+            ? (y ?? scrollNode.scrollTop)
+            : (optionsOrX?.top ?? scrollNode.scrollTop);
+      },
+    ) as typeof scrollNode.scrollTo;
+    const intentListener = vi.fn();
+    scrollNode.addEventListener(
+      MESSAGE_STACK_USER_SCROLL_INTENT_EVENT,
+      intentListener,
+    );
+    const demands: SessionHistoryPageDemand[] = [];
+    const removeDemandListener = addSessionHistoryPageDemandListener(
+      (demand) => demands.push(demand),
+    );
+    const hook = renderHook(() =>
+      useSessionPaneScrollState({
+        ...params(session(false)),
+        isActive: true,
+        isSessionTabActive: true,
+      }),
+    );
+    hook.result.current.messageStackRef.current = scrollNode;
+
+    try {
+      let ctrlShiftHomeContinues = true;
+      act(() => {
+        fireEvent.mouseDown(messageCard);
+        ctrlShiftHomeContinues = fireEvent.keyDown(document.body, {
+          key: "Home",
+          ctrlKey: true,
+          shiftKey: true,
+        });
+      });
+      expect(ctrlShiftHomeContinues).toBe(false);
+      expect(demands).toHaveLength(1);
+      expect(demands[0]).toMatchObject({
+        direction: "start",
+        sessionId: "session-history",
+      });
+      expect(hook.result.current.liveTailPinned).toBe(false);
+    } finally {
+      act(() => {
+        completeSessionHistoryPageDemand(demands[0]?.requestId, false);
+      });
       hook.unmount();
       removeDemandListener();
       scrollNode.remove();

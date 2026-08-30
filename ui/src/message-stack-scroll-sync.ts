@@ -633,11 +633,21 @@ export function resolveMessageStackKeyboardScrollIntent(
 }
 
 export function isMessageStackSelectionExtensionKey(event: {
+  ctrlKey: boolean;
   key: string;
+  metaKey: boolean;
   shiftKey: boolean;
 }) {
+  // Only PLAIN shifted navigation belongs to browser selection extension.
+  // Ctrl/Meta-modified shifted keys are pane boundary shortcuts
+  // (resolvePaneScrollCommand maps Ctrl+[Shift+]Arrow/Home/End to a
+  // boundary jump); claiming them here would hand e.g. Ctrl+Shift+ArrowDown
+  // to the browser as a paragraph-selection gesture instead of jumping to
+  // the transcript bottom.
   return (
     event.shiftKey &&
+    !event.ctrlKey &&
+    !event.metaKey &&
     (event.key === "ArrowUp" ||
       event.key === "ArrowDown" ||
       event.key === "Home" ||

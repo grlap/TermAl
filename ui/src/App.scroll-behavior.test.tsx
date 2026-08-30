@@ -616,7 +616,7 @@ describe("App scroll behaviour", () => {
     });
   });
 
-  it("keeps focused transcript selection-extension keys browser-owned", async () => {
+  it("keeps plain shifted keys browser-owned and routes Ctrl+Shift+Home to the pane boundary", async () => {
     await withVerifiedNoReactActWarnings(async () => {
       const restoreScrollGeometry = stubElementScrollGeometry({
         clientHeight: 200,
@@ -635,15 +635,8 @@ describe("App scroll behaviour", () => {
 
         messageStack.scrollTop = 800;
         messageStack.focus();
-        let ctrlShiftHomeContinues = false;
         let shiftPageUpContinues = false;
         await act(async () => {
-          ctrlShiftHomeContinues = fireEvent.keyDown(messageStack, {
-            key: "Home",
-            code: "Home",
-            ctrlKey: true,
-            shiftKey: true,
-          });
           shiftPageUpContinues = fireEvent.keyDown(messageStack, {
             key: "PageUp",
             code: "PageUp",
@@ -652,10 +645,28 @@ describe("App scroll behaviour", () => {
         });
         await settleAsyncUi();
 
-        expect(ctrlShiftHomeContinues).toBe(true);
+        // Plain shifted navigation stays with the browser's selection
+        // extension: not consumed, no scroll write.
         expect(shiftPageUpContinues).toBe(true);
         expect(messageStack.scrollTop).toBe(800);
         expect(filterScrollToCallsAt(scrollToMock, 0, "auto")).toEqual([]);
+
+        let ctrlShiftHomeContinues = true;
+        await act(async () => {
+          ctrlShiftHomeContinues = fireEvent.keyDown(messageStack, {
+            key: "Home",
+            code: "Home",
+            ctrlKey: true,
+            shiftKey: true,
+          });
+        });
+        await settleAsyncUi();
+
+        // Ctrl-modified shifted keys are pane boundary shortcuts: consumed,
+        // one seek write to the transcript start.
+        expect(ctrlShiftHomeContinues).toBe(false);
+        expect(messageStack.scrollTop).toBe(0);
+        expect(filterScrollToCallsAt(scrollToMock, 0, "auto")).toHaveLength(1);
       } finally {
         context.cleanup();
         restoreScrollGeometry();

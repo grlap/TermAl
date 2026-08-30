@@ -16,6 +16,7 @@ import {
   nativeScrollAdvancesUserScrollGeneration,
   nativeScrollKeepsPassiveTailFollow,
   pendingPrependNativeReflowMatches,
+  resolveBottomLandingClamp,
   resolveStableHeightNativeUserMovement,
   resolveVirtualizedInputMovementAuthority,
 } from "./virtualized-conversation-scroll-events";
@@ -257,6 +258,59 @@ describe("mounted prepend restore generation", () => {
       invalidatesPrependAuthority: true,
       isAttachedDownwardBoundaryInput: false,
     });
+  });
+
+  it("classifies every downward frame landing at the physical bottom as a clamp", () => {
+    // Viewport growth clamp stays a clamp.
+    expect(
+      resolveBottomLandingClamp({
+        isAtPhysicalBottom: true,
+        isViewportGrowthClamp: true,
+        scrollDelta: -40,
+      }),
+    ).toBe(true);
+    // Sub-pixel jitter landing at the bottom stays a clamp.
+    expect(
+      resolveBottomLandingClamp({
+        isAtPhysicalBottom: true,
+        isViewportGrowthClamp: false,
+        scrollDelta: -1,
+      }),
+    ).toBe(true);
+    // A turn-end shrink (live-turn card unmounting) clamps scrollTop down and
+    // lands the attached reader at the physical bottom of the shorter
+    // content. That frame is a browser clamp, never reader movement — even
+    // when a real user interaction happened recently.
+    expect(
+      resolveBottomLandingClamp({
+        isAtPhysicalBottom: true,
+        isViewportGrowthClamp: false,
+        scrollDelta: -120,
+      }),
+    ).toBe(true);
+    // An upward frame that ends above the bottom is reader movement.
+    expect(
+      resolveBottomLandingClamp({
+        isAtPhysicalBottom: false,
+        isViewportGrowthClamp: false,
+        scrollDelta: -40,
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps tail-follow through a bottom-landing clamp despite recent user interaction", () => {
+    expect(
+      nativeScrollKeepsPassiveTailFollow({
+        hadUserScrollInteraction: true,
+        isBottomLandingClamp: true,
+        isDetachedFromBottom: false,
+        isNativeUserMovement: false,
+        isProgrammaticNavigation: false,
+        scrollDelta: -120,
+        scrollHeightDelta: -180,
+        tailFollowIntent: true,
+      }),
+    ).toBe(true);
   });
 
   it("keeps tail-follow authority when content shrink clamps scrollTop upward", () => {

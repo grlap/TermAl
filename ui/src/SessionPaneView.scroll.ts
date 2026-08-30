@@ -127,6 +127,44 @@ function isScrollTraceEnabled() {
     return false;
   }
 }
+
+type ScrollTraceEntry = {
+  at: number;
+  details: Record<string, unknown>;
+  event: string;
+  stack?: string;
+};
+
+type ScrollTraceWindow = Window & {
+  __termalCopyScrollTrace?: () => string;
+  __termalScrollTraceEvents?: ScrollTraceEntry[];
+};
+
+// Keep a bounded in-memory flight recorder so a live scroll jump can be
+// inspected after it happens instead of requiring the operator to catch one
+// console line at exactly the right moment.
+function recordScrollTrace(
+  event: string,
+  details: Record<string, unknown>,
+) {
+  if (!isScrollTraceEnabled()) {
+    return;
+  }
+  const traceWindow = window as ScrollTraceWindow;
+  const events = (traceWindow.__termalScrollTraceEvents ??= []);
+  const entry: ScrollTraceEntry = {
+    at: performance.now(),
+    details,
+    event,
+    stack: new Error(event).stack,
+  };
+  events.push(entry);
+  if (events.length > 200) {
+    events.splice(0, events.length - 200);
+  }
+  traceWindow.__termalCopyScrollTrace = () => JSON.stringify(events, null, 2);
+  console.debug(`[termal-scroll-trace] ${event}`, details, entry.stack);
+}
 const SESSION_WHEEL_BURST_QUIET_MS = 48;
 const SESSION_BOTTOM_FOLLOW_STABLE_MS =
   SESSION_BOTTOM_FOLLOW_REFERENCE_FRAME_MS * 2;
@@ -598,7 +636,18 @@ export function useSessionPaneScrollState({
     nextValue: boolean,
     options: { preserveDetachedRestore?: boolean } = {},
   ) {
+    const previousValue = paneShouldStickToBottomRef.current[scrollStateKey];
     paneShouldStickToBottomRef.current[scrollStateKey] = nextValue;
+    if (nextValue && previousValue === false && isScrollTraceEnabled()) {
+      // Opt-in diagnostics: every path that re-pins a detached reader reports
+      // its call stack so a sticky bottom observed while the pill is visible
+      // can be attributed without guessing.
+      const traceNode = messageStackRef.current;
+      console.debug(
+        `[termal-scroll-trace] tail-follow re-pinned key=${scrollStateKey} scrollTop=${traceNode?.scrollTop} scrollHeight=${traceNode?.scrollHeight} clientHeight=${traceNode?.clientHeight}`,
+        new Error("tail-follow re-pinned").stack,
+      );
+    }
     if (!nextValue && isScrollTraceEnabled()) {
       // Opt-in diagnostics: every path that drops tail-follow intent reports
       // its call stack and the viewport geometry so a silent detach observed
@@ -786,6 +835,15 @@ export function useSessionPaneScrollState({
     visible: boolean,
     kind: NewResponseIndicatorKind = "response",
   ) {
+    if (isScrollTraceEnabled()) {
+      // Opt-in diagnostics: correlate pill arming/clearing with tail-follow
+      // intent so a pill-visible-while-sticky contradiction can be attributed
+      // to its exact writer.
+      console.debug(
+        `[termal-scroll-trace] pill ${visible ? "arm" : "clear"} kind=${kind} key=${key} tailIntent=${paneShouldStickToBottomRef.current[key]}`,
+        new Error("pill state change").stack,
+      );
+    }
     startTransition(() => {
       setNewResponseIndicatorByKey((current) => {
         const currentKind = current[key];
@@ -841,6 +899,8 @@ export function useSessionPaneScrollState({
       return;
     }
 
+    const beforeScrollTop = node.scrollTop;
+    const tailIntentBefore = getTailFollowIntent();
     const nextScrollTop = Math.max(node.scrollHeight - node.clientHeight, 0);
     const writeScrollTop =
       scrollKind === "bottom_follow"
@@ -894,6 +954,22 @@ export function useSessionPaneScrollState({
         wroteScrollTop,
       }),
       shouldStick: true,
+    });
+    recordScrollTrace("scroll-to-latest", {
+      afterScrollTop: node.scrollTop,
+      beforeScrollTop,
+      behavior,
+      clientHeight: node.clientHeight,
+      force,
+      key: scrollStateKey,
+      renderSequence: renderSequenceRef.current,
+      scrollHeight: node.scrollHeight,
+      scrollKind: scrollKind ?? "default",
+      snapBeforePaint: options.snapBottomFollowBeforePaint ?? false,
+      tailIntentBefore,
+      targetScrollTop: nextScrollTop,
+      writeScrollTop,
+      wroteScrollTop,
     });
     setNewResponseIndicator(scrollStateKey, false);
   }
@@ -2128,6 +2204,12 @@ export function useSessionPaneScrollState({
     } = {},
   ) {
     cancelSettledScrollToBottom();
+    if (isScrollTraceEnabled()) {
+      console.debug(
+        `[termal-scroll-trace] settled-bottom scheduled kind=${options.scrollKind ?? "default"} maxAttempts=${options.maxAttempts ?? 12} key=${scrollStateKey} tailIntent=${paneShouldStickToBottomRef.current[scrollStateKey]}`,
+        new Error("settled-bottom scheduled").stack,
+      );
+    }
 
     const scheduledScrollStateKey = scrollStateKey;
     let frameId = 0;

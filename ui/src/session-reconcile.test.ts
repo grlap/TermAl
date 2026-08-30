@@ -697,7 +697,16 @@ describe("reconcileSessions", () => {
 
     const merged = reconcileSingleSession(previous, next);
 
-    expect(merged.messageStartIndex).toBe(41);
+    // The overlapping summary extends residency instead of replacing it: the
+    // hydrated head stays, so the window start remains the resident start.
+    // The summary window's own derived start (41) still positions the newly
+    // adopted message-42 at global index 42, consuming the optimistic prompt.
+    expect(merged.messages.map((message) => message.id)).toEqual([
+      "message-40",
+      "message-41",
+      "message-42",
+    ]);
+    expect(merged.messageStartIndex).toBe(40);
     expect(merged.pendingPrompts).toBeUndefined();
   });
 
@@ -2179,5 +2188,83 @@ describe("reconcileSessions", () => {
     expect(merged[0]).not.toBe(previous[0]);
     expect(merged[0].remoteId).toBe("ssh-lab");
     expect(merged[0].messages).toBe(previous[0].messages);
+  });
+});
+
+describe("summary adoption residency", () => {
+  const textMessage = (index: number) => ({
+    id: `message-${index}`,
+    type: "text" as const,
+    timestamp: "10:00",
+    author: "assistant" as const,
+    text: `Body ${index}`,
+  });
+
+  it("keeps the hydrated head when a streaming summary window overlaps the resident tail", () => {
+    // The resident window covers messages 962..999 (older pages hydrated).
+    // A live-turn summary carries only the tail window 981..1000. Adopting it
+    // must extend residency to 962..1000, not collapse it to the summary
+    // window — a collapse shrinks the virtualizer's total height and clamps a
+    // detached reader's viewport to the bottom.
+    const previous = [
+      makeSession("session-a", {
+        messages: Array.from({ length: 38 }, (_, i) => textMessage(962 + i)),
+        messagesLoaded: false,
+        messageStartIndex: 962,
+        messageCount: 1000,
+        sessionMutationStamp: 1,
+      }),
+    ];
+    const next = [
+      makeSession("session-a", {
+        messages: Array.from({ length: 20 }, (_, i) => textMessage(981 + i)),
+        messagesLoaded: false,
+        messageStartIndex: 981,
+        messageCount: 1001,
+        sessionMutationStamp: 2,
+      }),
+    ];
+
+    const merged = reconcileSessions(previous, next);
+
+    expect(merged[0].messages).toHaveLength(39);
+    expect(merged[0].messages[0]?.id).toBe("message-962");
+    expect(merged[0].messages[38]?.id).toBe("message-1000");
+    expect(merged[0].messageStartIndex).toBe(962);
+    expect(merged[0].messagesLoaded).toBe(false);
+    // Preserved head objects keep identity so virtualizer measurements
+    // survive the summary.
+    expect(merged[0].messages[0]).toBe(previous[0].messages[0]);
+  });
+
+  it("replaces residency when the summary window starts beyond the resident window", () => {
+    // A real gap: the resident window covers 0..19 while the summary tail
+    // starts at 500. Preserving the head would fabricate a contiguous
+    // transcript with a missing middle, so replacement stays correct here.
+    const previous = [
+      makeSession("session-a", {
+        messages: Array.from({ length: 20 }, (_, i) => textMessage(i)),
+        messagesLoaded: false,
+        messageStartIndex: 0,
+        messageCount: 500,
+        sessionMutationStamp: 1,
+      }),
+    ];
+    const next = [
+      makeSession("session-a", {
+        messages: Array.from({ length: 20 }, (_, i) => textMessage(500 + i)),
+        messagesLoaded: false,
+        messageStartIndex: 500,
+        messageCount: 520,
+        sessionMutationStamp: 2,
+      }),
+    ];
+
+    const merged = reconcileSessions(previous, next);
+
+    expect(merged[0].messages).toHaveLength(20);
+    expect(merged[0].messages[0]?.id).toBe("message-500");
+    expect(merged[0].messageStartIndex).toBe(500);
+    expect(merged[0].messagesLoaded).toBe(false);
   });
 });

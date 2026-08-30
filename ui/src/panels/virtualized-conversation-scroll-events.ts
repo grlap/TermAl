@@ -76,6 +76,26 @@ export function resolveStableHeightNativeUserMovement({
   );
 }
 
+// A scrollTop drop that still lands at the physical bottom is a browser
+// clamp — viewport growth, sub-pixel jitter, or content shrinking under an
+// attached reader (a live-turn card unmounting at turn end) — never reader
+// movement: no genuine upward escape ends at the physical bottom. The
+// content-height direction is deliberately not consulted; a turn-end shrink
+// clamp arriving inside a recent user-interaction window must classify
+// exactly like a growth clamp instead of falling through to the
+// authority-transfer branch and breaking bottom-follow.
+export function resolveBottomLandingClamp({
+  isAtPhysicalBottom,
+  isViewportGrowthClamp,
+  scrollDelta,
+}: {
+  isAtPhysicalBottom: boolean;
+  isViewportGrowthClamp: boolean;
+  scrollDelta: number;
+}) {
+  return isViewportGrowthClamp || (scrollDelta < 0 && isAtPhysicalBottom);
+}
+
 export function nativeScrollKeepsPassiveTailFollow({
   hadUserScrollInteraction,
   isBottomLandingClamp,
@@ -427,13 +447,13 @@ export function useVirtualizedConversationScrollEvents({
           // The recorded client height cannot witness every viewport change:
           // a sub-pixel footer jitter between two native frames drops
           // scrollTop by a pixel while the reader is still at the physical
-          // bottom. No genuine upward movement ends there with non-shrinking
-          // content, so treat every such landing like the growth clamp.
-          const isBottomLandingClamp =
-            isViewportGrowthClamp ||
-            (scrollDelta < 0 &&
-              scrollHeightDelta >= 0 &&
-              isScrollContainerAtPhysicalBottom(node));
+          // bottom. No genuine upward movement ends there, so treat every
+          // such landing like the growth clamp.
+          const isBottomLandingClamp = resolveBottomLandingClamp({
+            isAtPhysicalBottom: isScrollContainerAtPhysicalBottom(node),
+            isViewportGrowthClamp,
+            scrollDelta,
+          });
           // A deferred mount or remeasurement can increase content height
           // between native scroll events. An upward scrollTop delta across
           // non-shrinking content is still reader movement; prepend/compaction
