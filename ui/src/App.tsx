@@ -443,6 +443,8 @@ export default function App() {
     setRemoteConfigs,
     telegramConfig,
     setTelegramConfig,
+    engramHostSettings,
+    setEngramHostSettings,
   } = useAppPreferencesState(initialWorkspaceBootstrap);
   const [isCreateSessionOpen, setIsCreateSessionOpen] = useState(false);
   const [createSessionPaneId, setCreateSessionPaneId] = useState<string | null>(
@@ -950,6 +952,7 @@ export default function App() {
       setDefaultClaudeEffort,
       setRemoteConfigs,
       setTelegramConfig,
+      setEngramHostSettings,
     },
     applyControlPanelLayout,
     clearRecoveredBackendRequestError,
@@ -2391,6 +2394,7 @@ export default function App() {
           void persistAppPreferences({ remotes: nextRemotes });
         }}
         telegramConfig={telegramConfig}
+        engramHostSettings={engramHostSettings}
         projects={projects}
         sessions={sessions}
         handleOrchestratorStateUpdated={handleOrchestratorStateUpdated}

@@ -1158,6 +1158,30 @@ async fn update_project_engram_settings(
     Ok(Json(response))
 }
 
+/// Verifies proposed Engram settings without changing the project. The
+/// response is redacted and the subsequent PATCH repeats all validation.
+async fn verify_project_engram_settings(
+    AxumPath(project_id): AxumPath<String>,
+    State(state): State<AppState>,
+    Json(request): Json<UpdateProjectEngramSettingsRequest>,
+) -> Result<Json<VerifyProjectEngramSettingsResponse>, ApiError> {
+    let response = run_blocking_api(move || {
+        state.verify_project_engram_settings(&project_id, request)
+    })
+    .await?;
+    Ok(Json(response))
+}
+
+/// Updates the machine-scoped Engram executable and home. Project grants and
+/// repository declarations are intentionally handled by separate contracts.
+async fn update_engram_host_settings(
+    State(state): State<AppState>,
+    Json(request): Json<UpdateEngramHostSettingsRequest>,
+) -> Result<Json<StateResponse>, ApiError> {
+    let response = run_blocking_api(move || state.update_engram_host_settings(request)).await?;
+    Ok(Json(response))
+}
+
 /// Gets project digest.
 async fn get_project_digest(
     AxumPath(project_id): AxumPath<String>,

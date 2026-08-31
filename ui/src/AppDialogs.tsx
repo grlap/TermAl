@@ -27,6 +27,7 @@ import {
   MarkdownPreferencesPanel,
   RemotePreferencesPanel,
   TelegramPreferencesPanel,
+  EngramPreferencesPanel,
   ClaudeApprovalsPreferencesPanel,
   CodexPromptPreferencesPanel,
   CursorPreferencesPanel,
@@ -49,6 +50,7 @@ import type {
   ClaudeEffortLevel,
   CodexReasoningEffort,
   CursorMode,
+  EngramHostSettings,
   GeminiApprovalMode,
   Project,
   RemoteConfig,
@@ -181,6 +183,7 @@ type AppDialogsProps = {
   remoteConfigs: RemotePanelProps["remotes"];
   onSaveRemotes: RemotePanelProps["onSaveRemotes"];
   telegramConfig?: TelegramUiConfig | null;
+  engramHostSettings: EngramHostSettings;
   projects: TelegramPanelProps["projects"];
   sessions: TelegramPanelProps["sessions"];
   handleOrchestratorStateUpdated: (state: StateResponse) => void;
@@ -468,6 +471,7 @@ export function AppDialogs({
   remoteConfigs,
   onSaveRemotes,
   telegramConfig,
+  engramHostSettings,
   projects,
   sessions,
   handleOrchestratorStateUpdated,
@@ -1160,6 +1164,12 @@ export function AppDialogs({
                 <OrchestratorTemplatesPanel
                   projects={projects}
                   sessions={sessions}
+                  onStateUpdated={handleOrchestratorStateUpdated}
+                />
+              ) : settingsTab === "engram" ? (
+                <EngramPreferencesPanel
+                  hostSettings={engramHostSettings}
+                  projects={projects}
                   onStateUpdated={handleOrchestratorStateUpdated}
                 />
               ) : settingsTab === "codex-prompts" ? (

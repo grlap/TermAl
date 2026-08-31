@@ -287,6 +287,7 @@ fn app_router(state: AppState) -> Router {
                 .delete(delete_workspace_layout),
         )
         .route("/api/settings", post(update_app_settings))
+        .route("/api/engram/settings", patch(update_engram_host_settings))
         .route("/api/remotes/{id}/register", post(register_remote_termal))
         .route("/api/remotes/{id}/upgrade", post(upgrade_remote_termal))
         .route("/api/telegram/status", get(get_telegram_status))
@@ -334,6 +335,10 @@ fn app_router(state: AppState) -> Router {
         .route(
             "/api/projects/{id}/engram",
             patch(update_project_engram_settings),
+        )
+        .route(
+            "/api/projects/{id}/engram/verify",
+            post(verify_project_engram_settings),
         )
         .route("/api/projects/{id}/digest", get(get_project_digest))
         .route(

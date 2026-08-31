@@ -160,6 +160,16 @@ fn validate_engram_project_enablement(
     project: &Project,
     settings: &EngramProjectSettings,
 ) -> std::result::Result<EngramAuthorityStoreKey, ApiError> {
+    let (binary_path, project_file, home) =
+        validate_engram_project_connection_paths(project, settings)?;
+    let project_root = FsPath::new(&project.root_path);
+    run_engram_doctor(&binary_path, &project_file, &home, project_root)
+}
+
+fn validate_engram_project_connection_paths(
+    project: &Project,
+    settings: &EngramProjectSettings,
+) -> std::result::Result<(PathBuf, PathBuf, PathBuf), ApiError> {
     let project_root = FsPath::new(&project.root_path);
     let project_file = project_root.join(".engram-project");
     let metadata = fs::metadata(&project_file).map_err(|err| {
@@ -174,6 +184,13 @@ fn validate_engram_project_enablement(
             project_file.display()
         )));
     }
+    let (binary_path, home) = validate_engram_host_connection_paths(settings)?;
+    Ok((binary_path, project_file, home))
+}
+
+fn validate_engram_host_connection_paths(
+    settings: &EngramProjectSettings,
+) -> std::result::Result<(PathBuf, PathBuf), ApiError> {
     let binary_path = settings
         .binary_path
         .as_deref()
@@ -181,9 +198,12 @@ fn validate_engram_project_enablement(
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
         .ok_or_else(|| ApiError::bad_request("cannot enable Engram without binaryPath"))?;
-    if !binary_path.is_absolute() || !binary_path.is_file() {
+    let binary_is_path = binary_path.components().count() > 1;
+    if (binary_is_path && (!binary_path.is_absolute() || !binary_path.is_file()))
+        || (!binary_is_path && binary_path.as_os_str().is_empty())
+    {
         return Err(ApiError::bad_request(
-            "cannot enable Engram: binaryPath must be an existing absolute file",
+            "cannot enable Engram: binaryPath must be a command on PATH or an existing absolute file",
         ));
     }
     let home = settings
@@ -198,7 +218,7 @@ fn validate_engram_project_enablement(
             "cannot enable Engram: home must be an existing absolute directory",
         ));
     }
-    run_engram_doctor(&binary_path, &project_file, &home, project_root)
+    Ok((binary_path, home))
 }
 
 fn run_engram_doctor(
@@ -207,6 +227,16 @@ fn run_engram_doctor(
     home: &FsPath,
     project_root: &FsPath,
 ) -> std::result::Result<EngramAuthorityStoreKey, ApiError> {
+    let result = run_engram_doctor_result(binary_path, project_file, home, project_root)?;
+    validate_engram_doctor_result(&result)
+}
+
+fn run_engram_doctor_result(
+    binary_path: &FsPath,
+    project_file: &FsPath,
+    home: &FsPath,
+    project_root: &FsPath,
+) -> std::result::Result<EngramDoctorResult, ApiError> {
     let mut command = engram_command(binary_path);
     let mut child = command
         .arg("--project-file")
@@ -229,7 +259,13 @@ fn run_engram_doctor(
                     ApiError::bad_request(format!("failed collecting Engram doctor output: {err}"))
                 })?;
                 if status.success() {
-                    return parse_engram_doctor_result(&output.stdout);
+                    return serde_json::from_slice::<EngramDoctorResult>(&output.stdout).map_err(
+                        |error| {
+                            ApiError::bad_request(format!(
+                                "cannot enable Engram: doctor returned invalid JSON: {error}"
+                            ))
+                        },
+                    );
                 }
                 let detail = String::from_utf8_lossy(&output.stderr).trim().to_owned();
                 return Err(ApiError::bad_request(if detail.is_empty() {
@@ -259,12 +295,12 @@ fn run_engram_doctor(
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct EngramDoctorControl {
     required_assurance: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct EngramDoctorResult {
     healthy: bool,
     control: Option<EngramDoctorControl>,
@@ -272,20 +308,15 @@ struct EngramDoctorResult {
     project_id: String,
 }
 
-fn parse_engram_doctor_result(
-    stdout: &[u8],
+fn validate_engram_doctor_result(
+    result: &EngramDoctorResult,
 ) -> std::result::Result<EngramAuthorityStoreKey, ApiError> {
-    let result = serde_json::from_slice::<EngramDoctorResult>(stdout).map_err(|error| {
-        ApiError::bad_request(format!(
-            "cannot enable Engram: doctor returned invalid JSON: {error}"
-        ))
-    })?;
     if !result.healthy {
         return Err(ApiError::bad_request(
             "cannot enable Engram: doctor reported an unhealthy store",
         ));
     }
-    let control = result.control.ok_or_else(|| {
+    let control = result.control.as_ref().ok_or_else(|| {
         ApiError::bad_request(
             "cannot enable Engram: doctor did not return a control policy",
         )
@@ -319,7 +350,7 @@ fn parse_engram_doctor_result(
     })
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct EngramAuthorityShowResult {
     installed: bool,
     subject_actor_id: Option<String>,
@@ -354,6 +385,14 @@ fn validate_engram_project_work_authority(
         actor_id: ENGRAM_PROJECT_ACTOR_ID.to_owned(),
         session_id: "termal-authority-validation".to_owned(),
     };
+    let result = run_engram_authority_show(&connection, grant)?;
+    validate_engram_authority_show_result(&result)
+}
+
+fn run_engram_authority_show(
+    connection: &EngramConnectionConfig,
+    grant: &str,
+) -> std::result::Result<EngramAuthorityShowResult, ApiError> {
     let value = run_engram_json_command_with_lock_retry(
         &connection,
         &["authority", "show", grant, "--json"],
@@ -364,11 +403,16 @@ fn validate_engram_project_work_authority(
             "cannot configure Engram work-authority grant because its status could not be verified",
         )
     })?;
-    let result = serde_json::from_value::<EngramAuthorityShowResult>(value).map_err(|_| {
+    serde_json::from_value::<EngramAuthorityShowResult>(value).map_err(|_| {
         ApiError::bad_request(
             "cannot configure Engram work-authority grant because authority show returned an invalid response",
         )
-    })?;
+    })
+}
+
+fn validate_engram_authority_show_result(
+    result: &EngramAuthorityShowResult,
+) -> std::result::Result<(), ApiError> {
     if !result.installed {
         return Err(ApiError::bad_request(
             "cannot configure Engram work-authority grant because it is not installed",

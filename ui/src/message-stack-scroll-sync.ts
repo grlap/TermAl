@@ -638,22 +638,25 @@ export function isMessageStackSelectionExtensionKey(event: {
   metaKey: boolean;
   shiftKey: boolean;
 }) {
-  // Only PLAIN shifted navigation belongs to browser selection extension.
-  // Ctrl/Meta-modified shifted keys are pane boundary shortcuts
-  // (resolvePaneScrollCommand maps Ctrl+[Shift+]Arrow/Home/End to a
-  // boundary jump); claiming them here would hand e.g. Ctrl+Shift+ArrowDown
-  // to the browser as a paragraph-selection gesture instead of jumping to
-  // the transcript bottom.
+  // Shifted navigation belongs to browser selection extension, with one
+  // deliberate exception: Ctrl/Cmd+Shift+ArrowUp/ArrowDown are pane boundary
+  // shortcuts (resolvePaneScrollCommand maps Ctrl+Arrow to a boundary jump
+  // and ignores Shift there), because the browser's own binding for them —
+  // extend selection by paragraph — is not a transcript gesture anyone
+  // relies on, while "jump to the very bottom" is. Ctrl/Cmd+Shift+Home/End
+  // and Shift+PageUp/PageDown stay browser-owned: select-to-document-boundary
+  // and select-by-page are standard selection gestures inside the transcript.
+  if (!event.shiftKey) {
+    return false;
+  }
+  if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+    return !event.ctrlKey && !event.metaKey;
+  }
   return (
-    event.shiftKey &&
-    !event.ctrlKey &&
-    !event.metaKey &&
-    (event.key === "ArrowUp" ||
-      event.key === "ArrowDown" ||
-      event.key === "Home" ||
-      event.key === "End" ||
-      event.key === "PageUp" ||
-      event.key === "PageDown")
+    event.key === "Home" ||
+    event.key === "End" ||
+    event.key === "PageUp" ||
+    event.key === "PageDown"
   );
 }
 

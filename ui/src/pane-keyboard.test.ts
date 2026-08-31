@@ -105,7 +105,7 @@ describe("resolvePaneScrollCommand", () => {
 
   it("keeps Ctrl+Shift+ArrowDown a boundary jump on Windows/Linux", () => {
     // The shift modifier must not demote the Ctrl boundary shortcut: the
-    // selection-extension guard owns plain shifted keys only.
+    // selection-extension guard releases Ctrl/Cmd-modified shifted arrows.
     expect(
       resolvePaneScrollCommand(
         {
@@ -119,6 +119,24 @@ describe("resolvePaneScrollCommand", () => {
         "Win32",
       ),
     ).toEqual({ kind: "boundary", direction: "down" });
+  });
+
+  it("leaves Cmd+Shift+ArrowDown browser-owned on macOS", () => {
+    // Cmd+Shift+Arrow is the macOS select-to-document-boundary gesture; the
+    // Apple Cmd+Arrow boundary shortcut is unshifted only.
+    expect(
+      resolvePaneScrollCommand(
+        {
+          altKey: false,
+          ctrlKey: false,
+          key: "ArrowDown",
+          metaKey: true,
+          shiftKey: true,
+        },
+        document.createElement("div"),
+        "MacIntel",
+      ),
+    ).toBeNull();
   });
 
   it("maps Ctrl+ArrowUp to a boundary jump on Windows/Linux", () => {

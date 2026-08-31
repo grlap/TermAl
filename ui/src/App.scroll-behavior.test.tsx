@@ -616,60 +616,178 @@ describe("App scroll behaviour", () => {
     });
   });
 
-  it("keeps plain shifted keys browser-owned and routes Ctrl+Shift+Home to the pane boundary", async () => {
+  it("keeps shifted selection gestures browser-owned and routes Ctrl+Shift+ArrowDown to the pane bottom", async () => {
     await withVerifiedNoReactActWarnings(async () => {
       const restoreScrollGeometry = stubElementScrollGeometry({
         clientHeight: 200,
         scrollHeight: 1000,
       });
       const scrollToMock = mockScrollToAndApplyTop();
+      // Platform-explicit: the Ctrl+Arrow boundary shortcut is a
+      // Windows/Linux contract; macOS is asserted separately below.
+      const navigatorWithUserAgentData = window.navigator as Navigator & {
+        userAgentData?: { platform?: string };
+      };
+      const originalPlatform = Object.getOwnPropertyDescriptor(
+        window.navigator,
+        "platform",
+      );
+      const originalUserAgentData = Object.getOwnPropertyDescriptor(
+        navigatorWithUserAgentData,
+        "userAgentData",
+      );
+      const setPlatform = (platform: string, userAgentPlatform: string) => {
+        Object.defineProperty(window.navigator, "platform", {
+          configurable: true,
+          value: platform,
+        });
+        Object.defineProperty(navigatorWithUserAgentData, "userAgentData", {
+          configurable: true,
+          value: { platform: userAgentPlatform },
+        });
+      };
+      const restorePlatform = () => {
+        if (originalPlatform) {
+          Object.defineProperty(window.navigator, "platform", originalPlatform);
+        } else {
+          Reflect.deleteProperty(window.navigator, "platform");
+        }
+        if (originalUserAgentData) {
+          Object.defineProperty(
+            navigatorWithUserAgentData,
+            "userAgentData",
+            originalUserAgentData,
+          );
+        } else {
+          Reflect.deleteProperty(navigatorWithUserAgentData, "userAgentData");
+        }
+      };
+      setPlatform("Win32", "Windows");
       const context = await renderAppWithProjectAndSession();
 
       try {
-        const messageStack = document.querySelector(
-          ".workspace-pane.active .message-stack",
-        );
-        if (!(messageStack instanceof HTMLElement)) {
-          throw new Error("Message stack not found");
-        }
+        // Re-resolve the live node before every phase: settling the UI can
+        // re-render the pane, and events fired at a detached node reach no
+        // React handler.
+        const getMessageStack = () => {
+          const node = document.querySelector(
+            ".workspace-pane.active .message-stack",
+          );
+          if (!(node instanceof HTMLElement)) {
+            throw new Error("Message stack not found");
+          }
+          return node;
+        };
+        let messageStack = getMessageStack();
 
-        messageStack.scrollTop = 800;
+        // A real, non-collapsed DOM selection inside transcript content: the
+        // reader is extending a selection, exactly what shifted boundary keys
+        // mean to the browser.
+        const selectionAnchor = document.createElement("p");
+        selectionAnchor.textContent = "Selected transcript text";
+        messageStack.append(selectionAnchor);
+        const selection = window.getSelection();
+        if (!selection) {
+          throw new Error("Selection API unavailable");
+        }
+        const range = document.createRange();
+        range.selectNodeContents(selectionAnchor);
+        selection.removeAllRanges();
+        selection.addRange(range);
+        expect(selection.isCollapsed).toBe(false);
+
+        messageStack.scrollTop = 400;
         messageStack.focus();
+        // Mount-time bottom-follow may already have written once; only the
+        // keys under test must add nothing.
+        const scrollToCallsBeforeKeys = scrollToMock.mock.calls.length;
         let shiftPageUpContinues = false;
+        let ctrlShiftHomeContinues = false;
+        let ctrlShiftEndContinues = false;
         await act(async () => {
           shiftPageUpContinues = fireEvent.keyDown(messageStack, {
             key: "PageUp",
             code: "PageUp",
             shiftKey: true,
           });
-        });
-        await settleAsyncUi();
-
-        // Plain shifted navigation stays with the browser's selection
-        // extension: not consumed, no scroll write.
-        expect(shiftPageUpContinues).toBe(true);
-        expect(messageStack.scrollTop).toBe(800);
-        expect(filterScrollToCallsAt(scrollToMock, 0, "auto")).toEqual([]);
-
-        let ctrlShiftHomeContinues = true;
-        await act(async () => {
           ctrlShiftHomeContinues = fireEvent.keyDown(messageStack, {
             key: "Home",
             code: "Home",
             ctrlKey: true,
             shiftKey: true,
           });
+          ctrlShiftEndContinues = fireEvent.keyDown(messageStack, {
+            key: "End",
+            code: "End",
+            ctrlKey: true,
+            shiftKey: true,
+          });
         });
         await settleAsyncUi();
+        messageStack = getMessageStack();
 
-        // Ctrl-modified shifted keys are pane boundary shortcuts: consumed,
-        // one seek write to the transcript start.
-        expect(ctrlShiftHomeContinues).toBe(false);
-        expect(messageStack.scrollTop).toBe(0);
-        expect(filterScrollToCallsAt(scrollToMock, 0, "auto")).toHaveLength(1);
+        // Shift+Page and Ctrl+Shift+Home/End are selection gestures: never
+        // consumed, no scroll write, the selection stays intact.
+        expect(shiftPageUpContinues).toBe(true);
+        expect(ctrlShiftHomeContinues).toBe(true);
+        expect(ctrlShiftEndContinues).toBe(true);
+        expect(messageStack.scrollTop).toBe(400);
+        expect(scrollToMock.mock.calls.length).toBe(scrollToCallsBeforeKeys);
+        // jsdom performs no native selection extension and the settled
+        // re-render can collapse the selection on its own; the contract
+        // under test is that the pane never consumed the keys or scrolled
+        // while a real selection was active when they were dispatched.
+
+        let ctrlShiftArrowDownContinues = true;
+        await act(async () => {
+          ctrlShiftArrowDownContinues = fireEvent.keyDown(messageStack, {
+            key: "ArrowDown",
+            code: "ArrowDown",
+            ctrlKey: true,
+            shiftKey: true,
+          });
+        });
+        await settleAsyncUi();
+        messageStack = getMessageStack();
+
+        // Ctrl+Shift+ArrowDown is the pane's jump-to-bottom shortcut:
+        // consumed, viewport lands at the physical bottom.
+        expect(ctrlShiftArrowDownContinues).toBe(false);
+        expect(messageStack.scrollTop).toBe(800);
+
+        // macOS: Cmd+Shift+Arrow and Cmd+Shift+End are the native
+        // select-to-document-boundary gestures; the pane's Cmd+Arrow boundary
+        // shortcut is unshifted only, so both stay browser-owned.
+        setPlatform("MacIntel", "macOS");
+        messageStack.scrollTop = 400;
+        const scrollToCallsBeforeMacKeys = scrollToMock.mock.calls.length;
+        let cmdShiftArrowDownContinues = false;
+        let cmdShiftEndContinues = false;
+        await act(async () => {
+          cmdShiftArrowDownContinues = fireEvent.keyDown(messageStack, {
+            key: "ArrowDown",
+            code: "ArrowDown",
+            metaKey: true,
+            shiftKey: true,
+          });
+          cmdShiftEndContinues = fireEvent.keyDown(messageStack, {
+            key: "End",
+            code: "End",
+            metaKey: true,
+            shiftKey: true,
+          });
+        });
+        await settleAsyncUi();
+        messageStack = getMessageStack();
+        expect(cmdShiftArrowDownContinues).toBe(true);
+        expect(cmdShiftEndContinues).toBe(true);
+        expect(messageStack.scrollTop).toBe(400);
+        expect(scrollToMock.mock.calls.length).toBe(scrollToCallsBeforeMacKeys);
       } finally {
+        window.getSelection()?.removeAllRanges();
         context.cleanup();
         restoreScrollGeometry();
+        restorePlatform();
       }
     });
   });

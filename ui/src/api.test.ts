@@ -26,9 +26,113 @@ import {
   TERMINAL_SSE_BUFFER_MAX_CHARS,
   testTelegramConnection,
   updateConversationMarker,
+  updateEngramHostSettings,
   updateTelegramConfig,
   upgradeRemoteTermal,
+  verifyProjectEngramSettings,
 } from "./api";
+
+describe("updateEngramHostSettings", () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    if (originalFetch === undefined) {
+      delete (globalThis as Partial<typeof globalThis>).fetch;
+      return;
+    }
+    globalThis.fetch = originalFetch;
+  });
+
+  it("patches the machine-scoped Engram endpoint", async () => {
+    const result = { projects: [], sessions: [] };
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(result), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      updateEngramHostSettings({
+        binaryPath: "C:\\tools\\engram.exe",
+        home: "C:\\EngramHome",
+      }),
+    ).resolves.toEqual(result);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/engram/settings",
+      expect.objectContaining({ method: "PATCH" }),
+    );
+    const [, init] = fetchMock.mock.calls[0] ?? [];
+    expect(JSON.parse(String(init?.body))).toEqual({
+      binaryPath: "C:\\tools\\engram.exe",
+      home: "C:\\EngramHome",
+    });
+  });
+});
+
+describe("verifyProjectEngramSettings", () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    if (originalFetch === undefined) {
+      delete (globalThis as Partial<typeof globalThis>).fetch;
+      return;
+    }
+    globalThis.fetch = originalFetch;
+  });
+
+  it("posts the write-only draft to the encoded project verification route", async () => {
+    const result = {
+      verified: true,
+      binaryPath: "engram",
+      home: "C:\\Users\\greg\\.engram",
+      projectId: "engram-project-1",
+      database: "C:\\Users\\greg\\.engram\\engram.db",
+      requiredAssurance: "turn_gated",
+      healthy: true,
+      grant: {
+        configured: true,
+        installed: true,
+        subjectActorId: "termal",
+        valid: true,
+      },
+    };
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(result), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      verifyProjectEngramSettings("project/one two", {
+        enabled: true,
+        binaryPath: "engram",
+        home: "%USERPROFILE%\\.engram",
+        workAuthorityGrant:
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      }),
+    ).resolves.toEqual(result);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/projects/project%2Fone%20two/engram/verify",
+      expect.objectContaining({ method: "POST" }),
+    );
+    const [, init] = fetchMock.mock.calls[0] ?? [];
+    expect(JSON.parse(String(init?.body))).toEqual({
+      enabled: true,
+      binaryPath: "engram",
+      home: "%USERPROFILE%\\.engram",
+      workAuthorityGrant:
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    });
+  });
+});
 
 describe("fetchCodexMcpServers", () => {
   const originalFetch = globalThis.fetch;
@@ -51,7 +155,9 @@ describe("fetchCodexMcpServers", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(fetchCodexMcpServers("session/a")).resolves.toEqual({ servers: [] });
+    await expect(fetchCodexMcpServers("session/a")).resolves.toEqual({
+      servers: [],
+    });
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/sessions/session%2Fa/codex/mcp-servers",
       expect.objectContaining({

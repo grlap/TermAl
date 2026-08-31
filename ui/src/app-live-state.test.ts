@@ -344,6 +344,7 @@ function makeLiveStateParams(
       setDefaultClaudeEffort: noopSetter,
       setRemoteConfigs: noopSetter,
       setTelegramConfig: noopSetter,
+      setEngramHostSettings: noopSetter,
     },
     applyControlPanelLayout: (workspace) => workspace,
     clearRecoveredBackendRequestError: vi.fn(),
@@ -450,6 +451,48 @@ afterEach(() => {
 });
 
 describe("deferred session-store sync", () => {
+  it("syncs machine-scoped Engram settings from adopted app state", () => {
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.spyOn(api, "fetchState").mockImplementation(
+      () => new Promise<StateResponse>(() => {}),
+    );
+    vi.spyOn(api, "fetchSessionTail").mockImplementation(
+      () =>
+        new Promise<Awaited<ReturnType<typeof api.fetchSessionTail>>>(() => {}),
+    );
+    const session = makeSession();
+    const params = makeLiveStateParams(session);
+    const setEngramHostSettings = vi.fn();
+    params.preferenceSetters.setEngramHostSettings = setEngramHostSettings;
+    let hook: UseAppLiveStateReturn | null = null;
+
+    renderLiveStateHarness(params, (nextHook) => {
+      hook = nextHook;
+    });
+
+    const state = makeStateResponse(session);
+    act(() => {
+      hook?.syncPreferencesFromState({
+        ...state,
+        preferences: {
+          ...state.preferences,
+          engram: {
+            binaryPath: "C:\\tools\\engram.exe",
+            home: "C:\\EngramHome",
+          },
+        },
+      });
+    });
+
+    expect(setEngramHostSettings).toHaveBeenCalledWith({
+      binaryPath: "C:\\tools\\engram.exe",
+      home: "C:\\EngramHome",
+    });
+  });
+
   it("syncs Telegram preferences from adopted app state", () => {
     vi.stubGlobal(
       "EventSource",

@@ -5,8 +5,8 @@
 //
 // What this file owns:
 //   - The `<section class="project-controls">` layout, the project
-//     rows, the project-count badge, and the per-project context
-//     menu portal.
+//     rows, the project-count badge, the per-project context menu,
+//     and the project-scoped Engram settings portal.
 //   - The local UI state for the context menu
 //     (`contextMenu` + `contextMenuStyle`), the ref used to
 //     measure the menu's bounding rect, and the
@@ -43,6 +43,12 @@ import {
 import { createPortal } from "react-dom";
 
 import { clamp } from "./app-utils";
+import type { StateResponse } from "./api";
+import {
+  EngramProjectSettingsDialog,
+  type ProjectEngramVerificationState,
+} from "./EngramProjectSettingsDialog";
+import { describeProjectEngramState } from "./EngramProjectSettingsPanel";
 import { ALL_PROJECTS_FILTER_ID } from "./project-filters";
 import { describeProjectScope } from "./session-model-utils";
 import type { Project, RemoteConfig } from "./types";
@@ -64,6 +70,7 @@ export type ProjectListSectionProps = {
   onProjectScopeChange: (projectId: string) => void;
   onRemoveProject: (project: Project) => void;
   onStartSession: (paneId: string | null, projectId: string) => void;
+  onStateUpdated: (state: StateResponse) => void;
 };
 
 export function ProjectListSection({
@@ -76,6 +83,7 @@ export function ProjectListSection({
   onProjectScopeChange,
   onRemoveProject,
   onStartSession,
+  onStateUpdated,
 }: ProjectListSectionProps) {
   const [contextMenu, setContextMenu] = useState<ProjectContextMenu | null>(
     null,
@@ -83,8 +91,19 @@ export function ProjectListSection({
   const [contextMenuStyle, setContextMenuStyle] =
     useState<CSSProperties | null>(null);
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
+  const [engramSettingsProjectId, setEngramSettingsProjectId] = useState<
+    string | null
+  >(null);
+  const [engramVerificationByProjectId, setEngramVerificationByProjectId] =
+    useState<Record<string, ProjectEngramVerificationState>>({});
   const contextMenuProject = contextMenu
     ? (projects.find((project) => project.id === contextMenu.projectId) ?? null)
+    : null;
+  const engramSettingsProject = engramSettingsProjectId
+    ? (projects.find(
+        (project) =>
+          project.id === engramSettingsProjectId && project.engramDeclared,
+      ) ?? null)
     : null;
 
   function closeContextMenu() {
@@ -192,6 +211,14 @@ export function ProjectListSection({
     closeContextMenu();
   }, [contextMenu, contextMenuProject]);
 
+  useEffect(() => {
+    if (!engramSettingsProjectId || engramSettingsProject) {
+      return;
+    }
+
+    setEngramSettingsProjectId(null);
+  }, [engramSettingsProject, engramSettingsProjectId]);
+
   useLayoutEffect(() => {
     if (!contextMenu) {
       setContextMenuStyle(null);
@@ -242,6 +269,15 @@ export function ProjectListSection({
                   <span className="project-row-path">
                     {describeProjectScope(project, remoteLookup)}
                   </span>
+                  {project.engramDeclared ? (
+                    <span className="project-row-engram-status">
+                      Engram ·{" "}
+                      {describeProjectEngramState(
+                        project,
+                        engramVerificationByProjectId[project.id],
+                      )}
+                    </span>
+                  ) : null}
                 </span>
                 <span className="project-row-count">
                   {projectSessionCounts.get(project.id) ?? 0}
@@ -265,6 +301,19 @@ export function ProjectListSection({
                 }
               }
             >
+              {contextMenuProject.engramDeclared ? (
+                <button
+                  className="context-menu-item pane-tab-context-menu-item"
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    closeContextMenu();
+                    setEngramSettingsProjectId(contextMenuProject.id);
+                  }}
+                >
+                  Engram settings
+                </button>
+              ) : null}
               <button
                 className="context-menu-item pane-tab-context-menu-item"
                 type="button"
@@ -288,6 +337,22 @@ export function ProjectListSection({
                 Remove project
               </button>
             </div>,
+            document.body,
+          )
+        : null}
+      {engramSettingsProject && typeof document !== "undefined"
+        ? createPortal(
+            <EngramProjectSettingsDialog
+              project={engramSettingsProject}
+              onClose={() => setEngramSettingsProjectId(null)}
+              onSaved={onStateUpdated}
+              onVerified={(projectId, verification) => {
+                setEngramVerificationByProjectId((current) => ({
+                  ...current,
+                  [projectId]: verification,
+                }));
+              }}
+            />,
             document.body,
           )
         : null}

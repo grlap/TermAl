@@ -384,6 +384,41 @@ struct AppPreferences {
     remotes: Vec<RemoteConfig>,
     #[serde(default, skip_serializing_if = "telegram_ui_config_is_default")]
     telegram: TelegramUiConfig,
+    #[serde(default)]
+    engram: EngramHostSettings,
+}
+
+/// Machine-scoped Engram process configuration. Repositories opt in through
+/// `.engram-project`; this host record only selects the executable and store.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EngramHostSettings {
+    #[serde(default = "default_engram_binary_path")]
+    binary_path: String,
+    #[serde(default = "default_engram_host_home")]
+    home: String,
+}
+
+impl Default for EngramHostSettings {
+    fn default() -> Self {
+        Self {
+            binary_path: default_engram_binary_path(),
+            home: default_engram_host_home(),
+        }
+    }
+}
+
+fn default_engram_binary_path() -> String {
+    "engram".to_owned()
+}
+
+fn default_engram_host_home() -> String {
+    std::env::var_os("USERPROFILE")
+        .filter(|value| !value.is_empty())
+        .or_else(|| std::env::var_os("HOME").filter(|value| !value.is_empty()))
+        .map(PathBuf::from)
+        .map(|path| path.join(".engram").to_string_lossy().into_owned())
+        .unwrap_or_else(|| "~/.engram".to_owned())
 }
 
 impl Default for AppPreferences {
@@ -402,6 +437,7 @@ impl Default for AppPreferences {
             default_claude_effort: default_claude_effort(),
             remotes: default_remote_configs(),
             telegram: TelegramUiConfig::default(),
+            engram: EngramHostSettings::default(),
         }
     }
 }

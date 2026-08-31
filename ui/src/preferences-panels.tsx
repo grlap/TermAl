@@ -68,6 +68,7 @@ import {
 
 export { ThemedCombobox } from "./preferences/themed-combobox";
 export { TelegramPreferencesPanel } from "./preferences/telegram-preferences-panel";
+export { EngramPreferencesPanel } from "./preferences/engram-preferences-panel";
 
 export const SANDBOX_MODE_OPTIONS = [
   { label: "workspace-write", value: "workspace-write" },

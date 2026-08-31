@@ -182,6 +182,20 @@ export function resolveAppPreferences(preferences?: AppPreferences | null) {
     defaultClaudeEffort: preferences?.defaultClaudeEffort ?? DEFAULT_CLAUDE_EFFORT,
     remotes: normalizeRemoteConfigs(preferences?.remotes),
     telegram: normalizeTelegramUiConfig(preferences?.telegram),
+    engram: normalizeEngramHostSettings(preferences?.engram),
+  };
+}
+
+export function normalizeEngramHostSettings(
+  settings?: AppPreferences["engram"] | null,
+) {
+  const defaultHome =
+    typeof navigator !== "undefined" && /Windows/i.test(navigator.userAgent)
+      ? "%USERPROFILE%\\.engram"
+      : "~/.engram";
+  return {
+    binaryPath: settings?.binaryPath?.trim() || "engram",
+    home: settings?.home?.trim() || defaultHome,
   };
 }
 

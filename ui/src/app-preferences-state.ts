@@ -60,6 +60,7 @@ import type {
   ClaudeEffortLevel,
   CodexReasoningEffort,
   CursorMode,
+  EngramHostSettings,
   GeminiApprovalMode,
   RemoteConfig,
   SandboxMode,
@@ -128,6 +129,8 @@ export function useAppPreferencesState(
   const [telegramConfig, setTelegramConfig] = useState<
     TelegramUiConfig | undefined
   >(undefined);
+  const [engramHostSettings, setEngramHostSettings] =
+    useState<EngramHostSettings>(() => resolveAppPreferences(null).engram);
   const [defaultCursorMode, setDefaultCursorMode] =
     useState<CursorMode>("agent");
   const [defaultGeminiApprovalMode, setDefaultGeminiApprovalMode] =
@@ -225,5 +228,7 @@ export function useAppPreferencesState(
     setRemoteConfigs,
     telegramConfig,
     setTelegramConfig,
+    engramHostSettings,
+    setEngramHostSettings,
   } as const;
 }

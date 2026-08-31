@@ -515,11 +515,11 @@ describe("isMessageStackSelectionExtensionKey", () => {
     }
   });
 
-  it("releases Ctrl- and Meta-modified shifted keys to the pane boundary shortcuts", () => {
+  it("releases only Ctrl- and Cmd-modified shifted arrows to the pane boundary shortcuts", () => {
     // Ctrl+Shift+ArrowDown must reach resolvePaneScrollCommand and jump to
     // the transcript bottom instead of being handed to the browser as a
     // paragraph-selection gesture.
-    for (const name of ["ArrowUp", "ArrowDown", "Home", "End"]) {
+    for (const name of ["ArrowUp", "ArrowDown"]) {
       expect(
         isMessageStackSelectionExtensionKey(
           key({ ctrlKey: true, key: name, shiftKey: true }),
@@ -530,6 +530,24 @@ describe("isMessageStackSelectionExtensionKey", () => {
           key({ key: name, metaKey: true, shiftKey: true }),
         ),
       ).toBe(false);
+    }
+  });
+
+  it("keeps Ctrl/Cmd+Shift+Home/End and shifted Page keys browser-owned for selection", () => {
+    // Select-to-document-boundary and select-by-page are standard selection
+    // gestures inside transcript content on every platform; the pane must
+    // not turn them into boundary jumps.
+    for (const name of ["Home", "End", "PageUp", "PageDown"]) {
+      expect(
+        isMessageStackSelectionExtensionKey(
+          key({ ctrlKey: true, key: name, shiftKey: true }),
+        ),
+      ).toBe(true);
+      expect(
+        isMessageStackSelectionExtensionKey(
+          key({ key: name, metaKey: true, shiftKey: true }),
+        ),
+      ).toBe(true);
     }
   });
 });

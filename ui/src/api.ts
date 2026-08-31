@@ -31,6 +31,7 @@ import type {
   OrchestratorTemplateDraft,
   Project,
   EngramProjectSettings,
+  EngramProjectVerification,
   RemoteConfig,
   SandboxMode,
   Session,
@@ -849,6 +850,16 @@ export function updateAppSettings(payload: {
   });
 }
 
+export function updateEngramHostSettings(payload: {
+  binaryPath: string;
+  home: string;
+}) {
+  return request<StateResponse>("/api/engram/settings", {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
 export type RemoteActionResponse = {
   remoteId: string;
   action: string;
@@ -1078,6 +1089,19 @@ export function updateProjectEngramSettings(
     `/api/projects/${encodeURIComponent(projectId)}/engram`,
     {
       method: "PATCH",
+      body: JSON.stringify(settings),
+    },
+  );
+}
+
+export function verifyProjectEngramSettings(
+  projectId: string,
+  settings: EngramProjectSettings,
+) {
+  return request<EngramProjectVerification>(
+    `/api/projects/${encodeURIComponent(projectId)}/engram/verify`,
+    {
+      method: "POST",
       body: JSON.stringify(settings),
     },
   );

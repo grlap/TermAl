@@ -4295,6 +4295,19 @@ fn real_fixture_engram_settings(root: &FsPath) -> EngramProjectSettings {
     }
 }
 
+fn install_fixture_engram_host_settings(state: &AppState, home: &FsPath) {
+    let mut inner = state.inner.lock().expect("state mutex poisoned");
+    inner.preferences.engram = EngramHostSettings {
+        binary_path: real_engram_control_fixture_path()
+            .to_string_lossy()
+            .into_owned(),
+        home: home.to_string_lossy().into_owned(),
+    };
+    state
+        .commit_locked(&mut inner)
+        .expect("fixture host settings should persist");
+}
+
 fn materialize_fixture_engram_store(
     project_root: &FsPath,
     home: &FsPath,
@@ -4311,6 +4324,312 @@ fn materialize_fixture_engram_store(
         ),
         project_id,
     }
+}
+
+#[test]
+fn project_engram_verification_is_redacted_and_does_not_mutate_settings() {
+    let state = test_app_state();
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("engram-project-settings-verify");
+    fs::create_dir_all(&root).expect("project root should exist");
+    fs::write(root.join(".engram-project"), "fixture-ready\n").expect("fixture mode should write");
+    install_fixture_engram_host_settings(&state, &root);
+    let project_id = create_test_project(&state, &root, "Engram settings verification");
+    let secret = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+    let verification = state
+        .verify_project_engram_settings(
+            &project_id,
+            UpdateProjectEngramSettingsRequest {
+                enabled: true,
+                binary_path: Some(
+                    real_engram_control_fixture_path()
+                        .to_string_lossy()
+                        .into_owned(),
+                ),
+                home: Some(root.to_string_lossy().into_owned()),
+                work_authority_grant: Some(Some(secret.to_owned())),
+                deadline_ms: Some(250),
+            },
+        )
+        .expect("fixture settings should verify");
+
+    assert!(verification.verified);
+    assert!(verification.healthy);
+    assert_eq!(verification.project_id, "fixture-ready");
+    assert_eq!(verification.required_assurance, "turn_gated");
+    assert_eq!(
+        verification.binary_path,
+        real_engram_control_fixture_path()
+            .to_string_lossy()
+            .into_owned()
+    );
+    assert_eq!(verification.home, root.to_string_lossy());
+    assert!(verification.grant.configured);
+    assert_eq!(verification.grant.installed, Some(true));
+    assert_eq!(
+        verification.grant.subject_actor_id.as_deref(),
+        Some("termal")
+    );
+    assert!(verification.grant.valid);
+    assert!(verification.grant.revoked_at.is_none());
+
+    let encoded =
+        serde_json::to_string(&verification).expect("verification response should serialize");
+    assert!(!encoded.contains(secret));
+    assert!(!encoded.contains("workAuthorityGrant"));
+    assert!(
+        state
+            .inner
+            .lock()
+            .expect("state mutex poisoned")
+            .find_project(&project_id)
+            .expect("project should remain")
+            .engram
+            .is_none(),
+        "Verify must not persist the proposed settings"
+    );
+}
+
+#[test]
+fn project_engram_verification_reports_revoked_authority_fail_closed() {
+    let state = test_app_state();
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("engram-project-settings-revoked");
+    fs::create_dir_all(&root).expect("project root should exist");
+    fs::write(root.join(".engram-project"), "fixture-authority-revoked\n")
+        .expect("fixture mode should write");
+    install_fixture_engram_host_settings(&state, &root);
+    let project_id = create_test_project(&state, &root, "Revoked Engram settings");
+
+    let verification = state
+        .verify_project_engram_settings(
+            &project_id,
+            UpdateProjectEngramSettingsRequest {
+                enabled: true,
+                binary_path: Some(
+                    real_engram_control_fixture_path()
+                        .to_string_lossy()
+                        .into_owned(),
+                ),
+                home: Some(root.to_string_lossy().into_owned()),
+                work_authority_grant: Some(Some(
+                    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_owned(),
+                )),
+                deadline_ms: Some(250),
+            },
+        )
+        .expect("domain validation should return a structured result");
+
+    assert!(!verification.verified);
+    assert_eq!(verification.grant.installed, Some(true));
+    assert!(verification.grant.revoked_at.is_some());
+    assert!(!verification.grant.valid);
+    assert!(
+        verification
+            .errors
+            .iter()
+            .any(|message| message.contains("revoked")),
+        "revocation must be visible in the fail-closed result"
+    );
+    assert!(
+        state
+            .inner
+            .lock()
+            .expect("state mutex poisoned")
+            .find_project(&project_id)
+            .expect("project should remain")
+            .engram
+            .is_none()
+    );
+}
+
+#[test]
+fn project_engram_verification_requires_a_stored_or_proposed_grant() {
+    let state = test_app_state();
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("engram-project-settings-missing-grant");
+    fs::create_dir_all(&root).expect("project root should exist");
+    fs::write(root.join(".engram-project"), "fixture-ready\n")
+        .expect("repository declaration should exist");
+    install_fixture_engram_host_settings(&state, &root);
+    let project_id = create_test_project(&state, &root, "Engram grant required");
+
+    let verification = state
+        .verify_project_engram_settings(
+            &project_id,
+            UpdateProjectEngramSettingsRequest {
+                enabled: true,
+                binary_path: None,
+                home: None,
+                work_authority_grant: None,
+                deadline_ms: None,
+            },
+        )
+        .expect("missing grant should return a structured verification result");
+
+    assert!(!verification.verified);
+    assert!(!verification.grant.configured);
+    assert!(verification.errors.iter().any(|message| {
+        message == "a work-authority grant is required before Engram can be enabled"
+    }));
+
+    let error = match state.patch_project_engram_settings(
+        &project_id,
+        UpdateProjectEngramSettingsRequest {
+            enabled: true,
+            binary_path: None,
+            home: None,
+            work_authority_grant: None,
+            deadline_ms: None,
+        },
+    ) {
+        Ok(_) => panic!("Save must not enable a project without a grant"),
+        Err(error) => error,
+    };
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        error.message,
+        "a work-authority grant is required before Engram can be enabled"
+    );
+}
+
+#[test]
+fn client_snapshot_derives_repository_engram_declaration_and_redacts_authority() {
+    let state = test_app_state();
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("engram-client-declaration");
+    fs::create_dir_all(&root).expect("project root should exist");
+    fs::write(root.join(".engram-project"), "fixture-ready\n")
+        .expect("repository declaration should exist");
+    let project_id = create_test_project(&state, &root, "Declared Engram project");
+    let secret = "client-snapshot-secret";
+    let mut settings = real_fixture_engram_settings(&root);
+    settings.work_authority_grant = Some(secret.to_owned());
+    state
+        .update_project_engram_settings(&project_id, settings)
+        .expect("fixture Engram settings should enable");
+
+    let snapshot = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        state.snapshot_from_inner(&inner)
+    };
+    let encoded = serde_json::to_value(snapshot).expect("client snapshot should serialize");
+    let project = encoded["projects"]
+        .as_array()
+        .expect("projects should serialize")
+        .iter()
+        .find(|project| project["id"] == project_id)
+        .expect("declared project should be present");
+
+    assert_eq!(project["engramDeclared"], true);
+    assert_eq!(project["engramGrantConfigured"], true);
+    assert_eq!(project["engramOperatorDisabled"], false);
+    assert!(project["engram"]["workAuthorityGrant"].is_null());
+    assert!(!encoded.to_string().contains(secret));
+}
+
+#[test]
+fn host_engram_settings_are_machine_scoped_and_cannot_rotate_while_enabled() {
+    let state = test_app_state();
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("engram-host-settings");
+    let project_root = root.join("project");
+    let replacement_home = root.join("replacement-home");
+    fs::create_dir_all(&project_root).expect("project root should exist");
+    fs::create_dir_all(&replacement_home).expect("replacement home should exist");
+    fs::write(project_root.join(".engram-project"), "fixture-ready\n")
+        .expect("repository declaration should exist");
+
+    state
+        .update_engram_host_settings(UpdateEngramHostSettingsRequest {
+            binary_path: real_engram_control_fixture_path()
+                .to_string_lossy()
+                .into_owned(),
+            home: root.to_string_lossy().into_owned(),
+        })
+        .expect("host Engram settings should persist");
+    let project_id = create_test_project(&state, &project_root, "Host settings project");
+    let mut settings = real_fixture_engram_settings(&root);
+    settings.work_authority_grant = Some("host-settings-grant".to_owned());
+    state
+        .update_project_engram_settings(&project_id, settings)
+        .expect("fixture Engram settings should enable");
+
+    let error = match state.update_engram_host_settings(UpdateEngramHostSettingsRequest {
+        binary_path: real_engram_control_fixture_path()
+            .to_string_lossy()
+            .into_owned(),
+        home: replacement_home.to_string_lossy().into_owned(),
+    }) {
+        Ok(_) => panic!("enabled projects must fence host settings rotation"),
+        Err(error) => error,
+    };
+    assert!(
+        error
+            .message
+            .contains("disable every enabled Engram project")
+    );
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert_eq!(inner.preferences.engram.home, root.to_string_lossy());
+}
+
+#[test]
+fn project_engram_connection_accepts_the_default_path_command() {
+    let state = test_app_state();
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("engram-project-settings-path-command");
+    fs::create_dir_all(&root).expect("project root should exist");
+    fs::write(root.join(".engram-project"), "fixture-ready\n").expect("fixture mode should write");
+    let project_id = create_test_project(&state, &root, "Engram PATH command");
+    let project = state
+        .inner
+        .lock()
+        .expect("state mutex poisoned")
+        .find_project(&project_id)
+        .expect("project should remain")
+        .clone();
+    let settings = EngramProjectSettings {
+        enabled: true,
+        binary_path: Some("engram".to_owned()),
+        home: Some(root.to_string_lossy().into_owned()),
+        work_authority_grant: None,
+        authority_store_key: None,
+        deadline_ms: Some(2_000),
+    };
+
+    let (binary_path, project_file, home) =
+        validate_engram_project_connection_paths(&project, &settings)
+            .expect("a single command name should resolve through PATH at execution time");
+
+    assert_eq!(binary_path, PathBuf::from("engram"));
+    assert_eq!(project_file, root.join(".engram-project"));
+    assert_eq!(home, root);
 }
 
 fn fixture_authority_revoke_args_path(root: &FsPath) -> PathBuf {
@@ -4979,7 +5298,7 @@ fn engram_mcp_home_alias_keeps_the_current_store_authority() {
 }
 
 #[test]
-fn engram_enabled_settings_reject_empty_and_relative_homes_before_store_normalization() {
+fn engram_enabled_settings_default_blank_home_and_reject_relative_home() {
     let state = test_app_state();
     let root = state
         .test_temp_root
@@ -4991,23 +5310,38 @@ fn engram_enabled_settings_reject_empty_and_relative_homes_before_store_normaliz
     fs::write(root.join(".engram-project"), "fixture-ready\n").expect("fixture mode should write");
     let project_id = create_test_project(&state, &root, "Engram invalid home");
 
-    for (home, expected_error) in [
-        ("", "cannot enable Engram without home"),
-        (".", "non-empty absolute path"),
-    ] {
-        let mut settings = real_fixture_engram_settings(&root);
-        settings.home = Some(home.to_owned());
-        let error = match state.update_project_engram_settings(&project_id, settings) {
-            Ok(_) => panic!("enabled Engram must reject a non-absolute home"),
-            Err(error) => error,
-        };
-        assert_eq!(error.status, StatusCode::BAD_REQUEST);
-        assert!(
-            error.message.contains(expected_error),
-            "unexpected validation error for {home:?}: {}",
-            error.message
-        );
-    }
+    let mut blank_home = real_fixture_engram_settings(&root);
+    blank_home.home = Some(String::new());
+    state
+        .update_project_engram_settings(&project_id, blank_home)
+        .expect("an enabled blank home should use the documented default");
+    let expected_home = default_engram_home_path()
+        .expect("test process should expose a user home")
+        .to_string_lossy()
+        .into_owned();
+    assert_eq!(
+        state
+            .inner
+            .lock()
+            .expect("state mutex poisoned")
+            .find_project(&project_id)
+            .and_then(|project| project.engram.as_ref())
+            .and_then(|settings| settings.home.as_deref()),
+        Some(expected_home.as_str())
+    );
+
+    let mut relative_home = real_fixture_engram_settings(&root);
+    relative_home.home = Some(".".to_owned());
+    let error = match state.update_project_engram_settings(&project_id, relative_home) {
+        Ok(_) => panic!("enabled Engram must reject a relative home"),
+        Err(error) => error,
+    };
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert!(
+        error.message.contains("non-empty absolute path"),
+        "unexpected relative-home validation error: {}",
+        error.message
+    );
 }
 
 #[test]
@@ -5130,7 +5464,7 @@ fn engram_grant_clear_cannot_smuggle_an_unvalidated_binary_change() {
     assert!(
         error
             .message
-            .contains("binaryPath must be an existing absolute file")
+            .contains("binaryPath must be a command on PATH or an existing absolute file")
     );
 
     let inner = state.inner.lock().expect("state mutex poisoned");
@@ -8556,6 +8890,7 @@ fn project_engram_patch_normalizes_and_validates_work_authority_grants() {
         .join("engram-authority-grant-validation");
     fs::create_dir_all(&root).expect("project root should exist");
     fs::write(root.join(".engram-project"), "fixture-ok\n").expect("fixture mode should write");
+    install_fixture_engram_host_settings(&state, &root);
     let project_id = create_test_project(&state, &root, "Engram grant validation");
     let valid_grant = "ab".repeat(32);
     let request: UpdateProjectEngramSettingsRequest = serde_json::from_value(json!({
@@ -13655,7 +13990,7 @@ fn per_session_engram_mcp_omits_optional_grant_and_preserves_ineligible_baseline
 }
 
 #[test]
-fn redacted_project_patch_preserves_and_explicit_null_clears_work_authority_grant() {
+fn redacted_project_patch_preserves_and_disable_clears_work_authority_grant() {
     let (state, _runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-authority-patch");
     let root = state
@@ -13666,6 +14001,7 @@ fn redacted_project_patch_preserves_and_explicit_null_clears_work_authority_gran
         .join("engram-authority-patch-project");
     fs::create_dir_all(&root).expect("project root should exist");
     fs::write(root.join(".engram-project"), "fixture-ok\n").expect("fixture mode should write");
+    install_fixture_engram_host_settings(&state, &root);
     let project_id = create_test_project(&state, &root, "Engram authority patch project");
     {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
@@ -13710,7 +14046,7 @@ fn redacted_project_patch_preserves_and_explicit_null_clears_work_authority_gran
     );
 
     let request: UpdateProjectEngramSettingsRequest = serde_json::from_value(json!({
-        "enabled": true,
+        "enabled": false,
         "binaryPath": real_engram_control_fixture_path().to_string_lossy(),
         "home": root.to_string_lossy(),
         "workAuthorityGrant": null,
@@ -13731,7 +14067,7 @@ fn redacted_project_patch_preserves_and_explicit_null_clears_work_authority_gran
     assert_fixture_authority_revoke_args(
         &read_fixture_authority_revoke_args(&root),
         "operator-secret-grant",
-        "TermAl project Engram work-authority grant removed",
+        "TermAl project Engram integration disabled",
     );
 }
 

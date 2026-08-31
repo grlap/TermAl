@@ -332,6 +332,16 @@ struct Project {
 /// operator-installed Engram work-authority credential. The runtime `Project`
 /// and persisted-state projection keep the value intact; only `StateResponse`
 /// uses this sanitizer.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ClientProjectSnapshot {
+    #[serde(flatten)]
+    project: Project,
+    engram_declared: bool,
+    engram_grant_configured: bool,
+    engram_operator_disabled: bool,
+}
+
 fn serialize_client_projects_without_engram_authority<S>(
     projects: &[Project],
     serializer: S,
@@ -343,11 +353,28 @@ where
         .iter()
         .cloned()
         .map(|mut project| {
+            let engram_declared = project.remote_id == LOCAL_REMOTE_ID
+                && fs::metadata(FsPath::new(&project.root_path).join(".engram-project"))
+                    .is_ok_and(|metadata| metadata.is_file() && metadata.len() > 0);
+            let engram_grant_configured = project
+                .engram
+                .as_ref()
+                .is_some_and(|settings| settings.work_authority_grant.is_some());
+            let engram_operator_disabled = engram_declared
+                && project
+                    .engram
+                    .as_ref()
+                    .is_some_and(|settings| !settings.enabled);
             if let Some(settings) = project.engram.as_mut() {
                 settings.work_authority_grant = None;
                 settings.authority_store_key = None;
             }
-            project
+            ClientProjectSnapshot {
+                project,
+                engram_declared,
+                engram_grant_configured,
+                engram_operator_disabled,
+            }
         })
         .collect::<Vec<_>>();
     sanitized.serialize(serializer)
@@ -1473,7 +1500,7 @@ struct CreateProjectRequest {
 /// The authority grant follows the API's tri-state secret convention: an
 /// omitted field preserves the saved credential, `null` clears it, and a
 /// string replaces it.
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct UpdateProjectEngramSettingsRequest {
     #[serde(default)]
@@ -1486,6 +1513,45 @@ struct UpdateProjectEngramSettingsRequest {
     work_authority_grant: Option<Option<String>>,
     #[serde(default)]
     deadline_ms: Option<u64>,
+}
+
+/// Redacted, non-mutating verification result for the project Engram settings
+/// UI. The work-authority grant is never echoed; only its public status fields
+/// are returned.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VerifyProjectEngramSettingsResponse {
+    verified: bool,
+    binary_path: String,
+    home: String,
+    project_id: String,
+    database: String,
+    required_assurance: String,
+    healthy: bool,
+    grant: EngramAuthorityVerificationStatus,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    errors: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EngramAuthorityVerificationStatus {
+    configured: bool,
+    installed: Option<bool>,
+    subject_actor_id: Option<String>,
+    valid_from: Option<String>,
+    valid_until: Option<String>,
+    revoked_at: Option<String>,
+    valid: bool,
+}
+
+/// Updates the machine-scoped Engram executable and home. Repository
+/// declaration and project grants remain separate concerns.
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateEngramHostSettingsRequest {
+    binary_path: String,
+    home: String,
 }
 
 impl UpdateProjectEngramSettingsRequest {

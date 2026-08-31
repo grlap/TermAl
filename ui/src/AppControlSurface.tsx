@@ -978,6 +978,7 @@ export function AppControlSurface({
                 void handleProjectMenuRemoveProject(project)
               }
               onStartSession={handleProjectMenuStartSession}
+              onStateUpdated={handleOrchestratorStateUpdated}
             />
           );
 

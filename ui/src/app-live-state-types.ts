@@ -16,6 +16,7 @@ import type {
   ClaudeEffortLevel,
   CodexReasoningEffort,
   CodexState,
+  EngramHostSettings,
   OrchestratorInstance,
   Project,
   RemoteConfig,
@@ -161,6 +162,7 @@ export type UseAppLiveStatePreferenceSetters = {
   setDefaultClaudeEffort: Dispatch<SetStateAction<ClaudeEffortLevel>>;
   setRemoteConfigs: Dispatch<SetStateAction<RemoteConfig[]>>;
   setTelegramConfig: Dispatch<SetStateAction<TelegramUiConfig | undefined>>;
+  setEngramHostSettings: Dispatch<SetStateAction<EngramHostSettings>>;
 };
 
 export type UseAppLiveStateParams = {

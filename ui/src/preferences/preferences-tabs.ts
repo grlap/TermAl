@@ -25,6 +25,7 @@ export type PreferencesTabId =
   | "remotes"
   | "telegram"
   | "orchestrators"
+  | "engram"
   | "codex-prompts"
   | "claude-approvals"
   | "cursor"
@@ -41,6 +42,7 @@ export const PREFERENCES_TABS: ReadonlyArray<{
   { id: "remotes", label: "Remotes" },
   { id: "telegram", label: "Telegram" },
   { id: "orchestrators", label: "Orchestrators" },
+  { id: "engram", label: "Engram" },
   { id: "codex-prompts", label: "Codex" },
   { id: "claude-approvals", label: "Claude" },
   { id: "cursor", label: "Cursor" },

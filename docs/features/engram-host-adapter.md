@@ -11,15 +11,20 @@ The adapter is deliberately local-only. Remote proxy sessions do not enter the
 local Engram control plane. Project-scoped remote access remains a separate
 design contract in [Project-scoped remotes](./project-scoped-remotes.md).
 
-## Project configuration
+## Configuration authority
 
-Engram is configured per local TermAl project:
+The configuration model is **repository declares, host authorizes**:
 
-- `enabled`: enables the host-control adapter;
-- `binaryPath`: absolute path to the Engram executable;
-- `home`: absolute Engram home directory;
-- `workAuthorityGrant`: the single project grant used by every TermAl agent;
-- `deadlineMs`: bounded control-call deadline.
+- A local repository opts in by carrying a non-empty `.engram-project` file at
+  its root. Undeclared and remote projects are not configurable through the
+  local Engram host adapter.
+- The host stores one machine-wide `binaryPath` and `home`. The binary defaults
+  to `engram` resolved through the server process `PATH`; home defaults to the
+  server user's `.engram` directory.
+- Each declared project stores only its write-only `workAuthorityGrant` and an
+  operator veto. There is no independent project-side Enabled toggle.
+- Effective enablement is derived from the repository declaration, a stored
+  grant, a successful Verify/save, and the absence of the host veto.
 
 TermAl persists one grant per project, not one grant per session or agent. The
 fixed Engram subject and control actor is `termal`. Individual activity remains
@@ -29,6 +34,34 @@ CLI/control connection.
 Grant material is secret. It is persisted server-side but removed from client
 project snapshots, logs, errors, and durable operator notices. The PATCH API's
 redacted placeholder preserves the current grant; explicit `null` clears it.
+
+## Settings UI
+
+Open **Settings > Engram** to configure the host-global binary and home once
+per machine. `PATCH /api/engram/settings` persists those paths. They cannot be
+rotated while a project is enabled; first apply the project's unconditional
+host veto so no runtime can silently cross from one Engram store to another.
+
+The same page automatically lists local projects whose roots contain a
+non-empty `.engram-project`. A declared project's context menu also exposes
+**Engram settings**. Both surfaces share the project-scoped write-only grant,
+**Verify**, **Save & enable**, and **Disable Engram** controls. Undeclared
+projects expose none of those controls.
+
+The grant input is always blank when the dialog opens. Leaving it blank
+preserves the saved grant; typing a value installs or replaces it. The saved
+value is never returned to or rendered by the client.
+
+**Verify** calls the non-mutating
+`POST /api/projects/{id}/engram/verify` probe. It reports the doctor project id,
+database, required assurance and health plus the redacted authority status
+(installed, subject, validity interval, and revocation). An enabled
+configuration cannot be enabled until its current draft verifies successfully.
+Save uses the existing `PATCH /api/projects/{id}/engram` route, which repeats
+all checks and remains the final fail-closed authority. Disabling stays
+available without verification as a recovery action. Project state is derived
+as `not declared`, `declared / awaiting grant`, `enabled`, `operator vetoed`, or
+`verify failed`; the stored grant itself is never returned to the browser.
 
 ## Enablement validation
 

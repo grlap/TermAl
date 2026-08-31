@@ -2267,4 +2267,151 @@ describe("summary adoption residency", () => {
     expect(merged[0].messageStartIndex).toBe(500);
     expect(merged[0].messagesLoaded).toBe(false);
   });
+
+  it("keeps referential identity when an overlapping summary changes only session metadata", () => {
+    // A stamp-only change (status/preview) re-adopts an overlapping window
+    // whose messages are unchanged: the previous messages array must be
+    // returned as-is so the transcript does not rerender.
+    const previous = [
+      makeSession("session-a", {
+        messages: Array.from({ length: 38 }, (_, i) => textMessage(962 + i)),
+        messagesLoaded: false,
+        messageStartIndex: 962,
+        messageCount: 1000,
+        sessionMutationStamp: 1,
+      }),
+    ];
+    const next = [
+      makeSession("session-a", {
+        messages: Array.from({ length: 19 }, (_, i) => textMessage(981 + i)),
+        messagesLoaded: false,
+        messageStartIndex: 981,
+        messageCount: 1000,
+        sessionMutationStamp: 2,
+        preview: "metadata changed",
+      }),
+    ];
+
+    const merged = reconcileSessions(previous, next);
+
+    expect(merged[0].messages).toBe(previous[0].messages);
+    expect(merged[0].messageStartIndex).toBe(962);
+    expect(merged[0].preview).toBe("metadata changed");
+  });
+
+  it("applies content-only updates for an interior summary window without touching residency or prompts", () => {
+    // A late or raced summary whose window ends before the resident tail
+    // must neither truncate residency nor replace it, and must not consume
+    // a pending prompt for a message it does not adopt.
+    const optimisticPrompt = {
+      id: "optimistic-1",
+      timestamp: "10:02",
+      text: "continue",
+      localOnly: true,
+      transcriptEndIndexAtEnqueue: 1000,
+    };
+    const previous = [
+      makeSession("session-a", {
+        messages: Array.from({ length: 38 }, (_, i) => textMessage(962 + i)),
+        messagesLoaded: false,
+        messageStartIndex: 962,
+        messageCount: 1000,
+        sessionMutationStamp: 1,
+        pendingPrompts: [optimisticPrompt],
+        hasOlderHistory: true,
+      }),
+    ];
+    const next = [
+      makeSession("session-a", {
+        messages: [
+          ...Array.from({ length: 5 }, (_, i) => ({
+            ...textMessage(970 + i),
+            text: `Updated ${970 + i}`,
+          })),
+          { ...textMessage(1000), author: "you" as const, text: "continue" },
+        ],
+        messagesLoaded: false,
+        messageStartIndex: 970,
+        messageCount: 1001,
+        sessionMutationStamp: 2,
+        hasOlderHistory: false,
+      }),
+    ];
+
+    const merged = reconcileSessions(previous, next);
+
+    expect(merged[0].messages).toHaveLength(38);
+    expect(merged[0].messages[0]?.id).toBe("message-962");
+    expect(merged[0].messages[37]?.id).toBe("message-999");
+    expect(merged[0].messages[8]).toMatchObject({
+      id: "message-970",
+      text: "Updated 970",
+    });
+    expect(merged[0].messageStartIndex).toBe(962);
+    expect(merged[0].pendingPrompts).toEqual([optimisticPrompt]);
+    expect(merged[0].hasOlderHistory).toBe(true);
+    expect(merged[0].messagesLoaded).toBe(false);
+  });
+
+  it("applies content-only updates when the declared window start contradicts the id overlap", () => {
+    const previous = [
+      makeSession("session-a", {
+        messages: Array.from({ length: 38 }, (_, i) => textMessage(962 + i)),
+        messagesLoaded: false,
+        messageStartIndex: 962,
+        messageCount: 1000,
+        sessionMutationStamp: 1,
+      }),
+    ];
+    const next = [
+      makeSession("session-a", {
+        messages: Array.from({ length: 20 }, (_, i) => textMessage(981 + i)),
+        messagesLoaded: false,
+        // Declared start disagrees with the id overlap (981 resolves to
+        // resident index 19 => global 981, not 900).
+        messageStartIndex: 900,
+        messageCount: 1001,
+        sessionMutationStamp: 2,
+      }),
+    ];
+
+    const merged = reconcileSessions(previous, next);
+
+    expect(merged[0].messages).toHaveLength(38);
+    expect(merged[0].messages[37]?.id).toBe("message-999");
+    expect(merged[0].messageStartIndex).toBe(962);
+  });
+
+  it("normalizes history flags when a resident prefix and an incoming tail complete the transcript", () => {
+    const previous = [
+      makeSession("session-a", {
+        messages: Array.from({ length: 20 }, (_, i) => textMessage(i)),
+        messagesLoaded: false,
+        messageStartIndex: 0,
+        messageCount: 20,
+        sessionMutationStamp: 1,
+        hasOlderHistory: false,
+        hasNewerHistory: true,
+      }),
+    ];
+    const next = [
+      makeSession("session-a", {
+        messages: Array.from({ length: 10 }, (_, i) => textMessage(15 + i)),
+        messagesLoaded: false,
+        messageStartIndex: 15,
+        messageCount: 25,
+        sessionMutationStamp: 2,
+        hasOlderHistory: true,
+        hasNewerHistory: true,
+      }),
+    ];
+
+    const merged = reconcileSessions(previous, next);
+
+    expect(merged[0].messages).toHaveLength(25);
+    expect(merged[0].messageStartIndex).toBe(0);
+    expect(merged[0].messagesLoaded).toBe(true);
+    expect(merged[0].hasOlderHistory).toBe(false);
+    expect(merged[0].hasNewerHistory).toBe(false);
+  });
 });

@@ -283,8 +283,9 @@ describe("App live state - delta-gap core", () => {
     if (!(sessionList instanceof HTMLDivElement)) {
       throw new Error("Session list not found");
     }
-    const sessionRowButton =
-      within(sessionList).getByText(name).closest("button");
+    const sessionRowButton = within(sessionList)
+      .getByText(name)
+      .closest("button");
     if (!sessionRowButton) {
       throw new Error("Session row button not found");
     }
@@ -387,7 +388,10 @@ describe("App live state - delta-gap core", () => {
           stateFetchCount += 1;
           if (sessionFetchCount > 0) {
             stateFetchCountAfterHydration += 1;
-            return stateResync.promise;
+            // Multiple recovery triggers may legitimately share this pending
+            // state result. A real fetch gives each request its own readable
+            // body, so return a fresh clone instead of reusing one Response.
+            return stateResync.promise.then((response) => response.clone());
           }
           return jsonResponse(
             makeStateResponse({
@@ -401,9 +405,11 @@ describe("App live state - delta-gap core", () => {
         }
         if (requestUrl.pathname === "/api/sessions/session-1") {
           sessionFetchCount += 1;
-          return sessionFetchCount === 1
-            ? firstHydration.promise
-            : secondHydration.promise;
+          const hydration =
+            sessionFetchCount === 1
+              ? firstHydration.promise
+              : secondHydration.promise;
+          return hydration.then((response) => response.clone());
         }
         if (requestUrl.pathname === "/api/git/status") {
           return jsonResponse({
@@ -447,8 +453,9 @@ describe("App live state - delta-gap core", () => {
         if (!(sessionList instanceof HTMLDivElement)) {
           throw new Error("Session list not found");
         }
-        const sessionRowButton =
-          within(sessionList).getByText("Codex Session").closest("button");
+        const sessionRowButton = within(sessionList)
+          .getByText("Codex Session")
+          .closest("button");
         if (!sessionRowButton) {
           throw new Error("Session row button not found");
         }
@@ -624,8 +631,9 @@ describe("App live state - delta-gap core", () => {
         if (!(sessionList instanceof HTMLDivElement)) {
           throw new Error("Session list not found");
         }
-        const sessionRowButton =
-          within(sessionList).getByText("Codex Session").closest("button");
+        const sessionRowButton = within(sessionList)
+          .getByText("Codex Session")
+          .closest("button");
         if (!sessionRowButton) {
           throw new Error("Session row button not found");
         }
@@ -716,30 +724,32 @@ describe("App live state - delta-gap core", () => {
         status: "idle",
         preview: "Unknown old instance preview",
       });
-      const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const requestUrl = new URL(String(input), "http://localhost");
-        if (requestUrl.pathname === "/api/git/status") {
-          return jsonResponse({
-            ahead: 0,
-            behind: 0,
-            branch: "main",
-            files: [],
-            isClean: true,
-            repoRoot: "/tmp",
-            upstream: "origin/main",
-            workdir: "/tmp",
-          });
-        }
-        if (requestUrl.pathname.startsWith("/api/workspaces/")) {
-          if ((init?.method ?? "GET").toUpperCase() === "PUT") {
-            return jsonResponse({ ok: true });
+      const fetchMock = vi.fn(
+        async (input: RequestInfo | URL, init?: RequestInit) => {
+          const requestUrl = new URL(String(input), "http://localhost");
+          if (requestUrl.pathname === "/api/git/status") {
+            return jsonResponse({
+              ahead: 0,
+              behind: 0,
+              branch: "main",
+              files: [],
+              isClean: true,
+              repoRoot: "/tmp",
+              upstream: "origin/main",
+              workdir: "/tmp",
+            });
+          }
+          if (requestUrl.pathname.startsWith("/api/workspaces/")) {
+            if ((init?.method ?? "GET").toUpperCase() === "PUT") {
+              return jsonResponse({ ok: true });
+            }
+
+            return new Response("", { status: 404 });
           }
 
-          return new Response("", { status: 404 });
-        }
-
-        throw new Error(`Unexpected fetch: ${requestUrl.pathname}`);
-      });
+          throw new Error(`Unexpected fetch: ${requestUrl.pathname}`);
+        },
+      );
       vi.stubGlobal("fetch", fetchMock);
       vi.stubGlobal(
         "EventSource",
@@ -976,9 +986,9 @@ describe("App live state - delta-gap core", () => {
         });
         await settleAsyncUi();
         expect(stateFetchCountAfterSessionHydration).toBeGreaterThanOrEqual(1);
-        expect(
-          setTimeoutSpy.mock.calls.some(([, delay]) => delay === 50),
-        ).toBe(false);
+        expect(setTimeoutSpy.mock.calls.some(([, delay]) => delay === 50)).toBe(
+          false,
+        );
         setTimeoutSpy.mockRestore();
         expect(sessionHydrationFetchCount).toBe(1);
 
@@ -998,14 +1008,18 @@ describe("App live state - delta-gap core", () => {
           await flushUiWork();
         });
         await waitFor(() => {
-          expect(stateFetchCountAfterSessionHydration).toBeGreaterThanOrEqual(1);
+          expect(stateFetchCountAfterSessionHydration).toBeGreaterThanOrEqual(
+            1,
+          );
         });
         await waitFor(() => {
           expect(
             screen.getAllByText("Current authoritative transcript").length,
           ).toBeGreaterThan(0);
         });
-        expect(screen.queryByText("Unknown old transcript")).not.toBeInTheDocument();
+        expect(
+          screen.queryByText("Unknown old transcript"),
+        ).not.toBeInTheDocument();
       } finally {
         scrollIntoViewSpy.mockRestore();
         window.history.replaceState(window.history.state, "", originalUrl);
@@ -1202,7 +1216,9 @@ describe("App live state - delta-gap core", () => {
 
         await waitFor(() => {
           expect(sessionHydrationFetchSeen).toBe(true);
-          expect(stateFetchCountAfterSessionHydration).toBeGreaterThanOrEqual(1);
+          expect(stateFetchCountAfterSessionHydration).toBeGreaterThanOrEqual(
+            1,
+          );
           expect(
             screen.getAllByText("New instance first transcript").length,
           ).toBeGreaterThan(0);
@@ -1436,7 +1452,9 @@ describe("App live state - delta-gap core", () => {
           const fetchedSessionIds = fetchMock.mock.calls
             .map(([input]) => new URL(String(input), "http://localhost"))
             .filter((url) => url.pathname.startsWith("/api/sessions/"))
-            .map((url) => decodeURIComponent(url.pathname.split("/").pop() ?? ""));
+            .map((url) =>
+              decodeURIComponent(url.pathname.split("/").pop() ?? ""),
+            );
           expect(fetchedSessionIds).toEqual(
             expect.arrayContaining(["session-left", "session-right"]),
           );

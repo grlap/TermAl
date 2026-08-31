@@ -569,6 +569,104 @@ fn validate_engram_project_home_for_update(
     Ok(())
 }
 
+fn default_engram_home_path() -> Result<PathBuf, ApiError> {
+    let base = std::env::var_os("USERPROFILE")
+        .filter(|value| !value.is_empty())
+        .or_else(|| std::env::var_os("HOME").filter(|value| !value.is_empty()))
+        .map(PathBuf::from)
+        .ok_or_else(|| {
+            ApiError::bad_request(
+                "cannot resolve the default Engram home because USERPROFILE/HOME is unavailable",
+            )
+        })?;
+    Ok(base.join(".engram"))
+}
+
+fn expand_engram_home_path(raw_home: &str) -> Result<PathBuf, ApiError> {
+    let trimmed = raw_home.trim();
+    let user_profile_prefix = "%USERPROFILE%";
+    if trimmed
+        .get(..user_profile_prefix.len())
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(user_profile_prefix))
+    {
+        let base = std::env::var_os("USERPROFILE")
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+            .ok_or_else(|| {
+                ApiError::bad_request(
+                    "cannot expand %USERPROFILE% because USERPROFILE is unavailable",
+                )
+            })?;
+        let suffix = trimmed[user_profile_prefix.len()..]
+            .trim_start_matches(['/', '\\']);
+        return Ok(if suffix.is_empty() {
+            base
+        } else {
+            base.join(suffix)
+        });
+    }
+    if trimmed == "~" || trimmed.starts_with("~/") || trimmed.starts_with("~\\") {
+        let base = std::env::var_os("HOME")
+            .filter(|value| !value.is_empty())
+            .or_else(|| std::env::var_os("USERPROFILE").filter(|value| !value.is_empty()))
+            .map(PathBuf::from)
+            .ok_or_else(|| {
+                ApiError::bad_request("cannot expand ~ because HOME/USERPROFILE is unavailable")
+            })?;
+        let suffix = trimmed[1..].trim_start_matches(['/', '\\']);
+        return Ok(if suffix.is_empty() {
+            base
+        } else {
+            base.join(suffix)
+        });
+    }
+    Ok(PathBuf::from(trimmed))
+}
+
+fn normalize_engram_project_paths(settings: &mut EngramProjectSettings) -> Result<(), ApiError> {
+    let requires_runtime_paths = settings.enabled || settings.work_authority_grant.is_some();
+    if requires_runtime_paths && settings.binary_path.is_none() {
+        settings.binary_path = Some("engram".to_owned());
+    }
+    if requires_runtime_paths && settings.home.is_none() {
+        settings.home = Some(default_engram_home_path()?.to_string_lossy().into_owned());
+    }
+    if let Some(home) = settings.home.as_deref() {
+        settings.home = Some(expand_engram_home_path(home)?.to_string_lossy().into_owned());
+    }
+    Ok(())
+}
+
+fn normalize_engram_host_settings(
+    settings: EngramHostSettings,
+) -> Result<EngramHostSettings, ApiError> {
+    let binary_path = settings.binary_path.trim();
+    let binary_path = if binary_path.is_empty() {
+        default_engram_binary_path()
+    } else {
+        binary_path.to_owned()
+    };
+    let raw_home = settings.home.trim();
+    let home = if raw_home.is_empty() {
+        default_engram_home_path()?
+    } else {
+        expand_engram_home_path(raw_home)?
+    };
+    let project_settings = EngramProjectSettings {
+        enabled: true,
+        binary_path: Some(binary_path.clone()),
+        home: Some(home.to_string_lossy().into_owned()),
+        work_authority_grant: None,
+        authority_store_key: None,
+        deadline_ms: None,
+    };
+    let (binary_path, home) = validate_engram_host_connection_paths(&project_settings)?;
+    Ok(EngramHostSettings {
+        binary_path: binary_path.to_string_lossy().into_owned(),
+        home: home.to_string_lossy().into_owned(),
+    })
+}
+
 fn normalize_engram_work_authority_grant_update(
     update: Option<Option<String>>,
 ) -> Result<Option<Option<String>>, ApiError> {
@@ -1600,6 +1698,137 @@ impl AppState {
         self.finish_revoked_engram_mcp_runtime_outcome(outcome)
     }
 
+    /// Verifies a proposed project Engram configuration without mutating
+    /// project state. Save repeats the same checks, so this response is UI
+    /// guidance rather than an authorization token.
+    fn verify_project_engram_settings(
+        &self,
+        project_id: &str,
+        request: UpdateProjectEngramSettingsRequest,
+    ) -> Result<VerifyProjectEngramSettingsResponse, ApiError> {
+        let project_id = normalize_optional_identifier(Some(project_id))
+            .ok_or_else(|| ApiError::bad_request("project id is required"))?
+            .to_owned();
+        let (project, retired_work_authority_grants, host_settings) = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            let project = inner
+                .find_project(&project_id)
+                .cloned()
+                .ok_or_else(|| ApiError::not_found("project not found"))?;
+            (
+                project,
+                inner.engram_retired_work_authority_grants.clone(),
+                inner.preferences.engram.clone(),
+            )
+        };
+        if project.remote_id != LOCAL_REMOTE_ID {
+            return Err(ApiError::bad_request(
+                "Engram host control is available only for local projects",
+            ));
+        }
+
+        let (mut settings, grant_update) = request.into_settings();
+        settings.binary_path = Some(host_settings.binary_path.clone());
+        settings.home = Some(host_settings.home.clone());
+        settings.deadline_ms = None;
+        let grant_update = normalize_engram_work_authority_grant_update(grant_update)?;
+        settings.work_authority_grant = match grant_update {
+            Some(grant) => grant,
+            None => project
+                .engram
+                .as_ref()
+                .and_then(|current| current.work_authority_grant.clone()),
+        };
+        // Verify always probes the proposed runtime, even when the Enabled
+        // toggle is currently off. Disabling remains an unconditional recovery
+        // action on Save, but a successful Verify proves the fields are ready
+        // for a later enable.
+        settings.enabled = true;
+        normalize_engram_project_paths(&mut settings)?;
+        validate_engram_project_home_for_update(&settings)?;
+        let (binary_path, project_file, home) =
+            validate_engram_project_connection_paths(&project, &settings)?;
+        let project_root = PathBuf::from(&project.root_path);
+        let doctor =
+            run_engram_doctor_result(&binary_path, &project_file, &home, &project_root)?;
+        let mut errors = Vec::new();
+        if settings.work_authority_grant.is_none() {
+            errors.push(
+                "a work-authority grant is required before Engram can be enabled".to_owned(),
+            );
+        }
+        let store_key = match validate_engram_doctor_result(&doctor) {
+            Ok(store_key) => Some(store_key),
+            Err(error) => {
+                errors.push(error.message);
+                None
+            }
+        };
+        settings.authority_store_key = store_key;
+        if let Err(error) =
+            reject_retired_engram_work_authority_grant(&settings, &retired_work_authority_grants)
+        {
+            errors.push(error.message);
+        }
+
+        let grant = if let Some(work_authority_grant) = settings.work_authority_grant.as_deref() {
+            let connection = EngramConnectionConfig {
+                binary_path: binary_path.clone(),
+                project_file,
+                home: home.clone(),
+                project_root,
+                actor_id: ENGRAM_PROJECT_ACTOR_ID.to_owned(),
+                session_id: "termal-authority-verification".to_owned(),
+            };
+            let status = run_engram_authority_show(&connection, work_authority_grant)?;
+            let valid = match validate_engram_authority_show_result(&status) {
+                Ok(()) => true,
+                Err(error) => {
+                    errors.push(error.message);
+                    false
+                }
+            };
+            EngramAuthorityVerificationStatus {
+                configured: true,
+                installed: Some(status.installed),
+                subject_actor_id: status.subject_actor_id,
+                valid_from: status.valid_from,
+                valid_until: status.valid_until,
+                revoked_at: status.revoked_at,
+                valid,
+            }
+        } else {
+            EngramAuthorityVerificationStatus {
+                configured: false,
+                installed: None,
+                subject_actor_id: None,
+                valid_from: None,
+                valid_until: None,
+                revoked_at: None,
+                valid: false,
+            }
+        };
+        let required_assurance = doctor
+            .control
+            .as_ref()
+            .map(|control| control.required_assurance.clone())
+            .unwrap_or_default();
+        let verified = errors.is_empty();
+        Ok(VerifyProjectEngramSettingsResponse {
+            verified,
+            binary_path: settings.binary_path.unwrap_or_default(),
+            home: settings.home.unwrap_or_default(),
+            project_id: doctor.project_id,
+            database: normalize_user_facing_path(&doctor.database)
+                .to_string_lossy()
+                .into_owned(),
+            required_assurance,
+            healthy: doctor.healthy,
+            grant,
+            errors,
+        })
+    }
+
     /// Updates the optional Engram adapter for one local project. Filesystem
     /// checks and `engram doctor` run off-lock; the project identity/root are
     /// fenced before the validated settings are committed.
@@ -1614,6 +1843,7 @@ impl AppState {
             project_id,
             settings,
             work_authority_grant_update,
+            None,
         )
     }
 
@@ -1623,6 +1853,16 @@ impl AppState {
         request: UpdateProjectEngramSettingsRequest,
     ) -> Result<StateResponse, ApiError> {
         let (mut settings, work_authority_grant_update) = request.into_settings();
+        let host_settings = self
+            .inner
+            .lock()
+            .expect("state mutex poisoned")
+            .preferences
+            .engram
+            .clone();
+        settings.binary_path = Some(host_settings.binary_path.clone());
+        settings.home = Some(host_settings.home.clone());
+        settings.deadline_ms = None;
         let work_authority_grant_update =
             normalize_engram_work_authority_grant_update(work_authority_grant_update)?;
         settings.work_authority_grant = work_authority_grant_update.clone().flatten();
@@ -1630,6 +1870,7 @@ impl AppState {
             project_id,
             settings,
             work_authority_grant_update,
+            Some(host_settings),
         )
     }
 
@@ -1638,6 +1879,7 @@ impl AppState {
         project_id: &str,
         mut settings: EngramProjectSettings,
         work_authority_grant_update: Option<Option<String>>,
+        expected_host_settings: Option<EngramHostSettings>,
     ) -> Result<StateResponse, ApiError> {
         settings.binary_path = settings.binary_path.and_then(|binary_path| {
             let binary_path = binary_path.trim().to_owned();
@@ -1680,6 +1922,14 @@ impl AppState {
                 .as_ref()
                 .and_then(|current| current.work_authority_grant.clone());
         }
+        if expected_host_settings.is_some()
+            && settings.enabled
+            && settings.work_authority_grant.is_none()
+        {
+            return Err(ApiError::bad_request(
+                "a work-authority grant is required before Engram can be enabled",
+            ));
+        }
         if !settings.enabled
             && let Some(current) = project_snapshot.engram.as_ref()
         {
@@ -1699,6 +1949,7 @@ impl AppState {
             // later re-enable could accidentally reuse it.
             settings.work_authority_grant = None;
         }
+        normalize_engram_project_paths(&mut settings)?;
         let pure_authority_clear = project_snapshot.engram.as_ref().is_some_and(|current| {
             current.work_authority_grant.is_some()
                 && settings.work_authority_grant.is_none()
@@ -1980,6 +2231,9 @@ impl AppState {
                 || project.root_path != project_snapshot.root_path
                 || project.remote_id != project_snapshot.remote_id
                 || project.engram != project_snapshot.engram
+                || expected_host_settings
+                    .as_ref()
+                    .is_some_and(|expected| inner.preferences.engram != *expected)
             {
                 if let Some(generation) = project_reset_generation {
                     inner.engram_project_resets.release(&project_id, generation);
@@ -2567,6 +2821,9 @@ impl AppState {
                 || project.remote_id != project_snapshot.remote_id
                 || project.engram != project_snapshot.engram
                 || !reset_still_in_progress
+                || expected_host_settings
+                    .as_ref()
+                    .is_some_and(|expected| inner.preferences.engram != *expected)
             {
                 drop(inner);
                 self.abort_engram_project_reset(
@@ -3822,6 +4079,38 @@ impl AppState {
         }
         commit_result?;
         Ok(snapshot)
+    }
+
+    /// Updates machine-scoped Engram process settings. Enabled projects must
+    /// be vetoed first so a host-path rotation cannot silently strand or reuse
+    /// project authority against a different store.
+    fn update_engram_host_settings(
+        &self,
+        request: UpdateEngramHostSettingsRequest,
+    ) -> Result<StateResponse, ApiError> {
+        let normalized = normalize_engram_host_settings(EngramHostSettings {
+            binary_path: request.binary_path,
+            home: request.home,
+        })?;
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        if inner.preferences.engram == normalized {
+            return Ok(self.snapshot_from_inner(&inner));
+        }
+        if inner.projects.iter().any(|project| {
+            project
+                .engram
+                .as_ref()
+                .is_some_and(EngramProjectSettings::is_runtime_enabled)
+        }) {
+            return Err(ApiError::bad_request(
+                "disable every enabled Engram project before changing the host binary path or home",
+            ));
+        }
+        inner.preferences.engram = normalized;
+        self.commit_locked(&mut inner).map_err(|err| {
+            ApiError::internal(format!("failed to persist Engram host settings: {err:#}"))
+        })?;
+        Ok(self.snapshot_from_inner(&inner))
     }
 
     /// Creates a new Project entry (a named bundle of workdir + remote

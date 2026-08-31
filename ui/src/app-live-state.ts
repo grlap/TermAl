@@ -282,6 +282,7 @@ export function useAppLiveState(
     setDefaultClaudeEffort,
     setRemoteConfigs,
     setTelegramConfig,
+    setEngramHostSettings,
   } = preferenceSetters;
 
   const hydratingSessionIdsRef = useRef<Set<string>>(new Set());
@@ -1398,6 +1399,7 @@ export function useAppLiveState(
         ? current
         : preferences.telegram,
     );
+    setEngramHostSettings(preferences.engram);
   }
 
   function adoptState(nextState: StateResponse, options?: AdoptStateOptions) {

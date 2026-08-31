@@ -142,6 +142,10 @@ function createBaseProps(
     remoteConfigs: [],
     onSaveRemotes: vi.fn(),
     telegramConfig: undefined,
+    engramHostSettings: {
+      binaryPath: "engram",
+      home: "C:\\Users\\greg\\.engram",
+    },
     projects: [],
     sessions: [],
     handleOrchestratorStateUpdated: vi.fn(),
@@ -388,6 +392,42 @@ describe("AppDialogs create-dialog backdrop dismissal", () => {
 });
 
 describe("AppDialogs settings agent defaults", () => {
+  it("renders Engram as a visible settings tab with a project selector", () => {
+    renderSettingsDialog("engram", {
+      projects: [
+        {
+          id: "project-1",
+          name: "TermAl",
+          rootPath: "C:\\github\\Personal\\TermAl",
+          remoteId: "local",
+          engramDeclared: true,
+          engramGrantConfigured: true,
+          engram: {
+            enabled: true,
+            binaryPath: "engram",
+            home: "C:\\Users\\greg\\.engram",
+            deadlineMs: 2000,
+          },
+        },
+      ],
+    });
+
+    expect(
+      screen.getByRole("tab", { name: "Engram", selected: true }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Engram project")).toHaveValue("project-1");
+    expect(screen.getByLabelText("Engram host binary path")).toHaveValue(
+      "engram",
+    );
+    expect(screen.getByLabelText("Engram host home")).toHaveValue(
+      "C:\\Users\\greg\\.engram",
+    );
+    expect(screen.getByLabelText("Work authority grant")).toHaveAttribute(
+      "type",
+      "password",
+    );
+  });
+
   it("closes a settings combobox before the settings dialog", async () => {
     const onClose = renderSettingsDialog("cursor");
     fireEvent.click(

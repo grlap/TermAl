@@ -218,6 +218,12 @@ export type AppPreferences = {
   defaultClaudeEffort: ClaudeEffortLevel;
   remotes?: RemoteConfig[] | null;
   telegram?: TelegramUiConfig | null;
+  engram?: EngramHostSettings | null;
+};
+
+export type EngramHostSettings = {
+  binaryPath: string;
+  home: string;
 };
 
 export type TelegramUiConfig = {
@@ -234,6 +240,10 @@ export type Project = {
   rootPath: string;
   remoteId?: string | null;
   engram?: EngramProjectStateSettings | null;
+  engramDeclared?: boolean;
+  engramGrantConfigured?: boolean;
+  engramOperatorDisabled?: boolean;
+  engramCleanupWarning?: string | null;
 };
 
 export type EngramProjectSettings = {
@@ -251,6 +261,28 @@ export type EngramProjectStateSettings = Omit<
   EngramProjectSettings,
   "workAuthorityGrant"
 >;
+
+export type EngramAuthorityVerificationStatus = {
+  configured: boolean;
+  installed?: boolean | null;
+  subjectActorId?: string | null;
+  validFrom?: string | null;
+  validUntil?: string | null;
+  revokedAt?: string | null;
+  valid: boolean;
+};
+
+export type EngramProjectVerification = {
+  verified: boolean;
+  binaryPath: string;
+  home: string;
+  projectId: string;
+  database: string;
+  requiredAssurance: string;
+  healthy: boolean;
+  grant: EngramAuthorityVerificationStatus;
+  errors?: string[];
+};
 
 export type OrchestratorNodePosition = {
   x: number;

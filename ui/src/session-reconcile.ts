@@ -378,16 +378,22 @@ function reconcileSummarySession(
   // and must adopt or clear it together with transcript residency. A summary
   // that does adopt newly appended messages must consume their matching local
   // optimistic entries in the same commit so the prompt never renders twice.
+  // A content-only adoption deliberately adopts no message, so it must not
+  // consume any pending prompt either: consuming a prompt for a message that
+  // never entered the resident list would hide the prompt until a later
+  // hydration.
   const pendingPrompts =
-    options?.adoptPartialMessages === true
-      ? reconcilePendingPrompts(previous.pendingPrompts, next.pendingPrompts)
-      : shouldAdoptPartialMessages
-        ? reconcilePendingPromptsForAdoptedSummaryMessages(
-            previous,
-            next,
-            adoptedMessageStartIndex,
-          )
-        : previous.pendingPrompts;
+    shouldAdoptPartialMessages && summaryAdoptionMode === "content-only"
+      ? previous.pendingPrompts
+      : options?.adoptPartialMessages === true
+        ? reconcilePendingPrompts(previous.pendingPrompts, next.pendingPrompts)
+        : shouldAdoptPartialMessages
+          ? reconcilePendingPromptsForAdoptedSummaryMessages(
+              previous,
+              next,
+              adoptedMessageStartIndex,
+            )
+          : previous.pendingPrompts;
   const hasCompleteMessages =
     nextMessageCount === null || messages.length >= nextMessageCount;
   // After a backend restart the server's persisted `sessionMutationStamp`
@@ -395,11 +401,31 @@ function reconcileSummarySession(
   // the new server may have advanced the transcript. The caller signals
   // restart adoption via `forceMessagesUnloaded`; in that case we cannot
   // trust the local transcript and must re-hydrate.
-  const messagesLoaded =
+  const mergedMessageStartIndex = shouldAdoptPartialMessages
+    ? summaryAdoptionMode === "preserve-head" ||
+      summaryAdoptionMode === "content-only"
+      ? previousResidentMessageStartIndex
+      : (adoptedMessageStartIndex ?? next.messageStartIndex)
+    : previous.messages.length > 0
+      ? previousResidentMessageStartIndex
+      : previous.messageStartIndex;
+  // An overlap merge can complete the transcript: a resident prefix that
+  // starts at 0 joined with an incoming tail that reaches messageCount. A
+  // complete adopted window is authoritative on both sides, so it must not
+  // keep a partial response's history flags alive and trigger redundant
+  // history demands.
+  const mergedWindowIsComplete =
+    shouldAdoptPartialMessages &&
     options?.forceMessagesUnloaded !== true &&
-    !hasDifferentKnownSummaryMutation &&
-    hasCompleteMessages &&
-    (previous.messagesLoaded === true || previous.messages.length > 0);
+    nextMessageCount !== null &&
+    (mergedMessageStartIndex ?? 0) === 0 &&
+    messages.length >= nextMessageCount;
+  const messagesLoaded =
+    mergedWindowIsComplete ||
+    (options?.forceMessagesUnloaded !== true &&
+      !hasDifferentKnownSummaryMutation &&
+      hasCompleteMessages &&
+      (previous.messagesLoaded === true || previous.messages.length > 0));
   if (
     sameSessionSummary(previous, next) &&
     pendingPrompts === previous.pendingPrompts &&
@@ -413,23 +439,23 @@ function reconcileSummarySession(
     ...next,
     messages,
     messagesLoaded,
-    messageStartIndex: shouldAdoptPartialMessages
-      ? summaryAdoptionMode === "preserve-head" ||
-        summaryAdoptionMode === "content-only"
-        ? previousResidentMessageStartIndex
-        : (adoptedMessageStartIndex ?? next.messageStartIndex)
-      : previous.messages.length > 0
-        ? previousResidentMessageStartIndex
-        : previous.messageStartIndex,
+    messageStartIndex: mergedMessageStartIndex,
     // Targeted bounded-tail hydration owns the resident window, including
     // which transcript sides remain unloaded. Metadata-only summaries do not:
     // they must preserve the reader's current attachment state.
-    hasOlderHistory:
-      options?.adoptPartialMessages === true
+    // A content-only adoption rejected the incoming window shape, so its
+    // side flags are rejected with it; a complete merged window has no
+    // unloaded side on either end.
+    hasOlderHistory: mergedWindowIsComplete
+      ? false
+      : options?.adoptPartialMessages === true &&
+          summaryAdoptionMode !== "content-only"
         ? next.hasOlderHistory
         : previous.hasOlderHistory,
-    hasNewerHistory:
-      options?.adoptPartialMessages === true
+    hasNewerHistory: mergedWindowIsComplete
+      ? false
+      : options?.adoptPartialMessages === true &&
+          summaryAdoptionMode !== "content-only"
         ? next.hasNewerHistory
         : previous.hasNewerHistory,
   };

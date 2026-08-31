@@ -5,6 +5,7 @@ import {
   FALLBACK_CLAUDE_EFFORTS,
   areTelegramUiConfigsEqual,
   isDefaultModelPreference,
+  normalizeEngramHostSettings,
   normalizeTelegramUiConfig,
   resolveAppPreferences,
   supportedClaudeEffortLevelsForModelOption,
@@ -50,6 +51,20 @@ describe("resolveAppPreferences", () => {
       );
     },
   );
+});
+
+describe("normalizeEngramHostSettings", () => {
+  it("normalizes the machine-scoped binary and home values", () => {
+    expect(
+      normalizeEngramHostSettings({
+        binaryPath: "  C:\\tools\\engram.exe  ",
+        home: "  C:\\EngramHome  ",
+      }),
+    ).toEqual({
+      binaryPath: "C:\\tools\\engram.exe",
+      home: "C:\\EngramHome",
+    });
+  });
 });
 
 describe("isDefaultModelPreference", () => {
