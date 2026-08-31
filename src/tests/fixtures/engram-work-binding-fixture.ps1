@@ -31,7 +31,7 @@ for ($index = 0; $index -lt $args.Count; $index += 1) {
 if (-not $projectFile -or -not $engramHome -or -not $actorId -or -not $sessionId) {
     exit 2
 }
-if ($actorId -ne "termal:codex" -or $sessionId -ne "fixture-session") {
+if ($actorId -ne "termal" -or $sessionId -ne "fixture-session") {
     exit 3
 }
 $mode = (Get-Content -LiteralPath $projectFile -Raw).Trim()

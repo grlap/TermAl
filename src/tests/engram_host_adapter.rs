@@ -1,4 +1,4 @@
-//! Phase 0 Engram host-adapter conformance at the real TermAl choke points.
+//! Turn-gated Engram host-adapter conformance at the real TermAl choke points.
 
 use super::delegation_support::test_app_state_with_delegation_codex_runtime;
 use super::*;
@@ -482,7 +482,7 @@ fn stateful_bind(
             &EngramControlRequest::SessionBind {
                 external_ref: format!("termal:{}", connection.session_id),
                 title: "Stateful Engram test".to_owned(),
-                assurance: "advisory".to_owned(),
+                assurance: ENGRAM_CONTROL_ASSURANCE.to_owned(),
                 mediated_effects: vec![EngramEffect::Observe],
                 capability_map_revision: ENGRAM_CAPABILITY_MAP_REVISION,
                 work_binding: None,
@@ -694,7 +694,7 @@ fn stateful_transport_refuses_rebind_until_a_begun_grant_is_checkpointed() {
             &EngramControlRequest::SessionBind {
                 external_ref: "termal:stateful-begun-rebind".to_owned(),
                 title: "Stateful begun rebind".to_owned(),
-                assurance: "advisory".to_owned(),
+                assurance: ENGRAM_CONTROL_ASSURANCE.to_owned(),
                 mediated_effects: vec![EngramEffect::Observe],
                 capability_map_revision: ENGRAM_CAPABILITY_MAP_REVISION,
                 work_binding: None,
@@ -806,7 +806,7 @@ fn stateful_transport_replays_bind_and_checkpoint_receipts_and_scopes_begin_toke
             &EngramControlRequest::SessionBind {
                 external_ref: format!("termal:{}", connection.session_id),
                 title: "Changed bind intent".to_owned(),
-                assurance: "advisory".to_owned(),
+                assurance: ENGRAM_CONTROL_ASSURANCE.to_owned(),
                 mediated_effects: vec![EngramEffect::Observe],
                 capability_map_revision: ENGRAM_CAPABILITY_MAP_REVISION,
                 work_binding: None,
@@ -1183,6 +1183,7 @@ fn enable_test_project_engram(state: &AppState, project_id: &str, root: &FsPath)
         binary_path: Some(root.join("engram-fixture").to_string_lossy().into_owned()),
         home: Some(root.to_string_lossy().into_owned()),
         work_authority_grant: None,
+        authority_store_key: None,
         deadline_ms: Some(250),
     });
     state
@@ -1672,8 +1673,38 @@ fn work_claim_mismatch_is_a_nonretrying_session_configuration_fault() {
         ],
         [Ok(None), Ok(Some(test_control_work_binding("mismatch", 7)))],
     );
-    let (state, child_id, _runtime_token) =
-        start_scripted_engram_delegation("engram-a0-work-mismatch", transport.clone());
+    let (state, runtime_rx) =
+        test_app_state_with_delegation_codex_runtime("engram-a0-work-mismatch");
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("engram-a0-work-mismatch-project");
+    fs::create_dir_all(&root).expect("project root should exist");
+    let project_id = create_test_project(&state, &root, "Engram work mismatch");
+    let parent_session_id = create_test_project_session(&state, Agent::Codex, &project_id, &root);
+    enable_test_project_engram(&state, &project_id, &root);
+    state.install_test_engram_transport(transport.clone());
+    let created = state
+        .create_read_only_delegation(
+            &parent_session_id,
+            CreateDelegationRequest {
+                prompt: "Exercise a mismatched Engram work claim.".to_owned(),
+                title: Some("Engram work mismatch".to_owned()),
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(DelegationMode::Reviewer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .expect("delegation record should still be created");
+    assert!(
+        runtime_rx.try_recv().is_err(),
+        "invalid work must be withheld"
+    );
+    let child_id = created.delegation.child_session_id;
     let inner = state.inner.lock().expect("state mutex poisoned");
     let child = inner
         .sessions
@@ -1775,7 +1806,7 @@ fn real_process_work_binding_reader_uses_next_then_exact_focus() {
         project_file: project_file.clone(),
         home: temp.path().to_path_buf(),
         project_root: temp.path().to_path_buf(),
-        actor_id: "termal:codex".to_owned(),
+        actor_id: "termal".to_owned(),
         session_id: "fixture-session".to_owned(),
     };
     let binding = read_engram_work_binding_from_cli(&connection, Duration::from_secs(2))
@@ -1966,8 +1997,168 @@ fn mailbox_and_orchestrator_sources_each_evaluate_and_begin_once() {
     );
 }
 
+/// Operator-run acceptance test against the real Engram binary and a fresh
+/// temporary SQLite store. The grant is captured in memory and never printed.
 #[test]
-fn routing_token_replay_from_another_session_is_refused_without_begin() {
+#[ignore = "requires TERMAL_TEST_LIVE_ENGRAM_BINARY pointing at a real Engram build"]
+fn live_engram_store_turn_gated_bind_evaluate_begin_checkpoint_e2e() {
+    let binary_path = std::env::var_os("TERMAL_TEST_LIVE_ENGRAM_BINARY")
+        .map(PathBuf::from)
+        .expect("TERMAL_TEST_LIVE_ENGRAM_BINARY must be set for the live Engram E2E");
+    assert!(binary_path.is_absolute() && binary_path.is_file());
+
+    let (state, runtime_rx) =
+        test_app_state_with_delegation_codex_runtime("engram-live-turn-gated-e2e");
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("live-engram-project");
+    let home = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("live-engram-home");
+    fs::create_dir_all(&root).expect("live project root should exist");
+    fs::create_dir_all(&home).expect("live Engram home should exist");
+    let project_file = root.join(".engram-project");
+    fs::write(&project_file, "termal-live-turn-gated-e2e\n")
+        .expect("live Engram project identity should write");
+
+    let init = Command::new(&binary_path)
+        .args([
+            "--project-file",
+            project_file
+                .to_str()
+                .expect("temporary project path should be Unicode"),
+            "--home",
+            home.to_str()
+                .expect("temporary home path should be Unicode"),
+            "init",
+            "--required-assurance",
+            ENGRAM_CONTROL_ASSURANCE,
+            "--authorized-by",
+            "termal-e2e",
+            "--reason",
+            "TermAl live turn-gated acceptance test",
+        ])
+        .output()
+        .expect("real Engram init should launch");
+    assert!(init.status.success(), "real Engram init should succeed");
+
+    let grant_output = Command::new(&binary_path)
+        .args([
+            "--project-file",
+            project_file
+                .to_str()
+                .expect("temporary project path should be Unicode"),
+            "--home",
+            home.to_str()
+                .expect("temporary home path should be Unicode"),
+            "authority",
+            "grant",
+            "--subject-actor-id",
+            ENGRAM_PROJECT_ACTOR_ID,
+            "--issued-by",
+            "termal-e2e",
+            "--valid-seconds",
+            "600",
+            "--reason",
+            "TermAl live turn-gated acceptance test",
+        ])
+        .output()
+        .expect("real Engram authority grant should launch");
+    assert!(
+        grant_output.status.success(),
+        "real Engram authority grant should succeed"
+    );
+    let grant_json: serde_json::Value = serde_json::from_slice(&grant_output.stdout)
+        .expect("real Engram authority grant should return JSON");
+    let grant = grant_json["grant"]
+        .as_str()
+        .filter(|grant| !grant.trim().is_empty())
+        .expect("real Engram authority grant should return a hash")
+        .to_owned();
+
+    let project_id = create_test_project(&state, &root, "Live Engram E2E");
+    let parent_session_id = create_test_project_session(&state, Agent::Codex, &project_id, &root);
+    state
+        .update_project_engram_settings(
+            &project_id,
+            EngramProjectSettings {
+                enabled: true,
+                binary_path: Some(binary_path.to_string_lossy().into_owned()),
+                home: Some(home.to_string_lossy().into_owned()),
+                work_authority_grant: Some(grant),
+                authority_store_key: None,
+                deadline_ms: Some(2_000),
+            },
+        )
+        .expect("TermAl should accept the real doctor and active termal grant");
+
+    let created = state
+        .create_read_only_delegation(
+            &parent_session_id,
+            CreateDelegationRequest {
+                prompt: "Prove one real turn-gated Engram lifecycle.".to_owned(),
+                title: Some("Live Engram turn gate".to_owned()),
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(DelegationMode::Reviewer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .expect("real Engram should admit the delegation turn");
+    assert!(matches!(
+        runtime_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("a begun real Engram grant should release the runtime prompt"),
+        CodexRuntimeCommand::Prompt { .. }
+    ));
+    let child_id = created.delegation.child_session_id;
+    let runtime_token = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == child_id)
+            .and_then(|record| record.runtime.runtime_token())
+            .expect("the admitted turn should own a runtime token")
+    };
+    state
+        .finish_turn_ok_if_runtime_matches(&child_id, &runtime_token)
+        .expect("the admitted live turn should checkpoint");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let child = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == child_id)
+        .expect("live Engram child should remain");
+    assert!(child.engram.active_grant_id.is_none());
+    assert!(child.session.messages.iter().any(|message| matches!(
+        message,
+        Message::EngramControl { card, .. }
+            if card.stage == EngramControlStage::Dispatch
+                && card.assurance == ENGRAM_CONTROL_ASSURANCE
+                && card.decision == EngramControlCardDecision::Grant
+                && card.dispatch == EngramControlCardDispatch::SentOnGrant
+                && card.fail_mode == EngramControlFailMode::Enforced
+    )));
+    assert!(child.session.messages.iter().any(|message| matches!(
+        message,
+        Message::EngramControl { card, .. }
+            if card.stage == EngramControlStage::Checkpoint
+                && card.decision == EngramControlCardDecision::Grant
+                && card.fail_mode == EngramControlFailMode::Enforced
+    )));
+}
+
+#[test]
+fn routing_token_replay_from_another_session_is_withheld_without_begin() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-routing-token-replay");
     let root = state
@@ -2056,16 +2247,15 @@ fn routing_token_replay_from_another_session_is_refused_without_begin() {
     let replay_dispatch = state
         .start_next_queued_turn_off_lock(&child_id, false, false)
         .expect("replay turn promotion should complete")
-        .expect("shadow mode should still produce a runtime dispatch")
+        .expect("refused work should still produce a gated dispatch record")
         .dispatch;
-    deliver_turn_dispatch(&state, replay_dispatch)
-        .expect("shadow refusal should still deliver the user prompt");
-    assert!(matches!(
-        runtime_rx
-            .recv_timeout(Duration::from_secs(1))
-            .expect("shadow refusal should not withhold the runtime prompt"),
-        CodexRuntimeCommand::Prompt { .. }
-    ));
+    assert_eq!(
+        deliver_turn_dispatch(&state, replay_dispatch)
+            .expect_err("routing-token refusal must withhold the runtime prompt")
+            .status,
+        StatusCode::CONFLICT
+    );
+    assert!(runtime_rx.try_recv().is_err());
 
     let requests = transport.requests();
     let replay_evaluation = requests
@@ -2250,7 +2440,7 @@ fn checkpoint_refusal_is_repaired_by_the_next_mailbox_wake_without_user_input() 
 }
 
 #[test]
-fn checkpoint_required_evaluation_dispatches_automatic_mailbox_work_fail_open() {
+fn checkpoint_required_evaluation_withholds_automatic_mailbox_work() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-mailbox-evaluate-block");
     let root = state
@@ -2326,16 +2516,15 @@ fn checkpoint_required_evaluation_dispatches_automatic_mailbox_work_fail_open() 
     let dispatch = state
         .start_next_queued_turn_off_lock(&child_id, false, false)
         .expect("mailbox evaluation should complete")
-        .expect("Phase 0 should promote refused mailbox work")
+        .expect("refused mailbox work should retain a gated dispatch record")
         .dispatch;
-    deliver_turn_dispatch(&state, dispatch)
-        .expect("refused mailbox work should still reach the runtime");
-    assert!(matches!(
-        runtime_rx
-            .recv_timeout(Duration::from_secs(1))
-            .expect("mailbox prompt should reach runtime"),
-        CodexRuntimeCommand::Prompt { .. }
-    ));
+    assert_eq!(
+        deliver_turn_dispatch(&state, dispatch)
+            .expect_err("refused mailbox work must not reach the runtime")
+            .status,
+        StatusCode::CONFLICT
+    );
+    assert!(runtime_rx.try_recv().is_err());
     let requests = transport.requests();
     assert_eq!(
         requests
@@ -2364,13 +2553,13 @@ fn checkpoint_required_evaluation_dispatches_automatic_mailbox_work_fail_open() 
             Message::EngramControl { card, .. }
                 if card.decision == EngramControlCardDecision::Refuse
                     && card.refusal_code.as_deref() == Some("checkpoint_required")
-                    && card.dispatch == EngramControlCardDispatch::SentWithoutGrant
+                    && card.dispatch == EngramControlCardDispatch::Withheld
         )
     }));
 }
 
 #[test]
-fn unreachable_engram_degrades_within_deadline_and_still_delivers_prompt() {
+fn unreachable_engram_degrades_within_deadline_and_withholds_prompt() {
     let (state, runtime_rx) = test_app_state_with_delegation_codex_runtime("engram-s6");
     let root = state
         .test_temp_root
@@ -2404,13 +2593,11 @@ fn unreachable_engram_degrades_within_deadline_and_still_delivers_prompt() {
                 write_policy: Some(DelegationWritePolicy::ReadOnly),
             },
         )
-        .expect("shadow mode must dispatch despite a deadline");
-    assert!(matches!(
-        runtime_rx
-            .recv_timeout(Duration::from_secs(1))
-            .expect("runtime should still receive the prompt"),
-        CodexRuntimeCommand::Prompt { .. }
-    ));
+        .expect("delegation record should survive a control-plane deadline");
+    assert!(
+        runtime_rx.try_recv().is_err(),
+        "degraded work must be withheld"
+    );
     let child_id = created.delegation.child_session_id;
     let inner = state.inner.lock().expect("state mutex poisoned");
     let child = inner
@@ -2576,7 +2763,7 @@ fn issued_but_unbegun_checkpoint_matches_only_grant_not_begun() {
 }
 
 #[test]
-fn non_expiring_begin_refusal_rebinds_before_the_next_dispatch() {
+fn non_expiring_begin_refusal_is_withheld_and_arms_rebind() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-non-expiring-begin-refusal");
     let root = state
@@ -2606,13 +2793,11 @@ fn non_expiring_begin_refusal_rebinds_before_the_next_dispatch() {
                 write_policy: Some(DelegationWritePolicy::ReadOnly),
             },
         )
-        .expect("Phase 0 should dispatch after the begin refusal");
-    assert!(matches!(
-        runtime_rx
-            .recv_timeout(Duration::from_secs(1))
-            .expect("the first prompt should fail open to the runtime"),
-        CodexRuntimeCommand::Prompt { .. }
-    ));
+        .expect("delegation record should survive the begin refusal");
+    assert!(
+        runtime_rx.try_recv().is_err(),
+        "refused begin must be withheld"
+    );
     let child_id = created.delegation.child_session_id;
     let orphaned_grant_id = transport
         .grant_state(&child_id)
@@ -2632,38 +2817,12 @@ fn non_expiring_begin_refusal_rebinds_before_the_next_dispatch() {
             Message::EngramControl { card, .. }
                 if card.decision == EngramControlCardDecision::Refuse
                     && card.refusal_code.as_deref() == Some("delivery_invalid")
-                    && card.dispatch == EngramControlCardDispatch::SentWithoutGrant
+                    && card.dispatch == EngramControlCardDispatch::Withheld
                     && card.repair_armed
         )));
+        assert_eq!(child.session.status, SessionStatus::Error);
+        assert!(child.runtime.runtime_token().is_none());
     }
-
-    state
-        .stop_session(&child_id)
-        .expect("the fail-open runtime should stop without checkpointing an issued grant");
-    super::delegation_support::install_delegation_codex_runtime(
-        &state,
-        "engram-non-expiring-recovery-runtime",
-    );
-
-    let second_dispatch = match state
-        .dispatch_turn(
-            &child_id,
-            SendMessageRequest {
-                text: "Recover through status, refused checkpoint, and fresh bind.".to_owned(),
-                expanded_text: None,
-                attachments: Vec::new(),
-                source_session_id: None,
-                source_mailbox: None,
-            },
-        )
-        .expect("the next dispatch should repair the issued grant")
-    {
-        DispatchTurnResult::Dispatched(dispatch)
-        | DispatchTurnResult::DispatchedAfterQueue(dispatch) => dispatch,
-        DispatchTurnResult::Queued => panic!("idle child should stage the recovery dispatch"),
-    };
-    deliver_turn_dispatch(&state, second_dispatch)
-        .expect("the replacement grant should begin and reach the runtime");
 
     let child_operations = transport
         .requests()
@@ -2678,32 +2837,15 @@ fn non_expiring_begin_refusal_rebinds_before_the_next_dispatch() {
         .collect::<Vec<_>>();
     assert_eq!(
         child_operations,
-        [
-            "session_bind",
-            "turn_evaluate",
-            "turn_begin",
-            "session_status",
-            "turn_checkpoint",
-            "session_bind",
-            "turn_evaluate",
-            "turn_begin",
-        ]
+        ["session_bind", "turn_evaluate", "turn_begin"]
     );
     let (issued, begun) = transport.grant_state(&child_id);
-    assert!(issued.is_none());
-    assert_ne!(begun.as_deref(), Some(orphaned_grant_id.as_str()));
-    assert!(begun.is_some(), "the replacement grant should be begun");
-    let inner = state.inner.lock().expect("state mutex poisoned");
-    let child = inner
-        .sessions
-        .iter()
-        .find(|record| record.session.id == child_id)
-        .expect("child should exist");
-    assert!(!child.engram.rebind_required);
+    assert_eq!(issued.as_deref(), Some(orphaned_grant_id.as_str()));
+    assert!(begun.is_none());
 }
 
 #[test]
-fn turn_already_open_evaluation_decision_arms_fresh_bind_repair() {
+fn turn_already_open_evaluation_decision_is_withheld_and_arms_fresh_bind_repair() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-open-turn-decision");
     let root = state
@@ -2780,14 +2922,18 @@ fn turn_already_open_evaluation_decision_arms_fresh_bind_repair() {
                 source_mailbox: None,
             },
         )
-        .expect("the open-turn evaluation refusal should fail open")
+        .expect("the open-turn evaluation refusal should produce a gated dispatch")
     {
         DispatchTurnResult::Dispatched(dispatch)
         | DispatchTurnResult::DispatchedAfterQueue(dispatch) => dispatch,
         DispatchTurnResult::Queued => panic!("idle child should stage the refused dispatch"),
     };
-    deliver_turn_dispatch(&state, refused_dispatch)
-        .expect("Phase 0 should dispatch after an evaluation refusal");
+    assert_eq!(
+        deliver_turn_dispatch(&state, refused_dispatch)
+            .expect_err("an open-turn refusal must be withheld")
+            .status,
+        StatusCode::CONFLICT
+    );
 
     {
         let inner = state.inner.lock().expect("state mutex poisoned");
@@ -2804,38 +2950,13 @@ fn turn_already_open_evaluation_decision_arms_fresh_bind_repair() {
                     && card.refusal_code.as_deref() == Some("turn_already_open")
                     && card.repair_armed
         )));
+        assert_eq!(child.session.status, SessionStatus::Error);
+        assert!(child.runtime.runtime_token().is_none());
     }
     assert_eq!(
         transport.grant_state(&child_id),
         (Some(orphaned_grant_id.clone()), None)
     );
-
-    state
-        .stop_session(&child_id)
-        .expect("the fail-open runtime should stop without checkpointing the issued grant");
-    super::delegation_support::install_delegation_codex_runtime(
-        &state,
-        "engram-open-turn-repair-runtime",
-    );
-    let recovery_dispatch = match state
-        .dispatch_turn(
-            &child_id,
-            SendMessageRequest {
-                text: "Repair the out-of-band issued grant.".to_owned(),
-                expanded_text: None,
-                attachments: Vec::new(),
-                source_session_id: None,
-                source_mailbox: None,
-            },
-        )
-        .expect("the next dispatch should repair the open turn")
-    {
-        DispatchTurnResult::Dispatched(dispatch)
-        | DispatchTurnResult::DispatchedAfterQueue(dispatch) => dispatch,
-        DispatchTurnResult::Queued => panic!("idle child should stage the recovery dispatch"),
-    };
-    deliver_turn_dispatch(&state, recovery_dispatch)
-        .expect("the repaired dispatch should begin on a replacement grant");
 
     let child_operations = transport
         .requests()
@@ -2850,25 +2971,15 @@ fn turn_already_open_evaluation_decision_arms_fresh_bind_repair() {
         .collect::<Vec<_>>();
     assert_eq!(
         child_operations,
-        [
-            "session_bind",
-            "turn_evaluate",
-            "turn_evaluate",
-            "session_status",
-            "turn_checkpoint",
-            "session_bind",
-            "turn_evaluate",
-            "turn_begin",
-        ]
+        ["session_bind", "turn_evaluate", "turn_evaluate"]
     );
     let (issued, begun) = transport.grant_state(&child_id);
-    assert!(issued.is_none());
-    assert_ne!(begun.as_deref(), Some(orphaned_grant_id.as_str()));
-    assert!(begun.is_some(), "the replacement grant should be begun");
+    assert_eq!(issued.as_deref(), Some(orphaned_grant_id.as_str()));
+    assert!(begun.is_none());
 }
 
 #[test]
-fn issued_grant_invalidated_before_begin_rebinds_once_on_the_next_dispatch() {
+fn issued_grant_invalidated_before_begin_is_withheld_and_arms_rebind() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-issued-before-begin");
     let root = state
@@ -2950,8 +3061,12 @@ fn issued_grant_invalidated_before_begin_rebinds_once_on_the_next_dispatch() {
         pending.started_at =
             std::time::Instant::now() - Duration::from_millis(ENGRAM_DISPATCH_BUDGET_MS + 1);
     }
-    deliver_turn_dispatch(&state, first_dispatch)
-        .expect("expired Engram budget must fail open to the runtime");
+    assert_eq!(
+        deliver_turn_dispatch(&state, first_dispatch)
+            .expect_err("an expired Engram begin budget must withhold the runtime prompt")
+            .status,
+        StatusCode::CONFLICT
+    );
 
     {
         let inner = state.inner.lock().expect("state mutex poisoned");
@@ -2967,45 +3082,15 @@ fn issued_grant_invalidated_before_begin_rebinds_once_on_the_next_dispatch() {
             Message::EngramControl { card, .. }
                 if card.decision == EngramControlCardDecision::Degraded
                     && card.refusal_code.as_deref() == Some("dispatch_budget_exhausted")
-                    && card.dispatch == EngramControlCardDispatch::SentWithoutGrant
+                    && card.dispatch == EngramControlCardDispatch::Withheld
         )));
-        assert!(
-            child.runtime.runtime_token().is_some(),
-            "shadow dispatch should activate the runtime"
-        );
+        assert_eq!(child.session.status, SessionStatus::Error);
+        assert!(child.runtime.runtime_token().is_none());
     }
     assert_eq!(
         transport.grant_state(&child_id),
         (Some(issued_grant_id.clone()), None)
     );
-    state
-        .stop_session(&child_id)
-        .expect("shadow turn should stop without checkpointing an unbegun grant");
-    super::delegation_support::install_delegation_codex_runtime(
-        &state,
-        "engram-issued-before-begin-recovery-runtime",
-    );
-
-    let second_dispatch = match state
-        .dispatch_turn(
-            &child_id,
-            SendMessageRequest {
-                text: "Recover the orphaned issued grant through one fresh bind.".to_owned(),
-                expanded_text: None,
-                attachments: Vec::new(),
-                source_session_id: None,
-                source_mailbox: None,
-            },
-        )
-        .expect("the next dispatch should recover and evaluate")
-    {
-        DispatchTurnResult::Dispatched(dispatch)
-        | DispatchTurnResult::DispatchedAfterQueue(dispatch) => dispatch,
-        DispatchTurnResult::Queued => panic!("idle child should stage the recovery dispatch"),
-    };
-    deliver_turn_dispatch(&state, second_dispatch)
-        .expect("the recovered grant should begin and reach the runtime");
-
     let child_operations = transport
         .requests()
         .into_iter()
@@ -3019,29 +3104,12 @@ fn issued_grant_invalidated_before_begin_rebinds_once_on_the_next_dispatch() {
         .collect::<Vec<_>>();
     assert_eq!(
         child_operations,
-        [
-            "session_bind",
-            "turn_evaluate",
-            "session_status",
-            "turn_checkpoint",
-            "session_bind",
-            "turn_evaluate",
-            "turn_begin",
-        ],
-        "an issued-but-unbegun grant needs one status/checkpoint probe and one fresh bind"
-    );
-    assert_eq!(
-        child_operations
-            .iter()
-            .filter(|operation| operation.as_str() == "session_bind")
-            .count(),
-        2,
-        "recovery must perform exactly one fresh bind"
+        ["session_bind", "turn_evaluate"],
+        "the withheld turn must not begin or checkpoint an issued grant"
     );
     let (issued, begun) = transport.grant_state(&child_id);
-    assert!(issued.is_none());
-    assert_ne!(begun.as_deref(), Some(issued_grant_id.as_str()));
-    assert!(begun.is_some(), "the recovery grant should be begun");
+    assert_eq!(issued.as_deref(), Some(issued_grant_id.as_str()));
+    assert!(begun.is_none());
 }
 
 #[test]
@@ -3335,7 +3403,7 @@ fn real_process_fixture_covers_spawn_eof_timeout_kill_and_respawn() {
     let request = EngramControlRequest::SessionBind {
         external_ref: "termal:fixture".to_owned(),
         title: "Fixture".to_owned(),
-        assurance: "advisory".to_owned(),
+        assurance: ENGRAM_CONTROL_ASSURANCE.to_owned(),
         mediated_effects: vec![EngramEffect::Observe],
         capability_map_revision: ENGRAM_CAPABILITY_MAP_REVISION,
         work_binding: None,
@@ -3392,7 +3460,7 @@ fn real_process_timeout_kills_the_entire_control_process_tree() {
     let request = EngramControlRequest::SessionBind {
         external_ref: "termal:fixture-tree".to_owned(),
         title: "Fixture tree".to_owned(),
-        assurance: "advisory".to_owned(),
+        assurance: ENGRAM_CONTROL_ASSURANCE.to_owned(),
         mediated_effects: vec![EngramEffect::Observe],
         capability_map_revision: ENGRAM_CAPABILITY_MAP_REVISION,
         work_binding: None,
@@ -3542,7 +3610,7 @@ fn engram_control_process_tree_request(suffix: &str) -> EngramControlRequest {
     EngramControlRequest::SessionBind {
         external_ref: format!("termal:fixture-tree-{suffix}"),
         title: "Fixture tree".to_owned(),
-        assurance: "advisory".to_owned(),
+        assurance: ENGRAM_CONTROL_ASSURANCE.to_owned(),
         mediated_effects: vec![EngramEffect::Observe],
         capability_map_revision: ENGRAM_CAPABILITY_MAP_REVISION,
         work_binding: None,
@@ -3649,7 +3717,7 @@ fn process_fixture_bind(
             &EngramControlRequest::SessionBind {
                 external_ref: format!("termal:{}", connection.session_id),
                 title: "Stateful process fixture".to_owned(),
-                assurance: "advisory".to_owned(),
+                assurance: ENGRAM_CONTROL_ASSURANCE.to_owned(),
                 mediated_effects: vec![EngramEffect::Observe],
                 capability_map_revision: ENGRAM_CAPABILITY_MAP_REVISION,
                 work_binding: None,
@@ -3723,7 +3791,7 @@ fn real_process_fixture_persists_idempotency_and_unknown_grant_semantics() {
             &EngramControlRequest::SessionBind {
                 external_ref: format!("termal:{}", connection.session_id),
                 title: "Changed fixture bind intent".to_owned(),
-                assurance: "advisory".to_owned(),
+                assurance: ENGRAM_CONTROL_ASSURANCE.to_owned(),
                 mediated_effects: vec![EngramEffect::Observe],
                 capability_map_revision: ENGRAM_CAPABILITY_MAP_REVISION,
                 work_binding: None,
@@ -4167,7 +4235,7 @@ fn real_process_fixture_enforces_stale_begin_and_unbegun_grant_recovery() {
             &EngramControlRequest::SessionBind {
                 external_ref: "termal:engram-fixture-non-expiring-refusal".to_owned(),
                 title: "Reject bind over begun grant".to_owned(),
-                assurance: "advisory".to_owned(),
+                assurance: ENGRAM_CONTROL_ASSURANCE.to_owned(),
                 mediated_effects: vec![EngramEffect::Observe],
                 capability_map_revision: ENGRAM_CAPABILITY_MAP_REVISION,
                 work_binding: None,
@@ -4222,6 +4290,7 @@ fn real_fixture_engram_settings(root: &FsPath) -> EngramProjectSettings {
         ),
         home: Some(root.to_string_lossy().into_owned()),
         work_authority_grant: None,
+        authority_store_key: None,
         deadline_ms: Some(250),
     }
 }
@@ -4234,19 +4303,14 @@ fn materialize_fixture_engram_store(
         .expect("fixture project id should exist")
         .trim()
         .to_owned();
-    let database_path = home
-        .join("projects")
-        .join(sha256_hex(project_id.as_bytes()))
-        .join("engram.db");
-    fs::create_dir_all(
-        database_path
-            .parent()
-            .expect("fixture database should have a parent"),
-    )
-    .expect("fixture store directory should exist");
+    let database_path = home.join("fixture-engram.db");
     fs::write(&database_path, b"fixture database").expect("fixture database should exist");
-    engram_store_key(&project_root.to_string_lossy(), &home.to_string_lossy())
-        .expect("materialized fixture store should have an exact key")
+    EngramAuthorityStoreKey {
+        database_path: normalize_user_facing_path(
+            &fs::canonicalize(database_path).expect("fixture database should canonicalize"),
+        ),
+        project_id,
+    }
 }
 
 fn fixture_authority_revoke_args_path(root: &FsPath) -> PathBuf {
@@ -4875,11 +4939,6 @@ fn engram_mcp_home_alias_keeps_the_current_store_authority() {
     attach_engram_mcp_test_runtime(&state, &session_id);
 
     let alias_home = root.join(".").to_string_lossy().into_owned();
-    assert_eq!(
-        engram_store_key(&root.to_string_lossy(), &alias_home),
-        Some(exact_store_key),
-        "store identity must use the trimmed project id and canonical database path"
-    );
     enabled.home = Some(alias_home.clone());
     state
         .update_project_engram_settings(&project_id, enabled)
@@ -4898,6 +4957,14 @@ fn engram_mcp_home_alias_keeps_the_current_store_authority() {
         persisted_home,
         Some(alias_home.as_str()),
         "TermAl should preserve the operator's home spelling"
+    );
+    assert_eq!(
+        inner
+            .find_project(&project_id)
+            .and_then(|project| project.engram.as_ref())
+            .and_then(|settings| settings.authority_store_key.clone()),
+        Some(exact_store_key),
+        "doctor identity must remain stable across a home path alias"
     );
     let record = inner
         .find_session_index(&session_id)
@@ -5040,6 +5107,13 @@ fn engram_grant_clear_cannot_smuggle_an_unvalidated_binary_change() {
     state
         .update_project_engram_settings(&project_id, enabled.clone())
         .expect("initial authority should persist");
+    enabled = state
+        .inner
+        .lock()
+        .expect("state mutex poisoned")
+        .find_project(&project_id)
+        .and_then(|project| project.engram.clone())
+        .expect("validated settings should persist the doctor store identity");
 
     let mut invalid_clear = enabled.clone();
     invalid_clear.work_authority_grant = None;
@@ -5093,11 +5167,7 @@ fn engram_disabled_settings_reject_relative_homes_and_unresolved_stores_never_al
 
     let home_a = root.join("home-a").to_string_lossy().into_owned();
     let home_b = root.join("home-b").to_string_lossy().into_owned();
-    assert!(!engram_authority_stores_match(
-        &root.to_string_lossy(),
-        &home_a,
-        &home_b,
-    ));
+    assert!(!engram_authority_stores_match(None, &home_a, None, &home_b,));
 
     let unresolved = EngramRetiredWorkAuthorityGrant {
         home: home_a.clone(),
@@ -5127,8 +5197,9 @@ fn engram_disabled_settings_reject_relative_homes_and_unresolved_stores_never_al
 #[test]
 fn engram_unresolved_windows_store_identity_is_case_insensitive() {
     assert!(engram_authority_stores_match(
-        r"C:\termal-missing-project",
+        None,
         r"C:\Engram\Home",
+        None,
         r"c:\engram\home",
     ));
     let left = EngramRetiredWorkAuthorityGrant {
@@ -5413,10 +5484,17 @@ fn engram_mcp_rechecks_retired_grants_under_the_commit_lock_across_projects() {
     state
         .update_project_engram_settings(&first_id, first)
         .expect("first authority should persist");
-    let second_original = real_fixture_engram_settings(&second_root);
+    let mut second_original = real_fixture_engram_settings(&second_root);
     state
         .update_project_engram_settings(&second_id, second_original.clone())
         .expect("second project should enable without a grant");
+    second_original = state
+        .inner
+        .lock()
+        .expect("state mutex poisoned")
+        .find_project(&second_id)
+        .and_then(|project| project.engram.clone())
+        .expect("validated settings should persist the doctor store identity");
 
     let gate = gate_next_engram_project_reset_fence(&second_id);
     let racing_state = state.clone();
@@ -5474,13 +5552,20 @@ fn engram_mcp_rechecks_active_grant_ownership_under_the_commit_lock() {
     let first_id = create_test_project(&state, &first_root, "First active grant racer");
     let second_id = create_test_project(&state, &second_root, "Second active grant racer");
     let first_original = real_fixture_engram_settings(&first_root);
-    let second_original = real_fixture_engram_settings(&second_root);
+    let mut second_original = real_fixture_engram_settings(&second_root);
     state
         .update_project_engram_settings(&first_id, first_original)
         .expect("first project should enable without a grant");
     state
         .update_project_engram_settings(&second_id, second_original.clone())
         .expect("second project should enable without a grant");
+    second_original = state
+        .inner
+        .lock()
+        .expect("state mutex poisoned")
+        .find_project(&second_id)
+        .and_then(|project| project.engram.clone())
+        .expect("validated settings should persist the doctor store identity");
 
     let gate = gate_next_engram_project_reset_fence(&second_id);
     let racing_state = state.clone();
@@ -7091,6 +7176,7 @@ fn engram_mcp_reconfigure_binds_fresh_connection_before_resuming_queued_prompt()
                 binary_path: enabled.binary_path,
                 home: Some(fresh_home.to_string_lossy().into_owned()),
                 work_authority_grant: None,
+                authority_store_key: None,
                 deadline_ms: enabled.deadline_ms,
             },
         )
@@ -7793,7 +7879,7 @@ fn engram_mcp_grant_revoke_cli_failure_is_visible_after_durable_grant_clear() {
 }
 
 #[test]
-fn engram_mcp_missing_project_identity_keeps_a_pending_tombstone_and_retries_after_repair() {
+fn engram_mcp_uses_persisted_project_identity_when_marker_disappears_and_retries_after_repair() {
     let state = test_app_state();
     let root = state
         .test_temp_root
@@ -7809,6 +7895,13 @@ fn engram_mcp_missing_project_identity_keeps_a_pending_tombstone_and_retries_aft
     state
         .update_project_engram_settings(&project_id, enabled.clone())
         .expect("initial authority should persist");
+    enabled = state
+        .inner
+        .lock()
+        .expect("state mutex poisoned")
+        .find_project(&project_id)
+        .and_then(|project| project.engram.clone())
+        .expect("validated settings should persist the doctor store identity");
     fs::remove_file(root.join(".engram-project"))
         .expect("project identity should become unavailable");
 
@@ -7827,9 +7920,9 @@ fn engram_mcp_missing_project_identity_keeps_a_pending_tombstone_and_retries_aft
             .find(|entry| entry.grant_hash == "grant-pending-identity")
             .expect("unresolved retirement must be durable");
         assert_eq!(tombstone.project_root, root.to_string_lossy());
-        assert!(tombstone.project_id.is_empty());
+        assert_eq!(tombstone.project_id, "fixture-ready");
         assert!(!tombstone.revoke_confirmed);
-        assert!(tombstone.reason.contains("project identity is unavailable"));
+        assert!(tombstone.reason.contains("work-authority grant removed"));
     }
 
     fs::write(root.join(".engram-project"), "fixture-ready\n")
@@ -7849,7 +7942,7 @@ fn engram_mcp_missing_project_identity_keeps_a_pending_tombstone_and_retries_aft
         .find(|entry| entry.grant_hash == "grant-pending-identity")
         .expect("pending tombstone should remain as a reuse blocker");
     assert!(tombstone.revoke_confirmed);
-    assert!(tombstone.reason.contains("project identity is unavailable"));
+    assert!(tombstone.reason.contains("work-authority grant removed"));
 }
 
 #[test]
@@ -8271,6 +8364,7 @@ fn successful_authority_cleanup_clears_the_matching_project_warning_durably() {
         binary_path: "engram".to_owned(),
         home: home.to_string_lossy().into_owned(),
         project_root: root.to_string_lossy().into_owned(),
+        store_key: None,
         work_authority_grant: "grant-cleanup-warning-cleared".to_owned(),
     };
     {
@@ -8345,12 +8439,14 @@ fn unrelated_authority_success_keeps_warning_until_every_project_retirement_is_c
         binary_path: "engram".to_owned(),
         home: home_a.to_string_lossy().into_owned(),
         project_root: root.to_string_lossy().into_owned(),
+        store_key: None,
         work_authority_grant: "grant-cleanup-warning-a".to_owned(),
     };
     let target_b = EngramAuthorityRevocationTarget {
         binary_path: "engram".to_owned(),
         home: home_b.to_string_lossy().into_owned(),
         project_root: root.to_string_lossy().into_owned(),
+        store_key: None,
         work_authority_grant: "grant-cleanup-warning-b".to_owned(),
     };
     {
@@ -8649,6 +8745,7 @@ fn immediate_revocation_covers_current_and_runtime_installed_engram_descriptors(
             .engram_mcp_installed = Some(EngramMcpInstalledDescriptor {
             binary_path: binary_path.clone(),
             home: older_runtime_home.to_string_lossy().into_owned(),
+            store_key: None,
             work_authority_grant: Some("grant-runtime-older".to_owned()),
         });
     }
@@ -8916,7 +9013,7 @@ fn engram_mcp_enable_marks_runtime_but_deadline_only_patch_does_not() {
 }
 
 #[test]
-fn enablement_accepts_real_doctor_required_advisory() {
+fn enablement_accepts_real_doctor_required_turn_gated_and_adopts_identity() {
     let (state, _runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-doctor-advisory");
     let root = state
@@ -8926,25 +9023,31 @@ fn enablement_accepts_real_doctor_required_advisory() {
         .path()
         .join("engram-doctor-advisory-project");
     fs::create_dir_all(&root).expect("project root should exist");
-    fs::write(root.join(".engram-project"), "fixture-doctor-advisory\n")
+    fs::write(root.join(".engram-project"), "fixture-doctor-turn-gated\n")
         .expect("fixture mode should write");
-    let project_id = create_test_project(&state, &root, "Engram doctor advisory");
+    let project_id = create_test_project(&state, &root, "Engram doctor turn gated");
 
     state
         .update_project_engram_settings(&project_id, real_fixture_engram_settings(&root))
-        .expect("advisory doctor requirement should be compatible with Phase 0");
+        .expect("turn-gated doctor requirement should match TermAl mediation");
 
     let inner = state.inner.lock().expect("state mutex poisoned");
-    assert!(
-        inner
-            .find_project(&project_id)
-            .and_then(|project| project.engram.as_ref())
-            .is_some_and(|settings| settings.enabled)
+    let settings = inner
+        .find_project(&project_id)
+        .and_then(|project| project.engram.as_ref())
+        .expect("enabled settings should persist");
+    assert!(settings.enabled);
+    assert_eq!(
+        settings.authority_store_key,
+        Some(EngramAuthorityStoreKey {
+            database_path: normalize_user_facing_path(&root.join("fixture-engram.db")),
+            project_id: "fixture-doctor-turn-gated".to_owned(),
+        })
     );
 }
 
 #[test]
-fn enablement_rejects_real_doctor_requirements_above_advisory() {
+fn enablement_rejects_real_doctor_requirements_other_than_turn_gated() {
     let (state, _runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-doctor-assurance");
     let root = state
@@ -8958,21 +9061,21 @@ fn enablement_rejects_real_doctor_requirements_above_advisory() {
     let project_id = create_test_project(&state, &root, "Engram doctor assurance");
 
     for (mode, required) in [
-        ("fixture-doctor-turn-gated", "TurnGated"),
-        ("fixture-doctor-action-gated", "ActionGated"),
+        ("fixture-doctor-advisory", "advisory"),
+        ("fixture-doctor-action-gated", "action_gated"),
     ] {
         fs::write(&project_file, format!("{mode}\n")).expect("fixture mode should write");
         let error = match state
             .update_project_engram_settings(&project_id, real_fixture_engram_settings(&root))
         {
-            Ok(_) => panic!("a requirement above advisory must refuse Phase 0 enablement"),
+            Ok(_) => panic!("a non-turn-gated requirement must be refused"),
             Err(error) => error,
         };
         assert_eq!(error.status, StatusCode::BAD_REQUEST);
         assert_eq!(
             error.message,
             format!(
-                "cannot enable Engram: control_assurance_insufficient: doctor requires `{required}`, but TermAl Phase 0 provides only `advisory`; configure the Engram store with `required=Advisory` or disable the integration"
+                "cannot enable Engram: doctor requires `{required}`, but TermAl provides `turn_gated`"
             )
         );
         let inner = state.inner.lock().expect("state mutex poisoned");
@@ -9013,7 +9116,7 @@ fn enablement_rejects_real_doctor_output_without_required_assurance() {
     assert_eq!(error.status, StatusCode::BAD_REQUEST);
     assert_eq!(
         error.message,
-        "cannot enable Engram: doctor succeeded but did not report `required=` control assurance; TermAl Phase 0 requires `required=Advisory`"
+        "cannot enable Engram: doctor did not return a control policy"
     );
     let inner = state.inner.lock().expect("state mutex poisoned");
     assert!(
@@ -9022,6 +9125,62 @@ fn enablement_rejects_real_doctor_output_without_required_assurance() {
             .and_then(|project| project.engram.as_ref())
             .is_none(),
         "invalid doctor output must not enable the project"
+    );
+}
+
+#[test]
+fn project_settings_ingress_validates_authority_show_status_and_subject() {
+    let state = test_app_state();
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("engram-authority-show-ingress");
+    fs::create_dir_all(&root).expect("project root should exist");
+    let project_file = root.join(".engram-project");
+    let project_id = create_test_project(&state, &root, "Engram authority show ingress");
+    let grant = "a".repeat(64);
+
+    for (mode, expected) in [
+        ("fixture-authority-unknown", "because it is not installed"),
+        ("fixture-authority-revoked", "because it is revoked"),
+        ("fixture-authority-expired", "because it is expired"),
+        ("fixture-authority-future", "before its valid_from time"),
+        (
+            "fixture-authority-subject-mismatch",
+            "subject actor must be `termal`",
+        ),
+    ] {
+        fs::write(&project_file, format!("{mode}\n")).expect("fixture mode should write");
+        let mut settings = real_fixture_engram_settings(&root);
+        settings.work_authority_grant = Some(grant.clone());
+        let error = match state.update_project_engram_settings(&project_id, settings) {
+            Ok(_) => panic!("invalid authority status must reject settings ingress"),
+            Err(error) => error,
+        };
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert!(
+            error.message.contains(expected),
+            "unexpected error: {error:?}"
+        );
+        assert!(!error.message.contains(&grant));
+    }
+
+    fs::write(&project_file, "fixture-authority-active\n")
+        .expect("active fixture mode should write");
+    let mut settings = real_fixture_engram_settings(&root);
+    settings.work_authority_grant = Some(grant.clone());
+    state
+        .update_project_engram_settings(&project_id, settings)
+        .expect("active matching authority should persist");
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    assert_eq!(
+        inner
+            .find_project(&project_id)
+            .and_then(|project| project.engram.as_ref())
+            .and_then(|settings| settings.work_authority_grant.as_deref()),
+        Some(grant.as_str())
     );
 }
 
@@ -10182,6 +10341,7 @@ fn changing_connection_settings_checkpoints_old_grant_then_reaps_and_fresh_binds
                 binary_path: Some(fresh_binary_path.to_string_lossy().into_owned()),
                 home: Some(fresh_home.to_string_lossy().into_owned()),
                 work_authority_grant: None,
+                authority_store_key: None,
                 deadline_ms: Some(250),
             },
         )
@@ -10292,18 +10452,22 @@ fn project_reset_fence_keeps_a_new_delegation_off_the_old_connection() {
                 write_policy: Some(DelegationWritePolicy::ReadOnly),
             },
         )
-        .expect("Phase 0 shadow dispatch should remain available during reset");
-    assert!(matches!(
-        runtime_rx
-            .recv_timeout(Duration::from_secs(1))
-            .expect("second child prompt should dispatch in shadow mode"),
-        CodexRuntimeCommand::Prompt { .. }
-    ));
+        .expect("the delegation should remain queued while reset owns the project");
+    assert!(
+        runtime_rx.try_recv().is_err(),
+        "the reset fence must prevent ungranted runtime delivery"
+    );
     checkpoint_gate.release();
     update_handle
         .join()
         .expect("settings thread should not panic")
         .expect("project reset should complete");
+    assert!(matches!(
+        runtime_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("the queued prompt should dispatch after the disabling reset commits"),
+        CodexRuntimeCommand::Prompt { .. }
+    ));
     let requests = transport.requests();
     assert_eq!(requests.len(), 5);
     assert!(
@@ -10636,34 +10800,23 @@ fn reset_stale_begin_preserves_successor_until_immediate_disable_revokes_it() {
         parent_session_id
     );
 
-    let successor = match state
+    let successor = state
         .dispatch_turn(
             &child_id,
             SendMessageRequest {
-                text: "Prompt B must stay live on the reset shadow path.".to_owned(),
+                text: "Prompt B must wait for the reset fence.".to_owned(),
                 expanded_text: None,
                 attachments: Vec::new(),
                 source_session_id: None,
                 source_mailbox: None,
             },
         )
-        .expect("prompt B should start while the reset fence is held")
-    {
-        DispatchTurnResult::Dispatched(dispatch)
-        | DispatchTurnResult::DispatchedAfterQueue(dispatch) => dispatch,
-        DispatchTurnResult::Queued => panic!("prompt B should dispatch immediately"),
-    };
+        .expect("prompt B should be accepted into the durable queue");
+    assert!(matches!(successor, DispatchTurnResult::Queued));
     assert!(
-        successor.engram_dispatch_generation().is_none(),
-        "the fenced successor must use the shadow path"
+        runtime_rx.try_recv().is_err(),
+        "the reset fence must withhold prompt B"
     );
-    deliver_turn_dispatch(&state, successor).expect("prompt B should reach the live runtime");
-    assert!(matches!(
-        runtime_rx
-            .recv_timeout(Duration::from_secs(1))
-            .expect("runtime should receive prompt B"),
-        CodexRuntimeCommand::Prompt { .. }
-    ));
 
     stale_begin_gate.release();
     create_handle
@@ -10675,18 +10828,21 @@ fn reset_stale_begin_preserves_successor_until_immediate_disable_revokes_it() {
         let child = inner
             .find_session_index(&child_id)
             .and_then(|index| inner.sessions.get(index))
-            .expect("prompt B session should remain");
-        assert_eq!(child.session.status, SessionStatus::Active);
-        assert!(child.runtime.runtime_token().is_some());
+            .expect("queued prompt B session should remain");
+        assert_eq!(child.session.status, SessionStatus::Idle);
+        assert!(child.runtime.runtime_token().is_none());
         assert!(child.engram.pending_dispatch.is_none());
         assert_eq!(
-            child.session.preview,
-            "Prompt B must stay live on the reset shadow path."
+            child
+                .queued_prompts
+                .front()
+                .map(|queued| queued.pending_prompt.text.as_str()),
+            Some("Prompt B must wait for the reset fence.")
         );
         assert!(!child.session.messages.iter().any(|message| matches!(
             message,
             Message::Text { text, .. }
-                if text.contains("turn dispatch was invalidated before Engram begin completed")
+                if text.contains("Engram did not authorize this turn for runtime delivery")
         )));
     }
     let stale_checkpoint = transport
@@ -10705,18 +10861,24 @@ fn reset_stale_begin_preserves_successor_until_immediate_disable_revokes_it() {
         .join()
         .expect("reset thread should not panic")
         .expect("reset should complete after both stale grants close");
+    assert!(matches!(
+        runtime_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("prompt B should dispatch after the disabling reset commits"),
+        CodexRuntimeCommand::Prompt { .. }
+    ));
     let inner = state.inner.lock().expect("state mutex poisoned");
     let child = inner
         .find_session_index(&child_id)
         .and_then(|index| inner.sessions.get(index))
         .expect("prompt B session should survive reset completion");
-    assert_eq!(child.session.status, SessionStatus::Idle);
-    assert!(matches!(child.runtime, SessionRuntime::None));
-    assert!(child.session.messages.iter().any(|message| matches!(
-        message,
-        Message::Text { text, .. }
-            if text == "Turn stopped: Engram MCP configuration was revoked."
-    )));
+    assert_eq!(child.session.status, SessionStatus::Active);
+    assert!(child.runtime.runtime_token().is_some());
+    assert!(child.queued_prompts.is_empty());
+    assert_eq!(
+        child.session.preview,
+        "Prompt B must wait for the reset fence."
+    );
 }
 
 #[test]
@@ -10959,7 +11121,7 @@ fn api_rejection_guard_ignores_a_dispatch_marker_replaced_after_finish() {
         EngramControlCard {
             schema_version: ENGRAM_CONTROL_SCHEMA_VERSION,
             stage: EngramControlStage::Dispatch,
-            assurance: "advisory".to_owned(),
+            assurance: ENGRAM_CONTROL_ASSURANCE.to_owned(),
             decision: EngramControlCardDecision::Grant,
             dispatch: EngramControlCardDispatch::SentOnGrant,
             refusal_code: None,
@@ -10973,7 +11135,7 @@ fn api_rejection_guard_ignores_a_dispatch_marker_replaced_after_finish() {
                 checkpoint: None,
                 total: 0,
             },
-            fail_mode: EngramControlFailMode::Shadow,
+            fail_mode: EngramControlFailMode::Enforced,
             repair_armed: false,
             next_intent: None,
         },
@@ -10995,7 +11157,7 @@ fn api_rejection_guard_ignores_a_dispatch_marker_replaced_after_finish() {
     let rejected = record_rejected_turn_dispatch(
         &state,
         &child_id,
-        "turn dispatch was invalidated before Engram begin completed",
+        "Engram did not authorize this turn for runtime delivery",
         None,
         Some(stale_generation),
         &runtime_token,
@@ -11014,7 +11176,7 @@ fn api_rejection_guard_ignores_a_dispatch_marker_replaced_after_finish() {
     assert!(!child.session.messages.iter().any(|message| matches!(
         message,
         Message::Text { text, .. }
-            if text.contains("turn dispatch was invalidated before Engram begin completed")
+            if text.contains("Engram did not authorize this turn for runtime delivery")
     )));
 }
 
@@ -11262,7 +11424,7 @@ fn marked_nested_parent_without_delegation_row_has_no_parent_shaped_target() {
         );
         assert!(
             project_engram_binding_target_locked(&inner, &outer.child_session_id)
-                .expect("project target projection should fail open")
+                .expect("project target projection should resolve")
                 .is_none(),
             "a durable child marker with no delegation row must not become a parent target"
         );
@@ -11505,7 +11667,7 @@ fn disabling_during_bind_rejects_the_late_token_and_reaps_the_process() {
     let created = create_handle
         .join()
         .expect("delegation thread should not panic")
-        .expect("shadow mode should continue without Engram");
+        .expect("ordinary dispatch should continue after Engram is disabled");
     assert!(matches!(
         runtime_rx
             .recv_timeout(Duration::from_secs(1))
@@ -12460,6 +12622,7 @@ fn boot_recovery_bounds_worker_concurrency_across_many_targets() {
         binary_path: Some(root.join("engram-fixture").to_string_lossy().into_owned()),
         home: Some(home.to_string_lossy().into_owned()),
         work_authority_grant: None,
+        authority_store_key: None,
         deadline_ms: Some(250),
     };
     {
@@ -12545,6 +12708,7 @@ fn boot_recovery_rebinds_after_issued_checkpoint_refusal_decision() {
         binary_path: Some(root.join("engram-fixture").to_string_lossy().into_owned()),
         home: Some(home.to_string_lossy().into_owned()),
         work_authority_grant: None,
+        authority_store_key: None,
         deadline_ms: Some(250),
     };
     {
@@ -12858,7 +13022,7 @@ fn missing_session_mid_bind_reaps_off_lock_even_when_shutdown_blocks() {
 }
 
 #[test]
-fn defer_card_separates_engram_decision_from_shadow_dispatch_outcome() {
+fn defer_card_records_that_turn_gating_withheld_the_prompt() {
     let (state, runtime_rx) = test_app_state_with_delegation_codex_runtime("engram-card-defer");
     let root = state
         .test_temp_root
@@ -12890,13 +13054,11 @@ fn defer_card_separates_engram_decision_from_shadow_dispatch_outcome() {
                 write_policy: Some(DelegationWritePolicy::ReadOnly),
             },
         )
-        .expect("Phase 0 shadow mode should send a deferred turn");
-    assert!(matches!(
-        runtime_rx
-            .recv_timeout(Duration::from_secs(1))
-            .expect("runtime should receive the shadow-dispatched prompt"),
-        CodexRuntimeCommand::Prompt { .. }
-    ));
+        .expect("delegation record should survive an Engram deferral");
+    assert!(
+        runtime_rx.try_recv().is_err(),
+        "deferred work must be withheld"
+    );
 
     let inner = state.inner.lock().expect("state mutex poisoned");
     let card = inner
@@ -12919,12 +13081,12 @@ fn defer_card_separates_engram_decision_from_shadow_dispatch_outcome() {
         })
         .expect("dispatch should append an Engram control card");
     assert_eq!(card.decision, EngramControlCardDecision::Defer);
-    assert_eq!(card.dispatch, EngramControlCardDispatch::SentWithoutGrant);
+    assert_eq!(card.dispatch, EngramControlCardDispatch::Withheld);
     assert_eq!(card.defer_code.as_deref(), Some("lease_busy"));
     assert!(card.refusal_code.is_none());
     let serialized = serde_json::to_value(card).expect("card should serialize");
     assert_eq!(serialized["decision"], "defer");
-    assert_eq!(serialized["dispatch"], "sent_without_grant");
+    assert_eq!(serialized["dispatch"], "withheld");
     assert_eq!(serialized["deferCode"], "lease_busy");
     assert!(serialized.get("refusalCode").is_none());
     drop(inner);
@@ -12937,7 +13099,7 @@ fn defer_card_separates_engram_decision_from_shadow_dispatch_outcome() {
 }
 
 #[test]
-fn fatal_bind_error_disables_transport_but_still_records_the_fail_open_card() {
+fn fatal_bind_error_disables_transport_and_records_a_withheld_card() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-fatal-bind-card");
     let root = state
@@ -12971,13 +13133,11 @@ fn fatal_bind_error_disables_transport_but_still_records_the_fail_open_card() {
                 write_policy: Some(DelegationWritePolicy::ReadOnly),
             },
         )
-        .expect("Phase 0 should dispatch after the fatal bind error");
-    assert!(matches!(
-        runtime_rx
-            .recv_timeout(Duration::from_secs(1))
-            .expect("runtime should receive the fail-open prompt"),
-        CodexRuntimeCommand::Prompt { .. }
-    ));
+        .expect("delegation record should survive the fatal bind error");
+    assert!(
+        runtime_rx.try_recv().is_err(),
+        "fatal bind work must be withheld"
+    );
     assert_eq!(
         transport.requests().len(),
         2,
@@ -13007,7 +13167,7 @@ fn fatal_bind_error_disables_transport_but_still_records_the_fail_open_card() {
         })
         .expect("fatal bind failure should still append a dispatch card");
     assert_eq!(card.decision, EngramControlCardDecision::Degraded);
-    assert_eq!(card.dispatch, EngramControlCardDispatch::SentWithoutGrant);
+    assert_eq!(card.dispatch, EngramControlCardDispatch::Withheld);
     assert_eq!(card.refusal_code.as_deref(), Some("unknown_control_schema"));
 }
 
@@ -13035,6 +13195,7 @@ fn state_snapshot_redacts_work_authority_grant_without_changing_persisted_projec
             binary_path: Some("C:/tools/engram".to_owned()),
             home: Some("C:/engram-home".to_owned()),
             work_authority_grant: Some("operator-secret-grant".to_owned()),
+            authority_store_key: None,
             deadline_ms: Some(250),
         };
         let debug = format!("{settings:?}");
@@ -13104,6 +13265,7 @@ fn set_test_project_engram_mcp_settings(
         binary_path: Some("C:/tools/engram.exe".to_owned()),
         home: Some("C:/engram-home".to_owned()),
         work_authority_grant: grant.map(str::to_owned),
+        authority_store_key: None,
         deadline_ms: Some(250),
     });
     state
@@ -13136,7 +13298,7 @@ fn assert_delegation_mcp_baseline_is_unchanged(state: &AppState, session_id: &st
 }
 
 #[test]
-fn per_session_engram_mcp_is_added_to_claude_acp_and_codex_configs() {
+fn project_actor_engram_mcp_is_added_to_claude_acp_and_codex_configs() {
     let (state, _runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-per-session-mcp");
     let root = state
@@ -13171,6 +13333,8 @@ fn per_session_engram_mcp_is_added_to_claude_acp_and_codex_configs() {
         claude["mcpServers"]["engram"]["command"],
         "C:/tools/engram.exe"
     );
+    // The grant is a bearer secret: it travels only in the child environment,
+    // never on the command line where process listings expose it.
     assert_eq!(
         claude["mcpServers"]["engram"]["args"],
         json!([
@@ -13180,12 +13344,19 @@ fn per_session_engram_mcp_is_added_to_claude_acp_and_codex_configs() {
             "C:/engram-home",
             "mcp",
             "--actor-id",
-            "termal:claude",
+            "termal",
             "--session-id",
             claude_session,
-            "--work-authority-grant",
-            "operator-secret-grant",
         ])
+    );
+    assert_eq!(
+        claude["mcpServers"]["engram"]["env"],
+        json!({ "ENGRAM_WORK_AUTHORITY_GRANT": "operator-secret-grant" })
+    );
+    assert!(
+        !claude["mcpServers"]["engram"]["args"]
+            .to_string()
+            .contains("operator-secret-grant")
     );
 
     let acp = state
@@ -13199,9 +13370,14 @@ fn per_session_engram_mcp_is_added_to_claude_acp_and_codex_configs() {
     );
     assert_eq!(acp[1]["name"], ENGRAM_MCP_SERVER_NAME);
     assert_eq!(acp[1]["command"], "C:/tools/engram.exe");
-    assert_eq!(acp[1]["args"][6], "termal:acp:cursor");
+    assert_eq!(acp[1]["args"][6], "termal");
     assert_eq!(acp[1]["args"][8], acp_session);
-    assert_eq!(acp[1]["env"], json!([]));
+    assert_eq!(acp[1]["args"].as_array().map(Vec::len), Some(9));
+    assert_eq!(
+        acp[1]["env"],
+        json!([{ "name": "ENGRAM_WORK_AUTHORITY_GRANT", "value": "operator-secret-grant" }])
+    );
+    assert!(!acp[1]["args"].to_string().contains("operator-secret-grant"));
 
     let codex = state
         .termal_delegation_mcp_codex_config(&codex_session)
@@ -13213,11 +13389,22 @@ fn per_session_engram_mcp_is_added_to_claude_acp_and_codex_configs() {
             .len(),
         2
     );
-    assert_eq!(codex["mcp_servers"]["engram"]["args"][6], "termal:codex");
+    assert_eq!(codex["mcp_servers"]["engram"]["args"][6], "termal");
     assert_eq!(codex["mcp_servers"]["engram"]["args"][8], codex_session);
     assert_eq!(
-        codex["mcp_servers"]["engram"]["args"][10],
-        "operator-secret-grant"
+        codex["mcp_servers"]["engram"]["args"]
+            .as_array()
+            .map(Vec::len),
+        Some(9)
+    );
+    assert_eq!(
+        codex["mcp_servers"]["engram"]["env"],
+        json!({ "ENGRAM_WORK_AUTHORITY_GRANT": "operator-secret-grant" })
+    );
+    assert!(
+        !codex["mcp_servers"]["engram"]["args"]
+            .to_string()
+            .contains("operator-secret-grant")
     );
 
     let state_json = serde_json::to_value(state.snapshot()).expect("state should serialize");
@@ -13343,6 +13530,86 @@ fn cold_claude_turn_start_does_not_reenter_state_mutex_for_engram_config() {
 }
 
 #[test]
+fn claude_private_mcp_config_file_carries_the_grant_only_in_the_engram_env() {
+    let (state, _runtime_rx) =
+        test_app_state_with_delegation_codex_runtime("engram-claude-private-mcp-file");
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("engram-claude-private-mcp-file-project");
+    fs::create_dir_all(&root).expect("project root should exist");
+    let project_id = create_test_project(&state, &root, "Engram Claude private MCP file");
+    set_test_project_engram_mcp_settings(&state, &project_id, true, Some("operator-secret-grant"));
+    let claude_session = create_test_project_session(&state, Agent::Claude, &project_id, &root);
+
+    let config_json = state
+        .termal_delegation_mcp_claude_config_json(&claude_session)
+        .expect("Claude MCP config should compose");
+    let dir = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("delegations")
+        .join("mcp");
+    let guard = write_private_claude_mcp_config(&dir, "runtime-claude", &config_json)
+        .expect("the private MCP configuration should be written");
+
+    // What reaches Claude's argv is only the path.
+    let argv_value = guard.path.to_string_lossy().into_owned();
+    assert!(!argv_value.contains("operator-secret-grant"));
+    assert!(!argv_value.contains("mcpServers"));
+
+    // The file carries the grant exactly once, under the Engram child env,
+    // and never inside any args array.
+    let stored: Value = serde_json::from_str(
+        &fs::read_to_string(&guard.path).expect("the file should be readable"),
+    )
+    .expect("the file should be JSON");
+    assert_eq!(
+        stored["mcpServers"]["engram"]["env"]["ENGRAM_WORK_AUTHORITY_GRANT"],
+        "operator-secret-grant"
+    );
+    for (name, server) in stored["mcpServers"]
+        .as_object()
+        .expect("mcpServers should be an object")
+    {
+        assert!(
+            !server["args"].to_string().contains("operator-secret-grant"),
+            "server `{name}` must not carry the grant in args"
+        );
+        assert!(
+            !server["command"]
+                .to_string()
+                .contains("operator-secret-grant"),
+            "server `{name}` must not carry the grant in command"
+        );
+    }
+    assert_eq!(
+        fs::read_to_string(&guard.path)
+            .expect("the file should be readable")
+            .matches("operator-secret-grant")
+            .count(),
+        1
+    );
+
+    let path = guard.path.clone();
+    drop(guard);
+    assert!(!path.exists());
+
+    // Grant-less settings produce an empty Engram env map in the file.
+    set_test_project_engram_mcp_settings(&state, &project_id, true, None);
+    let grantless_json = state
+        .termal_delegation_mcp_claude_config_json(&claude_session)
+        .expect("grant-less Claude MCP config should compose");
+    let stored: Value = serde_json::from_str(&grantless_json).expect("config should be JSON");
+    assert_eq!(stored["mcpServers"]["engram"]["env"], json!({}));
+    assert!(!grantless_json.contains("operator-secret-grant"));
+}
+
+#[test]
 fn per_session_engram_mcp_omits_optional_grant_and_preserves_ineligible_baselines() {
     let (state, _runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-per-session-mcp-baselines");
@@ -13363,6 +13630,9 @@ fn per_session_engram_mcp_omits_optional_grant_and_preserves_ineligible_baseline
         .as_array()
         .expect("Engram args should be an array");
     assert!(!args.iter().any(|arg| arg == "--work-authority-grant"));
+    // Grant-less settings leave the child environment empty: unset means
+    // grant-less to Engram, and no placeholder value may be invented.
+    assert_eq!(enabled["mcp_servers"]["engram"]["env"], json!({}));
 
     set_test_project_engram_mcp_settings(&state, &project_id, false, None);
     assert_delegation_mcp_baseline_is_unchanged(&state, &enabled_session);
@@ -13630,6 +13900,7 @@ fn project_deletion_without_an_engram_binary_still_persists_the_unconfirmed_gran
             binary_path: None,
             home: Some(root.to_string_lossy().into_owned()),
             work_authority_grant: Some("grant-without-binary".to_owned()),
+            authority_store_key: None,
             deadline_ms: Some(250),
         });
         state
@@ -13873,7 +14144,7 @@ fn concurrent_bind_attempts_share_one_in_flight_operation() {
 
     let second = state
         .bind_engram_target_off_lock(target)
-        .expect_err("a second bind must fail open instead of racing the first");
+        .expect_err("a second bind must fail fast instead of racing the first");
     assert_eq!(second.kind, EngramTransportErrorKind::Backoff);
     bind_gate.release();
     assert_eq!(
@@ -14016,7 +14287,7 @@ fn circuit_breaker_and_fatal_protocol_errors_update_only_the_effective_child() {
             dispatch_generation: 42,
             intent_fingerprint: "fatal-card-intent".to_owned(),
         })
-        .expect("a fatally disabled session should still emit a fail-open card");
+        .expect("a fatally disabled session should still emit a withheld card");
     assert!(matches!(
         pending.evaluated,
         EngramDispatchEvaluation::Degraded { ref code, .. }
@@ -14052,9 +14323,9 @@ fn circuit_breaker_and_fatal_protocol_errors_update_only_the_effective_child() {
         EngramControlCard {
             schema_version: ENGRAM_CONTROL_SCHEMA_VERSION,
             stage: EngramControlStage::Dispatch,
-            assurance: "advisory".to_owned(),
+            assurance: ENGRAM_CONTROL_ASSURANCE.to_owned(),
             decision: EngramControlCardDecision::Degraded,
-            dispatch: EngramControlCardDispatch::SentWithoutGrant,
+            dispatch: EngramControlCardDispatch::Withheld,
             refusal_code: Some("control_policy_missing".to_owned()),
             defer_code: None,
             grant_id: None,
@@ -14085,7 +14356,7 @@ fn circuit_breaker_and_fatal_protocol_errors_update_only_the_effective_child() {
 }
 
 #[test]
-fn dispatch_card_persist_failure_continues_fail_open_delivery_from_memory() {
+fn dispatch_card_persist_failure_continues_granted_delivery_from_memory() {
     let (mut state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-dispatch-card-persist-failure");
     let root = state
@@ -14156,7 +14427,7 @@ fn dispatch_card_persist_failure_continues_fail_open_delivery_from_memory() {
         EngramControlCard {
             schema_version: ENGRAM_CONTROL_SCHEMA_VERSION,
             stage: EngramControlStage::Dispatch,
-            assurance: "advisory".to_owned(),
+            assurance: ENGRAM_CONTROL_ASSURANCE.to_owned(),
             decision: EngramControlCardDecision::Grant,
             dispatch: EngramControlCardDispatch::SentOnGrant,
             refusal_code: None,
@@ -14170,7 +14441,7 @@ fn dispatch_card_persist_failure_continues_fail_open_delivery_from_memory() {
                 checkpoint: None,
                 total: 0,
             },
-            fail_mode: EngramControlFailMode::Shadow,
+            fail_mode: EngramControlFailMode::Enforced,
             repair_armed: false,
             next_intent: None,
         },

@@ -38,19 +38,30 @@ fn record_rejected_turn_dispatch(
     runtime_token: &RuntimeToken,
     active_turn_generation: u64,
 ) -> bool {
-    if let Some(dispatch_generation) = engram_dispatch_generation {
+    let rejected_by_engram_generation = if let Some(dispatch_generation) = engram_dispatch_generation {
         match state.reject_engram_turn_delivery_if_current(
             session_id,
             dispatch_generation,
             error_message,
         ) {
-            Ok(true) => {}
-            Ok(false) => return false,
-            Err(err) => eprintln!(
-                "turn dispatch> failed recording guarded Engram rejection for `{session_id}`: {err:#}"
-            ),
+            Ok(rejected) => rejected,
+            Err(err) => {
+                eprintln!(
+                    "turn dispatch> failed recording guarded Engram rejection for `{session_id}`: {err:#}"
+                );
+                false
+            }
         }
     } else {
+        false
+    };
+    if !rejected_by_engram_generation {
+        // A policy refusal/defer/degradation persists its Engram card and
+        // consumes the pending-dispatch marker before returning Rejected. The
+        // Engram-generation cleanup is therefore expected to no-op for that
+        // case; finish the exact turn by runtime token + active generation.
+        // If this callback is stale, the atomic helper returns false without
+        // touching the successor.
         match state.fail_rejected_turn_delivery(
             session_id,
             runtime_token,
@@ -100,7 +111,7 @@ fn deliver_turn_dispatch(state: &AppState, dispatch: TurnDispatch) -> Result<(),
             EngramTurnDeliveryPreparation::Rejected => {
                 let session_id = dispatch.session_id().to_owned();
                 let mailbox_notification = dispatch.mailbox_notification().cloned();
-                let error_message = "turn dispatch was invalidated before Engram begin completed";
+                let error_message = "Engram did not authorize this turn for runtime delivery";
                 let rejected = record_rejected_turn_dispatch(
                     state,
                     &session_id,

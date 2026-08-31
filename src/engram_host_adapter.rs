@@ -1,7 +1,7 @@
 // Engram's host-private JSON-lines protocol and its process transport.
 //
 // Owns: protocol serialization, per-session `engram control` children,
-// deadline-bounded request/response exchange, and Phase 0 adapter outcomes.
+// deadline-bounded request/response exchange, and enforced turn-gated outcomes.
 // Does not own: TermAl's dispatch/termination policy, project settings routes,
 // transcript mutation, or delegation lifecycle. Those call this seam only
 // after releasing the global state mutex.
@@ -30,9 +30,10 @@ const ENGRAM_CONTROL_MAX_FRAME_BYTES: usize = 256 * 1_024;
 const ENGRAM_CIRCUIT_BREAKER_FAILURES: u8 = 3;
 const ENGRAM_CONTROL_IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 const ENGRAM_GLOBAL_DISABLE_ENV: &str = "TERMAL_ENGRAM_DISABLED";
-const ENGRAM_PHASE_ZERO_ASSURANCE: &str = "advisory";
+const ENGRAM_CONTROL_ASSURANCE: &str = "turn_gated";
+const ENGRAM_PROJECT_ACTOR_ID: &str = "termal";
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct EngramAuthorityStoreKey {
     database_path: PathBuf,
@@ -86,6 +87,11 @@ struct EngramProjectSettings {
     home: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     work_authority_grant: Option<String>,
+    /// Authoritative store identity returned by `engram doctor --json`.
+    /// This is persisted for authority retirement but removed from
+    /// client-facing snapshots together with the grant credential.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    authority_store_key: Option<EngramAuthorityStoreKey>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     deadline_ms: Option<u64>,
 }
@@ -104,6 +110,7 @@ impl std::fmt::Debug for EngramProjectSettings {
                     .as_ref()
                     .map(|_| "[REDACTED]"),
             )
+            .field("authority_store_key", &self.authority_store_key)
             .field("deadline_ms", &self.deadline_ms)
             .finish()
     }
@@ -116,6 +123,7 @@ impl Default for EngramProjectSettings {
             binary_path: None,
             home: None,
             work_authority_grant: None,
+            authority_store_key: None,
             deadline_ms: None,
         }
     }
@@ -151,7 +159,7 @@ fn engram_disable_env_value_is_truthy(value: &str) -> bool {
 fn validate_engram_project_enablement(
     project: &Project,
     settings: &EngramProjectSettings,
-) -> std::result::Result<(), ApiError> {
+) -> std::result::Result<EngramAuthorityStoreKey, ApiError> {
     let project_root = FsPath::new(&project.root_path);
     let project_file = project_root.join(".engram-project");
     let metadata = fs::metadata(&project_file).map_err(|err| {
@@ -198,7 +206,7 @@ fn run_engram_doctor(
     project_file: &FsPath,
     home: &FsPath,
     project_root: &FsPath,
-) -> std::result::Result<(), ApiError> {
+) -> std::result::Result<EngramAuthorityStoreKey, ApiError> {
     let mut command = engram_command(binary_path);
     let mut child = command
         .arg("--project-file")
@@ -206,6 +214,7 @@ fn run_engram_doctor(
         .arg("--home")
         .arg(home)
         .arg("doctor")
+        .arg("--json")
         .current_dir(project_root)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -220,7 +229,7 @@ fn run_engram_doctor(
                     ApiError::bad_request(format!("failed collecting Engram doctor output: {err}"))
                 })?;
                 if status.success() {
-                    return validate_engram_doctor_assurance(&output.stdout, &output.stderr);
+                    return parse_engram_doctor_result(&output.stdout);
                 }
                 let detail = String::from_utf8_lossy(&output.stderr).trim().to_owned();
                 return Err(ApiError::bad_request(if detail.is_empty() {
@@ -250,47 +259,166 @@ fn run_engram_doctor(
     }
 }
 
-fn validate_engram_doctor_assurance(
+#[derive(Deserialize)]
+struct EngramDoctorControl {
+    required_assurance: String,
+}
+
+#[derive(Deserialize)]
+struct EngramDoctorResult {
+    healthy: bool,
+    control: Option<EngramDoctorControl>,
+    database: PathBuf,
+    project_id: String,
+}
+
+fn parse_engram_doctor_result(
     stdout: &[u8],
-    stderr: &[u8],
-) -> std::result::Result<(), ApiError> {
-    let stdout = String::from_utf8_lossy(stdout);
-    let stderr = String::from_utf8_lossy(stderr);
-    let required = stdout
-        .split_whitespace()
-        .chain(stderr.split_whitespace())
-        .find_map(|field| {
-            let (name, value) = field.split_once('=')?;
-            name.trim_matches(|character: char| !character.is_ascii_alphanumeric())
-                .eq_ignore_ascii_case("required")
-                .then(|| {
-                    value
-                        .trim_matches(|character: char| {
-                            !character.is_ascii_alphanumeric() && character != '_'
-                        })
-                        .to_owned()
-                })
-        })
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| {
-            ApiError::bad_request(
-                "cannot enable Engram: doctor succeeded but did not report `required=` control assurance; TermAl Phase 0 requires `required=Advisory`",
-            )
-        })?;
-    let normalized = required
+) -> std::result::Result<EngramAuthorityStoreKey, ApiError> {
+    let result = serde_json::from_slice::<EngramDoctorResult>(stdout).map_err(|error| {
+        ApiError::bad_request(format!(
+            "cannot enable Engram: doctor returned invalid JSON: {error}"
+        ))
+    })?;
+    if !result.healthy {
+        return Err(ApiError::bad_request(
+            "cannot enable Engram: doctor reported an unhealthy store",
+        ));
+    }
+    let control = result.control.ok_or_else(|| {
+        ApiError::bad_request(
+            "cannot enable Engram: doctor did not return a control policy",
+        )
+    })?;
+    let normalized = control
+        .required_assurance
         .chars()
         .filter(|character| character.is_ascii_alphanumeric())
         .flat_map(char::to_lowercase)
         .collect::<String>();
-    match normalized.as_str() {
-        "advisory" => Ok(()),
-        "turngated" | "actiongated" => Err(ApiError::bad_request(format!(
-            "cannot enable Engram: control_assurance_insufficient: doctor requires `{required}`, but TermAl Phase 0 provides only `{ENGRAM_PHASE_ZERO_ASSURANCE}`; configure the Engram store with `required=Advisory` or disable the integration"
-        ))),
-        _ => Err(ApiError::bad_request(format!(
-            "cannot enable Engram: doctor reported unsupported control assurance `required={required}`; TermAl Phase 0 recognizes Advisory, TurnGated, and ActionGated"
-        ))),
+    if normalized != "turngated" {
+        return Err(ApiError::bad_request(format!(
+            "cannot enable Engram: doctor requires `{}`, but TermAl provides `{ENGRAM_CONTROL_ASSURANCE}`",
+            control.required_assurance
+        )));
     }
+    let project_id = result.project_id.trim().to_owned();
+    if project_id.is_empty() {
+        return Err(ApiError::bad_request(
+            "cannot enable Engram: doctor returned an empty project_id",
+        ));
+    }
+    if !result.database.is_absolute() {
+        return Err(ApiError::bad_request(
+            "cannot enable Engram: doctor returned a non-absolute database path",
+        ));
+    }
+    Ok(EngramAuthorityStoreKey {
+        database_path: normalize_user_facing_path(&result.database),
+        project_id,
+    })
+}
+
+#[derive(Deserialize)]
+struct EngramAuthorityShowResult {
+    installed: bool,
+    subject_actor_id: Option<String>,
+    valid_from: Option<String>,
+    valid_until: Option<String>,
+    revoked_at: Option<String>,
+}
+
+fn validate_engram_project_work_authority(
+    project: &Project,
+    settings: &EngramProjectSettings,
+) -> std::result::Result<(), ApiError> {
+    let Some(grant) = settings.work_authority_grant.as_deref() else {
+        return Ok(());
+    };
+    let binary_path = settings
+        .binary_path
+        .as_deref()
+        .map(PathBuf::from)
+        .ok_or_else(|| ApiError::bad_request("Engram work-authority grant requires binaryPath"))?;
+    let home = settings
+        .home
+        .as_deref()
+        .map(PathBuf::from)
+        .ok_or_else(|| ApiError::bad_request("Engram work-authority grant requires home"))?;
+    let project_root = PathBuf::from(&project.root_path);
+    let connection = EngramConnectionConfig {
+        binary_path,
+        project_file: project_root.join(".engram-project"),
+        home,
+        project_root,
+        actor_id: ENGRAM_PROJECT_ACTOR_ID.to_owned(),
+        session_id: "termal-authority-validation".to_owned(),
+    };
+    let value = run_engram_json_command_with_lock_retry(
+        &connection,
+        &["authority", "show", grant, "--json"],
+        ENGRAM_WORK_BINDING_COMMAND_TIMEOUT,
+    )
+    .map_err(|_| {
+        ApiError::bad_request(
+            "cannot configure Engram work-authority grant because its status could not be verified",
+        )
+    })?;
+    let result = serde_json::from_value::<EngramAuthorityShowResult>(value).map_err(|_| {
+        ApiError::bad_request(
+            "cannot configure Engram work-authority grant because authority show returned an invalid response",
+        )
+    })?;
+    if !result.installed {
+        return Err(ApiError::bad_request(
+            "cannot configure Engram work-authority grant because it is not installed",
+        ));
+    }
+    if result.revoked_at.is_some() {
+        return Err(ApiError::bad_request(
+            "cannot configure Engram work-authority grant because it is revoked",
+        ));
+    }
+    let subject_actor_id = result.subject_actor_id.as_deref().ok_or_else(|| {
+        ApiError::bad_request(
+            "cannot configure Engram work-authority grant because its subject actor is missing",
+        )
+    })?;
+    if subject_actor_id != ENGRAM_PROJECT_ACTOR_ID {
+        return Err(ApiError::bad_request(format!(
+            "cannot configure Engram work-authority grant because its subject actor must be `{ENGRAM_PROJECT_ACTOR_ID}`"
+        )));
+    }
+    let valid_from = result
+        .valid_from
+        .as_deref()
+        .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+        .ok_or_else(|| {
+            ApiError::bad_request(
+                "cannot configure Engram work-authority grant because valid_from is missing or invalid",
+            )
+        })?;
+    let valid_until = result
+        .valid_until
+        .as_deref()
+        .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+        .ok_or_else(|| {
+            ApiError::bad_request(
+                "cannot configure Engram work-authority grant because valid_until is missing or invalid",
+            )
+        })?;
+    let now = chrono::Utc::now();
+    if valid_from > now {
+        return Err(ApiError::bad_request(
+            "cannot configure Engram work-authority grant before its valid_from time",
+        ));
+    }
+    if valid_until <= now {
+        return Err(ApiError::bad_request(
+            "cannot configure Engram work-authority grant because it is expired",
+        ));
+    }
+    Ok(())
 }
 
 fn engram_command(binary_path: &FsPath) -> Command {
@@ -1385,7 +1513,18 @@ fn read_engram_work_binding_from_cli(
 ) -> std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError> {
     let next = run_engram_json_command_with_lock_retry(
         connection,
-        &["work", "--actor-id", &connection.actor_id, "--session-id", &connection.session_id, "next", "--sections", "focus"],
+        &[
+            "work",
+            "--actor-id",
+            &connection.actor_id,
+            "--session-id",
+            &connection.session_id,
+            "core",
+            "next",
+            "--sections",
+            "focus",
+            "--json",
+        ],
         timeout,
     )?;
     let Some(work_id) = next
@@ -1399,7 +1538,17 @@ fn read_engram_work_binding_from_cli(
     };
     let focus = run_engram_json_command_with_lock_retry(
         connection,
-        &["work", "--actor-id", &connection.actor_id, "--session-id", &connection.session_id, "focus", work_id],
+        &[
+            "work",
+            "--actor-id",
+            &connection.actor_id,
+            "--session-id",
+            &connection.session_id,
+            "core",
+            "focus",
+            work_id,
+            "--json",
+        ],
         timeout,
     )?;
     focus
@@ -2055,8 +2204,8 @@ struct EngramSessionState {
     bind_in_progress: bool,
     pending_dispatch: Option<EngramPendingDispatch>,
     rebind_required: bool,
-    /// Ephemeral settings-transition fence. New turns stay on the Phase 0
-    /// shadow path while the old connection drains and checkpoints.
+    /// Ephemeral settings-transition fence. New turns remain queued while the
+    /// old connection drains and checkpoints, then use the committed config.
     project_reset_in_progress: bool,
     disabled_reason: Option<String>,
 }
@@ -2191,7 +2340,9 @@ enum EngramControlCardDecision {
 #[serde(rename_all = "snake_case")]
 enum EngramControlCardDispatch {
     SentOnGrant,
+    /// Retained only so previously persisted shadow-mode cards still decode.
     SentWithoutGrant,
+    Withheld,
     Queued,
 }
 
@@ -2249,14 +2400,8 @@ fn parse_engram_result<T: for<'de> Deserialize<'de>>(
     })
 }
 
-fn engram_actor_id(agent: Agent) -> String {
-    match agent {
-        Agent::Claude => "termal:claude".to_owned(),
-        Agent::Codex => "termal:codex".to_owned(),
-        Agent::Cursor => "termal:acp:cursor".to_owned(),
-        Agent::Gemini => "termal:acp:gemini".to_owned(),
-        Agent::OpenCode => "termal:acp:opencode".to_owned(),
-    }
+fn engram_actor_id(_agent: Agent) -> String {
+    ENGRAM_PROJECT_ACTOR_ID.to_owned()
 }
 
 fn engram_effects_for_write_policy(write_policy: &DelegationWritePolicy) -> Vec<EngramEffect> {
@@ -2589,7 +2734,7 @@ impl AppState {
                     session_id,
                     EngramControlCardDecision::Grant,
                     None,
-                    EngramControlFailMode::Shadow,
+                    EngramControlFailMode::Enforced,
                     elapsed,
                 );
             }
@@ -2627,7 +2772,7 @@ impl AppState {
             let card = EngramControlCard {
                 schema_version: ENGRAM_CONTROL_SCHEMA_VERSION,
                 stage: EngramControlStage::Restart,
-                assurance: "advisory".to_owned(),
+                assurance: ENGRAM_CONTROL_ASSURANCE.to_owned(),
                 decision,
                 dispatch: if inner.sessions[index].engram.active_grant_id.is_some() {
                     EngramControlCardDispatch::SentOnGrant
@@ -2799,7 +2944,7 @@ impl AppState {
             Ok(()) => (
                 EngramControlCardDecision::Grant,
                 None,
-                EngramControlFailMode::Shadow,
+                EngramControlFailMode::Enforced,
             ),
             Err(error) => (
                 EngramControlCardDecision::Degraded,
@@ -2810,7 +2955,7 @@ impl AppState {
         let card = EngramControlCard {
             schema_version: ENGRAM_CONTROL_SCHEMA_VERSION,
             stage: EngramControlStage::Checkpoint,
-            assurance: "advisory".to_owned(),
+            assurance: ENGRAM_CONTROL_ASSURANCE.to_owned(),
             decision,
             // A checkpoint exists iff this turn was begun from a grant; the
             // checkpoint result does not rewrite how the prompt was sent.
@@ -3059,7 +3204,7 @@ impl AppState {
                                 None,
                                 Vec::new(),
                                 delivered_range,
-                                EngramControlFailMode::Shadow,
+                                EngramControlFailMode::Enforced,
                             );
                         }
                         Ok(EngramTurnBeginResponse::Refuse { code })
@@ -3217,7 +3362,7 @@ impl AppState {
                                 Some(code),
                                 Vec::new(),
                                 delivered_range,
-                                EngramControlFailMode::Shadow,
+                                EngramControlFailMode::Enforced,
                             );
                         }
                         Err(error) => {
@@ -3240,7 +3385,7 @@ impl AppState {
                         Some(code),
                         vec![directive],
                         None,
-                        EngramControlFailMode::Shadow,
+                        EngramControlFailMode::Enforced,
                     );
                 }
                 EngramDispatchEvaluation::Defer {
@@ -3254,7 +3399,7 @@ impl AppState {
                         Some(code),
                         Vec::new(),
                         None,
-                        EngramControlFailMode::Shadow,
+                        EngramControlFailMode::Enforced,
                     );
                 }
                 EngramDispatchEvaluation::Degraded { code, detail } => {
@@ -3278,7 +3423,7 @@ impl AppState {
         let dispatch = if active_grant_id.is_some() {
             EngramControlCardDispatch::SentOnGrant
         } else {
-            EngramControlCardDispatch::SentWithoutGrant
+            EngramControlCardDispatch::Withheld
         };
         let (refusal_code, defer_code) = if decision == EngramControlCardDecision::Defer {
             (None, refusal_code)
@@ -3288,7 +3433,7 @@ impl AppState {
         let card = EngramControlCard {
             schema_version: ENGRAM_CONTROL_SCHEMA_VERSION,
             stage: EngramControlStage::Dispatch,
-            assurance: "advisory".to_owned(),
+            assurance: ENGRAM_CONTROL_ASSURANCE.to_owned(),
             decision,
             dispatch,
             refusal_code,
@@ -3306,6 +3451,8 @@ impl AppState {
             repair_armed,
             next_intent: None,
         };
+        let delivery_is_authorized = decision == EngramControlCardDecision::Grant
+            && active_grant_id.is_some();
         let preparation = loop {
             match self.finish_engram_dispatch_record(
                 session_id,
@@ -3314,7 +3461,11 @@ impl AppState {
                 card.clone(),
             ) {
                 EngramDispatchRecordFinish::Ready => {
-                    break EngramTurnDeliveryPreparation::Ready;
+                    break if delivery_is_authorized {
+                        EngramTurnDeliveryPreparation::Ready
+                    } else {
+                        EngramTurnDeliveryPreparation::Rejected
+                    };
                 }
                 EngramDispatchRecordFinish::Superseded => {
                     break EngramTurnDeliveryPreparation::Superseded;
@@ -3468,10 +3619,10 @@ impl AppState {
                 Err(error) => {
                     // Persistence failures are ambiguous: SQLite may already
                     // have committed before a later hardening step failed.
-                    // Keep the mutated in-memory record authoritative and
-                    // continue Phase 0 delivery fail-open. Rejecting here would
-                    // leave a durable/in-memory dispatch card and open grant for
-                    // a prompt that was never sent to the runtime.
+                    // Keep the mutated in-memory record authoritative. A
+                    // granted turn must still reach the runtime so an open
+                    // Engram grant cannot be stranded after an ambiguous
+                    // post-commit persistence failure.
                     eprintln!(
                         "engram> session={session_id} failed persisting dispatch card; \
                          publishing in-memory state and continuing delivery: {error:#}"
@@ -4041,7 +4192,7 @@ impl AppState {
                 &EngramControlRequest::SessionBind {
                     external_ref: target.external_ref.clone(),
                     title: target.title.clone(),
-                    assurance: "advisory".to_owned(),
+                    assurance: ENGRAM_CONTROL_ASSURANCE.to_owned(),
                     mediated_effects: target.effects.clone(),
                     capability_map_revision: ENGRAM_CAPABILITY_MAP_REVISION,
                     work_binding,

@@ -14,6 +14,29 @@ if (-not $projectFile -or -not $engramHome) {
     exit 2
 }
 
+if (($args -contains "authority") -and ($args -contains "show")) {
+    $mode = (Get-Content -LiteralPath $projectFile -Raw).Trim()
+    $result = [ordered]@{
+        installed = $true
+        subject_actor_id = "termal"
+        issued_by = "test"
+        valid_from = "2020-01-01T00:00:00Z"
+        valid_until = "2099-01-01T00:00:00Z"
+        revoked_at = $null
+        operations = @("root_create", "plan", "claim", "dispose", "root_complete", "completion_drain")
+        scope = @{ kind = "project" }
+    }
+    switch ($mode) {
+        "fixture-authority-unknown" { $result.installed = $false; $result.subject_actor_id = $null; $result.valid_from = $null; $result.valid_until = $null; $result.operations = $null; $result.scope = $null }
+        "fixture-authority-revoked" { $result.revoked_at = "2026-08-30T22:26:46.8Z" }
+        "fixture-authority-expired" { $result.valid_until = "2020-01-02T00:00:00Z" }
+        "fixture-authority-future" { $result.valid_from = "2098-01-01T00:00:00Z" }
+        "fixture-authority-subject-mismatch" { $result.subject_actor_id = "another-actor" }
+    }
+    [Console]::Out.WriteLine(($result | ConvertTo-Json -Compress -Depth 10))
+    exit 0
+}
+
 if (($args -contains "authority") -and ($args -contains "revoke")) {
     $mode = (Get-Content -LiteralPath $projectFile -Raw).Trim()
     $args | ConvertTo-Json -Compress | Set-Content -LiteralPath (Join-Path $engramHome "engram-authority-revoke-args.json")
@@ -35,24 +58,27 @@ if (($args -contains "authority") -and ($args -contains "revoke")) {
 
 if ($args -contains "doctor") {
     $mode = (Get-Content -LiteralPath $projectFile -Raw).Trim()
+    $requiredAssurance = "turn_gated"
+    $control = @{
+        required_assurance = $requiredAssurance
+    }
     switch ($mode) {
-        "fixture-doctor-turn-gated" {
-            [Console]::Out.WriteLine("Control policy schema=1 epoch=1 required=TurnGated supported=[Observe, Communicate]")
-            exit 0
-        }
+        "fixture-doctor-advisory" { $control.required_assurance = "advisory" }
         "fixture-doctor-action-gated" {
-            [Console]::Out.WriteLine("Control policy schema=1 epoch=1 required=ActionGated supported=[Observe, Communicate, MutateLocal]")
-            exit 0
+            $control.required_assurance = "action_gated"
         }
         "fixture-doctor-missing-required" {
-            [Console]::Out.WriteLine("Engram store is healthy")
-            exit 0
-        }
-        default {
-            [Console]::Out.WriteLine("Control policy schema=1 epoch=1 required=Advisory supported=[Observe, Communicate]")
-            exit 0
+            $control = $null
         }
     }
+    $database = [System.IO.Path]::GetFullPath((Join-Path $engramHome "fixture-engram.db"))
+    [Console]::Out.WriteLine((@{
+        healthy = $true
+        control = $control
+        database = $database
+        project_id = $mode
+    } | ConvertTo-Json -Compress -Depth 10))
+    exit 0
 }
 
 $routingToken = "fixture-token"
@@ -171,6 +197,10 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
         continue
     }
     $request = $line | ConvertFrom-Json
+    if ($request.operation -eq "session_bind" -and $request.assurance -ne "turn_gated") {
+        Write-ControlError "invalid_assurance" "fixture requires turn_gated assurance"
+        continue
+    }
     if (-not $mode.StartsWith("fixture-stateful")) {
         if ($request.operation -ne "session_bind") {
             Write-ControlError "invalid_request" "fixture only accepts session_bind"

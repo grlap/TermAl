@@ -33,7 +33,7 @@ done
 
 [ -n "$project_file" ] || exit 2
 [ -n "$engram_home" ] || exit 2
-[ "$actor_id" = "termal:codex" ] || exit 3
+[ "$actor_id" = "termal" ] || exit 3
 [ "$session_id" = "fixture-session" ] || exit 3
 mode=$(tr -d '\r\n' < "$project_file")
 marker="$engram_home/work-next-read"

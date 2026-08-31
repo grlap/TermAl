@@ -259,6 +259,95 @@ fn reset_claude_turn_state_for_replay_generation<R: TurnRecorder + ?Sized>(
     Ok(true)
 }
 
+// Claude receives its MCP configuration as a private file path, never as an
+// inline JSON argv value: the Engram work-authority grant inside that
+// configuration is a bearer secret, and anything on a command line is readable
+// from every process listing. The file lives under TermAl's own data tree, is
+// created exclusively (`create_new`) with owner-only permissions on POSIX, is
+// released as soon as Claude's first valid stdout line proves the
+// configuration was read, and is removed by the guard's drop when the spawn
+// fails or the runtime exits without ever printing. There is deliberately no
+// boot-time sweep: TermAl holds no single-instance lock, so a second process
+// sharing the data directory could not tell a crashed owner's leftover from a
+// live file another process wrote a moment ago; a leftover after a crash in
+// that window carries only the grant hash that the protected state database
+// already stores.
+const CLAUDE_MCP_CONFIG_FILE_PREFIX: &str = "claude-mcp-";
+const CLAUDE_MCP_CONFIG_FILE_SUFFIX: &str = ".json";
+
+// Derived from the persistence path, never from HOME: production resolves to
+// the `~/.termal` tree next to `termal.sqlite`, and tests stay inside their
+// explicit temporary persistence root instead of touching the operator's
+// real data directory.
+fn claude_mcp_config_dir(persistence_path: &FsPath) -> PathBuf {
+    persistence_path
+        .parent()
+        .map(FsPath::to_path_buf)
+        .unwrap_or_else(|| persistence_path.to_path_buf())
+        .join("delegations")
+        .join("mcp")
+}
+
+/// Owns one private Claude MCP configuration file; dropping the guard removes it.
+struct ClaudeMcpConfigFile {
+    path: PathBuf,
+}
+
+impl Drop for ClaudeMcpConfigFile {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
+}
+
+/// Releases the private configuration as soon as Claude has proven it read it:
+/// the first valid stdout line means CLI startup and configuration parsing are
+/// complete, so the file must not stay readable for the rest of the session
+/// (an agent tool could otherwise follow its own `--mcp-config` argv path to
+/// the secret). Idempotent; the guard's drop remains the fallback.
+fn release_private_claude_mcp_config(slot: &mut Option<ClaudeMcpConfigFile>) {
+    slot.take();
+}
+
+fn claude_mcp_config_file_name(runtime_id: &str) -> String {
+    format!("{CLAUDE_MCP_CONFIG_FILE_PREFIX}{runtime_id}{CLAUDE_MCP_CONFIG_FILE_SUFFIX}")
+}
+
+fn write_private_claude_mcp_config(
+    dir: &FsPath,
+    runtime_id: &str,
+    contents: &str,
+) -> Result<ClaudeMcpConfigFile> {
+    fs::create_dir_all(dir)
+        .with_context(|| format!("failed to create `{}`", dir.display()))?;
+    // The directory must be a real directory in TermAl's data tree, not a
+    // symlink that redirects the secret somewhere else.
+    let dir_metadata = fs::symlink_metadata(dir)
+        .with_context(|| format!("failed to inspect `{}`", dir.display()))?;
+    if dir_metadata.file_type().is_symlink() || !dir_metadata.is_dir() {
+        return Err(anyhow!(
+            "refusing to write the Claude MCP configuration: `{}` is not a plain directory",
+            dir.display()
+        ));
+    }
+    let path = dir.join(claude_mcp_config_file_name(runtime_id));
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options
+        .open(&path)
+        .with_context(|| format!("failed to create `{}`", path.display()))?;
+    let guard = ClaudeMcpConfigFile { path };
+    file.write_all(contents.as_bytes())
+        .with_context(|| format!("failed to write `{}`", guard.path.display()))?;
+    file.sync_all()
+        .with_context(|| format!("failed to flush `{}`", guard.path.display()))?;
+    Ok(guard)
+}
+
 /// Spawns Claude runtime.
 fn spawn_claude_runtime(
     state: AppState,
@@ -279,6 +368,15 @@ fn spawn_claude_runtime(
 
     let runtime_id = Uuid::new_v4().to_string();
     let cwd = normalize_local_user_facing_path(&cwd);
+    // Written before the spawn so a spawn failure drops the guard and removes
+    // the file; on success the guard moves into the stdout reader, which
+    // releases it on Claude's first valid JSON line and otherwise drops it
+    // when the reader ends.
+    let mcp_config_file = write_private_claude_mcp_config(
+        &claude_mcp_config_dir(&state.persistence_path),
+        &runtime_id,
+        &delegation_mcp_config,
+    )?;
     let mut command = Command::new("claude");
     command.current_dir(&cwd);
     command.args(claude_cli_persistent_args(
@@ -287,7 +385,7 @@ fn spawn_claude_runtime(
         effort,
         resume_session_id.as_deref(),
     ));
-    command.arg("--mcp-config").arg(delegation_mcp_config);
+    command.arg("--mcp-config").arg(&mcp_config_file.path);
     command.env("CLAUDE_CODE_ENTRYPOINT", "termal");
 
     let mut child = command
@@ -411,6 +509,11 @@ fn spawn_claude_runtime(
         // permission checker compares `cd` targets against it so a same-folder `cd`
         // (a no-op) does not trip the cd+git exec-sink guard.
         let reader_cwd = cwd.clone();
+        // The private MCP configuration file is owned by the stdout reader: it
+        // is released on the first valid line Claude prints (startup and
+        // configuration parsing are complete by then) and, as the fallback,
+        // when this thread ends without ever seeing one.
+        let mut reader_mcp_config_file = Some(mcp_config_file);
         std::thread::spawn(move || {
             let mut reader = BufReader::new(stdout);
             let mut raw_line = String::new();
@@ -459,6 +562,7 @@ fn spawn_claude_runtime(
                         break;
                     }
                 };
+                release_private_claude_mcp_config(&mut reader_mcp_config_file);
 
                 let message_type = message.get("type").and_then(Value::as_str);
                 let is_result = message.get("type").and_then(Value::as_str) == Some("result");
@@ -753,7 +857,8 @@ fn spawn_claude_runtime(
         let wait_state = state.clone();
         let wait_process = process.clone();
         let wait_runtime_token = RuntimeToken::Claude(runtime_id.clone());
-        std::thread::spawn(move || match wait_process.wait() {
+        std::thread::spawn(move || {
+            match wait_process.wait() {
             Ok(status) if status.success() => {
                 let _ = wait_state.handle_runtime_exit_if_matches(
                     &wait_session_id,
@@ -774,6 +879,7 @@ fn spawn_claude_runtime(
                     &wait_runtime_token,
                     Some(&format!("failed waiting for Claude session: {err}")),
                 );
+            }
             }
         });
     }

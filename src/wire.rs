@@ -345,6 +345,7 @@ where
         .map(|mut project| {
             if let Some(settings) = project.engram.as_mut() {
                 settings.work_authority_grant = None;
+                settings.authority_store_key = None;
             }
             project
         })
@@ -1467,7 +1468,7 @@ struct CreateProjectRequest {
 }
 
 /// Patches one project's Engram host-adapter configuration. The route is
-/// intentionally project-scoped: Phase 0 never enables Engram globally by
+/// intentionally project-scoped so Engram is never enabled globally by
 /// accident, and a project can be disabled immediately without a restart.
 /// The authority grant follows the API's tri-state secret convention: an
 /// omitted field preserves the saved credential, `null` clears it, and a
@@ -1496,6 +1497,7 @@ impl UpdateProjectEngramSettingsRequest {
                 binary_path: self.binary_path,
                 home: self.home,
                 work_authority_grant: work_authority_grant_update.clone().flatten(),
+                authority_store_key: None,
                 deadline_ms: self.deadline_ms,
             },
             work_authority_grant_update,

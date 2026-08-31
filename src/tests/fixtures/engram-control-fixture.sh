@@ -25,6 +25,33 @@ done
 [ -n "$engram_home" ] || exit 2
 
 case " $original_args " in
+  *" authority show "*)
+    mode=$(tr -d '\r\n' < "$project_file")
+    case "$mode" in
+      fixture-authority-unknown)
+        printf '%s\n' '{"installed":false,"subject_actor_id":null,"issued_by":null,"valid_from":null,"valid_until":null,"revoked_at":null,"operations":null,"scope":null}'
+        ;;
+      fixture-authority-revoked)
+        printf '%s\n' '{"installed":true,"subject_actor_id":"termal","issued_by":"test","valid_from":"2020-01-01T00:00:00Z","valid_until":"2099-01-01T00:00:00Z","revoked_at":"2026-08-30T22:26:46.8Z","operations":["root_create"],"scope":{"kind":"project"}}'
+        ;;
+      fixture-authority-expired)
+        printf '%s\n' '{"installed":true,"subject_actor_id":"termal","issued_by":"test","valid_from":"2020-01-01T00:00:00Z","valid_until":"2020-01-02T00:00:00Z","revoked_at":null,"operations":["root_create"],"scope":{"kind":"project"}}'
+        ;;
+      fixture-authority-future)
+        printf '%s\n' '{"installed":true,"subject_actor_id":"termal","issued_by":"test","valid_from":"2098-01-01T00:00:00Z","valid_until":"2099-01-01T00:00:00Z","revoked_at":null,"operations":["root_create"],"scope":{"kind":"project"}}'
+        ;;
+      fixture-authority-subject-mismatch)
+        printf '%s\n' '{"installed":true,"subject_actor_id":"another-actor","issued_by":"test","valid_from":"2020-01-01T00:00:00Z","valid_until":"2099-01-01T00:00:00Z","revoked_at":null,"operations":["root_create"],"scope":{"kind":"project"}}'
+        ;;
+      *)
+        printf '%s\n' '{"installed":true,"subject_actor_id":"termal","issued_by":"test","valid_from":"2020-01-01T00:00:00Z","valid_until":"2099-01-01T00:00:00Z","revoked_at":null,"operations":["root_create","plan","claim","dispose","root_complete","completion_drain"],"scope":{"kind":"project"}}'
+        ;;
+    esac
+    exit 0
+    ;;
+esac
+
+case " $original_args " in
   *" authority revoke "*)
     printf '%s\n' "$original_args" > "$engram_home/engram-authority-revoke-args.txt"
     mode=$(tr -d '\r\n' < "$project_file")
@@ -47,20 +74,20 @@ esac
 
 if [ "$is_doctor" -eq 1 ]; then
   mode=$(tr -d '\r\n' < "$project_file")
+  control='{"required_assurance":"turn_gated"}'
   case "$mode" in
-    fixture-doctor-turn-gated)
-      printf '%s\n' 'Control policy schema=1 epoch=1 required=TurnGated supported=[Observe, Communicate]'
+    fixture-doctor-advisory)
+      control='{"required_assurance":"advisory"}'
       ;;
     fixture-doctor-action-gated)
-      printf '%s\n' 'Control policy schema=1 epoch=1 required=ActionGated supported=[Observe, Communicate, MutateLocal]'
+      control='{"required_assurance":"action_gated"}'
       ;;
     fixture-doctor-missing-required)
-      printf '%s\n' 'Engram store is healthy'
-      ;;
-    *)
-      printf '%s\n' 'Control policy schema=1 epoch=1 required=Advisory supported=[Observe, Communicate]'
+      control=null
       ;;
   esac
+  database="$engram_home/fixture-engram.db"
+  printf '{"healthy":true,"control":%s,"database":"%s","project_id":"%s"}\n' "$control" "$database" "$mode"
   exit 0
 fi
 
@@ -203,6 +230,10 @@ while IFS= read -r line; do
     fixture-stateful*)
       operation=$(json_field "$line" operation)
       request_token=$(json_field "$line" routing_token)
+      if [ "$operation" = "session_bind" ] && ! printf '%s' "$line" | grep -q '"assurance":"turn_gated"'; then
+        write_error invalid_assurance 'fixture requires turn_gated assurance'
+        continue
+      fi
       if [ "$operation" != "session_bind" ] && [ "$request_token" != "$routing_token" ]; then
         write_error control_session_token_mismatch 'routing token does not match'
         continue
@@ -395,7 +426,11 @@ $key|$intent|checkpointed||$grant"
     *)
       case "$line" in
         *'"operation":"session_bind"'*)
-          printf '%s\n' '{"status":"ok","result":{"routing_token":"fixture-token","status":{"phase":"ready"}}}'
+          if printf '%s' "$line" | grep -q '"assurance":"turn_gated"'; then
+            printf '%s\n' '{"status":"ok","result":{"routing_token":"fixture-token","status":{"phase":"ready"}}}'
+          else
+            write_error invalid_assurance 'fixture requires turn_gated assurance'
+          fi
           ;;
         *)
           printf '%s\n' '{"status":"error","error":{"code":"invalid_request","message":"fixture only accepts session_bind"}}'

@@ -168,6 +168,7 @@ fn project_has_live_quarantined_engram_mcp_runtime_locked(
 struct ProjectEngramMcpRuntimeFingerprint {
     binary_path: String,
     home: String,
+    store_key: Option<EngramAuthorityStoreKey>,
     work_authority_grant: Option<String>,
 }
 
@@ -179,6 +180,7 @@ struct ProjectEngramMcpRuntimeFingerprint {
 struct EngramAuthorityTuple {
     binary_path: Option<String>,
     home: String,
+    store_key: Option<EngramAuthorityStoreKey>,
     work_authority_grant: Option<String>,
 }
 
@@ -195,6 +197,7 @@ fn project_engram_mcp_runtime_fingerprint(
     Some(ProjectEngramMcpRuntimeFingerprint {
         binary_path: settings.binary_path.clone()?,
         home: settings.home.clone()?,
+        store_key: settings.authority_store_key.clone(),
         work_authority_grant: settings.work_authority_grant.clone(),
     })
 }
@@ -207,34 +210,8 @@ fn project_engram_authority_tuple(project: &Project) -> Option<EngramAuthorityTu
     Some(EngramAuthorityTuple {
         binary_path: settings.binary_path.clone(),
         home: settings.home.clone()?,
+        store_key: settings.authority_store_key.clone(),
         work_authority_grant: settings.work_authority_grant.clone(),
-    })
-}
-
-fn engram_project_id(project_root: &str) -> Option<String> {
-    let project_id = fs::read_to_string(FsPath::new(project_root).join(".engram-project"))
-        .ok()?
-        .trim()
-        .to_owned();
-    (!project_id.is_empty()).then_some(project_id)
-}
-
-/// Engram stores one project database at
-/// `<home>/projects/<sha256(trimmed project id)>/engram.db`. The project id is
-/// the trimmed content of the tracked `.engram-project` file. A minted grant
-/// always has an existing database and is bound to this exact `(database,
-/// project_id)` pair. Keep this layout contract aligned with Engram's
-/// `src/project.rs` and store-opening path until `doctor --json` exposes it.
-fn engram_store_key(project_root: &str, home: &str) -> Option<EngramAuthorityStoreKey> {
-    let project_id = engram_project_id(project_root)?;
-    let database_path = FsPath::new(home.trim())
-        .join("projects")
-        .join(sha256_hex(project_id.as_bytes()))
-        .join("engram.db");
-    let database_path = fs::canonicalize(database_path).ok()?;
-    Some(EngramAuthorityStoreKey {
-        database_path: normalize_user_facing_path(&database_path),
-        project_id,
     })
 }
 
@@ -275,11 +252,13 @@ fn lexically_normalized_absolute_paths_match(left: &str, right: &str) -> bool {
     }
 }
 
-fn engram_authority_stores_match(project_root: &str, left_home: &str, right_home: &str) -> bool {
-    match (
-        engram_store_key(project_root, left_home),
-        engram_store_key(project_root, right_home),
-    ) {
+fn engram_authority_stores_match(
+    left_key: Option<&EngramAuthorityStoreKey>,
+    left_home: &str,
+    right_key: Option<&EngramAuthorityStoreKey>,
+    right_home: &str,
+) -> bool {
+    match (left_key, right_key) {
         (Some(left), Some(right)) => left == right,
         _ => lexically_normalized_absolute_paths_match(left_home, right_home),
     }
@@ -390,7 +369,10 @@ fn retired_engram_work_authority_grants_for_targets(
             let runnable = targets
                 .iter()
                 .any(|target| target.work_authority_grant == *grant_hash);
-            let project_id = engram_project_id(&project.root_path);
+            let store_key = settings.authority_store_key.clone();
+            let project_id = store_key
+                .as_ref()
+                .map(|store_key| store_key.project_id.clone());
             let mut reason = reason.to_owned();
             if !runnable || project_id.is_none() {
                 let unavailable = match (settings.binary_path.as_ref(), project_id.as_ref()) {
@@ -404,7 +386,7 @@ fn retired_engram_work_authority_grants_for_targets(
             Some(EngramRetiredWorkAuthorityGrant {
                 home: home.clone(),
                 project_root: project.root_path.clone(),
-                store_key: engram_store_key(&project.root_path, home),
+                store_key,
                 project_id: project_id.unwrap_or_default(),
                 grant_hash: grant_hash.clone(),
                 retired_at: retired_at.clone(),
@@ -420,8 +402,12 @@ fn retired_engram_work_authority_grants_for_targets(
             EngramRetiredWorkAuthorityGrant {
                 home: target.home.clone(),
                 project_root: target.project_root.clone(),
-                store_key: engram_store_key(&target.project_root, &target.home),
-                project_id: engram_project_id(&target.project_root).unwrap_or_default(),
+                store_key: target.store_key.clone(),
+                project_id: target
+                    .store_key
+                    .as_ref()
+                    .map(|store_key| store_key.project_id.clone())
+                    .unwrap_or_default(),
                 grant_hash: target.work_authority_grant.clone(),
                 retired_at: retired_at.clone(),
                 reason: reason.to_owned(),
@@ -622,6 +608,7 @@ fn project_engram_authority_revocation_targets_locked(
             binary_path: binary_path.clone(),
             home: home.clone(),
             project_root: project.root_path.clone(),
+            store_key: settings.authority_store_key.clone(),
             work_authority_grant: work_authority_grant.clone(),
         });
     }
@@ -645,6 +632,7 @@ fn project_engram_authority_revocation_targets_locked(
             binary_path: installed.binary_path.clone(),
             home: installed.home.clone(),
             project_root: project.root_path.clone(),
+            store_key: installed.store_key.clone(),
             work_authority_grant: work_authority_grant.clone(),
         });
     }
@@ -666,8 +654,12 @@ fn extend_with_unconfirmed_engram_authority_targets(
     let current_identity = EngramRetiredWorkAuthorityGrant {
         home: home.clone(),
         project_root: project.root_path.clone(),
-        store_key: engram_store_key(&project.root_path, home),
-        project_id: engram_project_id(&project.root_path).unwrap_or_default(),
+        store_key: settings.authority_store_key.clone(),
+        project_id: settings
+            .authority_store_key
+            .as_ref()
+            .map(|store_key| store_key.project_id.clone())
+            .unwrap_or_default(),
         grant_hash: String::new(),
         retired_at: String::new(),
         reason: String::new(),
@@ -686,6 +678,7 @@ fn extend_with_unconfirmed_engram_authority_targets(
             } else {
                 tombstone.project_root.clone()
             },
+            store_key: tombstone.store_key.clone(),
             work_authority_grant: tombstone.grant_hash.clone(),
         });
     }
@@ -709,7 +702,12 @@ fn retain_superseded_engram_authority_targets(
         return;
     };
     targets.retain(|target| {
-        !engram_authority_stores_match(&target.project_root, &target.home, &next.home)
+        !engram_authority_stores_match(
+            target.store_key.as_ref(),
+            &target.home,
+            next.store_key.as_ref(),
+            &next.home,
+        )
             || Some(target.work_authority_grant.as_str())
                 != next.work_authority_grant.as_deref()
     });
@@ -804,8 +802,11 @@ fn retired_engram_authority_belongs_to_project(
             &project.root_path,
         ))
         || (!tombstone.project_id.is_empty()
-            && engram_project_id(&project.root_path).as_deref()
-                == Some(tombstone.project_id.as_str()))
+            && project
+                .engram
+                .as_ref()
+                .and_then(|settings| settings.authority_store_key.as_ref())
+                .is_some_and(|store_key| store_key.project_id == tombstone.project_id))
 }
 
 fn append_engram_cleanup_degraded_notices_locked(
@@ -1709,9 +1710,19 @@ impl AppState {
             validate_engram_project_home_for_update(&settings)?;
         }
         if settings.enabled && !pure_authority_clear {
-            validate_engram_project_enablement(&project_snapshot, &settings)?;
+            settings.authority_store_key = Some(validate_engram_project_enablement(
+                &project_snapshot,
+                &settings,
+            )?);
+        } else {
+            settings.authority_store_key = project_snapshot.engram.as_ref().and_then(|current| {
+                (current.home == settings.home)
+                    .then(|| current.authority_store_key.clone())
+                    .flatten()
+            });
         }
         reject_retired_engram_work_authority_grant(&settings, &retired_work_authority_grants)?;
+        validate_engram_project_work_authority(&project_snapshot, &settings)?;
 
         let mut updated_project_snapshot = project_snapshot.clone();
         updated_project_snapshot.engram = Some(settings.clone());
@@ -1729,8 +1740,9 @@ impl AppState {
                 previous.binary_path != next.binary_path
                     || previous.work_authority_grant != next.work_authority_grant
                     || !engram_authority_stores_match(
-                        &project_snapshot.root_path,
+                        previous.store_key.as_ref(),
                         &previous.home,
+                        next.store_key.as_ref(),
                         &next.home,
                     )
             }
@@ -1743,8 +1755,9 @@ impl AppState {
                 previous.work_authority_grant.is_some()
                     && next_authority.as_ref().is_none_or(|next| {
                         !engram_authority_stores_match(
-                            &project_snapshot.root_path,
+                            previous.store_key.as_ref(),
                             &previous.home,
+                            next.store_key.as_ref(),
                             &next.home,
                         ) || previous.work_authority_grant != next.work_authority_grant
                     })
@@ -1807,8 +1820,9 @@ impl AppState {
                     || current.binary_path != settings.binary_path
                     || match (current.home.as_deref(), settings.home.as_deref()) {
                         (Some(current_home), Some(next_home)) => !engram_authority_stores_match(
-                            &project_snapshot.root_path,
+                            current.authority_store_key.as_ref(),
                             current_home,
+                            settings.authority_store_key.as_ref(),
                             next_home,
                         ),
                         (None, None) => false,
@@ -1820,8 +1834,9 @@ impl AppState {
                 // but a home change must drain the old connection first.
                 match (current.home.as_deref(), settings.home.as_deref()) {
                     (Some(current_home), Some(next_home)) => !engram_authority_stores_match(
-                        &project_snapshot.root_path,
+                        current.authority_store_key.as_ref(),
                         current_home,
+                        settings.authority_store_key.as_ref(),
                         next_home,
                     ),
                     (None, None) => false,
@@ -2306,7 +2321,7 @@ impl AppState {
 
         // Fence every session before releasing the lock. The generation bump
         // rejects an already-evaluating dispatch; the ephemeral flag keeps new
-        // dispatches on the Phase 0 shadow path while the old connection drains.
+        // dispatches queued until the replacement authority is committed.
         let (
             session_ids,
             reset_target_candidates,
@@ -2447,8 +2462,9 @@ impl AppState {
             && project_snapshot.engram.as_ref().is_some_and(|current| {
                 match (current.home.as_deref(), settings.home.as_deref()) {
                     (Some(current_home), Some(next_home)) => engram_authority_stores_match(
-                        &project_snapshot.root_path,
+                        current.authority_store_key.as_ref(),
                         current_home,
+                        settings.authority_store_key.as_ref(),
                         next_home,
                     ),
                     _ => false,
@@ -2895,7 +2911,7 @@ impl AppState {
             EngramControlCard {
                 schema_version: ENGRAM_CONTROL_SCHEMA_VERSION,
                 stage: EngramControlStage::Checkpoint,
-                assurance: "advisory".to_owned(),
+                assurance: ENGRAM_CONTROL_ASSURANCE.to_owned(),
                 decision: EngramControlCardDecision::Degraded,
                 dispatch: EngramControlCardDispatch::SentOnGrant,
                 refusal_code: Some(
@@ -3167,7 +3183,20 @@ impl AppState {
         {
             return;
         }
-        for session_id in session_ids {
+        let mut affected_session_ids = session_ids.to_vec();
+        affected_session_ids.extend(
+            inner
+                .sessions
+                .iter()
+                .filter(|record| {
+                    engram_project_for_session_locked(&inner, &record.session.id)
+                        .is_some_and(|project| project.id == project_id)
+                })
+                .map(|record| record.session.id.clone()),
+        );
+        affected_session_ids.sort();
+        affected_session_ids.dedup();
+        for session_id in &affected_session_ids {
             if let Some(index) = inner.find_session_index(session_id) {
                 let record = inner
                     .session_mut_by_index(index)
@@ -3176,6 +3205,23 @@ impl AppState {
                 record
                     .engram
                     .clear_checkpoint_if_owned_by(Some(owner_generation));
+            }
+        }
+        drop(inner);
+        for session_id in affected_session_ids {
+            match self.dispatch_next_queued_turn(&session_id, false) {
+                Ok(Some(dispatch)) => {
+                    if let Err(error) = deliver_turn_dispatch(self, dispatch) {
+                        eprintln!(
+                            "engram> session={session_id} failed delivering queued turn after project-reset release: {}",
+                            error.message
+                        );
+                    }
+                }
+                Ok(None) => {}
+                Err(error) => eprintln!(
+                    "engram> session={session_id} failed resuming queue after project-reset release: {error:#}"
+                ),
             }
         }
     }
@@ -3196,8 +3242,21 @@ impl AppState {
         let project_fence_release_failed = !inner
             .engram_project_resets
             .release(project_id, owner_generation);
+        let mut affected_session_ids = session_ids.to_vec();
         if !project_fence_release_failed {
-            for session_id in session_ids {
+            affected_session_ids.extend(
+                inner
+                    .sessions
+                    .iter()
+                    .filter(|record| {
+                        engram_project_for_session_locked(&inner, &record.session.id)
+                            .is_some_and(|project| project.id == project_id)
+                    })
+                    .map(|record| record.session.id.clone()),
+            );
+            affected_session_ids.sort();
+            affected_session_ids.dedup();
+            for session_id in &affected_session_ids {
                 if let Some(index) = inner.find_session_index(session_id) {
                     let record = inner
                         .session_mut_by_index(index)
@@ -3219,6 +3278,25 @@ impl AppState {
         }
         if runtime_changed {
             self.publish_state_locked(&inner);
+        }
+        drop(inner);
+        if !project_fence_release_failed {
+            for session_id in affected_session_ids {
+                match self.dispatch_next_queued_turn(&session_id, false) {
+                    Ok(Some(dispatch)) => {
+                        if let Err(error) = deliver_turn_dispatch(self, dispatch) {
+                            eprintln!(
+                                "engram> session={session_id} failed delivering queued turn after project-reset/runtime-fence release: {}",
+                                error.message
+                            );
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(error) => eprintln!(
+                        "engram> session={session_id} failed resuming queue after project-reset/runtime-fence release: {error:#}"
+                    ),
+                }
+            }
         }
         release
     }

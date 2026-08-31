@@ -870,6 +870,15 @@ impl AppState {
             let Some(index) = inner.find_session_index(session_id) else {
                 return Ok(None);
             };
+            let project_reset_fenced = inner.sessions[index].engram.project_reset_in_progress
+                || engram_project_for_session_locked(&inner, session_id)
+                    .is_some_and(|project| inner.engram_project_resets.contains(&project.id));
+            if project_reset_fenced {
+                // A settings transaction has not yet committed the authority
+                // that should govern this prompt. Keep the queue head durable
+                // until the exact project-reset owner releases its fence.
+                return Ok(None);
+            }
             if !Self::engram_child_requires_dispatch_card_locked(&inner, session_id) {
                 let record = &inner.sessions[index];
                 if record.runtime_stop_in_progress {
@@ -925,6 +934,12 @@ impl AppState {
                     return Ok(None);
                 };
                 let record = &inner.sessions[index];
+                let project_reset_fenced = record.engram.project_reset_in_progress
+                    || engram_project_for_session_locked(&inner, session_id)
+                        .is_some_and(|project| inner.engram_project_resets.contains(&project.id));
+                if project_reset_fenced {
+                    return Ok(None);
+                }
                 if record.runtime_stop_in_progress {
                     return Ok(None);
                 }
@@ -1120,10 +1135,14 @@ impl AppState {
             return Err(ApiError::bad_request("prompt cannot be empty"));
         }
 
+        let project_reset_fenced = inner.sessions[index].engram.project_reset_in_progress
+            || engram_project_for_session_locked(&inner, session_id)
+                .is_some_and(|project| inner.engram_project_resets.contains(&project.id));
         let session_is_busy = matches!(
             inner.sessions[index].session.status,
             SessionStatus::Active | SessionStatus::Approval
-        ) || inner.sessions[index].runtime_stop_in_progress;
+        ) || inner.sessions[index].runtime_stop_in_progress
+            || project_reset_fenced;
         let has_queued_prompts = !inner.sessions[index].queued_prompts.is_empty();
         let blocked_queue_contains_user_prompt = inner.sessions[index]
             .queued_prompts
@@ -1139,6 +1158,19 @@ impl AppState {
         } else {
             QueuedPromptSource::User
         };
+        let explicit_reset_resume = project_reset_fenced
+            && orchestrator_auto_dispatch_blocked
+            && queued_prompt_source == QueuedPromptSource::User;
+        if explicit_reset_resume {
+            // A user prompt accepted while a project-settings fence is active
+            // is still an explicit resume. Keep it durable until the fence is
+            // released, but clear Stop's automatic-dispatch latch now so the
+            // committed settings can drain that prompt without another click.
+            inner
+                .session_mut_by_index(index)
+                .expect("session index should be valid")
+                .orchestrator_auto_dispatch_blocked = false;
+        }
         // Stop leaves a persisted explicit-resume latch. Routine mailbox
         // notifications must join the durable queue even when it was empty at
         // the moment of Stop; only a later user prompt may lift the latch.
@@ -1350,6 +1382,13 @@ impl AppState {
                     attachments,
                     queued_prompt_source,
                 );
+                if explicit_reset_resume {
+                    prioritize_user_queued_prompts(
+                        inner
+                            .session_mut_by_index(index)
+                            .expect("session index should be valid"),
+                    );
+                }
                 self.commit_locked(&mut inner).map_err(|err| {
                     ApiError::internal(format!("failed to persist session state: {err:#}"))
                 })?;
@@ -1521,6 +1560,7 @@ impl AppState {
         );
         if recover_blocked_queue_with_existing_user_prompt
             || prioritize_manual_dispatch_over_blocked_queue
+            || explicit_reset_resume
         {
             prioritize_user_queued_prompts(
                 inner

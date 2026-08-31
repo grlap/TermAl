@@ -1494,6 +1494,7 @@ impl StateInner {
 struct EngramMcpInstalledDescriptor {
     binary_path: String,
     home: String,
+    store_key: Option<EngramAuthorityStoreKey>,
     work_authority_grant: Option<String>,
 }
 
@@ -1502,6 +1503,7 @@ struct EngramAuthorityRevocationTarget {
     binary_path: String,
     home: String,
     project_root: String,
+    store_key: Option<EngramAuthorityStoreKey>,
     work_authority_grant: String,
 }
 
@@ -1512,6 +1514,7 @@ impl std::fmt::Debug for EngramAuthorityRevocationTarget {
             .field("binary_path", &self.binary_path)
             .field("home", &self.home)
             .field("project_root", &self.project_root)
+            .field("store_key", &self.store_key)
             .field("work_authority_grant", &"[REDACTED]")
             .finish()
     }
@@ -1523,6 +1526,7 @@ impl std::fmt::Debug for EngramMcpInstalledDescriptor {
             .debug_struct("EngramMcpInstalledDescriptor")
             .field("binary_path", &self.binary_path)
             .field("home", &self.home)
+            .field("store_key", &self.store_key)
             .field(
                 "work_authority_grant",
                 &self.work_authority_grant.as_ref().map(|_| "[REDACTED]"),

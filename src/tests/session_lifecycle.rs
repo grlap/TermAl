@@ -200,6 +200,104 @@ fn lightweight_test_state_rejects_direct_claude_runtime_spawning() {
 }
 
 #[test]
+fn private_claude_mcp_config_file_is_exclusive_owner_only_and_removed_on_drop() {
+    let temp = TestTempRoot::create("termal-claude-mcp-config-file");
+    let dir = temp.path().join("delegations").join("mcp");
+    let contents = r#"{"mcpServers":{"engram":{"env":{"ENGRAM_WORK_AUTHORITY_GRANT":"operator-secret-grant"}}}}"#;
+
+    let guard = write_private_claude_mcp_config(&dir, "runtime-a", contents)
+        .expect("the private MCP configuration should be written");
+    assert_eq!(guard.path, dir.join("claude-mcp-runtime-a.json"));
+    assert_eq!(
+        fs::read_to_string(&guard.path).expect("the file should be readable"),
+        contents
+    );
+    // Exclusive creation: a second file for the same runtime id must fail
+    // instead of silently overwriting or truncating.
+    assert!(write_private_claude_mcp_config(&dir, "runtime-a", "{}").is_err());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = fs::metadata(&guard.path)
+            .expect("metadata should be readable")
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600);
+    }
+    // The path handed to Claude's argv never carries the secret itself.
+    assert!(
+        !guard
+            .path
+            .to_string_lossy()
+            .contains("operator-secret-grant")
+    );
+
+    let path = guard.path.clone();
+    drop(guard);
+    assert!(!path.exists(), "dropping the guard must remove the file");
+}
+
+#[test]
+fn private_claude_mcp_config_write_refuses_a_symlinked_directory() {
+    #[cfg(unix)]
+    {
+        let temp = TestTempRoot::create("termal-claude-mcp-config-symlink");
+        let real = temp.path().join("elsewhere");
+        fs::create_dir_all(&real).expect("real directory should exist");
+        let link = temp.path().join("mcp");
+        std::os::unix::fs::symlink(&real, &link).expect("symlink should be created");
+        assert!(write_private_claude_mcp_config(&link, "runtime-b", "{}").is_err());
+        assert!(
+            fs::read_dir(&real)
+                .expect("real directory should be listable")
+                .next()
+                .is_none()
+        );
+    }
+}
+
+#[test]
+fn claude_mcp_config_dir_stays_beside_the_persistence_root_not_under_home() {
+    let temp = TestTempRoot::create("termal-claude-mcp-config-dir");
+    let persistence_path = temp.path().join("state").join("termal.sqlite");
+    let dir = claude_mcp_config_dir(&persistence_path);
+    assert_eq!(
+        dir,
+        temp.path().join("state").join("delegations").join("mcp")
+    );
+    for home in [std::env::var_os("HOME"), std::env::var_os("USERPROFILE")]
+        .into_iter()
+        .flatten()
+    {
+        let home = PathBuf::from(home).join(".termal");
+        assert!(
+            !dir.starts_with(&home),
+            "test persistence roots must never resolve into the operator's real data tree"
+        );
+    }
+}
+
+#[test]
+fn private_claude_mcp_config_is_released_on_first_valid_stdout_line() {
+    let temp = TestTempRoot::create("termal-claude-mcp-config-release");
+    let dir = temp.path().join("delegations").join("mcp");
+    let guard = write_private_claude_mcp_config(&dir, "runtime-c", "{}")
+        .expect("the private MCP configuration should be written");
+    let path = guard.path.clone();
+    let mut slot = Some(guard);
+
+    release_private_claude_mcp_config(&mut slot);
+    assert!(slot.is_none());
+    assert!(
+        !path.exists(),
+        "the first valid stdout line must remove the secret file"
+    );
+    // Idempotent: later lines and the exit fallback find nothing to do.
+    release_private_claude_mcp_config(&mut slot);
+    assert!(!path.exists());
+}
+
+#[test]
 fn lightweight_test_state_rejects_direct_shared_codex_runtime_spawning() {
     let state = test_app_state();
     let result = spawn_shared_codex_runtime(state);
