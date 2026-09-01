@@ -573,12 +573,13 @@ than aborting the process and hiding every healthy session. Schema-v1
 transcript extraction is likewise batched and skips malformed session rows.
 
 Coordination bootstrap runs before the persist worker, coordination stores,
-and HTTP listener. When upgrading from the former single-database layout, it
-attaches `termal.sqlite` read-only and copies all mailbox/board rows into
-`coordination.sqlite`; copy, invariant verification, and the destination
-migration marker commit atomically in one destination transaction. The old
-tables remain inert so an interrupted or rolled-back migration never destroys
-the only copy.
+and HTTP listener. An empty `coordination.sqlite` is initialized atomically
+with the current schema; an existing file must already match the current
+schema version, table set, and column order. TermAl never opens
+`termal.sqlite` to recover coordination rows. Because no released
+single-database history exists, obsolete developer coordination databases are
+rejected with instructions to move or delete `coordination.sqlite` and reset
+local mailboxes and boards.
 
 ---
 
@@ -1249,7 +1250,7 @@ termal/
 |   |-- paths.rs             # path resolution, canonicalization, project-scoped guards
 |   |
 |   |-- # Durable coordination
-|   |-- coordination_persist.rs # coordination.sqlite schema + atomic legacy migration
+|   |-- coordination_persist.rs # current coordination.sqlite schema init + validation
 |   |-- mailboxes.rs         # durable edge-triggered peer messages + cursors
 |   |-- delegation_review_results.rs # typed review validation, projection + recovery
 |   |-- coordination_board.rs # level-triggered project facts + CAS/idempotency

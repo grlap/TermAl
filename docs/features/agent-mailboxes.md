@@ -304,11 +304,12 @@ caller can safely replay them. WAL still permits concurrent readers.
 External-process or OS-level lock exhaustion uses the same retryable
 classification instead of an internal-error `500`.
 
-On the first boot of this layout, TermAl attaches the legacy `termal.sqlite`
-read-only and copies mailbox plus board rows into `coordination.sqlite`. Copy,
-verification, and the destination-owned completion marker commit in one
-destination transaction before either coordination store or the HTTP listener
-is available. Legacy coordination tables remain inert and are not deleted.
+Before either coordination store or the HTTP listener is available, TermAl
+initializes an empty `coordination.sqlite` with the current schema or validates
+that an existing file already has the exact current version, tables, and
+columns. It does not inspect or attach `termal.sqlite` for mailbox or board
+rows. Obsolete unreleased developer schemas are rejected with a clear
+move/delete-and-reset instruction instead of being migrated.
 
 While an original dispatch is still finalizing, duplicate requests may receive
 repeated retryable `503` responses; retrying the same idempotency key remains
@@ -350,18 +351,10 @@ commit. Transport failures still instruct callers to re-list the mailbox
 cursor before constructing the next compare-and-swap; replaying an already
 satisfied acknowledgement is safe.
 
-The mutable row lifecycle remains stored in the historical
-`notification_disposition` column for database compatibility. A separate
+The mutable row lifecycle is stored in `notification_disposition`. A separate
 immutable `dispatch_outcome` column preserves duplicate receipt semantics.
-Existing rows are backfilled into the documented immutable receipt domain:
-`queuedBehindActiveTurn` and `deliveredToIdleSession` remain exact, while
-`recoveredWake` or any unknown historical lifecycle value maps conservatively
-to `durableButNotWoken` because it cannot reconstruct the original
-point-in-time dispatch outcome. Preserving a legacy
-`deliveredToIdleSession` value is necessarily an approximation: the historical
-single column cannot distinguish direct delivery from delivery reached after a
-recovery wake. Do not use pre-migration receipt outcomes to derive recovery
-statistics.
+Both columns are part of the current schema from database creation onward;
+there is no legacy dispatch-outcome backfill.
 
 See [Architecture](../architecture.md) for the system-level API and persistence
 overview.

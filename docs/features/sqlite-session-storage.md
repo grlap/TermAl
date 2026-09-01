@@ -252,39 +252,23 @@ On startup:
    delegation rows, or bootstrap an empty local state when it has no app
    metadata yet.
 2. Bootstrap `coordination.sqlite` before any coordination stores, background
-   persistence worker, or HTTP listener.
-3. On first split-database boot, attach `termal.sqlite` read-only and copy the
-   legacy mailbox/board rows. Copy, invariant verification, and the
-   destination-owned migration marker commit atomically.
-4. Open the long-lived mailbox and board connections and start a dedicated
+   persistence worker, or HTTP listener. An empty file receives the complete
+   current schema atomically; an existing file must already match the current
+   schema version, table set, and columns.
+3. Open the long-lived mailbox and board connections and start a dedicated
    coordination-cleanup worker alongside the primary-state persist worker.
-5. Queue the boot-state persistence tick. Once it confirms any durable
+4. Queue the boot-state persistence tick. Once it confirms any durable
    project-deletion outbox in `termal.sqlite`, it signals the cleanup worker;
    completed cleanup wakes primary persistence again to clear the outbox.
    Failed or interrupted cleanup remains durable for retry. Because the
    deleted project cannot authorize new board traffic, the HTTP listener can
    open without waiting for a large cascade or a backlog of scopes.
 
-That first-boot attachment assumes one TermAl process owns the data directory.
-Do not start a second instance against the same `~/.termal` (even on another
-port) while migration is pending: its read-only attachment would still open
-the first process's live WAL database. Stop the existing process before
-repairing or retrying a marker-absent migration.
-
-If legacy verification fails, the destination copy and migration marker roll
-back together and TermAl refuses to start; the HTTP listener has not opened,
-so no live coordination traffic can race recovery. Stop TermAl and preserve
-both database files. Repair or restore the legacy `termal.sqlite`, or install
-a build that understands the reported legacy schema, then restart: the absent
-marker makes the import retry from the beginning. Do not insert the marker by
-hand. A marker-absent destination must contain no mailbox, board, or deleted-
-scope rows: TermAl refuses to merge an independently populated destination
-because same-key payload conflicts cannot be resolved safely. If
-`coordination.sqlite` was created solely by that failed first boot and it is
-certain no earlier split-database build ever served traffic from it, moving
-that unopened destination aside is safe and lets TermAl create a fresh
-destination; otherwise retain it for diagnosis rather than discarding durable
-mailbox or board data.
+TermAl does not attach `termal.sqlite` or import coordination rows from the
+former unreleased single-database layout. If validation reports an unsupported
+`coordination.sqlite`, stop TermAl and move the file aside for diagnosis or
+delete it to reset local mailboxes and boards, then restart. Current-schema
+files are never rewritten merely to satisfy startup validation.
 
 ## Frontend Changes
 

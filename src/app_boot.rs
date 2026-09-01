@@ -437,12 +437,12 @@ impl AppState {
         let persist_path_for_persist = Arc::new(persistence_path.clone());
         let persist_path_for_state = Arc::clone(&persist_path_for_persist);
         let coordination_path = resolve_coordination_persistence_path(&persistence_path);
-        // Coordination bootstrap is a hard boot barrier: the destination schema
-        // and any legacy import commit before either store exists, before the
-        // persist worker starts, and therefore before run_server can expose an
-        // HTTP listener. No append may mint sequences in an empty destination
-        // ahead of legacy history.
-        bootstrap_coordination_database(&persistence_path, &coordination_path)?;
+        // Coordination bootstrap is a hard boot barrier: a fresh current schema
+        // is initialized, or an existing database is validated, before either
+        // store exists, before the persist worker starts, and therefore before
+        // run_server can expose an HTTP listener. Legacy local schemas are
+        // rejected with reset guidance rather than migrated.
+        bootstrap_coordination_database(&coordination_path)?;
         let mailbox_store = Arc::new(MailboxStore::open(&coordination_path)?);
         // Mailboxes and the level-triggered board deliberately share the small
         // coordination database and its FIFO writer admission, while session

@@ -101,19 +101,16 @@ fn state_inner_from_persisted_value(encoded: Value) -> Result<StateInner> {
 }
 
 #[test]
-fn app_state_boot_migrates_coordination_before_stores_can_append() {
-    let state_root = PersistTestRoot::new("boot-coordination-migration");
+fn app_state_boot_ignores_legacy_coordination_tables_and_initializes_current_store() {
+    let state_root = PersistTestRoot::new("boot-current-coordination");
     let persistence_path = state_root.path().join("termal.sqlite");
     let coordination_path = resolve_coordination_persistence_path(&persistence_path);
     let templates_path = state_root.path().join("orchestrators.json");
     persist_state(&persistence_path, &StateInner::new())
-        .expect("empty legacy application state should persist");
+        .expect("empty application state should persist");
     {
-        // Reproduce the actual pre-board upgrade shape directly. Opening this
-        // fixture through MailboxStore would create every current board table
-        // and leave the production "mailboxes only" branch untested.
         let connection = rusqlite::Connection::open(&persistence_path)
-            .expect("legacy state database should reopen");
+            .expect("primary state database should reopen");
         connection
             .execute_batch(
                 "
@@ -123,95 +120,16 @@ fn app_state_boot_migrates_coordination_before_stores_can_append() {
                   created_at TEXT NOT NULL,
                   next_sequence INTEGER NOT NULL
                 );
-                CREATE TABLE mailbox_participants (
-                  mailbox_id TEXT NOT NULL,
-                  session_id TEXT NOT NULL,
-                  display_name TEXT NOT NULL,
-                  processed_through INTEGER NOT NULL DEFAULT 0,
-                  joined_at TEXT NOT NULL,
-                  left_at TEXT,
-                  PRIMARY KEY (mailbox_id, session_id),
-                  FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id) ON DELETE CASCADE
-                );
-                CREATE TABLE mailbox_messages (
-                  id TEXT PRIMARY KEY,
-                  mailbox_id TEXT NOT NULL,
-                  sequence INTEGER NOT NULL,
-                  sender_session_id TEXT NOT NULL,
-                  sender_name TEXT NOT NULL,
-                  target_session_id TEXT NOT NULL,
-                  target_name TEXT NOT NULL,
-                  created_at TEXT NOT NULL,
-                  class TEXT NOT NULL CHECK (class = 'routine'),
-                  topic TEXT,
-                  state_stamp TEXT,
-                  body TEXT NOT NULL,
-                  idempotency_key TEXT NOT NULL,
-                  unread_depth_at_append INTEGER NOT NULL,
-                  notification_disposition TEXT NOT NULL,
-                  UNIQUE (mailbox_id, sequence),
-                  UNIQUE (sender_session_id, idempotency_key),
-                  FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id) ON DELETE CASCADE
+                INSERT INTO mailboxes(id, participant_key, created_at, next_sequence)
+                VALUES(
+                  'mailbox-obsolete-boot',
+                  'session-old-a\\nsession-old-b',
+                  '2026-07-26T00:00:00Z',
+                  2
                 );
                 ",
             )
-            .expect("pre-board mailbox schema should initialize");
-        let participant_key = mailbox_participant_key("session-boot-sender", "session-boot-target");
-        connection
-            .execute(
-                "INSERT INTO mailboxes(id, participant_key, created_at, next_sequence)
-                 VALUES('mailbox-legacy-boot', ?1, '2026-07-26T00:00:00Z', 2)",
-                rusqlite::params![participant_key],
-            )
-            .expect("legacy mailbox head should insert");
-        for (session_id, display_name) in [
-            ("session-boot-sender", "Sender"),
-            ("session-boot-target", "Target"),
-        ] {
-            connection
-                .execute(
-                    "INSERT INTO mailbox_participants(
-                       mailbox_id, session_id, display_name, processed_through,
-                       joined_at, left_at
-                     )
-                     VALUES('mailbox-legacy-boot', ?1, ?2, 0,
-                            '2026-07-26T00:00:00Z', NULL)",
-                    rusqlite::params![session_id, display_name],
-                )
-                .expect("legacy mailbox participant should insert");
-        }
-        connection
-            .execute(
-                "INSERT INTO mailbox_messages(
-                   id, mailbox_id, sequence, sender_session_id, sender_name,
-                   target_session_id, target_name, created_at, class, topic,
-                   state_stamp, body, idempotency_key, unread_depth_at_append,
-                   notification_disposition
-                 )
-                 VALUES(
-                   'mailbox-message-legacy-boot', 'mailbox-legacy-boot', 1,
-                   'session-boot-sender', 'Sender',
-                   'session-boot-target', 'Target',
-                   '2026-07-26T00:00:00Z', 'routine', 'boot-order',
-                   NULL, 'Legacy sequence one', 'boot-legacy-1', 1,
-                   'durableButNotWoken'
-                 )",
-                [],
-            )
-            .expect("legacy mailbox message should insert");
-        let board_table_count: u32 = connection
-            .query_row(
-                "SELECT COUNT(*)
-                 FROM sqlite_master
-                 WHERE type = 'table' AND name LIKE 'coordination_board_%'",
-                [],
-                |row| row.get(0),
-            )
-            .expect("legacy table inventory should query");
-        assert_eq!(
-            board_table_count, 0,
-            "pre-board installations must not be upgraded through a current-schema fixture"
-        );
+            .expect("obsolete embedded coordination fixture should initialize");
     }
 
     let state = AppState::new_with_paths(
@@ -219,51 +137,62 @@ fn app_state_boot_migrates_coordination_before_stores_can_append() {
         persistence_path.clone(),
         templates_path,
     )
-    .expect("AppState boot should migrate before opening coordination stores");
+    .expect("AppState boot should ignore coordination tables in the primary database");
     assert!(
         coordination_path.exists(),
         "boot should create the sibling coordination database"
     );
-    let migrated = state
-        .mailbox_store
-        .list_for_session("session-boot-target")
-        .expect("migrated mailbox should list");
-    assert_eq!(migrated.len(), 1);
-    assert_eq!(migrated[0].latest_sequence, 1);
-    assert_eq!(
-        migrated[0].unread_count, 1,
-        "missing target sessions must not make boot consume or lose the never-woken row"
+    assert!(
+        state
+            .mailbox_store
+            .list_for_session("session-old-b")
+            .expect("current mailbox store should list")
+            .is_empty(),
+        "obsolete primary-database coordination rows must not be imported"
     );
-    let migration_marker_count: u32 = state
+    let connection = state
         .mailbox_store
         .connection()
-        .expect("migrated mailbox connection should be available")
-        .query_row(
-            "SELECT COUNT(*) FROM meta WHERE key = ?1",
-            rusqlite::params![COORDINATION_LEGACY_IMPORT_KEY],
-            |row| row.get(0),
-        )
-        .expect("completed migration marker should query");
-    assert_eq!(migration_marker_count, 1);
+        .expect("current mailbox connection should be available");
+    let mut metadata_statement = connection
+        .prepare("SELECT key, value FROM meta ORDER BY key")
+        .expect("metadata query should prepare");
+    let metadata = metadata_statement
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .expect("metadata query should run")
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .expect("metadata should decode");
+    assert_eq!(
+        metadata,
+        vec![(
+            "coordination_schema_version".to_owned(),
+            COORDINATION_SQLITE_SCHEMA_VERSION.to_owned()
+        )],
+        "boot must create only current coordination metadata"
+    );
+    drop(metadata_statement);
+    drop(connection);
 
-    let next = state
+    let first = state
         .mailbox_store
         .append(&MailboxAppendInput {
-            sender_session_id: "session-boot-sender".to_owned(),
+            sender_session_id: "session-current-sender".to_owned(),
             sender_name: "Sender".to_owned(),
-            target_session_id: "session-boot-target".to_owned(),
+            target_session_id: "session-current-target".to_owned(),
             target_name: "Target".to_owned(),
-            body: "Post-cutover sequence two".to_owned(),
-            idempotency_key: "boot-cutover-2".to_owned(),
+            body: "First current-schema message".to_owned(),
+            idempotency_key: "current-boot-1".to_owned(),
             topic: Some("boot-order".to_owned()),
             state_stamp: None,
         })
-        .expect("first post-cutover append should continue the legacy sequence");
+        .expect("current mailbox append should succeed");
     assert_eq!(
-        next.sequence, 2,
-        "no coordination write may mint a fresh sequence before migration"
+        first.sequence, 1,
+        "fresh coordination history starts independently of obsolete embedded rows"
     );
-    drop(next);
+    drop(first);
     state.shutdown_persist_blocking();
 }
 
@@ -279,8 +208,8 @@ fn app_state_boot_hands_durable_project_board_cleanup_to_the_dedicated_worker() 
         .pending_coordination_scope_deletions
         .insert(scope_project_id.to_owned());
     persist_state(&persistence_path, &inner).expect("pending cleanup outbox should persist");
-    bootstrap_coordination_database(&persistence_path, &coordination_path)
-        .expect("coordination database should complete its legacy bootstrap before writes");
+    bootstrap_coordination_database(&coordination_path)
+        .expect("coordination database should initialize before writes");
     {
         let board_store =
             CoordinationBoardStore::open(&coordination_path).expect("board store should open");
