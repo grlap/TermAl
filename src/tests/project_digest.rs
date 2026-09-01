@@ -240,6 +240,7 @@ fn project_digest_inputs_keep_deep_live_requests_from_routing_registries() {
             detail: "Interaction remains live outside the digest scan window.".to_owned(),
             questions: Vec::new(),
             state: InteractionRequestState::Pending,
+            declinable: false,
             submitted_answers: None,
         });
         for index in 0..1_024 {
@@ -312,12 +313,14 @@ fn project_digest_inputs_surface_pending_claude_user_questions() {
             detail: "Choose a scope.".to_owned(),
             questions: Vec::new(),
             state: InteractionRequestState::Pending,
+            declinable: false,
             submitted_answers: None,
         });
         record.message_positions = build_message_positions(&record.session.messages);
         record.pending_claude_user_inputs.insert(
             message_id.clone(),
             ClaudePendingUserInput {
+                transport: ClaudeUserInputTransport::Dialog,
                 input: json!({ "questions": [] }),
                 questions: Vec::new(),
                 request_id: "claude-project-digest-request".to_owned(),

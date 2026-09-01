@@ -124,6 +124,8 @@ export const MessageCard = memo(
     onCancelParallelAgent,
     parallelAgentActionsEnabled = true,
     approvalActionsEnabled = true,
+    userInputActionsEnabled = true,
+    userInputSubmissionPending = false,
     searchQuery = "",
     searchHighlightTone = "match",
     isLatestAssistantMessage = true,
@@ -141,8 +143,8 @@ export const MessageCard = memo(
     onApprovalDecision: (messageId: string, decision: ApprovalDecision) => void;
     onUserInputSubmit: (
       messageId: string,
-      answers: Record<string, string[]>,
-    ) => void;
+      answers: Record<string, string[]> | null,
+    ) => Promise<void>;
     onMcpElicitationSubmit?: (
       messageId: string,
       action: McpElicitationAction,
@@ -154,6 +156,12 @@ export const MessageCard = memo(
     onCancelParallelAgent?: (agentId: string) => Promise<void> | void;
     parallelAgentActionsEnabled?: boolean;
     approvalActionsEnabled?: boolean;
+    /** When false (board snapshots, staging trays), the user-input card
+     * renders its Submit/Skip controls disabled instead of live. */
+    userInputActionsEnabled?: boolean;
+    /** Parent-owned in-flight state that survives virtualized page-band
+     * unmounts and remounts of the same pending card. */
+    userInputSubmissionPending?: boolean;
     searchQuery?: string;
     searchHighlightTone?: SearchHighlightTone;
     // When false, `ConnectionRetryCard` renders the resolved (static, past-tense)
@@ -428,6 +436,8 @@ export const MessageCard = memo(
           <UserInputRequestCard
             message={message}
             onSubmit={onUserInputSubmit}
+            actionsEnabled={userInputActionsEnabled}
+            submissionPending={userInputSubmissionPending}
             searchQuery={searchQuery}
             searchHighlightTone={searchHighlightTone}
           />
@@ -479,6 +489,9 @@ export const MessageCard = memo(
         next.isStreamingAssistantTextMessage &&
       previous.onApprovalDecision === next.onApprovalDecision &&
       previous.approvalActionsEnabled === next.approvalActionsEnabled &&
+      previous.userInputActionsEnabled === next.userInputActionsEnabled &&
+      previous.userInputSubmissionPending ===
+        next.userInputSubmissionPending &&
       previous.onUserInputSubmit === next.onUserInputSubmit &&
       previous.onMcpElicitationSubmit === next.onMcpElicitationSubmit &&
       previous.onCodexAppRequestSubmit === next.onCodexAppRequestSubmit &&

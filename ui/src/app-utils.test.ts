@@ -25,6 +25,30 @@ describe("messageChangeMarker", () => {
     ],
   };
 
+  it("changes user-input markers when declinable flips", () => {
+    // The Skip affordance must invalidate memoized rendering: false and
+    // true must never share a marker.
+    const baseUserInput: Message = {
+      id: "message-input",
+      type: "userInputRequest",
+      timestamp: "10:01",
+      author: "assistant",
+      title: "Claude needs your input",
+      detail: "Answer Claude's question to continue.",
+      state: "pending",
+      declinable: false,
+      questions: [],
+    };
+    const declinable: Message = { ...baseUserInput, declinable: true };
+
+    expect(messageChangeMarker(baseUserInput)).not.toBe(
+      messageChangeMarker(declinable),
+    );
+    expect(messageChangeMarker(baseUserInput)).toBe(
+      messageChangeMarker({ ...baseUserInput }),
+    );
+  });
+
   it("changes parallel-agent markers when only source changes", () => {
     const delegationMessage: ParallelAgentsMessage = {
       ...baseParallelAgentsMessage,
@@ -80,6 +104,7 @@ describe("messageChangeMarker", () => {
     [
       "user-input request",
       {
+        declinable: false,
         id: "request-user-input",
         type: "userInputRequest",
         timestamp: "10:02",
@@ -90,6 +115,7 @@ describe("messageChangeMarker", () => {
         state: "pending",
       },
       {
+        declinable: false,
         id: "request-user-input",
         type: "userInputRequest",
         timestamp: "10:02",
@@ -178,6 +204,7 @@ describe("messageChangeMarker", () => {
     [
       "user-input answer",
       {
+        declinable: false,
         id: "request-user-input",
         type: "userInputRequest",
         timestamp: "10:02",

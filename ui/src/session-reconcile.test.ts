@@ -1719,6 +1719,7 @@ describe("reconcileSessions", () => {
   it("replaces user input request messages when their state changes", () => {
     expectChangedMessageReference(
       {
+        declinable: false,
         id: "message-1",
         type: "userInputRequest",
         timestamp: "10:01",
@@ -1741,6 +1742,7 @@ describe("reconcileSessions", () => {
         ],
       },
       {
+        declinable: false,
         id: "message-1",
         type: "userInputRequest",
         timestamp: "10:01",
@@ -1770,6 +1772,7 @@ describe("reconcileSessions", () => {
 
   it("reuses user input request messages when nothing changed", () => {
     expectStableMessageReference({
+      declinable: false,
       id: "message-1",
       type: "userInputRequest",
       timestamp: "10:01",
@@ -1791,6 +1794,96 @@ describe("reconcileSessions", () => {
         },
       ],
     });
+  });
+
+  it("replaces user input request messages when declinable flips from false to true", () => {
+    // Without this, a snapshot that arrives with the Skip affordance would
+    // keep rendering the stale non-declinable card.
+    const question = {
+      header: "Mode",
+      id: "mode",
+      question: "Choose a mode",
+      options: [
+        {
+          label: "Fast",
+          description: "Uses the fast mode",
+        },
+      ],
+    };
+    expectChangedMessageReference(
+      {
+        id: "message-1",
+        type: "userInputRequest",
+        timestamp: "10:01",
+        author: "assistant",
+        title: "Need input",
+        detail: "Choose one option",
+        state: "pending",
+        declinable: false,
+        questions: [question],
+      },
+      {
+        id: "message-1",
+        type: "userInputRequest",
+        timestamp: "10:01",
+        author: "assistant",
+        title: "Need input",
+        detail: "Choose one option",
+        state: "pending",
+        declinable: true,
+        questions: [question],
+      },
+    );
+  });
+
+  it("reuses user input request messages when declinable is unchanged", () => {
+    const question = {
+      header: "Mode",
+      id: "mode",
+      question: "Choose a mode",
+      options: [
+        {
+          label: "Fast",
+          description: "Uses the fast mode",
+        },
+      ],
+    };
+    const previous = [
+      makeSession("session-1", {
+        messages: [
+          {
+            id: "message-1",
+            type: "userInputRequest",
+            timestamp: "10:01",
+            author: "assistant",
+            title: "Need input",
+            detail: "Choose one option",
+            state: "pending",
+            declinable: false,
+            questions: [question],
+          },
+        ],
+      }),
+    ];
+    const next = [
+      makeSession("session-1", {
+        messages: [
+          {
+            id: "message-1",
+            type: "userInputRequest",
+            timestamp: "10:01",
+            author: "assistant",
+            title: "Need input",
+            detail: "Choose one option",
+            state: "pending",
+            declinable: false,
+            questions: [question],
+          },
+        ],
+      }),
+    ];
+    const merged = reconcileSessions(previous, next);
+    expect(merged[0].messages[0]).toBe(previous[0].messages[0]);
   });
 
   it("replaces MCP elicitation request messages when their state changes", () => {

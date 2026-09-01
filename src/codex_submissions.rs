@@ -19,7 +19,17 @@
 // `update_approval` searches `pending_claude_approvals` (keyed by
 // message_id), `pending_codex_approvals`, and `pending_acp_approvals`
 // to find the right response channel. `submit_user_input` handles both
-// Claude and Codex; the remaining `submit_codex_*` methods look up their
+// Claude and Codex; Claude answers are additionally routed by
+// `ClaudeUserInputTransport` — the legacy `request_user_dialog` completion
+// envelope, or (for questions that arrived as a `can_use_tool` permission
+// request, the current AskUserQuestion contract) a permission allow whose
+// `updatedInput.answers` carries the user's answers: exact question text
+// as the key, a label string for single-select, and a label array for
+// multi-select. The compatibility-only legacy dialog keeps its historical
+// comma-joined multi-select encoding because that channel is not live-verified. A declined
+// submission maps to a permission deny on that same channel (permission
+// transport only) and resolves the card as declined.
+// The remaining `submit_codex_*` methods look up their
 // Codex-specific maps (`pending_codex_mcp_elicitations` / `pending_codex_app_requests`),
 // validate payloads through `src/codex_validation.rs`, then dispatch
 // via `CodexRuntimeCommand::JsonRpcResponse`. See
@@ -38,11 +48,17 @@
 // `set_approval_decision_on_record` + the `set_*_request_state_on_record`
 // helpers; `src/tests/http_routes.rs` for end-to-end route coverage.
 
+/// Written onto the declined card alongside the semantic `Declined` state so
+/// the transcript clearly explains how a user Skip differs from an agent-side
+/// cancel.
+const CLAUDE_USER_SKIPPED_QUESTIONS_DETAIL: &str =
+    "The user skipped these questions; Claude was asked to decide on its own.";
+
 enum PendingUserInputRuntimeAction {
     Claude {
         handle: ClaudeRuntimeHandle,
         pending: ClaudePendingUserInput,
-        response: ClaudeUserInputResponse,
+        command: ClaudeRuntimeCommand,
     },
     Codex {
         handle: CodexRuntimeHandle,
@@ -51,19 +67,49 @@ enum PendingUserInputRuntimeAction {
     },
 }
 
+/// Maps a completed Claude user-input response onto the stdin channel the
+/// request arrived on: the legacy dialog envelope, or — for questions that
+/// arrived as a `can_use_tool` permission request — an allow decision whose
+/// `updatedInput` carries the answers.
+fn claude_user_input_runtime_command(
+    transport: ClaudeUserInputTransport,
+    response: ClaudeUserInputResponse,
+) -> ClaudeRuntimeCommand {
+    match transport {
+        ClaudeUserInputTransport::Dialog => ClaudeRuntimeCommand::UserInputResponse(response),
+        ClaudeUserInputTransport::Permission => {
+            ClaudeRuntimeCommand::PermissionResponse(ClaudePermissionDecision::Allow {
+                request_id: response.request_id,
+                updated_input: response.updated_input,
+            })
+        }
+    }
+}
+
+/// Maps a declined Claude user-input request onto a permission deny. Only
+/// the permission transport can carry a decline; callers must have checked
+/// `pending_claude_user_input_is_declinable` first.
+fn claude_user_input_decline_runtime_command(
+    pending: &ClaudePendingUserInput,
+) -> ClaudeRuntimeCommand {
+    ClaudeRuntimeCommand::PermissionResponse(ClaudePermissionDecision::Deny {
+        request_id: pending.request_id.clone(),
+        message: CLAUDE_USER_DECLINED_QUESTION_MESSAGE.to_owned(),
+    })
+}
+
 impl PendingUserInputRuntimeAction {
     fn send(&self) -> std::result::Result<(), ApiError> {
         match self {
             Self::Claude {
-                handle, response, ..
-            } => handle
-                .input_tx
-                .send(ClaudeRuntimeCommand::UserInputResponse(response.clone()))
-                .map_err(|err| {
-                    ApiError::internal(format!(
-                        "failed to deliver user input response to Claude: {err}"
-                    ))
-                }),
+                handle,
+                command,
+                pending: _,
+            } => handle.input_tx.send(command.clone()).map_err(|err| {
+                ApiError::internal(format!(
+                    "failed to deliver user input response to Claude: {err}"
+                ))
+            }),
             Self::Codex {
                 handle,
                 pending,
@@ -125,11 +171,26 @@ fn validate_claude_user_input_answers(
     let mut display_answers = BTreeMap::new();
     for question in &pending.questions {
         let raw_answers = answers.get(&question.id).ok_or_else(|| {
-            ApiError::bad_request(format!("question `{}` is missing an answer", question.header))
+            ApiError::bad_request(format!(
+                "question `{}` is missing an answer",
+                question.header
+            ))
         })?;
         let mut normalized_answers = Vec::new();
         for answer in raw_answers {
-            let answer = answer.trim();
+            // Option labels are protocol values on the permission transport:
+            // preserve an exact label byte-for-byte so Claude can match it
+            // back to its own option list. Free-form "Other" answers keep the
+            // historical surrounding-whitespace normalization.
+            let answer = if question.options.as_ref().is_some_and(|options| {
+                options
+                    .iter()
+                    .any(|option| option.label == answer.as_str())
+            }) {
+                answer.as_str()
+            } else {
+                answer.trim()
+            };
             if !answer.is_empty() && !normalized_answers.iter().any(|seen| seen == answer) {
                 normalized_answers.push(answer.to_owned());
             }
@@ -154,11 +215,7 @@ fn validate_claude_user_input_answers(
         if let Some(options) = question.options.as_ref() {
             let unknown_count = normalized_answers
                 .iter()
-                .filter(|answer| {
-                    !options
-                        .iter()
-                        .any(|option| option.label == answer.as_str())
-                })
+                .filter(|answer| !options.iter().any(|option| option.label == answer.as_str()))
                 .count();
             if unknown_count > usize::from(question.is_other) {
                 return Err(ApiError::bad_request(format!(
@@ -168,10 +225,31 @@ fn validate_claude_user_input_answers(
             }
         }
 
-        claude_answers.insert(
-            question.question.clone(),
-            Value::String(normalized_answers.join(", ")),
-        );
+        // The permission transport uses the live-verified answer encoding:
+        // a label string for single-select and a JSON label array for
+        // multi-select, keyed by exact question text. The compatibility-only
+        // dialog channel has no current live capture, so preserve its
+        // historical comma-joined multi-select shape rather than changing an
+        // unverified contract.
+        let answer_value = if question.multi_select {
+            match pending.transport {
+                ClaudeUserInputTransport::Permission => Value::Array(
+                    normalized_answers
+                        .iter()
+                        .cloned()
+                        .map(Value::String)
+                        .collect(),
+                ),
+                ClaudeUserInputTransport::Dialog => {
+                    Value::String(normalized_answers.join(", "))
+                }
+            }
+        } else {
+            Value::String(normalized_answers.first().cloned().ok_or_else(|| {
+                ApiError::internal("Claude single-select answer normalization produced no answer")
+            })?)
+        };
+        claude_answers.insert(question.question.clone(), answer_value);
         display_answers.insert(
             question.id.clone(),
             if question.is_secret {
@@ -183,10 +261,13 @@ fn validate_claude_user_input_answers(
     }
 
     let mut updated_input = pending.input.clone();
-    updated_input
-        .as_object_mut()
-        .expect("Claude pending user input was validated as an object")
-        .insert("answers".to_owned(), Value::Object(claude_answers));
+    let updated_input_object = updated_input.as_object_mut().ok_or_else(|| {
+        // Pending input is runtime-owned, but return a typed error instead of
+        // panicking under the AppState mutex if a future parser refactor ever
+        // violates the object invariant.
+        ApiError::internal("Claude pending user input is not a JSON object")
+    })?;
+    updated_input_object.insert("answers".to_owned(), Value::Object(claude_answers));
     Ok((updated_input, display_answers))
 }
 
@@ -528,16 +609,27 @@ impl AppState {
     }
 
     /// Submits a structured user-input response to the live Claude or Codex
-    /// runtime that owns the transcript card. Claude receives a completed
-    /// `request_user_dialog` response; Codex receives its JSON-RPC result.
+    /// runtime that owns the transcript card. Claude receives either a
+    /// completed `request_user_dialog` response or a permission allow/deny,
+    /// according to the pending request's transport; Codex receives its
+    /// JSON-RPC result.
     fn submit_user_input(
         &self,
         session_id: &str,
         message_id: &str,
         answers: BTreeMap<String, Vec<String>>,
+        declined: bool,
     ) -> std::result::Result<StateResponse, ApiError> {
+        // Validated before remote proxying so local and remote submissions
+        // reject an answer-carrying decline identically.
+        if declined && !answers.is_empty() {
+            return Err(ApiError::bad_request(
+                "a declined user input request cannot carry answers",
+            ));
+        }
+
         if self.remote_session_target(session_id)?.is_some() {
-            return self.proxy_remote_submit_user_input(session_id, message_id, answers);
+            return self.proxy_remote_submit_user_input(session_id, message_id, answers, declined);
         }
 
         let display_answers = {
@@ -573,8 +665,30 @@ impl AppState {
                             ));
                         }
                     };
-                    let (updated_input, display_answers) =
-                        validate_claude_user_input_answers(&pending, answers)?;
+                    let (command, display_answers) = if declined {
+                        if !pending_claude_user_input_is_declinable(&pending) {
+                            // Conflict, not bad-request: the payload is
+                            // well-formed, it just targets a request whose
+                            // transport has no decline envelope.
+                            return Err(ApiError::conflict(
+                                "the legacy Claude question dialog cannot be declined; answer the questions instead",
+                            ));
+                        }
+                        (claude_user_input_decline_runtime_command(&pending), None)
+                    } else {
+                        let (updated_input, display_answers) =
+                            validate_claude_user_input_answers(&pending, answers)?;
+                        (
+                            claude_user_input_runtime_command(
+                                pending.transport,
+                                ClaudeUserInputResponse {
+                                    request_id: pending.request_id.clone(),
+                                    updated_input,
+                                },
+                            ),
+                            Some(display_answers),
+                        )
+                    };
                     let pending = record
                         .pending_claude_user_inputs
                         .remove(message_id)
@@ -582,16 +696,20 @@ impl AppState {
                     (
                         PendingUserInputRuntimeAction::Claude {
                             handle,
-                            response: ClaudeUserInputResponse {
-                                request_id: pending.request_id.clone(),
-                                updated_input,
-                            },
                             pending,
+                            command,
                         },
                         display_answers,
                     )
                 }
                 Agent::Codex => {
+                    if declined {
+                        // Conflict, not bad-request: see the dialog-transport
+                        // decline rejection above.
+                        return Err(ApiError::conflict(
+                            "Codex user input requests do not support declining; answer the questions instead",
+                        ));
+                    }
                     let pending = record
                         .pending_codex_user_inputs
                         .get(message_id)
@@ -621,7 +739,7 @@ impl AppState {
                             pending,
                             response_answers,
                         },
-                        display_answers,
+                        Some(display_answers),
                     )
                 }
                 Agent::Cursor | Agent::Gemini | Agent::OpenCode => {
@@ -642,20 +760,36 @@ impl AppState {
             display_answers
         };
 
+        // A decline resolves the card as declined with no recorded answers —
+        // a durable state distinct from agent-side cancellation; an answered
+        // submission resolves it as submitted with the answers.
+        let submitted_state = if declined {
+            InteractionRequestState::Declined
+        } else {
+            InteractionRequestState::Submitted
+        };
         self.commit_interaction_message_update(session_id, message_id, |record| {
             let message_index = set_user_input_request_state_on_record(
                 record,
                 message_id,
-                InteractionRequestState::Submitted,
-                Some(display_answers),
+                submitted_state,
+                display_answers,
             )
             .map_err(|_| ApiError::not_found("user input request not found"))?;
+            if declined {
+                // The semantic Declined state is the durable audit
+                // distinction; this detail explains that choice to the user.
+                // Turn-end cancellations remain Canceled and keep their
+                // original detail.
+                if let Some(Message::UserInputRequest { detail, .. }) =
+                    record.session.messages.get_mut(message_index)
+                {
+                    *detail = CLAUDE_USER_SKIPPED_QUESTIONS_DETAIL.to_owned();
+                }
+            }
             sync_session_interaction_state(
                 record,
-                user_input_request_preview_text(
-                    record.session.agent.name(),
-                    InteractionRequestState::Submitted,
-                ),
+                user_input_request_preview_text(record.session.agent.name(), submitted_state),
             );
             Ok(message_index)
         })
@@ -690,8 +824,8 @@ impl AppState {
                 .find_visible_session_index(session_id)
                 .ok_or_else(|| ApiError::not_found("session not found"))?;
             let record = inner
-            .session_mut_by_index(index)
-            .expect("session index should be valid");
+                .session_mut_by_index(index)
+                .expect("session index should be valid");
             if record.session.status != SessionStatus::Approval {
                 return Err(ApiError::conflict(
                     "session is not currently waiting for input",

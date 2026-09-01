@@ -38,6 +38,13 @@ function isResolvedInteractionTurnBoundary(message: Message) {
     case "approval":
       return message.decision !== "pending";
     case "userInputRequest":
+      // A non-declinable Declined card is an unattended AskUserQuestion that
+      // TermAl resolved on Claude's behalf while the same agent turn keeps
+      // running. It is an audit event, not a user-interaction boundary, so it
+      // must not disarm stale-transport recovery for a headless session.
+      return !(
+        message.state === "declined" && message.declinable === false
+      ) && message.state !== "pending";
     case "mcpElicitationRequest":
     case "codexAppRequest":
       return message.state !== "pending";

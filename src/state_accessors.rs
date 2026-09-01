@@ -130,6 +130,9 @@ fn conversation_overview_message_metadata(
                 | ApprovalDecision::Rejected,
             ..
         } => (author, ConversationOverviewKind::Error),
+        // Deliberate: Declined is a benign answerless resolution, whether the
+        // user skipped or TermAl self-resolved an unattended question. It
+        // does not match this error guard and falls through to Text below.
         Message::UserInputRequest { author, state, .. }
         | Message::McpElicitationRequest { author, state, .. }
         | Message::CodexAppRequest { author, state, .. }
@@ -1534,19 +1537,25 @@ impl AppState {
 
 
 
-    /// Returns the effective Claude approval mode for a session
-    /// (falling back to the app default when the session hasn't
-    /// overridden it). Used by the runtime spawn helpers and the
-    /// "approve all" UI toggle.
-    fn claude_approval_mode(&self, session_id: &str) -> Result<ClaudeApprovalMode> {
+    /// Returns the classification context for a Claude control request —
+    /// the effective approval mode and whether the session is a delegation
+    /// child — read under a single state lock so the attendedness policy
+    /// (`claude_question_is_unattended`) never sees a torn pair.
+    fn claude_control_request_context(
+        &self,
+        session_id: &str,
+    ) -> Result<(ClaudeApprovalMode, bool)> {
         let inner = self.inner.lock().expect("state mutex poisoned");
         let index = inner
             .find_session_index(session_id)
             .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
-        Ok(inner.sessions[index]
-            .session
-            .claude_approval_mode
-            .unwrap_or_else(default_claude_approval_mode))
+        let session = &inner.sessions[index].session;
+        Ok((
+            session
+                .claude_approval_mode
+                .unwrap_or_else(default_claude_approval_mode),
+            session.parent_delegation_id.is_some(),
+        ))
     }
 
     /// Returns the effective Cursor agent mode for a session

@@ -72,7 +72,7 @@ describe("MeasuredPageBand", () => {
         conversationSearchActiveItemKey={null}
         onSearchItemMount={() => {}}
         onApprovalDecision={() => {}}
-        onUserInputSubmit={() => {}}
+        onUserInputSubmit={async () => {}}
         onMcpElicitationSubmit={() => {}}
         onCodexAppRequestSubmit={() => {}}
         onHeightChange={onHeightChange}
@@ -135,7 +135,7 @@ describe("MeasuredPageBand", () => {
         conversationSearchActiveItemKey={null}
         onSearchItemMount={() => {}}
         onApprovalDecision={() => {}}
-        onUserInputSubmit={() => {}}
+        onUserInputSubmit={async () => {}}
         onMcpElicitationSubmit={() => {}}
         onCodexAppRequestSubmit={() => {}}
         onHeightChange={onHeightChange}
@@ -191,7 +191,7 @@ describe("MeasuredPageBand", () => {
         conversationSearchActiveItemKey={null}
         onSearchItemMount={() => {}}
         onApprovalDecision={() => {}}
-        onUserInputSubmit={() => {}}
+        onUserInputSubmit={async () => {}}
         onMcpElicitationSubmit={() => {}}
         onCodexAppRequestSubmit={() => {}}
         onHeightChange={onHeightChange}
@@ -248,7 +248,7 @@ describe("MeasuredPageBand", () => {
         conversationSearchActiveItemKey={null}
         onSearchItemMount={() => {}}
         onApprovalDecision={() => {}}
-        onUserInputSubmit={() => {}}
+        onUserInputSubmit={async () => {}}
         onMcpElicitationSubmit={() => {}}
         onCodexAppRequestSubmit={() => {}}
         onHeightChange={onHeightChange}
@@ -300,7 +300,7 @@ describe("MeasuredPageBand", () => {
         conversationSearchActiveItemKey={null}
         onSearchItemMount={() => {}}
         onApprovalDecision={() => {}}
-        onUserInputSubmit={() => {}}
+        onUserInputSubmit={async () => {}}
         onMcpElicitationSubmit={() => {}}
         onCodexAppRequestSubmit={() => {}}
         onHeightChange={onHeightChange}

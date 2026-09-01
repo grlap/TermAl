@@ -142,7 +142,7 @@ describe("AgentSessionPanel response-board actions", () => {
         <MessageCard
           message={message}
           onApprovalDecision={() => {}}
-          onUserInputSubmit={() => {}}
+          onUserInputSubmit={async () => {}}
         />
       ),
     });
@@ -378,7 +378,7 @@ function createAgentSessionPanelHarness(
       diffMessages={[]}
       scrollContainerRef={scrollContainerRef}
       onApprovalDecision={() => {}}
-      onUserInputSubmit={() => {}}
+      onUserInputSubmit={async () => {}}
       onMcpElicitationSubmit={() => {}}
       onCodexAppRequestSubmit={() => {}}
       onCancelQueuedPrompt={() => {}}
@@ -425,7 +425,7 @@ function renderNavigableMessageCard(message: Message) {
       <MessageCard
         message={message}
         onApprovalDecision={() => {}}
-        onUserInputSubmit={() => {}}
+        onUserInputSubmit={async () => {}}
         onCodexAppRequestSubmit={() => {}}
       />
       <span>{message.id}</span>
@@ -590,7 +590,7 @@ describe("AgentSessionPanel conversation caching", () => {
         diffMessages={[]}
         scrollContainerRef={{ current: document.createElement("section") }}
         onApprovalDecision={() => {}}
-        onUserInputSubmit={() => {}}
+        onUserInputSubmit={async () => {}}
         onMcpElicitationSubmit={() => {}}
         onCodexAppRequestSubmit={() => {}}
         onCancelQueuedPrompt={() => {}}
@@ -681,7 +681,7 @@ describe("AgentSessionPanel conversation caching", () => {
             } as RefObject<HTMLElement | null>
           }
           onApprovalDecision={() => {}}
-          onUserInputSubmit={() => {}}
+          onUserInputSubmit={async () => {}}
           onMcpElicitationSubmit={() => {}}
           onCodexAppRequestSubmit={() => {}}
           onCancelQueuedPrompt={() => {}}
@@ -2176,7 +2176,7 @@ describe("AgentSessionPanel conversation caching", () => {
           diffMessages={[]}
           scrollContainerRef={{ current: detachedScrollRoot }}
           onApprovalDecision={() => {}}
-          onUserInputSubmit={() => {}}
+          onUserInputSubmit={async () => {}}
           onMcpElicitationSubmit={() => {}}
           onCodexAppRequestSubmit={() => {}}
           onCancelQueuedPrompt={() => {}}
@@ -3012,7 +3012,7 @@ describe("AgentSessionPanel conversation caching", () => {
         <MessageCard
           message={message}
           onApprovalDecision={() => {}}
-          onUserInputSubmit={() => {}}
+          onUserInputSubmit={async () => {}}
           onCodexAppRequestSubmit={() => {}}
         />
       ),
@@ -3084,7 +3084,7 @@ describe("AgentSessionPanel conversation caching", () => {
         <MessageCard
           message={message}
           onApprovalDecision={() => {}}
-          onUserInputSubmit={() => {}}
+          onUserInputSubmit={async () => {}}
           onCodexAppRequestSubmit={() => {}}
         />
       ),
@@ -3138,7 +3138,7 @@ describe("AgentSessionPanel conversation caching", () => {
         <MessageCard
           message={message}
           onApprovalDecision={() => {}}
-          onUserInputSubmit={() => {}}
+          onUserInputSubmit={async () => {}}
           onCodexAppRequestSubmit={() => {}}
         />
       ),
@@ -3173,7 +3173,7 @@ describe("AgentSessionPanel conversation caching", () => {
         <MessageCard
           message={message}
           onApprovalDecision={() => {}}
-          onUserInputSubmit={() => {}}
+          onUserInputSubmit={async () => {}}
           onCodexAppRequestSubmit={() => {}}
         />
       ),
@@ -3217,7 +3217,7 @@ describe("AgentSessionPanel conversation caching", () => {
         <MessageCard
           message={message}
           onApprovalDecision={() => {}}
-          onUserInputSubmit={() => {}}
+          onUserInputSubmit={async () => {}}
           onCodexAppRequestSubmit={() => {}}
         />
       ),
@@ -3257,7 +3257,7 @@ describe("AgentSessionPanel conversation caching", () => {
       <MessageCard
         message={message}
         onApprovalDecision={() => {}}
-        onUserInputSubmit={() => {}}
+        onUserInputSubmit={async () => {}}
         onCodexAppRequestSubmit={() => {}}
       />
     );
@@ -3330,7 +3330,7 @@ describe("AgentSessionPanel conversation caching", () => {
       <MessageCard
         message={message}
         onApprovalDecision={() => {}}
-        onUserInputSubmit={() => {}}
+        onUserInputSubmit={async () => {}}
         onCodexAppRequestSubmit={() => {}}
       />
     );
@@ -3399,7 +3399,7 @@ describe("AgentSessionPanel conversation caching", () => {
       <MessageCard
         message={message}
         onApprovalDecision={() => {}}
-        onUserInputSubmit={() => {}}
+        onUserInputSubmit={async () => {}}
         onCodexAppRequestSubmit={() => {}}
       />
     );
@@ -3553,7 +3553,7 @@ describe("AgentSessionPanel conversation caching", () => {
         <MessageCard
           message={message}
           onApprovalDecision={() => {}}
-          onUserInputSubmit={() => {}}
+          onUserInputSubmit={async () => {}}
           onCodexAppRequestSubmit={() => {}}
         />
       ),
@@ -3612,7 +3612,7 @@ describe("AgentSessionPanel conversation caching", () => {
         <MessageCard
           message={message}
           onApprovalDecision={() => {}}
-          onUserInputSubmit={() => {}}
+          onUserInputSubmit={async () => {}}
           onCodexAppRequestSubmit={() => {}}
         />
       ),
@@ -3641,7 +3641,7 @@ describe("AgentSessionPanel conversation caching", () => {
         <MessageCard
           message={message}
           onApprovalDecision={() => {}}
-          onUserInputSubmit={() => {}}
+          onUserInputSubmit={async () => {}}
           onCodexAppRequestSubmit={() => {}}
         />
       ),
@@ -3717,7 +3717,7 @@ describe("AgentSessionPanel conversation caching", () => {
         <MessageCard
           message={message}
           onApprovalDecision={() => {}}
-          onUserInputSubmit={() => {}}
+          onUserInputSubmit={async () => {}}
           onCodexAppRequestSubmit={() => {}}
         />
       ),
@@ -4295,7 +4295,7 @@ describe("AgentSessionPanel conversation caching", () => {
         diffMessages={[]}
         scrollContainerRef={{ current: document.createElement("section") }}
         onApprovalDecision={onApprovalDecision}
-        onUserInputSubmit={() => {}}
+        onUserInputSubmit={async () => {}}
         onMcpElicitationSubmit={() => {}}
         onCodexAppRequestSubmit={() => {}}
         onCancelQueuedPrompt={() => {}}
@@ -4369,7 +4369,7 @@ describe("AgentSessionPanel conversation caching", () => {
         diffMessages={[]}
         scrollContainerRef={{ current: document.createElement("section") }}
         onApprovalDecision={() => {}}
-        onUserInputSubmit={() => {}}
+        onUserInputSubmit={async () => {}}
         onMcpElicitationSubmit={() => {}}
         onCodexAppRequestSubmit={() => {}}
         onCancelQueuedPrompt={() => {}}
@@ -4548,7 +4548,7 @@ describe("AgentSessionPanel conversation caching", () => {
     const scrollContainerRef = { current: document.createElement("section") };
     const matchedItemKeys = new Set<string>();
     const noopApproval = () => {};
-    const noopUserInput = () => {};
+    const noopUserInput = async () => {};
     const noopElicitation = () => {};
     const noopAppRequest = () => {};
     const noopCancel = () => {};
@@ -4654,7 +4654,7 @@ describe("AgentSessionPanel conversation caching", () => {
         diffMessages={[]}
         scrollContainerRef={{ current: document.createElement("section") }}
         onApprovalDecision={() => {}}
-        onUserInputSubmit={() => {}}
+        onUserInputSubmit={async () => {}}
         onMcpElicitationSubmit={() => {}}
         onCodexAppRequestSubmit={onCodexAppRequestSubmit}
         onCancelQueuedPrompt={() => {}}
@@ -4747,7 +4747,7 @@ describe("AgentSessionPanel conversation caching", () => {
         diffMessages={[]}
         scrollContainerRef={{ current: document.createElement("section") }}
         onApprovalDecision={() => {}}
-        onUserInputSubmit={() => {}}
+        onUserInputSubmit={async () => {}}
         onMcpElicitationSubmit={() => {}}
         onCodexAppRequestSubmit={() => {}}
         onCancelQueuedPrompt={onCancelQueuedPrompt}

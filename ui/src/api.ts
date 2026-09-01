@@ -1272,16 +1272,24 @@ export function submitApproval(
   );
 }
 
+/**
+ * Submits the answers for a user-input card, or declines it when `answers`
+ * is null. Declining is only valid for `declinable` cards (Claude
+ * AskUserQuestion over the permission channel — the backend maps the
+ * decline to a permission deny that tells Claude to decide on its own).
+ */
 export function submitUserInput(
   sessionId: string,
   messageId: string,
-  answers: Record<string, string[]>,
+  answers: Record<string, string[]> | null,
 ) {
   return request<StateResponse>(
     `/api/sessions/${encodeURIComponent(sessionId)}/user-input/${encodeURIComponent(messageId)}`,
     {
       method: "POST",
-      body: JSON.stringify({ answers }),
+      body: JSON.stringify(
+        answers === null ? { answers: {}, declined: true } : { answers },
+      ),
     },
   );
 }

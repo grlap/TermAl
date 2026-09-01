@@ -116,6 +116,7 @@ const resolvedInteractionBoundaryCases: {
   {
     label: "user input request",
     pending: {
+      declinable: false,
       id: "message-user-input-pending",
       type: "userInputRequest",
       author: "assistant",
@@ -126,6 +127,7 @@ const resolvedInteractionBoundaryCases: {
       state: "pending",
     },
     resolved: {
+      declinable: false,
       id: "message-user-input-submitted",
       type: "userInputRequest",
       author: "assistant",
@@ -487,6 +489,74 @@ describe("session transport helpers", () => {
       ).toBe(false);
     },
   );
+
+  it("keeps stale-transport recovery armed after an unattended question self-resolution", () => {
+    const session = makeSession("session-1", {
+      status: "active",
+      messages: [
+        {
+          id: "message-user-1",
+          type: "text",
+          timestamp: "10:00",
+          author: "you",
+          text: "Review these changes.",
+        },
+        {
+          id: "message-self-resolved-question",
+          type: "userInputRequest",
+          author: "assistant",
+          timestamp: "10:01",
+          title: "Claude asked a question",
+          detail: "TermAl asked Claude to decide without human input.",
+          questions: [],
+          state: "declined",
+          declinable: false,
+        },
+      ],
+    });
+
+    expect(
+      sessionHasPotentiallyStaleTransport(
+        session,
+        0,
+        LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS,
+      ),
+    ).toBe(true);
+  });
+
+  it("treats a user-skipped question as a resolved interaction boundary", () => {
+    const session = makeSession("session-1", {
+      status: "active",
+      messages: [
+        {
+          id: "message-user-1",
+          type: "text",
+          timestamp: "10:00",
+          author: "you",
+          text: "Review these changes.",
+        },
+        {
+          id: "message-user-skipped-question",
+          type: "userInputRequest",
+          author: "assistant",
+          timestamp: "10:01",
+          title: "Claude needs your input",
+          detail: "The user skipped these questions.",
+          questions: [],
+          state: "declined",
+          declinable: true,
+        },
+      ],
+    });
+
+    expect(
+      sessionHasPotentiallyStaleTransport(
+        session,
+        0,
+        LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS,
+      ),
+    ).toBe(false);
+  });
 
   it("prunes tracked transport activity for sessions missing from the latest snapshot", () => {
     const liveTransportActivityAtBySessionId = new Map<string, number>([

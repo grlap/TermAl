@@ -83,6 +83,7 @@ fn claude_ask_user_question_dialog_is_classified_with_every_question() {
         &claude_user_dialog_request(),
         &mut turn_state,
         ClaudeApprovalMode::AutoApprove,
+        false,
         "/tmp",
         false,
     )
@@ -108,6 +109,905 @@ fn claude_ask_user_question_dialog_is_classified_with_every_question() {
     assert_eq!(questions[1].id, "claude-question-2");
     assert!(questions[1].multi_select);
     assert_eq!(request.questions, questions);
+    assert_eq!(request.transport, ClaudeUserInputTransport::Dialog);
+}
+
+fn claude_ask_user_question_permission_request() -> Value {
+    claude_permission_request(
+        "AskUserQuestion",
+        json!({
+            "questions": [
+                {
+                    "header": "Scope",
+                    "question": "Which scope should I use?",
+                    "multiSelect": false,
+                    "options": [
+                        {"label": "Focused", "description": "Only the changed module"},
+                        {"label": "Broad", "description": "The whole workspace"}
+                    ]
+                }
+            ]
+        }),
+    )
+}
+
+#[test]
+fn claude_ask_user_question_permission_waits_for_user_input_in_every_mode() {
+    // Current Claude CLIs deliver AskUserQuestion as a can_use_tool
+    // permission request and read the answers from the allow decision's
+    // updatedInput.answers. Every attended approval mode — including Plan,
+    // which denies ordinary tools — must queue the question card instead of
+    // resolving the permission on its own; an instant allow makes the tool
+    // return "The user did not answer the questions". Read-only reviewer
+    // delegations are covered separately below.
+    for approval_mode in [
+        ClaudeApprovalMode::Ask,
+        ClaudeApprovalMode::AutoApprove,
+        ClaudeApprovalMode::Plan,
+    ] {
+        for delegation_control_plane_access in [false, true] {
+            let mut turn_state = ClaudeTurnState::default();
+            let action = classify_claude_control_request(
+                &claude_ask_user_question_permission_request(),
+                &mut turn_state,
+                approval_mode,
+                false,
+                "/tmp",
+                delegation_control_plane_access,
+            )
+            .expect("permission payload should parse")
+            .expect("permission payload should be classified");
+
+            let ClaudeControlRequestAction::QueueUserInput {
+                title,
+                detail,
+                questions,
+                request,
+            } = action
+            else {
+                panic!(
+                    "AskUserQuestion must wait for user input in mode {approval_mode:?} (delegation={delegation_control_plane_access})"
+                );
+            };
+            assert_eq!(title, "Claude needs your input");
+            assert_eq!(detail, "Answer Claude's question to continue.");
+            assert_eq!(questions.len(), 1);
+            assert_eq!(questions[0].question, "Which scope should I use?");
+            assert!(questions[0].is_other);
+            assert_eq!(request.request_id, "permission-request-1");
+            assert_eq!(request.transport, ClaudeUserInputTransport::Permission);
+            assert_eq!(
+                request.input.pointer("/questions/0/question"),
+                Some(&json!("Which scope should I use?"))
+            );
+
+            // The same request replayed within one turn is suppressed.
+            let replay = classify_claude_control_request(
+                &claude_ask_user_question_permission_request(),
+                &mut turn_state,
+                approval_mode,
+                false,
+                "/tmp",
+                delegation_control_plane_access,
+            )
+            .expect("replay should parse");
+            assert!(replay.is_none());
+        }
+    }
+}
+
+#[test]
+fn claude_ask_user_question_keeps_immediate_denial_for_read_only_reviewers() {
+    // Read-only reviewer delegations run unattended under a fan-in: parking
+    // a question card would stall the review, so they keep a fail-closed
+    // immediate denial whose message tells Claude to decide without asking.
+    let mut turn_state = ClaudeTurnState::default();
+    let action = classify_claude_control_request(
+        &claude_ask_user_question_permission_request(),
+        &mut turn_state,
+        ClaudeApprovalMode::ReadOnlyAutoApprove,
+        false,
+        "/tmp",
+        true,
+    )
+    .expect("permission payload should parse")
+    .expect("permission payload should be classified");
+
+    // The runtime still receives the immediate deny; the transcript
+    // additionally gets a resolved audit card carrying the questions.
+    let ClaudeControlRequestAction::RecordSelfResolvedQuestion {
+        questions,
+        response:
+            ClaudeSelfResolvedQuestionResponse::PermissionDeny(ClaudePermissionDecision::Deny {
+                request_id,
+                message,
+            }),
+        ..
+    } = action
+    else {
+        panic!("read-only reviewers must keep the immediate AskUserQuestion denial");
+    };
+    assert_eq!(questions.len(), 1);
+    assert_eq!(request_id, "permission-request-1");
+    assert!(message.contains("unattended"));
+    assert!(message.contains("your own judgment"));
+}
+
+#[test]
+fn claude_ask_user_question_attendedness_matrix_on_permission_transport() {
+    // Attended (question card queued): a root AutoApprove session has a
+    // person watching it, and an Ask-mode implementer child surfaces its
+    // approvals and questions to a human on purpose. Unattended
+    // (self-resolve): an AutoApprove delegation child runs headless under
+    // the fan-in by the parent's choice, and a read-only reviewer always.
+    for (approval_mode, delegation_child) in [
+        (ClaudeApprovalMode::AutoApprove, false),
+        (ClaudeApprovalMode::Plan, false),
+        (ClaudeApprovalMode::Ask, true),
+    ] {
+        let mut turn_state = ClaudeTurnState::default();
+        let action = classify_claude_control_request(
+            &claude_ask_user_question_permission_request(),
+            &mut turn_state,
+            approval_mode,
+            delegation_child,
+            "/tmp",
+            false,
+        )
+        .expect("permission payload should parse")
+        .expect("permission payload should be classified");
+        assert!(
+            matches!(action, ClaudeControlRequestAction::QueueUserInput { .. }),
+            "mode {approval_mode:?} child={delegation_child} must queue the question card"
+        );
+    }
+
+    for (approval_mode, delegation_child) in [
+        (ClaudeApprovalMode::AutoApprove, true),
+        (ClaudeApprovalMode::Plan, true),
+        (ClaudeApprovalMode::ReadOnlyAutoApprove, false),
+    ] {
+        let mut turn_state = ClaudeTurnState::default();
+        let action = classify_claude_control_request(
+            &claude_ask_user_question_permission_request(),
+            &mut turn_state,
+            approval_mode,
+            delegation_child,
+            "/tmp",
+            false,
+        )
+        .expect("permission payload should parse")
+        .expect("permission payload should be classified");
+        // Self-resolution records an audit card with the parsed questions
+        // and answers the runtime with the very deny a plain refusal sends.
+        let ClaudeControlRequestAction::RecordSelfResolvedQuestion {
+            title,
+            detail,
+            questions,
+            response:
+                ClaudeSelfResolvedQuestionResponse::PermissionDeny(ClaudePermissionDecision::Deny {
+                    request_id,
+                    message,
+                }),
+        } = action
+        else {
+            panic!("mode {approval_mode:?} child={delegation_child} must self-resolve");
+        };
+        assert_eq!(title, "Claude asked a question");
+        assert!(detail.contains("without human input"));
+        assert_eq!(questions.len(), 1);
+        assert_eq!(questions[0].question, "Which scope should I use?");
+        assert_eq!(request_id, "permission-request-1");
+        assert!(message.contains("unattended"));
+        assert!(message.contains("your own judgment"));
+
+        let replay = classify_claude_control_request(
+            &claude_ask_user_question_permission_request(),
+            &mut turn_state,
+            approval_mode,
+            delegation_child,
+            "/tmp",
+            false,
+        )
+        .expect("replay should parse");
+        assert!(
+            replay.is_none(),
+            "the denial must deduplicate within a turn"
+        );
+    }
+}
+
+#[test]
+fn unattended_ask_user_question_with_malformed_payload_records_an_error_and_denies() {
+    // No parsed questions means no question card can be built. Preserve the
+    // parser diagnostic as a transcript error before denying so the automatic
+    // decision remains auditable without parking the agent.
+    let message = claude_permission_request("AskUserQuestion", json!({ "metadata": {} }));
+    let mut turn_state = ClaudeTurnState::default();
+    let action = classify_claude_control_request(
+        &message,
+        &mut turn_state,
+        ClaudeApprovalMode::ReadOnlyAutoApprove,
+        false,
+        "/tmp",
+        false,
+    )
+    .expect("permission payload should parse")
+    .expect("permission payload should be classified");
+    let ClaudeControlRequestAction::RecordSelfResolvedQuestionError {
+        detail,
+        response:
+            ClaudeSelfResolvedQuestionResponse::PermissionDeny(ClaudePermissionDecision::Deny {
+                request_id,
+                message,
+            }),
+    } = action
+    else {
+        panic!("a malformed unattended question must be diagnosed and denied");
+    };
+    assert!(detail.contains("has no `questions` array"));
+    assert_eq!(request_id, "permission-request-1");
+    assert!(message.contains("your own judgment"));
+}
+
+#[test]
+fn unattended_ask_user_question_retries_are_bounded_per_turn() {
+    let mut turn_state = ClaudeTurnState::default();
+    for attempt in 1..=MAX_CLAUDE_UNATTENDED_QUESTIONS_PER_TURN {
+        let mut request = claude_ask_user_question_permission_request();
+        request["request_id"] = json!(format!("permission-request-{attempt}"));
+        let action = classify_claude_control_request(
+            &request,
+            &mut turn_state,
+            ClaudeApprovalMode::ReadOnlyAutoApprove,
+            false,
+            "/tmp",
+            false,
+        )
+        .expect("an unattended retry within the cap should classify")
+        .expect("an unattended retry within the cap should self-resolve");
+        assert!(matches!(
+            action,
+            ClaudeControlRequestAction::RecordSelfResolvedQuestion { .. }
+        ));
+    }
+
+    let mut request = claude_ask_user_question_permission_request();
+    request["request_id"] = json!("permission-request-over-limit");
+    let err = match classify_claude_control_request(
+        &request,
+        &mut turn_state,
+        ClaudeApprovalMode::ReadOnlyAutoApprove,
+        false,
+        "/tmp",
+        false,
+    ) {
+        Err(err) => err,
+        Ok(_) => panic!("the fourth unattended question must fail the turn"),
+    };
+    assert!(err.to_string().contains("more than 3 times"));
+}
+
+#[test]
+fn claude_legacy_dialog_attendedness_matrix() {
+    // The no-park invariant applies the same attendedness policy to the
+    // legacy request_user_dialog channel: root AutoApprove and Ask-mode
+    // implementer children queue the card; AutoApprove delegation children
+    // and read-only reviewers get an immediate control error carrying the
+    // self-decide wording (the dialog protocol has no deny decision),
+    // deduplicated within the turn like the queued path.
+    for (approval_mode, delegation_child) in [
+        (ClaudeApprovalMode::AutoApprove, false),
+        (ClaudeApprovalMode::Plan, false),
+        (ClaudeApprovalMode::Ask, true),
+    ] {
+        let mut turn_state = ClaudeTurnState::default();
+        let action = classify_claude_control_request(
+            &claude_user_dialog_request(),
+            &mut turn_state,
+            approval_mode,
+            delegation_child,
+            "/tmp",
+            false,
+        )
+        .expect("legacy dialog should parse")
+        .expect("legacy dialog should be classified");
+        assert!(
+            matches!(action, ClaudeControlRequestAction::QueueUserInput { .. }),
+            "mode {approval_mode:?} child={delegation_child} must queue the legacy dialog card"
+        );
+    }
+
+    for approval_mode in [ClaudeApprovalMode::AutoApprove, ClaudeApprovalMode::Plan] {
+        let mut turn_state = ClaudeTurnState::default();
+        let child_action = classify_claude_control_request(
+            &claude_user_dialog_request(),
+            &mut turn_state,
+            approval_mode,
+            true,
+            "/tmp",
+            false,
+        )
+        .expect("legacy dialog should parse")
+        .expect("legacy dialog should be classified");
+        assert!(
+            matches!(
+                child_action,
+                ClaudeControlRequestAction::RecordSelfResolvedQuestion {
+                    response: ClaudeSelfResolvedQuestionResponse::DialogError(_),
+                    ..
+                }
+            ),
+            "a {approval_mode:?} delegation child must self-resolve the legacy dialog"
+        );
+    }
+
+    let mut turn_state = ClaudeTurnState::default();
+    let action = classify_claude_control_request(
+        &claude_user_dialog_request(),
+        &mut turn_state,
+        ClaudeApprovalMode::ReadOnlyAutoApprove,
+        false,
+        "/tmp",
+        false,
+    )
+    .expect("legacy dialog should parse")
+    .expect("legacy dialog should be classified");
+    // The audit card carries the parsed questions; the control error the
+    // runtime receives is unchanged from a plain refusal.
+    let ClaudeControlRequestAction::RecordSelfResolvedQuestion {
+        title,
+        detail,
+        questions,
+        response: ClaudeSelfResolvedQuestionResponse::DialogError(response),
+    } = action
+    else {
+        panic!("a read-only reviewer's legacy dialog must respond immediately");
+    };
+    assert_eq!(title, "Claude asked a question");
+    assert!(detail.contains("without human input"));
+    assert!(detail.contains("control error"));
+    assert_eq!(questions.len(), 2);
+    assert_eq!(response.request_id, "dialog-request-1");
+    assert!(response.error.contains("unattended"));
+    assert!(response.error.contains("your own judgment"));
+
+    let replay = classify_claude_control_request(
+        &claude_user_dialog_request(),
+        &mut turn_state,
+        ClaudeApprovalMode::ReadOnlyAutoApprove,
+        false,
+        "/tmp",
+        false,
+    )
+    .expect("replay should parse");
+    assert!(
+        replay.is_none(),
+        "the denial must deduplicate within a turn"
+    );
+}
+
+#[test]
+fn namespaced_mcp_ask_user_question_takes_the_ordinary_permission_flow() {
+    // The CLI namespaces MCP tools as mcp__<server>__<tool>; a leaf that
+    // names itself AskUserQuestion must not reach the question card.
+    let message = claude_permission_request(
+        "mcp__helper__AskUserQuestion",
+        json!({
+            "questions": [
+                {"header": "Scope", "question": "Which scope should I use?"}
+            ]
+        }),
+    );
+    let mut turn_state = ClaudeTurnState::default();
+    let action = classify_claude_control_request(
+        &message,
+        &mut turn_state,
+        ClaudeApprovalMode::Ask,
+        false,
+        "/tmp",
+        false,
+    )
+    .expect("permission payload should parse")
+    .expect("permission payload should be classified");
+    assert!(
+        matches!(action, ClaudeControlRequestAction::QueueApproval { .. }),
+        "a namespaced MCP AskUserQuestion must take the ordinary permission flow"
+    );
+}
+
+#[test]
+fn question_dedupe_keys_are_namespaced_per_transport() {
+    // A legacy dialog and a permission request that share a request id
+    // within one turn must not suppress each other: the dedupe namespaces
+    // are per transport.
+    let mut turn_state = ClaudeTurnState::default();
+    let dialog_action = classify_claude_control_request(
+        &claude_user_dialog_request(),
+        &mut turn_state,
+        ClaudeApprovalMode::Ask,
+        false,
+        "/tmp",
+        false,
+    )
+    .expect("legacy dialog should parse");
+    assert!(
+        dialog_action.is_some(),
+        "the legacy dialog must be classified"
+    );
+
+    let mut permission_message = claude_ask_user_question_permission_request();
+    permission_message["request_id"] = json!("dialog-request-1");
+    let permission_action = classify_claude_control_request(
+        &permission_message,
+        &mut turn_state,
+        ClaudeApprovalMode::Ask,
+        false,
+        "/tmp",
+        false,
+    )
+    .expect("permission payload should parse");
+    assert!(
+        matches!(
+            permission_action,
+            Some(ClaudeControlRequestAction::QueueUserInput { ref request, .. })
+                if request.request_id == "dialog-request-1"
+        ),
+        "a colliding request id on the other transport must still be classified"
+    );
+}
+
+#[test]
+fn recorder_records_self_resolved_question_as_declined_without_a_claim() {
+    // The audit card is a resolved, non-declinable Declined card: nothing
+    // pending, no live claim, no Approval status — just the transcript
+    // entry saying TermAl asked Claude to decide.
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let mut delta_rx = state.subscribe_delta_events();
+    let mut recorder = SessionRecorder::new(state.clone(), session_id.clone());
+    recorder
+        .push_claude_self_resolved_user_input(
+            "Claude asked a question",
+            "TermAl asked Claude to decide without human input.",
+            vec![UserInputQuestion {
+                header: "Scope".to_owned(),
+                id: "claude-question-1".to_owned(),
+                is_other: true,
+                is_secret: false,
+                multi_select: false,
+                options: None,
+                question: "Which scope should I use?".to_owned(),
+            }],
+        )
+        .expect("self-resolved question should record");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("Claude session should exist");
+    assert!(record.pending_claude_user_inputs.is_empty());
+    assert!(!has_pending_requests(record));
+    assert_ne!(record.session.status, SessionStatus::Approval);
+    assert!(matches!(
+        record.session.messages.last(),
+        Some(Message::UserInputRequest {
+            state: InteractionRequestState::Declined,
+            declinable: false,
+            submitted_answers: None,
+            questions,
+            detail,
+            ..
+        }) if questions.len() == 1 && detail.contains("without human input")
+    ));
+    drop(inner);
+    assert!(
+        delta_rx.try_recv().is_ok(),
+        "the audit card must publish a transcript delta"
+    );
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn recorder_marks_user_input_declinable_by_pending_transport() {
+    // Wiring pin: the recorded card's declinable flag must come from the
+    // pending request's transport (permission = skippable, legacy dialog =
+    // not), without hand-constructing the message.
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    for (transport, expected_declinable) in [
+        (ClaudeUserInputTransport::Permission, true),
+        (ClaudeUserInputTransport::Dialog, false),
+    ] {
+        let questions = vec![UserInputQuestion {
+            header: "Scope".to_owned(),
+            id: "claude-question-1".to_owned(),
+            is_other: true,
+            is_secret: false,
+            multi_select: false,
+            options: None,
+            question: "Which scope should I use?".to_owned(),
+        }];
+        let mut recorder = SessionRecorder::new(state.clone(), session_id.clone());
+        recorder
+            .push_claude_user_input_request(
+                "Claude needs your input",
+                "Answer Claude's question to continue.",
+                questions.clone(),
+                ClaudePendingUserInput {
+                    input: json!({ "questions": [{ "question": "Which scope should I use?" }] }),
+                    questions,
+                    request_id: format!("recorder-declinable-{expected_declinable}"),
+                    transport,
+                },
+            )
+            .expect("user input request should record");
+
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let record = inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == session_id)
+            .expect("Claude session should exist");
+        assert!(
+            matches!(
+                record.session.messages.last(),
+                Some(Message::UserInputRequest { declinable, .. })
+                    if *declinable == expected_declinable
+            ),
+            "transport {transport:?} must record declinable={expected_declinable}"
+        );
+    }
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn claude_ask_user_question_preserves_exact_question_and_option_text() {
+    // The CLI keys the returned updatedInput.answers by the exact question
+    // string and matches answer values against its exact option labels;
+    // trimming either would orphan the answer on the CLI side.
+    let message = claude_permission_request(
+        "AskUserQuestion",
+        json!({
+            "questions": [
+                {
+                    "header": "Scope",
+                    "question": "  Which scope should I use? \t",
+                    "options": [
+                        {"label": "  Focused \t", "description": "Only the changed module"}
+                    ]
+                }
+            ]
+        }),
+    );
+    let mut turn_state = ClaudeTurnState::default();
+    let action = classify_claude_control_request(
+        &message,
+        &mut turn_state,
+        ClaudeApprovalMode::Ask,
+        false,
+        "/tmp",
+        false,
+    )
+    .expect("permission payload should parse")
+    .expect("permission payload should be classified");
+
+    let ClaudeControlRequestAction::QueueUserInput {
+        questions, request, ..
+    } = action
+    else {
+        panic!("a well-formed question must queue the question card");
+    };
+    assert_eq!(questions[0].question, "  Which scope should I use? \t");
+    assert_eq!(
+        questions[0]
+            .options
+            .as_ref()
+            .and_then(|options| options.first())
+            .map(|option| option.label.as_str()),
+        Some("  Focused \t")
+    );
+
+    let (updated_input, display_answers) = validate_claude_user_input_answers(
+        &request,
+        BTreeMap::from([(
+            "claude-question-1".to_owned(),
+            vec!["  Focused \t".to_owned()],
+        )]),
+    )
+    .expect("the exact option label should remain a valid answer");
+    assert_eq!(
+        updated_input["answers"]["  Which scope should I use? \t"],
+        "  Focused \t"
+    );
+    assert_eq!(
+        display_answers["claude-question-1"],
+        vec!["  Focused \t".to_owned()]
+    );
+}
+
+#[test]
+fn legacy_claude_question_dialog_retains_historical_text_trimming() {
+    // Exact strings are required by the live permission channel, but the
+    // compatibility-only dialog channel historically normalized both keys
+    // and labels. Keep that unverified legacy contract stable.
+    let questions = json!([
+        {
+            "header": "Scope",
+            "question": "  Which scope should I use? \t",
+            "options": [
+                {"label": "  Focused \t", "description": "Only the changed module"}
+            ]
+        }
+    ]);
+    let mut message = claude_user_dialog_request();
+    message["request"]["payload"]["questions"] = questions.clone();
+    message["request"]["payload"]["input"]["questions"] = questions;
+
+    let mut turn_state = ClaudeTurnState::default();
+    let action = classify_claude_control_request(
+        &message,
+        &mut turn_state,
+        ClaudeApprovalMode::Ask,
+        false,
+        "/tmp",
+        false,
+    )
+    .expect("legacy dialog should parse")
+    .expect("legacy dialog should be classified");
+    let ClaudeControlRequestAction::QueueUserInput {
+        questions, request, ..
+    } = action
+    else {
+        panic!("the legacy dialog must queue structured input");
+    };
+    assert_eq!(questions[0].question, "Which scope should I use?");
+    assert_eq!(
+        questions[0]
+            .options
+            .as_ref()
+            .and_then(|options| options.first())
+            .map(|option| option.label.as_str()),
+        Some("Focused")
+    );
+
+    let (updated_input, _) = validate_claude_user_input_answers(
+        &request,
+        BTreeMap::from([("claude-question-1".to_owned(), vec!["Focused".to_owned()])]),
+    )
+    .expect("the historically normalized dialog answer should validate");
+    assert_eq!(
+        updated_input["answers"]["Which scope should I use?"],
+        "Focused"
+    );
+}
+
+#[test]
+fn claude_ask_user_question_rejects_present_invalid_optional_field_types() {
+    for (field, invalid_value, expected_diagnostic) in [
+        (
+            "options",
+            json!({"Focused": "Only this module"}),
+            "is not an array",
+        ),
+        ("multiSelect", json!("yes"), "is not a boolean"),
+    ] {
+        let mut question = json!({
+            "header": "Scope",
+            "question": "Which scope should I use?"
+        });
+        question[field] = invalid_value;
+        let message =
+            claude_permission_request("AskUserQuestion", json!({"questions": [question]}));
+        let mut turn_state = ClaudeTurnState::default();
+        let action = classify_claude_control_request(
+            &message,
+            &mut turn_state,
+            ClaudeApprovalMode::Ask,
+            false,
+            "/tmp",
+            false,
+        )
+        .expect("permission payload should classify")
+        .expect("malformed optional fields should use normal permission handling");
+        let ClaudeControlRequestAction::QueueApproval { detail, .. } = action else {
+            panic!("a present invalid {field} must fall back to permission handling");
+        };
+        assert!(detail.contains("AskUserQuestion payload rejected"));
+        assert!(
+            detail.contains(expected_diagnostic),
+            "diagnostic for {field} was missing: {detail}"
+        );
+    }
+}
+
+#[test]
+fn claude_ask_user_question_rejects_oversized_or_duplicate_option_lists() {
+    let cases = [
+        (
+            (1..=5)
+                .map(|index| json!({"label": format!("Option {index}")}))
+                .collect::<Vec<_>>(),
+            "expected at most 4",
+        ),
+        (
+            vec![json!({"label": "Focused"}), json!({"label": "Focused"})],
+            "duplicate option label",
+        ),
+    ];
+
+    for (options, expected_diagnostic) in cases {
+        let message = claude_permission_request(
+            "AskUserQuestion",
+            json!({
+                "questions": [{
+                    "header": "Scope",
+                    "question": "Which scope should I use?",
+                    "options": options
+                }]
+            }),
+        );
+        let mut turn_state = ClaudeTurnState::default();
+        let action = classify_claude_control_request(
+            &message,
+            &mut turn_state,
+            ClaudeApprovalMode::Ask,
+            false,
+            "/tmp",
+            false,
+        )
+        .expect("permission payload should classify")
+        .expect("invalid option lists should use normal permission handling");
+        let ClaudeControlRequestAction::QueueApproval { detail, .. } = action else {
+            panic!("an invalid option list must fall back to permission handling");
+        };
+        assert!(detail.contains("AskUserQuestion payload rejected"));
+        assert!(
+            detail.contains(expected_diagnostic),
+            "expected `{expected_diagnostic}` in `{detail}`"
+        );
+    }
+}
+
+#[test]
+fn claude_ask_user_question_with_malformed_questions_falls_back_to_permission_flow() {
+    // Five questions exceed the tool contract; the payload is treated as an
+    // ordinary permission request instead of failing the turn.
+    let questions: Vec<Value> = (1..=5)
+        .map(|index| {
+            json!({
+                "header": format!("Q{index}"),
+                "question": format!("Question number {index}?"),
+                "multiSelect": false,
+                "options": []
+            })
+        })
+        .collect();
+    let message = claude_permission_request("AskUserQuestion", json!({ "questions": questions }));
+
+    let mut turn_state = ClaudeTurnState::default();
+    let action = classify_claude_control_request(
+        &message,
+        &mut turn_state,
+        ClaudeApprovalMode::Ask,
+        false,
+        "/tmp",
+        false,
+    )
+    .expect("permission payload should parse")
+    .expect("permission payload should be classified");
+    let ClaudeControlRequestAction::QueueApproval { detail, .. } = action else {
+        panic!("a malformed question list must fall back to the approval flow");
+    };
+    assert!(
+        detail.contains("AskUserQuestion payload rejected"),
+        "the approval card must surface why no question card was shown: {detail}"
+    );
+    assert!(detail.contains("expected 1 to 4"));
+    // The fallback wording must stay mode-neutral: depending on the approval
+    // mode the ordinary flow shows a card, auto-allows, or denies.
+    assert!(detail.contains("normal permission handling"));
+    assert!(!detail.contains("asking for approval"));
+}
+
+#[test]
+fn claude_ask_user_question_without_questions_array_is_diagnosed_in_fallback() {
+    // A payload with no questions array (missing or mistyped) is diagnosed
+    // like any other parse failure — the approval card explains why the
+    // question card did not appear instead of silently degrading.
+    for tool_input in [
+        json!({ "metadata": {"source": "test"} }),
+        json!({ "questions": "not-an-array" }),
+    ] {
+        let message = claude_permission_request("AskUserQuestion", tool_input);
+        let mut turn_state = ClaudeTurnState::default();
+        let action = classify_claude_control_request(
+            &message,
+            &mut turn_state,
+            ClaudeApprovalMode::Ask,
+            false,
+            "/tmp",
+            false,
+        )
+        .expect("permission payload should parse")
+        .expect("permission payload should be classified");
+        let ClaudeControlRequestAction::QueueApproval { detail, .. } = action else {
+            panic!("a missing question list must fall back to the approval flow");
+        };
+        assert!(
+            detail.contains("has no `questions` array"),
+            "the approval card must diagnose the missing question list: {detail}"
+        );
+    }
+}
+
+#[test]
+fn claude_user_input_response_routes_by_transport() {
+    let response = ClaudeUserInputResponse {
+        request_id: "permission-request-1".to_owned(),
+        updated_input: json!({
+            "questions": [],
+            "answers": {"Which scope should I use?": "Focused"}
+        }),
+    };
+
+    let command =
+        claude_user_input_runtime_command(ClaudeUserInputTransport::Permission, response.clone());
+    let ClaudeRuntimeCommand::PermissionResponse(ClaudePermissionDecision::Allow {
+        request_id,
+        updated_input,
+    }) = command
+    else {
+        panic!("permission-transport answers must return through the allow decision");
+    };
+    assert_eq!(request_id, "permission-request-1");
+    assert_eq!(
+        updated_input.pointer("/answers/Which scope should I use?"),
+        Some(&json!("Focused"))
+    );
+
+    let command = claude_user_input_runtime_command(ClaudeUserInputTransport::Dialog, response);
+    assert!(matches!(
+        command,
+        ClaudeRuntimeCommand::UserInputResponse(_)
+    ));
+}
+
+#[test]
+fn claude_self_resolved_question_response_routes_by_transport() {
+    let command = claude_self_resolved_question_runtime_command(
+        ClaudeSelfResolvedQuestionResponse::PermissionDeny(ClaudePermissionDecision::Deny {
+            request_id: "permission-request-1".to_owned(),
+            message: "Decide without asking.".to_owned(),
+        }),
+    );
+    let ClaudeRuntimeCommand::PermissionResponse(ClaudePermissionDecision::Deny {
+        request_id,
+        message,
+    }) = command
+    else {
+        panic!("permission self-resolution must use the permission deny envelope");
+    };
+    assert_eq!(request_id, "permission-request-1");
+    assert_eq!(message, "Decide without asking.");
+
+    let command = claude_self_resolved_question_runtime_command(
+        ClaudeSelfResolvedQuestionResponse::DialogError(ClaudeControlErrorResponse {
+            error: "Decide without asking.".to_owned(),
+            request_id: "dialog-request-1".to_owned(),
+        }),
+    );
+    let ClaudeRuntimeCommand::ControlErrorResponse(ClaudeControlErrorResponse {
+        error,
+        request_id,
+    }) = command
+    else {
+        panic!("legacy dialog self-resolution must use the control error envelope");
+    };
+    assert_eq!(request_id, "dialog-request-1");
+    assert_eq!(error, "Decide without asking.");
 }
 
 #[test]
@@ -166,6 +1066,7 @@ fn malformed_claude_question_dialog_is_answered_with_a_control_error() {
         &request,
         &mut turn_state,
         ClaudeApprovalMode::Ask,
+        false,
         "/tmp",
         false,
     )
@@ -196,6 +1097,155 @@ fn malformed_claude_question_dialog_is_answered_with_a_control_error() {
 }
 
 #[test]
+fn malformed_unattended_claude_question_dialogs_are_deduped_and_bounded() {
+    let mut turn_state = ClaudeTurnState::default();
+    for attempt in 1..=MAX_CLAUDE_UNATTENDED_QUESTIONS_PER_TURN {
+        let mut request = claude_user_dialog_request();
+        request["request_id"] = json!(format!("dialog-request-{attempt}"));
+        request["request"]["payload"]["questions"] = json!([{}, {}, {}, {}, {}]);
+        let action = classify_claude_control_request(
+            &request,
+            &mut turn_state,
+            ClaudeApprovalMode::ReadOnlyAutoApprove,
+            false,
+            "/tmp",
+            false,
+        )
+        .expect("a malformed unattended dialog within the cap should classify")
+        .expect("a malformed unattended dialog within the cap should self-resolve");
+        let ClaudeControlRequestAction::RecordSelfResolvedQuestionError {
+            detail,
+            response:
+                ClaudeSelfResolvedQuestionResponse::DialogError(ClaudeControlErrorResponse {
+                    request_id,
+                    error,
+                }),
+        } = action
+        else {
+            panic!("malformed unattended dialog should record an error and self-resolve");
+        };
+        assert!(detail.contains("expected 1 to 4"));
+        assert_eq!(request_id, format!("dialog-request-{attempt}"));
+        assert!(error.contains("your own judgment"));
+
+        if attempt == 1 {
+            let replay = classify_claude_control_request(
+                &request,
+                &mut turn_state,
+                ClaudeApprovalMode::ReadOnlyAutoApprove,
+                false,
+                "/tmp",
+                false,
+            )
+            .expect("a malformed dialog replay should classify");
+            assert!(
+                replay.is_none(),
+                "a malformed dialog replay must deduplicate"
+            );
+        }
+    }
+
+    let mut request = claude_user_dialog_request();
+    request["request_id"] = json!("dialog-request-over-limit");
+    request["request"]["payload"]["questions"] = json!([{}, {}, {}, {}, {}]);
+    let err = match classify_claude_control_request(
+        &request,
+        &mut turn_state,
+        ClaudeApprovalMode::ReadOnlyAutoApprove,
+        false,
+        "/tmp",
+        false,
+    ) {
+        Err(err) => err,
+        Ok(_) => panic!("the fourth malformed unattended dialog must fail the turn"),
+    };
+    assert!(err.to_string().contains("more than 3 times"));
+}
+
+#[test]
+fn claude_cancel_request_clears_pending_permission_question_and_updates_its_card() {
+    // control_cancel_request is keyed by request id, so a question that
+    // arrived over the can_use_tool permission transport is cleared exactly
+    // like a legacy dialog: pending claim dropped, card Canceled, delta
+    // published.
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let message_id = "claude-canceled-permission-question".to_owned();
+    let questions = vec![UserInputQuestion {
+        header: "Scope".to_owned(),
+        id: "claude-question-1".to_owned(),
+        is_other: true,
+        is_secret: false,
+        multi_select: false,
+        options: None,
+        question: "Which scope should I use?".to_owned(),
+    }];
+    state
+        .push_message(
+            &session_id,
+            Message::UserInputRequest {
+                id: message_id.clone(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                title: "Claude needs your input".to_owned(),
+                detail: "Answer Claude's question to continue.".to_owned(),
+                questions: questions.clone(),
+                state: InteractionRequestState::Pending,
+                declinable: true,
+                submitted_answers: None,
+            },
+        )
+        .expect("user input request should be recorded");
+    state
+        .register_claude_pending_user_input(
+            &session_id,
+            message_id.clone(),
+            ClaudePendingUserInput {
+                transport: ClaudeUserInputTransport::Permission,
+                input: json!({ "questions": [{ "question": "Which scope should I use?" }] }),
+                questions,
+                request_id: "permission-request-canceled-by-claude".to_owned(),
+            },
+        )
+        .expect("pending Claude user input should be registered");
+    let mut delta_rx = state.subscribe_delta_events();
+
+    state
+        .clear_claude_pending_interaction_by_request(
+            &session_id,
+            "permission-request-canceled-by-claude",
+        )
+        .expect("Claude cancellation should clear the permission question");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("Claude session should exist");
+    assert!(record.pending_claude_user_inputs.is_empty());
+    assert!(!has_pending_requests(record));
+    assert!(matches!(
+        record.session.messages.last(),
+        Some(Message::UserInputRequest {
+            state: InteractionRequestState::Canceled,
+            submitted_answers: None,
+            ..
+        })
+    ));
+    drop(inner);
+
+    let delta: DeltaEvent = serde_json::from_str(
+        &delta_rx
+            .try_recv()
+            .expect("canceled permission question should publish its message update"),
+    )
+    .expect("canceled permission question delta should decode");
+    assert!(matches!(delta, DeltaEvent::MessageUpdated { .. }));
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
 fn claude_cancel_request_clears_pending_user_dialog_and_updates_its_card() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Claude);
@@ -220,6 +1270,7 @@ fn claude_cancel_request_clears_pending_user_dialog_and_updates_its_card() {
                 detail: "Answer Claude's question to continue.".to_owned(),
                 questions: questions.clone(),
                 state: InteractionRequestState::Pending,
+                declinable: false,
                 submitted_answers: None,
             },
         )
@@ -229,6 +1280,7 @@ fn claude_cancel_request_clears_pending_user_dialog_and_updates_its_card() {
             &session_id,
             message_id.clone(),
             ClaudePendingUserInput {
+                transport: ClaudeUserInputTransport::Dialog,
                 input: json!({"questions": []}),
                 questions,
                 request_id: "dialog-request-canceled-by-claude".to_owned(),
@@ -805,6 +1857,7 @@ fn claude_read_only_auto_approve_allows_read_only_bash_permission_request() {
         ),
         &mut turn_state,
         ClaudeApprovalMode::ReadOnlyAutoApprove,
+        false,
         "C:/reviewer-sandbox",
         false,
     )
@@ -836,6 +1889,7 @@ fn claude_reviewer_allows_authorized_delegation_control_plane_submission() {
         ),
         &mut turn_state,
         ClaudeApprovalMode::Ask,
+        false,
         "C:/reviewer-sandbox",
         true,
     )
@@ -858,6 +1912,7 @@ fn claude_reviewer_denies_control_plane_submission_without_delegation_authority(
         ),
         &mut turn_state,
         ClaudeApprovalMode::ReadOnlyAutoApprove,
+        false,
         "C:/reviewer-sandbox",
         false,
     )
@@ -880,6 +1935,7 @@ fn claude_reviewer_does_not_auto_approve_an_unscoped_colliding_tool_name() {
         ),
         &mut turn_state,
         ClaudeApprovalMode::Ask,
+        false,
         "C:/reviewer-sandbox",
         true,
     )
@@ -902,6 +1958,7 @@ fn claude_reviewer_does_not_auto_approve_a_qualified_foreign_server_alias() {
         ),
         &mut turn_state,
         ClaudeApprovalMode::Ask,
+        false,
         "C:/reviewer-sandbox",
         true,
     )
@@ -959,6 +2016,7 @@ fn claude_read_only_auto_approve_allows_review_code_bash_shapes() {
             &claude_permission_request("Bash", json!({ "command": command })),
             &mut turn_state,
             ClaudeApprovalMode::ReadOnlyAutoApprove,
+            false,
             "C:/reviewer-sandbox",
             false,
         )
@@ -1001,6 +2059,7 @@ fn claude_bash_is_read_only_for_test(command: &str, cwd: &str) -> bool {
         &claude_permission_request("Bash", json!({ "command": command })),
         &mut turn_state,
         ClaudeApprovalMode::ReadOnlyAutoApprove,
+        false,
         cwd,
         false,
     )
@@ -1243,6 +2302,7 @@ fn read_only_powershell_tool_is_denied_wholesale() {
             &claude_permission_request(tool, json!({ "command": command })),
             &mut turn_state,
             ClaudeApprovalMode::ReadOnlyAutoApprove,
+            false,
             cwd,
             false,
         )
@@ -1303,6 +2363,7 @@ fn claude_read_only_auto_approve_denies_write_permission_request() {
         ),
         &mut turn_state,
         ClaudeApprovalMode::ReadOnlyAutoApprove,
+        false,
         "C:/reviewer-sandbox",
         false,
     )
@@ -1333,6 +2394,7 @@ fn claude_read_only_auto_approve_denies_unsafe_bash_permission_request() {
         ),
         &mut turn_state,
         ClaudeApprovalMode::ReadOnlyAutoApprove,
+        false,
         "C:/reviewer-sandbox",
         false,
     )
@@ -1499,6 +2561,7 @@ fn claude_read_only_auto_approve_denies_mutating_git_find_and_sed_shapes() {
             &claude_permission_request("Bash", json!({ "command": command })),
             &mut turn_state,
             ClaudeApprovalMode::ReadOnlyAutoApprove,
+            false,
             "C:/reviewer-sandbox",
             false,
         )
@@ -1528,6 +2591,7 @@ fn claude_read_only_auto_approve_denies_mutating_git_find_and_sed_shapes() {
 fn clear_claude_turn_state_resets_all_fields() {
     let mut state = ClaudeTurnState {
         approval_keys_this_turn: HashSet::from(["approval-1".to_owned()]),
+        unattended_questions_self_resolved_this_turn: 2,
         parallel_agent_group_key: Some("group-1".to_owned()),
         parallel_agent_order: vec!["agent-1".to_owned()],
         parallel_agents: HashMap::from([(
@@ -1559,6 +2623,7 @@ fn clear_claude_turn_state_resets_all_fields() {
     clear_claude_turn_state(&mut state);
 
     assert!(state.approval_keys_this_turn.is_empty());
+    assert_eq!(state.unattended_questions_self_resolved_this_turn, 0);
     assert_eq!(state.parallel_agent_group_key, None);
     assert!(state.parallel_agent_order.is_empty());
     assert!(state.parallel_agents.is_empty());
@@ -1579,6 +2644,7 @@ fn clear_claude_turn_state_resets_all_fields() {
 fn reset_claude_turn_state_clears_all_fields_and_finishes_streaming_text() {
     let mut state = ClaudeTurnState {
         approval_keys_this_turn: HashSet::from(["approval-1".to_owned()]),
+        unattended_questions_self_resolved_this_turn: 2,
         parallel_agent_group_key: Some("group-1".to_owned()),
         parallel_agent_order: vec!["agent-1".to_owned()],
         parallel_agents: HashMap::from([(
@@ -1615,6 +2681,7 @@ fn reset_claude_turn_state_clears_all_fields_and_finishes_streaming_text() {
     reset_claude_turn_state(&mut state, &mut recorder).unwrap();
 
     assert!(state.approval_keys_this_turn.is_empty());
+    assert_eq!(state.unattended_questions_self_resolved_this_turn, 0);
     assert_eq!(state.parallel_agent_group_key, None);
     assert!(state.parallel_agent_order.is_empty());
     assert!(state.parallel_agents.is_empty());
@@ -1627,6 +2694,200 @@ fn reset_claude_turn_state_clears_all_fields_and_finishes_streaming_text() {
     assert_eq!(recorder.finish_streaming_text_calls, 2);
     assert_eq!(recorder.streaming_text_delta_start, None);
     assert!(!recorder.streaming_text_active);
+}
+
+// Pins the complete AskUserQuestion denial result lifecycle: the assistant
+// registers the tool use, TermAl deliberately returns an unattended deny,
+// and Claude reports that deny as an error-shaped tool result. The resolved
+// question card already owns that outcome, so the result must not add a
+// duplicate transcript error; an unrelated AskUserQuestion failure must.
+#[test]
+fn claude_ask_user_question_denial_result_is_suppressed_but_unexpected_error_is_recorded() {
+    let mut turn_state = ClaudeTurnState::default();
+    let mut recorder = TestRecorder::default();
+    let mut session_id = None;
+
+    handle_claude_event(
+        &json!({
+            "type": "assistant",
+            "message": {
+                "content": [{
+                    "type": "tool_use",
+                    "id": "question-tool-1",
+                    "name": "AskUserQuestion",
+                    "input": {
+                        "questions": [{
+                            "header": "Scope",
+                            "question": "Which scope should I use?"
+                        }]
+                    }
+                }]
+            }
+        }),
+        &mut session_id,
+        &mut turn_state,
+        &mut recorder,
+    )
+    .unwrap();
+
+    let action = classify_claude_control_request(
+        &claude_ask_user_question_permission_request(),
+        &mut turn_state,
+        ClaudeApprovalMode::ReadOnlyAutoApprove,
+        true,
+        "/tmp",
+        false,
+    )
+    .expect("permission payload should parse")
+    .expect("permission payload should be classified");
+    let ClaudeControlRequestAction::RecordSelfResolvedQuestion {
+        response:
+            ClaudeSelfResolvedQuestionResponse::PermissionDeny(ClaudePermissionDecision::Deny {
+                message: denial_message,
+                ..
+            }),
+        ..
+    } = action
+    else {
+        panic!("the unattended question should produce a permission deny");
+    };
+
+    handle_claude_event(
+        &json!({
+            "type": "user",
+            "message": {
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": "question-tool-1",
+                    "is_error": true,
+                    "content": denial_message
+                }]
+            }
+        }),
+        &mut session_id,
+        &mut turn_state,
+        &mut recorder,
+    )
+    .unwrap();
+    assert!(recorder.errors.is_empty());
+    assert!(!turn_state.pending_tools.contains_key("question-tool-1"));
+
+    handle_claude_event(
+        &json!({
+            "type": "assistant",
+            "message": {
+                "content": [{
+                    "type": "tool_use",
+                    "id": "question-tool-skip",
+                    "name": "AskUserQuestion",
+                    "input": {"questions": []}
+                }]
+            }
+        }),
+        &mut session_id,
+        &mut turn_state,
+        &mut recorder,
+    )
+    .unwrap();
+    handle_claude_event(
+        &json!({
+            "type": "user",
+            "message": {
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": "question-tool-skip",
+                    "is_error": true,
+                    "content": CLAUDE_USER_DECLINED_QUESTION_MESSAGE
+                }]
+            }
+        }),
+        &mut session_id,
+        &mut turn_state,
+        &mut recorder,
+    )
+    .unwrap();
+    assert!(recorder.errors.is_empty());
+
+    handle_claude_event(
+        &json!({
+            "type": "assistant",
+            "message": {
+                "content": [{
+                    "type": "tool_use",
+                    "id": "question-tool-2",
+                    "name": "AskUserQuestion",
+                    "input": {"questions": []}
+                }]
+            }
+        }),
+        &mut session_id,
+        &mut turn_state,
+        &mut recorder,
+    )
+    .unwrap();
+    handle_claude_event(
+        &json!({
+            "type": "user",
+            "message": {
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": "question-tool-2",
+                    "is_error": true,
+                    "content": "AskUserQuestion failed to validate its schema."
+                }]
+            }
+        }),
+        &mut session_id,
+        &mut turn_state,
+        &mut recorder,
+    )
+    .unwrap();
+    assert_eq!(
+        recorder.errors,
+        vec!["AskUserQuestion failed to validate its schema.".to_owned()]
+    );
+
+    handle_claude_event(
+        &json!({
+            "type": "assistant",
+            "message": {
+                "content": [{
+                    "type": "tool_use",
+                    "id": "question-tool-3",
+                    "name": "AskUserQuestion",
+                    "input": {"questions": []}
+                }]
+            }
+        }),
+        &mut session_id,
+        &mut turn_state,
+        &mut recorder,
+    )
+    .unwrap();
+    handle_claude_event(
+        &json!({
+            "type": "user",
+            "message": {
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": "question-tool-3",
+                    "is_error": true,
+                    "content": "AskUserQuestion failed while checking requested permissions."
+                }]
+            }
+        }),
+        &mut session_id,
+        &mut turn_state,
+        &mut recorder,
+    )
+    .unwrap();
+    assert_eq!(
+        recorder.errors,
+        vec![
+            "AskUserQuestion failed to validate its schema.".to_owned(),
+            "AskUserQuestion failed while checking requested permissions.".to_owned(),
+        ]
+    );
 }
 
 // Pins `handle_claude_tool_use` fanning out two concurrent `task` tool_use

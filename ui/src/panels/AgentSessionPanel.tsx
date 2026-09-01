@@ -29,6 +29,7 @@ import {
   VirtualizedConversationMessageList,
   type RenderMessageCard,
 } from "./VirtualizedConversationMessageList";
+import { usePendingUserInputSubmissions } from "./pending-user-input-submissions";
 import {
   CONVERSATION_OVERVIEW_MIN_MESSAGES,
   ConversationOverviewRail,
@@ -182,6 +183,16 @@ export function AgentSessionPanel({
 }: AgentSessionPanelProps): JSX.Element {
   const stableOnApprovalDecision = useStableEvent(onApprovalDecision);
   const stableOnUserInputSubmit = useStableEvent(onUserInputSubmit);
+  // The pane owns submission claims so switching away from a session cannot
+  // remount its conversation with the same request enabled while the first
+  // HTTP submission is still in flight.
+  const {
+    trackedUserInputSubmit,
+    pendingUserInputMessageIds,
+  } = usePendingUserInputSubmissions(
+    activeSessionId,
+    stableOnUserInputSubmit,
+  );
   const stableOnMcpElicitationSubmit = useStableEvent(onMcpElicitationSubmit);
   const stableOnCodexAppRequestSubmit = useStableEvent(onCodexAppRequestSubmit);
   const stableOnCancelQueuedPrompt = useStableEvent(onCancelQueuedPrompt);
@@ -214,7 +225,8 @@ export function AgentSessionPanel({
       commandMessages={fallbackCommandMessages}
       diffMessages={fallbackDiffMessages}
       onApprovalDecision={stableOnApprovalDecision}
-      onUserInputSubmit={stableOnUserInputSubmit}
+      onUserInputSubmit={trackedUserInputSubmit}
+      pendingUserInputMessageIds={pendingUserInputMessageIds}
       onMcpElicitationSubmit={stableOnMcpElicitationSubmit}
       onCodexAppRequestSubmit={stableOnCodexAppRequestSubmit}
       onCancelQueuedPrompt={stableOnCancelQueuedPrompt}
@@ -332,6 +344,7 @@ const SessionBody = memo(
     diffMessages: fallbackDiffMessages,
     onApprovalDecision,
     onUserInputSubmit,
+    pendingUserInputMessageIds,
     onMcpElicitationSubmit,
     onCodexAppRequestSubmit,
     onCancelQueuedPrompt,
@@ -431,6 +444,7 @@ const SessionBody = memo(
             waitingIndicatorActivity={resolvedWaitingIndicatorActivity}
             onApprovalDecision={onApprovalDecision}
             onUserInputSubmit={onUserInputSubmit}
+            pendingUserInputMessageIds={pendingUserInputMessageIds}
             onMcpElicitationSubmit={onMcpElicitationSubmit}
             onCodexAppRequestSubmit={onCodexAppRequestSubmit}
             onCancelQueuedPrompt={onCancelQueuedPrompt}
@@ -517,6 +531,8 @@ const SessionBody = memo(
     previous.diffMessages === next.diffMessages &&
     previous.onApprovalDecision === next.onApprovalDecision &&
     previous.onUserInputSubmit === next.onUserInputSubmit &&
+    previous.pendingUserInputMessageIds ===
+      next.pendingUserInputMessageIds &&
     previous.onMcpElicitationSubmit === next.onMcpElicitationSubmit &&
     previous.onCodexAppRequestSubmit === next.onCodexAppRequestSubmit &&
     previous.onPinResponseBoardMessage === next.onPinResponseBoardMessage &&
@@ -564,6 +580,7 @@ const SessionConversationPage = memo(
     waitingIndicatorActivity,
     onApprovalDecision,
     onUserInputSubmit,
+    pendingUserInputMessageIds,
     onMcpElicitationSubmit,
     onCodexAppRequestSubmit,
     onCancelQueuedPrompt,
@@ -1001,6 +1018,7 @@ const SessionConversationPage = memo(
         onMessageUserInputSubmit,
         onMessageMcpElicitationSubmit,
         onMessageCodexAppRequestSubmit,
+        userInputSubmissionPending,
       ) => {
         const currentUserScrollGeneration =
           conversationOverview.virtualizerHandleRef.current?.getUserScrollGeneration() ??
@@ -1012,6 +1030,7 @@ const SessionConversationPage = memo(
           onMessageUserInputSubmit,
           onMessageMcpElicitationSubmit,
           onMessageCodexAppRequestSubmit,
+          userInputSubmissionPending,
         );
         if (!rendered) {
           return null;
@@ -1222,6 +1241,7 @@ const SessionConversationPage = memo(
         isActive={isActive}
         onApprovalDecision={onApprovalDecision}
         onUserInputSubmit={onUserInputSubmit}
+        pendingUserInputMessageIds={pendingUserInputMessageIds}
         onMcpElicitationSubmit={onMcpElicitationSubmit}
         onCodexAppRequestSubmit={onCodexAppRequestSubmit}
         conversationSearchQuery={conversationSearchQuery}
@@ -1382,6 +1402,8 @@ const SessionConversationPage = memo(
     previous.waitingIndicatorPrompt === next.waitingIndicatorPrompt &&
     previous.waitingIndicatorActivity === next.waitingIndicatorActivity &&
     previous.onUserInputSubmit === next.onUserInputSubmit &&
+    previous.pendingUserInputMessageIds ===
+      next.pendingUserInputMessageIds &&
     previous.onMcpElicitationSubmit === next.onMcpElicitationSubmit &&
     previous.onCodexAppRequestSubmit === next.onCodexAppRequestSubmit &&
     previous.onCreateConversationMarker === next.onCreateConversationMarker &&
@@ -1396,7 +1418,7 @@ const SessionConversationPage = memo(
       next.onConversationSearchItemMount,
 );
 
-function ConversationMessageList({
+export function ConversationMessageList({
   renderMessageCard,
   sessionId,
   messageStartIndex,
@@ -1407,6 +1429,7 @@ function ConversationMessageList({
   isActive,
   onApprovalDecision,
   onUserInputSubmit,
+  pendingUserInputMessageIds,
   onMcpElicitationSubmit,
   onCodexAppRequestSubmit,
   conversationSearchQuery,
@@ -1415,6 +1438,12 @@ function ConversationMessageList({
   onConversationSearchItemMount,
   forceVirtualized = false,
 }: ConversationMessageListProps) {
+  const boundUserInputSubmit = useCallback(
+    (messageId: string, answers: Record<string, string[]> | null) =>
+      onUserInputSubmit(sessionId, messageId, answers),
+    [onUserInputSubmit, sessionId],
+  );
+
   if (
     !forceVirtualized &&
     messages.length < CONVERSATION_VIRTUALIZATION_MIN_MESSAGES
@@ -1440,12 +1469,12 @@ function ConversationMessageList({
               isActive && index >= messages.length - 2,
               (messageId, decision) =>
                 onApprovalDecision(sessionId, messageId, decision),
-              (messageId, answers) =>
-                onUserInputSubmit(sessionId, messageId, answers),
+              boundUserInputSubmit,
               (messageId, action, content) =>
                 onMcpElicitationSubmit(sessionId, messageId, action, content),
               (messageId, result) =>
                 onCodexAppRequestSubmit(sessionId, messageId, result),
+              pendingUserInputMessageIds.has(message.id),
             )}
           </MessageSlot>
         ))}
@@ -1479,7 +1508,8 @@ function ConversationMessageList({
       conversationSearchActiveItemKey={conversationSearchActiveItemKey}
       onConversationSearchItemMount={onConversationSearchItemMount}
       onApprovalDecision={onApprovalDecision}
-      onUserInputSubmit={onUserInputSubmit}
+      onUserInputSubmit={boundUserInputSubmit}
+      pendingUserInputMessageIds={pendingUserInputMessageIds}
       onMcpElicitationSubmit={onMcpElicitationSubmit}
       onCodexAppRequestSubmit={onCodexAppRequestSubmit}
     />

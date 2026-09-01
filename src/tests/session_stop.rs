@@ -173,7 +173,19 @@ fn shared_codex_stdin_watchdog_times_out_stalled_writer_and_clears_runtime() {
             .lock()
             .expect("shared Codex runtime mutex poisoned")
             .is_none();
-        if cleared {
+        // Runtime-exit handling deliberately clears the shared slot before
+        // cascading the failure onto its sessions. Wait for both observable
+        // effects so this test cannot snapshot that intentional intermediate
+        // state and misclassify the watchdog as incomplete.
+        let terminalized = {
+            let inner = state.inner.lock().expect("state mutex poisoned");
+            inner
+                .sessions
+                .iter()
+                .find(|record| record.session.id == session_id)
+                .is_some_and(|record| record.session.status == SessionStatus::Error)
+        };
+        if cleared && terminalized {
             break;
         }
         assert!(

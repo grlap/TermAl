@@ -200,6 +200,44 @@ fn lightweight_test_state_rejects_direct_claude_runtime_spawning() {
 }
 
 #[test]
+fn claude_control_failure_terminates_the_child_and_preserves_the_waiter_reason() {
+    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let error_override = Arc::new(Mutex::new(None));
+    let detail = "failed to handle Claude control request: unattended question loop";
+
+    terminate_claude_runtime_after_control_failure(&process, &error_override, detail)
+        .expect("the reader failure should terminate the Claude child");
+    process
+        .wait()
+        .expect("the terminated Claude child should be reapable");
+    assert_eq!(
+        error_override
+            .lock()
+            .expect("Claude runtime-exit override mutex poisoned")
+            .take()
+            .as_deref(),
+        Some(detail)
+    );
+}
+
+#[test]
+fn claude_waiter_collects_the_reader_failure_after_the_reader_finishes() {
+    let error_override = Arc::new(Mutex::new(None));
+    let reader_error_override = error_override.clone();
+    let detail = "failed to handle Claude control request: recorder unavailable";
+    let reader = std::thread::spawn(move || {
+        *reader_error_override
+            .lock()
+            .expect("Claude runtime-exit override mutex poisoned") = Some(detail.to_owned());
+    });
+
+    assert_eq!(
+        take_claude_runtime_exit_error_after_reader(reader, &error_override).as_deref(),
+        Some(detail)
+    );
+}
+
+#[test]
 fn private_claude_mcp_config_file_is_exclusive_owner_only_and_removed_on_drop() {
     let temp = TestTempRoot::create("termal-claude-mcp-config-file");
     let dir = temp.path().join("delegations").join("mcp");

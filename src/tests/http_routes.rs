@@ -751,6 +751,32 @@ async fn get_session_overview_route_is_complete_for_a_retained_tail() {
     );
 }
 
+#[test]
+fn conversation_overview_classifies_declined_input_as_text_not_error() {
+    // Deliberate asymmetry: an answerless resolution (Declined), whether the
+    // user skipped or TermAl self-resolved it, is benign and lands in the
+    // Text bucket, while agent/turn-side outcomes (Canceled) read as errors.
+    let card = |state: InteractionRequestState| Message::UserInputRequest {
+        id: "overview-input".to_owned(),
+        timestamp: stamp_now(),
+        author: Author::Assistant,
+        title: "Claude needs your input".to_owned(),
+        detail: "Answer Claude's question to continue.".to_owned(),
+        questions: Vec::new(),
+        state,
+        declinable: true,
+        submitted_answers: None,
+    };
+    assert_eq!(
+        conversation_overview_message_metadata(&card(InteractionRequestState::Declined)),
+        (ConversationOverviewKind::Text, false)
+    );
+    assert_eq!(
+        conversation_overview_message_metadata(&card(InteractionRequestState::Canceled)),
+        (ConversationOverviewKind::Error, false)
+    );
+}
+
 #[tokio::test]
 async fn get_session_history_route_centers_an_around_position() {
     let state = test_app_state();

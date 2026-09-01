@@ -2,7 +2,7 @@
 // Deliberately does not own generic MessageCard routing or Markdown rendering;
 // this was split out of `message-cards.tsx` as a pure code move.
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { MessageMeta } from "./message-card-meta";
 import {
   renderHighlightedText,
@@ -20,6 +20,7 @@ import type {
 
 type UserInputDraftField = {
   customAnswer: string;
+  otherSelected: boolean;
   selectedOptions: string[];
 };
 
@@ -45,10 +46,8 @@ function buildUserInputDraft(
       customAnswer: customAnswers.includes("[secret provided]")
         ? ""
         : customAnswers.join(", "),
-      selectedOptions: [
-        ...selectedOptions,
-        ...(question.isOther && customAnswers.length ? ["__other__"] : []),
-      ],
+      otherSelected: !!question.isOther && customAnswers.length > 0,
+      selectedOptions,
     };
   }
   return next;
@@ -85,11 +84,21 @@ function buildUserInputSummary(
 export function UserInputRequestCard({
   message,
   onSubmit,
+  actionsEnabled = true,
+  submissionPending = false,
   searchQuery = "",
   searchHighlightTone = "match",
 }: {
   message: UserInputRequestMessage;
-  onSubmit: (messageId: string, answers: Record<string, string[]>) => void;
+  onSubmit: (
+    messageId: string,
+    answers: Record<string, string[]> | null,
+  ) => void | Promise<unknown>;
+  /** When false (board snapshots, staging trays), Submit/Skip render
+   * disabled so a stale copy of the card cannot look actionable. */
+  actionsEnabled?: boolean;
+  /** Stable virtualizer-owned claim for a request already in flight. */
+  submissionPending?: boolean;
   searchQuery?: string;
   searchHighlightTone?: SearchHighlightTone;
 }) {
@@ -97,12 +106,82 @@ export function UserInputRequestCard({
     buildUserInputDraft(message.questions, message.submittedAnswers),
   );
   const [validationError, setValidationError] = useState<string | null>(null);
+  // In-flight guard: set as soon as Submit or Skip dispatches so a
+  // double-click cannot fire a second request (and a second error toast).
+  // Cleared when the submission settles or the message itself updates.
+  const [dispatched, setDispatched] = useState(false);
+  // Unmount and stale-settle guards for the dispatch below: a submission
+  // that settles after unmount (or after a newer dispatch superseded it)
+  // must not call setState.
+  const mountedRef = useRef(true);
+  const dispatchedRef = useRef(false);
+  const dispatchGenerationRef = useRef(0);
+  // Radio groups are keyed per rendered instance, not per message: a live
+  // card and a board snapshot of the same message would otherwise form one
+  // native radio group and steal each other's selection.
+  const instanceId = useId();
   const pending = message.state === "pending";
+  // The whole card freezes while a submission is in flight, not only the
+  // Submit/Skip buttons: editing the draft mid-flight would desync what the
+  // user sees from what was sent.
+  const interactive =
+    pending && actionsEnabled && !dispatched && !submissionPending;
 
   useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  // The in-flight guard is owned by dispatch completion (generation-checked
+  // settle). Ordinary message updates while a submission is in flight must
+  // not lift it; only a genuinely different message resets it.
+  useEffect(() => {
+    dispatchGenerationRef.current += 1;
+    dispatchedRef.current = false;
+    setDispatched(false);
+  }, [message.id]);
+
+  useEffect(() => {
+    // Preserve the visible draft when a pending card is re-synced while its
+    // submission is still in flight. If the message resolves, server-owned
+    // submitted answers replace the draft immediately.
+    if (dispatchedRef.current && message.state === "pending") {
+      return;
+    }
     setDraft(buildUserInputDraft(message.questions, message.submittedAnswers));
     setValidationError(null);
   }, [message.id, message.questions, message.state, message.submittedAnswers]);
+
+  function dispatchSubmission(answers: Record<string, string[]> | null) {
+    if (dispatchedRef.current || submissionPending) {
+      return;
+    }
+    const generation = dispatchGenerationRef.current + 1;
+    dispatchGenerationRef.current = generation;
+    dispatchedRef.current = true;
+    setDispatched(true);
+    const settle = () => {
+      if (mountedRef.current && dispatchGenerationRef.current === generation) {
+        dispatchedRef.current = false;
+        setDispatched(false);
+      }
+    };
+    let result: void | Promise<unknown>;
+    try {
+      result = onSubmit(message.id, answers);
+    } catch {
+      // Error reporting belongs to the app-level handler; a synchronous
+      // throw here only re-enables the actions so the user can retry.
+      settle();
+      return;
+    }
+    // `.then(settle, settle)` observes rejections (no unhandled-rejection
+    // event) while re-enabling the actions on either outcome; the app
+    // handler already reported any failure to the user.
+    void Promise.resolve(result).then(settle, settle);
+  }
 
   function updateField(
     questionId: string,
@@ -112,6 +191,7 @@ export function UserInputRequestCard({
       ...current,
       [questionId]: {
         customAnswer: current[questionId]?.customAnswer ?? "",
+        otherSelected: current[questionId]?.otherSelected ?? false,
         selectedOptions: current[questionId]?.selectedOptions ?? [],
         ...nextField,
       },
@@ -123,20 +203,16 @@ export function UserInputRequestCard({
     for (const question of message.questions) {
       const field = draft[question.id] ?? {
         customAnswer: "",
+        otherSelected: false,
         selectedOptions: [],
       };
       const options = question.options ?? [];
       const optionLabels = new Set(
         options.map((option) => option.label),
       );
-      const selectedAnswers = field.selectedOptions.filter(
-        (answer) => answer !== "__other__",
-      );
+      const selectedAnswers = [...field.selectedOptions];
       const customAnswer = field.customAnswer.trim();
-      if (
-        (options.length === 0 || field.selectedOptions.includes("__other__")) &&
-        customAnswer
-      ) {
+      if ((options.length === 0 || field.otherSelected) && customAnswer) {
         selectedAnswers.push(customAnswer);
       }
 
@@ -162,7 +238,7 @@ export function UserInputRequestCard({
     }
 
     setValidationError(null);
-    onSubmit(message.id, answers);
+    dispatchSubmission(answers);
   }
 
   return (
@@ -186,13 +262,13 @@ export function UserInputRequestCard({
         {message.questions.map((question) => {
           const field = draft[question.id] ?? {
             customAnswer: "",
+            otherSelected: false,
             selectedOptions: [],
           };
           const options = question.options ?? [];
           const inputType = question.isSecret ? "password" : "text";
           const usesOther = !!question.isOther;
-          const showFreeform =
-            options.length === 0 || field.selectedOptions.includes("__other__");
+          const showFreeform = options.length === 0 || field.otherSelected;
 
           return (
             <section key={question.id} className="user-input-question">
@@ -217,14 +293,17 @@ export function UserInputRequestCard({
                     <label key={option.label} className="user-input-option">
                       <input
                         type={question.multiSelect ? "checkbox" : "radio"}
-                        name={`user-input-${message.id}-${question.id}`}
+                        name={`user-input-${instanceId}-${question.id}`}
                         checked={field.selectedOptions.includes(option.label)}
-                        disabled={!pending}
+                        disabled={!interactive}
                         onChange={() =>
                           updateField(question.id, {
                             customAnswer: question.multiSelect
                               ? field.customAnswer
                               : "",
+                            otherSelected: question.multiSelect
+                              ? field.otherSelected
+                              : false,
                             selectedOptions: question.multiSelect
                               ? field.selectedOptions.includes(option.label)
                                 ? field.selectedOptions.filter(
@@ -257,18 +336,17 @@ export function UserInputRequestCard({
                     <label className="user-input-option">
                       <input
                         type={question.multiSelect ? "checkbox" : "radio"}
-                        name={`user-input-${message.id}-${question.id}`}
-                        checked={field.selectedOptions.includes("__other__")}
-                        disabled={!pending}
+                        name={`user-input-${instanceId}-${question.id}`}
+                        checked={field.otherSelected}
+                        disabled={!interactive}
                         onChange={() =>
                           updateField(question.id, {
+                            otherSelected: question.multiSelect
+                              ? !field.otherSelected
+                              : true,
                             selectedOptions: question.multiSelect
-                              ? field.selectedOptions.includes("__other__")
-                                ? field.selectedOptions.filter(
-                                    (selected) => selected !== "__other__",
-                                  )
-                                : [...field.selectedOptions, "__other__"]
-                              : ["__other__"],
+                              ? field.selectedOptions
+                              : [],
                           })
                         }
                       />
@@ -283,7 +361,7 @@ export function UserInputRequestCard({
                   className="user-input-text"
                   type={inputType}
                   value={field.customAnswer}
-                  disabled={!pending}
+                  disabled={!interactive}
                   onChange={(event) =>
                     updateField(question.id, {
                       customAnswer: event.target.value,
@@ -312,13 +390,39 @@ export function UserInputRequestCard({
             className="approval-button"
             type="button"
             onClick={handleSubmit}
+            disabled={dispatched || submissionPending || !actionsEnabled}
           >
             Submit answers
           </button>
+          {message.declinable ? (
+            <button
+              className="approval-button approval-button-reject"
+              type="button"
+              onClick={() => {
+                setValidationError(null);
+                dispatchSubmission(null);
+              }}
+              disabled={dispatched || submissionPending || !actionsEnabled}
+            >
+              Skip
+            </button>
+          ) : null}
         </div>
       ) : (
-        <p className="approval-result">Status: {message.state}</p>
+        <p className="approval-result">
+          Status:{" "}
+          {message.state === "declined"
+            ? message.declinable
+              ? "Skipped by you"
+              : "Resolved by TermAl without human input"
+            : message.state}
+        </p>
       )}
+      {pending && !actionsEnabled ? (
+        <p className="support-copy">
+          Answer these questions from the live conversation.
+        </p>
+      ) : null}
     </article>
   );
 }

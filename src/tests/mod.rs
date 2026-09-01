@@ -67,6 +67,7 @@ mod remote_terminal;
 mod response_board;
 mod review;
 mod runtime_rpc;
+mod session_actions;
 mod session_lifecycle;
 mod session_settings;
 mod session_stop;
@@ -102,6 +103,7 @@ struct TestRecorder {
     codex_app_requests: Vec<(String, String, String, Value, CodexPendingAppRequest)>,
     commands: Vec<(String, String, CommandStatus)>,
     diffs: Vec<(String, String, String, ChangeType)>,
+    errors: Vec<String>,
     parallel_agents: Vec<Vec<ParallelAgentProgress>>,
     subagent_results: Vec<(String, String)>,
     thinking: Vec<(String, Vec<String>)>,
@@ -339,7 +341,8 @@ impl TurnRecorder for TestRecorder {
         Ok(())
     }
 
-    fn error(&mut self, _detail: &str) -> Result<()> {
+    fn error(&mut self, detail: &str) -> Result<()> {
+        self.errors.push(detail.to_owned());
         Ok(())
     }
 }

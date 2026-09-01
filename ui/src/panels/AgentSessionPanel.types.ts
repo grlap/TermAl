@@ -172,6 +172,7 @@ export type SessionBodyProps = {
     decision: ApprovalDecision,
   ) => void;
   onUserInputSubmit: UserInputSubmitHandler;
+  pendingUserInputMessageIds: ReadonlySet<string>;
   onMcpElicitationSubmit: McpElicitationSubmitHandler;
   onCodexAppRequestSubmit: CodexAppRequestSubmitHandler;
   onCancelQueuedPrompt: (sessionId: string, promptId: string) => void;
@@ -311,6 +312,7 @@ export type SessionConversationPageProps = {
     decision: ApprovalDecision,
   ) => void;
   onUserInputSubmit: UserInputSubmitHandler;
+  pendingUserInputMessageIds: ReadonlySet<string>;
   onMcpElicitationSubmit: McpElicitationSubmitHandler;
   onCodexAppRequestSubmit: CodexAppRequestSubmitHandler;
   onCancelQueuedPrompt: (sessionId: string, promptId: string) => void;
@@ -348,6 +350,7 @@ export type ConversationMessageListProps = {
     decision: ApprovalDecision,
   ) => void;
   onUserInputSubmit: UserInputSubmitHandler;
+  pendingUserInputMessageIds: ReadonlySet<string>;
   onMcpElicitationSubmit: McpElicitationSubmitHandler;
   onCodexAppRequestSubmit: CodexAppRequestSubmitHandler;
   conversationSearchQuery: string;

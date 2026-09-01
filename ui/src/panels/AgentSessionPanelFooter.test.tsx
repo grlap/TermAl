@@ -254,7 +254,7 @@ function createAgentSessionPanelHarness(
       diffMessages={[]}
       scrollContainerRef={scrollContainerRef}
       onApprovalDecision={() => {}}
-      onUserInputSubmit={() => {}}
+      onUserInputSubmit={async () => {}}
       onMcpElicitationSubmit={() => {}}
       onCodexAppRequestSubmit={() => {}}
       onCancelQueuedPrompt={() => {}}
@@ -289,7 +289,7 @@ function renderNavigableMessageCard(message: Message) {
       <MessageCard
         message={message}
         onApprovalDecision={() => {}}
-        onUserInputSubmit={() => {}}
+        onUserInputSubmit={async () => {}}
         onCodexAppRequestSubmit={() => {}}
       />
       <span>{message.id}</span>

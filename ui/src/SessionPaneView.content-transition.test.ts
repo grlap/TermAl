@@ -277,6 +277,7 @@ describe("turn content transitions", () => {
       detail: "Pick one",
       questions: [],
       state: "pending" as const,
+      declinable: false,
     };
 
     expect(

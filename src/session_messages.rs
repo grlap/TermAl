@@ -43,11 +43,15 @@ impl AppState {
     /// no message id itself — the caller provides one via
     /// `Message::id()`. Updates `session.preview` from the message body
     /// (via `Message::preview_text`), flips `session.status` to `Approval`
-    /// when the new message is an interaction request, and publishes a
-    /// `DeltaEvent::MessageCreated`. Called by every recorder `push_*`
-    /// path (see `src/recorders.rs`) for whole-block events (text,
-    /// thinking, diff, approval, subagent result, etc.).
+    /// only when the new message is a pending interaction request, and
+    /// publishes a `DeltaEvent::MessageCreated`. Already-resolved audit
+    /// cards remain visible without parking the session. Called by every
+    /// recorder `push_*` path (see `src/recorders.rs`) for whole-block
+    /// events (text, thinking, diff, approval, subagent result, etc.).
     fn push_message(&self, session_id: &str, message: Message) -> Result<()> {
+        // The broader predicate is deliberate here: parent delegation
+        // summaries should refresh for a newly recorded resolved audit card
+        // as well as for a card that is still waiting on the operator.
         let should_refresh_delegation = message.is_interaction_request();
         let (revision, message, message_index, message_count, preview, status, session_mutation_stamp) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
@@ -61,7 +65,10 @@ impl AppState {
                 if let Some(next_preview) = message.preview_text() {
                     record.session.preview = next_preview;
                 }
-                if message.is_interaction_request() {
+                // Only a request that is actually waiting parks the session
+                // in Approval; a card recorded already resolved (e.g. an
+                // unattended AskUserQuestion TermAl self-resolved) must not.
+                if message.is_pending_interaction_request() {
                     record.session.status = SessionStatus::Approval;
                 }
                 let message_index = push_message_on_record(record, message.clone());

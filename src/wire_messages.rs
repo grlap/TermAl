@@ -110,6 +110,11 @@ enum InteractionRequestState {
     Submitted,
     Interrupted,
     Canceled,
+    /// The request was resolved without answers: either the user explicitly
+    /// skipped a declinable card, or TermAl self-resolved an unattended
+    /// question. Distinct from `Canceled`, which is an agent- or turn-side
+    /// cancellation.
+    Declined,
 }
 
 /// Represents parallel agent progress.
@@ -402,6 +407,15 @@ enum Message {
         detail: String,
         questions: Vec<UserInputQuestion>,
         state: InteractionRequestState,
+        /// Whether the browser may skip this request without answers. Only
+        /// Claude questions that arrived over the `can_use_tool` permission
+        /// channel are declinable — a permission deny carries the skip back
+        /// to the agent. Codex `request_user_input` and the legacy Claude
+        /// dialog channel have no decline envelope. Always serialized (the
+        /// backend owns the flag; `default` only covers payloads persisted
+        /// before it existed) so the UI treats it as a required boolean.
+        #[serde(default)]
+        declinable: bool,
         #[serde(
             default,
             rename = "submittedAnswers",
@@ -477,6 +491,29 @@ impl Message {
                 | Self::UserInputRequest { .. }
                 | Self::McpElicitationRequest { .. }
                 | Self::CodexAppRequest { .. }
+        )
+    }
+
+    /// An interaction request that is still waiting for someone. A card
+    /// recorded in an already-resolved state (for example an unattended
+    /// AskUserQuestion TermAl self-resolved) is an interaction request but
+    /// not a pending one, and must not park the session in Approval.
+    fn is_pending_interaction_request(&self) -> bool {
+        matches!(
+            self,
+            Self::Approval {
+                decision: ApprovalDecision::Pending,
+                ..
+            } | Self::UserInputRequest {
+                state: InteractionRequestState::Pending,
+                ..
+            } | Self::McpElicitationRequest {
+                state: InteractionRequestState::Pending,
+                ..
+            } | Self::CodexAppRequest {
+                state: InteractionRequestState::Pending,
+                ..
+            }
         )
     }
 

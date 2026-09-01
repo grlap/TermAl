@@ -41,6 +41,8 @@ import {
   zoomBoardViewAtPoint,
 } from "./response-board-camera";
 import {
+  INERT_RESPONSE_BOARD_APPROVAL_DECISION,
+  INERT_RESPONSE_BOARD_USER_INPUT_SUBMIT,
   RESPONSE_BOARD_STAGED_CARD_MIME,
   ResponseBoardPreview,
   ResponseBoardStagingTray,
@@ -1419,10 +1421,11 @@ export function ResponseBoardPanel({
                   <MessageCard
                     message={card.snapshot}
                     approvalActionsEnabled={false}
+                    userInputActionsEnabled={false}
                     parallelAgentActionsEnabled={false}
                     preferImmediateHeavyRender
-                    onApprovalDecision={() => {}}
-                    onUserInputSubmit={() => {}}
+                    onApprovalDecision={INERT_RESPONSE_BOARD_APPROVAL_DECISION}
+                    onUserInputSubmit={INERT_RESPONSE_BOARD_USER_INPUT_SUBMIT}
                   />
                 </div>
               </div>

@@ -308,6 +308,47 @@ fn release_private_claude_mcp_config(slot: &mut Option<ClaudeMcpConfigFile>) {
     slot.take();
 }
 
+/// Stops a live Claude child after a reader-side protocol failure and leaves
+/// the actionable reason for the waiter that owns token-guarded runtime
+/// cleanup. On a kill failure the override is removed so the caller can
+/// record the teardown failure directly without the waiter duplicating it.
+fn terminate_claude_runtime_after_control_failure(
+    process: &Arc<SharedChild>,
+    runtime_exit_error_override: &Arc<Mutex<Option<String>>>,
+    detail: &str,
+) -> Result<()> {
+    *runtime_exit_error_override
+        .lock()
+        .expect("Claude runtime-exit override mutex poisoned") = Some(detail.to_owned());
+    if let Err(error) = kill_child_process(process, "Claude") {
+        runtime_exit_error_override
+            .lock()
+            .expect("Claude runtime-exit override mutex poisoned")
+            .take();
+        return Err(error);
+    }
+    Ok(())
+}
+
+/// Waits for the stdout reader to finish publishing any reader-side failure
+/// before the process waiter consumes the one-shot exit override. A Claude
+/// process can exit while its final control message is still being handled;
+/// joining here prevents that last diagnostic from losing a race with
+/// `SharedChild::wait`.
+fn take_claude_runtime_exit_error_after_reader(
+    reader_thread: std::thread::JoinHandle<()>,
+    runtime_exit_error_override: &Arc<Mutex<Option<String>>>,
+) -> Option<String> {
+    let reader_panicked = reader_thread.join().is_err();
+    let mut error_override = runtime_exit_error_override
+        .lock()
+        .expect("Claude runtime-exit override mutex poisoned");
+    if reader_panicked && error_override.is_none() {
+        *error_override = Some("Claude stdout reader panicked".to_owned());
+    }
+    error_override.take()
+}
+
 fn claude_mcp_config_file_name(runtime_id: &str) -> String {
     format!("{CLAUDE_MCP_CONFIG_FILE_PREFIX}{runtime_id}{CLAUDE_MCP_CONFIG_FILE_SUFFIX}")
 }
@@ -412,6 +453,11 @@ fn spawn_claude_runtime(
     let (input_tx, input_rx) = mpsc::channel::<ClaudeRuntimeCommand>();
 
     let replay_prompt = Arc::new(Mutex::new(None));
+    // Reader-side protocol failures can require terminating a still-live
+    // child. The waiter owns runtime cleanup, so carry the actionable reason
+    // across the process exit instead of first recording one failure and then
+    // appending a second generic exit-status failure.
+    let runtime_exit_error_override = Arc::new(Mutex::new(None::<String>));
 
     {
         let writer_session_id = session_id.clone();
@@ -499,12 +545,14 @@ fn spawn_claude_runtime(
         });
     }
 
-    {
+    let reader_thread = {
         let reader_session_id = session_id.clone();
         let reader_state = state.clone();
         let reader_input_tx = input_tx.clone();
         let reader_runtime_token = RuntimeToken::Claude(runtime_id.clone());
         let reader_replay_prompt = replay_prompt.clone();
+        let reader_process = process.clone();
+        let reader_runtime_exit_error_override = runtime_exit_error_override.clone();
         // The reviewer child's own working directory, pre-normalized. The read-only
         // permission checker compares `cd` targets against it so a same-folder `cd`
         // (a no-op) does not trip the cd+git exec-sink guard.
@@ -632,25 +680,29 @@ fn spawn_claude_runtime(
                     // A permission request may already have led to an external
                     // side effect. Once one is observed, replay must fail closed.
                     turn_state.replay_became_unsafe = true;
-                    let approval_mode = match reader_state.claude_approval_mode(&reader_session_id)
-                    {
-                        Ok(mode) => mode,
-                        Err(err) => {
-                            let _ = reader_state.fail_turn_if_runtime_matches(
-                                &reader_session_id,
-                                &reader_runtime_token,
-                                &format!(
-                                    "failed to resolve Claude approval mode for session: {err:#}"
-                                ),
-                            );
-                            break;
-                        }
-                    };
+                    // Approval mode and delegation-child identity are read
+                    // under one state lock so the attendedness policy never
+                    // sees a torn pair.
+                    let (approval_mode, delegation_child) =
+                        match reader_state.claude_control_request_context(&reader_session_id) {
+                            Ok(context) => context,
+                            Err(err) => {
+                                let _ = reader_state.fail_turn_if_runtime_matches(
+                                    &reader_session_id,
+                                    &reader_runtime_token,
+                                    &format!(
+                                        "failed to resolve Claude approval mode for session: {err:#}"
+                                    ),
+                                );
+                                break;
+                            }
+                        };
 
                     let action = match classify_claude_control_request(
                         &message,
                         &mut turn_state,
                         approval_mode,
+                        delegation_child,
                         &reader_cwd,
                         reader_state.delegation_control_plane_capability_allowed(
                             &reader_session_id,
@@ -659,11 +711,21 @@ fn spawn_claude_runtime(
                     ) {
                         Ok(action) => action,
                         Err(err) => {
-                            let _ = reader_state.fail_turn_if_runtime_matches(
-                                &reader_session_id,
-                                &reader_runtime_token,
-                                &format!("failed to handle Claude control request: {err:#}"),
-                            );
+                            let detail =
+                                format!("failed to handle Claude control request: {err:#}");
+                            if let Err(kill_error) = terminate_claude_runtime_after_control_failure(
+                                &reader_process,
+                                &reader_runtime_exit_error_override,
+                                &detail,
+                            ) {
+                                let _ = reader_state.fail_turn_if_runtime_matches(
+                                    &reader_session_id,
+                                    &reader_runtime_token,
+                                    &format!(
+                                        "{detail}; failed to stop the Claude runtime: {kill_error:#}"
+                                    ),
+                                );
+                            }
                             break;
                         }
                     };
@@ -673,42 +735,99 @@ fn spawn_claude_runtime(
                             finish_claude_assistant_text_stream(&mut turn_state, &mut recorder)
                                 .and_then(|_| {
                                     match action {
-                            ClaudeControlRequestAction::QueueApproval {
-                                title,
-                                command,
-                                detail,
-                                approval,
-                            } => recorder.push_claude_approval(&title, &command, &detail, approval),
-                            ClaudeControlRequestAction::QueueUserInput {
-                                title,
-                                detail,
-                                questions,
-                                request,
-                            } => recorder.push_claude_user_input_request(
-                                &title,
-                                &detail,
-                                questions,
-                                request,
-                            ),
-                            ClaudeControlRequestAction::Respond(decision) => reader_input_tx
-                                .send(ClaudeRuntimeCommand::PermissionResponse(decision))
-                                .map_err(|err| {
-                                    anyhow!("failed to auto-approve Claude tool request: {err}")
-                                }),
-                            ClaudeControlRequestAction::RespondError(response) => reader_input_tx
-                                .send(ClaudeRuntimeCommand::ControlErrorResponse(response))
-                                .map_err(|err| {
-                                    anyhow!("failed to reject malformed Claude control request: {err}")
-                                }),
-                        }
+                                        ClaudeControlRequestAction::QueueApproval {
+                                            title,
+                                            command,
+                                            detail,
+                                            approval,
+                                        } => recorder.push_claude_approval(
+                                            &title, &command, &detail, approval,
+                                        ),
+                                        ClaudeControlRequestAction::QueueUserInput {
+                                            title,
+                                            detail,
+                                            questions,
+                                            request,
+                                        } => recorder.push_claude_user_input_request(
+                                            &title, &detail, questions, request,
+                                        ),
+                                        ClaudeControlRequestAction::Respond(decision) => {
+                                            reader_input_tx
+                                                .send(ClaudeRuntimeCommand::PermissionResponse(
+                                                    decision,
+                                                ))
+                                                .map_err(|err| {
+                                                    anyhow!(
+                                                        "failed to auto-approve Claude tool request: {err}"
+                                                    )
+                                                })
+                                        }
+                                        ClaudeControlRequestAction::RespondError(response) => {
+                                            reader_input_tx
+                                                .send(ClaudeRuntimeCommand::ControlErrorResponse(
+                                                    response,
+                                                ))
+                                                .map_err(|err| {
+                                                    anyhow!(
+                                                        "failed to reject malformed Claude control request: {err}"
+                                                    )
+                                                })
+                                        }
+                                        ClaudeControlRequestAction::RecordSelfResolvedQuestion {
+                                            title,
+                                            detail,
+                                            questions,
+                                            response,
+                                        } => {
+                                            // The audit card is recorded first so the transcript
+                                            // explains the answer the runtime is about to receive.
+                                            recorder.push_claude_self_resolved_user_input(
+                                                &title, &detail, questions,
+                                            )?;
+                                            let command =
+                                                claude_self_resolved_question_runtime_command(
+                                                    response,
+                                                );
+                                            reader_input_tx.send(command).map_err(|err| {
+                                                anyhow!(
+                                                    "failed to self-resolve Claude question: {err}"
+                                                )
+                                            })
+                                        }
+                                        ClaudeControlRequestAction::RecordSelfResolvedQuestionError {
+                                            detail,
+                                            response,
+                                        } => {
+                                            recorder.error(&detail)?;
+                                            let command =
+                                                claude_self_resolved_question_runtime_command(
+                                                    response,
+                                                );
+                                            reader_input_tx.send(command).map_err(|err| {
+                                                anyhow!(
+                                                    "failed to self-resolve malformed Claude question: {err}"
+                                                )
+                                            })
+                                        }
+                                    }
                                 });
 
                         if let Err(err) = action_result {
-                            let _ = reader_state.fail_turn_if_runtime_matches(
-                                &reader_session_id,
-                                &reader_runtime_token,
-                                &format!("failed to handle Claude control request: {err:#}"),
-                            );
+                            let detail =
+                                format!("failed to handle Claude control request: {err:#}");
+                            if let Err(kill_error) = terminate_claude_runtime_after_control_failure(
+                                &reader_process,
+                                &reader_runtime_exit_error_override,
+                                &detail,
+                            ) {
+                                let _ = reader_state.fail_turn_if_runtime_matches(
+                                    &reader_session_id,
+                                    &reader_runtime_token,
+                                    &format!(
+                                        "{detail}; failed to stop the Claude runtime: {kill_error:#}"
+                                    ),
+                                );
+                            }
                             break;
                         }
                     }
@@ -725,13 +844,21 @@ fn spawn_claude_runtime(
                             // Without the owning session, the cancellation cannot be
                             // reconciled with the persisted request card. Stop this reader
                             // instead of accepting more control traffic for stale state.
-                            let _ = reader_state.fail_turn_if_runtime_matches(
-                                &reader_session_id,
-                                &reader_runtime_token,
-                                &format!(
-                                    "failed to cancel Claude interaction request: {err:#}"
-                                ),
-                            );
+                            let detail =
+                                format!("failed to cancel Claude interaction request: {err:#}");
+                            if let Err(kill_error) = terminate_claude_runtime_after_control_failure(
+                                &reader_process,
+                                &reader_runtime_exit_error_override,
+                                &detail,
+                            ) {
+                                let _ = reader_state.fail_turn_if_runtime_matches(
+                                    &reader_session_id,
+                                    &reader_runtime_token,
+                                    &format!(
+                                        "{detail}; failed to stop the Claude runtime: {kill_error:#}"
+                                    ),
+                                );
+                            }
                             break;
                         }
                     }
@@ -838,8 +965,8 @@ fn spawn_claude_runtime(
                 ));
             }
             let _ = recorder.finish_streaming_text();
-        });
-    }
+        })
+    };
 
     {
         std::thread::spawn(move || {
@@ -857,32 +984,42 @@ fn spawn_claude_runtime(
         let wait_state = state.clone();
         let wait_process = process.clone();
         let wait_runtime_token = RuntimeToken::Claude(runtime_id.clone());
+        let wait_runtime_exit_error_override = runtime_exit_error_override.clone();
         std::thread::spawn(move || {
-            match wait_process.wait() {
+            let wait_result = wait_process.wait();
+            let error_override = take_claude_runtime_exit_error_after_reader(
+                reader_thread,
+                &wait_runtime_exit_error_override,
+            );
+            match wait_result {
             Ok(status) if status.success() => {
                 let _ = wait_state.handle_runtime_exit_if_matches(
                     &wait_session_id,
                     &wait_runtime_token,
-                    None,
+                    error_override.as_deref(),
                 );
             }
             Ok(status) => {
+                let detail = error_override
+                    .unwrap_or_else(|| format!("Claude session exited with status {status}"));
                 let _ = wait_state.handle_runtime_exit_if_matches(
                     &wait_session_id,
                     &wait_runtime_token,
-                    Some(&format!("Claude session exited with status {status}")),
+                    Some(&detail),
                 );
             }
             Err(err) => {
+                let detail = error_override
+                    .unwrap_or_else(|| format!("failed waiting for Claude session: {err}"));
                 let _ = wait_state.handle_runtime_exit_if_matches(
                     &wait_session_id,
                     &wait_runtime_token,
-                    Some(&format!("failed waiting for Claude session: {err}")),
+                    Some(&detail),
                 );
             }
             }
-        });
-    }
+        })
+    };
 
     Ok(ClaudeRuntimeHandle {
         runtime_id,

@@ -335,8 +335,8 @@ export function WorkspaceNodeView({
   onUserInputSubmit: (
     sessionId: string,
     messageId: string,
-    answers: Record<string, string[]>,
-  ) => void;
+    answers: Record<string, string[]> | null,
+  ) => Promise<void>;
   onMcpElicitationSubmit: (
     sessionId: string,
     messageId: string,

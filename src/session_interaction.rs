@@ -393,6 +393,9 @@ fn user_input_request_preview_text(agent_name: &str, state: InteractionRequestSt
         InteractionRequestState::Canceled => {
             format!("Input request canceled. {agent_name} is continuing\u{2026}")
         }
+        InteractionRequestState::Declined => {
+            format!("Questions resolved without answers. {agent_name} is deciding on its own\u{2026}")
+        }
     }
 }
 
@@ -423,6 +426,11 @@ fn mcp_elicitation_request_preview_text(
         InteractionRequestState::Canceled => {
             format!("MCP input request canceled. {agent_name} is continuing\u{2026}")
         }
+        // Unreachable today: only declinable Claude user-input cards can be
+        // declined, but the shared state enum keeps this match exhaustive.
+        InteractionRequestState::Declined => {
+            format!("MCP input request declined. {agent_name} is continuing\u{2026}")
+        }
     }
 }
 
@@ -438,6 +446,11 @@ fn codex_app_request_preview_text(agent_name: &str, state: InteractionRequestSta
         }
         InteractionRequestState::Canceled => {
             format!("Codex request canceled. {agent_name} is continuing\u{2026}")
+        }
+        // Unreachable today: only declinable Claude user-input cards can be
+        // declined, but the shared state enum keeps this match exhaustive.
+        InteractionRequestState::Declined => {
+            format!("Codex request declined. {agent_name} is continuing\u{2026}")
         }
     }
 }

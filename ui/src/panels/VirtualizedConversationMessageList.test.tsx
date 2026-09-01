@@ -325,7 +325,7 @@ function renderVirtualizedHarness({
       scrollContainerRef={scrollContainerRef}
       tailFollowIntent={tailFollowIntent}
       onApprovalDecision={() => {}}
-      onUserInputSubmit={() => {}}
+      onUserInputSubmit={async () => {}}
       onMcpElicitationSubmit={() => {}}
       onCodexAppRequestSubmit={() => {}}
       conversationSearchQuery={
@@ -2129,7 +2129,7 @@ describe("VirtualizedConversationMessageList foundation", () => {
         messages={messages}
         scrollContainerRef={scrollContainerRef}
         onApprovalDecision={() => {}}
-        onUserInputSubmit={() => {}}
+        onUserInputSubmit={async () => {}}
         onMcpElicitationSubmit={() => {}}
         onCodexAppRequestSubmit={() => {}}
       />

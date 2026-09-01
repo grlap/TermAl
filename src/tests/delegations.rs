@@ -659,6 +659,7 @@ fn test_user_input_message(message_id: &str) -> Message {
             question: "How deep should the review go?".to_owned(),
         }],
         state: InteractionRequestState::Pending,
+        declinable: false,
         submitted_answers: None,
     }
 }
@@ -6155,6 +6156,7 @@ fn removing_delegation_parent_deletes_child_runtime_and_session() {
                 detail: "Waiting for user input".to_owned(),
                 questions: questions.clone(),
                 state: InteractionRequestState::Pending,
+                declinable: false,
                 submitted_answers: None,
             },
         );

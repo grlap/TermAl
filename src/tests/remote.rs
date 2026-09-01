@@ -2743,3 +2743,200 @@ fn remote_review_put_sends_scope_via_query_params() {
 
     join_test_server(server);
 }
+
+// Pins that a declined user-input submission forwards `declined: true` with
+// empty answers to the remote backend instead of being silently dropped —
+// without this the remote card would wait forever for answers the local
+// user already refused to give.
+#[test]
+fn remote_user_input_decline_forwards_declined_flag() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-user-input-decline".to_owned(),
+        name: "SSH User Input Decline".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("example.com".to_owned()),
+        port: Some(22),
+        user: Some("alice".to_owned()),
+    };
+    let local_project_id = create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/repo",
+        "Remote Project",
+        "remote-project-1",
+    );
+    let remote_state = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        1,
+        OrchestratorInstanceStatus::Running,
+    );
+    let remote_session = remote_state
+        .sessions
+        .iter()
+        .find(|session| session.id == "remote-session-1")
+        .expect("sample remote session should exist")
+        .clone();
+    let local_session_id = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let local_session_id = upsert_remote_proxy_session_record(
+            &mut inner,
+            &remote.id,
+            &remote_session,
+            Some(local_project_id),
+        );
+        state
+            .commit_locked(&mut inner)
+            .expect("remote proxy session should persist");
+        local_session_id
+    };
+
+    let response_body =
+        serde_json::to_string(&remote_state).expect("remote state response should encode");
+    let requests = Arc::new(Mutex::new(Vec::<(String, String)>::new()));
+    let requests_for_server = requests.clone();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("test listener should bind");
+    let port = listener.local_addr().expect("listener addr").port();
+    let server = std::thread::spawn(move || {
+        for _ in 0..2 {
+            let mut stream = accept_test_connection(&listener, "remote user-input listener");
+            let request = read_test_http_request(&mut stream);
+            requests_for_server
+                .lock()
+                .expect("requests mutex poisoned")
+                .push((request.request_line.clone(), request.body.clone()));
+
+            if request.request_line.starts_with("GET /api/health ") {
+                write_test_http_response(
+                    &mut stream,
+                    StatusCode::OK,
+                    "application/json",
+                    r#"{"ok":true}"#,
+                );
+                continue;
+            }
+
+            if request
+                .request_line
+                .starts_with("POST /api/sessions/remote-session-1/user-input/remote-input-1 ")
+            {
+                write_test_http_response(
+                    &mut stream,
+                    StatusCode::OK,
+                    "application/json",
+                    &response_body,
+                );
+                continue;
+            }
+
+            panic!("unexpected request: {}", request.request_line);
+        }
+    });
+    insert_test_remote_connection(
+        &state,
+        &remote,
+        port,
+        TestRemoteBridgeOwnership::RequestOnly,
+    );
+
+    state
+        .submit_user_input(&local_session_id, "remote-input-1", BTreeMap::new(), true)
+        .expect("remote decline should proxy successfully");
+
+    let forwarded = requests
+        .lock()
+        .expect("requests mutex poisoned")
+        .iter()
+        .find(|(request_line, _)| request_line.starts_with("POST /api/sessions/"))
+        .map(|(_, body)| body.clone())
+        .expect("forwarded user-input request should be captured");
+    let forwarded: Value = serde_json::from_str(&forwarded).expect("forwarded body should decode");
+    assert_eq!(
+        forwarded,
+        json!({ "answers": {}, "declined": true }),
+        "the decline must forward declined=true with empty answers"
+    );
+
+    join_test_server(server);
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// Pins that the answers-carrying-decline validation runs before remote
+// proxying: the local 400 must be returned without any HTTP request
+// reaching the remote backend.
+#[test]
+fn remote_user_input_decline_with_answers_rejects_locally_without_forwarding() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-user-input-decline-local".to_owned(),
+        name: "SSH User Input Decline Local".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("example.com".to_owned()),
+        port: Some(22),
+        user: Some("alice".to_owned()),
+    };
+    let local_project_id = create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/repo",
+        "Remote Project",
+        "remote-project-1",
+    );
+    let remote_state = sample_remote_orchestrator_state(
+        "remote-project-1",
+        "/remote/repo",
+        1,
+        OrchestratorInstanceStatus::Running,
+    );
+    let remote_session = remote_state
+        .sessions
+        .iter()
+        .find(|session| session.id == "remote-session-1")
+        .expect("sample remote session should exist")
+        .clone();
+    let local_session_id = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let local_session_id = upsert_remote_proxy_session_record(
+            &mut inner,
+            &remote.id,
+            &remote_session,
+            Some(local_project_id),
+        );
+        state
+            .commit_locked(&mut inner)
+            .expect("remote proxy session should persist");
+        local_session_id
+    };
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("test listener should bind");
+    let port = listener.local_addr().expect("listener addr").port();
+    listener
+        .set_nonblocking(true)
+        .expect("listener should switch to nonblocking");
+    insert_test_remote_connection(
+        &state,
+        &remote,
+        port,
+        TestRemoteBridgeOwnership::RequestOnly,
+    );
+
+    let error = match state.submit_user_input(
+        &local_session_id,
+        "remote-input-1",
+        BTreeMap::from([("scope".to_owned(), vec!["Focused".to_owned()])]),
+        true,
+    ) {
+        Ok(_) => panic!("an answers-carrying decline must be rejected locally"),
+        Err(error) => error,
+    };
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert!(error.message.contains("cannot carry answers"));
+    match listener.accept() {
+        Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {}
+        Ok(_) => panic!("no HTTP request may reach the remote for a locally rejected decline"),
+        Err(err) => panic!("unexpected listener error: {err}"),
+    }
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}

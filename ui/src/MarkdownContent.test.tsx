@@ -177,7 +177,7 @@ describe("MarkdownContent Mermaid diagrams", () => {
       title: "Thinking",
       type: "thinking",
     } as const;
-    const noop = () => {};
+    const noop = async () => {};
 
     try {
       render(
@@ -230,7 +230,7 @@ describe("MarkdownContent Mermaid diagrams", () => {
       title: "Approval",
       type: "approval",
     } as const;
-    const noop = () => {};
+    const noop = async () => {};
 
     try {
       const { container } = render(
@@ -266,7 +266,7 @@ describe("MarkdownContent Mermaid diagrams", () => {
       timestamp: "2026-04-15T00:00:00.000Z",
       type: "text",
     } as const;
-    const noop = () => {};
+    const noop = async () => {};
     const { rerender } = render(
       <MessageCard
         appearance="dark"
@@ -745,7 +745,7 @@ describe("MessageCard memoization", () => {
   it("uses the latest approval handler after handler-only rerenders", () => {
     const firstHandler = vi.fn();
     const secondHandler = vi.fn();
-    const noop = () => {};
+    const noop = async () => {};
     const message = {
       author: "assistant",
       command: "git status",
@@ -778,11 +778,12 @@ describe("MessageCard memoization", () => {
     expect(secondHandler).toHaveBeenCalledWith("approval-1", "accepted");
   });
 
-  it("uses the latest user-input handler after handler-only rerenders", () => {
+  it("uses the latest user-input handler after handler-only rerenders", async () => {
     const firstHandler = vi.fn();
     const secondHandler = vi.fn();
-    const noop = () => {};
+    const noop = async () => {};
     const message: UserInputRequestMessage = {
+      declinable: false,
       author: "assistant",
       detail: "Codex requested additional input.",
       id: "user-input-1",
@@ -815,7 +816,10 @@ describe("MessageCard memoization", () => {
     );
 
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "TERM-42" } });
-    fireEvent.click(screen.getByRole("button", { name: "Submit answers" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Submit answers" }));
+      await Promise.resolve();
+    });
 
     expect(firstHandler).not.toHaveBeenCalled();
     expect(secondHandler).toHaveBeenCalledWith("user-input-1", {
@@ -826,7 +830,7 @@ describe("MessageCard memoization", () => {
   it("uses the latest MCP elicitation handler after handler-only rerenders", () => {
     const firstHandler = vi.fn();
     const secondHandler = vi.fn();
-    const noop = () => {};
+    const noop = async () => {};
     const message: McpElicitationRequestMessage = {
       author: "assistant",
       detail: "deployment-helper requested structured input.",
@@ -951,7 +955,7 @@ describe("MessageCard memoization", () => {
   it("uses the latest Codex app-request handler after handler-only rerenders", () => {
     const firstHandler = vi.fn();
     const secondHandler = vi.fn();
-    const noop = () => {};
+    const noop = async () => {};
     const message: CodexAppRequestMessage = {
       author: "assistant",
       detail: "Codex requested a result for `search_workspace`.",

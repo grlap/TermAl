@@ -7,6 +7,8 @@ import { MessageCard } from "../message-cards";
 
 export const RESPONSE_BOARD_STAGED_CARD_MIME =
   "application/x-termal-response-board-staged-card";
+export const INERT_RESPONSE_BOARD_APPROVAL_DECISION = () => {};
+export const INERT_RESPONSE_BOARD_USER_INPUT_SUBMIT = () => Promise.resolve();
 
 export function ResponseBoardStagingTray({
   cards,
@@ -84,10 +86,11 @@ export function ResponseBoardPreview({
         <MessageCard
           message={card.snapshot}
           approvalActionsEnabled={false}
+          userInputActionsEnabled={false}
           parallelAgentActionsEnabled={false}
           preferImmediateHeavyRender
-          onApprovalDecision={() => {}}
-          onUserInputSubmit={() => {}}
+          onApprovalDecision={INERT_RESPONSE_BOARD_APPROVAL_DECISION}
+          onUserInputSubmit={INERT_RESPONSE_BOARD_USER_INPUT_SUBMIT}
         />
       </div>
       <div className="response-board-preview-actions">

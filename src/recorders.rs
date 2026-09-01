@@ -211,6 +211,36 @@ impl SessionRecorder {
         )
     }
 
+    /// Records an AskUserQuestion that TermAl resolved on Claude's behalf
+    /// because the session runs unattended: a resolved (`Declined`,
+    /// non-declinable) card carrying the parsed questions, with no pending
+    /// claim — nothing is waiting for the browser.
+    fn push_claude_self_resolved_user_input(
+        &mut self,
+        title: &str,
+        detail: &str,
+        questions: Vec<UserInputQuestion>,
+    ) -> Result<()> {
+        recorder_finish_streaming_text(self)?;
+        let state = self.state.clone();
+        let session_id = self.session_id.clone();
+        let message_id = state.allocate_message_id();
+        state.push_message(
+            &session_id,
+            Message::UserInputRequest {
+                id: message_id,
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                title: title.to_owned(),
+                detail: detail.to_owned(),
+                questions,
+                state: InteractionRequestState::Declined,
+                declinable: false,
+                submitted_answers: None,
+            },
+        )
+    }
+
     /// Records a Claude AskUserQuestion dialog and retains its routing data
     /// until the browser submits every answer.
     fn push_claude_user_input_request(
@@ -224,6 +254,9 @@ impl SessionRecorder {
         let state = self.state.clone();
         let session_id = self.session_id.clone();
         let message_id = state.allocate_message_id();
+        // Only the permission transport has a decline envelope (a permission
+        // deny); the legacy dialog channel would have nothing to send.
+        let declinable = pending_claude_user_input_is_declinable(&request);
         state.push_message(
             &session_id,
             Message::UserInputRequest {
@@ -234,6 +267,7 @@ impl SessionRecorder {
                 detail: detail.to_owned(),
                 questions,
                 state: InteractionRequestState::Pending,
+                declinable,
                 submitted_answers: None,
             },
         )?;
@@ -357,6 +391,8 @@ fn recorder_push_codex_user_input_request<R: SessionRecorderAccess>(
             detail: detail.to_owned(),
             questions,
             state: InteractionRequestState::Pending,
+            // Codex's request_user_input protocol has no decline response.
+            declinable: false,
             submitted_answers: None,
         },
     )?;

@@ -15,6 +15,8 @@ import type {
   RenderMessageCard,
 } from "./virtualized-conversation-types";
 
+const EMPTY_PENDING_USER_INPUT_MESSAGE_IDS = new Set<string>();
+
 export const MeasuredPageBand = memo(function MeasuredPageBand({
   isActive,
   page,
@@ -27,6 +29,7 @@ export const MeasuredPageBand = memo(function MeasuredPageBand({
   onSearchItemMount,
   onApprovalDecision,
   onUserInputSubmit,
+  pendingUserInputMessageIds = EMPTY_PENDING_USER_INPUT_MESSAGE_IDS,
   onMcpElicitationSubmit,
   onCodexAppRequestSubmit,
   onHeightChange,
@@ -42,6 +45,7 @@ export const MeasuredPageBand = memo(function MeasuredPageBand({
   onSearchItemMount: (itemKey: string, node: HTMLElement | null) => void;
   onApprovalDecision: (messageId: string, decision: ApprovalDecision) => void;
   onUserInputSubmit: BoundUserInputSubmitHandler;
+  pendingUserInputMessageIds?: ReadonlySet<string>;
   onMcpElicitationSubmit: BoundMcpElicitationSubmitHandler;
   onCodexAppRequestSubmit: BoundCodexAppRequestSubmitHandler;
   onHeightChange: (
@@ -194,6 +198,7 @@ export const MeasuredPageBand = memo(function MeasuredPageBand({
                   onUserInputSubmit,
                   onMcpElicitationSubmit,
                   onCodexAppRequestSubmit,
+                  pendingUserInputMessageIds.has(message.id),
                 )}
               </DeferredHeavyContentActivationProvider>
             </MessageSlot>

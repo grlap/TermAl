@@ -187,7 +187,7 @@ export type UseAppSessionActionsReturn = {
   handleUserInputSubmit: (
     sessionId: string,
     messageId: string,
-    answers: Record<string, string[]>,
+    answers: Record<string, string[]> | null,
   ) => Promise<void>;
   handleMcpElicitationSubmit: (
     sessionId: string,

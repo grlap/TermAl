@@ -97,7 +97,6 @@ import type {
   McpElicitationSubmitHandler,
   MessageWindowSnapshot,
   RenderMessageCard,
-  UserInputSubmitHandler,
   UserScrollKind,
   VirtualizedConversationJumpOptions,
   VirtualizedConversationLayoutMessage,
@@ -140,6 +139,7 @@ export {
 } from "./virtualized-conversation-controller";
 
 const EMPTY_MATCHED_ITEM_KEYS = new Set<string>();
+const EMPTY_PENDING_USER_INPUT_MESSAGE_IDS = new Set<string>();
 
 export function retainLatestVisibleMessageAnchor(
   current: VisibleMessageAnchor | null,
@@ -165,6 +165,7 @@ export function VirtualizedConversationMessageList({
   virtualizerHandleRef,
   onApprovalDecision,
   onUserInputSubmit,
+  pendingUserInputMessageIds = EMPTY_PENDING_USER_INPUT_MESSAGE_IDS,
   onMcpElicitationSubmit,
   onCodexAppRequestSubmit,
 }: {
@@ -190,7 +191,8 @@ export function VirtualizedConversationMessageList({
     messageId: string,
     decision: ApprovalDecision,
   ) => void;
-  onUserInputSubmit: UserInputSubmitHandler;
+  onUserInputSubmit: BoundUserInputSubmitHandler;
+  pendingUserInputMessageIds?: ReadonlySet<string>;
   onMcpElicitationSubmit: McpElicitationSubmitHandler;
   onCodexAppRequestSubmit: CodexAppRequestSubmitHandler;
 }) {
@@ -2108,11 +2110,6 @@ export function VirtualizedConversationMessageList({
       onApprovalDecision(sessionId, messageId, decision),
     [onApprovalDecision, sessionId],
   );
-  const boundUserInputSubmit = useCallback(
-    (messageId: string, answers: Record<string, string[]>) =>
-      onUserInputSubmit(sessionId, messageId, answers),
-    [onUserInputSubmit, sessionId],
-  );
   const boundMcpElicitationSubmit = useCallback(
     (messageId: string, action: McpElicitationAction, content?: JsonValue) =>
       onMcpElicitationSubmit(sessionId, messageId, action, content),
@@ -2156,7 +2153,8 @@ export function VirtualizedConversationMessageList({
           conversationSearchActiveItemKey={conversationSearchActiveItemKey}
           onSearchItemMount={onConversationSearchItemMount}
           onApprovalDecision={boundApprovalDecision}
-          onUserInputSubmit={boundUserInputSubmit}
+          onUserInputSubmit={onUserInputSubmit}
+          pendingUserInputMessageIds={pendingUserInputMessageIds}
           onMcpElicitationSubmit={boundMcpElicitationSubmit}
           onCodexAppRequestSubmit={boundCodexAppRequestSubmit}
           onHeightChange={handlePageHeightChange}

@@ -25,13 +25,16 @@ import * as slashPalette from "./session-slash-palette";
 import {
   AgentSessionPanel,
   AgentSessionPanelFooter,
+  ConversationMessageList,
   splitAgentCommandResolverTail,
 } from "./AgentSessionPanel";
 import {
   VirtualizedConversationMessageList,
+  type RenderMessageCard,
   type VirtualizedConversationMessageListHandleRef,
 } from "./VirtualizedConversationMessageList";
 import { RunningIndicator } from "./session-activity-cards";
+import { usePendingUserInputSubmissions } from "./pending-user-input-submissions";
 import {
   MESSAGE_STACK_SCROLL_WRITE_EVENT,
   notifyMessageStackScrollWrite,
@@ -313,7 +316,7 @@ function createAgentSessionPanelHarness(
       diffMessages={[]}
       scrollContainerRef={scrollContainerRef}
       onApprovalDecision={() => {}}
-      onUserInputSubmit={() => {}}
+      onUserInputSubmit={async () => {}}
       onMcpElicitationSubmit={() => {}}
       onCodexAppRequestSubmit={() => {}}
       onCancelQueuedPrompt={() => {}}
@@ -348,7 +351,7 @@ function renderNavigableMessageCard(message: Message) {
       <MessageCard
         message={message}
         onApprovalDecision={() => {}}
-        onUserInputSubmit={() => {}}
+        onUserInputSubmit={async () => {}}
         onCodexAppRequestSubmit={() => {}}
       />
       <span>{message.id}</span>
@@ -1168,7 +1171,7 @@ describe("AgentSessionPanel virtualization", () => {
         diffMessages={[]}
         scrollContainerRef={{ current: document.createElement("section") }}
         onApprovalDecision={() => {}}
-        onUserInputSubmit={() => {}}
+        onUserInputSubmit={async () => {}}
         onMcpElicitationSubmit={() => {}}
         onCodexAppRequestSubmit={() => {}}
         onCancelQueuedPrompt={() => {}}
@@ -1326,7 +1329,7 @@ describe("AgentSessionPanel virtualization", () => {
             current: scrollNode,
           } as RefObject<HTMLElement | null>}
           onApprovalDecision={() => {}}
-          onUserInputSubmit={() => {}}
+          onUserInputSubmit={async () => {}}
           onMcpElicitationSubmit={() => {}}
           onCodexAppRequestSubmit={() => {}}
         />,
@@ -1415,7 +1418,7 @@ describe("AgentSessionPanel virtualization", () => {
             current: scrollNode,
           } as RefObject<HTMLElement | null>}
           onApprovalDecision={() => {}}
-          onUserInputSubmit={() => {}}
+          onUserInputSubmit={async () => {}}
           onMcpElicitationSubmit={() => {}}
           onCodexAppRequestSubmit={() => {}}
         />,
@@ -1447,6 +1450,284 @@ describe("AgentSessionPanel virtualization", () => {
       window.ResizeObserver = OriginalResizeObserver;
       Element.prototype.getBoundingClientRect = originalGetBoundingClientRect;
     }
+  });
+
+  it("keeps a user-input submission locked across virtualized and direct-list remounts", async () => {
+    const OriginalResizeObserver = window.ResizeObserver;
+    const originalGetBoundingClientRect =
+      Element.prototype.getBoundingClientRect;
+
+    class ResizeObserverMock {
+      observe() {}
+      disconnect() {}
+    }
+
+    const pendingQuestion: Message = {
+      id: "message-120",
+      type: "userInputRequest",
+      timestamp: "10:59",
+      author: "assistant",
+      title: "Claude needs your input",
+      detail: "Answer Claude's question to continue.",
+      state: "pending",
+      declinable: true,
+      questions: [
+        {
+          id: "claude-question-1",
+          header: "Scope",
+          question: "Which scope should I use?",
+          options: [
+            { label: "Focused", description: "Only this module." },
+          ],
+        },
+      ],
+    };
+    const messages = [pendingQuestion];
+    const estimatedLayout = buildVirtualizedMessageLayout(
+      messages.map((message) => estimateConversationMessageHeight(message)),
+    );
+    const clientHeight = 500;
+    let scrollTop = 0;
+    let resolveSubmission: (() => void) | undefined;
+    const onUserInputSubmit = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSubmission = resolve;
+        }),
+    );
+
+    const scrollNode = document.createElement("div");
+    Object.defineProperty(scrollNode, "clientHeight", {
+      configurable: true,
+      get: () => clientHeight,
+    });
+    Object.defineProperty(scrollNode, "scrollHeight", {
+      configurable: true,
+      get: () => estimatedLayout.totalHeight,
+    });
+    Object.defineProperty(scrollNode, "scrollTop", {
+      configurable: true,
+      get: () => scrollTop,
+      set: (nextValue: number) => {
+        scrollTop = nextValue;
+      },
+    });
+
+    window.ResizeObserver =
+      ResizeObserverMock as unknown as typeof ResizeObserver;
+    Element.prototype.getBoundingClientRect =
+      function getBoundingClientRectMock() {
+        const element = this as HTMLElement;
+        const height = element.classList.contains("virtualized-message-slot")
+          ? 0
+          : clientHeight;
+        return {
+          bottom: height,
+          height,
+          left: 0,
+          right: 100,
+          top: 0,
+          width: 100,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        } as DOMRect;
+      };
+
+    try {
+      const renderMessageCard = (
+        message: Message,
+        _preferImmediateHeavyRender?: boolean,
+        approve: Parameters<RenderMessageCard>[2] = () => {},
+        submitUserInput: Parameters<RenderMessageCard>[3] = async () => {},
+        _submitMcpElicitation?: Parameters<RenderMessageCard>[4],
+        _submitCodexAppRequest?: Parameters<RenderMessageCard>[5],
+        userInputSubmissionPending?: boolean,
+      ) => (
+        <MessageCard
+          message={message}
+          onApprovalDecision={approve}
+          onUserInputSubmit={submitUserInput}
+          userInputSubmissionPending={userInputSubmissionPending}
+        />
+      );
+      const conversationProps = {
+        renderMessageCard,
+        messageStartIndex: 0,
+        scrollContainerRef: {
+          current: scrollNode,
+        } as RefObject<HTMLElement | null>,
+        tailFollowIntent: false,
+        isActive: true,
+        onApprovalDecision: () => {},
+        onMcpElicitationSubmit: () => {},
+        onCodexAppRequestSubmit: () => {},
+        conversationSearchQuery: "",
+        conversationSearchMatchedItemKeys: new Set<string>(),
+        conversationSearchActiveItemKey: null,
+        onConversationSearchItemMount: () => {},
+      };
+      function ConversationHarness({
+        forceVirtualized = false,
+        sessionId = "session-a",
+      }: {
+        forceVirtualized?: boolean;
+        sessionId?: string;
+      }) {
+        const {
+          trackedUserInputSubmit,
+          pendingUserInputMessageIds,
+        } = usePendingUserInputSubmissions(sessionId, onUserInputSubmit);
+        return (
+          <ConversationMessageList
+            {...conversationProps}
+            key={sessionId}
+            sessionId={sessionId}
+            messages={messages}
+            forceVirtualized={forceVirtualized}
+            onUserInputSubmit={trackedUserInputSubmit}
+            pendingUserInputMessageIds={pendingUserInputMessageIds}
+          />
+        );
+      }
+      const { rerender } = render(
+        <ConversationHarness />,
+      );
+
+      const skipButton = screen.getByRole("button", { name: "Skip" });
+      await act(async () => {
+        fireEvent.click(skipButton);
+        await Promise.resolve();
+      });
+      expect(onUserInputSubmit).toHaveBeenCalledTimes(1);
+      expect(skipButton).toBeDisabled();
+
+      rerender(<ConversationHarness forceVirtualized />);
+      const remountedSkipButton = screen.getByRole("button", { name: "Skip" });
+      expect(remountedSkipButton).toBeDisabled();
+      fireEvent.click(remountedSkipButton);
+      expect(onUserInputSubmit).toHaveBeenCalledTimes(1);
+
+      rerender(<ConversationHarness />);
+      const directListSkipButton = screen.getByRole("button", { name: "Skip" });
+      expect(directListSkipButton).toBeDisabled();
+      fireEvent.click(directListSkipButton);
+      expect(onUserInputSubmit).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        resolveSubmission?.();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(directListSkipButton).not.toBeDisabled();
+    } finally {
+      window.ResizeObserver = OriginalResizeObserver;
+      Element.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+    }
+  });
+
+  it("keeps a user-input submission locked after switching away from and back to its session", async () => {
+    const pendingQuestion: Message = {
+      id: "message-question",
+      type: "userInputRequest",
+      timestamp: "10:59",
+      author: "assistant",
+      title: "Claude needs your input",
+      detail: "Answer Claude's question to continue.",
+      state: "pending",
+      declinable: true,
+      questions: [
+        {
+          id: "claude-question-1",
+          header: "Scope",
+          question: "Which scope should I use?",
+          options: [
+            { label: "Focused", description: "Only this module." },
+          ],
+        },
+      ],
+    };
+    const sessionA = makeSession("session-a", {
+      messages: [pendingQuestion],
+    });
+    const sessionB = makeSession("session-b", {
+      messages: [
+        {
+          id: "message-b",
+          type: "text",
+          timestamp: "11:00",
+          author: "assistant",
+          text: "Session B",
+        },
+      ],
+    });
+    let resolveSubmission: (() => void) | undefined;
+    const onUserInputSubmit = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSubmission = resolve;
+        }),
+    );
+    const panel = createAgentSessionPanelHarness({
+      activeSession: sessionA,
+      onUserInputSubmit,
+      renderMessageCard: (
+        message,
+        _preferImmediateHeavyRender,
+        onApprovalDecision,
+        submitUserInput,
+        _submitMcpElicitation,
+        _submitCodexAppRequest,
+        userInputSubmissionPending,
+      ) => (
+        <MessageCard
+          message={message}
+          onApprovalDecision={onApprovalDecision}
+          onUserInputSubmit={submitUserInput}
+          userInputSubmissionPending={userInputSubmissionPending}
+        />
+      ),
+    });
+    act(() => {
+      syncComposerSessionsStore({
+        sessions: [sessionA, sessionB],
+        draftsBySessionId: {},
+        draftAttachmentsBySessionId: {},
+      });
+    });
+
+    const rendered = render(panel({ activeSessionId: sessionA.id }));
+    const firstSkipButton = screen.getByRole("button", { name: "Skip" });
+    await act(async () => {
+      fireEvent.click(firstSkipButton);
+      await Promise.resolve();
+    });
+    expect(onUserInputSubmit).toHaveBeenCalledTimes(1);
+    expect(firstSkipButton).toBeDisabled();
+
+    rendered.rerender(panel({ activeSessionId: sessionB.id }));
+    expect(screen.queryByRole("button", { name: "Skip" })).toBeNull();
+
+    rendered.rerender(panel({ activeSessionId: sessionA.id }));
+    const remountedSkipButton = screen.getByRole("button", { name: "Skip" });
+    expect(remountedSkipButton).toBeDisabled();
+    fireEvent.click(remountedSkipButton);
+    expect(onUserInputSubmit).toHaveBeenCalledTimes(1);
+
+    rendered.unmount();
+    const reopened = render(panel({ activeSessionId: sessionA.id }));
+    const reopenedSkipButton = screen.getByRole("button", { name: "Skip" });
+    expect(reopenedSkipButton).toBeDisabled();
+    fireEvent.click(reopenedSkipButton);
+    expect(onUserInputSubmit).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveSubmission?.();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(reopenedSkipButton).not.toBeDisabled();
+    reopened.unmount();
   });
 
   it("does not flush virtualizer range updates from layout-effect scroll writes", async () => {
@@ -1517,7 +1798,7 @@ describe("AgentSessionPanel virtualization", () => {
               current: scrollNode,
             } as RefObject<HTMLElement | null>}
             onApprovalDecision={() => {}}
-            onUserInputSubmit={() => {}}
+            onUserInputSubmit={async () => {}}
             onMcpElicitationSubmit={() => {}}
             onCodexAppRequestSubmit={() => {}}
           />
@@ -1684,7 +1965,7 @@ describe("AgentSessionPanel virtualization", () => {
             current: scrollNode,
           } as RefObject<HTMLElement | null>}
           onApprovalDecision={() => {}}
-          onUserInputSubmit={() => {}}
+          onUserInputSubmit={async () => {}}
           onMcpElicitationSubmit={() => {}}
           onCodexAppRequestSubmit={() => {}}
         />,
@@ -1833,7 +2114,7 @@ describe("AgentSessionPanel virtualization", () => {
             current: scrollNode,
           } as RefObject<HTMLElement | null>}
           onApprovalDecision={() => {}}
-          onUserInputSubmit={() => {}}
+          onUserInputSubmit={async () => {}}
           onMcpElicitationSubmit={() => {}}
           onCodexAppRequestSubmit={() => {}}
         />,
@@ -1966,7 +2247,7 @@ describe("AgentSessionPanel virtualization", () => {
             current: scrollNode,
           } as RefObject<HTMLElement | null>}
           onApprovalDecision={() => {}}
-          onUserInputSubmit={() => {}}
+          onUserInputSubmit={async () => {}}
           onMcpElicitationSubmit={() => {}}
           onCodexAppRequestSubmit={() => {}}
         />,
@@ -2068,7 +2349,7 @@ describe("AgentSessionPanel virtualization", () => {
           messages={makeTextMessages(3)}
           scrollContainerRef={scrollContainerRef}
           onApprovalDecision={() => {}}
-          onUserInputSubmit={() => {}}
+          onUserInputSubmit={async () => {}}
           onMcpElicitationSubmit={() => {}}
           onCodexAppRequestSubmit={() => {}}
         />,
@@ -2204,7 +2485,7 @@ describe("AgentSessionPanel virtualization", () => {
             current: scrollNode,
           } as RefObject<HTMLElement | null>}
           onApprovalDecision={() => {}}
-          onUserInputSubmit={() => {}}
+          onUserInputSubmit={async () => {}}
           onMcpElicitationSubmit={() => {}}
           onCodexAppRequestSubmit={() => {}}
         />,
@@ -2366,7 +2647,7 @@ describe("AgentSessionPanel virtualization", () => {
           messages={makeTextMessages(3)}
           scrollContainerRef={scrollContainerRef}
           onApprovalDecision={() => {}}
-          onUserInputSubmit={() => {}}
+          onUserInputSubmit={async () => {}}
           onMcpElicitationSubmit={() => {}}
           onCodexAppRequestSubmit={() => {}}
         />,
@@ -2544,7 +2825,7 @@ describe("AgentSessionPanel virtualization", () => {
             current: scrollNode,
           } as RefObject<HTMLElement | null>}
           onApprovalDecision={() => {}}
-          onUserInputSubmit={() => {}}
+          onUserInputSubmit={async () => {}}
           onMcpElicitationSubmit={() => {}}
           onCodexAppRequestSubmit={() => {}}
         />,
@@ -2664,7 +2945,7 @@ describe("AgentSessionPanel virtualization", () => {
             current: scrollNode,
           } as RefObject<HTMLElement | null>}
           onApprovalDecision={() => {}}
-          onUserInputSubmit={() => {}}
+          onUserInputSubmit={async () => {}}
           onMcpElicitationSubmit={() => {}}
           onCodexAppRequestSubmit={() => {}}
         />,
@@ -2803,7 +3084,7 @@ describe("AgentSessionPanel virtualization", () => {
             current: scrollNode,
           } as RefObject<HTMLElement | null>}
           onApprovalDecision={() => {}}
-          onUserInputSubmit={() => {}}
+          onUserInputSubmit={async () => {}}
           onMcpElicitationSubmit={() => {}}
           onCodexAppRequestSubmit={() => {}}
         />,
@@ -3029,7 +3310,7 @@ describe("AgentSessionPanel virtualization", () => {
             current: scrollNode,
           } as RefObject<HTMLElement | null>}
           onApprovalDecision={() => {}}
-          onUserInputSubmit={() => {}}
+          onUserInputSubmit={async () => {}}
           onMcpElicitationSubmit={() => {}}
           onCodexAppRequestSubmit={() => {}}
         />,

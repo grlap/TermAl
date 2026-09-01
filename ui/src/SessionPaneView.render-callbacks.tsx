@@ -486,6 +486,7 @@ export function useSessionRenderCallbacks({
       handleUserInput,
       handleMcpElicitation,
       handleCodexAppRequest,
+      userInputSubmissionPending,
     ) => (
       <MessageCard
         appearance={editorAppearance}
@@ -514,6 +515,7 @@ export function useSessionRenderCallbacks({
         preferImmediateHeavyRender={preferImmediateHeavyRender}
         onApprovalDecision={handleDecision}
         onUserInputSubmit={handleUserInput}
+        userInputSubmissionPending={userInputSubmissionPending}
         onMcpElicitationSubmit={handleMcpElicitation}
         onCodexAppRequestSubmit={handleCodexAppRequest}
         onOpenParallelAgentSession={handleOpenParallelAgentSession}

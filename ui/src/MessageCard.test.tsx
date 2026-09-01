@@ -2743,9 +2743,10 @@ describe("MessageCard", () => {
     expect(screen.getByText("Decision: canceled")).toBeInTheDocument();
   });
 
-  it("submits structured user input answers", () => {
+  it("submits structured user input answers", async () => {
     const onUserInputSubmit = vi.fn();
     const message: UserInputRequestMessage = {
+      declinable: false,
       id: "message-user-input",
       type: "userInputRequest",
       author: "assistant",
@@ -2784,7 +2785,10 @@ describe("MessageCard", () => {
     fireEvent.change(screen.getByDisplayValue(""), {
       target: { value: "secret-123" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Submit answers" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Submit answers" }));
+      await Promise.resolve();
+    });
 
     expect(onUserInputSubmit).toHaveBeenCalledWith("message-user-input", {
       environment: ["Production"],
@@ -2796,9 +2800,10 @@ describe("MessageCard", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("submits every Claude question including multi-select and Other", () => {
+  it("submits every Claude question including multi-select and Other", async () => {
     const onUserInputSubmit = vi.fn();
     const message: UserInputRequestMessage = {
+      declinable: false,
       id: "message-claude-user-input",
       type: "userInputRequest",
       author: "assistant",
@@ -2845,7 +2850,10 @@ describe("MessageCard", () => {
     fireEvent.change(screen.getByRole("textbox"), {
       target: { value: "Smoke check" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Submit answers" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Submit answers" }));
+      await Promise.resolve();
+    });
 
     expect(onUserInputSubmit).toHaveBeenCalledWith(
       "message-claude-user-input",

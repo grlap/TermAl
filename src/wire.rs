@@ -911,11 +911,16 @@ struct ApprovalRequest {
     decision: ApprovalDecision,
 }
 
-/// Represents the user input submission request payload.
+/// Represents the user input submission request payload. `declined: true`
+/// skips the questions instead of answering them (`answers` must then be
+/// empty or omitted entirely); only declinable requests accept it.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct UserInputSubmissionRequest {
+    #[serde(default)]
     answers: BTreeMap<String, Vec<String>>,
+    #[serde(default)]
+    declined: bool,
 }
 
 /// Represents the MCP elicitation submission request payload.

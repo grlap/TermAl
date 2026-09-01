@@ -1392,7 +1392,7 @@ async fn submit_user_input(
     Json(request): Json<UserInputSubmissionRequest>,
 ) -> Result<Json<StateResponse>, ApiError> {
     let response = run_blocking_api(move || {
-        state.submit_user_input(&session_id, &message_id, request.answers)
+        state.submit_user_input(&session_id, &message_id, request.answers, request.declined)
     })
     .await?;
     Ok(Json(response))

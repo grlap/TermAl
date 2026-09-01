@@ -995,7 +995,7 @@ export function useAppSessionActions(
   async function handleUserInputSubmit(
     sessionId: string,
     messageId: string,
-    answers: Record<string, string[]>,
+    answers: Record<string, string[]> | null,
   ) {
     try {
       const state = await submitUserInput(sessionId, messageId, answers);

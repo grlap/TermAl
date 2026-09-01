@@ -1040,6 +1040,9 @@ function reconcileUserInputRequestMessage(
     previous.title === next.title &&
     previous.detail === next.detail &&
     previous.state === next.state &&
+    // A declinable flip must replace the message so the Skip control
+    // cannot stay stale.
+    previous.declinable === next.declinable &&
     sameUserInputQuestions(previous.questions, next.questions) &&
     sameSubmittedAnswers(previous.submittedAnswers, next.submittedAnswers)
   ) {

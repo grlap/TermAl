@@ -791,7 +791,11 @@ export type InteractionRequestState =
   | "pending"
   | "submitted"
   | "interrupted"
-  | "canceled";
+  | "canceled"
+  /** Resolved without answers: either the user skipped a declinable card or
+   * TermAl self-resolved an unattended question. Distinct from "canceled",
+   * which is an agent- or turn-side cancel. */
+  | "declined";
 
 export type JsonValue =
   | null
@@ -807,6 +811,13 @@ export type UserInputRequestMessage = BaseMessage & {
   detail: string;
   questions: UserInputQuestion[];
   state: InteractionRequestState;
+  /**
+   * Whether the card offers a Skip action that resolves the request without
+   * answers. Only Claude questions that arrived over the permission channel
+   * are declinable; skipping sends a deny telling Claude to decide alone.
+   * Always present — the backend serializes it unconditionally.
+   */
+  declinable: boolean;
   submittedAnswers?: Record<string, string[]> | null;
 };
 

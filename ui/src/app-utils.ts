@@ -273,7 +273,7 @@ export function messageChangeMarker(message: Message) {
     case "approval":
       return `${message.type}:${message.decision}:${message.command.length}`;
     case "userInputRequest":
-      return `${message.type}:${message.state}:${message.questions.length}:${jsonContentChangeMarker(message.submittedAnswers)}`;
+      return `${message.type}:${message.state}:${message.declinable}:${message.questions.length}:${jsonContentChangeMarker(message.submittedAnswers)}`;
     case "mcpElicitationRequest":
       return `${message.type}:${message.state}:${message.request.mode}:${message.submittedAction ?? "none"}:${jsonContentChangeMarker(message.submittedContent)}`;
     case "codexAppRequest":

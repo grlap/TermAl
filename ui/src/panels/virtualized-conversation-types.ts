@@ -15,13 +15,13 @@ import type {
 export type UserInputSubmitHandler = (
   sessionId: string,
   messageId: string,
-  answers: Record<string, string[]>,
-) => void;
+  answers: Record<string, string[]> | null,
+) => Promise<void>;
 
 export type BoundUserInputSubmitHandler = (
   messageId: string,
-  answers: Record<string, string[]>,
-) => void;
+  answers: Record<string, string[]> | null,
+) => Promise<void>;
 
 export type McpElicitationSubmitHandler = (
   sessionId: string,
@@ -54,6 +54,7 @@ export type RenderMessageCard = (
   onUserInputSubmit: BoundUserInputSubmitHandler,
   onMcpElicitationSubmit: BoundMcpElicitationSubmitHandler,
   onCodexAppRequestSubmit: BoundCodexAppRequestSubmitHandler,
+  userInputSubmissionPending?: boolean,
 ) => JSX.Element | null;
 
 export type VirtualizedConversationJumpOptions = {

@@ -268,6 +268,7 @@ impl AppState {
         session_id: &str,
         message_id: &str,
         answers: BTreeMap<String, Vec<String>>,
+        declined: bool,
     ) -> Result<StateResponse, ApiError> {
         let Some(target) = self.remote_session_target(session_id)? else {
             return Err(ApiError::bad_request("session is not assigned to a remote"));
@@ -283,7 +284,7 @@ impl AppState {
                 encode_uri_component(message_id)
             ),
             &[],
-            Some(json!({ "answers": answers })),
+            Some(json!({ "answers": answers, "declined": declined })),
         )?;
         self.sync_remote_state_for_target(&target, remote_state, &response_lease)?;
         Ok(self.snapshot())

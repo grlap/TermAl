@@ -23,6 +23,7 @@ import {
   runTerminalCommand,
   runTerminalCommandStream,
   saveFile,
+  submitUserInput,
   TERMINAL_SSE_BUFFER_MAX_CHARS,
   testTelegramConnection,
   updateConversationMarker,
@@ -69,6 +70,63 @@ describe("updateEngramHostSettings", () => {
     expect(JSON.parse(String(init?.body))).toEqual({
       binaryPath: "C:\\tools\\engram.exe",
       home: "C:\\EngramHome",
+    });
+  });
+});
+
+describe("submitUserInput", () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    if (originalFetch === undefined) {
+      delete (globalThis as Partial<typeof globalThis>).fetch;
+      return;
+    }
+    globalThis.fetch = originalFetch;
+  });
+
+  function stubStateFetch() {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ projects: [], sessions: [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  it("posts the answers keyed by question id", async () => {
+    const fetchMock = stubStateFetch();
+
+    await submitUserInput("session-1", "message-1", {
+      "claude-question-1": ["Focused"],
+      "claude-question-2": ["Tests", "Lint"],
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/sessions/session-1/user-input/message-1",
+      expect.objectContaining({ method: "POST" }),
+    );
+    const [, init] = fetchMock.mock.calls[0] ?? [];
+    expect(JSON.parse(String(init?.body))).toEqual({
+      answers: {
+        "claude-question-1": ["Focused"],
+        "claude-question-2": ["Tests", "Lint"],
+      },
+    });
+  });
+
+  it("maps a null submission to a declined body with empty answers", async () => {
+    const fetchMock = stubStateFetch();
+
+    await submitUserInput("session-1", "message-1", null);
+
+    const [, init] = fetchMock.mock.calls[0] ?? [];
+    expect(JSON.parse(String(init?.body))).toEqual({
+      answers: {},
+      declined: true,
     });
   });
 });

@@ -256,7 +256,7 @@ function createAgentSessionPanelHarness(
       diffMessages={[]}
       scrollContainerRef={scrollContainerRef}
       onApprovalDecision={() => {}}
-      onUserInputSubmit={() => {}}
+      onUserInputSubmit={async () => {}}
       onMcpElicitationSubmit={() => {}}
       onCodexAppRequestSubmit={() => {}}
       onCancelQueuedPrompt={() => {}}
@@ -291,7 +291,7 @@ function renderNavigableMessageCard(message: Message) {
       <MessageCard
         message={message}
         onApprovalDecision={() => {}}
-        onUserInputSubmit={() => {}}
+        onUserInputSubmit={async () => {}}
         onCodexAppRequestSubmit={() => {}}
       />
       <span>{message.id}</span>
@@ -521,7 +521,7 @@ describe("AgentSessionPanel virtualization scroll behavior", () => {
             current: scrollNode,
           } as RefObject<HTMLElement | null>}
           onApprovalDecision={() => {}}
-          onUserInputSubmit={() => {}}
+          onUserInputSubmit={async () => {}}
           onMcpElicitationSubmit={() => {}}
           onCodexAppRequestSubmit={() => {}}
         />,
@@ -826,7 +826,7 @@ describe("AgentSessionPanel virtualization scroll behavior", () => {
             current: scrollNode,
           } as RefObject<HTMLElement | null>}
           onApprovalDecision={() => {}}
-          onUserInputSubmit={() => {}}
+          onUserInputSubmit={async () => {}}
           onMcpElicitationSubmit={() => {}}
           onCodexAppRequestSubmit={() => {}}
         />,
@@ -1058,7 +1058,7 @@ describe("AgentSessionPanel virtualization scroll behavior", () => {
             current: scrollNode,
           } as RefObject<HTMLElement | null>}
           onApprovalDecision={() => {}}
-          onUserInputSubmit={() => {}}
+          onUserInputSubmit={async () => {}}
           onMcpElicitationSubmit={() => {}}
           onCodexAppRequestSubmit={() => {}}
         />,
@@ -1204,7 +1204,7 @@ describe("AgentSessionPanel virtualization scroll behavior", () => {
             current: scrollNode,
           } as RefObject<HTMLElement | null>}
           onApprovalDecision={() => {}}
-          onUserInputSubmit={() => {}}
+          onUserInputSubmit={async () => {}}
           onMcpElicitationSubmit={() => {}}
           onCodexAppRequestSubmit={() => {}}
         />,
@@ -1331,7 +1331,7 @@ describe("AgentSessionPanel virtualization scroll behavior", () => {
             current: scrollNode,
           } as RefObject<HTMLElement | null>}
           onApprovalDecision={() => {}}
-          onUserInputSubmit={() => {}}
+          onUserInputSubmit={async () => {}}
           onMcpElicitationSubmit={() => {}}
           onCodexAppRequestSubmit={() => {}}
         />,
@@ -1498,7 +1498,7 @@ describe("AgentSessionPanel virtualization scroll behavior", () => {
             current: scrollNode,
           } as RefObject<HTMLElement | null>}
           onApprovalDecision={() => {}}
-          onUserInputSubmit={() => {}}
+          onUserInputSubmit={async () => {}}
           onMcpElicitationSubmit={() => {}}
           onCodexAppRequestSubmit={() => {}}
         />,
@@ -1638,7 +1638,7 @@ describe("AgentSessionPanel virtualization scroll behavior", () => {
             current: scrollNode,
           } as RefObject<HTMLElement | null>}
           onApprovalDecision={() => {}}
-          onUserInputSubmit={() => {}}
+          onUserInputSubmit={async () => {}}
           onMcpElicitationSubmit={() => {}}
           onCodexAppRequestSubmit={() => {}}
         />,
@@ -1792,7 +1792,7 @@ describe("AgentSessionPanel virtualization scroll behavior", () => {
             current: scrollNode,
           } as RefObject<HTMLElement | null>}
           onApprovalDecision={() => {}}
-          onUserInputSubmit={() => {}}
+          onUserInputSubmit={async () => {}}
           onMcpElicitationSubmit={() => {}}
           onCodexAppRequestSubmit={() => {}}
         />,
@@ -1921,7 +1921,7 @@ describe("AgentSessionPanel virtualization scroll behavior", () => {
             current: scrollNode,
           } as RefObject<HTMLElement | null>}
           onApprovalDecision={() => {}}
-          onUserInputSubmit={() => {}}
+          onUserInputSubmit={async () => {}}
           onMcpElicitationSubmit={() => {}}
           onCodexAppRequestSubmit={() => {}}
         />,
@@ -2088,7 +2088,7 @@ describe("AgentSessionPanel virtualization scroll behavior", () => {
           messages={makeTextMessages(210)}
           scrollContainerRef={scrollContainerRef}
           onApprovalDecision={() => {}}
-          onUserInputSubmit={() => {}}
+          onUserInputSubmit={async () => {}}
           onMcpElicitationSubmit={() => {}}
           onCodexAppRequestSubmit={() => {}}
         />,
@@ -2186,7 +2186,7 @@ describe("AgentSessionPanel virtualization scroll behavior", () => {
           messages={makeTextMessages(1)}
           scrollContainerRef={scrollContainerRef}
           onApprovalDecision={() => {}}
-          onUserInputSubmit={() => {}}
+          onUserInputSubmit={async () => {}}
           onMcpElicitationSubmit={() => {}}
           onCodexAppRequestSubmit={() => {}}
         />,
@@ -2272,7 +2272,7 @@ describe("AgentSessionPanel virtualization scroll behavior", () => {
           messages={makeTextMessages(120)}
           scrollContainerRef={scrollContainerRef}
           onApprovalDecision={() => {}}
-          onUserInputSubmit={() => {}}
+          onUserInputSubmit={async () => {}}
           onMcpElicitationSubmit={() => {}}
           onCodexAppRequestSubmit={() => {}}
         />,
@@ -2293,7 +2293,7 @@ describe("AgentSessionPanel virtualization scroll behavior", () => {
           messages={makeTextMessages(120)}
           scrollContainerRef={scrollContainerRef}
           onApprovalDecision={() => {}}
-          onUserInputSubmit={() => {}}
+          onUserInputSubmit={async () => {}}
           onMcpElicitationSubmit={() => {}}
           onCodexAppRequestSubmit={() => {}}
         />,
