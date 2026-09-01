@@ -397,6 +397,11 @@ struct EngramHostSettings {
     binary_path: String,
     #[serde(default = "default_engram_host_home")]
     home: String,
+    /// Maximum wall-clock time spent coordinating eager Engram recovery after
+    /// process start. Unfinished sessions remain readiness-fenced and retry on
+    /// their first later use.
+    #[serde(default = "default_engram_boot_recovery_budget_ms")]
+    boot_recovery_budget_ms: u64,
 }
 
 impl Default for EngramHostSettings {
@@ -404,8 +409,16 @@ impl Default for EngramHostSettings {
         Self {
             binary_path: default_engram_binary_path(),
             home: default_engram_host_home(),
+            boot_recovery_budget_ms: default_engram_boot_recovery_budget_ms(),
         }
     }
+}
+
+const MIN_ENGRAM_BOOT_RECOVERY_BUDGET_MS: u64 = 100;
+const MAX_ENGRAM_BOOT_RECOVERY_BUDGET_MS: u64 = 60_000;
+
+fn default_engram_boot_recovery_budget_ms() -> u64 {
+    5_000
 }
 
 fn default_engram_binary_path() -> String {

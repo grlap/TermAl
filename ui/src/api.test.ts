@@ -59,6 +59,7 @@ describe("updateEngramHostSettings", () => {
       updateEngramHostSettings({
         binaryPath: "C:\\tools\\engram.exe",
         home: "C:\\EngramHome",
+        bootRecoveryBudgetMs: 5_000,
       }),
     ).resolves.toEqual(result);
 
@@ -70,6 +71,7 @@ describe("updateEngramHostSettings", () => {
     expect(JSON.parse(String(init?.body))).toEqual({
       binaryPath: "C:\\tools\\engram.exe",
       home: "C:\\EngramHome",
+      bootRecoveryBudgetMs: 5_000,
     });
   });
 });

@@ -777,7 +777,7 @@ impl AppState {
         // pre-listen points the bridge at an unlistening backend. Tests have no HTTP server
         // or real runtimes, so they run it inline here to preserve behavior.
         #[cfg(test)]
-        state.run_post_listen_boot();
+        state.run_post_listen_boot()?;
         Ok(state)
     }
 
@@ -786,7 +786,25 @@ impl AppState {
     /// TermAl MCP bridges these runtimes spawn are configured with the correct base URL and
     /// can reach a listening backend. Each step self-persists / self-commits, so
     /// deferring this work past the boot persist above is safe.
-    fn run_post_listen_boot(&self) {
+    #[cfg(test)]
+    fn run_post_listen_boot(&self) -> Result<()> {
+        let engram_plan = self.prepare_engram_sessions_for_boot_recovery()?;
+        self.run_post_listen_boot_after_readiness(engram_plan);
+        Ok(())
+    }
+
+    /// Marks every affected session as recovering synchronously, then runs the
+    /// expensive recovery sequence on a detached worker while Axum serves.
+    fn start_post_listen_boot(&self) -> Result<std::thread::JoinHandle<()>> {
+        let engram_plan = self.prepare_engram_sessions_for_boot_recovery()?;
+        let state = self.clone();
+        std::thread::Builder::new()
+            .name("termal-post-listen-boot".to_owned())
+            .spawn(move || state.run_post_listen_boot_after_readiness(engram_plan))
+            .context("failed spawning post-listen boot recovery worker")
+    }
+
+    fn run_post_listen_boot_after_readiness(&self, engram_plan: EngramBootRecoveryPlan) {
         // Structured reviewer envelopes live in coordination.sqlite. Recover
         // them before wait reconciliation so a restart between mailbox append
         // and primary-state recording cannot resume a parent with a false
@@ -794,10 +812,10 @@ impl AppState {
         self.reconcile_durable_delegation_review_submissions_after_boot();
         // Engram routing tokens and open grants are host-private session
         // state. Recover them before any mailbox/workflow pass can dispatch a
-        // prompt. Recovery runs as a bounded barrier: at most eight sidecars
-        // are contacted concurrently and each call stays under the adapter's
-        // 600 ms budget, avoiding unbounded OS-thread creation.
-        self.recover_engram_sessions_after_boot();
+        // prompt. Recovery runs in bounded batches while HTTP remains live;
+        // the per-session readiness fence blocks only affected sessions until
+        // their own recovery result is committed.
+        self.recover_prepared_engram_sessions_after_boot(engram_plan);
         // Materialize unread mailbox wakes before either workflow reconciler can
         // queue and dispatch a durable resume. That preserves FIFO ordering:
         // the workflow activation drains the recovered mailbox wake first.

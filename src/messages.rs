@@ -23,6 +23,7 @@
 // synthesis treats the same text as a terminal sentinel rather than review
 // output. Keep both call sites tied to this neutral message contract.
 const SESSION_STOPPED_BY_USER_MESSAGE: &str = "Turn stopped by user.";
+const SESSION_STOPPING_MESSAGE: &str = "Stopping current turn...";
 const SESSION_IN_MEMORY_MESSAGE_LIMIT: usize = 64;
 const SESSION_PROMPT_HISTORY_LIMIT: usize = 64;
 const SESSION_PROMPT_HISTORY_MAX_BYTES: usize = 512 * 1024;
@@ -140,7 +141,7 @@ fn append_prompt_history(record: &mut SessionRecord, prompt: &str) {
 fn recover_interrupted_session_record(record: &mut SessionRecord) -> Option<String> {
     if !matches!(
         record.session.status,
-        SessionStatus::Active | SessionStatus::Approval
+        SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
     ) {
         return None;
     }
@@ -149,7 +150,9 @@ fn recover_interrupted_session_record(record: &mut SessionRecord) -> Option<Stri
         expire_pending_interaction_messages(&mut record.session.messages);
     fail_running_command_messages(&mut record.session.messages);
 
-    let mut notice = if interrupted_interaction_count > 0
+    let mut notice = if record.session.status == SessionStatus::Stopping {
+        "TermAl restarted while this session was stopping. The interrupted turn was recovered as an error; send another prompt to continue.".to_owned()
+    } else if interrupted_interaction_count > 0
         || record.session.status == SessionStatus::Approval
     {
         "TermAl restarted while this session was waiting for approval or input. That request expired. Send another prompt to continue.".to_owned()

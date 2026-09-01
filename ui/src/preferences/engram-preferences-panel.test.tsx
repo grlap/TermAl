@@ -35,7 +35,11 @@ describe("EngramPreferencesPanel", () => {
     const onStateUpdated = vi.fn();
     render(
       <EngramPreferencesPanel
-        hostSettings={{ binaryPath: "engram", home: "C:\\Engram" }}
+        hostSettings={{
+          binaryPath: "engram",
+          home: "C:\\Engram",
+          bootRecoveryBudgetMs: 5_000,
+        }}
         projects={[
           declaredProject,
           {
@@ -58,12 +62,16 @@ describe("EngramPreferencesPanel", () => {
     fireEvent.change(screen.getByLabelText("Engram host home"), {
       target: { value: "C:\\EngramHome" },
     });
+    fireEvent.change(screen.getByLabelText("Engram boot recovery budget"), {
+      target: { value: "7500" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Save host settings" }));
 
     await waitFor(() =>
       expect(mockUpdateEngramHostSettings).toHaveBeenCalledWith({
         binaryPath: "C:\\tools\\engram.exe",
         home: "C:\\EngramHome",
+        bootRecoveryBudgetMs: 7_500,
       }),
     );
     expect(onStateUpdated).toHaveBeenCalledTimes(1);
@@ -72,7 +80,11 @@ describe("EngramPreferencesPanel", () => {
   it("explains that an undeclared repository is not configurable", () => {
     render(
       <EngramPreferencesPanel
-        hostSettings={{ binaryPath: "engram", home: "C:\\Engram" }}
+        hostSettings={{
+          binaryPath: "engram",
+          home: "C:\\Engram",
+          bootRecoveryBudgetMs: 5_000,
+        }}
         projects={[{ ...declaredProject, engramDeclared: false }]}
         onStateUpdated={vi.fn()}
       />,

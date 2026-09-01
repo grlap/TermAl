@@ -445,7 +445,7 @@ fn detect_deadlocked_consolidate_session_ids(
             let destination_record = &inner.sessions[destination_session_index];
             if matches!(
                 destination_record.session.status,
-                SessionStatus::Active | SessionStatus::Approval
+                SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
             ) || !destination_record.queued_prompts.is_empty()
             {
                 return None;

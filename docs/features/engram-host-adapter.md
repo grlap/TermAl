@@ -18,9 +18,11 @@ The configuration model is **repository declares, host authorizes**:
 - A local repository opts in by carrying a non-empty `.engram-project` file at
   its root. Undeclared and remote projects are not configurable through the
   local Engram host adapter.
-- The host stores one machine-wide `binaryPath` and `home`. The binary defaults
-  to `engram` resolved through the server process `PATH`; home defaults to the
-  server user's `.engram` directory.
+- The host stores one machine-wide `binaryPath`, `home`, and
+  `bootRecoveryBudgetMs`. The binary defaults to `engram` resolved through the
+  server process `PATH`; home defaults to the server user's `.engram`
+  directory; eager boot recovery defaults to a 5,000 ms overall wall-clock
+  budget and accepts 100–60,000 ms.
 - Each declared project stores only its write-only `workAuthorityGrant` and an
   operator veto. There is no independent project-side Enabled toggle.
 - Effective enablement is derived from the repository declaration, a stored
@@ -37,10 +39,12 @@ redacted placeholder preserves the current grant; explicit `null` clears it.
 
 ## Settings UI
 
-Open **Settings > Engram** to configure the host-global binary and home once
-per machine. `PATCH /api/engram/settings` persists those paths. They cannot be
-rotated while a project is enabled; first apply the project's unconditional
-host veto so no runtime can silently cross from one Engram store to another.
+Open **Settings > Engram** to configure the host-global binary, home, and eager
+boot-recovery budget once per machine. `PATCH /api/engram/settings` persists
+them. Binary/home paths cannot be rotated while a project is enabled; first
+apply the project's unconditional host veto so no runtime can silently cross
+from one Engram store to another. The recovery budget is operational rather
+than authority-bearing and can be changed while projects remain enabled.
 
 The same page automatically lists local projects whose roots contain a
 non-empty `.engram-project`. A declared project's context menu also exposes
@@ -133,6 +137,34 @@ checkpoint a successor turn.
 The former `sent_without_grant` card value remains deserializable only for
 already-persisted historical cards. New enforced turns never emit it.
 
+## Boot recovery budget and lazy retry
+
+TermAl binds the HTTP listener and publishes the affected sessions'
+`engramBootRecoveryPending` markers before starting Engram recovery. Axum then
+serves health/state requests while a background coordinator recovers at most
+eight targets concurrently. The coordinator stops waiting at the host-global
+`bootRecoveryBudgetMs` wall-clock deadline; it never joins an uncooperative
+transport worker after that deadline.
+
+A completed target records its restart card and clears only its own readiness
+marker, even when its result arrives after the coordinator deadline. At the
+deadline, still-running targets keep their marker until that result arrives;
+unstarted targets keep it until first use. The next targeted session read
+(including opening its browser pane) starts one background lazy retry for an
+unstarted target. A direct prompt also starts that retry and fails fast with
+HTTP 409; a queued activation stays parked and starts the same retry. When the
+retry finishes, the marker clears and a queue activation that actually hit the
+fence is re-kicked. A persisted user queue that received no current-process
+activation remains dormant across restart.
+
+Recovery diagnostics use stable single-line fields. Each target emits
+`boot-recovery session=<id> command=<phase> attempt=<n> elapsed_ms=<n>
+outcome=<ok|error>` for `session_status`, `turn_checkpoint`, the combined
+`work_next_focus` read plus its concrete `work_core_next` / `work_core_focus`
+CLI commands, `session_bind`, and the whole target. The coordinator emits an
+`overall` line with its elapsed time, budget, outcome, and unfinished count.
+These lines contain no routing tokens or grant material.
+
 ## Settings transitions
 
 An Engram settings/reset transaction owns a project-generation fence while the
@@ -158,9 +190,16 @@ before any successor work. The poisoned automatic queue is paused until an
 explicit resume so the same wake cannot spin indefinitely. A wake refused by
 Engram is never sent to the agent runtime.
 
-Stop remains valid for an Active/Approval session whose local runtime has
-already vanished. Terminalization, runtime cleanup, mailbox-boundary recovery,
-and public status publication share the guarded lifecycle transaction.
+The public Stop route remains valid for an Active/Approval session whose local
+runtime has already vanished. It claims the guarded lifecycle transaction,
+persists `Stopping`, and returns immediately; runtime interruption and the
+Engram checkpoint finish on a background worker. A second Stop while that
+worker owns the fence is idempotent. Success publishes `Idle`; a runtime or
+checkpoint failure publishes `Error` with an actionable preview and transcript
+notice. Persisted `Stopping` is intentionally classified as an interrupted
+turn during restart recovery, so a process exit cannot strand the session.
+Internal orchestrator cleanup retains its synchronous stop-with-options
+contract because its transition transaction depends on completion ordering.
 
 See [Agent mailboxes](./agent-mailboxes.md) for the durable delivery and recovery
 contract.

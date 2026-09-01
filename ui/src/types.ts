@@ -3,7 +3,7 @@ export type ExhaustiveValueCoverage<
   Union extends string,
   Options extends ReadonlyArray<{ value: Union }>,
 > = Exclude<Union, Options[number]["value"]> extends never ? true : never;
-export type SessionStatus = "active" | "idle" | "approval" | "error";
+export type SessionStatus = "active" | "idle" | "approval" | "stopping" | "error";
 export type SandboxMode =
   | "read-only"
   | "workspace-write"
@@ -224,6 +224,7 @@ export type AppPreferences = {
 export type EngramHostSettings = {
   binaryPath: string;
   home: string;
+  bootRecoveryBudgetMs: number;
 };
 
 export type TelegramUiConfig = {
@@ -406,6 +407,8 @@ export type Session = {
   agentCommandsRevision?: number;
   codexThreadState?: CodexThreadState | null;
   liveActivity?: SessionLiveActivity | null;
+  /** True while TermAl restores this session's Engram authority after restart. */
+  engramBootRecoveryPending?: boolean;
   status: SessionStatus;
   preview: string;
   messages: Message[];

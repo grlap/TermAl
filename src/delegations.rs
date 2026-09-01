@@ -2323,7 +2323,7 @@ fn queue_delegation_wait_resume_locked(
         let record = &inner.sessions[parent_index];
         !matches!(
             record.session.status,
-            SessionStatus::Active | SessionStatus::Approval
+            SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
         ) && !record.orchestrator_auto_dispatch_blocked
             && record.queued_prompts.is_empty()
             && !record_has_archived_codex_thread(record)
@@ -3823,7 +3823,7 @@ fn delegation_child_outcome(inner: &StateInner, child_session_id: &str) -> Deleg
     };
     let child = &inner.sessions[child_index];
     match child.session.status {
-        SessionStatus::Active | SessionStatus::Approval => {
+        SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping => {
             if !matches!(child.runtime, SessionRuntime::None) || !child.is_local_session() {
                 return DelegationChildOutcome::Running;
             }

@@ -482,6 +482,7 @@ describe("deferred session-store sync", () => {
           engram: {
             binaryPath: "C:\\tools\\engram.exe",
             home: "C:\\EngramHome",
+            bootRecoveryBudgetMs: 8_000,
           },
         },
       });
@@ -490,6 +491,7 @@ describe("deferred session-store sync", () => {
     expect(setEngramHostSettings).toHaveBeenCalledWith({
       binaryPath: "C:\\tools\\engram.exe",
       home: "C:\\EngramHome",
+      bootRecoveryBudgetMs: 8_000,
     });
   });
 

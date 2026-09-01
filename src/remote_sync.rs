@@ -426,6 +426,7 @@ fn apply_remote_session_to_record(
     let previous_remote_mutation_stamp = record.session.session_mutation_stamp;
     record.session =
         localize_remote_session(remote_id, &local_session_id, local_project_id, remote_session);
+    record.engram_boot_recovery_pending = remote_session.engram_boot_recovery_pending;
     if remote_session.session_mutation_stamp.is_none() {
         record.session.session_mutation_stamp = previous_remote_mutation_stamp;
     }
@@ -578,6 +579,9 @@ fn upsert_remote_proxy_session_record(
         engram_mcp_revocation_pending: false,
         deferred_stop_callbacks: Vec::new(),
         engram: EngramSessionState::default(),
+        engram_boot_recovery_pending: remote_session.engram_boot_recovery_pending,
+        engram_boot_recovery_dispatch_pending: false,
+        engram_boot_recovery_retry_in_progress: false,
         hidden: false,
         // Freshly created records start unstamped; subsequent edits
         // flow through `session_mut*` which stamps them on access.

@@ -144,10 +144,12 @@ impl AppState {
                 "Codex thread actions are only available for Codex sessions",
             ));
         }
-        if matches!(
-            record.session.status,
-            SessionStatus::Active | SessionStatus::Approval
-        ) {
+        if record.runtime_stop_in_progress
+            || matches!(
+                record.session.status,
+                SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
+            )
+        {
             return Err(ApiError::conflict(
                 "wait for the current Codex turn to finish before using thread actions",
             ));

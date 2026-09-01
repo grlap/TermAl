@@ -591,7 +591,7 @@ impl AppState {
 
                     let should_dispatch_now = !matches!(
                         inner.sessions[destination_session_index].session.status,
-                        SessionStatus::Active | SessionStatus::Approval
+                        SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
                     ) && inner.sessions[destination_session_index]
                         .queued_prompts
                         .is_empty()

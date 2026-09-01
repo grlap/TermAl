@@ -1125,6 +1125,7 @@ fn sample_remote_orchestrator_state(
                 agent_commands_revision: 0,
                 codex_thread_state: None,
                 live_activity: None,
+                engram_boot_recovery_pending: false,
                 status: SessionStatus::Idle,
                 preview: format!("Remote {} ready.", template_session.name),
                 messages: Vec::new(),

@@ -620,7 +620,7 @@ impl AppState {
                     .primary_session_id
                     .clone()
                     .ok_or_else(|| ApiError::conflict("project does not have a session to stop"))?;
-                let _ = self.stop_session(&session_id)?;
+                let _ = self.request_stop_session(&session_id)?;
             }
             ProjectActionId::ReviewInTermal => {}
         }
@@ -1360,7 +1360,7 @@ async fn stop_session(
     AxumPath(session_id): AxumPath<String>,
     State(state): State<AppState>,
 ) -> Result<Json<StateResponse>, ApiError> {
-    let response = run_blocking_api(move || state.stop_session(&session_id)).await?;
+    let response = run_blocking_api(move || state.request_stop_session(&session_id)).await?;
     Ok(Json(response))
 }
 

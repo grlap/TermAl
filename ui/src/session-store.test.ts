@@ -86,6 +86,30 @@ describe("session-store composer snapshots", () => {
     expect(nextSummary?.codexFastMode).toBe(true);
   });
 
+  it("updates composer and summary snapshots when Engram recovery readiness changes", () => {
+    const initial = createSession({ engramBootRecoveryPending: false });
+    syncComposerSessionsStore({
+      draftAttachmentsBySessionId: {},
+      draftsBySessionId: {},
+      sessions: [initial],
+    });
+    const initialComposer = getComposerSessionSnapshotForTesting(initial.id);
+    const initialSummary = getSessionSummarySnapshotForTesting(initial.id);
+
+    syncComposerSessionsStore({
+      draftAttachmentsBySessionId: {},
+      draftsBySessionId: {},
+      sessions: [createSession({ engramBootRecoveryPending: true })],
+    });
+
+    const nextComposer = getComposerSessionSnapshotForTesting(initial.id);
+    const nextSummary = getSessionSummarySnapshotForTesting(initial.id);
+    expect(nextComposer).not.toBe(initialComposer);
+    expect(nextSummary).not.toBe(initialSummary);
+    expect(nextComposer?.engramBootRecoveryPending).toBe(true);
+    expect(nextSummary?.engramBootRecoveryPending).toBe(true);
+  });
+
   it("preserves snapshot identity when only assistant transcript messages change", () => {
     const initialSession = createSession();
 

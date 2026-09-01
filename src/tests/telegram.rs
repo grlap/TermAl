@@ -805,6 +805,7 @@ fn telegram_state_sessions_response_decodes_statuses_as_enum() {
                 "sessionMutationStamp": 42,
                 "parentDelegationId": "delegation-1"
             },
+            { "id": "session-stopping", "name": "Stopping", "status": "stopping" },
             { "id": "session-future", "name": "Future", "status": "queued" }
         ]
     }))
@@ -818,9 +819,14 @@ fn telegram_state_sessions_response_decodes_statuses_as_enum() {
         state.sessions[0].parent_delegation_id.as_deref(),
         Some("delegation-1")
     );
-    assert_eq!(state.sessions[1].status, TelegramSessionStatus::Unknown);
+    assert_eq!(state.sessions[1].status, TelegramSessionStatus::Stopping);
     assert_eq!(
         telegram_state_session_status_label(&state.sessions[1].status),
+        "stopping"
+    );
+    assert_eq!(state.sessions[2].status, TelegramSessionStatus::Unknown);
+    assert_eq!(
+        telegram_state_session_status_label(&state.sessions[2].status),
         "unknown"
     );
 }

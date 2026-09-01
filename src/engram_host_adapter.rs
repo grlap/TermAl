@@ -594,6 +594,13 @@ enum EngramExecutionOutcome {
     Unknown,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum EngramCheckpointOutcome {
+    Skipped,
+    Succeeded,
+    Failed(String),
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 struct EngramExecutionSourceBasis {
     workspace_id: String,
@@ -816,6 +823,14 @@ trait EngramControlTransport: Send + Sync {
         _timeout: Duration,
     ) -> std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError> {
         Ok(None)
+    }
+
+    fn read_work_binding_for_boot(
+        &self,
+        connection: &EngramConnectionConfig,
+        timeout: Duration,
+    ) -> std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError> {
+        self.read_work_binding(connection, timeout)
     }
 
     fn shutdown_session(&self, session_id: &str);
@@ -1554,7 +1569,9 @@ impl ProcessEngramControlTransport {
 fn read_engram_work_binding_from_cli(
     connection: &EngramConnectionConfig,
     timeout: Duration,
+    trace_boot_recovery: bool,
 ) -> std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError> {
+    let next_started_at = std::time::Instant::now();
     let next = run_engram_json_command_with_lock_retry(
         connection,
         &[
@@ -1570,7 +1587,17 @@ fn read_engram_work_binding_from_cli(
             "--json",
         ],
         timeout,
-    )?;
+    );
+    if trace_boot_recovery {
+        log_engram_boot_recovery_phase(
+            &connection.session_id,
+            "work_core_next",
+            1,
+            next_started_at.elapsed(),
+            &next,
+        );
+    }
+    let next = next?;
     let Some(work_id) = next
         .get("focus")
         .and_then(|focus| focus.get("status"))
@@ -1580,6 +1607,7 @@ fn read_engram_work_binding_from_cli(
     else {
         return Ok(None);
     };
+    let focus_started_at = std::time::Instant::now();
     let focus = run_engram_json_command_with_lock_retry(
         connection,
         &[
@@ -1594,7 +1622,17 @@ fn read_engram_work_binding_from_cli(
             "--json",
         ],
         timeout,
-    )?;
+    );
+    if trace_boot_recovery {
+        log_engram_boot_recovery_phase(
+            &connection.session_id,
+            "work_core_focus",
+            1,
+            focus_started_at.elapsed(),
+            &focus,
+        );
+    }
+    let focus = focus?;
     focus
         .get("control_binding")
         .cloned()
@@ -1961,7 +1999,15 @@ impl EngramControlTransport for ProcessEngramControlTransport {
         connection: &EngramConnectionConfig,
         timeout: Duration,
     ) -> std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError> {
-        read_engram_work_binding_from_cli(connection, timeout)
+        read_engram_work_binding_from_cli(connection, timeout, false)
+    }
+
+    fn read_work_binding_for_boot(
+        &self,
+        connection: &EngramConnectionConfig,
+        timeout: Duration,
+    ) -> std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError> {
+        read_engram_work_binding_from_cli(connection, timeout, true)
     }
 
     fn shutdown_session(&self, session_id: &str) {
@@ -2199,6 +2245,14 @@ impl EngramHostAdapter {
         timeout: Duration,
     ) -> std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError> {
         self.transport.read_work_binding(connection, timeout)
+    }
+
+    fn read_work_binding_for_boot(
+        &self,
+        connection: &EngramConnectionConfig,
+        timeout: Duration,
+    ) -> std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError> {
+        self.transport.read_work_binding_for_boot(connection, timeout)
     }
 
     fn shutdown_session(&self, session_id: &str) {
@@ -2482,6 +2536,17 @@ struct EngramBindingTarget {
     next_bind_retry_at: Option<std::time::Instant>,
 }
 
+struct EngramBootRecoveryPlan {
+    targets: Vec<EngramBindingTarget>,
+    budget: Duration,
+}
+
+struct EngramBootRecoveryCompletion {
+    session_id: String,
+    elapsed: Duration,
+    result: std::result::Result<String, EngramTransportError>,
+}
+
 impl EngramBindingTarget {
     fn checkpoint_for_project_reset_off_lock(
         &self,
@@ -2698,70 +2763,308 @@ impl AppState {
         }
     }
 
+    fn engram_boot_recovery_targets_locked(inner: &StateInner) -> Vec<EngramBindingTarget> {
+        let mut targets = HashMap::<String, EngramBindingTarget>::new();
+        for delegation in &inner.delegations {
+            if let Ok(Some(target)) =
+                Self::engram_binding_target_for_parent_locked(inner, &delegation.parent_session_id)
+            {
+                targets
+                    .entry(target.connection.session_id.clone())
+                    .or_insert(target);
+            }
+            if let Ok(Some(target)) = Self::engram_binding_target_for_child_locked(
+                inner,
+                &delegation.child_session_id,
+                true,
+            ) {
+                targets
+                    .entry(target.connection.session_id.clone())
+                    .or_insert(target);
+            }
+        }
+        targets.into_values().collect()
+    }
+
+    /// Publishes the exact per-session readiness fence before boot recovery
+    /// moves off-thread. This contains no Engram I/O, so the listener can begin
+    /// serving immediately after the resulting state revision is queued.
+    fn prepare_engram_sessions_for_boot_recovery(&self) -> Result<EngramBootRecoveryPlan> {
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let targets = Self::engram_boot_recovery_targets_locked(&inner);
+        let budget = Duration::from_millis(inner.preferences.engram.boot_recovery_budget_ms);
+        let target_ids = targets
+            .iter()
+            .map(|target| target.connection.session_id.clone())
+            .collect::<HashSet<_>>();
+        let mut changed = false;
+        for index in 0..inner.sessions.len() {
+            let should_be_pending = target_ids.contains(&inner.sessions[index].session.id);
+            if inner.sessions[index].engram_boot_recovery_pending == should_be_pending
+                && !inner.sessions[index].engram_boot_recovery_dispatch_pending
+                && !inner.sessions[index].engram_boot_recovery_retry_in_progress
+            {
+                continue;
+            }
+            let record = inner
+                .session_mut_by_index(index)
+                .expect("session index should be valid");
+            record.engram_boot_recovery_pending = should_be_pending;
+            record.engram_boot_recovery_dispatch_pending = false;
+            record.engram_boot_recovery_retry_in_progress = false;
+            changed = true;
+        }
+        if changed {
+            self.commit_locked(&mut inner)?;
+        }
+        Ok(EngramBootRecoveryPlan { targets, budget })
+    }
+
+    #[cfg(test)]
     fn recover_engram_sessions_after_boot(&self) {
-        let targets = {
+        let plan = {
             let inner = self.inner.lock().expect("state mutex poisoned");
-            let mut targets = HashMap::<String, EngramBindingTarget>::new();
-            for delegation in &inner.delegations {
-                if let Ok(Some(target)) = Self::engram_binding_target_for_parent_locked(
-                    &inner,
-                    &delegation.parent_session_id,
-                ) {
-                    targets
-                        .entry(target.connection.session_id.clone())
-                        .or_insert(target);
-                }
-                if let Ok(Some(target)) = Self::engram_binding_target_for_child_locked(
-                    &inner,
-                    &delegation.child_session_id,
-                    true,
-                ) {
-                    targets
-                        .entry(target.connection.session_id.clone())
-                        .or_insert(target);
+            EngramBootRecoveryPlan {
+                targets: Self::engram_boot_recovery_targets_locked(&inner),
+                budget: Duration::from_millis(
+                    inner.preferences.engram.boot_recovery_budget_ms,
+                ),
+            }
+        };
+        self.recover_prepared_engram_sessions_after_boot(plan);
+    }
+
+    /// Coordinates eager recovery only until the configured wall-clock
+    /// budget. Workers are ordinary owned threads rather than scoped threads,
+    /// so one transport that ignores its request timeout cannot hold the
+    /// coordinator beyond the budget. Completed work always counts, even when
+    /// its result arrives after the coordinator stops waiting; only targets
+    /// that have not finished remain readiness-fenced for a lazy retry.
+    fn recover_prepared_engram_sessions_after_boot(&self, plan: EngramBootRecoveryPlan) {
+        let started_at = std::time::Instant::now();
+        let target_ids = plan
+            .targets
+            .iter()
+            .map(|target| target.connection.session_id.clone())
+            .collect::<HashSet<_>>();
+        let mut pending = VecDeque::from(plan.targets);
+        let (completion_tx, completion_rx) = mpsc::channel::<EngramBootRecoveryCompletion>();
+        let accepting_completions = Arc::new(Mutex::new(true));
+        let mut in_flight = HashSet::<String>::new();
+
+        loop {
+            while in_flight.len() < ENGRAM_BOOT_RECOVERY_CONCURRENCY
+                && started_at.elapsed() < plan.budget
+            {
+                let Some(target) = pending.pop_front() else {
+                    break;
+                };
+                let session_id = target.connection.session_id.clone();
+                let worker_session_id = session_id.clone();
+                let thread_name = format!("engram-recover-{session_id}");
+                let state = self.clone();
+                let sender = completion_tx.clone();
+                let accepting_completions = accepting_completions.clone();
+                match std::thread::Builder::new().name(thread_name).spawn(move || {
+                    let target_started_at = std::time::Instant::now();
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        state.bind_engram_target_off_lock_traced(target)
+                    }))
+                    .unwrap_or_else(|_| {
+                        state.clear_engram_bind_in_progress(&worker_session_id);
+                        Err(EngramTransportError::transport(
+                            "restart recovery worker panicked",
+                        ))
+                    });
+                    let completion = EngramBootRecoveryCompletion {
+                        session_id: worker_session_id,
+                        elapsed: target_started_at.elapsed(),
+                        result,
+                    };
+                    let accepting = accepting_completions
+                        .lock()
+                        .expect("boot recovery completion gate mutex poisoned");
+                    if *accepting {
+                        let _ = sender.send(completion);
+                    } else {
+                        drop(accepting);
+                        state.finish_late_engram_restart_recovery(completion);
+                    }
+                }) {
+                    Ok(_) => {
+                        in_flight.insert(session_id);
+                    }
+                    Err(error) => self.finish_engram_restart_recovery(
+                        &session_id,
+                        Duration::ZERO,
+                        Err(EngramTransportError::transport(format!(
+                            "failed spawning bounded restart recovery worker: {error}"
+                        ))),
+                    ),
                 }
             }
-            targets.into_values().collect::<Vec<_>>()
+
+            if in_flight.is_empty() {
+                break;
+            }
+            let Some(remaining) = plan.budget.checked_sub(started_at.elapsed()) else {
+                break;
+            };
+            if remaining.is_zero() {
+                break;
+            }
+            match completion_rx.recv_timeout(remaining) {
+                Ok(completion) => {
+                    in_flight.remove(&completion.session_id);
+                    if started_at.elapsed() <= plan.budget {
+                        self.finish_engram_restart_recovery(
+                            &completion.session_id,
+                            completion.elapsed,
+                            completion.result,
+                        );
+                    } else {
+                        self.finish_late_engram_restart_recovery(completion);
+                    }
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => break,
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            }
+        }
+
+        // Close admission under the same mutex each worker takes before its
+        // send. Any completion admitted just before this transition is drained
+        // below; every later completion follows the first-use path directly.
+        *accepting_completions
+            .lock()
+            .expect("boot recovery completion gate mutex poisoned") = false;
+        while let Ok(completion) = completion_rx.try_recv() {
+            in_flight.remove(&completion.session_id);
+            self.finish_late_engram_restart_recovery(completion);
+        }
+
+        let unfinished = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            target_ids
+                .iter()
+                .filter(|session_id| {
+                    inner
+                        .find_session_index(session_id)
+                        .is_some_and(|index| {
+                            inner.sessions[index].engram_boot_recovery_pending
+                        })
+                })
+                .count()
         };
-        for batch in targets.chunks(ENGRAM_BOOT_RECOVERY_CONCURRENCY) {
-            std::thread::scope(|scope| {
-                let mut handles = Vec::with_capacity(batch.len());
-                for target in batch.iter().cloned() {
-                    let session_id = target.connection.session_id.clone();
-                    let thread_name = format!("engram-recover-{session_id}");
-                    match std::thread::Builder::new().name(thread_name).spawn_scoped(
-                        scope,
-                        move || {
-                            let started_at = std::time::Instant::now();
-                            let result = self.bind_engram_target_off_lock(target);
-                            (started_at.elapsed(), result)
-                        },
-                    ) {
-                        Ok(handle) => handles.push((session_id, handle)),
-                        Err(error) => self.finish_engram_restart_recovery(
-                            &session_id,
-                            Duration::ZERO,
-                            Err(EngramTransportError::transport(format!(
-                                "failed spawning bounded restart recovery worker: {error}"
-                            ))),
-                        ),
-                    }
-                }
-                for (session_id, handle) in handles {
-                    match handle.join() {
-                        Ok((elapsed, result)) => {
-                            self.finish_engram_restart_recovery(&session_id, elapsed, result);
-                        }
-                        Err(_) => self.finish_engram_restart_recovery(
-                            &session_id,
-                            Duration::ZERO,
-                            Err(EngramTransportError::transport(
-                                "restart recovery worker panicked",
-                            )),
-                        ),
-                    }
-                }
+        if unfinished > 0 {
+            eprintln!(
+                "engram> boot-recovery command=overall elapsed_ms={} outcome=budget_exhausted budget_ms={} unfinished={unfinished}",
+                duration_millis(started_at.elapsed()),
+                plan.budget.as_millis()
+            );
+        } else {
+            eprintln!(
+                "engram> boot-recovery command=overall elapsed_ms={} outcome=complete budget_ms={} unfinished=0",
+                duration_millis(started_at.elapsed()),
+                plan.budget.as_millis()
+            );
+        }
+    }
+
+    fn finish_late_engram_restart_recovery(&self, completion: EngramBootRecoveryCompletion) {
+        self.finish_engram_restart_recovery(
+            &completion.session_id,
+            completion.elapsed,
+            completion.result,
+        );
+    }
+
+    /// Starts at most one lazy retry for a session left pending when the eager
+    /// budget expired. The caller still fails fast or keeps its queue parked;
+    /// successful/degraded retry completion releases the readiness fence and
+    /// re-kicks a queue activation recorded while it was raised.
+    fn request_engram_boot_recovery_retry(&self, session_id: &str) {
+        let target = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let Some(index) = inner.find_session_index(session_id) else {
+                return;
+            };
+            if !inner.sessions[index].engram_boot_recovery_pending {
+                return;
+            }
+            // A proxy mirrors its owner's readiness marker. Only the remote
+            // owner may recover that Engram authority; the local host must not
+            // synthesize a degraded result or clear the mirrored fence.
+            if !inner.sessions[index].is_local_session() {
+                return;
+            }
+            inner.sessions[index].engram_boot_recovery_dispatch_pending = true;
+            if inner.sessions[index].engram.bind_in_progress
+                || inner.sessions[index].engram_boot_recovery_retry_in_progress
+            {
+                return;
+            }
+            let target =
+                Self::engram_binding_target_for_session_shape_locked(&inner, session_id, true);
+            inner.sessions[index].engram_boot_recovery_retry_in_progress = true;
+            target
+        };
+
+        let target = match target {
+            Ok(Some(target)) => target,
+            Ok(None) => {
+                self.finish_engram_restart_recovery(
+                    session_id,
+                    Duration::ZERO,
+                    Err(EngramTransportError::backoff(
+                        "Engram boot-recovery target is no longer available",
+                    )),
+                );
+                return;
+            }
+            Err(error) => {
+                self.finish_engram_restart_recovery(
+                    session_id,
+                    Duration::ZERO,
+                    Err(EngramTransportError::backoff(error)),
+                );
+                return;
+            }
+        };
+
+        let state = self.clone();
+        let retry_session_id = session_id.to_owned();
+        let thread_name = format!("engram-recover-lazy-{session_id}");
+        if let Err(error) = std::thread::Builder::new().name(thread_name).spawn(move || {
+            let started_at = std::time::Instant::now();
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                state.bind_engram_target_off_lock_traced(target)
+            }))
+            .unwrap_or_else(|_| {
+                state.clear_engram_bind_in_progress(&retry_session_id);
+                Err(EngramTransportError::transport(
+                    "lazy restart recovery worker panicked",
+                ))
             });
+            state.finish_engram_restart_recovery(
+                &retry_session_id,
+                started_at.elapsed(),
+                result,
+            );
+        }) {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            if let Some(index) = inner.find_session_index(session_id) {
+                inner.sessions[index].engram_boot_recovery_retry_in_progress = false;
+            }
+            eprintln!(
+                "engram> boot-recovery session={session_id} command=lazy_retry elapsed_ms=0 outcome=spawn_error error={error}"
+            );
+        }
+    }
+
+    fn clear_engram_bind_in_progress(&self, session_id: &str) {
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        if let Some(index) = inner.find_session_index(session_id) {
+            inner.sessions[index].engram.bind_in_progress = false;
         }
     }
 
@@ -2795,6 +3098,57 @@ impl AppState {
                     elapsed,
                 );
                 eprintln!("engram> session={session_id} restart recovery degraded: {error}");
+            }
+        }
+        self.clear_engram_boot_recovery_pending(session_id);
+    }
+
+    fn clear_engram_boot_recovery_pending(&self, session_id: &str) {
+        let should_dispatch = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let Some(index) = inner.find_session_index(session_id) else {
+                return;
+            };
+            if !inner.sessions[index].engram_boot_recovery_pending {
+                return;
+            }
+            let record = inner
+                .session_mut_by_index(index)
+                .expect("session index should be valid");
+            record.engram_boot_recovery_pending = false;
+            let should_dispatch = record.engram_boot_recovery_dispatch_pending;
+            record.engram_boot_recovery_dispatch_pending = false;
+            record.engram_boot_recovery_retry_in_progress = false;
+            if let Err(error) = self.commit_locked(&mut inner) {
+                eprintln!(
+                    "engram> session={session_id} failed publishing boot-recovery readiness: {error:#}"
+                );
+            }
+            should_dispatch
+        };
+
+        if !should_dispatch {
+            return;
+        }
+
+        // Recovery is the activation event for prompts that arrived while the
+        // readiness fence was raised. Re-kick this session after releasing the
+        // state mutex; otherwise an ordinary user prompt can remain parked
+        // forever waiting for an unrelated lifecycle callback.
+        match self.dispatch_next_queued_turn(session_id, false) {
+            Ok(Some(dispatch)) => {
+                if let Err(error) = deliver_turn_dispatch(self, dispatch) {
+                    eprintln!(
+                        "engram> session={session_id} failed delivering queued prompt after boot recovery: {}",
+                        error.message
+                    );
+                }
+            }
+            Ok(None) => {}
+            Err(error) => {
+                eprintln!(
+                    "engram> session={session_id} failed preparing queued prompt after boot recovery: {error:#}"
+                );
             }
         }
     }
@@ -2872,27 +3226,27 @@ impl AppState {
         active_turn_generation: Option<u64>,
         next_intent: EngramNextIntent,
         project_reset_owner_generation: Option<u64>,
-    ) {
+    ) -> EngramCheckpointOutcome {
         let snapshot = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_session_index(session_id) else {
-                return;
+                return EngramCheckpointOutcome::Skipped;
             };
             if runtime_token
                 .is_some_and(|token| !inner.sessions[index].runtime.matches_runtime_token(token))
             {
-                return;
+                return EngramCheckpointOutcome::Skipped;
             }
             if active_turn_generation.is_some_and(|generation| {
                 inner.sessions[index].active_turn_generation != generation
             }) {
-                return;
+                return EngramCheckpointOutcome::Skipped;
             }
             if runtime_token.is_some() && inner.sessions[index].runtime_stop_in_progress {
-                return;
+                return EngramCheckpointOutcome::Skipped;
             }
             let Some(grant_id) = inner.sessions[index].engram.active_grant_id.clone() else {
-                return;
+                return EngramCheckpointOutcome::Skipped;
             };
             // A global/project kill switch prevents new evaluate/bind calls, but
             // it must not strand a grant that was already begun. Resolve the
@@ -2916,7 +3270,7 @@ impl AppState {
                 // shadow-runtime lifecycle transitions. Global disable still
                 // reaches this path because the persisted project setting is
                 // enabled in that case.
-                return;
+                return EngramCheckpointOutcome::Skipped;
             }
             if !inner
                 .session_mut_by_index(index)
@@ -2924,7 +3278,7 @@ impl AppState {
                 .engram
                 .begin_checkpoint(project_reset_owner_generation)
             {
-                return;
+                return EngramCheckpointOutcome::Skipped;
             }
             (grant_id, target)
         };
@@ -2984,6 +3338,10 @@ impl AppState {
             Ok(()) => self.record_engram_transport_success(session_id),
             Err(error) => self.record_engram_transport_failure(session_id, error),
         }
+        let failure_detail = outcome
+            .as_ref()
+            .err()
+            .map(|error| format!("{error:#}"));
         let (decision, refusal_code, fail_mode) = match outcome {
             Ok(()) => (
                 EngramControlCardDecision::Grant,
@@ -3026,6 +3384,10 @@ impl AppState {
             card,
             project_reset_owner_generation,
         );
+        match failure_detail {
+            Some(detail) => EngramCheckpointOutcome::Failed(detail),
+            None => EngramCheckpointOutcome::Succeeded,
+        }
     }
 
     /// A destructive session removal must not tear down the sidecar while a
@@ -3612,7 +3974,10 @@ impl AppState {
                 .is_some_and(|pending| pending.dispatch_generation == dispatch_generation);
             if record.engram.dispatch_generation == dispatch_generation
                 && pending_dispatch_is_current
-                && record.session.status == SessionStatus::Active
+                && matches!(
+                    record.session.status,
+                    SessionStatus::Active | SessionStatus::Stopping
+                )
                 && record.runtime_stop_in_progress
             {
                 // Stop has borrowed the runtime but has not yet established
@@ -4001,7 +4366,23 @@ impl AppState {
         &self,
         target: EngramBindingTarget,
     ) -> std::result::Result<String, EngramTransportError> {
+        self.bind_engram_target_off_lock_with_trace(target, false)
+    }
+
+    fn bind_engram_target_off_lock_traced(
+        &self,
+        target: EngramBindingTarget,
+    ) -> std::result::Result<String, EngramTransportError> {
+        self.bind_engram_target_off_lock_with_trace(target, true)
+    }
+
+    fn bind_engram_target_off_lock_with_trace(
+        &self,
+        target: EngramBindingTarget,
+        trace_boot_recovery: bool,
+    ) -> std::result::Result<String, EngramTransportError> {
         let session_id = target.connection.session_id.clone();
+        let target_started_at = std::time::Instant::now();
         {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let current_project = engram_project_for_session_locked(&inner, &session_id);
@@ -4037,7 +4418,7 @@ impl AppState {
             record.engram.bind_in_progress = true;
         }
 
-        let result = self.bind_engram_target_uncoordinated_off_lock(target);
+        let result = self.bind_engram_target_uncoordinated_off_lock(target, trace_boot_recovery);
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         if let Some(index) = inner.find_session_index(&session_id) {
             inner
@@ -4046,12 +4427,22 @@ impl AppState {
                 .engram
                 .bind_in_progress = false;
         }
+        if trace_boot_recovery {
+            log_engram_boot_recovery_phase(
+                &session_id,
+                "target",
+                1,
+                target_started_at.elapsed(),
+                &result,
+            );
+        }
         result
     }
 
     fn bind_engram_target_uncoordinated_off_lock(
         &self,
         mut target: EngramBindingTarget,
+        trace_boot_recovery: bool,
     ) -> std::result::Result<String, EngramTransportError> {
         let runtime_enabled = {
             let inner = self.inner.lock().expect("state mutex poisoned");
@@ -4095,15 +4486,26 @@ impl AppState {
                         .ok_or_else(|| {
                         EngramTransportError::deadline("Engram rebind budget exhausted")
                     })?;
+                let status_started_at = std::time::Instant::now();
                 let status = target.adapter.request(
                     &target.connection,
                     &EngramControlRequest::SessionStatus {
                         routing_token: routing_token.clone(),
                     },
                     timeout,
-                );
+                )
+                .and_then(parse_engram_result::<EngramSessionStatusResponse>);
+                if trace_boot_recovery {
+                    log_engram_boot_recovery_phase(
+                        &target.connection.session_id,
+                        "session_status",
+                        1,
+                        status_started_at.elapsed(),
+                        &status,
+                    );
+                }
                 let status = match status {
-                    Ok(status) => Some(parse_engram_result::<EngramSessionStatusResponse>(status)?),
+                    Ok(status) => Some(status),
                     Err(error) if engram_status_error_requires_fresh_bind(&error) => {
                         self.clear_engram_stale_binding_record(
                             &target.connection.session_id,
@@ -4136,48 +4538,55 @@ impl AppState {
                         .ok_or_else(|| {
                             EngramTransportError::deadline("Engram rebind budget exhausted")
                         })?;
-                        let checkpoint = target.adapter.request(
-                            &target.connection,
-                            &EngramControlRequest::TurnCheckpoint {
-                                routing_token: routing_token.clone(),
-                                grant_id: grant_id.to_owned(),
-                                next_intent: EngramNextIntent::Wait,
-                                observations: Vec::new(),
-                                idempotency_key: engram_checkpoint_idempotency_key(
-                                    format!(
-                                        "termal-restart-checkpoint:{}:{}",
-                                        target.connection.session_id, grant_id
+                        let checkpoint_started_at = std::time::Instant::now();
+                        let checkpoint = target
+                            .adapter
+                            .request(
+                                &target.connection,
+                                &EngramControlRequest::TurnCheckpoint {
+                                    routing_token: routing_token.clone(),
+                                    grant_id: grant_id.to_owned(),
+                                    next_intent: EngramNextIntent::Wait,
+                                    observations: Vec::new(),
+                                    idempotency_key: engram_checkpoint_idempotency_key(
+                                        format!(
+                                            "termal-restart-checkpoint:{}:{}",
+                                            target.connection.session_id, grant_id
+                                        ),
+                                        &[],
                                     ),
-                                    &[],
-                                ),
-                            },
-                            timeout,
-                        );
+                                },
+                                timeout,
+                            )
+                            .and_then(parse_engram_result::<EngramTurnCheckpointResponse>);
+                        if trace_boot_recovery {
+                            log_engram_boot_recovery_phase(
+                                &target.connection.session_id,
+                                "turn_checkpoint",
+                                1,
+                                checkpoint_started_at.elapsed(),
+                                &checkpoint,
+                            );
+                        }
                         let checkpoint = match checkpoint {
                             Err(error) if engram_grant_was_issued_but_not_begun(&error) => None,
                             Err(error) => return Err(error),
-                            Ok(checkpoint) => {
-                                let checkpoint: EngramTurnCheckpointResponse =
-                                    parse_engram_result(checkpoint)?;
-                                match checkpoint {
-                                    EngramTurnCheckpointResponse::Checkpointed { .. } => Some(()),
-                                    EngramTurnCheckpointResponse::Refuse { code }
-                                        if engram_grant_code_was_issued_but_not_begun(&code) =>
-                                    {
-                                        None
-                                    }
-                                    EngramTurnCheckpointResponse::Refuse { .. } => {
-                                        return Err(EngramTransportError::remote(
-                                            EngramControlErrorBody {
-                                                code: "restart_checkpoint_refused".to_owned(),
-                                                message: format!(
-                                                    "Engram refused restart checkpoint for grant `{grant_id}`"
-                                                ),
-                                            },
-                                        ));
-                                    }
-                                }
+                            Ok(EngramTurnCheckpointResponse::Checkpointed { .. }) => Some(()),
+                            Ok(EngramTurnCheckpointResponse::Refuse { code })
+                                if engram_grant_code_was_issued_but_not_begun(&code) =>
+                            {
+                                None
                             }
+                            Ok(EngramTurnCheckpointResponse::Refuse { .. }) => {
+                                return Err(EngramTransportError::remote(
+                                    EngramControlErrorBody {
+                                        code: "restart_checkpoint_refused".to_owned(),
+                                        message: format!(
+                                            "Engram refused restart checkpoint for grant `{grant_id}`"
+                                        ),
+                                    },
+                                ));
+                                }
                         };
                         if checkpoint.is_none() {
                             // Engram reports an issued grant as open, but only a
@@ -4220,9 +4629,28 @@ impl AppState {
 
         let mut stale_retry_used = false;
         let binding = loop {
-            let work_binding = target
-                .adapter
-                .read_work_binding(&target.connection, ENGRAM_WORK_BINDING_COMMAND_TIMEOUT)?;
+            let attempt = usize::from(stale_retry_used) + 1;
+            let work_binding_started_at = std::time::Instant::now();
+            let work_binding = if trace_boot_recovery {
+                target.adapter.read_work_binding_for_boot(
+                    &target.connection,
+                    ENGRAM_WORK_BINDING_COMMAND_TIMEOUT,
+                )
+            } else {
+                target
+                    .adapter
+                    .read_work_binding(&target.connection, ENGRAM_WORK_BINDING_COMMAND_TIMEOUT)
+            };
+            if trace_boot_recovery {
+                log_engram_boot_recovery_phase(
+                    &target.connection.session_id,
+                    "work_next_focus",
+                    attempt,
+                    work_binding_started_at.elapsed(),
+                    &work_binding,
+                );
+            }
+            let work_binding = work_binding?;
             // Work-focus CLI reads launch separate Engram processes and have
             // no contractual sub-600ms latency bound. Keep that bounded read
             // outside the hot JSON-lines bind budget. A stale-fence retry
@@ -4231,31 +4659,42 @@ impl AppState {
             // bounded CLI reader completes. A stale-fence retry performs a
             // fresh reader and receives the same fresh bind budget.
             let timeout = target.settings.call_timeout();
-            let result = target.adapter.request(
-                &target.connection,
-                &EngramControlRequest::SessionBind {
-                    external_ref: target.external_ref.clone(),
-                    title: target.title.clone(),
-                    assurance: ENGRAM_CONTROL_ASSURANCE.to_owned(),
-                    mediated_effects: target.effects.clone(),
-                    capability_map_revision: ENGRAM_CAPABILITY_MAP_REVISION,
-                    work_binding,
-                    idempotency_key: format!(
-                        "termal-bind:{}:{}",
-                        target.connection.session_id,
-                        Uuid::new_v4()
-                    ),
-                },
-                timeout,
-            );
+            let bind_started_at = std::time::Instant::now();
+            let result = target
+                .adapter
+                .request(
+                    &target.connection,
+                    &EngramControlRequest::SessionBind {
+                        external_ref: target.external_ref.clone(),
+                        title: target.title.clone(),
+                        assurance: ENGRAM_CONTROL_ASSURANCE.to_owned(),
+                        mediated_effects: target.effects.clone(),
+                        capability_map_revision: ENGRAM_CAPABILITY_MAP_REVISION,
+                        work_binding,
+                        idempotency_key: format!(
+                            "termal-bind:{}:{}",
+                            target.connection.session_id,
+                            Uuid::new_v4()
+                        ),
+                    },
+                    timeout,
+                )
+                .and_then(parse_engram_result::<EngramSessionBindingResponse>);
+            if trace_boot_recovery {
+                log_engram_boot_recovery_phase(
+                    &target.connection.session_id,
+                    "session_bind",
+                    attempt,
+                    bind_started_at.elapsed(),
+                    &result,
+                );
+            }
             match result {
                 Err(error) if !stale_retry_used && engram_error_is_stale_fence(&error) => {
                     stale_retry_used = true;
                 }
                 Err(error) => return Err(error),
-                Ok(result) => {
-                    break parse_engram_result::<EngramSessionBindingResponse>(result)?;
-                }
+                Ok(binding) => break binding,
             }
         };
         if was_rebind && binding.status.phase != "sync_required" {
@@ -4668,6 +5107,39 @@ impl AppState {
 
 fn duration_millis(duration: Duration) -> u64 {
     u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
+}
+
+fn log_engram_boot_recovery_phase<T>(
+    session_id: &str,
+    command: &str,
+    attempt: usize,
+    elapsed: Duration,
+    result: &std::result::Result<T, EngramTransportError>,
+) {
+    eprintln!(
+        "{}",
+        format_engram_boot_recovery_phase(session_id, command, attempt, elapsed, result)
+    );
+}
+
+fn format_engram_boot_recovery_phase<T>(
+    session_id: &str,
+    command: &str,
+    attempt: usize,
+    elapsed: Duration,
+    result: &std::result::Result<T, EngramTransportError>,
+) -> String {
+    match result {
+        Ok(_) => format!(
+            "engram> boot-recovery session={session_id} command={command} attempt={attempt} elapsed_ms={} outcome=ok",
+            duration_millis(elapsed)
+        ),
+        Err(error) => format!(
+            "engram> boot-recovery session={session_id} command={command} attempt={attempt} elapsed_ms={} outcome=error code={}",
+            duration_millis(elapsed),
+            error.code.as_deref().unwrap_or("transport_error")
+        ),
+    }
 }
 
 fn engram_checkpoint_idempotency_key(

@@ -265,6 +265,7 @@ mod visible_session_hydration_error_tests {
             agent_commands_revision: 0,
             codex_thread_state: None,
             live_activity: None,
+            engram_boot_recovery_pending: false,
             status: SessionStatus::Idle,
             preview: "Remote session ready.".to_owned(),
             messages: Vec::new(),
@@ -610,6 +611,7 @@ impl AppState {
         session.messages_loaded = record.session.messages_loaded;
         session.message_count = session_message_count(record);
         session.session_mutation_stamp = Some(record.mutation_stamp);
+        session.engram_boot_recovery_pending = record.engram_boot_recovery_pending;
         if session.status != SessionStatus::Active {
             session.live_activity = None;
         }
@@ -685,6 +687,7 @@ impl AppState {
             live_activity: (session.status == SessionStatus::Active)
                 .then(|| bounded_live_activity_summary(&session.live_activity))
                 .flatten(),
+            engram_boot_recovery_pending: record.engram_boot_recovery_pending,
             status: session.status,
             preview: session.preview.clone(),
             messages: Vec::new(),
@@ -754,6 +757,10 @@ impl AppState {
             full.agent_commands_revision
         );
         debug_assert_eq!(summary.codex_thread_state, full.codex_thread_state);
+        debug_assert_eq!(
+            summary.engram_boot_recovery_pending,
+            full.engram_boot_recovery_pending
+        );
         debug_assert_eq!(
             summary.live_activity,
             bounded_live_activity_summary(&full.live_activity)
@@ -862,6 +869,11 @@ impl AppState {
         session_id: &str,
         message_limit: usize,
     ) -> Result<SessionResponse, ApiError> {
+        // Opening a targeted session is a first use just like a prompt or a
+        // queue activation. This matters for the browser: the readiness fence
+        // deliberately disables its composer, so hydration must be able to
+        // launch the lazy retry that will eventually re-enable it.
+        self.request_engram_boot_recovery_retry(session_id);
         let should_hydrate_remote_proxy = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner

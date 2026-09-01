@@ -199,6 +199,9 @@ SessionRecord {
     remote_session_id: Option<String>,         // remote session id when proxied
     external_session_id: Option<String>,       // Claude/Codex/ACP resume identifier
     runtime_reset_required: bool,
+    engram_boot_recovery_pending: bool,         // process-local readiness fence, wire-visible
+    engram_boot_recovery_dispatch_pending: bool,// process-local queue activation, not persisted
+    engram_boot_recovery_retry_in_progress: bool,// process-local lazy retry ownership
     hidden: bool,
 }
 ```
@@ -257,7 +260,7 @@ All routes are under `/api`. The backend serves JSON, and the frontend proxies r
 | POST | `/api/git/sync` | Pull, rebase, or otherwise sync the current repo |
 | POST | `/api/terminal/run` | Run a shell command in a project- or session-scoped working directory. Request body enforces `command` ≤ 20,000 chars and `workdir` ≤ 4,096 chars (no interior NUL bytes), and captured output is capped. There is no process timeout. Returns 429 (`{ "error": ... }`) when the concurrency cap for that destination is exhausted; local and remote commands have independent budgets of 4 in-flight requests each. When the destination is remote, a 429 emitted by the remote host is re-emitted locally with the remote's display name prefixed onto the error message (e.g. `remote alice: too many local terminal commands are already running; limit is 4`), so the caller can distinguish a local cap rejection from a remote-side propagation. |
 | POST | `/api/terminal/run/stream` | Run the same terminal command as `/api/terminal/run`, but return an SSE stream. `output` events carry `{ "stream": "stdout" \| "stderr", "text": string }`, `complete` carries the normal terminal response, and `error` carries `{ "error": string, "status": number }` for failures after the stream has started. Validation, workdir/scope resolution, and local concurrency-cap failures are returned as normal HTTP errors before the stream starts; local cap failures use HTTP 429 with `{ "error": ... }` and the same independent local/remote 4-in-flight budgets as the JSON route. Remote 429s discovered by the proxy are surfaced with `status: 429` and the remote display-name prefix in the error message; after the local SSE response has started they travel as SSE `error` frames rather than changing the local HTTP status. There is no process timeout. Remote-scoped commands proxy this streamed route when the remote supports it and fall back to the JSON route only for 404/405 older-remotes responses; successful non-SSE stream responses are treated as remote protocol errors to avoid double-running commands. |
-| GET | `/api/state` | Metadata-first state snapshot; sessions are summary shells with `messagesLoaded: false` and no transcript payload. Delegations carry `id`/`childSessionId` ownership links plus the `mode`/`reviewResultRequired` capability metadata needed for delegation MCP tool gating. Full delegation lifecycle/result summaries come from the parent-scoped delegation endpoints. |
+| GET | `/api/state` | Metadata-first state snapshot; sessions are summary shells with `messagesLoaded: false` and no transcript payload. A session whose Engram authority is still being restored exposes `engramBootRecoveryPending: true`, allowing clients to disable only that session's prompt controls while state and health routes remain available. Eager Engram recovery is backgrounded and bounded by the persisted host `bootRecoveryBudgetMs` (default 5,000 ms); workers that finish after the deadline still clear their marker, while targets not yet started retry lazily when the session is opened or otherwise used. Delegations carry `id`/`childSessionId` ownership links plus the `mode`/`reviewResultRequired` capability metadata needed for delegation MCP tool gating. Full delegation lifecycle/result summaries come from the parent-scoped delegation endpoints. |
 | GET | `/api/workspaces` | List saved workspace layout summaries |
 | GET | `/api/workspaces/{id}` | Read a persisted workspace layout |
 | PUT | `/api/workspaces/{id}` | Save a persisted workspace layout |
@@ -326,7 +329,7 @@ All routes are under `/api`. The backend serves JSON, and the frontend proxies r
 | GET | `/api/sessions/{id}/delegations` | List compact summaries for delegations owned by this parent -> `DelegationListResponse`. This recovery endpoint returns exact delegation/child-session ids, title, agent, and fresh lifecycle status without prompts or transcripts; same-title delegations remain distinct. Unknown parent ids return `404`. Backs `termal_list_delegations`. |
 | POST | `/api/sessions/{id}/delegation-waits` | Create a parent-scoped backend resume wait for one or more delegations. Returns `201` with `DelegationWaitResponse`; terminal targets may consume the wait immediately and queue/resume the parent in the same response cycle. |
 | POST | `/api/sessions/{id}/queued-prompts/{prompt_id}/cancel` | Cancel queued prompt |
-| POST | `/api/sessions/{id}/stop` | Stop active turn |
+| POST | `/api/sessions/{id}/stop` | Persist `Stopping` and return immediately; interrupt/checkpoint completes in background |
 | POST | `/api/sessions/{id}/kill` | Kill and remove session |
 | POST | `/api/sessions/{id}/approvals/{message_id}` | Submit approval decision |
 | POST | `/api/sessions/{id}/user-input/{message_id}` | Submit structured user-input answers (Codex `request_user_input`, Claude `AskUserQuestion`), or `declined: true` to skip a declinable Claude card — decline semantics in the Claude protocol notes below |
@@ -1207,10 +1210,12 @@ Turn complete
   → If queued prompts exist: dispatch next one automatically
 
 Stop (POST /api/sessions/{id}/stop)
-  → Kill active runtime process
-  → Reject pending approvals
-  → Status = Idle
-  → Dispatch next queued prompt if any
+  → Atomically claim the runtime-stop fence, persist Status = Stopping
+  → Return the Stopping snapshot immediately (a repeated Stop is idempotent)
+  → Background worker interrupts/kills the active runtime and checkpoints Engram
+  → Success: reject pending approvals and set Status = Idle
+  → Failure: set Status = Error and append a transcript notice
+  → A restart from persisted Stopping uses interrupted-session recovery
 
 Kill (POST /api/sessions/{id}/kill)
   → Kill runtime, remove session from list entirely
@@ -1218,7 +1223,7 @@ Kill (POST /api/sessions/{id}/kill)
 
 ### Prompt Queueing
 
-When a session is busy (Active or Approval), new messages are queued in a `VecDeque`. The frontend shows these as `PendingPrompt` entries below the composer. Users can cancel individual queued prompts. After each turn completes, `dispatch_next_queued_turn()` pops the next prompt and starts it automatically.
+When a session is busy (Active, Approval, or Stopping), new messages are queued in a `VecDeque`. The frontend shows these as `PendingPrompt` entries below the composer. Users can cancel individual queued prompts. After each turn completes, `dispatch_next_queued_turn()` pops the next prompt and starts it automatically. Explicit Stop leaves queued work paused until a later user resume.
 
 ---
 

@@ -315,10 +315,16 @@ export const SessionComposer = memo(function SessionComposer({
       : (slashPalette.items[Math.min(slashActiveIndex, slashPalette.items.length - 1)] ?? null);
   const canDelegateActiveSlashCommand =
     slashPalette.kind !== "none" && activeSlashItem?.kind === "agent-command";
+  const isEngramBootRecoveryPending = session?.engramBootRecoveryPending === true;
   const composerInputDisabled =
-    !session || isStopping || isAgentCommandResolving || isDelegationSpawning;
+    !session ||
+    isEngramBootRecoveryPending ||
+    isStopping ||
+    isAgentCommandResolving ||
+    isDelegationSpawning;
   const composerSendDisabled =
     !session ||
+    isEngramBootRecoveryPending ||
     isSending ||
     isStopping ||
     isUpdating ||
@@ -326,6 +332,7 @@ export const SessionComposer = memo(function SessionComposer({
     (slashPalette.kind !== "none" && slashPalette.items.length === 0);
   const composerDelegateDisabled =
     !session ||
+    isEngramBootRecoveryPending ||
     !canSpawnDelegation ||
     !onSpawnDelegation ||
     isSending ||
@@ -336,6 +343,7 @@ export const SessionComposer = memo(function SessionComposer({
     (slashPalette.kind !== "none" && !canDelegateActiveSlashCommand);
   const composerActionMenuDisabled =
     !session ||
+    isEngramBootRecoveryPending ||
     isSending ||
     isStopping ||
     isUpdating ||
@@ -1461,7 +1469,13 @@ export const SessionComposer = memo(function SessionComposer({
           disabled={composerInputDisabled}
           onKeyDown={handleComposerKeyDown}
           onPaste={onPaste}
-          placeholder={session ? `Send a prompt to ${session.agent}...` : "Open a session..."}
+          placeholder={
+            isEngramBootRecoveryPending
+              ? "Resuming Engram recovery after restart..."
+              : session
+                ? `Send a prompt to ${session.agent}...`
+                : "Open a session..."
+          }
           rows={1}
         />
         <div className="composer-actions">
@@ -1522,11 +1536,12 @@ export const SessionComposer = memo(function SessionComposer({
       </div>
       {session ? (
         <p className="composer-hint">
-          Paste PNG, JPEG, GIF, or WebP images into the prompt. Drag-and-drop is not supported
-          yet.
-          {composerActionMode === "send"
-            ? null
-            : ` Enter still sends normally; click ${composerPrimaryLabel} to delegate.`}
+          {isEngramBootRecoveryPending
+            ? "Opening this session resumes Engram recovery. Prompts will be available when its background retry finishes."
+            : "Paste PNG, JPEG, GIF, or WebP images into the prompt. Drag-and-drop is not supported yet."}
+          {!isEngramBootRecoveryPending && composerActionMode !== "send"
+            ? ` Enter still sends normally; click ${composerPrimaryLabel} to delegate.`
+            : null}
         </p>
       ) : null}
       {session && slashPalette.kind !== "none" ? (

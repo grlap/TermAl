@@ -485,7 +485,9 @@ export function SessionPaneView({
     [activeSession, pane.viewMode],
   );
   const isSessionBusy =
-    activeSession?.status === "active" || activeSession?.status === "approval";
+    activeSession?.status === "active" ||
+    activeSession?.status === "approval" ||
+    activeSession?.status === "stopping";
   const activeDelegationWaits = useMemo(
     () =>
       activeSession
@@ -513,6 +515,7 @@ export function SessionPaneView({
     pane.viewMode === "session" &&
     Boolean(activeSession) &&
     (activeSession?.status === "active" ||
+      activeSession?.status === "stopping" ||
       (!isSessionBusy &&
         isSending &&
         !hasAgentOutputAfterLatestUserPrompt(activeSession?.messages ?? [])));

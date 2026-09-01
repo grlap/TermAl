@@ -640,6 +640,13 @@ fn normalize_engram_project_paths(settings: &mut EngramProjectSettings) -> Resul
 fn normalize_engram_host_settings(
     settings: EngramHostSettings,
 ) -> Result<EngramHostSettings, ApiError> {
+    if !(MIN_ENGRAM_BOOT_RECOVERY_BUDGET_MS..=MAX_ENGRAM_BOOT_RECOVERY_BUDGET_MS)
+        .contains(&settings.boot_recovery_budget_ms)
+    {
+        return Err(ApiError::bad_request(format!(
+            "boot_recovery_budget_ms must be between {MIN_ENGRAM_BOOT_RECOVERY_BUDGET_MS} and {MAX_ENGRAM_BOOT_RECOVERY_BUDGET_MS}"
+        )));
+    }
     let binary_path = settings.binary_path.trim();
     let binary_path = if binary_path.is_empty() {
         default_engram_binary_path()
@@ -664,6 +671,7 @@ fn normalize_engram_host_settings(
     Ok(EngramHostSettings {
         binary_path: binary_path.to_string_lossy().into_owned(),
         home: home.to_string_lossy().into_owned(),
+        boot_recovery_budget_ms: settings.boot_recovery_budget_ms,
     })
 }
 
@@ -4091,12 +4099,15 @@ impl AppState {
         let normalized = normalize_engram_host_settings(EngramHostSettings {
             binary_path: request.binary_path,
             home: request.home,
+            boot_recovery_budget_ms: request.boot_recovery_budget_ms,
         })?;
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         if inner.preferences.engram == normalized {
             return Ok(self.snapshot_from_inner(&inner));
         }
-        if inner.projects.iter().any(|project| {
+        let host_paths_changed = inner.preferences.engram.binary_path != normalized.binary_path
+            || inner.preferences.engram.home != normalized.home;
+        if host_paths_changed && inner.projects.iter().any(|project| {
             project
                 .engram
                 .as_ref()

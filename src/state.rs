@@ -1621,6 +1621,18 @@ struct SessionRecord {
     /// Host-private Engram binding and open-turn state. It is persisted in the
     /// session row but never copied onto the wire-level `Session`.
     engram: EngramSessionState,
+    /// Process-local readiness fence while boot restores this session's
+    /// host-private Engram routing authority. The wire projection exposes the
+    /// fence, but it is deliberately absent from persisted `Session` state so
+    /// every process recomputes recovery work from durable authority records.
+    engram_boot_recovery_pending: bool,
+    /// A queue-drain activation that arrived while the boot-recovery fence was
+    /// raised. Recovery completion consumes this bit and re-kicks the queue;
+    /// persisted user queues with no current-process activation stay dormant.
+    engram_boot_recovery_dispatch_pending: bool,
+    /// Suppresses duplicate first-use retry workers after eager boot recovery
+    /// exhausts its wall-clock budget. Process-local and never persisted.
+    engram_boot_recovery_retry_in_progress: bool,
     hidden: bool,
     session: Session,
     /// Monotonic mutation stamp assigned by [`StateInner::next_mutation_stamp`]

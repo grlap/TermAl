@@ -415,7 +415,8 @@ export function WorkspaceNodeView({
         }
         isStopping={
           pane.activeSessionId
-            ? Boolean(stoppingSessionIds[pane.activeSessionId])
+            ? Boolean(stoppingSessionIds[pane.activeSessionId]) ||
+              sessionLookup.get(pane.activeSessionId)?.status === "stopping"
             : false
         }
         isKilling={

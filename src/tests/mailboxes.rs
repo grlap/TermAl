@@ -1836,7 +1836,9 @@ fn boot_recovers_a_delivered_notification_after_its_turn_dies_exactly_once() {
         ),
         ..state.clone()
     };
-    restarted.run_post_listen_boot();
+    restarted
+        .run_post_listen_boot()
+        .expect("post-listen boot recovery should run");
     {
         let inner = restarted.inner.lock().expect("state mutex poisoned");
         let target = inner
@@ -1992,7 +1994,9 @@ fn rejected_boot_recovery_wake_is_immediately_requeued() {
         sync_pending_prompts(target);
     }
 
-    state.run_post_listen_boot();
+    state
+        .run_post_listen_boot()
+        .expect("post-listen boot recovery should run");
     let dispatch = state
         .dispatch_turn(
             &target_id,
@@ -2121,7 +2125,9 @@ fn boot_dispatches_committed_workflow_queue_heads() {
         input_rx
     };
 
-    state.run_post_listen_boot();
+    state
+        .run_post_listen_boot()
+        .expect("post-listen boot recovery should run");
 
     assert!(matches!(
         input_rx.recv_timeout(Duration::from_secs(1)),
@@ -2183,7 +2189,9 @@ fn boot_keeps_a_user_queue_barrier_and_workflow_behind_it_dormant() {
         input_rx
     };
 
-    state.run_post_listen_boot();
+    state
+        .run_post_listen_boot()
+        .expect("post-listen boot recovery should run");
 
     assert!(
         matches!(input_rx.try_recv(), Err(mpsc::TryRecvError::Empty)),
@@ -2256,7 +2264,9 @@ fn boot_workflow_activation_drains_a_recovered_mailbox_wake_first() {
         input_rx
     };
 
-    state.run_post_listen_boot();
+    state
+        .run_post_listen_boot()
+        .expect("post-listen boot recovery should run");
 
     let runtime_prompt = match input_rx.recv_timeout(Duration::from_secs(1)) {
         Ok(AcpRuntimeCommand::Prompt(command)) => command.prompt,
@@ -2340,7 +2350,9 @@ fn boot_workflow_activation_retries_a_rejected_recovered_wake_once() {
         );
     }
 
-    state.run_post_listen_boot();
+    state
+        .run_post_listen_boot()
+        .expect("post-listen boot recovery should run");
 
     assert!(matches!(
         accepted_rx.recv_timeout(Duration::from_secs(1)),
@@ -2405,7 +2417,9 @@ fn boot_requeues_a_rejected_workflow_head_for_a_later_recovery_pass() {
         );
     }
 
-    state.run_post_listen_boot();
+    state
+        .run_post_listen_boot()
+        .expect("post-listen boot recovery should run");
 
     {
         let inner = state.inner.lock().expect("state mutex poisoned");

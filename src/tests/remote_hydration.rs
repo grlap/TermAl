@@ -2481,6 +2481,7 @@ fn remote_session_create_forwards_configured_default_model() {
         agent_commands_revision: 0,
         codex_thread_state: None,
         live_activity: None,
+        engram_boot_recovery_pending: false,
         status: SessionStatus::Idle,
         preview: "Remote Default Model ready.".to_owned(),
         messages: Vec::new(),

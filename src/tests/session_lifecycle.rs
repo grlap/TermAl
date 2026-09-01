@@ -1,4 +1,4 @@
-// Claude and Codex session lifecycle: creation and kill semantics.
+// Claude and Codex session lifecycle: creation, asynchronous Stop, and kill semantics.
 //
 // Agent processes start lazily when the user sends the first prompt;
 // creating a session alone must not start a runtime. Codex sessions can
@@ -8,8 +8,8 @@
 // after restart.
 //
 // Production surfaces under test: `StateInner::create_session`,
-// `AppState::kill_session`, and the Axum `kill_session` route in
-// `src/api.rs`.
+// `AppState::request_stop_session`, `AppState::kill_session`, and the Axum
+// Stop/kill routes in `src/api.rs`.
 
 use super::*;
 
@@ -34,6 +34,44 @@ fn creates_claude_sessions_with_default_ask_mode() {
     );
     assert_eq!(record.session.approval_policy, None);
     assert_eq!(record.session.sandbox_mode, None);
+}
+
+// A process can exit after persisting Stopping but before its background
+// worker records completion. Boot must route that state through the same
+// interrupted-turn recovery as Active/Approval rather than leaving a session
+// permanently stuck in Stopping.
+#[test]
+fn boot_recovers_a_persisted_stopping_session_as_interrupted() {
+    let mut inner = StateInner::new();
+    let session_id = inner
+        .create_session(Agent::Claude, None, "/tmp".to_owned(), None, None)
+        .session
+        .id
+        .clone();
+    let index = inner
+        .find_session_index(&session_id)
+        .expect("session should exist");
+    inner.sessions[index].session.status = SessionStatus::Stopping;
+    inner.sessions[index].session.preview = SESSION_STOPPING_MESSAGE.to_owned();
+
+    inner.recover_interrupted_sessions();
+
+    let record = inner
+        .find_session_index(&session_id)
+        .and_then(|index| inner.sessions.get(index))
+        .expect("recovered session should remain");
+    assert_eq!(record.session.status, SessionStatus::Error);
+    assert!(
+        record
+            .session
+            .preview
+            .contains("restarted while this session was stopping")
+    );
+    assert!(record.session.messages.iter().any(|message| matches!(
+        message,
+        Message::Text { text, .. }
+            if text.contains("restarted while this session was stopping")
+    )));
 }
 
 // pins that the sentinel `"default"` model tells the cli layer to
@@ -556,6 +594,202 @@ async fn kill_session_route_returns_ok_when_shared_codex_interrupt_fails() {
         .is_none()
     );
 
+    process.kill().unwrap();
+    process.wait().unwrap();
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// Pins the public Stop contract: the route persists an explicit Stopping
+// state and returns well below the runtime's shutdown bound, a repeated Stop
+// is idempotent, and the claimed worker finishes the old synchronous cleanup
+// after the response is already in the caller's hands.
+#[tokio::test]
+async fn stop_session_route_returns_stopping_immediately_and_finishes_in_background() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let (input_tx, _input_rx) = mpsc::channel();
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Claude session should exist");
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("Claude session index should be valid");
+        record.runtime = SessionRuntime::Claude(ClaudeRuntimeHandle {
+            runtime_id: "claude-async-stop-route".to_owned(),
+            input_tx,
+            process: process.clone(),
+        });
+        record.session.status = SessionStatus::Active;
+        record.session.preview = "Streaming reply...".to_owned();
+    }
+
+    let gate = install_test_stop_fence_gate(&state, &session_id);
+    let app = app_router(state.clone());
+    let started_at = std::time::Instant::now();
+    let (status, response): (StatusCode, StateResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("POST")
+            .uri(format!("/api/sessions/{session_id}/stop"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    let route_elapsed = started_at.elapsed();
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        route_elapsed < Duration::from_millis(100),
+        "Stop route took {route_elapsed:?} before returning"
+    );
+    let stopping = response
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("stopping session should remain visible");
+    assert_eq!(stopping.status, SessionStatus::Stopping);
+    assert_eq!(stopping.preview, SESSION_STOPPING_MESSAGE);
+    gate.wait_until_claimed();
+
+    let second_started_at = std::time::Instant::now();
+    let (second_status, second_response): (StatusCode, StateResponse) = request_json(
+        &app,
+        Request::builder()
+            .method("POST")
+            .uri(format!("/api/sessions/{session_id}/stop"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(second_status, StatusCode::OK);
+    assert!(second_started_at.elapsed() < Duration::from_millis(100));
+    assert_eq!(
+        second_response
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .expect("idempotent Stop should retain the session")
+            .status,
+        SessionStatus::Stopping
+    );
+
+    gate.release();
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        let status = state
+            .snapshot()
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .expect("session should survive Stop")
+            .status;
+        if status != SessionStatus::Stopping {
+            assert_eq!(status, SessionStatus::Idle);
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "background Stop did not finish"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .find_session_index(&session_id)
+        .and_then(|index| inner.sessions.get(index))
+        .expect("stopped session should remain");
+    assert!(!record.runtime_stop_in_progress);
+    assert!(matches!(record.runtime, SessionRuntime::None));
+    assert_eq!(record.session.preview, SESSION_STOPPED_BY_USER_MESSAGE);
+    drop(inner);
+
+    process.wait().unwrap();
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// A background interrupt failure cannot be returned through the already
+// completed HTTP response. It must therefore settle the persisted Stopping
+// state to Error and leave an actionable transcript notice.
+#[test]
+fn asynchronous_stop_surfaces_runtime_interrupt_failure_on_the_session() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let (input_tx, _input_rx) = mpsc::channel();
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Claude session should exist");
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("Claude session index should be valid");
+        record.runtime = SessionRuntime::Claude(ClaudeRuntimeHandle {
+            runtime_id: "claude-async-stop-failure".to_owned(),
+            input_tx,
+            process: process.clone(),
+        });
+        record.session.status = SessionStatus::Active;
+    }
+
+    let failure_guard = force_test_kill_child_process_failure(&process, "Claude");
+    let response = state
+        .request_stop_session(&session_id)
+        .expect("Stop should return its Stopping snapshot");
+    assert_eq!(
+        response
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .expect("session should remain")
+            .status,
+        SessionStatus::Stopping
+    );
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        let status = state
+            .snapshot()
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .expect("session should remain")
+            .status;
+        if status != SessionStatus::Stopping {
+            assert_eq!(status, SessionStatus::Error);
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "background interrupt failure was not surfaced"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .find_session_index(&session_id)
+        .and_then(|index| inner.sessions.get(index))
+        .expect("failed Stop session should remain");
+    assert!(!record.runtime_stop_in_progress);
+    assert!(
+        record
+            .session
+            .preview
+            .contains("Stop failed in the background")
+    );
+    assert!(record.session.messages.iter().any(|message| matches!(
+        message,
+        Message::Text { text, .. }
+            if text.contains("Stop failed in the background")
+                && text.contains("failed to stop session")
+    )));
+    drop(inner);
+
+    drop(failure_guard);
     process.kill().unwrap();
     process.wait().unwrap();
     let _ = fs::remove_file(state.persistence_path.as_path());

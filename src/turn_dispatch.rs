@@ -64,6 +64,9 @@ struct PreparedEngramQueuedTurn {
     pending_engram: Option<EngramPendingDispatch>,
 }
 
+const ENGRAM_BOOT_RECOVERY_PENDING_MESSAGE: &str =
+    "session is restoring its Engram authority after restart; retry when engramBootRecoveryPending is false";
+
 /// Adds transport context that a receiving agent cannot infer from its own
 /// repository instructions. Peer sessions may live in entirely different
 /// projects, so the prompt must explain both the context boundary and the
@@ -870,6 +873,25 @@ impl AppState {
             let Some(index) = inner.find_session_index(session_id) else {
                 return Ok(None);
             };
+            if inner.sessions[index].engram_boot_recovery_pending {
+                let should_retry = if orphaned_workflow_only {
+                    inner.sessions[index]
+                        .queued_prompts
+                        .iter()
+                        .find(|queued| queued.source != QueuedPromptSource::Mailbox)
+                        .is_some_and(|queued| queued.source == QueuedPromptSource::Orchestrator)
+                } else {
+                    !inner.sessions[index].queued_prompts.is_empty()
+                };
+                if should_retry {
+                    inner.sessions[index].engram_boot_recovery_dispatch_pending = true;
+                }
+                drop(inner);
+                if should_retry {
+                    self.request_engram_boot_recovery_retry(session_id);
+                }
+                return Ok(None);
+            }
             let project_reset_fenced = inner.sessions[index].engram.project_reset_in_progress
                 || engram_project_for_session_locked(&inner, session_id)
                     .is_some_and(|project| inner.engram_project_resets.contains(&project.id));
@@ -929,10 +951,31 @@ impl AppState {
 
         for _attempt in 0..3 {
             let snapshot = {
-                let inner = self.inner.lock().expect("state mutex poisoned");
+                let mut inner = self.inner.lock().expect("state mutex poisoned");
                 let Some(index) = inner.find_session_index(session_id) else {
                     return Ok(None);
                 };
+                if inner.sessions[index].engram_boot_recovery_pending {
+                    let should_retry = if orphaned_workflow_only {
+                        inner.sessions[index]
+                            .queued_prompts
+                            .iter()
+                            .find(|queued| queued.source != QueuedPromptSource::Mailbox)
+                            .is_some_and(|queued| {
+                                queued.source == QueuedPromptSource::Orchestrator
+                            })
+                    } else {
+                        !inner.sessions[index].queued_prompts.is_empty()
+                    };
+                    if should_retry {
+                        inner.sessions[index].engram_boot_recovery_dispatch_pending = true;
+                    }
+                    drop(inner);
+                    if should_retry {
+                        self.request_engram_boot_recovery_retry(session_id);
+                    }
+                    return Ok(None);
+                }
                 let record = &inner.sessions[index];
                 let project_reset_fenced = record.engram.project_reset_in_progress
                     || engram_project_for_session_locked(&inner, session_id)
@@ -973,7 +1016,10 @@ impl AppState {
                     record.session.status,
                 )
             };
-            if matches!(snapshot.2, SessionStatus::Active | SessionStatus::Approval) {
+            if matches!(
+                snapshot.2,
+                SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
+            ) {
                 return Ok(None);
             }
             let intent = EngramTurnIntentSnapshot {
@@ -1002,9 +1048,10 @@ impl AppState {
                     })
                 && !matches!(
                     inner.sessions[index].session.status,
-                    SessionStatus::Active | SessionStatus::Approval
+                    SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
                 )
-                && !inner.sessions[index].runtime_stop_in_progress;
+                && !inner.sessions[index].runtime_stop_in_progress
+                && !inner.sessions[index].engram_boot_recovery_pending;
             if !unchanged {
                 let record = inner
                     .session_mut_by_index(index)
@@ -1063,6 +1110,16 @@ impl AppState {
         session_id: &str,
         request: SendMessageRequest,
     ) -> std::result::Result<DispatchTurnResult, ApiError> {
+        let recovery_pending = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            inner
+                .find_visible_session_index(session_id)
+                .is_some_and(|index| inner.sessions[index].engram_boot_recovery_pending)
+        };
+        if recovery_pending {
+            self.request_engram_boot_recovery_retry(session_id);
+            return Err(ApiError::conflict(ENGRAM_BOOT_RECOVERY_PENDING_MESSAGE));
+        }
         if self.remote_session_target(session_id)?.is_some() {
             self.proxy_remote_turn_dispatch(session_id, request)?;
             return Ok(DispatchTurnResult::Queued);
@@ -1081,6 +1138,11 @@ impl AppState {
         let index = inner
             .find_visible_session_index(session_id)
             .ok_or_else(|| ApiError::not_found("session not found"))?;
+        if inner.sessions[index].engram_boot_recovery_pending {
+            drop(inner);
+            self.request_engram_boot_recovery_retry(session_id);
+            return Err(ApiError::conflict(ENGRAM_BOOT_RECOVERY_PENDING_MESSAGE));
+        }
         if delegated_child_dispatch_is_blocked_locked(&inner, index) {
             return Err(ApiError::conflict(
                 DELEGATION_NO_LONGER_STARTABLE_MESSAGE,
@@ -1140,7 +1202,7 @@ impl AppState {
                 .is_some_and(|project| inner.engram_project_resets.contains(&project.id));
         let session_is_busy = matches!(
             inner.sessions[index].session.status,
-            SessionStatus::Active | SessionStatus::Approval
+            SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
         ) || inner.sessions[index].runtime_stop_in_progress
             || project_reset_fenced;
         let has_queued_prompts = !inner.sessions[index].queued_prompts.is_empty();

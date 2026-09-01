@@ -142,12 +142,11 @@ async fn run_server() -> Result<()> {
         .context("failed to read local backend address")?;
     state.set_local_http_base_url(format!("http://{bound}"));
 
-    // Now that the backend is bound and its base URL is published, resume session
-    // runtimes. The shared Codex app-server configures its TermAl MCP bridge from
-    // this base URL and connects back here, so this MUST come after the two lines
-    // above. Starting it during `AppState::new` would point the bridge at a backend
-    // that is not listening yet.
-    state.run_post_listen_boot();
+    // Publish per-session readiness fences synchronously, then recover runtimes
+    // in the background. The shared Codex app-server still receives the bound
+    // base URL, while health and state routes begin serving without waiting for
+    // Engram CLI work-binding calls.
+    let _post_listen_boot_worker = state.start_post_listen_boot()?;
 
     println!("TermAl backend");
     println!("listening: http://{bound}");

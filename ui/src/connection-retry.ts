@@ -87,7 +87,9 @@ export function buildConnectionRetryDisplayStateByMessageId(
   }
 
   const sessionIsBusy =
-    session.status === "active" || session.status === "approval";
+    session.status === "active" ||
+    session.status === "approval" ||
+    session.status === "stopping";
   let nearestLaterTranscriptItem:
     | "assistant-retry"
     | "assistant-response"

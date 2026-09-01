@@ -59,10 +59,12 @@ describe("normalizeEngramHostSettings", () => {
       normalizeEngramHostSettings({
         binaryPath: "  C:\\tools\\engram.exe  ",
         home: "  C:\\EngramHome  ",
+        bootRecoveryBudgetMs: 7_500,
       }),
     ).toEqual({
       binaryPath: "C:\\tools\\engram.exe",
       home: "C:\\EngramHome",
+      bootRecoveryBudgetMs: 7_500,
     });
   });
 });

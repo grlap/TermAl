@@ -678,6 +678,7 @@ fn telegram_session_is_prompt_target(session: &TelegramStateSession) -> bool {
         TelegramSessionStatus::Active
         | TelegramSessionStatus::Idle
         | TelegramSessionStatus::Approval
+        | TelegramSessionStatus::Stopping
         | TelegramSessionStatus::Unknown => true,
         TelegramSessionStatus::Error => false,
     }
@@ -685,7 +686,9 @@ fn telegram_session_is_prompt_target(session: &TelegramStateSession) -> bool {
 
 fn telegram_session_status_sort_rank(status: &TelegramSessionStatus) -> u8 {
     match status {
-        TelegramSessionStatus::Active | TelegramSessionStatus::Approval => 0,
+        TelegramSessionStatus::Active
+        | TelegramSessionStatus::Approval
+        | TelegramSessionStatus::Stopping => 0,
         TelegramSessionStatus::Idle => 1,
         TelegramSessionStatus::Error | TelegramSessionStatus::Unknown => 2,
     }
@@ -751,6 +754,7 @@ fn telegram_state_session_status_label(status: &TelegramSessionStatus) -> &'stat
         TelegramSessionStatus::Active => "active",
         TelegramSessionStatus::Idle => "idle",
         TelegramSessionStatus::Approval => "approval",
+        TelegramSessionStatus::Stopping => "stopping",
         TelegramSessionStatus::Error => "error",
         TelegramSessionStatus::Unknown => "unknown",
     }

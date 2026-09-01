@@ -29,6 +29,7 @@ function createSession(
 describe("session list filters", () => {
   const sessions = [
     createSession("active", "active"),
+    createSession("stopping", "stopping"),
     createSession("approval", "approval"),
     createSession("idle", "idle"),
     createSession("error", "error"),
@@ -36,8 +37,8 @@ describe("session list filters", () => {
 
   it("counts sessions by requested filter buckets", () => {
     expect(countSessionsByFilter(sessions)).toEqual({
-      all: 4,
-      working: 1,
+      all: 5,
+      working: 2,
       asking: 1,
       completed: 1,
     });
@@ -46,12 +47,14 @@ describe("session list filters", () => {
   it("keeps error sessions in no-filter results but excludes them from status buckets", () => {
     expect(filterSessionsByListFilter(sessions, "all").map((session) => session.id)).toEqual([
       "active",
+      "stopping",
       "approval",
       "idle",
       "error",
     ]);
     expect(filterSessionsByListFilter(sessions, "working").map((session) => session.id)).toEqual([
       "active",
+      "stopping",
     ]);
     expect(filterSessionsByListFilter(sessions, "asking").map((session) => session.id)).toEqual([
       "approval",

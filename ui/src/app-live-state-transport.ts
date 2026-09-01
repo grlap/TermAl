@@ -1003,7 +1003,10 @@ export function useAppLiveStateTransport(
     }
 
     function hasActivelyStreamingSession() {
-      return sessionsRef.current.some((session) => session.status === "active");
+      return sessionsRef.current.some(
+        (session) =>
+          session.status === "active" || session.status === "stopping",
+      );
     }
 
     function hasPotentiallyStaleTransportSession(now: number) {
@@ -1060,7 +1063,7 @@ export function useAppLiveStateTransport(
       }
 
       const detectedResumeGap = sessionsRef.current.some((session) => {
-        if (session.status !== "active") {
+        if (session.status !== "active" && session.status !== "stopping") {
           return false;
         }
 

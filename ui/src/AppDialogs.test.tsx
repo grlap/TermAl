@@ -145,6 +145,7 @@ function createBaseProps(
     engramHostSettings: {
       binaryPath: "engram",
       home: "C:\\Users\\greg\\.engram",
+      bootRecoveryBudgetMs: 5_000,
     },
     projects: [],
     sessions: [],

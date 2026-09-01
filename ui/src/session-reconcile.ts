@@ -174,6 +174,7 @@ function sameSessionSummary(previous: Session, next: Session) {
     (previous.liveActivity?.commandStatus ?? null) ===
       (next.liveActivity?.commandStatus ?? null) &&
     previous.sessionMutationStamp === next.sessionMutationStamp &&
+    previous.engramBootRecoveryPending === next.engramBootRecoveryPending &&
     previous.status === next.status &&
     previous.preview === next.preview &&
     sameOptionalStringArray(previous.promptHistory, next.promptHistory) &&

@@ -38,6 +38,9 @@ export function EngramPreferencesPanel({
   );
   const [binaryPath, setBinaryPath] = useState(hostSettings.binaryPath);
   const [home, setHome] = useState(hostSettings.home);
+  const [bootRecoveryBudgetMs, setBootRecoveryBudgetMs] = useState(
+    hostSettings.bootRecoveryBudgetMs,
+  );
   const [isSavingHost, setIsSavingHost] = useState(false);
   const [hostNotice, setHostNotice] = useState<string | null>(null);
   const [hostError, setHostError] = useState<string | null>(null);
@@ -48,7 +51,12 @@ export function EngramPreferencesPanel({
   useEffect(() => {
     setBinaryPath(hostSettings.binaryPath);
     setHome(hostSettings.home);
-  }, [hostSettings.binaryPath, hostSettings.home]);
+    setBootRecoveryBudgetMs(hostSettings.bootRecoveryBudgetMs);
+  }, [
+    hostSettings.binaryPath,
+    hostSettings.bootRecoveryBudgetMs,
+    hostSettings.home,
+  ]);
 
   useEffect(() => {
     if (declaredProjects.some((project) => project.id === selectedProjectId)) {
@@ -72,6 +80,7 @@ export function EngramPreferencesPanel({
       const state = await updateEngramHostSettings({
         binaryPath: binaryPath.trim() || "engram",
         home: home.trim(),
+        bootRecoveryBudgetMs,
       });
       onStateUpdated(state);
       setHostNotice("Host Engram settings saved.");
@@ -138,6 +147,32 @@ export function EngramPreferencesPanel({
             />
             <span className="create-session-field-hint">
               Defaults to the server user's <code>.engram</code> directory.
+            </span>
+          </label>
+          <label
+            className="create-session-field"
+            htmlFor="settings-engram-boot-recovery-budget"
+          >
+            <span>Boot recovery budget (ms)</span>
+            <input
+              id="settings-engram-boot-recovery-budget"
+              aria-label="Engram boot recovery budget"
+              className="themed-input"
+              type="number"
+              min={100}
+              max={60_000}
+              step={100}
+              value={bootRecoveryBudgetMs}
+              disabled={isSavingHost}
+              onChange={(event) => {
+                setBootRecoveryBudgetMs(event.currentTarget.valueAsNumber);
+                setHostNotice(null);
+                setHostError(null);
+              }}
+            />
+            <span className="create-session-field-hint">
+              Eager recovery stops at this wall-clock budget; unfinished
+              sessions retry when next used.
             </span>
           </label>
         </div>

@@ -28,7 +28,9 @@
 // mid-stop would race the stop machinery. See
 // `src/state.rs::handle_shared_codex_runtime_exit` + the deferred-callback
 // replay path in `src/tests/session_stop.rs`. If a second stop arrives while
-// the first is still in flight, the guard returns HTTP 409 Conflict (see
+// the user-facing asynchronous Stop is still in flight, the route returns the
+// same `Stopping` snapshot without starting another worker. Synchronous
+// internal cleanup retains the stricter 409 contract (see
 // `src/tests/session_stop_runtime.rs::stop_session_returns_conflict_when_already_stopping`).
 //
 // Remote proxying: if `session.remote_target` is set, each route short-circuits
@@ -127,6 +129,13 @@ fn wait_at_test_stop_fence_gate(state: &AppState, session_id: &str) {
             .expect("test Stop fence gate should be released");
     }
 }
+
+#[derive(Clone)]
+struct RequestedStopClaim {
+    runtime_token: Option<RuntimeToken>,
+    owner_generation: u64,
+}
+
 impl AppState {
     /// Destructively removes a session: tears down its runtime (kill
     /// child process for Claude/ACP, `turn/interrupt` + detach for shared
@@ -314,8 +323,198 @@ impl AppState {
     /// `stop_session_with_options` with `StopSessionOptions::default()`
     /// (leave queued work paused on success, not part of an orchestrator
     /// cleanup wave).
+    #[cfg_attr(not(test), allow(dead_code))]
     fn stop_session(&self, session_id: &str) -> std::result::Result<StateResponse, ApiError> {
         self.stop_session_with_options(session_id, StopSessionOptions::default())
+    }
+
+    /// Starts the user-facing Stop operation and returns the persisted
+    /// `Stopping` snapshot without waiting for the agent interrupt or Engram
+    /// checkpoint. The runtime-stop ownership claim is established before the
+    /// state becomes visible, so runtime callbacks are deferred throughout the
+    /// handoff to the background worker. Repeated requests while that claim is
+    /// active are idempotent.
+    fn request_stop_session(
+        &self,
+        session_id: &str,
+    ) -> std::result::Result<StateResponse, ApiError> {
+        if self.remote_session_target(session_id)?.is_some() {
+            return self.proxy_remote_stop_session(session_id);
+        }
+
+        let options = StopSessionOptions::default();
+        let (response, claim) = self.begin_requested_stop_session(session_id, &options)?;
+        let Some(claim) = claim else {
+            return Ok(response);
+        };
+
+        let state = self.clone();
+        let worker_session_id = session_id.to_owned();
+        let worker_claim = claim.clone();
+        if let Err(error) = std::thread::Builder::new()
+            .name(format!("termal-stop-{session_id}"))
+            .spawn(move || {
+                if let Err(error) = state.stop_local_session_with_options(
+                    &worker_session_id,
+                    options,
+                    Some(worker_claim.clone()),
+                ) {
+                    state.record_requested_stop_failure(
+                        &worker_session_id,
+                        &worker_claim,
+                        &error.message,
+                    );
+                }
+            })
+        {
+            let detail = format!("failed to start background Stop worker: {error}");
+            self.record_requested_stop_failure(session_id, &claim, &detail);
+            return Err(ApiError::internal(detail));
+        }
+
+        Ok(response)
+    }
+
+    fn begin_requested_stop_session(
+        &self,
+        session_id: &str,
+        options: &StopSessionOptions,
+    ) -> std::result::Result<(StateResponse, Option<RequestedStopClaim>), ApiError> {
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_visible_session_index(session_id)
+            .ok_or_else(|| ApiError::not_found("session not found"))?;
+
+        if inner.sessions[index].session.status == SessionStatus::Stopping {
+            return Ok((self.snapshot_from_inner(&inner), None));
+        }
+        if inner.sessions[index].runtime_stop_in_progress {
+            return Err(ApiError::conflict("session is already stopping"));
+        }
+        if !matches!(
+            inner.sessions[index].session.status,
+            SessionStatus::Active | SessionStatus::Approval
+        ) {
+            return Err(ApiError::conflict(SESSION_NOT_RUNNING_CONFLICT_MESSAGE));
+        }
+
+        let original = inner.sessions[index].clone();
+        let runtime_token = inner.sessions[index].runtime.runtime_token();
+        let owner_generation = {
+            let record = inner
+                .session_mut_by_index(index)
+                .expect("session index should be valid");
+            let owner_generation = match runtime_token.as_ref() {
+                Some(runtime_token) => record.claim_runtime_stop(
+                    RuntimeStopOwnerKind::UserStop,
+                    runtime_token.clone(),
+                ),
+                None => record.claim_missing_runtime_stop(RuntimeStopOwnerKind::UserStop),
+            };
+            record.session.status = SessionStatus::Stopping;
+            record.session.preview = SESSION_STOPPING_MESSAGE.to_owned();
+            if options.pause_automatic_resumes_on_success {
+                record.orchestrator_auto_dispatch_blocked = true;
+                clear_queued_prompts_by_source(record, QueuedPromptSource::Orchestrator);
+            }
+            owner_generation
+        };
+
+        if let Err(error) = self.commit_locked(&mut inner) {
+            inner.sessions[index] = original;
+            return Err(ApiError::internal(format!(
+                "failed to persist stopping session state: {error:#}"
+            )));
+        }
+        let response = self.snapshot_from_inner(&inner);
+        Ok((
+            response,
+            Some(RequestedStopClaim {
+                runtime_token,
+                owner_generation,
+            }),
+        ))
+    }
+
+    fn record_requested_stop_failure(
+        &self,
+        session_id: &str,
+        claim: &RequestedStopClaim,
+        detail: &str,
+    ) {
+        let cleaned = detail.trim();
+        let failure_text = if cleaned.is_empty() {
+            "Stop failed in the background.".to_owned()
+        } else {
+            format!("Stop failed in the background: {cleaned}")
+        };
+        let (revision, creates, replay) = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let Some(index) = inner.find_visible_session_index(session_id) else {
+                return;
+            };
+            if inner.sessions[index].session.status != SessionStatus::Stopping {
+                return;
+            }
+            let owns_stop = match claim.runtime_token.as_ref() {
+                Some(runtime_token) => inner.sessions[index].runtime_stop_is_owned_by(
+                    RuntimeStopOwnerKind::UserStop,
+                    runtime_token,
+                    claim.owner_generation,
+                ),
+                None => inner.sessions[index].missing_runtime_stop_is_owned_by(
+                    RuntimeStopOwnerKind::UserStop,
+                    claim.owner_generation,
+                ),
+            };
+            // A failing finalizer may already have released its own fence
+            // before returning the error. Record that failure, but never let
+            // an obsolete worker overwrite a newer stop owner's Stopping
+            // state.
+            if !owns_stop && inner.sessions[index].runtime_stop_in_progress {
+                return;
+            }
+            let message_id = inner.next_message_id();
+            let record = inner
+                .session_mut_by_index(index)
+                .expect("session index should be valid");
+            let replay = owns_stop.then(|| {
+                let runtime_token = record.runtime.runtime_token();
+                record.clear_runtime_stop();
+                let callbacks = std::mem::take(&mut record.deferred_stop_callbacks);
+                (runtime_token, callbacks)
+            });
+            record.session.status = SessionStatus::Error;
+            record.session.preview = make_preview(&failure_text);
+            let message_index = push_message_on_record(
+                record,
+                Message::Text {
+                    attachments: Vec::new(),
+                    id: message_id,
+                    timestamp: stamp_now(),
+                    author: Author::Assistant,
+                    text: failure_text,
+                    expanded_text: None,
+                    source: None,
+                },
+            );
+            let creates = message_created_delta_parts_for_indices(record, vec![message_index]);
+            let revision = match self.commit_locked(&mut inner) {
+                Ok(revision) => revision,
+                Err(error) => {
+                    eprintln!(
+                        "session stop> failed persisting background failure for `{session_id}`: {error:#}"
+                    );
+                    self.publish_state_locked(&inner);
+                    inner.revision
+                }
+            };
+            (revision, creates, replay)
+        };
+        self.publish_message_created_delta_parts(revision, creates);
+        if let Some((Some(runtime_token), callbacks)) = replay {
+            self.replay_deferred_runtime_stop_callbacks(session_id, &runtime_token, callbacks);
+        }
     }
 
     /// Full stop implementation. Enters the `runtime_stop_in_progress`
@@ -349,6 +548,15 @@ impl AppState {
         if self.remote_session_target(session_id)?.is_some() {
             return self.proxy_remote_stop_session(session_id);
         }
+        self.stop_local_session_with_options(session_id, options, None)
+    }
+
+    fn stop_local_session_with_options(
+        &self,
+        session_id: &str,
+        options: StopSessionOptions,
+        requested_claim: Option<RequestedStopClaim>,
+    ) -> std::result::Result<StateResponse, ApiError> {
         let (runtime_to_stop, stop_failure_is_best_effort, stop_token, stop_owner_generation) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
@@ -358,15 +566,34 @@ impl AppState {
                 .session_mut_by_index(index)
                 .expect("session index should be valid");
 
-            if record.runtime_stop_in_progress {
-                return Err(ApiError::conflict("session is already stopping"));
-            }
+            if let Some(claim) = requested_claim.as_ref() {
+                let owns_stop = match claim.runtime_token.as_ref() {
+                    Some(runtime_token) => record.runtime_stop_is_owned_by(
+                        RuntimeStopOwnerKind::UserStop,
+                        runtime_token,
+                        claim.owner_generation,
+                    ),
+                    None => record.missing_runtime_stop_is_owned_by(
+                        RuntimeStopOwnerKind::UserStop,
+                        claim.owner_generation,
+                    ),
+                };
+                if !owns_stop || record.session.status != SessionStatus::Stopping {
+                    return Err(ApiError::conflict(
+                        "background Stop no longer owns the session",
+                    ));
+                }
+            } else {
+                if record.runtime_stop_in_progress {
+                    return Err(ApiError::conflict("session is already stopping"));
+                }
 
-            if !matches!(
-                record.session.status,
-                SessionStatus::Active | SessionStatus::Approval
-            ) {
-                return Err(ApiError::conflict(SESSION_NOT_RUNNING_CONFLICT_MESSAGE));
+                if !matches!(
+                    record.session.status,
+                    SessionStatus::Active | SessionStatus::Approval
+                ) {
+                    return Err(ApiError::conflict(SESSION_NOT_RUNNING_CONFLICT_MESSAGE));
+                }
             }
 
             let runtime = match &record.runtime {
@@ -385,12 +612,15 @@ impl AppState {
             // `deferred_stop_callbacks` is guaranteed to be empty here because the guard above
             // already returned if `runtime_stop_in_progress` was true (and callbacks can only
             // defer when that flag is set).
-            let stop_owner_generation = match stop_token.as_ref() {
-                Some(stop_token) => record.claim_runtime_stop(
-                    RuntimeStopOwnerKind::UserStop,
-                    stop_token.clone(),
-                ),
-                None => record.claim_missing_runtime_stop(RuntimeStopOwnerKind::UserStop),
+            let stop_owner_generation = match requested_claim.as_ref() {
+                Some(claim) => claim.owner_generation,
+                None => match stop_token.as_ref() {
+                    Some(stop_token) => record.claim_runtime_stop(
+                        RuntimeStopOwnerKind::UserStop,
+                        stop_token.clone(),
+                    ),
+                    None => record.claim_missing_runtime_stop(RuntimeStopOwnerKind::UserStop),
+                },
             };
 
             (
@@ -529,13 +759,16 @@ impl AppState {
         } else {
             false
         };
-        self.checkpoint_engram_turn_off_lock(
+        let checkpoint_failure = match self.checkpoint_engram_turn_off_lock(
             session_id,
             None,
             None,
             EngramNextIntent::Wait,
             None,
-        );
+        ) {
+            EngramCheckpointOutcome::Failed(detail) => Some(detail),
+            EngramCheckpointOutcome::Skipped | EngramCheckpointOutcome::Succeeded => None,
+        };
         let prepared_queued_turn = options
             .dispatch_queued_prompts_on_success
             .then(|| self.prepare_next_queued_turn_engram_off_lock(session_id))
@@ -625,15 +858,27 @@ impl AppState {
                     }
                     set_record_external_session_id(record, None);
                 }
-                record.session.status = SessionStatus::Idle;
-                record.session.preview = SESSION_STOPPED_BY_USER_MESSAGE.to_owned();
+                let (terminal_status, terminal_text) = match checkpoint_failure.as_deref() {
+                    Some(detail) => (
+                        SessionStatus::Error,
+                        format!(
+                            "Stop completed, but the Engram checkpoint failed: {detail}"
+                        ),
+                    ),
+                    None => (
+                        SessionStatus::Idle,
+                        SESSION_STOPPED_BY_USER_MESSAGE.to_owned(),
+                    ),
+                };
+                record.session.status = terminal_status;
+                record.session.preview = make_preview(&terminal_text);
                 let stopped_message_index = record.session.messages.len();
                 record.session.messages.push(Message::Text {
                     attachments: Vec::new(),
                     id: message_id,
                     timestamp: stamp_now(),
                     author: Author::Assistant,
-                    text: SESSION_STOPPED_BY_USER_MESSAGE.to_owned(),
+                    text: terminal_text,
                     expanded_text: None,
                     source: None,
                 });

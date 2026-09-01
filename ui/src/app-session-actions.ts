@@ -345,7 +345,9 @@ export function useAppSessionActions(
           allowUnknownServerInstance: true,
         });
         const shouldStop = !freshState.sessions?.some(
-          (session) => session.id === sessionId && session.status === "active",
+          (session) =>
+            session.id === sessionId &&
+            (session.status === "active" || session.status === "stopping"),
         );
         if (
           adopted &&
@@ -584,7 +586,8 @@ export function useAppSessionActions(
         setRequestError(null);
         const responseKeepsSessionActive = state.sessions?.some(
           (candidate) =>
-            candidate.id === sessionId && candidate.status === "active",
+            candidate.id === sessionId &&
+            (candidate.status === "active" || candidate.status === "stopping"),
         );
         if (
           !adopted &&

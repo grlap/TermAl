@@ -617,6 +617,11 @@ struct Session {
     /// bounded transcript page happens to be resident.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     live_activity: Option<SessionLiveActivity>,
+    /// True while the host is restoring this session's Engram routing
+    /// authority after process start. This readiness marker is projected from
+    /// process-local state and is never persisted as session authority.
+    #[serde(default, skip_serializing_if = "is_false")]
+    engram_boot_recovery_pending: bool,
     status: SessionStatus,
     preview: String,
     messages: Vec<Message>,
@@ -853,6 +858,7 @@ enum SessionStatus {
     Active,
     Idle,
     Approval,
+    Stopping,
     Error,
 }
 
@@ -1557,6 +1563,8 @@ struct EngramAuthorityVerificationStatus {
 struct UpdateEngramHostSettingsRequest {
     binary_path: String,
     home: String,
+    #[serde(default = "default_engram_boot_recovery_budget_ms")]
+    boot_recovery_budget_ms: u64,
 }
 
 impl UpdateProjectEngramSettingsRequest {

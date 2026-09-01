@@ -604,6 +604,7 @@ impl AppState {
             SessionStatus::Idle => 1,
             SessionStatus::Approval => 2,
             SessionStatus::Error => 3,
+            SessionStatus::Stopping => 4,
         }
     }
 

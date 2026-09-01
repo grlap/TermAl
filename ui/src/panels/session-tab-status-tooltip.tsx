@@ -234,6 +234,9 @@ export function buildSessionTooltipRows(
   const rows: SessionTooltipRow[] = [
     { key: "Agent", value: session.agent },
     { key: "State", value: formatTooltipEnumLabel(session.status) },
+    ...(session.engramBootRecoveryPending
+      ? [{ key: "Readiness", value: "Restoring Engram" }]
+      : []),
     ...(session.lastResponseTimestamp
       ? [{ key: "Last response", value: session.lastResponseTimestamp }]
       : []),

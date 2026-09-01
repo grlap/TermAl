@@ -1010,7 +1010,7 @@ and result summaries.
 
 ```typescript
 type AgentType = "Claude" | "Codex" | "Cursor" | "Gemini";
-type SessionStatus = "active" | "idle" | "approval" | "error";
+type SessionStatus = "active" | "idle" | "approval" | "stopping" | "error";
 // UI recovery category, not a strict HTTP status-class discriminator.
 // Preserved parseable gateway JSON errors may report 502/503/504 as
 // "request-failed"; branch on status/restartRequired when status-class

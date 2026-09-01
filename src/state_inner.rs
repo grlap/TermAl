@@ -160,6 +160,9 @@ impl StateInner {
             engram_mcp_revocation_pending: false,
             deferred_stop_callbacks: Vec::new(),
             engram: EngramSessionState::default(),
+            engram_boot_recovery_pending: false,
+            engram_boot_recovery_dispatch_pending: false,
+            engram_boot_recovery_retry_in_progress: false,
             hidden: false,
             // Freshly created records start unstamped; the call path
             // immediately inserts this record and then the caller routes
@@ -208,6 +211,7 @@ impl StateInner {
                 agent_commands_revision: 0,
                 codex_thread_state: None,
                 live_activity: None,
+                engram_boot_recovery_pending: false,
                 status: SessionStatus::Idle,
                 preview: "Ready for a prompt.".to_owned(),
                 messages: Vec::new(),
@@ -687,7 +691,7 @@ impl StateInner {
             if record.mutation_stamp > watermark
                 || matches!(
                     record.session.status,
-                    SessionStatus::Active | SessionStatus::Approval
+                    SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
                 )
             {
                 continue;

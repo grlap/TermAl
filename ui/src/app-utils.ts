@@ -52,6 +52,8 @@ export function labelForStatus(status: Session["status"]) {
       return "Idle";
     case "approval":
       return "Awaiting approval";
+    case "stopping":
+      return "Stopping";
     case "error":
       return "Error";
   }

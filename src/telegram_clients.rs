@@ -602,6 +602,7 @@ enum TelegramSessionStatus {
     Active,
     Idle,
     Approval,
+    Stopping,
     Error,
     #[serde(other)]
     Unknown,
@@ -624,7 +625,10 @@ impl TelegramSessionStatus {
     }
 
     fn keeps_telegram_prompt_boundary_open(&self) -> bool {
-        matches!(self, Self::Active | Self::Approval | Self::Unknown)
+        matches!(
+            self,
+            Self::Active | Self::Approval | Self::Stopping | Self::Unknown
+        )
     }
 }
 

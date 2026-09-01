@@ -218,7 +218,7 @@ impl PersistedState {
             .filter(|record| {
                 !matches!(
                     record.session.status,
-                    SessionStatus::Active | SessionStatus::Approval
+                    SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
                 )
             })
             .map(|record| record.session.id.clone())
@@ -443,6 +443,9 @@ impl PersistedSessionRecord {
                 rebind_required: self.engram_routing_token.is_some(),
                 ..EngramSessionState::default()
             },
+            engram_boot_recovery_pending: false,
+            engram_boot_recovery_dispatch_pending: false,
+            engram_boot_recovery_retry_in_progress: false,
             runtime_stop_in_progress: false,
             runtime_stop_owner: None,
             runtime_stop_generation: 0,

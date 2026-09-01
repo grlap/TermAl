@@ -116,7 +116,10 @@ export function CodexPromptSettingsCard({
   const hasLiveThread = Boolean(session.externalSessionId);
   const hasQueuedPrompts = (session.pendingPrompts?.length ?? 0) > 0;
   const threadIsArchived = hasLiveThread && session.codexThreadState === "archived";
-  const sessionBusy = session.status === "active" || session.status === "approval";
+  const sessionBusy =
+    session.status === "active" ||
+    session.status === "approval" ||
+    session.status === "stopping";
   const threadActionsDisabled =
     isUpdating ||
     isRefreshingModelOptions ||
@@ -375,7 +378,10 @@ export function ClaudePromptSettingsCard({
   });
 
   const modelOptions = sessionModelComboboxOptions(session.modelOptions, session.model);
-  const sessionBusy = session.status === "active" || session.status === "approval";
+  const sessionBusy =
+    session.status === "active" ||
+    session.status === "approval" ||
+    session.status === "stopping";
   const currentModelOption = currentSessionModelOption(session);
   const currentClaudeEffortValue = currentClaudeEffort(session);
   const claudeEffortOptions = claudeEffortComboboxOptions(session);
@@ -513,7 +519,10 @@ function useSessionModelOptionsAutoRefresh({
   }, [session.id]);
 
   useEffect(() => {
-    const sessionBusy = session.status === "active" || session.status === "approval";
+    const sessionBusy =
+      session.status === "active" ||
+      session.status === "approval" ||
+      session.status === "stopping";
     const wasBusy = previousSessionBusyRef.current;
     const wasRevocationPending = previousRevocationPendingRef.current;
     previousSessionBusyRef.current = sessionBusy;
@@ -823,7 +832,10 @@ export function CursorPromptSettingsCard({
   const modelOptions = sessionModelComboboxOptions(session.modelOptions, session.model);
   const canChangeModel = (session.modelOptions?.length ?? 0) > 0;
   const currentModelOption = currentSessionModelOption(session);
-  const sessionBusy = session.status === "active" || session.status === "approval";
+  const sessionBusy =
+    session.status === "active" ||
+    session.status === "approval" ||
+    session.status === "stopping";
 
   return (
     <article className="message-card prompt-settings-card">
@@ -930,7 +942,10 @@ export function GeminiPromptSettingsCard({
   const modelOptions = sessionModelComboboxOptions(session.modelOptions, session.model);
   const canChangeModel = (session.modelOptions?.length ?? 0) > 0;
   const currentModelOption = currentSessionModelOption(session);
-  const sessionBusy = session.status === "active" || session.status === "approval";
+  const sessionBusy =
+    session.status === "active" ||
+    session.status === "approval" ||
+    session.status === "stopping";
 
   return (
     <article className="message-card prompt-settings-card">
@@ -1068,7 +1083,10 @@ export function OpenCodePromptSettingsCard({
         description: option.description ?? undefined,
       })),
   ];
-  const sessionBusy = session.status === "active" || session.status === "approval";
+  const sessionBusy =
+    session.status === "active" ||
+    session.status === "approval" ||
+    session.status === "stopping";
 
   return (
     <article className="message-card prompt-settings-card">

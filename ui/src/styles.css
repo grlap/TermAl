@@ -3176,6 +3176,19 @@ textarea {
   box-shadow: 0 0 0 0.24rem var(--status-green-glow);
 }
 
+.status-agent-badge[data-status="stopping"]::before {
+  inset: -0.22rem;
+  border-width: 1.9px;
+  border-color: color-mix(in srgb, var(--signal-gold) 52%, transparent);
+  border-top-color: var(--signal-gold);
+  animation: spin 850ms linear infinite;
+}
+
+.status-agent-badge[data-status="stopping"]::after {
+  opacity: 1;
+  box-shadow: 0 0 0 0.24rem var(--status-gold-glow);
+}
+
 .status-agent-badge[data-status="idle"]::before {
   border-color: color-mix(in srgb, var(--signal-blue) 22%, transparent);
 }

@@ -83,7 +83,7 @@ export function sessionHasPotentiallyStaleTransport(
   now: number,
 ) {
   return (
-    session.status === "active" &&
+    (session.status === "active" || session.status === "stopping") &&
     hasInTurnActivitySinceTurnBoundary(session) &&
     lastLiveTransportActivityAt !== undefined &&
     now - lastLiveTransportActivityAt >=

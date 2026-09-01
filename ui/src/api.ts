@@ -853,6 +853,7 @@ export function updateAppSettings(payload: {
 export function updateEngramHostSettings(payload: {
   binaryPath: string;
   home: string;
+  bootRecoveryBudgetMs: number;
 }) {
   return request<StateResponse>("/api/engram/settings", {
     method: "PATCH",

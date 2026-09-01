@@ -1809,7 +1809,7 @@ fn real_process_work_binding_reader_uses_next_then_exact_focus() {
         actor_id: "termal".to_owned(),
         session_id: "fixture-session".to_owned(),
     };
-    let binding = read_engram_work_binding_from_cli(&connection, Duration::from_secs(2))
+    let binding = read_engram_work_binding_from_cli(&connection, Duration::from_secs(2), false)
         .expect("work binding should be read")
         .expect("focused work should carry a binding");
     assert_eq!(
@@ -1826,7 +1826,7 @@ fn real_process_work_binding_reader_uses_next_then_exact_focus() {
 
     fs::write(&project_file, "no-focus").expect("no-focus fixture mode should write");
     assert_eq!(
-        read_engram_work_binding_from_cli(&connection, Duration::from_secs(2))
+        read_engram_work_binding_from_cli(&connection, Duration::from_secs(2), false)
             .expect("no-focus read should succeed"),
         None,
         "no focus must omit work_binding without staging work delivery"
@@ -1834,14 +1834,14 @@ fn real_process_work_binding_reader_uses_next_then_exact_focus() {
 
     fs::write(&project_file, "read-error-once").expect("read-error-once fixture mode should write");
     assert!(
-        read_engram_work_binding_from_cli(&connection, Duration::from_secs(2))
+        read_engram_work_binding_from_cli(&connection, Duration::from_secs(2), false)
             .expect("database-lock read should retry once")
             .is_some(),
         "the one retry should recover the exact work binding"
     );
 
     fs::write(&project_file, "read-error").expect("read-error fixture mode should write");
-    let error = read_engram_work_binding_from_cli(&connection, Duration::from_secs(2))
+    let error = read_engram_work_binding_from_cli(&connection, Duration::from_secs(2), false)
         .expect_err("a failed focus read must remain unknown instead of becoming no-focus");
     assert_eq!(error.kind, EngramTransportErrorKind::Transport);
     assert!(
@@ -4302,6 +4302,7 @@ fn install_fixture_engram_host_settings(state: &AppState, home: &FsPath) {
             .to_string_lossy()
             .into_owned(),
         home: home.to_string_lossy().into_owned(),
+        boot_recovery_budget_ms: default_engram_boot_recovery_budget_ms(),
     };
     state
         .commit_locked(&mut inner)
@@ -4567,6 +4568,7 @@ fn host_engram_settings_are_machine_scoped_and_cannot_rotate_while_enabled() {
                 .to_string_lossy()
                 .into_owned(),
             home: root.to_string_lossy().into_owned(),
+            boot_recovery_budget_ms: default_engram_boot_recovery_budget_ms(),
         })
         .expect("host Engram settings should persist");
     let project_id = create_test_project(&state, &project_root, "Host settings project");
@@ -4575,12 +4577,22 @@ fn host_engram_settings_are_machine_scoped_and_cannot_rotate_while_enabled() {
     state
         .update_project_engram_settings(&project_id, settings)
         .expect("fixture Engram settings should enable");
+    state
+        .update_engram_host_settings(UpdateEngramHostSettingsRequest {
+            binary_path: real_engram_control_fixture_path()
+                .to_string_lossy()
+                .into_owned(),
+            home: root.to_string_lossy().into_owned(),
+            boot_recovery_budget_ms: 7_500,
+        })
+        .expect("budget-only host settings changes should remain live-configurable");
 
     let error = match state.update_engram_host_settings(UpdateEngramHostSettingsRequest {
         binary_path: real_engram_control_fixture_path()
             .to_string_lossy()
             .into_owned(),
         home: replacement_home.to_string_lossy().into_owned(),
+        boot_recovery_budget_ms: default_engram_boot_recovery_budget_ms(),
     }) {
         Ok(_) => panic!("enabled projects must fence host settings rotation"),
         Err(error) => error,
@@ -4593,6 +4605,16 @@ fn host_engram_settings_are_machine_scoped_and_cannot_rotate_while_enabled() {
 
     let inner = state.inner.lock().expect("state mutex poisoned");
     assert_eq!(inner.preferences.engram.home, root.to_string_lossy());
+    assert_eq!(inner.preferences.engram.boot_recovery_budget_ms, 7_500);
+}
+
+#[test]
+fn host_engram_settings_reject_out_of_range_boot_recovery_budgets() {
+    let mut settings = EngramHostSettings::default();
+    settings.boot_recovery_budget_ms = MIN_ENGRAM_BOOT_RECOVERY_BUDGET_MS - 1;
+    let error = normalize_engram_host_settings(settings)
+        .expect_err("too-small boot recovery budgets should fail validation");
+    assert!(error.message.contains("boot_recovery_budget_ms"));
 }
 
 #[test]
@@ -6048,6 +6070,95 @@ fn engram_mcp_grant_clear_checkpoints_open_child_grant_through_owned_project_fen
         message,
         Message::Text { text, .. }
             if text.contains("TermAl is retiring this runtime's previous write authority")
+    )));
+}
+
+// Pins the asynchronous Stop failure contract for Engram: the route has
+// already returned Stopping when the checkpoint runs, and a refused
+// checkpoint completes the runtime teardown but leaves an Error status,
+// actionable preview, and transcript notice instead of silently reporting a
+// clean Idle stop.
+#[test]
+fn asynchronous_stop_surfaces_engram_checkpoint_failure_on_the_session() {
+    let (state, _root, _project_id, session_ids) =
+        engram_mcp_runtime_family_fixture("async-stop-checkpoint-failure", Some("grant-old"));
+    // Checkpoint routing is delegation-scoped, so exercise the linked
+    // descendant rather than one of the fixture's project-root sessions.
+    let session_id = session_ids[3].clone();
+    let transport =
+        ScriptedEngramControlTransport::new([checkpoint_refusal_reply("checkpoint_denied")]);
+    state.install_test_engram_transport(transport.clone());
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Claude session should exist");
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("Claude session index should be valid");
+        record.runtime = SessionRuntime::None;
+        record.session.status = SessionStatus::Active;
+        record.session.preview = "Working before Stop...".to_owned();
+        record.engram.routing_token = Some("routing-stop-failure".to_owned());
+        record.engram.active_grant_id = Some("grant-stop-failure".to_owned());
+    }
+
+    let response = state
+        .request_stop_session(&session_id)
+        .expect("Stop request should return before checkpointing");
+    assert_eq!(
+        response
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .expect("session should remain")
+            .status,
+        SessionStatus::Stopping
+    );
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        let status = state
+            .snapshot()
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .expect("session should remain")
+            .status;
+        if status != SessionStatus::Stopping {
+            assert_eq!(status, SessionStatus::Error);
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "background checkpoint failure was not surfaced"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+
+    assert_eq!(transport.requests().len(), 1);
+    assert_eq!(
+        transport.requests()[0].request["operation"],
+        "turn_checkpoint"
+    );
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .find_session_index(&session_id)
+        .and_then(|index| inner.sessions.get(index))
+        .expect("failed Stop session should remain");
+    assert!(!record.runtime_stop_in_progress);
+    assert!(record.session.preview.contains("Engram checkpoint failed"));
+    assert!(record.session.messages.iter().any(|message| matches!(
+        message,
+        Message::Text { text, .. }
+            if text.contains("Stop completed, but the Engram checkpoint failed")
+    )));
+    assert!(record.session.messages.iter().any(|message| matches!(
+        message,
+        Message::EngramControl { card, .. }
+            if card.stage == EngramControlStage::Checkpoint
+                && card.decision == EngramControlCardDecision::Degraded
+                && card.refusal_code.as_deref() == Some("checkpoint_denied")
     )));
 }
 
@@ -12896,6 +13007,14 @@ impl EngramControlTransport for BoundedBootRecoveryTransport {
                 "routing_token": format!("recovered-{}", connection.session_id),
                 "status": { "phase": "sync_required" }
             })),
+            Some("turn_evaluate") => Ok(json!({
+                "decision": "grant",
+                "grant": { "grant_id": "post-recovery-grant" }
+            })),
+            Some("turn_begin") => Ok(json!({
+                "decision": "begin",
+                "receipt": { "grant_id": "post-recovery-grant" }
+            })),
             operation => Err(EngramTransportError::protocol(format!(
                 "unexpected bounded boot recovery operation: {operation:?}"
             ))),
@@ -12905,6 +13024,516 @@ impl EngramControlTransport for BoundedBootRecoveryTransport {
     }
 
     fn shutdown_session(&self, _session_id: &str) {}
+}
+
+struct BlockingBootRecoveryTransport {
+    gate: Mutex<(usize, bool)>,
+    changed: Condvar,
+}
+
+impl BlockingBootRecoveryTransport {
+    fn new() -> Arc<Self> {
+        Arc::new(Self {
+            gate: Mutex::new((0, false)),
+            changed: Condvar::new(),
+        })
+    }
+
+    fn wait_until_started(&self) {
+        let gate = self.gate.lock().expect("boot recovery gate mutex poisoned");
+        let (_gate, timeout) = self
+            .changed
+            .wait_timeout_while(gate, Duration::from_secs(2), |(started, _)| *started == 0)
+            .expect("boot recovery gate should wait");
+        assert!(
+            !timeout.timed_out(),
+            "background boot recovery did not start"
+        );
+    }
+
+    fn started_count(&self) -> usize {
+        self.gate
+            .lock()
+            .expect("boot recovery gate mutex poisoned")
+            .0
+    }
+
+    fn release(&self) {
+        let mut gate = self.gate.lock().expect("boot recovery gate mutex poisoned");
+        gate.1 = true;
+        self.changed.notify_all();
+    }
+}
+
+impl EngramControlTransport for BlockingBootRecoveryTransport {
+    fn request(
+        &self,
+        connection: &EngramConnectionConfig,
+        request: &EngramControlRequest,
+        _timeout: Duration,
+    ) -> std::result::Result<Value, EngramTransportError> {
+        let request = serde_json::to_value(request)
+            .map_err(|error| EngramTransportError::protocol(error.to_string()))?;
+        match request["operation"].as_str() {
+            Some("session_status") => {
+                let mut gate = self.gate.lock().expect("boot recovery gate mutex poisoned");
+                gate.0 += 1;
+                self.changed.notify_all();
+                while !gate.1 {
+                    gate = self
+                        .changed
+                        .wait(gate)
+                        .expect("boot recovery gate should wait");
+                }
+                Ok(json!({ "phase": "ready" }))
+            }
+            Some("session_bind") => Ok(json!({
+                "routing_token": format!("recovered-{}", connection.session_id),
+                "status": { "phase": "sync_required" }
+            })),
+            operation => Err(EngramTransportError::protocol(format!(
+                "unexpected blocking boot recovery operation: {operation:?}"
+            ))),
+        }
+    }
+
+    fn shutdown_session(&self, _session_id: &str) {}
+}
+
+#[tokio::test]
+async fn background_boot_recovery_serves_state_and_gates_only_pending_sessions() {
+    let (state, runtime_rx) =
+        test_app_state_with_delegation_codex_runtime("engram-background-boot-recovery");
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("engram-background-boot-recovery-project");
+    fs::create_dir_all(&root).expect("project root should exist");
+    fs::write(root.join(".engram-project"), "fixture-ready")
+        .expect("Engram project marker should exist");
+    let home = root.join("engram-home");
+    fs::create_dir_all(&home).expect("Engram home should exist");
+    let project_id = create_test_project(&state, &root, "Engram background boot recovery");
+    let parent_session_id = create_test_project_session(&state, Agent::Codex, &project_id, &root);
+    let unaffected_session_id = test_session_id(&state, Agent::Codex);
+    let created = state
+        .create_read_only_delegation(
+            &parent_session_id,
+            CreateDelegationRequest {
+                prompt: "Create a boot-recovery target.".to_owned(),
+                title: Some("Engram background boot recovery".to_owned()),
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(DelegationMode::Reviewer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .expect("Engram-off delegation should start");
+    assert!(matches!(
+        runtime_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("runtime should receive the setup prompt"),
+        CodexRuntimeCommand::Prompt { .. }
+    ));
+    let child_session_id = created.delegation.child_session_id;
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        inner
+            .projects
+            .iter_mut()
+            .find(|project| project.id == project_id)
+            .expect("project should exist")
+            .engram = Some(EngramProjectSettings {
+            enabled: true,
+            binary_path: Some(root.join("engram-fixture").to_string_lossy().into_owned()),
+            home: Some(home.to_string_lossy().into_owned()),
+            work_authority_grant: None,
+            authority_store_key: None,
+            deadline_ms: Some(250),
+        });
+        for record in &mut inner.sessions {
+            if record.session.id == parent_session_id || record.session.id == child_session_id {
+                record.engram.routing_token = Some(format!("stale-{}", record.session.id));
+                record.engram.rebind_required = true;
+            }
+        }
+        state
+            .commit_locked(&mut inner)
+            .expect("recovery setup should persist");
+    }
+    queue_test_engram_prompt(
+        &state,
+        &parent_session_id,
+        "Keep this queued until Engram recovery finishes.",
+        QueuedPromptSource::User,
+        None,
+    );
+    let transport = BlockingBootRecoveryTransport::new();
+    state.install_test_engram_transport(transport.clone());
+
+    let recovery_worker = state
+        .start_post_listen_boot()
+        .expect("background boot recovery should start");
+    transport.wait_until_started();
+
+    assert!(
+        state
+            .start_next_queued_turn_off_lock(&parent_session_id, false, false)
+            .expect("pending queue drain should be checked")
+            .is_none(),
+        "a queued prompt must not dispatch while its session is recovering"
+    );
+    let dispatch_error = match state.dispatch_turn(
+        &parent_session_id,
+        SendMessageRequest {
+            text: "Do not dispatch during recovery.".to_owned(),
+            expanded_text: None,
+            attachments: Vec::new(),
+            source_session_id: None,
+            source_mailbox: None,
+        },
+    ) {
+        Ok(_) => panic!("a direct prompt should fail fast during recovery"),
+        Err(error) => error,
+    };
+    assert_eq!(dispatch_error.status, StatusCode::CONFLICT);
+    assert_eq!(dispatch_error.message, ENGRAM_BOOT_RECOVERY_PENDING_MESSAGE);
+
+    let app = app_router(state.clone());
+    let state_request_started = std::time::Instant::now();
+    let (status, body): (StatusCode, Value) = request_json(
+        &app,
+        Request::get("/api/state")
+            .body(Body::empty())
+            .expect("state request should build"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        state_request_started.elapsed() < Duration::from_secs(1),
+        "state should remain responsive while recovery is blocked"
+    );
+    let sessions = body["sessions"]
+        .as_array()
+        .expect("state sessions should be an array");
+    for session_id in [&parent_session_id, &child_session_id] {
+        let session = sessions
+            .iter()
+            .find(|session| session["id"] == **session_id)
+            .expect("recovery target should remain visible");
+        assert_eq!(session["engramBootRecoveryPending"], true);
+    }
+    let unaffected = sessions
+        .iter()
+        .find(|session| session["id"] == unaffected_session_id)
+        .expect("unaffected session should remain visible");
+    assert!(unaffected.get("engramBootRecoveryPending").is_none());
+
+    transport.release();
+    recovery_worker
+        .join()
+        .expect("background boot recovery should finish");
+    assert!(matches!(
+        runtime_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("recovery completion should dispatch the parked prompt"),
+        CodexRuntimeCommand::Prompt { .. }
+    ));
+    let snapshot = state.summary_snapshot();
+    for session_id in [&parent_session_id, &child_session_id] {
+        let session = snapshot
+            .sessions
+            .iter()
+            .find(|session| session.id == **session_id)
+            .expect("recovered session should remain visible");
+        assert!(!session.engram_boot_recovery_pending);
+    }
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let parent = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == parent_session_id)
+        .expect("parent session should remain visible");
+    assert!(parent.queued_prompts.is_empty());
+    assert_eq!(parent.session.status, SessionStatus::Active);
+}
+
+#[test]
+fn boot_recovery_budget_exhaustion_accepts_late_success_without_lazy_retry() {
+    let (state, runtime_rx) =
+        test_app_state_with_delegation_codex_runtime("engram-budgeted-boot-recovery");
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("engram-budgeted-boot-recovery-project");
+    fs::create_dir_all(&root).expect("project root should exist");
+    fs::write(root.join(".engram-project"), "fixture-ready")
+        .expect("Engram project marker should exist");
+    let home = root.join("engram-home");
+    fs::create_dir_all(&home).expect("Engram home should exist");
+    let project_id = create_test_project(&state, &root, "Engram budgeted boot recovery");
+    let parent_session_id = create_test_project_session(&state, Agent::Codex, &project_id, &root);
+    let created = state
+        .create_read_only_delegation(
+            &parent_session_id,
+            CreateDelegationRequest {
+                prompt: "Create a budget-exhaustion recovery target.".to_owned(),
+                title: Some("Engram budget exhaustion".to_owned()),
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(DelegationMode::Reviewer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .expect("Engram-off delegation should start");
+    assert!(matches!(
+        runtime_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("runtime should receive the setup prompt"),
+        CodexRuntimeCommand::Prompt { .. }
+    ));
+    let child_session_id = created.delegation.child_session_id;
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        inner.preferences.engram.boot_recovery_budget_ms = MIN_ENGRAM_BOOT_RECOVERY_BUDGET_MS;
+        inner
+            .projects
+            .iter_mut()
+            .find(|project| project.id == project_id)
+            .expect("project should exist")
+            .engram = Some(EngramProjectSettings {
+            enabled: true,
+            binary_path: Some(root.join("engram-fixture").to_string_lossy().into_owned()),
+            home: Some(home.to_string_lossy().into_owned()),
+            work_authority_grant: None,
+            authority_store_key: None,
+            deadline_ms: Some(250),
+        });
+        for record in &mut inner.sessions {
+            if record.session.id == parent_session_id || record.session.id == child_session_id {
+                record.engram.routing_token = Some(format!("stale-{}", record.session.id));
+                record.engram.rebind_required = true;
+            }
+        }
+        state
+            .commit_locked(&mut inner)
+            .expect("recovery setup should persist");
+    }
+    queue_test_engram_prompt(
+        &state,
+        &parent_session_id,
+        "Remain dormant after the late eager result arrives.",
+        QueuedPromptSource::User,
+        None,
+    );
+    let transport = BlockingBootRecoveryTransport::new();
+    state.install_test_engram_transport(transport.clone());
+
+    let started_at = std::time::Instant::now();
+    let recovery_worker = state
+        .start_post_listen_boot()
+        .expect("background boot recovery should start");
+    transport.wait_until_started();
+    recovery_worker
+        .join()
+        .expect("budgeted coordinator should return without joining blocked targets");
+    assert!(
+        started_at.elapsed() < Duration::from_secs(1),
+        "the overall recovery coordinator must return at its configured budget"
+    );
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        for session_id in [&parent_session_id, &child_session_id] {
+            let record = inner
+                .sessions
+                .iter()
+                .find(|record| record.session.id == **session_id)
+                .expect("recovery target should remain visible");
+            assert!(record.engram_boot_recovery_pending);
+        }
+    }
+
+    transport.release();
+    let completion_deadline = std::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        let all_recovered = {
+            let inner = state.inner.lock().expect("state mutex poisoned");
+            [&parent_session_id, &child_session_id]
+                .iter()
+                .all(|session_id| {
+                    inner
+                        .sessions
+                        .iter()
+                        .find(|record| record.session.id == session_id.as_str())
+                        .is_some_and(|record| !record.engram_boot_recovery_pending)
+                })
+        };
+        if all_recovered {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < completion_deadline,
+            "late successful workers should clear their readiness fences"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(
+        transport.started_count(),
+        2,
+        "the eager workers should each bind exactly once"
+    );
+    state
+        .get_session(&parent_session_id)
+        .expect("reading a recovered session should succeed");
+    std::thread::sleep(Duration::from_millis(20));
+    assert_eq!(
+        transport.started_count(),
+        2,
+        "a late successful bind must not be repeated lazily on first use"
+    );
+    assert!(
+        runtime_rx.try_recv().is_err(),
+        "a queue that never hit the readiness fence must remain dormant"
+    );
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let parent = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == parent_session_id)
+        .expect("parent should remain visible");
+    assert!(!parent.engram_boot_recovery_pending);
+    assert_eq!(parent.queued_prompts.len(), 1);
+    let child = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == child_session_id)
+        .expect("child should remain visible");
+    assert!(!child.engram_boot_recovery_pending);
+}
+
+#[test]
+fn unstarted_boot_recovery_target_retries_lazily_on_first_use() {
+    let state = test_app_state();
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("engram-unstarted-boot-recovery-project");
+    fs::create_dir_all(&root).expect("project root should exist");
+    fs::write(root.join(".engram-project"), "fixture-ready")
+        .expect("Engram project marker should exist");
+    let home = root.join("engram-home");
+    fs::create_dir_all(&home).expect("Engram home should exist");
+    let project_id = create_test_project(&state, &root, "Engram unstarted boot recovery");
+    let session_id = create_test_project_session(&state, Agent::Codex, &project_id, &root);
+    let target = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        inner
+            .projects
+            .iter_mut()
+            .find(|project| project.id == project_id)
+            .expect("project should exist")
+            .engram = Some(EngramProjectSettings {
+            enabled: true,
+            binary_path: Some(root.join("engram-fixture").to_string_lossy().into_owned()),
+            home: Some(home.to_string_lossy().into_owned()),
+            work_authority_grant: None,
+            authority_store_key: None,
+            deadline_ms: Some(250),
+        });
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("session should exist");
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("session should be mutable");
+        record.engram.routing_token = Some(format!("stale-{session_id}"));
+        record.engram.rebind_required = true;
+        record.engram_boot_recovery_pending = true;
+        AppState::engram_binding_target_for_session_shape_locked(&inner, &session_id, true)
+            .expect("recovery target should resolve")
+            .expect("recovery target should exist")
+    };
+    let transport = RestartEngramControlTransport::new(
+        "different-session".to_owned(),
+        "unused-open-grant".to_owned(),
+    );
+    state.install_test_engram_transport(transport.clone());
+
+    state.recover_prepared_engram_sessions_after_boot(EngramBootRecoveryPlan {
+        targets: vec![target],
+        budget: Duration::ZERO,
+    });
+    assert!(
+        transport.requests().is_empty(),
+        "a target beyond the eager budget must remain unstarted"
+    );
+
+    state
+        .get_session(&session_id)
+        .expect("opening the session should trigger lazy recovery without failing hydration");
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        let pending = {
+            let inner = state.inner.lock().expect("state mutex poisoned");
+            let index = inner
+                .find_session_index(&session_id)
+                .expect("session should remain visible");
+            inner.sessions[index].engram_boot_recovery_pending
+        };
+        if !pending {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "first-use lazy recovery should release the readiness fence"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(
+        transport
+            .requests()
+            .iter()
+            .map(|request| request.request["operation"]
+                .as_str()
+                .expect("operation should serialize"))
+            .collect::<Vec<_>>(),
+        ["session_status", "session_bind"],
+        "the first targeted read should run one fresh lazy recovery attempt"
+    );
+}
+
+#[test]
+fn boot_recovery_phase_log_names_target_command_duration_and_outcome() {
+    let line = format_engram_boot_recovery_phase(
+        "session-trace",
+        "session_bind",
+        2,
+        Duration::from_millis(17),
+        &Ok::<_, EngramTransportError>(()),
+    );
+    assert_eq!(
+        line,
+        "engram> boot-recovery session=session-trace command=session_bind attempt=2 elapsed_ms=17 outcome=ok"
+    );
+    let error_line = format_engram_boot_recovery_phase::<()>(
+        "session-trace",
+        "work_next_focus",
+        1,
+        Duration::from_millis(23),
+        &Err(EngramTransportError::deadline("timed out")),
+    );
+    assert!(error_line.contains("command=work_next_focus"));
+    assert!(error_line.contains("elapsed_ms=23"));
+    assert!(error_line.contains("outcome=error"));
 }
 
 #[test]

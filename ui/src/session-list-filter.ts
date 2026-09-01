@@ -17,7 +17,7 @@ export function filterSessionListVisibleSessions(
 export function matchesSessionListFilter(session: Session, filter: SessionListFilter) {
   switch (filter) {
     case "working":
-      return session.status === "active";
+      return session.status === "active" || session.status === "stopping";
     case "asking":
       return session.status === "approval";
     case "completed":
@@ -50,6 +50,7 @@ export function countSessionsByFilter(sessions: Session[]): SessionListFilterCou
   for (const session of sessions) {
     switch (session.status) {
       case "active":
+      case "stopping":
         counts.working += 1;
         break;
       case "approval":

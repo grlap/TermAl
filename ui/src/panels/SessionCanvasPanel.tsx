@@ -604,6 +604,8 @@ function statusLabel(status: Session["status"]) {
       return "Active";
     case "approval":
       return "Needs approval";
+    case "stopping":
+      return "Stopping";
     case "error":
       return "Error";
     case "idle":
