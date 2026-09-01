@@ -36,6 +36,35 @@
 
 use super::*;
 
+#[test]
+fn codex_orchestrator_auto_approve_uses_termal_managed_policy() {
+    let state = test_app_state();
+    let mut inner = state.inner.lock().expect("state mutex poisoned");
+    let template = sample_orchestrator_template_draft()
+        .sessions
+        .into_iter()
+        .find(|session| session.agent == Agent::Codex)
+        .expect("sample template should contain a Codex builder");
+    let mut record = inner.create_session(
+        Agent::Codex,
+        Some("Builder".to_owned()),
+        "/tmp".to_owned(),
+        None,
+        None,
+    );
+
+    apply_orchestrator_template_session_settings(&mut record, &template);
+
+    assert_eq!(
+        record.codex_approval_policy,
+        CodexApprovalPolicy::AutoApprove
+    );
+    assert_eq!(
+        record.session.approval_policy,
+        Some(CodexApprovalPolicy::AutoApprove)
+    );
+}
+
 // Pins the /api/orchestrators POST fallback: an empty projectId in the
 // request falls back to the template's own project, and the snapshot echoes
 // that resolved project id on every session instance.

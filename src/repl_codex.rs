@@ -180,6 +180,7 @@ fn send_repl_codex_json_rpc_request(
     stdout_rx: &mpsc::Receiver<std::result::Result<Value, String>>,
     repl_state: &mut ReplCodexSessionState,
     recorder: &mut dyn TurnRecorder,
+    approval_policy: CodexApprovalPolicy,
     method: &str,
     params: Value,
     timeout: Duration,
@@ -206,7 +207,13 @@ fn send_repl_codex_json_rpc_request(
             }
         }
 
-        handle_repl_codex_app_server_message(&message, writer, repl_state, recorder)?;
+        handle_repl_codex_app_server_message(
+            &message,
+            writer,
+            repl_state,
+            recorder,
+            approval_policy,
+        )?;
     }
 }
 
@@ -232,10 +239,17 @@ fn pump_repl_codex_turn(
     writer: &mut impl Write,
     repl_state: &mut ReplCodexSessionState,
     recorder: &mut dyn TurnRecorder,
+    approval_policy: CodexApprovalPolicy,
 ) -> Result<()> {
     while !repl_state.turn_completed && repl_state.turn_failed.is_none() {
         let message = recv_repl_codex_stdout(stdout_rx, None, "turn output")?;
-        handle_repl_codex_app_server_message(&message, writer, repl_state, recorder)?;
+        handle_repl_codex_app_server_message(
+            &message,
+            writer,
+            repl_state,
+            recorder,
+            approval_policy,
+        )?;
     }
     Ok(())
 }
@@ -246,13 +260,20 @@ fn handle_repl_codex_app_server_message(
     writer: &mut impl Write,
     repl_state: &mut ReplCodexSessionState,
     recorder: &mut dyn TurnRecorder,
+    approval_policy: CodexApprovalPolicy,
 ) -> Result<()> {
     let Some(method) = message.get("method").and_then(Value::as_str) else {
         return Ok(());
     };
 
     if message.get("id").is_some() {
-        return handle_repl_codex_app_server_request(method, message, writer, recorder);
+        return handle_repl_codex_app_server_request(
+            method,
+            message,
+            writer,
+            recorder,
+            approval_policy,
+        );
     }
 
     if handle_repl_codex_global_notice(method, message, recorder)? {
@@ -304,6 +325,7 @@ fn handle_repl_codex_app_server_request(
     message: &Value,
     writer: &mut impl Write,
     recorder: &mut dyn TurnRecorder,
+    approval_policy: CodexApprovalPolicy,
 ) -> Result<()> {
     let request_id = message
         .get("id")
@@ -312,6 +334,26 @@ fn handle_repl_codex_app_server_request(
     let params = message
         .get("params")
         .ok_or_else(|| anyhow!("Codex app-server request missing params"))?;
+
+    if approval_policy == CodexApprovalPolicy::AutoApprove {
+        if let Some(described) = parse_codex_approval_request(method, message)? {
+            let result = codex_approval_result(
+                &described.pending.kind,
+                ApprovalDecision::Accepted,
+            );
+            eprintln!(
+                "repl-codex auto-approval> kind={} request_id={} decision=accepted",
+                method, described.pending.request_id,
+            );
+            return write_codex_json_rpc_message(
+                writer,
+                &codex_json_rpc_response_message(&CodexJsonRpcResponseCommand {
+                    request_id: described.pending.request_id,
+                    payload: CodexJsonRpcResponsePayload::Result(result),
+                }),
+            );
+        }
+    }
 
     recorder.finish_streaming_text()?;
     let result = match method {

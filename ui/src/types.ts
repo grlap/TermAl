@@ -12,6 +12,7 @@ export type ApprovalPolicy =
   | "untrusted"
   | "on-failure"
   | "on-request"
+  | "auto-approve"
   | "never";
 export type ClaudeApprovalMode =
   | "ask"

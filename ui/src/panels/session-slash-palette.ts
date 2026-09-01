@@ -95,7 +95,8 @@ export const SANDBOX_SLASH_OPTIONS = [
   { detail: "Allow unrestricted file access", label: "danger-full-access", value: "danger-full-access" },
 ] as const;
 export const APPROVAL_POLICY_SLASH_OPTIONS = [
-  { detail: "Never ask before tools run", label: "never", value: "never" },
+  { detail: "Use Codex's native never-ask policy", label: "never", value: "never" },
+  { detail: "Let TermAl approve tool requests", label: "auto-approve", value: "auto-approve" },
   { detail: "Ask whenever a tool needs approval", label: "on-request", value: "on-request" },
   { detail: "Approve trusted commands, ask for the rest", label: "untrusted", value: "untrusted" },
   { detail: "Only ask after failures", label: "on-failure", value: "on-failure" },

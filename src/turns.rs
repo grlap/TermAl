@@ -131,6 +131,7 @@ fn run_codex_turn(
             &stdout_rx,
             &mut repl_state,
             recorder,
+            approval_policy,
             "initialize",
             codex_initialize_params(),
             Duration::from_secs(15),
@@ -146,6 +147,7 @@ fn run_codex_turn(
                 &stdout_rx,
                 &mut repl_state,
                 recorder,
+                approval_policy,
                 "thread/resume",
                 json!({
                     "threadId": thread_id,
@@ -162,6 +164,7 @@ fn run_codex_turn(
                 &stdout_rx,
                 &mut repl_state,
                 recorder,
+                approval_policy,
                 "thread/start",
                 json!({
                     "cwd": cwd.as_str(),
@@ -190,6 +193,7 @@ fn run_codex_turn(
             &stdout_rx,
             &mut repl_state,
             recorder,
+            approval_policy,
             "turn/start",
             json!({
                 "threadId": resolved_thread_id,
@@ -209,7 +213,13 @@ fn run_codex_turn(
             .map(str::to_owned)
             .or(repl_state.current_turn_id.clone());
 
-        pump_repl_codex_turn(&stdout_rx, &mut child_stdin, &mut repl_state, recorder)?;
+        pump_repl_codex_turn(
+            &stdout_rx,
+            &mut child_stdin,
+            &mut repl_state,
+            recorder,
+            approval_policy,
+        )?;
         recorder.finish_streaming_text()?;
         if let Some(detail) = repl_state.turn_failed.as_deref() {
             bail!(detail.to_owned());
@@ -263,6 +273,7 @@ fn default_codex_approval_policy() -> CodexApprovalPolicy {
         Some("untrusted") => CodexApprovalPolicy::Untrusted,
         Some("on-request") => CodexApprovalPolicy::OnRequest,
         Some("on-failure") => CodexApprovalPolicy::OnFailure,
+        Some("auto-approve") => CodexApprovalPolicy::AutoApprove,
         _ => CodexApprovalPolicy::Never,
     }
 }

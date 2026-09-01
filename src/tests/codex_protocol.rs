@@ -30,6 +30,40 @@
 
 use super::*;
 
+#[test]
+fn repl_codex_auto_approve_answers_without_prompting_or_recording_a_card() {
+    let mut recorder = TestRecorder::default();
+    let mut writer = Vec::new();
+    let message = json!({
+        "id": "repl-command-approval",
+        "params": {
+            "command": "cargo check",
+            "cwd": "/tmp/project"
+        }
+    });
+
+    handle_repl_codex_app_server_request(
+        "item/commandExecution/requestApproval",
+        &message,
+        &mut writer,
+        &mut recorder,
+        CodexApprovalPolicy::AutoApprove,
+    )
+    .expect("REPL AutoApprove request should be answered");
+
+    let response: Value = serde_json::from_slice(&writer).expect("response should be JSON");
+    assert_eq!(
+        response,
+        json!({
+            "jsonrpc": "2.0",
+            "id": "repl-command-approval",
+            "result": { "decision": "accept" }
+        })
+    );
+    assert!(recorder.approvals.is_empty());
+    assert!(recorder.texts.is_empty());
+}
+
 // pins that `item/commandExecution/requestApproval` is translated into a
 // `CodexApprovalKind::CommandExecution` pending approval with the command,
 // cwd, and reason composed into the detail string. exercises

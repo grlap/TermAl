@@ -568,6 +568,7 @@ fn parse_discovered_codex_approval_policy(value: &str) -> Option<CodexApprovalPo
         "untrusted" => Some(CodexApprovalPolicy::Untrusted),
         "on-failure" => Some(CodexApprovalPolicy::OnFailure),
         "on-request" => Some(CodexApprovalPolicy::OnRequest),
+        "auto-approve" => Some(CodexApprovalPolicy::AutoApprove),
         "never" => Some(CodexApprovalPolicy::Never),
         _ => None,
     }

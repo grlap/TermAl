@@ -77,6 +77,7 @@ export const SANDBOX_MODE_OPTIONS = [
 ] as const;
 export const APPROVAL_POLICY_OPTIONS = [
   { label: "never", value: "never" },
+  { label: "auto-approve", value: "auto-approve" },
   { label: "on-request", value: "on-request" },
   { label: "untrusted", value: "untrusted" },
   { label: "on-failure", value: "on-failure" },

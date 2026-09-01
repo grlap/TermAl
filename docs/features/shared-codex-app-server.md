@@ -31,6 +31,30 @@ Because the process is shared and long-lived, **its identity cannot answer
 per-session questions**. That single fact is the source of nearly every bug in this
 area.
 
+## Approval policy ownership
+
+Codex's `never` policy is native: Codex decides not to emit approval requests.
+TermAl's `auto-approve` policy is intentionally different. It is persisted and
+shown as its own session setting, but TermAl sends native `on-request` at
+`thread/start` / `thread/resume` and `turn/start` so the app-server emits the
+request. The shared event router then immediately answers only these methods:
+
+- `item/commandExecution/requestApproval`
+- `item/fileChange/requestApproval`
+- `item/permissions/requestApproval`
+
+The response is the ordinary one-turn acceptance shape (`accept`, or requested
+permissions with `scope: "turn"`). The active turn's recorded policy is
+authoritative; changing the next-turn setting while a turn is running cannot
+change its behavior. No pending approval or transcript card is created for an
+automatic response. User input, MCP elicitation, and generic app-server requests
+continue through their interactive handlers.
+
+Read-only delegation authority is checked under the same state lock as the active
+approval policy. It overrides AutoApprove and produces the ordinary decline shape
+for all three request kinds. This is the write guard on platforms where a
+read-only reviewer may intentionally use a permissive native sandbox.
+
 ## Two identities: process vs attachment
 
 There are two different "who is this?" questions, and conflating them is the classic

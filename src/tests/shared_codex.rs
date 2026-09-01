@@ -198,7 +198,7 @@ fn detach_removes_the_in_flight_thread_setup_so_the_next_prompt_starts_fresh() {
 
     let prompt_command = |prompt: &str, resume: Option<&str>| CodexPromptCommand {
         active_turn_generation: 0,
-        approval_policy: CodexApprovalPolicy::Never,
+        approval_policy: CodexApprovalPolicy::AutoApprove,
         attachments: Vec::new(),
         cwd: "/tmp".to_owned(),
         model: "gpt-5.4".to_owned(),
@@ -285,6 +285,11 @@ fn detach_removes_the_in_flight_thread_setup_so_the_next_prompt_starts_fresh() {
         Some(&Value::Bool(true)),
         "resuming a long thread must request metadata only so its full turn history \
          cannot exceed the shared app-server stdout line cap"
+    );
+    assert_eq!(
+        resume_request.pointer("/params/approvalPolicy"),
+        Some(&json!("on-request")),
+        "TermAl AutoApprove must keep native Codex approval requests enabled on resume"
     );
     assert_eq!(
         resume_request.pointer("/params/serviceTier"),
@@ -488,7 +493,7 @@ fn failed_thread_setup_write_releases_the_setup_slot() {
         &session_id,
         CodexPromptCommand {
             active_turn_generation: 0,
-            approval_policy: CodexApprovalPolicy::Never,
+            approval_policy: CodexApprovalPolicy::AutoApprove,
             attachments: Vec::new(),
             cwd: "/tmp".to_owned(),
             model: "gpt-5.4".to_owned(),
@@ -1105,7 +1110,7 @@ fn shared_codex_standard_turn_start_serializes_explicit_null_service_tier() {
         None,
         CodexPromptCommand {
             active_turn_generation: 0,
-            approval_policy: CodexApprovalPolicy::Never,
+            approval_policy: CodexApprovalPolicy::AutoApprove,
             attachments: Vec::new(),
             cwd: "/tmp".to_owned(),
             model: "gpt-5.4".to_owned(),
@@ -1123,6 +1128,11 @@ fn shared_codex_standard_turn_start_serializes_explicit_null_service_tier() {
         request.pointer("/params/serviceTier"),
         Some(&Value::Null),
         "Standard must explicitly clear a service tier inherited by the thread"
+    );
+    assert_eq!(
+        request.pointer("/params/approvalPolicy"),
+        Some(&json!("on-request")),
+        "TermAl AutoApprove must keep native Codex approval requests enabled per turn"
     );
 
     let (_request_id, sender) =
@@ -1175,7 +1185,7 @@ fn shared_codex_thread_start_includes_delegation_mcp_config() {
         &session_id,
         CodexPromptCommand {
             active_turn_generation: 0,
-            approval_policy: CodexApprovalPolicy::Never,
+            approval_policy: CodexApprovalPolicy::AutoApprove,
             attachments: Vec::new(),
             cwd: "/tmp".to_owned(),
             model: "gpt-5.4".to_owned(),
@@ -1209,6 +1219,11 @@ fn shared_codex_thread_start_includes_delegation_mcp_config() {
         start_request.pointer("/params/serviceTier"),
         Some(&Value::Null),
         "Standard must not omit the explicit service-tier clear"
+    );
+    assert_eq!(
+        start_request.pointer("/params/approvalPolicy"),
+        Some(&json!("on-request")),
+        "TermAl AutoApprove must keep native Codex approval requests enabled at thread start"
     );
 
     let (_request_id, sender) =
@@ -4580,4 +4595,252 @@ fn shared_codex_app_server_request_waits_for_turn_started() {
                 && detail == "Codex requested additional input for \"Scope\"."
                 && *state == InteractionRequestState::Pending
     ));
+}
+
+fn set_active_codex_approval_policy(
+    state: &AppState,
+    session_id: &str,
+    active_policy: CodexApprovalPolicy,
+    configured_policy: CodexApprovalPolicy,
+) {
+    let mut inner = state.inner.lock().expect("state mutex poisoned");
+    let index = inner
+        .find_session_index(session_id)
+        .expect("Codex session should exist");
+    inner.sessions[index].active_codex_approval_policy = Some(active_policy);
+    inner.sessions[index].codex_approval_policy = configured_policy;
+    inner.sessions[index].session.approval_policy = Some(configured_policy);
+}
+
+fn install_read_only_codex_delegation(state: &AppState, child_session_id: &str) {
+    let parent_session_id = test_session_id(state, Agent::Codex);
+    let mut inner = state.inner.lock().expect("state mutex poisoned");
+    let delegation_id = inner.next_delegation_id();
+    let child_index = inner
+        .find_session_index(child_session_id)
+        .expect("Codex child session should exist");
+    inner.sessions[child_index].session.parent_delegation_id = Some(delegation_id.clone());
+    inner.delegations.push(DelegationRecord {
+        id: delegation_id,
+        parent_session_id,
+        child_session_id: child_session_id.to_owned(),
+        mode: DelegationMode::Reviewer,
+        status: DelegationStatus::Running,
+        title: "Read-only Codex reviewer".to_owned(),
+        prompt: "Review without writing.".to_owned(),
+        cwd: "/tmp".to_owned(),
+        agent: Agent::Codex,
+        model: None,
+        write_policy: DelegationWritePolicy::ReadOnly,
+        created_at: stamp_now(),
+        started_at: Some(stamp_now()),
+        completed_at: None,
+        result: None,
+        submitted_review_result: None,
+        post_submission_transport_error: None,
+        review_result_recovery_probe_attempt: None,
+        review_result_recovery_error: None,
+        review_result_schema_version: None,
+        review_result_required: false,
+        review_result_submission_attempt: 1,
+        result_parser_version: 0,
+    });
+}
+
+fn codex_auto_approval_requests() -> Vec<(&'static str, Value, Value, Value)> {
+    vec![
+        (
+            "item/commandExecution/requestApproval",
+            json!({
+                "id": "command-approval",
+                "params": { "command": "cargo test", "cwd": "/tmp" }
+            }),
+            json!("command-approval"),
+            json!({ "decision": "accept" }),
+        ),
+        (
+            "item/fileChange/requestApproval",
+            json!({
+                "id": "file-approval",
+                "params": { "reason": "Apply the requested fix" }
+            }),
+            json!("file-approval"),
+            json!({ "decision": "accept" }),
+        ),
+        (
+            "item/permissions/requestApproval",
+            json!({
+                "id": "permissions-approval",
+                "params": {
+                    "permissions": {
+                        "network": { "enabled": true }
+                    }
+                }
+            }),
+            json!("permissions-approval"),
+            json!({
+                "permissions": {
+                    "network": { "enabled": true }
+                },
+                "scope": "turn"
+            }),
+        ),
+    ]
+}
+
+#[test]
+fn codex_auto_approve_maps_to_native_on_request() {
+    assert_eq!(
+        CodexApprovalPolicy::AutoApprove.as_cli_value(),
+        "on-request"
+    );
+    assert_eq!(
+        serde_json::to_value(CodexApprovalPolicy::AutoApprove).unwrap(),
+        json!("auto-approve")
+    );
+    assert_eq!(
+        codex_approval_policy_from_json_value(&json!("auto-approve")),
+        Some(CodexApprovalPolicy::AutoApprove)
+    );
+}
+
+#[test]
+fn codex_auto_approve_accepts_all_approval_kinds_without_pending_cards() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    // The active turn owns the decision even if the mutable next-turn setting
+    // has already changed.
+    set_active_codex_approval_policy(
+        &state,
+        &session_id,
+        CodexApprovalPolicy::AutoApprove,
+        CodexApprovalPolicy::OnRequest,
+    );
+    let (input_tx, input_rx) = mpsc::channel();
+
+    for (method, request, expected_request_id, expected_result) in codex_auto_approval_requests() {
+        assert!(
+            try_auto_respond_codex_approval_request(
+                method,
+                &request,
+                &state,
+                &session_id,
+                &input_tx,
+            )
+            .expect("AutoApprove request should be classified")
+        );
+        assert!(matches!(
+            input_rx.recv_timeout(Duration::from_secs(1)).unwrap(),
+            CodexRuntimeCommand::JsonRpcResponse {
+                response: CodexJsonRpcResponseCommand {
+                    request_id,
+                    payload: CodexJsonRpcResponsePayload::Result(result),
+                }
+            } if request_id == expected_request_id && result == expected_result
+        ));
+    }
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = &inner.sessions[inner
+        .find_session_index(&session_id)
+        .expect("Codex session should exist")];
+    assert!(record.session.messages.is_empty());
+    assert!(record.pending_codex_approvals.is_empty());
+}
+
+#[test]
+fn codex_auto_approve_declines_all_approval_kinds_for_read_only_delegations() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    install_read_only_codex_delegation(&state, &session_id);
+    set_active_codex_approval_policy(
+        &state,
+        &session_id,
+        CodexApprovalPolicy::AutoApprove,
+        CodexApprovalPolicy::AutoApprove,
+    );
+    let (input_tx, input_rx) = mpsc::channel();
+
+    for (method, request, expected_request_id, accepted_result) in codex_auto_approval_requests() {
+        assert!(
+            try_auto_respond_codex_approval_request(
+                method,
+                &request,
+                &state,
+                &session_id,
+                &input_tx,
+            )
+            .expect("read-only AutoApprove request should be classified")
+        );
+        let expected_result = if method == "item/permissions/requestApproval" {
+            json!({ "permissions": {}, "scope": "turn" })
+        } else {
+            json!({ "decision": "decline" })
+        };
+        assert_ne!(expected_result, accepted_result);
+        assert!(matches!(
+            input_rx.recv_timeout(Duration::from_secs(1)).unwrap(),
+            CodexRuntimeCommand::JsonRpcResponse {
+                response: CodexJsonRpcResponseCommand {
+                    request_id,
+                    payload: CodexJsonRpcResponsePayload::Result(result),
+                }
+            } if request_id == expected_request_id && result == expected_result
+        ));
+    }
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = &inner.sessions[inner
+        .find_session_index(&session_id)
+        .expect("Codex session should exist")];
+    assert!(record.session.messages.is_empty());
+    assert!(record.pending_codex_approvals.is_empty());
+}
+
+#[test]
+fn codex_auto_approve_leaves_non_approval_requests_and_next_turn_settings_alone() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    set_active_codex_approval_policy(
+        &state,
+        &session_id,
+        CodexApprovalPolicy::OnRequest,
+        CodexApprovalPolicy::AutoApprove,
+    );
+    let (input_tx, input_rx) = mpsc::channel();
+    let command_request = &codex_auto_approval_requests()[0];
+    assert!(
+        !try_auto_respond_codex_approval_request(
+            command_request.0,
+            &command_request.1,
+            &state,
+            &session_id,
+            &input_tx,
+        )
+        .expect("current turn should remain interactive")
+    );
+
+    for (method, request) in [
+        (
+            "item/tool/requestUserInput",
+            json!({ "id": "input", "params": { "questions": [] } }),
+        ),
+        (
+            "mcpServer/elicitation/request",
+            json!({ "id": "elicitation", "params": {} }),
+        ),
+        ("item/tool/call", json!({ "id": "generic", "params": {} })),
+    ] {
+        assert!(
+            !try_auto_respond_codex_approval_request(
+                method,
+                &request,
+                &state,
+                &session_id,
+                &input_tx,
+            )
+            .expect("non-approval request should remain interactive")
+        );
+    }
+    assert!(input_rx.try_recv().is_err());
 }

@@ -31,20 +31,29 @@
 // `codex_text_stream.rs`. This file is just the dispatcher + the
 // per-kind describers.
 
+struct DescribedCodexApprovalRequest {
+    title: &'static str,
+    command: String,
+    detail: String,
+    pending: CodexPendingApproval,
+}
 
-/// Dispatches an inbound Codex server request that expects a response
-/// back. Recognizes four purpose-built kinds — command-execution
-/// approval, file-change approval, permissions approval, user-input
-/// request, and MCP elicitation — and falls back to a generic
-/// `CodexPendingAppRequest` for any other method. Each branch writes
-/// a `Message` through the recorder describing the request for the
-/// UI sidebar; the request id is retained so the later approval/response
-/// plumbing can match the reply back to Codex.
-fn handle_codex_app_server_request(
+/// Parses the three Codex approval request shapes shared by the interactive
+/// recorder path and TermAl's AutoApprove response path. Non-approval methods
+/// return `None` without inspecting their payload.
+fn parse_codex_approval_request(
     method: &str,
     message: &Value,
-    recorder: &mut impl CodexTurnRecorder,
-) -> Result<()> {
+) -> Result<Option<DescribedCodexApprovalRequest>> {
+    if !matches!(
+        method,
+        "item/commandExecution/requestApproval"
+            | "item/fileChange/requestApproval"
+            | "item/permissions/requestApproval"
+    ) {
+        return Ok(None);
+    }
+
     let request_id = message
         .get("id")
         .cloned()
@@ -53,12 +62,13 @@ fn handle_codex_app_server_request(
         .get("params")
         .ok_or_else(|| anyhow!("Codex app-server request missing params"))?;
 
-    match method {
+    let described = match method {
         "item/commandExecution/requestApproval" => {
             let command = params
                 .get("command")
                 .and_then(Value::as_str)
-                .unwrap_or("Command execution");
+                .unwrap_or("Command execution")
+                .to_owned();
             let cwd = params.get("cwd").and_then(Value::as_str).unwrap_or("");
             let reason = params.get("reason").and_then(Value::as_str).unwrap_or("");
             let detail = if cwd.is_empty() && reason.is_empty() {
@@ -72,16 +82,15 @@ fn handle_codex_app_server_request(
                     "Codex requested approval to execute this command in {cwd}. Reason: {reason}"
                 )
             };
-
-            recorder.push_codex_approval(
-                "Codex needs approval",
+            DescribedCodexApprovalRequest {
+                title: "Codex needs approval",
                 command,
-                &detail,
-                CodexPendingApproval {
+                detail,
+                pending: CodexPendingApproval {
                     kind: CodexApprovalKind::CommandExecution,
                     request_id,
                 },
-            )?;
+            }
         }
         "item/fileChange/requestApproval" => {
             let reason = params.get("reason").and_then(Value::as_str).unwrap_or("");
@@ -90,16 +99,15 @@ fn handle_codex_app_server_request(
             } else {
                 format!("Codex requested approval to apply file changes. Reason: {reason}")
             };
-
-            recorder.push_codex_approval(
-                "Codex needs approval",
-                "Apply file changes",
-                &detail,
-                CodexPendingApproval {
+            DescribedCodexApprovalRequest {
+                title: "Codex needs approval",
+                command: "Apply file changes".to_owned(),
+                detail,
+                pending: CodexPendingApproval {
                     kind: CodexApprovalKind::FileChange,
                     request_id,
                 },
-            )?;
+            }
         }
         "item/permissions/requestApproval" => {
             let reason = params.get("reason").and_then(Value::as_str).unwrap_or("");
@@ -125,12 +133,11 @@ fn handle_codex_app_server_request(
                     "Codex requested approval to grant additional permissions. Reason: {reason}"
                 ),
             };
-
-            recorder.push_codex_approval(
-                "Codex needs approval",
-                "Grant additional permissions",
-                &detail,
-                CodexPendingApproval {
+            DescribedCodexApprovalRequest {
+                title: "Codex needs approval",
+                command: "Grant additional permissions".to_owned(),
+                detail,
+                pending: CodexPendingApproval {
                     kind: CodexApprovalKind::Permissions {
                         requested_permissions: params
                             .get("permissions")
@@ -139,8 +146,46 @@ fn handle_codex_app_server_request(
                     },
                     request_id,
                 },
-            )?;
+            }
         }
+        _ => unreachable!("approval methods were filtered above"),
+    };
+
+    Ok(Some(described))
+}
+
+/// Dispatches an inbound Codex server request that expects a response
+/// back. Recognizes five purpose-built kinds — command-execution
+/// approval, file-change approval, permissions approval, user-input
+/// request, and MCP elicitation — and falls back to a generic
+/// `CodexPendingAppRequest` for any other method. Each branch writes
+/// a `Message` through the recorder describing the request for the
+/// UI sidebar; the request id is retained so the later approval/response
+/// plumbing can match the reply back to Codex.
+fn handle_codex_app_server_request(
+    method: &str,
+    message: &Value,
+    recorder: &mut impl CodexTurnRecorder,
+) -> Result<()> {
+    if let Some(described) = parse_codex_approval_request(method, message)? {
+        recorder.push_codex_approval(
+            described.title,
+            &described.command,
+            &described.detail,
+            described.pending,
+        )?;
+        return Ok(());
+    }
+
+    let request_id = message
+        .get("id")
+        .cloned()
+        .ok_or_else(|| anyhow!("Codex app-server request missing id"))?;
+    let params = message
+        .get("params")
+        .ok_or_else(|| anyhow!("Codex app-server request missing params"))?;
+
+    match method {
         "item/tool/requestUserInput" => {
             let questions: Vec<UserInputQuestion> = serde_json::from_value(
                 params

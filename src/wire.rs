@@ -680,6 +680,9 @@ enum CodexApprovalPolicy {
     Untrusted,
     OnFailure,
     OnRequest,
+    /// TermAl answers Codex approval requests automatically while leaving
+    /// user-input, elicitation, and generic app requests interactive.
+    AutoApprove,
     Never,
 }
 
@@ -690,6 +693,10 @@ impl CodexApprovalPolicy {
             Self::Untrusted => "untrusted",
             Self::OnFailure => "on-failure",
             Self::OnRequest => "on-request",
+            // AutoApprove is a TermAl policy. Codex must still emit approval
+            // requests so TermAl can accept them (or reject them for an active
+            // read-only delegation) with the correct response shape.
+            Self::AutoApprove => "on-request",
             Self::Never => "never",
         }
     }

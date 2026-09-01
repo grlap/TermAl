@@ -1542,12 +1542,26 @@ impl AppState {
         }
     }
 
-
-
-
-
-
-
+    /// Returns the active turn's Codex approval policy together with whether
+    /// the session belongs to an active read-only delegation. Reading both
+    /// under one lock prevents a settings/delegation transition from creating
+    /// a torn AutoApprove decision. A session without an active turn policy is
+    /// not eligible for automatic approval handling.
+    fn active_codex_approval_context(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<(CodexApprovalPolicy, bool)>> {
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(session_id)
+            .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
+        let Some(approval_policy) = inner.sessions[index].active_codex_approval_policy else {
+            return Ok(None);
+        };
+        let read_only_delegation =
+            read_only_session_delegation_block_locked(&inner, Some(session_id)).is_some();
+        Ok(Some((approval_policy, read_only_delegation)))
+    }
 
     /// Returns the classification context for a Claude control request —
     /// the effective approval mode and whether the session is a delegation

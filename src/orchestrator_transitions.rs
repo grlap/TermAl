@@ -50,7 +50,7 @@ fn apply_orchestrator_template_session_settings(
     match record.session.agent {
         agent if agent.supports_codex_prompt_settings() => {
             let approval_policy = if template_session.auto_approve {
-                CodexApprovalPolicy::Never
+                CodexApprovalPolicy::AutoApprove
             } else {
                 CodexApprovalPolicy::OnRequest
             };

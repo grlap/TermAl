@@ -4105,6 +4105,7 @@ Please add tests.`,
     const textarea = screen.getByLabelText("Message session-a");
     fireEvent.change(textarea, { target: { value: "/approvals" } });
     fireEvent.keyDown(textarea, { key: "ArrowDown" });
+    fireEvent.keyDown(textarea, { key: "ArrowDown" });
     fireEvent.keyDown(textarea, { key: "Enter" });
 
     expect(onSessionSettingsChange).toHaveBeenCalledWith(

@@ -155,6 +155,58 @@ fn try_auto_respond_delegation_control_plane_request(
     Ok(true)
 }
 
+/// Answers Codex's three approval request methods when the active turn is
+/// running under TermAl's AutoApprove policy. Read-only delegation children
+/// fail closed with the same decline payloads used by the interactive path;
+/// all other request families remain interactive.
+fn try_auto_respond_codex_approval_request(
+    method: &str,
+    message: &Value,
+    state: &AppState,
+    session_id: &str,
+    input_tx: &Sender<CodexRuntimeCommand>,
+) -> Result<bool> {
+    let Some(described) = parse_codex_approval_request(method, message)? else {
+        return Ok(false);
+    };
+    let Some((approval_policy, read_only_delegation)) =
+        state.active_codex_approval_context(session_id)?
+    else {
+        return Ok(false);
+    };
+    if approval_policy != CodexApprovalPolicy::AutoApprove {
+        return Ok(false);
+    }
+
+    let decision = if read_only_delegation {
+        ApprovalDecision::Rejected
+    } else {
+        ApprovalDecision::Accepted
+    };
+    let result = codex_approval_result(&described.pending.kind, decision);
+    let request_id = described.pending.request_id;
+    eprintln!(
+        "shared-codex auto-approval> session={} kind={} request_id={} decision={}",
+        session_id,
+        method,
+        request_id,
+        if read_only_delegation {
+            "declined-read-only"
+        } else {
+            "accepted"
+        },
+    );
+    input_tx
+        .send(CodexRuntimeCommand::JsonRpcResponse {
+            response: CodexJsonRpcResponseCommand {
+                request_id,
+                payload: CodexJsonRpcResponsePayload::Result(result),
+            },
+        })
+        .map_err(|err| anyhow!("failed to deliver Codex AutoApprove response: {err}"))?;
+    Ok(true)
+}
+
 fn handle_shared_codex_app_server_message(
     message: &Value,
     state: &AppState,
@@ -457,6 +509,15 @@ fn handle_shared_codex_app_server_message(
             return Ok(());
         }
         if try_auto_respond_delegation_control_plane_request(
+            method,
+            message,
+            state,
+            &session_id,
+            input_tx,
+        )? {
+            return Ok(());
+        }
+        if try_auto_respond_codex_approval_request(
             method,
             message,
             state,

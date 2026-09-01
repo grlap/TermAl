@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   CLAUDE_EFFORT_SLASH_OPTIONS,
   FALLBACK_CLAUDE_EFFORTS,
+  codexApprovalSlashState,
   codexFastSlashState,
   codexMcpSlashState,
   opencodeEffortSlashState,
@@ -193,6 +194,22 @@ describe("Codex Fast slash choices", () => {
     expect(state.emptyMessage).not.toContain("Fetching");
     expect(state.refreshActionLabel).toBe("Retry live models");
     expect(state.hint).not.toBe(state.emptyMessage);
+  });
+});
+
+describe("Codex approval slash choices", () => {
+  it("offers TermAl-managed auto-approve as a distinct policy", () => {
+    const state = codexApprovalSlashState("", "auto-approve");
+
+    expect(state.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          value: "auto-approve",
+          isCurrent: true,
+        }),
+        expect.objectContaining({ value: "never", isCurrent: false }),
+      ]),
+    );
   });
 });
 

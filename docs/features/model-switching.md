@@ -49,6 +49,12 @@ palette.
 - Model, sandbox, approval policy, reasoning effort, and Fast mode are all
   session-scoped.
 - Those settings apply on the next Codex prompt.
+- `auto-approve` is a TermAl-managed approval policy, distinct from Codex's
+  native `never`. TermAl starts the Codex turn with native `on-request` and
+  immediately accepts command-execution, file-change, and permissions approval
+  requests. Structured user input, MCP elicitation, and generic app-server
+  requests remain interactive. An active read-only delegation always wins over
+  AutoApprove and receives the normal decline response instead of an approval.
 - Fast mode appears only when the active model's `model/list` entry advertises
   the Fast service tier. TermAl sends the tier id advertised by the catalog
   (`priority` in the current catalog and compatibility fallback); Standard

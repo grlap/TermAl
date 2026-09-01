@@ -490,13 +490,13 @@ describe("App preferences", () => {
         );
         await selectComboboxOption(
           "Default approval policy",
-          "on-request",
+          "auto-approve",
         );
 
         await waitFor(() => {
           expect(updateAppSettingsSpy.mock.calls).toEqual([
             [{ defaultCodexSandboxMode: "danger-full-access" }],
-            [{ defaultCodexApprovalPolicy: "on-request" }],
+            [{ defaultCodexApprovalPolicy: "auto-approve" }],
           ]);
           expect(
             screen.getByRole("combobox", { name: "Default sandbox" }),
@@ -505,7 +505,7 @@ describe("App preferences", () => {
             screen.getByRole("combobox", {
               name: "Default approval policy",
             }),
-          ).toHaveTextContent("on-request");
+          ).toHaveTextContent("auto-approve");
         });
       } finally {
         scrollIntoViewSpy.mockRestore();

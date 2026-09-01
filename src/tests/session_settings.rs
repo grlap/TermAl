@@ -600,7 +600,7 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
             default_opencode_model: None,
             default_codex_reasoning_effort: Some(CodexReasoningEffort::High),
             default_codex_sandbox_mode: Some(CodexSandboxMode::DangerFullAccess),
-            default_codex_approval_policy: Some(CodexApprovalPolicy::OnRequest),
+            default_codex_approval_policy: Some(CodexApprovalPolicy::AutoApprove),
             default_claude_approval_mode: Some(ClaudeApprovalMode::AutoApprove),
             default_claude_effort: Some(ClaudeEffortLevel::Max),
             remotes: None,
@@ -617,7 +617,7 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
     );
     assert_eq!(
         updated.preferences.default_codex_approval_policy,
-        CodexApprovalPolicy::OnRequest
+        CodexApprovalPolicy::AutoApprove
     );
     assert_eq!(updated.preferences.default_codex_model, "gpt-5.5");
     assert_eq!(
@@ -649,7 +649,7 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
     );
     assert_eq!(
         reloaded_inner.preferences.default_codex_approval_policy,
-        CodexApprovalPolicy::OnRequest
+        CodexApprovalPolicy::AutoApprove
     );
     assert_eq!(reloaded_inner.preferences.default_codex_model, "gpt-5.5");
     assert_eq!(
@@ -745,7 +745,7 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
     );
     assert_eq!(
         codex_session.approval_policy,
-        Some(CodexApprovalPolicy::OnRequest)
+        Some(CodexApprovalPolicy::AutoApprove)
     );
     assert_eq!(codex_session.model, "gpt-5.5");
 
