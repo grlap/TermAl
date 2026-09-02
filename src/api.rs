@@ -101,6 +101,7 @@ fn record_rejected_turn_dispatch(
 fn deliver_turn_dispatch(state: &AppState, dispatch: TurnDispatch) -> Result<(), ApiError> {
     let active_turn_generation = dispatch.active_turn_generation();
     let runtime_token = dispatch.runtime_token().clone();
+    let delivered_session_id = dispatch.session_id().to_owned();
     if let Some(dispatch_generation) = dispatch.engram_dispatch_generation() {
         match state.prepare_engram_turn_delivery_off_lock(
             dispatch.session_id(),
@@ -216,6 +217,10 @@ fn deliver_turn_dispatch(state: &AppState, dispatch: TurnDispatch) -> Result<(),
             mailbox_notification
         }
     };
+    state.acknowledge_engram_context_nudge_delivery(
+        &delivered_session_id,
+        active_turn_generation,
+    );
     if let Some(mailbox_notification) = mailbox_notification.as_ref() {
         state.mark_mailbox_notification_delivered(mailbox_notification);
     }
@@ -1149,8 +1154,10 @@ async fn delete_project(
 async fn update_project_engram_settings(
     AxumPath(project_id): AxumPath<String>,
     State(state): State<AppState>,
-    Json(request): Json<UpdateProjectEngramSettingsRequest>,
+    request: Result<Json<UpdateProjectEngramSettingsRequest>, JsonRejection>,
 ) -> Result<Json<StateResponse>, ApiError> {
+    let Json(request) =
+        request.map_err(|rejection| api_json_rejection("Engram project settings", rejection))?;
     let response = run_blocking_api(move || {
         state.patch_project_engram_settings(&project_id, request)
     })
@@ -1163,8 +1170,10 @@ async fn update_project_engram_settings(
 async fn verify_project_engram_settings(
     AxumPath(project_id): AxumPath<String>,
     State(state): State<AppState>,
-    Json(request): Json<UpdateProjectEngramSettingsRequest>,
+    request: Result<Json<UpdateProjectEngramSettingsRequest>, JsonRejection>,
 ) -> Result<Json<VerifyProjectEngramSettingsResponse>, ApiError> {
+    let Json(request) = request
+        .map_err(|rejection| api_json_rejection("Engram settings verification", rejection))?;
     let response = run_blocking_api(move || {
         state.verify_project_engram_settings(&project_id, request)
     })
@@ -1172,12 +1181,29 @@ async fn verify_project_engram_settings(
     Ok(Json(response))
 }
 
-/// Updates the machine-scoped Engram executable and home. Project grants and
-/// repository declarations are intentionally handled by separate contracts.
+/// Waives one exact open Engram obligation on the session's currently bound
+/// work run. Policy refusals remain typed successful responses; routing and
+/// idempotency faults surface as conflicts.
+async fn waive_engram_obligation(
+    AxumPath(session_id): AxumPath<String>,
+    State(state): State<AppState>,
+    request: Result<Json<WaiveEngramObligationRequest>, JsonRejection>,
+) -> Result<Json<EngramObligationWaiverDecisionResponse>, ApiError> {
+    let Json(request) =
+        request.map_err(|rejection| api_json_rejection("Engram obligation waiver", rejection))?;
+    let response =
+        run_blocking_api(move || state.waive_engram_obligation(&session_id, request)).await?;
+    Ok(Json(response))
+}
+
+/// Updates the machine-scoped Engram executable and home. Repository
+/// declarations and per-project tier selection are separate contracts.
 async fn update_engram_host_settings(
     State(state): State<AppState>,
-    Json(request): Json<UpdateEngramHostSettingsRequest>,
+    request: Result<Json<UpdateEngramHostSettingsRequest>, JsonRejection>,
 ) -> Result<Json<StateResponse>, ApiError> {
+    let Json(request) =
+        request.map_err(|rejection| api_json_rejection("Engram host settings", rejection))?;
     let response = run_blocking_api(move || state.update_engram_host_settings(request)).await?;
     Ok(Json(response))
 }

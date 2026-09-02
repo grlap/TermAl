@@ -254,9 +254,7 @@ fn reset_claude_turn_state_for_replay_generation<R: TurnRecorder + ?Sized>(
 }
 
 // Claude receives its MCP configuration as a private file path, never as an
-// inline JSON argv value: the Engram work-authority grant inside that
-// configuration is a bearer secret, and anything on a command line is readable
-// from every process listing. The file lives under TermAl's own data tree, is
+// inline JSON argv value. The file lives under TermAl's own data tree, is
 // created exclusively (`create_new`) with owner-only permissions on POSIX, is
 // released as soon as Claude's first valid stdout line proves the
 // configuration was read, and is removed by the guard's drop when the spawn
@@ -904,6 +902,10 @@ fn spawn_claude_runtime(
                     );
                 }
 
+                if claude_event_marks_engram_context_nudge(&message) {
+                    reader_state.mark_engram_context_nudge_pending(&reader_session_id);
+                }
+
                 if let Err(err) = handle_claude_event(
                     &message,
                     &mut resolved_session_id,
@@ -1009,6 +1011,14 @@ fn spawn_claude_runtime(
         input_tx,
         process,
     })
+}
+
+/// Claude's native stream-json compact boundary means the next prompt needs a
+/// fresh base-tier Engram work context. Hook names are not part of this stream
+/// contract, so a similarly named field must not arm a refresh by accident.
+fn claude_event_marks_engram_context_nudge(message: &Value) -> bool {
+    message.get("type").and_then(Value::as_str) == Some("system")
+        && message.get("subtype").and_then(Value::as_str) == Some("compact_boundary")
 }
 
 /// Writes Claude initialize.

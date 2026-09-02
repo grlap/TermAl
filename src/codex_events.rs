@@ -1257,6 +1257,9 @@ fn handle_shared_codex_thread_compacted(
     _recorder: &mut impl TurnRecorder,
 ) -> Result<()> {
     let event_turn_id = shared_codex_event_turn_id(message);
+    // Idle/manual compaction has no active turn id, but it still invalidates
+    // the work context that must accompany the next prompt.
+    state.mark_engram_context_nudge_pending(session_id);
     if !shared_codex_event_matches_active_turn(current_turn_id, event_turn_id) {
         return Ok(());
     }

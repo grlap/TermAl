@@ -27,9 +27,9 @@ const project: Project = {
   rootPath: "C:\\github\\Personal\\TermAl",
   remoteId: "local",
   engramDeclared: true,
-  engramGrantConfigured: true,
   engram: {
     enabled: true,
+    turnGatedControl: false,
     binaryPath: "engram",
     home: "C:\\Users\\greg\\.engram",
     deadlineMs: 2000,
@@ -44,15 +44,6 @@ const successfulVerification: EngramProjectVerification = {
   database: "C:\\Users\\greg\\.engram\\engram.db",
   requiredAssurance: "turn_gated",
   healthy: true,
-  grant: {
-    configured: true,
-    installed: true,
-    subjectActorId: "termal",
-    validFrom: "2026-01-01T00:00:00Z",
-    validUntil: "2027-01-01T00:00:00Z",
-    revokedAt: null,
-    valid: true,
-  },
 };
 
 function renderDialog(overrides: Partial<Project> = {}) {
@@ -77,13 +68,10 @@ beforeEach(() => {
 });
 
 describe("EngramProjectSettingsDialog", () => {
-  it("keeps the saved grant write-only and requires Verify before Save", async () => {
+  it("requires Verify before enabling the base tier", async () => {
     const callbacks = renderDialog();
-    const grantInput = screen.getByLabelText("Work authority grant");
     const saveButton = screen.getByRole("button", { name: "Save & enable" });
 
-    expect(grantInput).toHaveAttribute("type", "password");
-    expect(grantInput).toHaveValue("");
     expect(saveButton).toBeDisabled();
 
     fireEvent.click(screen.getByRole("button", { name: "Verify" }));
@@ -92,7 +80,10 @@ describe("EngramProjectSettingsDialog", () => {
     expect(mockVerifyProjectEngramSettings).toHaveBeenCalledTimes(1);
     const verificationPayload =
       mockVerifyProjectEngramSettings.mock.calls[0][1];
-    expect(verificationPayload).not.toHaveProperty("workAuthorityGrant");
+    expect(verificationPayload).toEqual({
+      enabled: true,
+      turnGatedControl: false,
+    });
     expect(verificationPayload).not.toHaveProperty("binaryPath");
     expect(verificationPayload).not.toHaveProperty("home");
     expect(verificationPayload).not.toHaveProperty("deadlineMs");
@@ -104,52 +95,47 @@ describe("EngramProjectSettingsDialog", () => {
       expect(mockUpdateProjectEngramSettings).toHaveBeenCalledTimes(1),
     );
     const savePayload = mockUpdateProjectEngramSettings.mock.calls[0][1];
-    expect(savePayload).not.toHaveProperty("workAuthorityGrant");
+    expect(savePayload).toEqual({
+      enabled: true,
+      turnGatedControl: false,
+    });
     expect(callbacks.onSaved).toHaveBeenCalledTimes(1);
     expect(callbacks.onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("sends a newly entered grant to Verify and Save without exposing it in status", async () => {
+  it("keeps premium turn-gated control as an explicit opt-in", async () => {
     renderDialog();
-    const secret = "grant-new-secret";
-    const grantInput = screen.getByLabelText("Work authority grant");
-    fireEvent.change(grantInput, { target: { value: secret } });
+    fireEvent.click(screen.getByLabelText("Turn-gated control"));
 
     fireEvent.click(screen.getByRole("button", { name: "Verify" }));
     await screen.findByText("engram-project-1");
 
     expect(mockVerifyProjectEngramSettings).toHaveBeenCalledWith(
       "project-1",
-      expect.objectContaining({ workAuthorityGrant: secret }),
+      expect.objectContaining({ enabled: true, turnGatedControl: true }),
     );
-    expect(screen.queryByText(secret)).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Save & enable" }));
     await waitFor(() =>
       expect(mockUpdateProjectEngramSettings).toHaveBeenCalledWith(
         "project-1",
-        expect.objectContaining({ workAuthorityGrant: secret }),
+        expect.objectContaining({ enabled: true, turnGatedControl: true }),
       ),
     );
   });
 
-  it("keeps Save blocked when verification reports revoked authority", async () => {
+  it("keeps Save blocked when project verification fails", async () => {
     mockVerifyProjectEngramSettings.mockResolvedValue({
       ...successfulVerification,
       verified: false,
-      grant: {
-        ...successfulVerification.grant,
-        revokedAt: "2026-08-30T22:26:46.8Z",
-        valid: false,
-      },
-      errors: ["cannot enable Engram: work-authority grant is revoked"],
+      errors: ["cannot enable Engram: doctor reported an unhealthy store"],
     });
     renderDialog();
 
     fireEvent.click(screen.getByRole("button", { name: "Verify" }));
 
     await screen.findByText("Verification failed");
-    expect(screen.getAllByText(/grant is revoked/)).toHaveLength(2);
+    expect(screen.getAllByText(/unhealthy store/)).toHaveLength(2);
     expect(
       screen.getByRole("button", { name: "Save & enable" }),
     ).toBeDisabled();
@@ -175,5 +161,57 @@ describe("EngramProjectSettingsDialog", () => {
       "project-1",
       expect.objectContaining({ verified: true, detail: "Operator vetoed" }),
     );
+  });
+
+  it("resets the premium draft from the persisted disable response", async () => {
+    mockUpdateProjectEngramSettings.mockResolvedValueOnce({
+      projects: [
+        {
+          ...project,
+          engram: {
+            ...project.engram!,
+            enabled: false,
+            turnGatedControl: false,
+          },
+        },
+      ],
+    } as StateResponse);
+    renderDialog({
+      engram: {
+        ...project.engram!,
+        turnGatedControl: true,
+      },
+    });
+    const premiumToggle = screen.getByLabelText("Turn-gated control");
+    expect(premiumToggle).toBeChecked();
+
+    fireEvent.click(screen.getByRole("button", { name: "Disable Engram" }));
+
+    await waitFor(() => expect(premiumToggle).not.toBeChecked());
+  });
+
+  it("resynchronizes the premium draft when persisted project state changes", () => {
+    const props = {
+      onClose: vi.fn(),
+      onSaved: vi.fn(),
+      onVerified: vi.fn(),
+    };
+    const view = render(
+      <EngramProjectSettingsDialog project={project} {...props} />,
+    );
+    const premiumToggle = screen.getByLabelText("Turn-gated control");
+    expect(premiumToggle).not.toBeChecked();
+
+    view.rerender(
+      <EngramProjectSettingsDialog
+        project={{
+          ...project,
+          engram: { ...project.engram!, turnGatedControl: true },
+        }}
+        {...props}
+      />,
+    );
+
+    expect(premiumToggle).toBeChecked();
   });
 });

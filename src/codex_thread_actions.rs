@@ -351,6 +351,12 @@ impl AppState {
             .find_session_index(session_id)
             .ok_or_else(|| ApiError::not_found("session not found"))?;
         let note_message_id = inner.next_message_id();
+        {
+            let record = inner
+                .session_mut_by_index(index)
+                .expect("session index should be valid");
+            record.engram.invalidate_context_nudge();
+        }
         push_session_markdown_note_on_record(
             inner
             .session_mut_by_index(index)

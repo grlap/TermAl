@@ -21,7 +21,6 @@ const declaredProject: Project = {
   rootPath: "C:\\work\\declared",
   remoteId: "local",
   engramDeclared: true,
-  engramGrantConfigured: false,
   engramOperatorDisabled: false,
 };
 
@@ -55,6 +54,10 @@ describe("EngramPreferencesPanel", () => {
 
     expect(screen.getByLabelText("Engram project")).toHaveValue("declared");
     expect(screen.queryByText(/Undeclared repo/)).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/Base MCP and work context are enabled/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/write-only grant/)).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("Engram host binary path"), {
       target: { value: "C:\\tools\\engram.exe" },

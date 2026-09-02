@@ -731,6 +731,24 @@ fn claude_initialize_does_not_advertise_the_removed_question_dialog() {
 }
 
 #[test]
+fn claude_compaction_events_refresh_engram_context_on_the_next_prompt() {
+    assert!(!claude_event_marks_engram_context_nudge(&json!({
+        "type": "system",
+        "subtype": "hook_response",
+        "hook_event": "PostCompact"
+    })));
+    assert!(claude_event_marks_engram_context_nudge(&json!({
+        "type": "system",
+        "subtype": "compact_boundary"
+    })));
+    assert!(!claude_event_marks_engram_context_nudge(&json!({
+        "type": "system",
+        "subtype": "hook_response",
+        "hook_event": "UserPromptSubmit"
+    })));
+}
+
+#[test]
 fn claude_cancel_request_clears_pending_permission_question_and_updates_its_card() {
     // control_cancel_request is keyed by request id, so a question that
     // arrived over can_use_tool is cleared by request id: pending claim

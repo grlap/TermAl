@@ -53,6 +53,15 @@ struct OrphanedWorkflowDispatch {
     queued: QueuedPromptRecord,
 }
 
+const ENGRAM_CONTEXT_PROMPT_ADMISSION_RETRIES: usize = 2;
+
+fn engram_context_runtime_prompt(context: &str, runtime_prompt: &str) -> String {
+    // The context comes from an external CLI/store. Keep it inside the host
+    // fence even if a work item contains the literal closing delimiter.
+    let context = context.replace('<', "&lt;");
+    format!("<engram-work-context>\n{context}\n</engram-work-context>\n\n{runtime_prompt}")
+}
+
 struct StartedQueuedTurn {
     dispatch: TurnDispatch,
     queued: QueuedPromptRecord,
@@ -334,6 +343,20 @@ impl AppState {
                 .as_ref()
                 .map(|source| peer_message_runtime_prompt(&runtime_prompt, source))
                 .unwrap_or(runtime_prompt)
+        };
+        let runtime_prompt = match record.engram.pending_context_nudge.as_deref() {
+            Some(context) => {
+                record.engram.context_nudge_delivery_generation =
+                    Some(record.engram.context_nudge_generation);
+                record.engram.context_nudge_delivery_turn_generation =
+                    Some(active_turn_generation);
+                engram_context_runtime_prompt(context, &runtime_prompt)
+            }
+            None => {
+                record.engram.context_nudge_delivery_generation = None;
+                record.engram.context_nudge_delivery_turn_generation = None;
+                runtime_prompt
+            }
         };
         let mailbox_notification = source
             .as_ref()
@@ -864,12 +887,34 @@ impl AppState {
         allow_blocked_dispatch: bool,
         orphaned_workflow_only: bool,
     ) -> Result<Option<StartedQueuedTurn>> {
-        // Preserve the exact pre-Engram queue-drain path while the adapter is
-        // absent or disabled. Besides guaranteeing zero transport work, this
-        // avoids the extra snapshot/revalidation lock pair and fingerprinting
-        // cost on the S0 hot path.
+        let mut context_preparation = self.prepare_engram_context_nudge_off_lock(session_id);
+        // Base-tier context refresh is the sole external operation before this
+        // queue-drain path. With base integration absent or disabled, the
+        // pre-Engram zero-transport behavior remains intact.
         {
-            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let mut context_admission_retries = 0;
+            let mut inner = loop {
+                let inner = self.inner.lock().expect("state mutex poisoned");
+                let context_refresh_raced_prompt_admission = matches!(
+                    context_preparation,
+                    EngramContextNudgePreparation::Ready
+                ) && inner.find_session_index(session_id).is_some_and(|index| {
+                    inner.sessions[index].engram.context_nudge_pending
+                        || inner.sessions[index].engram.context_nudge_in_progress
+                });
+                if !context_refresh_raced_prompt_admission {
+                    break inner;
+                }
+                context_admission_retries += 1;
+                if context_admission_retries >= ENGRAM_CONTEXT_PROMPT_ADMISSION_RETRIES {
+                    eprintln!(
+                        "engram> session={session_id} context refresh kept racing queued prompt admission; dispatching without further delay"
+                    );
+                    break inner;
+                }
+                drop(inner);
+                context_preparation = self.prepare_engram_context_nudge_off_lock(session_id);
+            };
             let Some(index) = inner.find_session_index(session_id) else {
                 return Ok(None);
             };
@@ -1124,6 +1169,17 @@ impl AppState {
             self.proxy_remote_turn_dispatch(session_id, request)?;
             return Ok(DispatchTurnResult::Queued);
         }
+        let mut prompt = request.text.trim().to_owned();
+        let mut expanded_prompt = request
+            .expanded_text
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty() && *value != prompt)
+            .map(str::to_owned);
+        let attachments = parse_prompt_image_attachments(&request.attachments)?;
+        if prompt.is_empty() && attachments.is_empty() {
+            return Err(ApiError::bad_request("prompt cannot be empty"));
+        }
         if request.source_mailbox.is_none() {
             if let Err(err) =
                 self.reconcile_never_woken_mailbox_notifications_for_session(session_id)
@@ -1134,7 +1190,32 @@ impl AppState {
             }
         }
         self.revalidate_queued_mailbox_wakeups_before_dispatch(session_id);
-        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let mut context_preparation = self.prepare_engram_context_nudge_off_lock(session_id);
+        let mut context_admission_retries = 0;
+        let mut inner = loop {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            let context_refresh_raced_prompt_admission = matches!(
+                context_preparation,
+                EngramContextNudgePreparation::Ready
+            ) && inner
+                .find_visible_session_index(session_id)
+                .is_some_and(|index| {
+                    inner.sessions[index].engram.context_nudge_pending
+                        || inner.sessions[index].engram.context_nudge_in_progress
+                });
+            if !context_refresh_raced_prompt_admission {
+                break inner;
+            }
+            context_admission_retries += 1;
+            if context_admission_retries >= ENGRAM_CONTEXT_PROMPT_ADMISSION_RETRIES {
+                eprintln!(
+                    "engram> session={session_id} context refresh kept racing prompt admission; dispatching without further delay"
+                );
+                break inner;
+            }
+            drop(inner);
+            context_preparation = self.prepare_engram_context_nudge_off_lock(session_id);
+        };
         let index = inner
             .find_visible_session_index(session_id)
             .ok_or_else(|| ApiError::not_found("session not found"))?;
@@ -1149,14 +1230,6 @@ impl AppState {
             ));
         }
 
-        let mut prompt = request.text.trim().to_owned();
-        let mut expanded_prompt = request
-            .expanded_text
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty() && *value != prompt)
-            .map(str::to_owned);
-        let attachments = parse_prompt_image_attachments(&request.attachments)?;
         // Resolve peer-sender attribution (`termal_send_to_session`) to the
         // sender's current display name while we hold the state lock. The
         // backend owns this lookup so a caller cannot spoof another session's
@@ -1193,10 +1266,6 @@ impl AppState {
                 prompt = rendered_prompt;
             }
         }
-        if prompt.is_empty() && attachments.is_empty() {
-            return Err(ApiError::bad_request("prompt cannot be empty"));
-        }
-
         let project_reset_fenced = inner.sessions[index].engram.project_reset_in_progress
             || engram_project_for_session_locked(&inner, session_id)
                 .is_some_and(|project| inner.engram_project_resets.contains(&project.id));

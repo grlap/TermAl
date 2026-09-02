@@ -350,6 +350,10 @@ fn app_router(state: AppState) -> Router {
         .route("/api/sessions/{id}/history", get(get_session_history))
         .route("/api/sessions/{id}/overview", get(get_session_overview))
         .route(
+            "/api/sessions/{id}/engram/obligations/waive",
+            post(waive_engram_obligation),
+        )
+        .route(
             "/api/sessions/{id}/delegations",
             get(list_session_delegations).post(create_session_delegation),
         )

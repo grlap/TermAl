@@ -1,6 +1,6 @@
-// Shared per-project Engram authority editor. Repository declaration comes
-// from `.engram-project`; this host surface only installs a write-only grant,
-// verifies it, enables the adapter, or applies an operator veto.
+// Shared per-project Engram editor. Repository declaration comes from
+// `.engram-project`; this surface enables the base MCP/context tier and keeps
+// premium turn-gated control as a separate explicit opt-in.
 
 import { useEffect, useState } from "react";
 
@@ -42,10 +42,13 @@ export function describeProjectEngramState(
   if (project.engramOperatorDisabled) {
     return "Declared · operator vetoed";
   }
-  if (project.engram?.enabled && project.engramGrantConfigured) {
-    return "Enabled";
+  if (project.engram?.enabled && project.engram.turnGatedControl) {
+    return "Enabled · turn-gated control";
   }
-  return "Declared · awaiting grant";
+  if (project.engram?.enabled) {
+    return "Enabled · base";
+  }
+  return "Declared · ready to enable";
 }
 
 export function EngramProjectSettingsPanel({
@@ -66,7 +69,9 @@ export function EngramProjectSettingsPanel({
   ) => void;
   onBusyChange?: (busy: boolean) => void;
 }) {
-  const [grant, setGrant] = useState("");
+  const [turnGatedControl, setTurnGatedControl] = useState(
+    project.engram?.turnGatedControl === true,
+  );
   const [verification, setVerification] =
     useState<EngramProjectVerification | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -80,16 +85,21 @@ export function EngramProjectSettingsPanel({
     return () => onBusyChange?.(false);
   }, [busy, onBusyChange]);
 
+  useEffect(() => {
+    setTurnGatedControl(project.engram?.turnGatedControl === true);
+    setVerification(null);
+    setError(null);
+  }, [project.id, project.engram?.turnGatedControl]);
+
   function invalidateVerification() {
     setVerification(null);
     setError(null);
   }
 
   function buildEnablePayload(): EngramProjectSettings {
-    const normalizedGrant = grant.trim();
     return {
       enabled: true,
-      ...(normalizedGrant ? { workAuthorityGrant: normalizedGrant } : {}),
+      turnGatedControl,
     };
   }
 
@@ -125,7 +135,7 @@ export function EngramProjectSettingsPanel({
 
   async function handleSave() {
     if (!verification?.verified) {
-      setError("Verify this grant successfully before saving.");
+      setError("Verify this Engram project successfully before saving.");
       return;
     }
     setIsSaving(true);
@@ -135,7 +145,12 @@ export function EngramProjectSettingsPanel({
         project.id,
         buildEnablePayload(),
       );
-      setGrant("");
+      const savedProject = state.projects?.find(
+        (candidate) => candidate.id === project.id,
+      );
+      if (savedProject) {
+        setTurnGatedControl(savedProject.engram?.turnGatedControl === true);
+      }
       onSaved(state);
       onVerified(project.id, {
         verified: true,
@@ -156,7 +171,12 @@ export function EngramProjectSettingsPanel({
       const state = await updateProjectEngramSettings(project.id, {
         enabled: false,
       });
-      setGrant("");
+      const savedProject = state.projects?.find(
+        (candidate) => candidate.id === project.id,
+      );
+      if (savedProject) {
+        setTurnGatedControl(savedProject.engram?.turnGatedControl === true);
+      }
       setVerification(null);
       onSaved(state);
       onVerified(project.id, {
@@ -188,11 +208,11 @@ export function EngramProjectSettingsPanel({
     <div className="settings-panel project-engram-settings-panel">
       <div className="settings-section-header">
         <div>
-          <div className="card-label">Repository-declared control</div>
+          <div className="card-label">Repository-declared Engram</div>
           <h3>{project.name}</h3>
           <p className="settings-panel-copy">
-            <code>.engram-project</code> declares this repository. The host
-            authorizes it with one write-only grant.
+            <code>.engram-project</code> declares this repository. Base mode
+            injects Engram MCP and fresh work context into local sessions.
           </p>
         </div>
         <span className="remote-settings-badge">
@@ -200,31 +220,29 @@ export function EngramProjectSettingsPanel({
         </span>
       </div>
 
-      <div className="project-engram-grant-form">
-        <label
-          className="create-session-field"
-          htmlFor={`${idPrefix}-work-authority-grant`}
-        >
-          <span>Work authority grant</span>
-          <input
-            id={`${idPrefix}-work-authority-grant`}
-            aria-label="Work authority grant"
-            className="themed-input"
-            type="password"
-            autoComplete="new-password"
-            value={grant}
-            disabled={busy}
-            placeholder="Leave blank to verify the stored grant"
-            onChange={(event) => {
-              setGrant(event.target.value);
-              invalidateVerification();
-            }}
-          />
-          <span className="create-session-field-hint">
-            Write-only secret. TermAl never renders the stored value back.
-          </span>
-        </label>
-      </div>
+      <label
+        className="remote-settings-toggle"
+        htmlFor={`${idPrefix}-turn-gated-control`}
+      >
+        <input
+          id={`${idPrefix}-turn-gated-control`}
+          aria-label="Turn-gated control"
+          type="checkbox"
+          checked={turnGatedControl}
+          disabled={busy}
+          onChange={(event) => {
+            setTurnGatedControl(event.target.checked);
+            invalidateVerification();
+          }}
+        />
+        <span>
+          <strong>Turn-gated control</strong>
+          <small>
+            Premium opt-in. Engram may evaluate and withhold turns. Base MCP
+            and context stay available when this is off.
+          </small>
+        </span>
+      </label>
 
       {verification ? (
         <section
@@ -258,32 +276,6 @@ export function EngramProjectSettingsPanel({
             <div>
               <dt>Healthy</dt>
               <dd>{verification.healthy ? "Yes" : "No"}</dd>
-            </div>
-            <div>
-              <dt>Grant installed</dt>
-              <dd>
-                {verification.grant.configured
-                  ? verification.grant.installed
-                    ? "Yes"
-                    : "No"
-                  : "Not configured"}
-              </dd>
-            </div>
-            <div>
-              <dt>Grant subject</dt>
-              <dd>{formatOptionalStatus(verification.grant.subjectActorId)}</dd>
-            </div>
-            <div>
-              <dt>Valid until</dt>
-              <dd>{formatOptionalStatus(verification.grant.validUntil)}</dd>
-            </div>
-            <div>
-              <dt>Revoked</dt>
-              <dd>
-                {verification.grant.revokedAt
-                  ? `Yes · ${verification.grant.revokedAt}`
-                  : "No"}
-              </dd>
             </div>
           </dl>
           {verification.errors?.length ? (
@@ -346,8 +338,8 @@ export function EngramProjectSettingsPanel({
         </button>
       </div>
       <p className="create-session-field-hint">
-        Disable is an unconditional host-side veto. Re-enabling requires a
-        successful Verify followed by Save &amp; enable.
+        Disable is the global per-project kill switch for both tiers.
+        Re-enabling requires a successful Verify followed by Save &amp; enable.
       </p>
     </div>
   );

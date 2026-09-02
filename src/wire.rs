@@ -328,21 +328,18 @@ struct Project {
     engram_cleanup_warning: Option<String>,
 }
 
-/// Serializes projects for client-facing state snapshots without exposing the
-/// operator-installed Engram work-authority credential. The runtime `Project`
-/// and persisted-state projection keep the value intact; only `StateResponse`
-/// uses this sanitizer.
+/// Serializes projects with repository-declaration and operator-veto status
+/// derived at snapshot time, while hiding host-private Engram store identity.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ClientProjectSnapshot {
     #[serde(flatten)]
     project: Project,
     engram_declared: bool,
-    engram_grant_configured: bool,
     engram_operator_disabled: bool,
 }
 
-fn serialize_client_projects_without_engram_authority<S>(
+fn serialize_client_projects_with_engram_status<S>(
     projects: &[Project],
     serializer: S,
 ) -> Result<S::Ok, S::Error>
@@ -356,23 +353,17 @@ where
             let engram_declared = project.remote_id == LOCAL_REMOTE_ID
                 && fs::metadata(FsPath::new(&project.root_path).join(".engram-project"))
                     .is_ok_and(|metadata| metadata.is_file() && metadata.len() > 0);
-            let engram_grant_configured = project
-                .engram
-                .as_ref()
-                .is_some_and(|settings| settings.work_authority_grant.is_some());
             let engram_operator_disabled = engram_declared
                 && project
                     .engram
                     .as_ref()
                     .is_some_and(|settings| !settings.enabled);
             if let Some(settings) = project.engram.as_mut() {
-                settings.work_authority_grant = None;
                 settings.authority_store_key = None;
             }
             ClientProjectSnapshot {
                 project,
                 engram_declared,
-                engram_grant_configured,
                 engram_operator_disabled,
             }
         })
@@ -1515,27 +1506,23 @@ struct CreateProjectRequest {
 /// Patches one project's Engram host-adapter configuration. The route is
 /// intentionally project-scoped so Engram is never enabled globally by
 /// accident, and a project can be disabled immediately without a restart.
-/// The authority grant follows the API's tri-state secret convention: an
-/// omitted field preserves the saved credential, `null` clears it, and a
-/// string replaces it.
 #[derive(Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct UpdateProjectEngramSettingsRequest {
     #[serde(default)]
     enabled: bool,
     #[serde(default)]
+    turn_gated_control: bool,
+    #[serde(default)]
     binary_path: Option<String>,
     #[serde(default)]
     home: Option<String>,
-    #[serde(default, deserialize_with = "deserialize_nullable_marker_field")]
-    work_authority_grant: Option<Option<String>>,
     #[serde(default)]
     deadline_ms: Option<u64>,
 }
 
 /// Redacted, non-mutating verification result for the project Engram settings
-/// UI. The work-authority grant is never echoed; only its public status fields
-/// are returned.
+/// UI.
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct VerifyProjectEngramSettingsResponse {
@@ -1546,25 +1533,12 @@ struct VerifyProjectEngramSettingsResponse {
     database: String,
     required_assurance: String,
     healthy: bool,
-    grant: EngramAuthorityVerificationStatus,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     errors: Vec<String>,
 }
 
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct EngramAuthorityVerificationStatus {
-    configured: bool,
-    installed: Option<bool>,
-    subject_actor_id: Option<String>,
-    valid_from: Option<String>,
-    valid_until: Option<String>,
-    revoked_at: Option<String>,
-    valid: bool,
-}
-
 /// Updates the machine-scoped Engram executable and home. Repository
-/// declaration and project grants remain separate concerns.
+/// declaration and per-project tier selection remain separate concerns.
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct UpdateEngramHostSettingsRequest {
@@ -1574,20 +1548,30 @@ struct UpdateEngramHostSettingsRequest {
     boot_recovery_budget_ms: u64,
 }
 
+/// Host-private human waiver of one exact obligation on the session's bound
+/// Engram work run. The backend supplies the routing token; callers never see
+/// or persist it.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct WaiveEngramObligationRequest {
+    obligation_id: String,
+    expected_definition: String,
+    waived_by: String,
+    reason: String,
+    idempotency_key: String,
+}
+
 impl UpdateProjectEngramSettingsRequest {
-    fn into_settings(self) -> (EngramProjectSettings, Option<Option<String>>) {
-        let work_authority_grant_update = self.work_authority_grant;
-        (
-            EngramProjectSettings {
-                enabled: self.enabled,
-                binary_path: self.binary_path,
-                home: self.home,
-                work_authority_grant: work_authority_grant_update.clone().flatten(),
-                authority_store_key: None,
-                deadline_ms: self.deadline_ms,
-            },
-            work_authority_grant_update,
-        )
+    fn into_settings(self) -> EngramProjectSettings {
+        EngramProjectSettings {
+            enabled: self.enabled,
+            turn_gated_control: self.turn_gated_control,
+            binary_path: self.binary_path,
+            home: self.home,
+            work_authority_grant: None,
+            authority_store_key: None,
+            deadline_ms: self.deadline_ms,
+        }
     }
 }
 
@@ -2069,7 +2053,7 @@ struct StateResponse {
     preferences: AppPreferences,
     #[serde(
         default,
-        serialize_with = "serialize_client_projects_without_engram_authority"
+        serialize_with = "serialize_client_projects_with_engram_status"
     )]
     projects: Vec<Project>,
     #[serde(default)]

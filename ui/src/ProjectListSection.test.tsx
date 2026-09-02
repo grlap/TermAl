@@ -10,7 +10,6 @@ const project: Project = {
   rootPath: "C:\\github\\Personal\\TermAl",
   remoteId: "local",
   engramDeclared: true,
-  engramGrantConfigured: true,
   engram: {
     enabled: true,
     binaryPath: "engram",
@@ -36,7 +35,7 @@ describe("ProjectListSection Engram settings", () => {
       />,
     );
 
-    expect(screen.getByText("Engram · Enabled")).toBeInTheDocument();
+    expect(screen.getByText("Engram · Enabled · base")).toBeInTheDocument();
 
     const projectRow = screen.getByRole("button", { name: /TermAl/ });
     fireEvent.contextMenu(projectRow, { clientX: 40, clientY: 50 });
@@ -46,10 +45,7 @@ describe("ProjectListSection Engram settings", () => {
     expect(
       screen.getByRole("tab", { name: "Engram", selected: true }),
     ).toBeInTheDocument();
-    expect(screen.getByLabelText("Work authority grant")).toHaveAttribute(
-      "type",
-      "password",
-    );
+    expect(screen.getByLabelText("Turn-gated control")).not.toBeChecked();
   });
 
   it("does not expose Engram controls for an undeclared repository", () => {

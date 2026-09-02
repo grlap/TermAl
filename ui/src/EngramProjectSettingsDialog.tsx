@@ -57,8 +57,8 @@ export function EngramProjectSettingsDialog({
             <div className="card-label">Project settings</div>
             <h2 id="project-settings-dialog-title">{project.name}</h2>
             <p className="dialog-copy settings-dialog-copy">
-              Configure and verify Engram without exposing its work-authority
-              credential.
+              Configure the base MCP/context tier and optional turn-gated
+              control for this repository.
             </p>
           </div>
           <button

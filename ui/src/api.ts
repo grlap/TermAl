@@ -1108,6 +1108,47 @@ export function verifyProjectEngramSettings(
   );
 }
 
+export type EngramObligationWaiverRequest = {
+  obligationId: string;
+  expectedDefinition: string;
+  waivedBy: string;
+  reason: string;
+  idempotencyKey: string;
+};
+
+export type EngramObligationWaiverDecision =
+  | {
+      decision: "waived";
+      receipt: {
+        obligationId: string;
+        definition: string;
+        resolution: string;
+        state: string;
+        waivedBy: string;
+        waivedAt: string;
+      };
+    }
+  | {
+      decision: "refused";
+      code: string;
+      obligationId: string;
+      currentDefinition?: string | null;
+      remedy: string;
+    };
+
+export function waiveEngramObligation(
+  sessionId: string,
+  payload: EngramObligationWaiverRequest,
+) {
+  return request<EngramObligationWaiverDecision>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/engram/obligations/waive`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
 export function fetchOrchestratorTemplates() {
   return request<OrchestratorTemplatesResponse>("/api/orchestrators/templates");
 }

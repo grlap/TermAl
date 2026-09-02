@@ -963,6 +963,14 @@ fn shared_codex_compaction_notice_inserts_before_visible_assistant_output() {
             "turnId": "turn-compact"
         }
     });
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].engram.context_nudge_pending = false;
+        inner.sessions[index].engram.context_nudge_generation = 10;
+    }
 
     handle_shared_codex_app_server_message(
         &compacted,
@@ -1004,4 +1012,48 @@ fn shared_codex_compaction_notice_inserts_before_visible_assistant_output() {
         })
         .expect("assistant output should remain present");
     assert!(compact_notice_index < assistant_index);
+
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        assert!(inner.sessions[index].engram.context_nudge_pending);
+        assert_eq!(inner.sessions[index].engram.context_nudge_generation, 11);
+    }
+
+    runtime
+        .sessions
+        .lock()
+        .expect("shared Codex session mutex poisoned")
+        .get_mut(&session_id)
+        .expect("shared Codex session should exist")
+        .turn_id = None;
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].engram.context_nudge_pending = false;
+    }
+    let idle_compacted = json!({
+        "method": "thread/compacted",
+        "params": { "threadId": "conversation-compact" }
+    });
+    handle_shared_codex_app_server_message(
+        &idle_compacted,
+        &state,
+        &runtime.runtime_id,
+        &pending_requests,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+        &mpsc::channel::<CodexRuntimeCommand>().0,
+    )
+    .unwrap();
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let index = inner
+        .find_session_index(&session_id)
+        .expect("Codex session should exist");
+    assert!(inner.sessions[index].engram.context_nudge_pending);
+    assert_eq!(inner.sessions[index].engram.context_nudge_generation, 12);
 }

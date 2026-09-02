@@ -11,6 +11,9 @@ persistent versioned facts that never wake anyone — lives on the
 [coordination board](agent-boards.md).
 Both durable coordination surfaces live in the isolated database described by
 [SQLite session storage](sqlite-session-storage.md).
+Mailbox wakes that enter premium local Engram control retain the delivery and
+Stop restoration rules described by the
+[Engram Host Adapter](engram-host-adapter.md#mailbox-and-stop-behavior).
 
 ## Delivery contract
 

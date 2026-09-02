@@ -1258,6 +1258,14 @@ struct StateInner {
     /// clone this handle while holding `inner`, but must release the state
     /// mutex before invoking any control operation.
     engram_host_adapter: Arc<EngramHostAdapter>,
+    /// Runtime-only cache of projects whose non-empty `.engram-project`
+    /// marker was confirmed off the global state mutex. Hot locked paths may
+    /// consult this set but must never touch the filesystem themselves.
+    engram_declared_project_ids: HashSet<String>,
+    /// Projects whose `.engram-project` marker has been observed in this
+    /// process. The first observation seeds the cache; later changes reset
+    /// already-created runtimes so their MCP configuration follows the marker.
+    engram_declaration_checked_project_ids: HashSet<String>,
     /// Runtime-only project fence used while Engram connection settings drain
     /// the old sidecars. It prevents newly-created delegations from binding to
     /// the old connection between the reset snapshot and commit.
@@ -1358,6 +1366,8 @@ impl StateInner {
         Self {
             codex: CodexState::default(),
             engram_host_adapter: Arc::new(EngramHostAdapter::default()),
+            engram_declared_project_ids: HashSet::new(),
+            engram_declaration_checked_project_ids: HashSet::new(),
             engram_project_resets: EngramProjectResetFences::default(),
             preferences: AppPreferences::default(),
             settings_persist_dirty: false,

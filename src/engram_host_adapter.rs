@@ -13,6 +13,14 @@ const ENGRAM_DEFAULT_CALL_TIMEOUT_MS: u64 = 250;
 /// one additional second for the owning callback to publish its terminal state.
 const ENGRAM_CONTROL_SETTLE_TIMEOUT: Duration = Duration::from_secs(11);
 const ENGRAM_DISPATCH_BUDGET_MS: u64 = 600;
+#[cfg(not(test))]
+const ENGRAM_ENABLEMENT_COMMAND_TIMEOUT: Duration = Duration::from_secs(5);
+// The Windows fixture launches through powershell.exe, and the full Rust suite
+// starts several process-heavy tests concurrently. Keep the production
+// enablement boundary unchanged while allowing fixture process scheduling the
+// same test-only headroom as the work-binding command below.
+#[cfg(test)]
+const ENGRAM_ENABLEMENT_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 // Engram's current store-open path may wait up to five seconds on SQLite's
 // writer lock. Bound each command in the two-command focus read above that
 // healthy contention window; a timeout or lock error remains an error, never
@@ -29,6 +37,9 @@ const ENGRAM_BOOT_RECOVERY_CONCURRENCY: usize = 8;
 const ENGRAM_CONTROL_MAX_FRAME_BYTES: usize = 256 * 1_024;
 const ENGRAM_CIRCUIT_BREAKER_FAILURES: u8 = 3;
 const ENGRAM_CONTROL_IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+const ENGRAM_WAIVER_IDENTITY_MAX_BYTES: usize = 256;
+const ENGRAM_WAIVER_REASON_MAX_BYTES: usize = 4 * 1024;
+const ENGRAM_WAIVER_IDEMPOTENCY_KEY_MAX_BYTES: usize = 256;
 const ENGRAM_GLOBAL_DISABLE_ENV: &str = "TERMAL_ENGRAM_DISABLED";
 const ENGRAM_CONTROL_ASSURANCE: &str = "turn_gated";
 const ENGRAM_PROJECT_ACTOR_ID: &str = "termal";
@@ -81,15 +92,21 @@ impl std::fmt::Debug for EngramRetiredWorkAuthorityGrant {
 struct EngramProjectSettings {
     #[serde(default)]
     enabled: bool,
+    /// Premium host-private turn gating. Base MCP/context integration remains
+    /// available whenever `enabled` is true; existing projects default to the
+    /// safer base-only tier until an operator explicitly opts in.
+    #[serde(default)]
+    turn_gated_control: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     binary_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     home: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Pre-cut-B compatibility carrier for in-process cleanup tests only.
+    /// The no-grant product contract neither reads nor writes this field.
+    #[serde(skip)]
     work_authority_grant: Option<String>,
-    /// Authoritative store identity returned by `engram doctor --json`.
-    /// This is persisted for authority retirement but removed from
-    /// client-facing snapshots together with the grant credential.
+    /// This host-private store identity is persisted for internal authority
+    /// retirement, but removed from client snapshots and MCP composition.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     authority_store_key: Option<EngramAuthorityStoreKey>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -101,6 +118,7 @@ impl std::fmt::Debug for EngramProjectSettings {
         formatter
             .debug_struct("EngramProjectSettings")
             .field("enabled", &self.enabled)
+            .field("turn_gated_control", &self.turn_gated_control)
             .field("binary_path", &self.binary_path)
             .field("home", &self.home)
             .field(
@@ -120,6 +138,7 @@ impl Default for EngramProjectSettings {
     fn default() -> Self {
         Self {
             enabled: false,
+            turn_gated_control: false,
             binary_path: None,
             home: None,
             work_authority_grant: None,
@@ -130,8 +149,12 @@ impl Default for EngramProjectSettings {
 }
 
 impl EngramProjectSettings {
-    fn is_runtime_enabled(&self) -> bool {
+    fn is_base_enabled(&self) -> bool {
         self.enabled && !engram_globally_disabled()
+    }
+
+    fn is_control_enabled(&self) -> bool {
+        self.is_base_enabled() && self.turn_gated_control
     }
 
     fn call_timeout(&self) -> Duration {
@@ -163,7 +186,8 @@ fn validate_engram_project_enablement(
     let (binary_path, project_file, home) =
         validate_engram_project_connection_paths(project, settings)?;
     let project_root = FsPath::new(&project.root_path);
-    run_engram_doctor(&binary_path, &project_file, &home, project_root)
+    let result = run_engram_doctor_result(&binary_path, &project_file, &home, project_root)?;
+    validate_engram_doctor_result(&result, settings.turn_gated_control)
 }
 
 fn validate_engram_project_connection_paths(
@@ -221,16 +245,6 @@ fn validate_engram_host_connection_paths(
     Ok((binary_path, home))
 }
 
-fn run_engram_doctor(
-    binary_path: &FsPath,
-    project_file: &FsPath,
-    home: &FsPath,
-    project_root: &FsPath,
-) -> std::result::Result<EngramAuthorityStoreKey, ApiError> {
-    let result = run_engram_doctor_result(binary_path, project_file, home, project_root)?;
-    validate_engram_doctor_result(&result)
-}
-
 fn run_engram_doctor_result(
     binary_path: &FsPath,
     project_file: &FsPath,
@@ -251,7 +265,7 @@ fn run_engram_doctor_result(
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|err| ApiError::bad_request(format!("Engram doctor failed to start: {err}")))?;
-    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    let deadline = std::time::Instant::now() + ENGRAM_ENABLEMENT_COMMAND_TIMEOUT;
     loop {
         match child.try_wait() {
             Ok(Some(status)) => {
@@ -280,9 +294,10 @@ fn run_engram_doctor_result(
             Ok(None) => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err(ApiError::bad_request(
-                    "Engram doctor exceeded the 5 second enablement deadline",
-                ));
+                return Err(ApiError::bad_request(format!(
+                    "Engram doctor exceeded the {} second enablement deadline",
+                    ENGRAM_ENABLEMENT_COMMAND_TIMEOUT.as_secs()
+                )));
             }
             Err(err) => {
                 let _ = child.kill();
@@ -310,28 +325,31 @@ struct EngramDoctorResult {
 
 fn validate_engram_doctor_result(
     result: &EngramDoctorResult,
+    require_turn_gated_control: bool,
 ) -> std::result::Result<EngramAuthorityStoreKey, ApiError> {
     if !result.healthy {
         return Err(ApiError::bad_request(
             "cannot enable Engram: doctor reported an unhealthy store",
         ));
     }
-    let control = result.control.as_ref().ok_or_else(|| {
-        ApiError::bad_request(
-            "cannot enable Engram: doctor did not return a control policy",
-        )
-    })?;
-    let normalized = control
-        .required_assurance
-        .chars()
-        .filter(|character| character.is_ascii_alphanumeric())
-        .flat_map(char::to_lowercase)
-        .collect::<String>();
-    if normalized != "turngated" {
-        return Err(ApiError::bad_request(format!(
-            "cannot enable Engram: doctor requires `{}`, but TermAl provides `{ENGRAM_CONTROL_ASSURANCE}`",
-            control.required_assurance
-        )));
+    if require_turn_gated_control {
+        let control = result.control.as_ref().ok_or_else(|| {
+            ApiError::bad_request(
+                "cannot enable Engram turn-gated control: doctor did not return a control policy",
+            )
+        })?;
+        let normalized = control
+            .required_assurance
+            .chars()
+            .filter(|character| character.is_ascii_alphanumeric())
+            .flat_map(char::to_lowercase)
+            .collect::<String>();
+        if normalized != "turngated" {
+            return Err(ApiError::bad_request(format!(
+                "cannot enable Engram turn-gated control: doctor requires `{}`, but TermAl provides `{ENGRAM_CONTROL_ASSURANCE}`",
+                control.required_assurance
+            )));
+        }
     }
     let project_id = result.project_id.trim().to_owned();
     if project_id.is_empty() {
@@ -539,6 +557,14 @@ enum EngramControlRequest {
     SessionStatus {
         routing_token: String,
     },
+    ObligationWaive {
+        routing_token: String,
+        obligation_id: String,
+        expected_definition: String,
+        waived_by: String,
+        reason: String,
+        idempotency_key: String,
+    },
     TurnEvaluate {
         routing_token: String,
         idempotency_key: String,
@@ -707,6 +733,43 @@ struct EngramCheckpointReceipt {
     _cursor: i64,
     #[serde(rename = "confirmed_cursor")]
     _confirmed_cursor: i64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(
+    tag = "decision",
+    rename_all = "snake_case"
+)]
+enum EngramObligationWaiverDecisionResponse {
+    Waived {
+        receipt: EngramObligationWaiverReceipt,
+    },
+    Refused {
+        code: String,
+        #[serde(rename = "obligationId", alias = "obligation_id")]
+        obligation_id: String,
+        #[serde(
+            default,
+            rename = "currentDefinition",
+            alias = "current_definition",
+            skip_serializing_if = "Option::is_none"
+        )]
+        current_definition: Option<String>,
+        remedy: String,
+    },
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct EngramObligationWaiverReceipt {
+    #[serde(rename = "obligationId", alias = "obligation_id")]
+    obligation_id: String,
+    definition: String,
+    resolution: String,
+    state: String,
+    #[serde(rename = "waivedBy", alias = "waived_by")]
+    waived_by: String,
+    #[serde(rename = "waivedAt", alias = "waived_at")]
+    waived_at: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1196,6 +1259,37 @@ impl EngramControlTransport for StatefulEngramControlTransport {
                         .as_ref()
                         .or(session.issued_grant_id.as_ref()),
                     "confirmed_cursor": 0
+                }))
+            }
+            EngramControlRequest::ObligationWaive {
+                routing_token,
+                obligation_id,
+                expected_definition,
+                waived_by,
+                reason,
+                ..
+            } => {
+                let session = state.sessions.get(&session_id);
+                Self::validate_routing_token(session, routing_token)?;
+                if reason == "fixture-refuse" {
+                    return Ok(json!({
+                        "decision": "refused",
+                        "code": "waiver_not_admitted",
+                        "obligation_id": obligation_id,
+                        "current_definition": expected_definition,
+                        "remedy": "complete the required verification"
+                    }));
+                }
+                Ok(json!({
+                    "decision": "waived",
+                    "receipt": {
+                        "obligation_id": obligation_id,
+                        "definition": expected_definition,
+                        "resolution": "b".repeat(64),
+                        "state": "waived",
+                        "waived_by": waived_by,
+                        "waived_at": "2026-09-02T00:00:00Z"
+                    }
                 }))
             }
             EngramControlRequest::TurnEvaluate {
@@ -2286,7 +2380,7 @@ impl AppState {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 struct EngramSessionState {
     routing_token: Option<String>,
     active_grant_id: Option<String>,
@@ -2300,17 +2394,61 @@ struct EngramSessionState {
     /// concurrent checkpoint that it did not start.
     checkpoint_owner_generation: Option<u64>,
     bind_in_progress: bool,
+    waiver_in_progress: bool,
     pending_dispatch: Option<EngramPendingDispatch>,
     rebind_required: bool,
     /// Ephemeral settings-transition fence. New turns remain queued while the
     /// old connection drains and checkpoints, then use the committed config.
     project_reset_in_progress: bool,
     disabled_reason: Option<String>,
+    /// Base-tier context is injected on the first prompt in this TermAl
+    /// process and again after an observed agent compaction.
+    context_nudge_pending: bool,
+    context_nudge_in_progress: bool,
+    context_nudge_in_progress_generation: Option<u64>,
+    context_nudge_generation: u64,
+    pending_context_nudge: Option<String>,
+    context_nudge_delivery_generation: Option<u64>,
+    context_nudge_delivery_turn_generation: Option<u64>,
+}
+
+impl Default for EngramSessionState {
+    fn default() -> Self {
+        Self {
+            routing_token: None,
+            active_grant_id: None,
+            dispatch_generation: 0,
+            consecutive_transport_failures: 0,
+            circuit_open: false,
+            next_bind_retry_at: None,
+            checkpoint_in_progress: false,
+            checkpoint_owner_generation: None,
+            bind_in_progress: false,
+            waiver_in_progress: false,
+            pending_dispatch: None,
+            rebind_required: false,
+            project_reset_in_progress: false,
+            disabled_reason: None,
+            context_nudge_pending: true,
+            context_nudge_in_progress: false,
+            context_nudge_in_progress_generation: None,
+            context_nudge_generation: 0,
+            pending_context_nudge: None,
+            context_nudge_delivery_generation: None,
+            context_nudge_delivery_turn_generation: None,
+        }
+    }
 }
 
 impl EngramSessionState {
+    fn invalidate_context_nudge(&mut self) {
+        self.context_nudge_generation = self.context_nudge_generation.saturating_add(1);
+        self.context_nudge_pending = true;
+        self.pending_context_nudge = None;
+    }
+
     fn begin_checkpoint(&mut self, owner_generation: Option<u64>) -> bool {
-        if self.checkpoint_in_progress {
+        if self.checkpoint_in_progress || self.waiver_in_progress {
             return false;
         }
         self.checkpoint_in_progress = true;
@@ -2630,6 +2768,79 @@ fn engram_project_for_session_locked<'a>(
     }
 }
 
+fn is_lowercase_sha256(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn validate_engram_obligation_waiver_decision(
+    response: EngramObligationWaiverDecisionResponse,
+    obligation_id: &str,
+    expected_definition: &str,
+    waived_by: &str,
+) -> std::result::Result<EngramObligationWaiverDecisionResponse, EngramTransportError> {
+    let valid = match &response {
+        EngramObligationWaiverDecisionResponse::Waived { receipt } => {
+            receipt.obligation_id == obligation_id
+                && receipt.definition == expected_definition
+                && is_lowercase_sha256(&receipt.resolution)
+                && receipt.state == "waived"
+                && receipt.waived_by.trim() == waived_by
+                && chrono::DateTime::parse_from_rfc3339(&receipt.waived_at).is_ok()
+        }
+        EngramObligationWaiverDecisionResponse::Refused {
+            code,
+            obligation_id: refused_obligation_id,
+            current_definition,
+            remedy,
+        } => {
+            refused_obligation_id == obligation_id
+                && !code.trim().is_empty()
+                && !remedy.trim().is_empty()
+                && current_definition
+                    .as_deref()
+                    .is_none_or(is_lowercase_sha256)
+        }
+    };
+    if valid {
+        Ok(response)
+    } else {
+        Err(EngramTransportError::protocol(
+            "Engram waiver response does not match the request or contains invalid audit fields",
+        ))
+    }
+}
+
+fn engram_waiver_api_error(error: EngramTransportError) -> ApiError {
+    let detail = error
+        .code
+        .as_deref()
+        .map(|code| format!("{code}: {}", error.message))
+        .unwrap_or_else(|| error.message.clone());
+    match error.kind {
+        EngramTransportErrorKind::Remote
+            if matches!(
+                error.code.as_deref(),
+                Some(
+                    "control_operation_idempotency_conflict"
+                        | "stale_fence"
+                        | "control_session_token_mismatch"
+                        | "control_session_not_bound"
+                        | "control_connection_superseded"
+                        | "invalid_routing_token"
+                        | "unknown_routing_token"
+                )
+            ) => ApiError::conflict(detail),
+        EngramTransportErrorKind::Deadline
+        | EngramTransportErrorKind::Transport
+        | EngramTransportErrorKind::Protocol
+        | EngramTransportErrorKind::Remote
+        | EngramTransportErrorKind::Backoff => ApiError::bad_gateway(detail),
+    }
+}
+
 impl AppState {
     fn engram_session_has_child_binding_shape_locked(inner: &StateInner, session_id: &str) -> bool {
         inner
@@ -2724,7 +2935,7 @@ impl AppState {
             && project
                 .engram
                 .as_ref()
-                .is_some_and(EngramProjectSettings::is_runtime_enabled)
+                .is_some_and(EngramProjectSettings::is_control_enabled)
     }
 
     fn engram_child_requires_dispatch_card_locked(inner: &StateInner, session_id: &str) -> bool {
@@ -2744,7 +2955,219 @@ impl AppState {
                         && !inner.engram_project_resets.contains(&project.id)
                 })
                 .and_then(|project| project.engram.as_ref())
-                .is_some_and(EngramProjectSettings::is_runtime_enabled)
+                .is_some_and(EngramProjectSettings::is_control_enabled)
+    }
+
+    fn waive_engram_obligation(
+        &self,
+        session_id: &str,
+        request: WaiveEngramObligationRequest,
+    ) -> Result<EngramObligationWaiverDecisionResponse, ApiError> {
+        let obligation_id = request.obligation_id.trim();
+        let expected_definition = request.expected_definition.trim();
+        let waived_by = request.waived_by.trim();
+        let reason = request.reason.trim();
+        let idempotency_key = request.idempotency_key.trim();
+        if obligation_id.is_empty() {
+            return Err(ApiError::bad_request("obligationId is required"));
+        }
+        let obligation_id = Uuid::parse_str(obligation_id)
+            .map_err(|_| ApiError::bad_request("obligationId must be a UUID"))?
+            .to_string();
+        if !is_lowercase_sha256(expected_definition) {
+            return Err(ApiError::bad_request(
+                "expectedDefinition must be a lowercase 64-character SHA-256 hash",
+            ));
+        }
+        if waived_by.is_empty() {
+            return Err(ApiError::bad_request("waivedBy is required"));
+        }
+        if waived_by.len() > ENGRAM_WAIVER_IDENTITY_MAX_BYTES {
+            return Err(ApiError::bad_request(format!(
+                "waivedBy must be at most {ENGRAM_WAIVER_IDENTITY_MAX_BYTES} bytes"
+            )));
+        }
+        if waived_by.chars().any(char::is_control) {
+            return Err(ApiError::bad_request(
+                "waivedBy must not contain control characters",
+            ));
+        }
+        if reason.is_empty() {
+            return Err(ApiError::bad_request("reason is required"));
+        }
+        if reason.len() > ENGRAM_WAIVER_REASON_MAX_BYTES {
+            return Err(ApiError::bad_request(format!(
+                "reason must be at most {ENGRAM_WAIVER_REASON_MAX_BYTES} bytes"
+            )));
+        }
+        if reason
+            .chars()
+            .any(|character| character.is_control() && character != '\n' && character != '\t')
+        {
+            return Err(ApiError::bad_request(
+                "reason must not contain control characters other than newlines or tabs",
+            ));
+        }
+        if idempotency_key.is_empty() {
+            return Err(ApiError::bad_request("idempotencyKey is required"));
+        }
+        if idempotency_key.len() > ENGRAM_WAIVER_IDEMPOTENCY_KEY_MAX_BYTES {
+            return Err(ApiError::bad_request(format!(
+                "idempotencyKey must be at most {ENGRAM_WAIVER_IDEMPOTENCY_KEY_MAX_BYTES} bytes"
+            )));
+        }
+        if idempotency_key.chars().any(char::is_control) {
+            return Err(ApiError::bad_request(
+                "idempotencyKey must not contain control characters",
+            ));
+        }
+
+        let boot_recovery_pending = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            inner
+                .find_visible_session_index(session_id)
+                .is_some_and(|index| inner.sessions[index].engram_boot_recovery_pending)
+        };
+        if boot_recovery_pending {
+            self.request_engram_boot_recovery_retry(session_id);
+            return Err(ApiError::conflict(ENGRAM_BOOT_RECOVERY_PENDING_MESSAGE));
+        }
+
+        let (target, project_reset_generation, routing_token) = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let Some(index) = inner.find_visible_session_index(session_id) else {
+                return Err(ApiError::not_found("session not found"));
+            };
+            let record = &inner.sessions[index];
+            if record.runtime_stop_in_progress
+                || record.engram.bind_in_progress
+                || record.engram.checkpoint_in_progress
+                || record.engram.waiver_in_progress
+                || record.engram.project_reset_in_progress
+            {
+                return Err(ApiError::conflict(
+                    "Engram session lifecycle is already changing",
+                ));
+            }
+            if matches!(
+                record.session.status,
+                SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
+            ) || record.engram.active_grant_id.is_some()
+                || record.engram.pending_dispatch.is_some()
+            {
+                return Err(ApiError::conflict(
+                    "Engram obligations can be waived only while the session has no active turn",
+                ));
+            }
+            if record.engram.circuit_open {
+                return Err(ApiError::bad_gateway(
+                    "control_circuit_open: Engram control circuit is open",
+                ));
+            }
+            if record
+                .engram
+                .next_bind_retry_at
+                .is_some_and(|retry_at| retry_at > std::time::Instant::now())
+            {
+                return Err(ApiError::bad_gateway(
+                    "control_unavailable: Engram control is waiting for retry backoff",
+                ));
+            }
+            if record.engram.rebind_required {
+                return Err(ApiError::conflict(
+                    "Engram session must be rebound before an obligation can be waived",
+                ));
+            }
+            let target =
+                Self::engram_binding_target_for_session_shape_locked(&inner, session_id, true)
+                    .map_err(ApiError::conflict)?
+                    .ok_or_else(|| {
+                        ApiError::conflict(
+                            "Engram turn-gated control is not enabled for this session",
+                        )
+                    })?;
+            let routing_token = target.routing_token.clone().ok_or_else(|| {
+                ApiError::conflict("Engram session is not bound to a live work run")
+            })?;
+            let project_reset_generation = inner
+                .engram_project_resets
+                .claim(&target.project_id)
+                .ok_or_else(|| {
+                    ApiError::conflict("Engram project settings are already being reset")
+                })?;
+            inner.sessions[index].engram.waiver_in_progress = true;
+            (target, project_reset_generation, routing_token)
+        };
+        let result = target
+            .adapter
+            .request(
+                &target.connection,
+                &EngramControlRequest::ObligationWaive {
+                    routing_token,
+                    obligation_id: obligation_id.clone(),
+                    expected_definition: expected_definition.to_owned(),
+                    waived_by: waived_by.to_owned(),
+                    reason: reason.to_owned(),
+                    idempotency_key: idempotency_key.to_owned(),
+                },
+                target.settings.call_timeout(),
+            )
+            .and_then(parse_engram_result::<EngramObligationWaiverDecisionResponse>)
+            .and_then(|response| {
+                validate_engram_obligation_waiver_decision(
+                    response,
+                    &obligation_id,
+                    expected_definition,
+                    waived_by,
+                )
+            });
+
+        {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            if let Some(index) = inner.find_session_index(session_id) {
+                inner.sessions[index].engram.waiver_in_progress = false;
+            }
+        }
+        self.release_engram_project_reset_fence(
+            &target.project_id,
+            project_reset_generation,
+            &[session_id.to_owned()],
+        );
+
+        match result {
+            Ok(response) => {
+                self.record_engram_transport_success(session_id);
+                if matches!(response, EngramObligationWaiverDecisionResponse::Waived { .. }) {
+                    let mut inner = self.inner.lock().expect("state mutex poisoned");
+                    if let Some(index) = inner.find_session_index(session_id) {
+                        let message_id = format!("engram-obligation-waiver-{obligation_id}");
+                        let record = inner
+                            .session_mut_by_index(index)
+                            .expect("session index should be valid");
+                        if message_index_on_record(record, &message_id).is_none() {
+                            push_session_markdown_note_on_record(
+                                record,
+                                message_id,
+                                "Engram obligation waived",
+                                format!(
+                                    "Operator `{waived_by}` waived obligation `{obligation_id}`.\n\n**Reason:** {reason}"
+                                ),
+                            );
+                            if let Err(error) = self.commit_locked(&mut inner) {
+                                eprintln!(
+                                    "engram> session={session_id} failed persisting obligation-waiver audit card: {error:#}"
+                                );
+                            }
+                        }
+                    }
+                }
+                Ok(response)
+            }
+            Err(error) => {
+                self.record_engram_transport_failure(session_id, &error);
+                Err(engram_waiver_api_error(error))
+            }
+        }
     }
 
     fn rebind_engram_session_after_runtime_loss(&self, session_id: &str) {
@@ -3410,6 +3833,32 @@ impl AppState {
             if std::time::Instant::now() >= deadline {
                 eprintln!(
                     "engram> session={session_id} checkpoint wait exceeded the control deadline"
+                );
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    /// Destructive lifecycle transitions wait for a human waiver to finish so
+    /// they cannot invalidate its routing token while Engram records the audit
+    /// decision. Control calls are deadline-bounded, making this wait finite.
+    fn wait_for_engram_waiver_completion(&self, session_id: &str) {
+        let deadline = std::time::Instant::now() + ENGRAM_CONTROL_SETTLE_TIMEOUT;
+        loop {
+            let in_progress = {
+                let inner = self.inner.lock().expect("state mutex poisoned");
+                inner
+                    .find_session_index(session_id)
+                    .and_then(|index| inner.sessions.get(index))
+                    .is_some_and(|record| record.engram.waiver_in_progress)
+            };
+            if !in_progress {
+                return;
+            }
+            if std::time::Instant::now() >= deadline {
+                eprintln!(
+                    "engram> session={session_id} waiver wait exceeded the control deadline"
                 );
                 return;
             }
@@ -4200,7 +4649,7 @@ impl AppState {
         if !reset_access_allowed
             || project.remote_id != LOCAL_REMOTE_ID
             || (require_runtime_enabled && child.engram.disabled_reason.is_some())
-            || (require_runtime_enabled && !settings.is_runtime_enabled())
+            || (require_runtime_enabled && !settings.is_control_enabled())
         {
             return Ok(None);
         }
@@ -4280,7 +4729,7 @@ impl AppState {
         if !reset_access_allowed
             || project.remote_id != LOCAL_REMOTE_ID
             || parent.engram.disabled_reason.is_some()
-            || !settings.is_runtime_enabled()
+            || !settings.is_control_enabled()
         {
             return Ok(None);
         }
@@ -4410,9 +4859,9 @@ impl AppState {
             let record = inner
                 .session_mut_by_index(index)
                 .expect("session index should be valid");
-            if record.engram.bind_in_progress {
+            if record.engram.bind_in_progress || record.engram.waiver_in_progress {
                 return Err(EngramTransportError::backoff(
-                    "Engram binding is already in progress",
+                    "Engram binding or obligation waiver is already in progress",
                 ));
             }
             record.engram.bind_in_progress = true;
@@ -4459,7 +4908,7 @@ impl AppState {
                         }
                 })
                 .and_then(|project| project.engram.as_ref())
-                .is_some_and(EngramProjectSettings::is_runtime_enabled)
+                .is_some_and(EngramProjectSettings::is_control_enabled)
         };
         if !runtime_enabled {
             return Err(EngramTransportError::backoff(
@@ -4716,7 +5165,7 @@ impl AppState {
                     None => !inner.engram_project_resets.contains(&project.id),
                 })
                 .and_then(|project| project.engram.as_ref())
-                .is_some_and(EngramProjectSettings::is_runtime_enabled);
+                .is_some_and(EngramProjectSettings::is_control_enabled);
             if !binding_still_enabled {
                 drop(inner);
                 target
@@ -5052,7 +5501,7 @@ impl AppState {
                 .filter(|project| project.remote_id == LOCAL_REMOTE_ID)
                 .filter(|project| !inner.engram_project_resets.contains(&project.id))
                 .and_then(|project| project.engram.as_ref())
-                .is_some_and(EngramProjectSettings::is_runtime_enabled);
+                .is_some_and(EngramProjectSettings::is_control_enabled);
             if !runtime_enabled {
                 return;
             }

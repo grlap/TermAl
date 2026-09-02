@@ -238,12 +238,13 @@ export function EngramPreferencesPanel({
               ))}
             </select>
             <span className="create-session-field-hint">
-              One write-only grant is required for each declared repository.
+              Base MCP and work context are enabled per declared repository;
+              turn-gated control remains a separate opt-in.
             </span>
           </label>
         ) : (
           <p className="settings-panel-copy" role="status">
-            No local project declares Engram yet. Add a tracked
+            No local project declares Engram yet. Add a non-empty
             <code> .engram-project</code> file to a repository and refresh the
             state.
           </p>

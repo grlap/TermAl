@@ -7,6 +7,9 @@ implemented in TermAl.
 
 Implemented for SSH-backed remote execution through the local control plane.
 
+Local-only host integrations such as Engram intentionally do not cross this
+proxy boundary; see [Engram Host Adapter](engram-host-adapter.md).
+
 The browser always talks to the local TermAl server. The local server owns the
 browser-facing API, persisted preferences, project list, workspace layouts, and
 event stream. Projects may be bound to the built-in local remote or to an SSH

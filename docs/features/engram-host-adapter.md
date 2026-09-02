@@ -1,254 +1,225 @@
 # Engram Host Adapter
 
-## Status
+## Status and product tiers
 
-The local Engram integration is enforced and turn-gated for delegation-child
-sessions. When a local project has Engram enabled, TermAl does not hand a
-prompt to Claude, Codex, Cursor, Gemini, or OpenCode until Engram has returned a
-grant and accepted `turn_begin` for that exact turn.
+The local Engram integration has two independent tiers:
 
-The adapter is deliberately local-only. Remote proxy sessions do not enter the
-local Engram control plane. Project-scoped remote access remains a separate
-design contract in [Project-scoped remotes](./project-scoped-remotes.md).
+- **Base** is available to every enabled, repository-declared local project.
+  TermAl injects the Engram MCP server into each local agent session and adds
+  fresh `engram work next` context at session start and after compaction.
+- **Turn-gated control** is a premium project opt-in and defaults off. When it
+  is enabled, the existing host-private bind/evaluate/begin/checkpoint protocol
+  can withhold a prompt until Engram authorizes that exact turn.
+
+Remote proxy sessions never enter either local tier. The global
+`TERMAL_ENGRAM_DISABLED` kill switch and the per-project Enabled switch stop
+both MCP and context injection; turning premium control off leaves Base intact.
+Project-scoped remote access remains a separate contract in
+[Project-scoped remotes](./project-scoped-remotes.md).
 
 ## Configuration authority
 
-The configuration model is **repository declares, host authorizes**:
+The repository declares the project and the host supplies non-secret runtime
+context:
 
-- A local repository opts in by carrying a non-empty `.engram-project` file at
-  its root. Undeclared and remote projects are not configurable through the
-  local Engram host adapter.
+- A local repository is declared only while its root contains a non-empty
+  `.engram-project` file. Teams normally commit this marker so declaration is
+  consistent across machines; TermAl validates the file, not Git index state.
 - The host stores one machine-wide `binaryPath`, `home`, and
-  `bootRecoveryBudgetMs`. The binary defaults to `engram` resolved through the
-  server process `PATH`; home defaults to the server user's `.engram`
-  directory; eager boot recovery defaults to a 5,000 ms overall wall-clock
-  budget and accepts 100–60,000 ms.
-- Each declared project stores only its write-only `workAuthorityGrant` and an
-  operator veto. There is no independent project-side Enabled toggle.
-- Effective enablement is derived from the repository declaration, a stored
-  grant, a successful Verify/save, and the absence of the host veto.
+  `bootRecoveryBudgetMs`. The binary defaults to `engram` on the server
+  process `PATH`; home defaults to the server user's `.engram` directory.
+- Each project stores `enabled` and the default-off `turnGatedControl` flag.
 
-TermAl persists one grant per project, not one grant per session or agent. The
-fixed Engram subject and control actor is `termal`. Individual activity remains
-attributable through the distinct TermAl `session_id` carried on every Engram
-CLI/control connection.
+There is no TermAl authority-grant setting, grant file, grant environment
+variable, or grant-installing verification step. Existing persisted grant
+fields from development builds are ignored and are not written again.
 
-Grant material is secret. It is persisted server-side but removed from client
-project snapshots, logs, errors, and durable operator notices. The PATCH API's
-redacted placeholder preserves the current grant; explicit `null` clears it.
+## Settings and verification
 
-## Settings UI
+Open **Settings > Engram** to configure the host-global binary, home, and boot
+recovery budget. Declared local projects expose **Engram settings** with:
 
-Open **Settings > Engram** to configure the host-global binary, home, and eager
-boot-recovery budget once per machine. `PATCH /api/engram/settings` persists
-them. Binary/home paths cannot be rotated while a project is enabled; first
-apply the project's unconditional host veto so no runtime can silently cross
-from one Engram store to another. The recovery budget is operational rather
-than authority-bearing and can be changed while projects remain enabled.
+- the Base Enabled/Disable switch;
+- a separate **Turn-gated control** checkbox;
+- **Verify**, which is non-mutating; and
+- **Save & enable**.
 
-The same page automatically lists local projects whose roots contain a
-non-empty `.engram-project`. A declared project's context menu also exposes
-**Engram settings**. Both surfaces share the project-scoped write-only grant,
-**Verify**, **Save & enable**, and **Disable Engram** controls. Undeclared
-projects expose none of those controls.
-
-The grant input is always blank when the dialog opens. Leaving it blank
-preserves the saved grant; typing a value installs or replaces it. The saved
-value is never returned to or rendered by the client.
-
-**Verify** calls the non-mutating
-`POST /api/projects/{id}/engram/verify` probe. It reports the doctor project id,
-database, required assurance and health plus the redacted authority status
-(installed, subject, validity interval, and revocation). An enabled
-configuration cannot be enabled until its current draft verifies successfully.
-Save uses the existing `PATCH /api/projects/{id}/engram` route, which repeats
-all checks and remains the final fail-closed authority. Disabling stays
-available without verification as a recovery action. Project state is derived
-as `not declared`, `declared / awaiting grant`, `enabled`, `operator vetoed`, or
-`verify failed`; the stored grant itself is never returned to the browser.
-
-## Enablement validation
-
-An enablement or connection-changing PATCH must pass both checks before the new
-settings are committed.
-
-### Doctor identity
-
-TermAl runs:
+`POST /api/projects/{id}/engram/verify` and the final
+`PATCH /api/projects/{id}/engram` both run:
 
 ```text
 engram --project-file <project>/.engram-project --home <home> doctor --json
 ```
 
-The command must exit successfully and return healthy JSON with:
+Doctor must report a healthy store, a non-empty project id, and an absolute
+database path. Only the premium toggle additionally requires
+`control.required_assurance == "turn_gated"`. Base mode does not require or
+install mutation authority.
 
-- `control.required_assurance == "turn_gated"`;
-- a non-empty `project_id`;
-- an absolute `database` path.
+## Base MCP composition
 
-The returned `project_id` and normalized database path are authoritative store
-identity. TermAl persists that pair with the private project settings and uses
-it for grant-ownership, rotation, revocation, and tombstone comparisons. It
-does not infer store identity by hashing `.engram-project` or constructing a
-database filename.
-
-### Work-authority grant
-
-When a grant is configured, TermAl runs:
+Every eligible local session receives an `engram` MCP stdio descriptor. TermAl
+invokes:
 
 ```text
 engram --project-file <project>/.engram-project --home <home> \
-  authority show <grant-hash> --json
+  mcp --actor-id termal --session-id <termal-session-id>
 ```
 
-The grant is rejected unless the response proves all of the following:
+The child environment contains exactly the host context Engram also exposes to
+its shell words:
 
-- `installed` is true;
-- `subject_actor_id` is exactly `termal`;
-- `revoked_at` is null;
-- `valid_from` is valid RFC 3339 and is not in the future;
-- `valid_until` is valid RFC 3339 and is later than the current time.
+```text
+ENGRAM_HOME=<home>
+ENGRAM_ACTOR_ID=termal
+ENGRAM_SESSION_ID=<termal-session-id>
+```
 
-Unknown grants, malformed output, store failures, expired grants, future grants,
-revoked grants, and subject mismatches fail closed. Error text is redacted and
-never includes the grant hash.
+No authority credential is placed in argv, environment, MCP JSON, state
+snapshots, logs, or private Claude MCP files. Claude, the shared Codex app
+server, and ACP runtimes all receive the same per-session descriptor.
 
-## Turn lifecycle
+## Start and post-compaction context
 
-For every eligible delegation-child turn, including user prompts, mailbox
-wakes, and orchestrator work, TermAl executes this sequence:
+Before the first prompt in a TermAl process, and again after an observed Codex
+`thread/compacted` event or Claude stream-json `compact_boundary`, TermAl runs
+off-lock:
 
-1. Resolve or refresh the session binding. `session_bind` always declares
-   `assurance: "turn_gated"`, actor `termal`, and the exact TermAl session id.
-2. Call `turn_evaluate` for the stable prompt fingerprint.
-3. Only for a grant, call `turn_begin` with the returned grant id and delivery
-   tokens.
-4. Only after a matching begin receipt, deliver the prompt to the agent runtime.
-5. On turn completion, Stop, error, runtime exit, project reset, or deletion,
-   checkpoint a begun grant exactly once with the appropriate next intent.
+```text
+engram --project-file <project>/.engram-project --home <home> \
+  work next --context-generation termal-<generation>
+```
 
-Refuse, defer, transport degradation, protocol degradation, missing binding,
-begin refusal, or dispatch-budget exhaustion all withhold the prompt. They
-produce a durable Engram control card with `dispatch: "withheld"`; no agent
-runtime command is sent. A stale callback is fenced by the runtime token,
-active-turn generation, and Engram dispatch generation, so it cannot fail or
-checkpoint a successor turn.
+The command receives the same three `ENGRAM_*` environment values as the MCP
+child. Its trimmed text is capped at 32 KiB, escapes the host fence terminator,
+is wrapped in an `<engram-work-context>` block, and is prepended only to the
+runtime prompt; the user's durable message remains unchanged. The cold-start
+command uses the bounded Engram CLI/store-open budget (six seconds in
+production), rather than the shorter control-frame deadline. A failure is
+logged, does not block the user's turn, and leaves the nudge pending for a later
+prompt. Concurrent prompt admission waits for the owning refresh; the context
+is consumed only after the runtime command channel accepts the prompt, so spawn
+or delivery failure preserves it for retry. ACP runtimes receive Base MCP, but
+this cut does not yet expose a portable ACP compaction event, so their refresh
+is session-start only.
 
-The former `sent_without_grant` card value remains deserializable only for
-already-persisted historical cards. New enforced turns never emit it.
+## Premium turn lifecycle
 
-## Boot recovery budget and lazy retry
+Only a project with both `enabled` and `turnGatedControl` enters the control
+path. For each eligible turn TermAl:
 
-TermAl binds the HTTP listener and publishes the affected sessions'
-`engramBootRecoveryPending` markers before starting Engram recovery. Axum then
-serves health/state requests while a background coordinator recovers at most
-eight targets concurrently. The coordinator stops waiting at the host-global
-`bootRecoveryBudgetMs` wall-clock deadline; it never joins an uncooperative
-transport worker after that deadline.
+1. binds or refreshes the exact session with `assurance: "turn_gated"`;
+2. calls `turn_evaluate` for the stable prompt fingerprint;
+3. calls `turn_begin` for a returned grant and delivery tokens;
+4. delivers the prompt only after the matching begin receipt; and
+5. checkpoints the begun turn on completion, Stop, failure, reset, or deletion.
 
-A completed target records its restart card and clears only its own readiness
-marker, even when its result arrives after the coordinator deadline. At the
-deadline, still-running targets keep their marker until that result arrives;
-unstarted targets keep it until first use. The next targeted session read
-(including opening its browser pane) starts one background lazy retry for an
-unstarted target. A direct prompt also starts that retry and fails fast with
-HTTP 409; a queued activation stays parked and starts the same retry. When the
-retry finishes, the marker clears and a queue activation that actually hit the
-fence is re-kicked. A persisted user queue that received no current-process
-activation remains dormant across restart.
+Refuse, defer, protocol/transport degradation, missing binding, begin refusal,
+or dispatch-budget exhaustion withhold the prompt and produce a durable Engram
+control card. Turning the premium flag off fences the transition, checkpoints
+open control state, clears the binding, and resumes ordinary Base-only
+dispatch.
 
-Recovery diagnostics use stable single-line fields. Each target emits
+## Human obligation waiver
+
+`POST /api/sessions/{id}/engram/obligations/waive` is a host-private operator
+action for an idle premium session already bound to the obligation's live
+WorkRun. A live turn retains exclusive ownership of its checkpoint lifecycle,
+so TermAl rejects a waiver while that turn, its grant, or Stop is active.
+The request contains the obligation UUID, expected definition hash, displayed
+human `waivedBy` identity, redactor-inspected reason, and idempotency key.
+TermAl resolves the routing token and sends the strict cut-B frame:
+
+```text
+obligation_waive(routing_token, obligation_id, expected_definition,
+                 waived_by, reason, idempotency_key)
+```
+
+The removed `authority_grant` field is never sent. Exact replay returns the
+same typed decision; a changed intent under one key surfaces
+`control_operation_idempotency_conflict`. Policy refusals are successful typed
+responses (`waiver_not_admitted`, `obligation_not_open`, or
+`definition_changed`) and retain Engram's remedy. Waived receipts expose the
+human attribution but omit the reason.
+
+This cut exposes the waiver as an API-only operator action; the settings UI does
+not yet provide a waiver form. Like the rest of TermAl's unauthenticated local
+API, this is a trusted-operator surface rather than an isolation boundary from
+processes running as the same OS user. Every successful waiver therefore also
+adds an idempotent durable audit card to the session transcript. The route holds
+the same project lifecycle fence as settings transitions, resumes prompts
+parked behind that fence when it releases, honors the adapter circuit breaker,
+and rejects any receipt or refusal that does not correlate to the submitted
+obligation.
+
+## Premium boot recovery and lazy retry
+
+Boot recovery applies only to premium control sessions. TermAl publishes
+`engramBootRecoveryPending` before recovering bindings, bounds the overall
+work by `bootRecoveryBudgetMs`, and retries an unfinished target lazily on the
+next targeted read or prompt. Base MCP/context injection does not bind a
+control session and never withholds delivery.
+
+Recovery diagnostics keep the stable single-line form
 `boot-recovery session=<id> command=<phase> attempt=<n> elapsed_ms=<n>
-outcome=<ok|error>` for `session_status`, `turn_checkpoint`, the combined
-`work_next_focus` read plus its concrete `work_core_next` / `work_core_focus`
-CLI commands, `session_bind`, and the whole target. The coordinator emits an
-`overall` line with its elapsed time, budget, outcome, and unfinished count.
-These lines contain no routing tokens or grant material.
+outcome=<ok|error>`. Phases include `session_status`, `turn_checkpoint`, the
+work-focus reads, `session_bind`, and the whole target. The coordinator emits
+an `overall` line with elapsed time, budget, outcome, and unfinished count.
+These diagnostics contain no routing token or other host-private control data.
 
 ## Settings transitions
 
-An Engram settings/reset transaction owns a project-generation fence while the
-old connection drains. Prompts arriving during that interval remain in the
-durable session queue; they are not sent through the old connection and do not
-bypass Engram. When the exact owner releases the fence, TermAl drains the queue
-against the committed configuration:
+An Engram settings transaction owns a project-generation fence while the old
+premium connection drains. Prompts arriving during the transition remain in
+the durable queue and cannot bypass the committed tier. When the exact owner
+releases the fence, TermAl drains the queue against the new settings:
 
-- if Engram remains enabled, the prompt receives a fresh bind/evaluate/begin;
-- if Engram was explicitly disabled, ordinary non-Engram dispatch resumes.
+- with premium still enabled, the prompt receives a fresh
+  bind/evaluate/begin sequence;
+- with only premium disabled, Base MCP/context remains active and ordinary
+  delivery resumes; and
+- with Engram disabled, neither Base nor premium work is composed.
 
-Grant clear, rotation, home change, disable, and project deletion preserve the
-existing revocation/tombstone rules. The authoritative doctor store identity is
-carried into runtime descriptors and retirement records. A missing project
-marker after successful validation therefore does not erase the known store
-identity.
+Binary/home changes and project deletion retain the same generation-fenced
+runtime teardown and checkpoint ordering as other premium transitions.
 
 ## Mailbox and Stop behavior
 
-Mailbox wakes use the same gate as user prompts. If a mailbox turn is stopped
-or fails after acceptance, TermAl restores the exact delivered-through sequence
-before any successor work. The poisoned automatic queue is paused until an
-explicit resume so the same wake cannot spin indefinitely. A wake refused by
-Engram is never sent to the agent runtime.
+Mailbox wakes use the same premium gate as user prompts. If a mailbox turn is
+stopped or fails after acceptance, TermAl restores the exact delivered-through
+sequence before successor work. A wake refused by Engram is never sent to the
+agent runtime. The public Stop route remains asynchronous for a live local
+turn: runtime interruption and the premium checkpoint finish on the background
+owner, while repeated Stop calls remain idempotent. Persisted `Stopping` is
+classified as an interrupted turn during restart recovery.
 
-The public Stop route remains valid for an Active/Approval session whose local
-runtime has already vanished. It claims the guarded lifecycle transaction,
-persists `Stopping`, and returns immediately; runtime interruption and the
-Engram checkpoint finish on a background worker. A second Stop while that
-worker owns the fence is idempotent. Success publishes `Idle`; a runtime or
-checkpoint failure publishes `Error` with an actionable preview and transcript
-notice. Persisted `Stopping` is intentionally classified as an interrupted
-turn during restart recovery, so a process exit cannot strand the session.
-Internal orchestrator cleanup retains its synchronous stop-with-options
-contract because its transition transaction depends on completion ordering.
+See [Agent mailboxes](./agent-mailboxes.md) for the durable delivery and
+recovery contract.
 
-See [Agent mailboxes](./agent-mailboxes.md) for the durable delivery and recovery
-contract.
+## Security and failure policy
 
-## Runtime composition
+All external Engram work runs without the global state mutex. Control calls and
+context nudges are deadline-bounded, JSON control replies are typed, routing
+tokens stay host-private, and TermAl never opens Engram's SQLite database
+directly.
 
-The project grant is also composed into eligible local agent MCP configuration.
-The grant hash is a bearer secret: it reaches the Engram MCP child only through
-the `ENGRAM_WORK_AUTHORITY_GRANT` environment variable in the child's MCP stdio
-configuration and never on the command line, where every process listing could
-read it. Engram reads that variable on `engram mcp` (unset means grant-less,
-a malformed value fails startup, and the value is never logged), so the argv
-form is not used anywhere in TermAl.
-Every descriptor records the authoritative doctor store identity and fixed
-actor `termal`. Runtime replacement and revocation remain generation-fenced so
-a stale teardown cannot remove a newer descriptor.
+## Operator verification
 
-## Failure and security policy
-
-- Control and grant validation fail closed.
-- Control calls are deadline-bounded and never run while holding the global
-  state mutex.
-- JSON is parsed into typed response structures; CLI stderr is diagnostic only.
-- Grant material is never included in state snapshots, SSE deltas, transcript
-  notices, or log messages.
-- Store identity comparisons prefer the authoritative doctor tuple and use a
-  normalized-home fallback only for settings created before that tuple exists.
-- The adapter does not open or inspect Engram's SQLite database directly.
-
-## Operator verification and restart
-
-Before enabling a project, verify the same binary, project marker, and home that
-TermAl will use:
+Before enabling a repository, verify the same binary, marker, and home TermAl
+will use:
 
 ```text
 engram --project-file <project>/.engram-project --home <home> doctor --json
-engram --project-file <project>/.engram-project --home <home> \
-  authority show <grant-hash> --json
 ```
 
-The grant must be active for subject `termal`. Configure the project through the
-TermAl project settings UI/API, then restart TermAl so every already-running
-agent runtime is rebuilt with the new host/MCP configuration. A valid smoke test
-must observe one complete live-store sequence:
+Save Base settings through the project UI/API. If premium control is enabled,
+one live smoke turn must show the complete sequence:
 
 ```text
 session_bind(turn_gated) -> turn_evaluate(grant) -> turn_begin(begin) \
   -> agent delivery -> turn_checkpoint(checkpointed)
 ```
 
-Do not treat a fixture-only test, direct SQLite inspection, or a control card
-without runtime-delivery evidence as an end-to-end proof.
+A fixture-only test, direct SQLite inspection, or control card without runtime
+delivery is not an end-to-end proof. Installing a new Engram build or switching
+the live host remains an explicit operator action outside settings validation.

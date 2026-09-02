@@ -402,7 +402,6 @@ describe("AppDialogs settings agent defaults", () => {
           rootPath: "C:\\github\\Personal\\TermAl",
           remoteId: "local",
           engramDeclared: true,
-          engramGrantConfigured: true,
           engram: {
             enabled: true,
             binaryPath: "engram",
@@ -423,10 +422,7 @@ describe("AppDialogs settings agent defaults", () => {
     expect(screen.getByLabelText("Engram host home")).toHaveValue(
       "C:\\Users\\greg\\.engram",
     );
-    expect(screen.getByLabelText("Work authority grant")).toHaveAttribute(
-      "type",
-      "password",
-    );
+    expect(screen.getByLabelText("Turn-gated control")).not.toBeChecked();
   });
 
   it("closes a settings combobox before the settings dialog", async () => {

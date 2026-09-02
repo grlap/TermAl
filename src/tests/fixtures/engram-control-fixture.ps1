@@ -14,6 +14,20 @@ if (-not $projectFile -or -not $engramHome) {
     exit 2
 }
 
+$workIndex = [Array]::IndexOf($args, "work")
+if ($workIndex -ge 0 -and ($workIndex + 1) -lt $args.Count -and $args[$workIndex + 1] -eq "next") {
+    if (-not $env:ENGRAM_HOME -or -not $env:ENGRAM_ACTOR_ID -or -not $env:ENGRAM_SESSION_ID) {
+        [Console]::Error.WriteLine("missing Engram base context environment")
+        exit 8
+    }
+    $mode = (Get-Content -LiteralPath $projectFile -Raw).Trim()
+    if ($mode -eq "fixture-work-next-slow") {
+        Start-Sleep -Milliseconds 400
+    }
+    [Console]::Out.WriteLine("Engram work context for $($env:ENGRAM_SESSION_ID) as $($env:ENGRAM_ACTOR_ID)")
+    exit 0
+}
+
 if (($args -contains "authority") -and ($args -contains "show")) {
     $mode = (Get-Content -LiteralPath $projectFile -Raw).Trim()
     $result = [ordered]@{

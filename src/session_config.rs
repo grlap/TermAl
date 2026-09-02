@@ -656,6 +656,7 @@ impl AppState {
         if self.remote_session_target(session_id)?.is_some() {
             return self.proxy_remote_refresh_session_model_options(session_id);
         }
+        self.refresh_engram_project_declaration_for_session_off_lock(session_id);
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let index = inner
             .find_visible_session_index(session_id)

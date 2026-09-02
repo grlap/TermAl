@@ -166,6 +166,7 @@ impl AppState {
             collected
         };
         for terminating_session_id in &engram_session_ids_to_terminate {
+            self.wait_for_engram_waiver_completion(terminating_session_id);
             self.checkpoint_engram_turn_off_lock(
                 terminating_session_id,
                 None,
@@ -391,6 +392,11 @@ impl AppState {
         if inner.sessions[index].runtime_stop_in_progress {
             return Err(ApiError::conflict("session is already stopping"));
         }
+        if inner.sessions[index].engram.waiver_in_progress {
+            return Err(ApiError::conflict(
+                "an Engram obligation waiver is in progress",
+            ));
+        }
         if !matches!(
             inner.sessions[index].session.status,
             SessionStatus::Active | SessionStatus::Approval
@@ -548,6 +554,7 @@ impl AppState {
         if self.remote_session_target(session_id)?.is_some() {
             return self.proxy_remote_stop_session(session_id);
         }
+        self.wait_for_engram_waiver_completion(session_id);
         self.stop_local_session_with_options(session_id, options, None)
     }
 
@@ -557,6 +564,7 @@ impl AppState {
         options: StopSessionOptions,
         requested_claim: Option<RequestedStopClaim>,
     ) -> std::result::Result<StateResponse, ApiError> {
+        self.wait_for_engram_waiver_completion(session_id);
         let (runtime_to_stop, stop_failure_is_best_effort, stop_token, stop_owner_generation) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner

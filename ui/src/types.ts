@@ -243,36 +243,19 @@ export type Project = {
   remoteId?: string | null;
   engram?: EngramProjectStateSettings | null;
   engramDeclared?: boolean;
-  engramGrantConfigured?: boolean;
   engramOperatorDisabled?: boolean;
   engramCleanupWarning?: string | null;
 };
 
 export type EngramProjectSettings = {
   enabled: boolean;
+  turnGatedControl?: boolean;
   binaryPath?: string | null;
   home?: string | null;
-  workAuthorityGrant?: string | null;
   deadlineMs?: number | null;
 };
 
-// Client-facing state snapshots deliberately omit the operator-installed
-// work-authority credential. `EngramProjectSettings` remains the update-route
-// input so an operator can install or replace that credential explicitly.
-export type EngramProjectStateSettings = Omit<
-  EngramProjectSettings,
-  "workAuthorityGrant"
->;
-
-export type EngramAuthorityVerificationStatus = {
-  configured: boolean;
-  installed?: boolean | null;
-  subjectActorId?: string | null;
-  validFrom?: string | null;
-  validUntil?: string | null;
-  revokedAt?: string | null;
-  valid: boolean;
-};
+export type EngramProjectStateSettings = EngramProjectSettings;
 
 export type EngramProjectVerification = {
   verified: boolean;
@@ -282,7 +265,6 @@ export type EngramProjectVerification = {
   database: string;
   requiredAssurance: string;
   healthy: boolean;
-  grant: EngramAuthorityVerificationStatus;
   errors?: string[];
 };
 

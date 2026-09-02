@@ -25,6 +25,20 @@ done
 [ -n "$engram_home" ] || exit 2
 
 case " $original_args " in
+  *" work next "*)
+    [ -n "${ENGRAM_HOME:-}" ] || exit 8
+    [ -n "${ENGRAM_ACTOR_ID:-}" ] || exit 8
+    [ -n "${ENGRAM_SESSION_ID:-}" ] || exit 8
+    mode=$(tr -d '\r\n' < "$project_file")
+    if [ "$mode" = "fixture-work-next-slow" ]; then
+      sleep 1
+    fi
+    printf 'Engram work context for %s as %s\n' "$ENGRAM_SESSION_ID" "$ENGRAM_ACTOR_ID"
+    exit 0
+    ;;
+esac
+
+case " $original_args " in
   *" authority show "*)
     mode=$(tr -d '\r\n' < "$project_file")
     case "$mode" in
