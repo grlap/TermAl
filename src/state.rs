@@ -1277,7 +1277,6 @@ struct StateInner {
     /// revision/replay bookkeeping.
     remote_delta_persist_dirty: bool,
     revision: u64,
-    next_project_number: usize,
     next_session_number: usize,
     next_message_number: u64,
     /// Stable project records used by local and remote session routing.
@@ -1365,7 +1364,6 @@ impl StateInner {
             remote_settings_persist_dirty: false,
             remote_delta_persist_dirty: false,
             revision: 0,
-            next_project_number: 1,
             next_session_number: 1,
             next_message_number: 1,
             projects: Vec::new(),

@@ -1069,27 +1069,6 @@ fn persisted_state_requires_projects() {
     );
 }
 
-// Pins that stripping `nextProjectNumber` causes `load_state` to
-// fail with `missing field `nextProjectNumber``. Guards against the
-// project-number counter resetting on reload and colliding with
-// existing project names.
-#[test]
-fn persisted_state_requires_next_project_number() {
-    let inner = StateInner::new();
-
-    let err_text = persisted_state_load_error_after_mutation(inner, |encoded| {
-        encoded
-            .as_object_mut()
-            .expect("persisted state should be an object")
-            .remove("nextProjectNumber");
-    });
-
-    assert!(
-        err_text.contains("missing field `nextProjectNumber`"),
-        "unexpected load_state error: {err_text}"
-    );
-}
-
 // Pins that stripping `remoteId` from a project entry causes
 // `load_state` to fail with `missing field `remoteId``. Guards
 // against projects reloading without a remote binding and being
@@ -2608,19 +2587,6 @@ fn sqlite_row_json(path: &FsPath, table: &str, id: &str) -> Option<String> {
     }
 }
 
-fn sqlite_prompt_history_json(path: &FsPath, session_id: &str) -> Option<String> {
-    let connection = rusqlite::Connection::open(path).expect("sqlite state should open");
-    match connection.query_row(
-        "SELECT value_json FROM session_prompt_histories WHERE session_id = ?1",
-        rusqlite::params![session_id],
-        |row| row.get(0),
-    ) {
-        Ok(value) => Some(value),
-        Err(rusqlite::Error::QueryReturnedNoRows) => None,
-        Err(err) => panic!("sqlite prompt-history query should succeed: {err}"),
-    }
-}
-
 fn sqlite_table_ids(path: &FsPath, table: &str) -> Vec<String> {
     let connection = rusqlite::Connection::open(path).expect("sqlite state should open");
     let sql = format!("SELECT id FROM {table} ORDER BY id");
@@ -3303,6 +3269,139 @@ fn prompt_history_outlives_the_retained_transcript_window() {
 }
 
 #[test]
+fn sqlite_prompt_history_load_rejects_embedded_state_before_normalized_loading() {
+    let state_root = PersistTestRoot::new("prompt-history-row-authority");
+    let path = state_root.path().join("termal.sqlite");
+    let mut inner = StateInner::new();
+    let session_id = inner
+        .create_session(
+            Agent::Claude,
+            Some("embedded".to_owned()),
+            "/tmp".to_owned(),
+            None,
+            None,
+        )
+        .session
+        .id;
+    let session_index = inner
+        .find_session_index(&session_id)
+        .expect("created session should exist");
+    push_message_on_record(
+        inner
+            .session_mut_by_index(session_index)
+            .expect("created session should remain mutable"),
+        Message::Text {
+            attachments: Vec::new(),
+            id: "message-embedded".to_owned(),
+            timestamp: stamp_now(),
+            author: Author::You,
+            text: "prompt from embedded".to_owned(),
+            expanded_text: None,
+            source: None,
+        },
+    );
+    persist_state(&path, &inner).expect("current prompt histories should persist");
+
+    let mut embedded_metadata: Value = serde_json::from_str(
+        &sqlite_row_json(&path, "sessions", &session_id)
+            .expect("embedded fixture session should exist"),
+    )
+    .expect("embedded fixture metadata should decode");
+    embedded_metadata["session"]["promptHistory"] =
+        Value::Array(vec![Value::String("obsolete embedded prompt".to_owned())]);
+    let connection = rusqlite::Connection::open(&path).expect("fixture database should reopen");
+    connection
+        .execute(
+            "UPDATE sessions SET value_json = ?2 WHERE id = ?1",
+            rusqlite::params![
+                session_id,
+                serde_json::to_string(&embedded_metadata)
+                    .expect("embedded fixture metadata should encode")
+            ],
+        )
+        .expect("embedded fixture metadata should update");
+    drop(connection);
+    let before_rejection = fs::read(&path).expect("fixture bytes should be readable");
+
+    let error = match load_state(&path) {
+        Ok(_) => panic!("embedded prompt history must reject obsolete v2"),
+        Err(error) => error,
+    };
+    let rendered = format!("{error:#}");
+    assert!(rendered.contains("session.promptHistory"), "{rendered}");
+    assert!(
+        rendered.contains("Move or delete `termal.sqlite`"),
+        "{rendered}"
+    );
+    assert_eq!(
+        fs::read(&path).expect("rejected fixture bytes should remain readable"),
+        before_rejection,
+        "schema rejection must not rewrite the primary database"
+    );
+}
+
+#[test]
+fn sqlite_prompt_history_load_uses_empty_history_when_normalized_row_is_absent() {
+    let state_root = PersistTestRoot::new("prompt-history-row-absent");
+    let path = state_root.path().join("termal.sqlite");
+    let mut inner = StateInner::new();
+    let session_id = inner
+        .create_session(
+            Agent::Claude,
+            Some("No normalized history".to_owned()),
+            "/tmp".to_owned(),
+            None,
+            None,
+        )
+        .session
+        .id;
+    let session_index = inner
+        .find_session_index(&session_id)
+        .expect("created session should exist");
+    push_message_on_record(
+        inner
+            .session_mut_by_index(session_index)
+            .expect("created session should remain mutable"),
+        Message::Text {
+            attachments: Vec::new(),
+            id: "message-with-user-prompt".to_owned(),
+            timestamp: stamp_now(),
+            author: Author::You,
+            text: "do not resurrect this from the transcript".to_owned(),
+            expanded_text: None,
+            source: None,
+        },
+    );
+    persist_state(&path, &inner).expect("current prompt history should persist");
+
+    let connection = rusqlite::Connection::open(&path).expect("fixture database should reopen");
+    assert_eq!(
+        connection
+            .execute(
+                "DELETE FROM session_prompt_histories WHERE session_id = ?1",
+                rusqlite::params![session_id],
+            )
+            .expect("normalized prompt-history row should delete"),
+        1
+    );
+    drop(connection);
+
+    let loaded = load_state(&path)
+        .expect("current schema without a history row should load")
+        .expect("persisted state should exist");
+    let loaded_index = loaded
+        .find_session_index(&session_id)
+        .expect("loaded session should exist");
+    assert!(
+        loaded.sessions[loaded_index]
+            .session
+            .prompt_history
+            .is_empty(),
+        "an absent normalized row means empty composer history; transcript prompts are not fallback authority"
+    );
+}
+
+#[test]
 fn appended_assistant_message_preserves_bounded_prompt_history_allocations() {
     let mut inner = StateInner::new();
     let session_id = inner
@@ -3407,135 +3506,6 @@ fn non_tail_insert_into_partial_transcript_preserves_authoritative_prompt_histor
     assert_eq!(
         record.session.prompt_history,
         ["authoritative older prompt"]
-    );
-}
-
-#[test]
-fn sqlite_startup_migrates_embedded_prompt_history_beyond_the_retained_transcript_tail() {
-    let state_root = PersistTestRoot::new("prompt-history-backfill");
-    let path = state_root.path().join("termal.sqlite");
-    let mut inner = StateInner::new();
-    let session_id = inner
-        .create_session(
-            Agent::Claude,
-            Some("Prompt history".to_owned()),
-            "/tmp".to_owned(),
-            None,
-            None,
-        )
-        .session
-        .id;
-    let session_index = inner
-        .find_session_index(&session_id)
-        .expect("created session should exist");
-    for index in 0..80 {
-        let record = inner
-            .session_mut_by_index(session_index)
-            .expect("created session should remain mutable");
-        push_message_on_record(
-            record,
-            Message::Text {
-                attachments: Vec::new(),
-                id: format!("user-{index:03}"),
-                timestamp: stamp_now(),
-                author: Author::You,
-                text: format!("prompt {index}"),
-                expanded_text: None,
-                source: None,
-            },
-        );
-        push_message_on_record(
-            record,
-            Message::Text {
-                attachments: Vec::new(),
-                id: format!("assistant-{index:03}"),
-                timestamp: stamp_now(),
-                author: Author::Assistant,
-                text: format!("response {index}"),
-                expanded_text: None,
-                source: None,
-            },
-        );
-    }
-    persist_state(&path, &inner).expect("prompt-history fixture should persist");
-
-    let mut encoded: Value = serde_json::from_str(
-        &sqlite_row_json(&path, "sessions", &session_id)
-            .expect("persisted session row should exist"),
-    )
-    .expect("persisted session row should decode");
-    assert!(
-        encoded["session"].get("promptHistory").is_none(),
-        "hot session metadata must not embed composer history"
-    );
-    encoded["session"]["promptHistory"] = Value::Array(
-        (16..80)
-            .map(|index| Value::String(format!("prompt {index}")))
-            .collect(),
-    );
-    let connection = rusqlite::Connection::open(&path).expect("fixture database should reopen");
-    connection
-        .execute(
-            "DELETE FROM session_prompt_histories WHERE session_id = ?1",
-            rusqlite::params![session_id],
-        )
-        .expect("current prompt-history row should delete");
-    connection
-        .execute(
-            "DELETE FROM meta WHERE key = ?1",
-            rusqlite::params![SQLITE_PROMPT_HISTORY_STORAGE_KEY],
-        )
-        .expect("migration marker should delete");
-    connection
-        .execute(
-            "UPDATE sessions SET value_json = ?2 WHERE id = ?1",
-            rusqlite::params![
-                session_id,
-                serde_json::to_string(&encoded).expect("legacy fixture should encode")
-            ],
-        )
-        .expect("legacy session row should update");
-    drop(connection);
-
-    let loaded = load_state(&path)
-        .expect("legacy prompt-history state should load")
-        .expect("legacy prompt-history state should exist");
-    let record = &loaded.sessions[loaded
-        .find_session_index(&session_id)
-        .expect("session should survive startup")];
-    assert_eq!(record.session.messages.len(), SQLITE_SESSION_TAIL_MESSAGES);
-    assert_eq!(
-        record.session.prompt_history.len(),
-        SESSION_PROMPT_HISTORY_LIMIT
-    );
-    assert_eq!(
-        record.session.prompt_history.first().map(String::as_str),
-        Some("prompt 16")
-    );
-    assert_eq!(
-        record.session.prompt_history.last().map(String::as_str),
-        Some("prompt 79")
-    );
-
-    let migrated_metadata: Value = serde_json::from_str(
-        &sqlite_row_json(&path, "sessions", &session_id)
-            .expect("migrated session row should remain"),
-    )
-    .expect("migrated session row should decode");
-    assert!(migrated_metadata["session"].get("promptHistory").is_none());
-    let migrated_history: Vec<String> = serde_json::from_str(
-        &sqlite_prompt_history_json(&path, &session_id)
-            .expect("migrated prompt-history row should exist"),
-    )
-    .expect("migrated prompt-history row should decode");
-    assert_eq!(migrated_history.len(), SESSION_PROMPT_HISTORY_LIMIT);
-    assert_eq!(
-        migrated_history.first().map(String::as_str),
-        Some("prompt 16")
-    );
-    assert_eq!(
-        migrated_history.last().map(String::as_str),
-        Some("prompt 79")
     );
 }
 
@@ -3690,83 +3660,6 @@ fn local_history_cursor_and_page_share_the_persisted_read_path() {
 }
 
 #[test]
-fn sqlite_legacy_embedded_delegations_are_requeued_for_table_migration() {
-    let state_root = std::env::temp_dir().join(format!(
-        "termal-sqlite-legacy-delegations-{}",
-        Uuid::new_v4()
-    ));
-    let _state_temp_root = TestTempRoot::own(state_root.clone());
-    fs::create_dir_all(&state_root).expect("state root should exist");
-    let path = state_root.join("termal.sqlite");
-    let mut inner = StateInner::new();
-    let parent_id = inner
-        .create_session(
-            Agent::Codex,
-            Some("Parent".to_owned()),
-            "/tmp".to_owned(),
-            None,
-            None,
-        )
-        .session
-        .id;
-    let child_id = inner
-        .create_session(
-            Agent::Codex,
-            Some("Child".to_owned()),
-            "/tmp".to_owned(),
-            None,
-            None,
-        )
-        .session
-        .id;
-    let delegation = make_persist_test_delegation("delegation-legacy", &parent_id, &child_id);
-    inner.delegations.push(delegation.clone());
-    let legacy_embedded_state = PersistedState::from_inner(&inner);
-    persist_state_parts_to_sqlite(
-        &path,
-        &legacy_embedded_state,
-        &[],
-        true,
-        &BTreeSet::new(),
-        &[],
-        true,
-        &BTreeSet::new(),
-    )
-    .expect("legacy sqlite metadata should persist with an empty delegation table");
-
-    let mut loaded = load_state(&path)
-        .expect("legacy sqlite state should load")
-        .expect("legacy sqlite state should exist");
-    assert!(
-        loaded
-            .delegations
-            .iter()
-            .any(|record| record.id == delegation.id),
-        "embedded legacy delegations should survive when the dedicated table is empty"
-    );
-
-    let delta = loaded.collect_persist_delta(0);
-    let changed_delegations = delta
-        .changed_delegations
-        .as_ref()
-        .expect("legacy embedded delegations should be requeued for table migration");
-    assert!(
-        changed_delegations
-            .iter()
-            .any(|record| record.id == delegation.id)
-    );
-    let mut cache = SqlitePersistConnectionCache::new();
-    persist_delta_via_cache(&mut cache, &path, &delta)
-        .expect("legacy delegation migration delta should persist");
-    assert_eq!(
-        sqlite_table_ids(&path, "delegations"),
-        vec![delegation.id.clone()]
-    );
-
-    let _ = fs::remove_dir_all(state_root);
-}
-
-#[test]
 fn sqlite_load_isolates_malformed_session_and_delegation_rows_but_rejects_metadata() {
     let state_root =
         std::env::temp_dir().join(format!("termal-sqlite-malformed-{}", Uuid::new_v4()));
@@ -3897,132 +3790,17 @@ fn sqlite_load_isolates_malformed_session_and_delegation_rows_but_rejects_metada
         Ok(_) => panic!("malformed app_state row should fail startup load"),
         Err(error) => error,
     };
+    let rendered = format!("{metadata_error:#}");
     assert!(
-        format!("{metadata_error:#}").contains("failed to parse persisted state"),
-        "{metadata_error:#}"
+        rendered.contains("persisted state metadata is not valid JSON"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("Move or delete `termal.sqlite`"),
+        "{rendered}"
     );
 
     let _ = fs::remove_dir_all(state_root);
-}
-
-#[test]
-fn sqlite_v1_migration_skip_preserves_the_only_embedded_transcript_copy() {
-    let state_root = PersistTestRoot::new("v1-migration-skip-preserves-transcript");
-    let path = state_root.path().join("termal.sqlite");
-    let mut inner = StateInner::new();
-    let session_id = inner
-        .create_session(
-            Agent::Claude,
-            Some("Legacy recovery".to_owned()),
-            "/tmp".to_owned(),
-            None,
-            None,
-        )
-        .session
-        .id;
-    let session_index = inner
-        .find_session_index(&session_id)
-        .expect("legacy fixture session should exist");
-    for sequence in 0..2 {
-        let record = inner
-            .session_mut_by_index(session_index)
-            .expect("legacy fixture session should remain mutable");
-        let insert_at = record.session.messages.len();
-        insert_message_on_record(
-            record,
-            insert_at,
-            Message::Text {
-                attachments: Vec::new(),
-                id: format!("legacy-message-{sequence}"),
-                timestamp: stamp_now(),
-                author: Author::You,
-                text: format!("recoverable body {sequence}"),
-                expanded_text: None,
-                source: None,
-            },
-        );
-    }
-
-    let persisted = PersistedState::from_inner(&inner);
-    let mut legacy_session_value = serde_json::to_value(
-        persisted
-            .sessions
-            .first()
-            .expect("legacy fixture should contain the session row"),
-    )
-    .expect("legacy session row should encode");
-    legacy_session_value["session"]["messages"][1]["id"] =
-        Value::String("legacy-message-0".to_owned());
-    let legacy_session_json =
-        serde_json::to_string(&legacy_session_value).expect("legacy session row should serialize");
-    let metadata_json =
-        serde_json::to_string(&persisted).expect("legacy metadata should serialize");
-
-    {
-        let connection =
-            rusqlite::Connection::open(&path).expect("legacy sqlite fixture should open");
-        connection
-            .execute_batch(
-                "
-                PRAGMA foreign_keys = ON;
-                CREATE TABLE meta (
-                  key TEXT PRIMARY KEY,
-                  value TEXT NOT NULL
-                );
-                INSERT INTO meta(key, value) VALUES('schema_version', '1');
-                CREATE TABLE app_state (
-                  key TEXT PRIMARY KEY,
-                  value_json TEXT NOT NULL
-                );
-                CREATE TABLE sessions (
-                  id TEXT PRIMARY KEY,
-                  value_json TEXT NOT NULL
-                );
-                ",
-            )
-            .expect("legacy v1 schema should initialize");
-        connection
-            .execute(
-                "INSERT INTO app_state(key, value_json) VALUES(?1, ?2)",
-                rusqlite::params![SQLITE_METADATA_KEY, metadata_json],
-            )
-            .expect("legacy metadata should insert");
-        connection
-            .execute(
-                "INSERT INTO sessions(id, value_json) VALUES(?1, ?2)",
-                rusqlite::params![session_id, legacy_session_json],
-            )
-            .expect("legacy session row should insert");
-    }
-
-    let loaded = load_state(&path)
-        .expect("one skipped legacy transcript must not abort startup")
-        .expect("legacy persisted state should exist");
-    assert!(
-        loaded.find_session_index(&session_id).is_none(),
-        "a skipped local transcript must be quarantined, not exposed as an empty unhydrated session"
-    );
-
-    persist_state(&path, &loaded)
-        .expect("a normal persistence pass must preserve the quarantined legacy row");
-    let preserved_json = sqlite_row_json(&path, "sessions", &session_id)
-        .expect("the skipped legacy session row must remain recoverable");
-    let preserved_value: Value = serde_json::from_str(&preserved_json)
-        .expect("preserved legacy row should remain valid JSON");
-    let preserved_messages = preserved_value["session"]["messages"]
-        .as_array()
-        .expect("preserved legacy transcript should remain an array");
-    assert_eq!(preserved_messages.len(), 2);
-    assert_eq!(preserved_messages[0]["text"], "recoverable body 0");
-    assert_eq!(preserved_messages[1]["text"], "recoverable body 1");
-
-    let reloaded = load_state(&path)
-        .expect("repeated boot must keep isolating the skipped legacy row")
-        .expect("persisted state should remain available after repeated boot");
-    assert!(
-        reloaded.find_session_index(&session_id).is_none(),
-        "the durable quarantine signal must survive repeated boot"
-    );
 }
 
 // Regression guard: `commit_session_created_locked` must route

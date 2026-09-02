@@ -138,7 +138,6 @@ StateInner {
     codex: CodexState,
     preferences: AppPreferences,
     revision: u64,
-    next_project_number: usize, // retained for persisted legacy-id validation
     next_session_number: usize,
     next_message_number: u64,
     projects: Vec<Project>,
@@ -558,8 +557,8 @@ carries delegation records. Transcript bodies, their compact overview, and
 bounded composer history live separately in `messages`, `session_overviews`,
 and `session_prompt_histories`. Prompt history has its own mutation watermark,
 so streamed assistant cards can update session metadata without repeatedly
-serializing and rewriting up to 512 KiB of user prompts; an existing embedded
-`session.promptHistory` value is migrated into the separate row on startup.
+serializing and rewriting up to 512 KiB of user prompts. The normalized
+`session_prompt_histories` row is the only persisted prompt-history authority.
 This split lets the background persist thread write only the **changed** rows
 on each commit — see `collect_persist_delta`, `persist_delta_via_cache`, and
 `SqlitePersistConnectionCache` in `src/persist.rs`.
@@ -569,8 +568,23 @@ otherwise boots a fresh local state. Template definitions live in
 `orchestrators.json` so reusable workflow designs can be managed separately
 from running instances. Normalized session and delegation rows are independent
 startup failure boundaries: a malformed record is reported and skipped rather
-than aborting the process and hiding every healthy session. Schema-v1
-transcript extraction is likewise batched and skips malformed session rows.
+than aborting the process and hiding every healthy session. The primary state
+database must use the current normalized v2 authority: all required state
+tables with their canonical column sets, `schema_version=2`,
+`prompt_history_storage_version=1`, and no metadata-embedded session,
+delegation, or prompt-history records. Unrelated extra tables are tolerated.
+Present `app_state.metadataState` must deserialize as current typed metadata;
+it may be absent only while all normalized session, message, overview,
+prompt-history, delegation, and board-card tables are empty after fresh schema
+initialization. Only the five columns added by retained
+message-overview and response-board maintenance may initially be absent;
+unexpected columns reject, and the post-maintenance shape must be canonical.
+Any parseable session row carrying an array-valued obsolete
+`session.promptHistory` key is rejected, including an empty array. Non-array
+values and malformed session JSON remain row-level quarantine concerns.
+Validation runs before persistent PRAGMAs or schema maintenance. Obsolete or
+partial unreleased schemas are rejected with reset guidance rather than
+migrated.
 
 Coordination bootstrap runs before the persist worker, coordination stores,
 and HTTP listener. An empty `coordination.sqlite` is initialized atomically

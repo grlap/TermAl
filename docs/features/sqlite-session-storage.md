@@ -44,10 +44,11 @@ lifecycles, and bounded file-descriptor budget remain one domain. See
 [durable agent mailboxes](agent-mailboxes.md) and the
 [coordination board](agent-boards.md) for their surface contracts.
 
-## Current Schema
+## Current Normalized Schema
 
-Schema v2 keeps session metadata JSON-shaped while moving ordered transcript
-messages into their own indexed rows:
+The primary state database keeps application and record metadata as JSON while
+normalizing the independently loaded session, transcript, prompt-history,
+delegation, overview, and response-board projections. The production DDL is:
 
 ```sql
 CREATE TABLE meta (
@@ -74,32 +75,66 @@ CREATE TABLE messages (
   is_user INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY(session_id, position),
   UNIQUE(session_id, message_id),
-  FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+  FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
 ) WITHOUT ROWID;
 
 CREATE TABLE session_overviews (
   session_id TEXT PRIMARY KEY,
   value_blob BLOB NOT NULL,
-  FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+  FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+) WITHOUT ROWID;
+
+CREATE TABLE session_prompt_histories (
+  session_id TEXT PRIMARY KEY,
+  value_json TEXT NOT NULL,
+  FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
 ) WITHOUT ROWID;
 
 CREATE TABLE delegations (
   id TEXT PRIMARY KEY,
   value_json TEXT NOT NULL
 );
+
+CREATE TABLE response_board_tabs (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  project_id TEXT UNIQUE,
+  sort_order INTEGER NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE board_cards (
+  id TEXT PRIMARY KEY,
+  x REAL NOT NULL,
+  y REAL NOT NULL,
+  w REAL NOT NULL,
+  h REAL NOT NULL,
+  snapshot_json TEXT NOT NULL,
+  source_session_id TEXT NOT NULL,
+  source_message_id TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  tab_id TEXT NOT NULL DEFAULT 'response-board-default',
+  placement TEXT NOT NULL DEFAULT 'placed',
+  has_canvas_position INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE INDEX board_cards_tab_placement_created_idx
+  ON board_cards(tab_id, placement, created_at, id);
 ```
 
-`app_state.metadataState` stores global app metadata without session,
-delegation, or message rows. `sessions.value_json` stores one serialized
+`app_state.metadataState` stores typed global app metadata without session,
+delegation, or message rows. It may be absent only in a freshly initialized,
+never-persisted database whose normalized authority tables are empty.
+`sessions.value_json` stores one serialized
 metadata record with an empty `messages` array. `messages.value_json` stores one
 message payload. `overview_kind` and `is_user` are compact semantic fields
 maintained with each message write. The composite primary key answers ordered
 range reads without a table scan; the unique key answers stable message-id
-cursor lookups.
-`session_overviews.value_blob` stores those semantic fields in one byte per
-global message position. It is updated in the same transaction as the message
-rows and lets the whole-conversation overview endpoint read one small row
-instead of stepping through or parsing every persisted message.
+cursor lookups. `session_overviews.value_blob` stores those semantic fields in
+one byte per global message position. It is updated in the same transaction as
+the message rows and lets the whole-conversation overview endpoint read one
+small row instead of stepping through or parsing every persisted message.
 `delegations.value_json` stores one serialized delegation record per row.
 
 Startup validates every normalized row against its durable key: session and
@@ -110,91 +145,29 @@ quarantine set so a later synchronous full-snapshot persistence fallback does
 not misinterpret the isolated row as a user deletion; the original SQLite row
 stays available for recovery or inspection.
 
-## Longer-Term Fully Columnar Schema
-
-Keep message payloads as JSON so the first migration is mostly a storage and API
-boundary change, not a rewrite of the message model.
-
-```sql
-CREATE TABLE meta (
-  key TEXT PRIMARY KEY,
-  value TEXT NOT NULL
-);
-
-CREATE TABLE app_state (
-  key TEXT PRIMARY KEY,
-  value_json TEXT NOT NULL
-);
-
-CREATE TABLE projects (
-  id TEXT PRIMARY KEY,
-  value_json TEXT NOT NULL
-);
-
-CREATE TABLE workspace_layouts (
-  id TEXT PRIMARY KEY,
-  value_json TEXT NOT NULL
-);
-
-CREATE TABLE orchestrators (
-  id TEXT PRIMARY KEY,
-  value_json TEXT NOT NULL
-);
-
-CREATE TABLE sessions (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  emoji TEXT NOT NULL,
-  agent TEXT NOT NULL,
-  status TEXT NOT NULL,
-  preview TEXT NOT NULL,
-  workdir TEXT NOT NULL,
-  project_id TEXT,
-  model TEXT NOT NULL,
-  settings_json TEXT NOT NULL,
-  external_session_id TEXT,
-  agent_commands_revision INTEGER NOT NULL DEFAULT 0,
-  codex_thread_state TEXT,
-  message_count INTEGER NOT NULL DEFAULT 0,
-  created_at_ms INTEGER NOT NULL,
-  updated_at_ms INTEGER NOT NULL
-);
-
-CREATE TABLE messages (
-  session_id TEXT NOT NULL,
-  position INTEGER NOT NULL,
-  id TEXT NOT NULL,
-  author TEXT NOT NULL,
-  type TEXT NOT NULL,
-  timestamp TEXT NOT NULL,
-  payload_json TEXT NOT NULL,
-  PRIMARY KEY (session_id, position),
-  UNIQUE (session_id, id),
-  FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
-);
-
-CREATE TABLE queued_prompts (
-  session_id TEXT NOT NULL,
-  position INTEGER NOT NULL,
-  payload_json TEXT NOT NULL,
-  PRIMARY KEY (session_id, position),
-  FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
-);
-
-CREATE INDEX idx_messages_session_id_position
-  ON messages(session_id, position);
-
-CREATE INDEX idx_sessions_project_id
-  ON sessions(project_id);
-
-CREATE INDEX idx_sessions_updated_at_ms
-  ON sessions(updated_at_ms);
-```
-
-`meta.schema_version` is `2`. The single supported v1-to-v2 upgrade moves each
-embedded session message array into indexed `messages` rows in one transaction,
-then records schema v2. Any other schema version is rejected; there is no runtime
-dual-read or alternate hydration path.
+`meta.schema_version` is `2`, and
+`meta.prompt_history_storage_version` is `1`. Existing databases must contain
+all nine tables above, but may retain unrelated tables from earlier development
+builds. Each required table must have exactly the column set shown above,
+except that the retained current-schema maintenance may add the two message
+overview columns and the three board-card partition columns when they are
+missing. Unexpected columns and every other missing column are rejected before
+maintenance; after maintenance all nine tables must match the canonical sets.
+Before any schema maintenance or persistent PRAGMA runs, startup also requires
+both metadata markers. A present `app_state.metadataState` row must deserialize
+as the current `PersistedState` shape. An absent row is accepted only when
+`sessions`, `messages`, `session_overviews`, `session_prompt_histories`,
+`delegations`, and `board_cards` contain no rows; the schema-seeded default
+response-board tab does not count as persisted app metadata. Startup rejects
+the obsolete v2 authority shapes: non-empty `sessions` or `delegations` arrays
+in `app_state` (and fail-closed non-null values of the wrong type), or an array-valued
+`session.promptHistory` key in a parseable `sessions.value_json` row, including
+an empty array. A non-array prompt-history value is damaged row data rather
+than legacy authority and remains a row-level quarantine concern, as does
+malformed session JSON. Fresh databases create every table and both markers in
+one immediate transaction. Any unsupported or partial shape is rejected with
+move/delete reset guidance; there is no migration, dual-read, or alternate
+hydration path for unreleased local state.
 
 ## API Shape
 
@@ -248,9 +221,15 @@ state and preview.
 
 On startup:
 
-1. Open `termal.sqlite` when it exists and load metadata, session rows, and
-   delegation rows, or bootstrap an empty local state when it has no app
-   metadata yet.
+1. Open `termal.sqlite` when it exists and validate the required current table
+   subset, canonical column sets, schema and prompt-history authority markers,
+   typed global metadata authority, and absence of embedded legacy records
+   before persistent PRAGMAs, maintenance, or state loading. Only the five
+   columns added by retained
+   overview/board maintenance may initially be absent, and the post-maintenance
+   shape must be canonical.
+   A database with no user tables receives all current tables and both markers
+   in one immediate transaction.
 2. Bootstrap `coordination.sqlite` before any coordination stores, background
    persistence worker, or HTTP listener. An empty file receives the complete
    current schema atomically; an existing file must already match the current
@@ -266,9 +245,10 @@ On startup:
 
 TermAl does not attach `termal.sqlite` or import coordination rows from the
 former unreleased single-database layout. If validation reports an unsupported
-`coordination.sqlite`, stop TermAl and move the file aside for diagnosis or
-delete it to reset local mailboxes and boards, then restart. Current-schema
-files are never rewritten merely to satisfy startup validation.
+`termal.sqlite` or `coordination.sqlite`, stop TermAl and move the named file
+aside for diagnosis or delete it to reset its local state, then restart.
+Current-schema coordination files are never rewritten merely to satisfy startup
+validation.
 
 ## Frontend Changes
 
@@ -313,10 +293,9 @@ The normalized transcript schema and bounded HTTP reads are implemented:
 - Production startup stores state in `~/.termal/termal.sqlite`.
 - SQLite stores global metadata and per-session metadata separately from
   transcript messages.
-- Schema v2 migrates message arrays out of v1 `sessions.value_json` rows in one
-  transaction without losing order or message ids. It reads legacy sessions in
-  bounded batches and isolates malformed rows so one damaged session cannot
-  prevent healthy siblings from migrating.
+- The current v2 schema stores transcript messages in indexed `messages` rows.
+  Version 1 databases are rejected with `termal.sqlite` reset guidance rather
+  than migrated or read through a compatibility path.
 - `messages` is a `WITHOUT ROWID` table with
   `PRIMARY KEY(session_id, position)` for ordered range pages and
   `UNIQUE(session_id, message_id)` for stable cursor resolution.
@@ -380,6 +359,5 @@ Frontend tests:
 ## Expected Result
 
 Session creation and startup are proportional to session metadata plus bounded
-retained suffixes, not all historical messages. The one-time v1-to-v2 SQLite
-migration preserves existing transcript order and ids; normal runtime reads only
-the v2 indexed tables.
+retained suffixes, not all historical messages. Runtime reads only the current
+indexed tables; obsolete development schemas must be reset instead of migrated.

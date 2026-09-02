@@ -1,8 +1,8 @@
 //! Delegation persistence-delta tests split from `delegations.rs`.
 //!
-//! This module owns delegation row persistence, tombstone, and migration delta
-//! coverage. It deliberately does not own wait fan-in, read-only enforcement,
-//! or result recovery tests.
+//! This module owns delegation row persistence and tombstone coverage. It
+//! deliberately does not own wait fan-in, read-only enforcement, or result
+//! recovery tests.
 
 use super::delegation_support::{
     finish_delegation_child_with_assistant_text,
@@ -130,15 +130,15 @@ fn delegation_create_and_completion_are_included_in_persist_delta() {
 }
 
 #[test]
-fn sqlite_empty_delegation_table_preserves_embedded_delegations_for_migration() {
+fn persisted_state_ignores_metadata_embedded_delegations() {
     let state = test_app_state();
     let parent_session_id = test_session_id(&state, Agent::Codex);
-    let created = state
+    state
         .create_read_only_delegation(
             &parent_session_id,
             CreateDelegationRequest {
-                prompt: "Persisted before dedicated delegation table.".to_owned(),
-                title: Some("Embedded Delegation".to_owned()),
+                prompt: "Dedicated delegation table authority.".to_owned(),
+                title: Some("Table Authority".to_owned()),
                 cwd: None,
                 agent: Some(Agent::Codex),
                 model: None,
@@ -147,35 +147,18 @@ fn sqlite_empty_delegation_table_preserves_embedded_delegations_for_migration() 
             },
         )
         .expect("delegation should be created");
-    let mut persisted = {
-        let inner = state.inner.lock().expect("state mutex poisoned");
-        PersistedState::from_inner(&inner)
-    };
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let mut metadata = serde_json::to_value(PersistedState::metadata_from_inner(&inner))
+        .expect("current metadata should encode");
+    metadata["delegations"] =
+        serde_json::to_value(&inner.delegations).expect("embedded fixture should encode");
+    drop(inner);
 
-    let loaded_from_table = apply_sqlite_delegation_records(&mut persisted, Vec::new(), false);
-
-    assert!(!loaded_from_table);
+    let persisted: PersistedState =
+        serde_json::from_value(metadata).expect("metadata fixture should decode");
     assert!(
-        persisted
-            .delegations
-            .iter()
-            .any(|delegation| delegation.id == created.delegation.id),
-        "empty dedicated table must not wipe embedded delegation metadata"
-    );
-
-    let mut inner = persisted
-        .into_inner()
-        .expect("embedded delegation state should load");
-    inner.mark_loaded_delegations_for_sqlite_migration();
-    let delta = inner.collect_persist_delta(0);
-    let delegations = delta
-        .changed_delegations
-        .as_ref()
-        .expect("embedded delegations should be migrated into the dedicated table");
-    assert!(
-        delegations
-            .iter()
-            .any(|delegation| delegation.id == created.delegation.id)
+        persisted.delegations.is_empty(),
+        "delegations must load only from the normalized delegations table"
     );
 }
 

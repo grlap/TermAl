@@ -410,19 +410,7 @@ impl AppState {
         let discovery_scopes = collect_codex_discovery_scopes(&default_workdir, &inner.projects);
         match discover_codex_threads(&default_workdir, &discovery_scopes) {
             Ok(discovery) => {
-                let DiscoveredCodexThreads {
-                    delegation_thread_ids,
-                    threads,
-                    mut subagent_thread_ids,
-                } = discovery;
-                subagent_thread_ids.extend(delegation_thread_ids);
-                let removed_child_sessions =
-                    inner.prune_auto_imported_codex_child_sessions(&subagent_thread_ids);
-                if removed_child_sessions > 0 {
-                    eprintln!(
-                        "codex discovery> removed {removed_child_sessions} auto-imported child session(s)"
-                    );
-                }
+                let DiscoveredCodexThreads { threads, .. } = discovery;
                 inner.import_discovered_codex_threads(&default_workdir, threads);
             }
             Err(err) => {
@@ -502,8 +490,8 @@ impl AppState {
         // The thread owns a `SqlitePersistConnectionCache` so the SQLite
         // connection and schema-validation cost are amortized across
         // every queued write — previously every persist opened a fresh
-        // connection and re-ran `ensure_sqlite_state_schema`, which
-        // writes `schema_version` on every call.
+        // connection and re-ran the schema validation and maintenance
+        // checks.
         let persist_thread_handle = std::thread::Builder::new()
             .name("termal-persist".to_owned())
             .spawn(move || {

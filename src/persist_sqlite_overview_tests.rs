@@ -4,7 +4,7 @@ mod sqlite_overview_tests {
     use super::*;
 
     #[test]
-    fn schema_v2_skips_unreadable_and_invalid_proxy_overview_candidates() {
+    fn current_schema_skips_unreadable_and_invalid_proxy_overview_candidates() {
         let connection =
             rusqlite::Connection::open_in_memory().expect("in-memory sqlite should open");
         connection
@@ -16,6 +16,8 @@ mod sqlite_overview_tests {
                   value TEXT NOT NULL
                 );
                 INSERT INTO meta(key, value) VALUES('schema_version', '2');
+                INSERT INTO meta(key, value)
+                VALUES('prompt_history_storage_version', '1');
                 CREATE TABLE sessions (
                   id TEXT PRIMARY KEY,
                   value_json TEXT NOT NULL
@@ -39,6 +41,8 @@ mod sqlite_overview_tests {
                 ",
             )
             .expect("mixed overview fixture should initialize");
+        seed_current_state_auxiliary_tables(&connection);
+        seed_current_state_metadata(&connection);
 
         let candidates: [(&str, rusqlite::types::Value); 10] = [
             ("healthy-local", "{}".to_owned().into()),

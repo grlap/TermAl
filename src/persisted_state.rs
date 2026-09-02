@@ -1,5 +1,5 @@
 // PersistedState + PersistedSessionRecord — the on-disk projections of
-// StateInner / SessionRecord used for SQLite + legacy-JSON persistence.
+// StateInner / SessionRecord used for normalized SQLite persistence.
 //
 // The "persisted" types are the single source of truth for the disk
 // schema: they use `#[serde(rename_all = "camelCase")]`, `#[serde(default)]`,
@@ -26,7 +26,6 @@ struct PersistedState {
     preferences: AppPreferences,
     #[serde(default)]
     revision: u64,
-    next_project_number: usize,
     next_session_number: usize,
     next_message_number: u64,
     projects: Vec<Project>,
@@ -40,7 +39,9 @@ struct PersistedState {
     ignored_discovered_codex_thread_ids: BTreeSet<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     orchestrator_instances: Vec<OrchestratorInstance>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    /// Snapshot-only carrier for the normalized `delegations` table.
+    /// Delegations are never read from or written into `app_state` metadata.
+    #[serde(skip)]
     delegations: Vec<DelegationRecord>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     delegation_waits: Vec<DelegationWaitRecord>,
@@ -72,7 +73,6 @@ impl PersistedState {
             codex: inner.codex.clone(),
             preferences: inner.preferences.clone(),
             revision: inner.revision,
-            next_project_number: inner.next_project_number,
             next_session_number: inner.next_session_number,
             next_message_number: inner.next_message_number,
             projects: inner.projects.clone(),
@@ -123,7 +123,6 @@ impl PersistedState {
             codex: self.codex.clone(),
             preferences: self.preferences.clone(),
             revision: self.revision,
-            next_project_number: self.next_project_number,
             next_session_number: self.next_session_number,
             next_message_number: self.next_message_number,
             projects: self.projects.clone(),
@@ -175,7 +174,6 @@ impl PersistedState {
             engram_project_resets: EngramProjectResetFences::default(),
             preferences,
             revision: self.revision,
-            next_project_number: self.next_project_number,
             next_session_number: self.next_session_number,
             next_message_number: self.next_message_number,
             projects: self.projects,

@@ -21,14 +21,11 @@ fn resolve_persistence_path(default_workdir: &str) -> PathBuf {
 }
 
 const SQLITE_SCHEMA_VERSION: &str = "2";
-const SQLITE_PREVIOUS_SCHEMA_VERSION: &str = "1";
 const SQLITE_METADATA_KEY: &str = "metadataState";
-const SQLITE_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
-const SQLITE_SESSION_TAIL_MESSAGES: usize = 64;
-const SQLITE_TRANSCRIPT_MIGRATION_SESSION_BATCH: usize = 16;
-const SQLITE_TRANSCRIPT_MIGRATION_MESSAGE_BATCH: usize = 64;
 const SQLITE_PROMPT_HISTORY_STORAGE_KEY: &str = "prompt_history_storage_version";
 const SQLITE_PROMPT_HISTORY_STORAGE_VERSION: &str = "1";
+const SQLITE_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
+const SQLITE_SESSION_TAIL_MESSAGES: usize = 64;
 
 /// Per-database writer locks shared by every in-process SQLite write path.
 ///
@@ -230,7 +227,7 @@ fn wait_for_sqlite_state_writer_issued_tickets(
     }
 }
 
-fn open_sqlite_state_connection(path: &FsPath) -> Result<rusqlite::Connection> {
+fn open_sqlite_state_connection_unconfigured(path: &FsPath) -> Result<rusqlite::Connection> {
     if let Some(parent) = path.parent() {
         harden_local_state_directory_permissions(parent)?;
     }
@@ -240,26 +237,32 @@ fn open_sqlite_state_connection(path: &FsPath) -> Result<rusqlite::Connection> {
     connection
         .busy_timeout(SQLITE_BUSY_TIMEOUT)
         .with_context(|| format!("failed to set SQLite busy timeout for `{}`", path.display()))?;
+    harden_sqlite_state_file_permissions(path)?;
+    Ok(connection)
+}
+
+fn configure_sqlite_state_connection(connection: &rusqlite::Connection) -> Result<()> {
     // WAL lets readers coexist with the background persistence writer. NORMAL
     // sync is the common local-app tradeoff: durable enough for TermAl state,
     // with much lower fsync cost than FULL on every small create-session write.
+    connection
+        .execute_batch(
+            "
+            PRAGMA journal_mode = WAL;
+            PRAGMA synchronous = NORMAL;
+            PRAGMA foreign_keys = ON;
+            ",
+        )
+        .context("failed to configure SQLite state pragmas")
+}
+
+fn open_sqlite_state_connection(path: &FsPath) -> Result<rusqlite::Connection> {
+    let connection = open_sqlite_state_connection_unconfigured(path)?;
     {
         let write_lock = sqlite_state_write_lock(path);
         let _write_guard = lock_sqlite_state_writer(&write_lock);
-        connection
-            .execute_batch(
-                "
-                PRAGMA journal_mode = WAL;
-                PRAGMA synchronous = NORMAL;
-                PRAGMA foreign_keys = ON;
-                ",
-            )
-            .with_context(|| {
-                format!(
-                    "failed to configure SQLite pragmas for `{}`",
-                    path.display()
-                )
-            })?;
+        configure_sqlite_state_connection(&connection)
+            .with_context(|| format!("failed to configure SQLite pragmas for `{}`", path.display()))?;
     }
     harden_sqlite_state_file_permissions(path)?;
     Ok(connection)
@@ -853,442 +856,464 @@ fn load_state(path: &FsPath) -> Result<Option<StateInner>> {
     load_state_from_sqlite(path)
 }
 
-fn ensure_sqlite_state_schema(connection: &rusqlite::Connection) -> Result<()> {
-    connection
-        .execute_batch(
-            "
-            CREATE TABLE IF NOT EXISTS meta (
-              key TEXT PRIMARY KEY,
-              value TEXT NOT NULL
-            );
-            ",
+fn sqlite_state_user_table_names(connection: &rusqlite::Connection) -> Result<BTreeSet<String>> {
+    let mut statement = connection
+        .prepare(
+            "SELECT name
+             FROM sqlite_master
+             WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+             ORDER BY name",
         )
-        .context("failed to initialize SQLite meta schema")?;
-    let stored_schema_version = match connection.query_row(
-        "SELECT value FROM meta WHERE key = 'schema_version'",
-        [],
-        |row| row.get::<_, String>(0),
-    ) {
-        Ok(value) => Some(value),
-        Err(rusqlite::Error::QueryReturnedNoRows) => None,
-        Err(err) => return Err(err).context("failed to read SQLite state schema version"),
-    };
-    if let Some(stored_schema_version) = stored_schema_version.as_deref()
-        && !matches!(
-            stored_schema_version,
-            SQLITE_SCHEMA_VERSION | SQLITE_PREVIOUS_SCHEMA_VERSION
-        )
-    {
-        bail!(
-            "unsupported SQLite state schema version `{}`; this binary supports `{}`",
-            stored_schema_version,
-            SQLITE_SCHEMA_VERSION
-        );
+        .context("failed to inspect state database tables")?;
+    statement
+        .query_map([], |row| row.get::<_, String>(0))
+        .context("failed to query state database tables")?
+        .collect::<rusqlite::Result<BTreeSet<_>>>()
+        .context("failed to decode state database tables")
+}
+
+fn sqlite_state_table_columns(
+    connection: &rusqlite::Connection,
+    table_name: &str,
+) -> Result<BTreeSet<String>> {
+    // Callers only pass names from CURRENT_SQLITE_STATE_TABLE_COLUMNS. SQLite
+    // PRAGMA table_info does not accept a bound table-name parameter.
+    let mut statement = connection
+        .prepare(&format!("PRAGMA table_info({table_name})"))
+        .with_context(|| format!("failed to inspect state table `{table_name}`"))?;
+    statement
+        .query_map([], |row| row.get::<_, String>(1))
+        .with_context(|| format!("failed to query state table `{table_name}`"))?
+        .collect::<rusqlite::Result<BTreeSet<_>>>()
+        .with_context(|| format!("failed to decode state table `{table_name}`"))
+}
+
+const CURRENT_SQLITE_STATE_TABLE_COLUMNS: &[(&str, &[&str])] = &[
+    ("meta", &["key", "value"]),
+    ("sessions", &["id", "value_json"]),
+    (
+        "messages",
+        &[
+            "session_id",
+            "position",
+            "message_id",
+            "value_json",
+            "overview_kind",
+            "is_user",
+        ],
+    ),
+    ("session_overviews", &["session_id", "value_blob"]),
+    ("app_state", &["key", "value_json"]),
+    (
+        "session_prompt_histories",
+        &["session_id", "value_json"],
+    ),
+    ("delegations", &["id", "value_json"]),
+    (
+        "response_board_tabs",
+        &[
+            "id",
+            "name",
+            "kind",
+            "project_id",
+            "sort_order",
+            "created_at",
+        ],
+    ),
+    (
+        "board_cards",
+        &[
+            "id",
+            "x",
+            "y",
+            "w",
+            "h",
+            "snapshot_json",
+            "source_session_id",
+            "source_message_id",
+            "created_at",
+            "tab_id",
+            "placement",
+            "has_canvas_position",
+        ],
+    ),
+];
+
+// These normalized tables contain durable state that a fresh in-memory
+// bootstrap must never adopt without the matching global metadata authority.
+// `response_board_tabs` is intentionally absent: schema initialization seeds
+// the deterministic default tab before the first metadata snapshot is written.
+const SQLITE_STATE_METADATA_AUTHORITY_TABLES: &[&str] = &[
+    "sessions",
+    "messages",
+    "session_overviews",
+    "session_prompt_histories",
+    "delegations",
+    "board_cards",
+];
+
+fn sqlite_state_column_may_be_added_by_maintenance(table_name: &str, column_name: &str) -> bool {
+    matches!(
+        (table_name, column_name),
+        ("messages", "overview_kind" | "is_user")
+            | (
+                "board_cards",
+                "tab_id" | "placement" | "has_canvas_position"
+            )
+    )
+}
+
+fn validate_sqlite_state_table_columns(
+    connection: &rusqlite::Connection,
+    expected_tables: &[(&str, &[&str])],
+    allow_maintenance_missing: bool,
+) -> Result<()> {
+    for (table_name, expected_columns) in expected_tables {
+        let actual_columns = sqlite_state_table_columns(connection, table_name)?;
+        let expected_columns = expected_columns
+            .iter()
+            .map(|column_name| (*column_name).to_owned())
+            .collect::<BTreeSet<_>>();
+        let unexpected_columns = actual_columns
+            .difference(&expected_columns)
+            .cloned()
+            .collect::<Vec<_>>();
+        let missing_columns = expected_columns
+            .difference(&actual_columns)
+            .filter(|column_name| {
+                !allow_maintenance_missing
+                    || !sqlite_state_column_may_be_added_by_maintenance(table_name, column_name)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        if !unexpected_columns.is_empty() || !missing_columns.is_empty() {
+            let mut differences = Vec::new();
+            if !missing_columns.is_empty() {
+                differences.push(format!("missing columns {missing_columns:?}"));
+            }
+            if !unexpected_columns.is_empty() {
+                differences.push(format!("unexpected columns {unexpected_columns:?}"));
+            }
+            return Err(reject_unsupported_state_schema(format!(
+                "table `{table_name}` has {}; expected columns {expected_columns:?}, found \
+                 {actual_columns:?}",
+                differences.join(" and ")
+            )));
+        }
     }
-    connection
-        .execute_batch(
-            "
-            CREATE TABLE IF NOT EXISTS app_state (
-              key TEXT PRIMARY KEY,
-              value_json TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS sessions (
-              id TEXT PRIMARY KEY,
-              value_json TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS messages (
-              session_id TEXT NOT NULL,
-              position INTEGER NOT NULL CHECK(position >= 0),
-              message_id TEXT NOT NULL,
-              value_json TEXT NOT NULL,
-              overview_kind INTEGER NOT NULL DEFAULT 0,
-              is_user INTEGER NOT NULL DEFAULT 0,
-              PRIMARY KEY(session_id, position),
-              UNIQUE(session_id, message_id),
-              FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
-            ) WITHOUT ROWID;
-
-            CREATE TABLE IF NOT EXISTS session_overviews (
-              session_id TEXT PRIMARY KEY,
-              value_blob BLOB NOT NULL,
-              FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
-            ) WITHOUT ROWID;
-
-            CREATE TABLE IF NOT EXISTS session_prompt_histories (
-              session_id TEXT PRIMARY KEY,
-              value_json TEXT NOT NULL,
-              FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
-            ) WITHOUT ROWID;
-
-            CREATE TABLE IF NOT EXISTS delegations (
-              id TEXT PRIMARY KEY,
-              value_json TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS response_board_tabs (
-              id TEXT PRIMARY KEY,
-              name TEXT NOT NULL,
-              kind TEXT NOT NULL,
-              project_id TEXT UNIQUE,
-              sort_order INTEGER NOT NULL,
-              created_at TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS board_cards (
-              id TEXT PRIMARY KEY,
-              x REAL NOT NULL,
-              y REAL NOT NULL,
-              w REAL NOT NULL,
-              h REAL NOT NULL,
-              snapshot_json TEXT NOT NULL,
-              source_session_id TEXT NOT NULL,
-              source_message_id TEXT NOT NULL,
-              created_at TEXT NOT NULL,
-              tab_id TEXT NOT NULL DEFAULT 'response-board-default',
-              placement TEXT NOT NULL DEFAULT 'placed',
-              has_canvas_position INTEGER NOT NULL DEFAULT 1
-            );
-            ",
-        )
-        .context("failed to initialize SQLite state schema")?;
-    ensure_sqlite_message_overview_columns(connection)?;
-    ensure_sqlite_response_board_schema(connection)?;
-    if stored_schema_version.as_deref() == Some(SQLITE_PREVIOUS_SCHEMA_VERSION) {
-        migrate_sqlite_state_schema_v1_to_v2(connection)?;
-    }
-    migrate_embedded_sqlite_prompt_histories(connection)?;
-    backfill_missing_sqlite_session_overviews(connection)?;
-    connection
-        .execute(
-            "INSERT INTO meta(key, value) VALUES('schema_version', ?1)
-             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            rusqlite::params![SQLITE_SCHEMA_VERSION],
-        )
-        .context("failed to record SQLite state schema version")?;
     Ok(())
 }
 
-/// Moves the legacy embedded `session.promptHistory` projection into its own
-/// row. The marker makes this a one-time upgrade while the transaction keeps a
-/// failed migration retryable on the next startup. Invalid session JSON stays
-/// untouched so the normal row-isolation loader can quarantine it.
-fn migrate_embedded_sqlite_prompt_histories(
+const SQLITE_STATE_CORE_SCHEMA_SQL: &str = "
+    CREATE TABLE meta (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+
+    CREATE TABLE sessions (
+      id TEXT PRIMARY KEY,
+      value_json TEXT NOT NULL
+    );
+
+    CREATE TABLE messages (
+      session_id TEXT NOT NULL,
+      position INTEGER NOT NULL CHECK(position >= 0),
+      message_id TEXT NOT NULL,
+      value_json TEXT NOT NULL,
+      overview_kind INTEGER NOT NULL DEFAULT 0,
+      is_user INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY(session_id, position),
+      UNIQUE(session_id, message_id),
+      FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+    ) WITHOUT ROWID;
+
+    CREATE TABLE session_overviews (
+      session_id TEXT PRIMARY KEY,
+      value_blob BLOB NOT NULL,
+      FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+    ) WITHOUT ROWID;
+";
+
+const SQLITE_STATE_AUXILIARY_SCHEMA_SQL: &str = "
+    CREATE TABLE app_state (
+      key TEXT PRIMARY KEY,
+      value_json TEXT NOT NULL
+    );
+
+    CREATE TABLE session_prompt_histories (
+      session_id TEXT PRIMARY KEY,
+      value_json TEXT NOT NULL,
+      FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+    ) WITHOUT ROWID;
+
+    CREATE TABLE delegations (
+      id TEXT PRIMARY KEY,
+      value_json TEXT NOT NULL
+    );
+
+    CREATE TABLE response_board_tabs (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      project_id TEXT UNIQUE,
+      sort_order INTEGER NOT NULL,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE board_cards (
+      id TEXT PRIMARY KEY,
+      x REAL NOT NULL,
+      y REAL NOT NULL,
+      w REAL NOT NULL,
+      h REAL NOT NULL,
+      snapshot_json TEXT NOT NULL,
+      source_session_id TEXT NOT NULL,
+      source_message_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      tab_id TEXT NOT NULL DEFAULT 'response-board-default',
+      placement TEXT NOT NULL DEFAULT 'placed',
+      has_canvas_position INTEGER NOT NULL DEFAULT 1
+    );
+";
+
+fn reject_unsupported_state_schema(detail: impl std::fmt::Display) -> anyhow::Error {
+    anyhow!(
+        "unsupported state database schema ({detail}); this unreleased local state is not migrated. \
+         Move or delete `termal.sqlite` to reset local app state, then restart TermAl"
+    )
+}
+
+fn required_state_meta_value(
     connection: &rusqlite::Connection,
-) -> Result<()> {
-    let migration_complete = connection
+    key: &str,
+) -> Result<String> {
+    connection
         .query_row(
             "SELECT value FROM meta WHERE key = ?1",
-            rusqlite::params![SQLITE_PROMPT_HISTORY_STORAGE_KEY],
+            rusqlite::params![key],
             |row| row.get::<_, String>(0),
         )
         .optional()
-        .context("failed to read SQLite prompt-history storage version")?
-        .as_deref()
-        == Some(SQLITE_PROMPT_HISTORY_STORAGE_VERSION);
-    if migration_complete {
+        .with_context(|| format!("failed to read state metadata key `{key}`"))?
+        .ok_or_else(|| reject_unsupported_state_schema(format!("missing `{key}` metadata")))
+}
+
+fn embedded_state_field_has_records_or_invalid_shape(value: &Value, key: &str) -> bool {
+    match value.get(key) {
+        None | Some(Value::Null) => false,
+        Some(Value::Array(entries)) => !entries.is_empty(),
+        Some(_) => true,
+    }
+}
+
+fn first_normalized_state_authority_table_with_rows(
+    connection: &rusqlite::Connection,
+) -> Result<Option<&'static str>> {
+    for table_name in SQLITE_STATE_METADATA_AUTHORITY_TABLES {
+        // Table names come only from the static inventory above. SQLite does
+        // not allow a bound identifier in this EXISTS query.
+        let has_rows = connection
+            .query_row(
+                &format!("SELECT EXISTS(SELECT 1 FROM {table_name} LIMIT 1)"),
+                [],
+                |row| row.get::<_, bool>(0),
+            )
+            .with_context(|| format!("failed to inspect normalized `{table_name}` authority"))?;
+        if has_rows {
+            return Ok(Some(table_name));
+        }
+    }
+    Ok(None)
+}
+
+fn validate_no_legacy_embedded_state(connection: &rusqlite::Connection) -> Result<()> {
+    let metadata = connection
+        .query_row(
+            "SELECT value_json FROM app_state WHERE key = ?1",
+            rusqlite::params![SQLITE_METADATA_KEY],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .context("failed to inspect state metadata authority")?;
+    if let Some(encoded) = metadata {
+        let value: Value = serde_json::from_str(&encoded).map_err(|error| {
+            reject_unsupported_state_schema(format!(
+                "persisted state metadata is not valid JSON: {error}"
+            ))
+        })?;
+        for key in ["sessions", "delegations"] {
+            if embedded_state_field_has_records_or_invalid_shape(&value, key) {
+                return Err(reject_unsupported_state_schema(format!(
+                    "app_state contains embedded `{key}` records or an invalid `{key}` shape"
+                )));
+            }
+        }
+        let _: PersistedState = serde_json::from_value(value).map_err(|error| {
+            reject_unsupported_state_schema(format!(
+                "persisted state metadata does not match the current metadata shape: {error}"
+            ))
+        })?;
+    } else if let Some(table_name) =
+        first_normalized_state_authority_table_with_rows(connection)?
+    {
+        return Err(reject_unsupported_state_schema(format!(
+            "missing app_state `{SQLITE_METADATA_KEY}` metadata while normalized table \
+             `{table_name}` contains rows"
+        )));
+    }
+
+    let embedded_prompt_history_session = connection
+        .query_row(
+            "SELECT id
+             FROM sessions
+             WHERE typeof(id) = 'text'
+               AND typeof(value_json) = 'text'
+               AND CASE
+                     WHEN json_valid(value_json)
+                     THEN json_type(value_json, '$.session.promptHistory')
+                   END = 'array'
+             LIMIT 1",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .context("failed to inspect embedded prompt-history authority")?;
+    if let Some(session_id) = embedded_prompt_history_session {
+        return Err(reject_unsupported_state_schema(format!(
+            "session `{session_id}` still contains embedded `session.promptHistory`"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_current_sqlite_state_schema(connection: &rusqlite::Connection) -> Result<()> {
+    let actual_tables = sqlite_state_user_table_names(connection)?;
+    if !actual_tables.contains("meta") {
+        return Err(reject_unsupported_state_schema(format!(
+            "missing `meta` table; found tables {actual_tables:?}"
+        )));
+    }
+    let meta_table = CURRENT_SQLITE_STATE_TABLE_COLUMNS
+        .iter()
+        .find(|(table_name, _)| *table_name == "meta")
+        .ok_or_else(|| anyhow!("current state schema inventory is missing the `meta` table"))?;
+    validate_sqlite_state_table_columns(connection, std::slice::from_ref(meta_table), false)?;
+    let stored_schema_version = required_state_meta_value(connection, "schema_version")?;
+    if stored_schema_version != SQLITE_SCHEMA_VERSION {
+        return Err(reject_unsupported_state_schema(format!(
+            "found version `{stored_schema_version}`, expected `{SQLITE_SCHEMA_VERSION}`"
+        )));
+    }
+
+    let missing_tables = CURRENT_SQLITE_STATE_TABLE_COLUMNS
+        .iter()
+        .map(|(table_name, _)| *table_name)
+        .filter(|table_name| !actual_tables.contains(*table_name))
+        .collect::<Vec<_>>();
+    if !missing_tables.is_empty() {
+        return Err(reject_unsupported_state_schema(format!(
+            "missing required tables {missing_tables:?}; found tables {actual_tables:?}"
+        )));
+    }
+    validate_sqlite_state_table_columns(connection, CURRENT_SQLITE_STATE_TABLE_COLUMNS, true)?;
+    let prompt_history_storage_version =
+        required_state_meta_value(connection, SQLITE_PROMPT_HISTORY_STORAGE_KEY)?;
+    if prompt_history_storage_version != SQLITE_PROMPT_HISTORY_STORAGE_VERSION {
+        return Err(reject_unsupported_state_schema(format!(
+            "found `{SQLITE_PROMPT_HISTORY_STORAGE_KEY}` value \
+             `{prompt_history_storage_version}`, expected `{SQLITE_PROMPT_HISTORY_STORAGE_VERSION}`"
+        )));
+    }
+    validate_no_legacy_embedded_state(connection)
+}
+
+fn initialize_current_sqlite_state_schema(
+    connection: &rusqlite::Connection,
+) -> Result<bool> {
+    let transaction = rusqlite::Transaction::new_unchecked(
+        connection,
+        rusqlite::TransactionBehavior::Immediate,
+    )
+    .context("failed to begin current state schema initialization")?;
+    if !sqlite_state_user_table_names(&transaction)?.is_empty() {
+        transaction
+            .commit()
+            .context("failed to finish concurrent state schema initialization check")?;
+        return Ok(false);
+    }
+    transaction
+        .execute_batch(SQLITE_STATE_CORE_SCHEMA_SQL)
+        .context("failed to initialize current SQLite core state schema")?;
+    transaction
+        .execute_batch(SQLITE_STATE_AUXILIARY_SCHEMA_SQL)
+        .context("failed to initialize current SQLite auxiliary state schema")?;
+    ensure_sqlite_message_overview_columns(&transaction)?;
+    ensure_sqlite_response_board_schema(&transaction)?;
+    backfill_missing_sqlite_session_overviews(&transaction)?;
+    validate_sqlite_state_table_columns(&transaction, CURRENT_SQLITE_STATE_TABLE_COLUMNS, false)?;
+    transaction
+        .execute(
+            "INSERT INTO meta(key, value) VALUES('schema_version', ?1)",
+            rusqlite::params![SQLITE_SCHEMA_VERSION],
+        )
+        .context("failed to record SQLite state schema version")?;
+    transaction
+        .execute(
+            "INSERT INTO meta(key, value) VALUES(?1, ?2)",
+            rusqlite::params![
+                SQLITE_PROMPT_HISTORY_STORAGE_KEY,
+                SQLITE_PROMPT_HISTORY_STORAGE_VERSION
+            ],
+        )
+        .context("failed to record SQLite prompt-history storage authority")?;
+    transaction
+        .commit()
+        .context("failed to commit current state schema initialization")?;
+    Ok(true)
+}
+
+fn ensure_sqlite_state_schema(connection: &rusqlite::Connection) -> Result<()> {
+    if sqlite_state_user_table_names(connection)?.is_empty()
+        && initialize_current_sqlite_state_schema(connection)?
+    {
+        configure_sqlite_state_connection(connection)?;
         return Ok(());
     }
 
-    let tx = connection
-        .unchecked_transaction()
-        .context("failed to start SQLite prompt-history migration")?;
-    let encoded_sessions = {
-        let mut statement = tx
-            .prepare(
-                "SELECT id, value_json
-                 FROM sessions
-                 WHERE typeof(id) = 'text' AND typeof(value_json) = 'text'",
-            )
-            .context("failed to prepare embedded prompt-history migration")?;
-        statement
-            .query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })
-            .context("failed to query embedded prompt histories")?
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .context("failed to read embedded prompt histories")?
-    };
-    for (session_id, encoded) in encoded_sessions {
-        let Ok(mut value) = serde_json::from_str::<Value>(&encoded) else {
-            continue;
-        };
-        let Some(session) = value.get_mut("session").and_then(Value::as_object_mut) else {
-            continue;
-        };
-        let Some(prompt_history) = session.remove("promptHistory") else {
-            continue;
-        };
-        let Some(prompt_history) = prompt_history.as_array() else {
-            // Leave malformed current-schema rows unchanged so strict session
-            // validation, rather than this compatibility migration, owns the
-            // resulting quarantine decision.
-            session.insert("promptHistory".to_owned(), prompt_history);
-            continue;
-        };
-        let history_json = serde_json::to_string(prompt_history)
-            .context("failed to serialize migrated prompt history")?;
-        let metadata_json = serde_json::to_string(&value)
-            .context("failed to serialize migrated session metadata")?;
-        tx.execute(
-            "INSERT INTO session_prompt_histories(session_id, value_json)
-             VALUES(?1, ?2)
-             ON CONFLICT(session_id) DO NOTHING",
-            rusqlite::params![session_id, history_json],
+    // Existing databases must pass every read-only compatibility check before
+    // a persistent PRAGMA, CREATE/ALTER, backfill, or metadata write can run.
+    validate_current_sqlite_state_schema(connection)?;
+    configure_sqlite_state_connection(connection)?;
+    ensure_sqlite_message_overview_columns(connection)?;
+    ensure_sqlite_response_board_schema(connection)?;
+    backfill_missing_sqlite_session_overviews(connection)?;
+    validate_sqlite_state_table_columns(connection, CURRENT_SQLITE_STATE_TABLE_COLUMNS, false)?;
+    Ok(())
+}
+
+#[cfg(test)]
+fn seed_current_state_auxiliary_tables(connection: &rusqlite::Connection) {
+    connection
+        .execute_batch(SQLITE_STATE_AUXILIARY_SCHEMA_SQL)
+        .expect("current auxiliary state tables should initialize");
+}
+
+#[cfg(test)]
+fn seed_current_state_metadata(connection: &rusqlite::Connection) {
+    connection
+        .execute(
+            "INSERT INTO app_state(key, value_json) VALUES(?1, ?2)",
+            rusqlite::params![
+                SQLITE_METADATA_KEY,
+                r#"{"nextSessionNumber":1,"nextMessageNumber":1,"projects":[],"sessions":[]}"#
+            ],
         )
-        .with_context(|| {
-            format!("failed to migrate prompt history for session `{session_id}`")
-        })?;
-        tx.execute(
-            "UPDATE sessions SET value_json = ?2 WHERE id = ?1",
-            rusqlite::params![session_id, metadata_json],
-        )
-        .with_context(|| {
-            format!("failed to remove embedded prompt history for session `{session_id}`")
-        })?;
-    }
-    tx.execute(
-        "INSERT INTO meta(key, value) VALUES(?1, ?2)
-         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-        rusqlite::params![
-            SQLITE_PROMPT_HISTORY_STORAGE_KEY,
-            SQLITE_PROMPT_HISTORY_STORAGE_VERSION
-        ],
-    )
-    .context("failed to record SQLite prompt-history storage version")?;
-    tx.commit()
-        .context("failed to commit SQLite prompt-history migration")
+        .expect("current metadata authority should seed");
 }
 
 include!("persist_sqlite_overview.rs");
 #[cfg(test)]
 include!("persist_sqlite_overview_tests.rs");
-
-fn migrate_sqlite_state_schema_v1_to_v2(connection: &rusqlite::Connection) -> Result<()> {
-    let tx = connection
-        .unchecked_transaction()
-        .context("failed to start SQLite transcript migration")?;
-    let mut last_rowid = 0_i64;
-    let mut skipped_sessions = 0_usize;
-    loop {
-        // Bound migration memory by session batches instead of collecting every
-        // legacy row id before decoding. Message payloads are streamed in a
-        // separate bounded loop below, so Rust never materializes one session's
-        // complete embedded transcript either.
-        let encoded_sessions = {
-            let mut statement = tx
-                .prepare(
-                    "SELECT rowid, id
-                     FROM sessions
-                     WHERE rowid > ?1
-                     ORDER BY rowid
-                     LIMIT ?2",
-                )
-                .context("failed to prepare persisted transcript migration batch")?;
-            let rows = statement
-                .query_map(
-                    rusqlite::params![
-                        last_rowid,
-                        i64::try_from(SQLITE_TRANSCRIPT_MIGRATION_SESSION_BATCH)
-                            .context("transcript migration batch size exceeds SQLite range")?
-                    ],
-                    |row| {
-                        Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
-                    },
-                )
-                .context("failed to query sessions for transcript migration")?;
-            rows.collect::<rusqlite::Result<Vec<_>>>()
-                .context("failed to read a session batch for transcript migration")?
-        };
-        if encoded_sessions.is_empty() {
-            break;
-        }
-        for (rowid, session_id) in encoded_sessions {
-            last_rowid = rowid;
-            tx.execute_batch("SAVEPOINT transcript_session_migration")
-                .context("failed to start per-session transcript migration")?;
-            match migrate_sqlite_v1_session_transcript(&tx, rowid, &session_id) {
-                Ok(()) => {
-                    tx.execute_batch("RELEASE transcript_session_migration")
-                        .context("failed to commit per-session transcript migration")?;
-                }
-                Err(err) => {
-                    tx.execute_batch(
-                        "ROLLBACK TO transcript_session_migration;
-                         RELEASE transcript_session_migration;",
-                    )
-                    .context("failed to roll back invalid per-session transcript migration")?;
-                    skipped_sessions += 1;
-                    eprintln!(
-                        "persist> skipping invalid legacy session `{session_id}` during transcript migration: {err:#}"
-                    );
-                }
-            }
-        }
-    }
-    if skipped_sessions > 0 {
-        eprintln!(
-            "persist> skipped {skipped_sessions} invalid legacy session record(s) during transcript migration"
-        );
-    }
-
-    tx.execute(
-        "INSERT INTO meta(key, value) VALUES('schema_version', ?1)
-         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-        rusqlite::params![SQLITE_SCHEMA_VERSION],
-    )
-    .context("failed to advance SQLite state schema version")?;
-    tx.commit()
-        .context("failed to commit SQLite transcript migration")?;
-    Ok(())
-}
-
-fn migrate_sqlite_v1_session_transcript(
-    tx: &rusqlite::Transaction<'_>,
-    rowid: i64,
-    session_id: &str,
-) -> Result<()> {
-    // SQLite removes the embedded array before the value crosses into Rust.
-    // `json_each` below then exposes only one explicit message batch at a time.
-    let metadata_json: String = tx
-        .query_row(
-            "SELECT json_set(
-                       value_json,
-                       '$.session.messages',
-                       json('[]'),
-                       '$.session.messageCount',
-                       json_array_length(value_json, '$.session.messages')
-                     )
-             FROM sessions
-             WHERE rowid = ?1",
-            rusqlite::params![rowid],
-            |row| row.get(0),
-        )
-        .with_context(|| format!("failed to normalize legacy session `{session_id}` metadata"))?;
-    let mut record: PersistedSessionRecord = serde_json::from_str(&metadata_json)
-        .with_context(|| format!("failed to parse session `{session_id}` metadata"))?;
-    if record.session.id != session_id {
-        bail!(
-            "row id `{session_id}` does not match embedded id `{}`",
-            record.session.id
-        );
-    }
-    backfill_persisted_session_defaults(&mut record.session);
-    validate_persisted_session_fields(&record.session, record.external_session_id.as_deref())
-        .with_context(|| format!("persisted session `{session_id}` failed validation"))?;
-    validate_remote_proxy_identity(
-        record.remote_id.as_deref(),
-        record.remote_session_id.as_deref(),
-    )
-    .with_context(|| format!("persisted session `{session_id}` has invalid remote proxy identity"))?;
-    let expected_message_count = usize::try_from(record.session.message_count)
-        .context("legacy transcript count does not fit this platform")?;
-    let mut next_position = 0_usize;
-    loop {
-        let message_rows = {
-            let mut statement = tx
-                .prepare(
-                    "SELECT CAST(entry.key AS INTEGER),
-                            json_extract(entry.value, '$.id'),
-                            entry.value
-                     FROM sessions AS session,
-                          json_each(session.value_json, '$.session.messages') AS entry
-                     WHERE session.rowid = ?1
-                       AND CAST(entry.key AS INTEGER) >= ?2
-                     ORDER BY CAST(entry.key AS INTEGER)
-                     LIMIT ?3",
-                )
-                .with_context(|| {
-                    format!("failed to prepare legacy transcript batch for `{session_id}`")
-                })?;
-            statement
-                .query_map(
-                    rusqlite::params![
-                        rowid,
-                        i64::try_from(next_position)
-                            .context("legacy transcript position exceeds SQLite range")?,
-                        i64::try_from(SQLITE_TRANSCRIPT_MIGRATION_MESSAGE_BATCH)
-                            .context("transcript migration message batch exceeds SQLite range")?,
-                    ],
-                    |row| {
-                        Ok((
-                            row.get::<_, i64>(0)?,
-                            row.get::<_, String>(1)?,
-                            row.get::<_, String>(2)?,
-                        ))
-                    },
-                )
-                .with_context(|| {
-                    format!("failed to query legacy transcript batch for `{session_id}`")
-                })?
-                .collect::<rusqlite::Result<Vec<_>>>()
-                .with_context(|| {
-                    format!("failed to read legacy transcript batch for `{session_id}`")
-                })?
-        };
-        if message_rows.is_empty() {
-            break;
-        }
-        for (position, message_id, encoded) in message_rows {
-            let position = usize::try_from(position)
-                .context("legacy transcript position is negative or too large")?;
-            if position != next_position {
-                bail!("legacy transcript has a gap at position {next_position}");
-            }
-            let message: Message = serde_json::from_str(&encoded).with_context(|| {
-                format!("failed to parse legacy transcript position {position}")
-            })?;
-            if message.id() != message_id {
-                bail!(
-                    "legacy transcript position {position} id `{message_id}` does not match embedded id `{}`",
-                    message.id()
-                );
-            }
-            let (overview_kind, is_user) = conversation_overview_message_metadata(&message);
-            tx.execute(
-                "INSERT INTO messages(
-                     session_id,
-                     position,
-                     message_id,
-                     value_json,
-                     overview_kind,
-                     is_user
-                 )
-                 VALUES(?1, ?2, ?3, ?4, ?5, ?6)",
-                rusqlite::params![
-                    session_id,
-                    i64::try_from(position)
-                        .context("legacy transcript position exceeds SQLite range")?,
-                    message_id,
-                    encoded,
-                    i64::try_from(conversation_overview_kind_index(overview_kind))
-                        .context("overview kind exceeds SQLite integer range")?,
-                    i64::from(is_user),
-                ],
-            )
-            .with_context(|| {
-                format!("failed to migrate transcript position {position} for `{session_id}`")
-            })?;
-            next_position = next_position.saturating_add(1);
-        }
-    }
-    if next_position != expected_message_count {
-        bail!(
-            "legacy transcript expected {expected_message_count} messages but migrated {next_position}"
-        );
-    }
-    let updated = tx
-        .execute(
-            "UPDATE sessions SET value_json = ?2 WHERE rowid = ?1",
-            rusqlite::params![rowid, metadata_json],
-        )
-        .with_context(|| format!("failed to store migrated metadata for `{session_id}`"))?;
-    if updated != 1 {
-        bail!("legacy session row disappeared during transcript migration");
-    }
-    Ok(())
-}
 
 fn ensure_sqlite_state_schema_for_path(
     connection: &rusqlite::Connection,
@@ -1296,7 +1321,12 @@ fn ensure_sqlite_state_schema_for_path(
 ) -> Result<()> {
     let write_lock = sqlite_state_write_lock(path);
     let _write_guard = lock_sqlite_state_writer(&write_lock);
-    ensure_sqlite_state_schema(connection)
+    ensure_sqlite_state_schema(connection).with_context(|| {
+        format!(
+            "failed to validate or initialize state database `{}`",
+            path.display()
+        )
+    })
 }
 
 #[cfg(test)]
@@ -1304,45 +1334,492 @@ mod sqlite_schema_tests {
     use super::*;
 
     #[test]
-    fn sqlite_schema_guard_rejects_unsupported_version_before_creating_state_tables() {
+    fn sqlite_schema_guard_rejects_noncurrent_versions_before_creating_state_tables() {
+        for unsupported_version in ["1", "3"] {
+            let connection =
+                rusqlite::Connection::open_in_memory().expect("in-memory sqlite should open");
+            connection
+                .execute_batch(&format!(
+                    "
+                    CREATE TABLE meta (
+                      key TEXT PRIMARY KEY,
+                      value TEXT NOT NULL
+                    );
+                    INSERT INTO meta(key, value)
+                    VALUES('schema_version', '{unsupported_version}');
+                    "
+                ))
+                .expect("seed unsupported schema version");
+
+            let error = ensure_sqlite_state_schema(&connection)
+                .expect_err("unsupported schema version should be rejected");
+
+            let rendered = format!("{error:#}");
+            assert!(
+                rendered.contains("unsupported state database schema"),
+                "{rendered}"
+            );
+            assert!(
+                rendered.contains(&format!("found version `{unsupported_version}`")),
+                "{rendered}"
+            );
+            assert!(
+                rendered.contains("Move or delete `termal.sqlite`"),
+                "{rendered}"
+            );
+            assert!(rendered.contains("not migrated"), "{rendered}");
+            let state_table_count: u32 = connection
+                .query_row(
+                    "
+                    SELECT COUNT(*)
+                    FROM sqlite_master
+                    WHERE type = 'table'
+                      AND name IN ('app_state', 'sessions', 'delegations')
+                    ",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("state table count should be queryable");
+            assert_eq!(state_table_count, 0);
+        }
+    }
+
+    #[test]
+    fn sqlite_schema_guard_accepts_the_current_normalized_schema() {
+        let connection =
+            rusqlite::Connection::open_in_memory().expect("in-memory sqlite should open");
+
+        ensure_sqlite_state_schema(&connection).expect("fresh current schema should initialize");
+        ensure_sqlite_state_schema(&connection).expect("current schema should validate on reopen");
+
+        assert_eq!(
+            sqlite_state_user_table_names(&connection)
+                .expect("current table inventory should remain readable"),
+            BTreeSet::from([
+                "app_state".to_owned(),
+                "board_cards".to_owned(),
+                "delegations".to_owned(),
+                "messages".to_owned(),
+                "meta".to_owned(),
+                "response_board_tabs".to_owned(),
+                "session_overviews".to_owned(),
+                "session_prompt_histories".to_owned(),
+                "sessions".to_owned(),
+            ])
+        );
+        let stored_version: String = connection
+            .query_row(
+                "SELECT value FROM meta WHERE key = 'schema_version'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("current schema version should exist");
+        assert_eq!(stored_version, "2");
+        let prompt_history_storage_version: String = connection
+            .query_row(
+                "SELECT value FROM meta WHERE key = ?1",
+                rusqlite::params![SQLITE_PROMPT_HISTORY_STORAGE_KEY],
+                |row| row.get(0),
+            )
+            .expect("current prompt-history authority marker should exist");
+        assert_eq!(prompt_history_storage_version, "1");
+        let default_board_tab_count: u32 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM response_board_tabs WHERE id = ?1",
+                rusqlite::params![RESPONSE_BOARD_DEFAULT_TAB_ID],
+                |row| row.get(0),
+            )
+            .expect("default response-board tab should be queryable");
+        assert_eq!(default_board_tab_count, 1);
+        let board_index_count: u32 = connection
+            .query_row(
+                "SELECT COUNT(*)
+                 FROM sqlite_master
+                 WHERE type = 'index'
+                   AND name = 'board_cards_tab_placement_created_idx'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("response-board index should be queryable");
+        assert_eq!(board_index_count, 1);
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM app_state WHERE key = ?1",
+                    rusqlite::params![SQLITE_METADATA_KEY],
+                    |row| row.get::<_, u32>(0),
+                )
+                .expect("fresh metadata authority count should be queryable"),
+            0,
+            "schema initialization alone must remain a valid never-persisted database"
+        );
+        assert_eq!(
+            first_normalized_state_authority_table_with_rows(&connection)
+                .expect("fresh authority tables should be inspectable"),
+            None
+        );
+    }
+
+    #[test]
+    fn sqlite_schema_guard_rejects_unversioned_existing_database_without_mutation() {
         let connection =
             rusqlite::Connection::open_in_memory().expect("in-memory sqlite should open");
         connection
             .execute_batch(
-                "
-                CREATE TABLE meta (
-                  key TEXT PRIMARY KEY,
-                  value TEXT NOT NULL
-                );
-                INSERT INTO meta(key, value) VALUES('schema_version', '0');
-                ",
+                "CREATE TABLE sessions (
+                   id TEXT PRIMARY KEY,
+                   value_json TEXT NOT NULL
+                 );",
             )
-            .expect("seed unsupported schema version");
+            .expect("obsolete unversioned table should seed");
 
         let error = ensure_sqlite_state_schema(&connection)
-            .expect_err("unsupported schema version should be rejected");
-
-        assert!(
-            format!("{error:#}").contains("unsupported SQLite state schema version `0`"),
-            "{error:#}"
+            .expect_err("unversioned existing state should be rejected");
+        let rendered = format!("{error:#}");
+        assert!(rendered.contains("unsupported state database schema"), "{rendered}");
+        assert!(rendered.contains("missing `meta` table"), "{rendered}");
+        assert!(rendered.contains("Move or delete `termal.sqlite`"), "{rendered}");
+        assert_eq!(
+            sqlite_state_user_table_names(&connection)
+                .expect("table inventory should remain readable"),
+            BTreeSet::from(["sessions".to_owned()]),
+            "rejection must not initialize current tables into an obsolete database"
         );
-        let state_table_count: u32 = connection
-            .query_row(
-                "
-                SELECT COUNT(*)
-                FROM sqlite_master
-                WHERE type = 'table'
-                  AND name IN ('app_state', 'sessions', 'delegations')
-                ",
-                [],
-                |row| row.get(0),
-            )
-            .expect("state table count should be queryable");
-        assert_eq!(state_table_count, 0);
     }
 
     #[test]
-    fn schema_v2_backfills_compact_session_overview_metadata() {
+    fn sqlite_schema_guard_rejects_partial_same_version_schema_without_repairing_it() {
+        let connection =
+            rusqlite::Connection::open_in_memory().expect("in-memory sqlite should open");
+        ensure_sqlite_state_schema(&connection).expect("fresh current schema should initialize");
+        connection
+            .execute_batch("DROP TABLE delegations;")
+            .expect("required table should drop for partial-schema fixture");
+
+        let error = ensure_sqlite_state_schema(&connection)
+            .expect_err("partial same-version schema should be rejected");
+        let rendered = format!("{error:#}");
+        assert!(rendered.contains("missing required tables"), "{rendered}");
+        assert!(rendered.contains("delegations"), "{rendered}");
+        assert!(
+            !sqlite_state_user_table_names(&connection)
+                .expect("partial table inventory should remain readable")
+                .contains("delegations"),
+            "rejection must not recreate a missing current table"
+        );
+    }
+
+    #[test]
+    fn sqlite_schema_guard_rejects_missing_authority_rows_without_mutation() {
+        for missing_key in ["schema_version", SQLITE_PROMPT_HISTORY_STORAGE_KEY] {
+            let connection =
+                rusqlite::Connection::open_in_memory().expect("in-memory sqlite should open");
+            ensure_sqlite_state_schema(&connection)
+                .expect("fresh current schema should initialize");
+            connection
+                .execute(
+                    "DELETE FROM meta WHERE key = ?1",
+                    rusqlite::params![missing_key],
+                )
+                .expect("authority row should delete for fixture");
+            let changes_before_rejection = connection.total_changes();
+
+            let error = ensure_sqlite_state_schema(&connection)
+                .expect_err("missing authority row should be rejected");
+            let rendered = format!("{error:#}");
+            assert!(rendered.contains(missing_key), "{rendered}");
+            assert_eq!(connection.total_changes(), changes_before_rejection);
+            assert_eq!(
+                connection
+                    .query_row(
+                        "SELECT COUNT(*) FROM meta WHERE key = ?1",
+                        rusqlite::params![missing_key],
+                        |row| row.get::<_, u32>(0),
+                    )
+                    .expect("authority row count should remain readable"),
+                0,
+                "rejection must not restore a missing authority row"
+            );
+        }
+    }
+
+    #[test]
+    fn sqlite_schema_guard_rejects_legacy_embedded_app_state_arrays() {
+        for embedded_key in ["sessions", "delegations"] {
+            let connection =
+                rusqlite::Connection::open_in_memory().expect("in-memory sqlite should open");
+            ensure_sqlite_state_schema(&connection)
+                .expect("fresh current schema should initialize");
+            let encoded = format!(r#"{{"{embedded_key}":[{{"id":"legacy"}}]}}"#);
+            connection
+                .execute(
+                    "INSERT INTO app_state(key, value_json) VALUES(?1, ?2)",
+                    rusqlite::params![SQLITE_METADATA_KEY, encoded],
+                )
+                .expect("embedded app-state fixture should insert");
+            let changes_before_rejection = connection.total_changes();
+
+            let error = ensure_sqlite_state_schema(&connection)
+                .expect_err("embedded app-state records should be rejected");
+            let rendered = format!("{error:#}");
+            assert!(rendered.contains(embedded_key), "{rendered}");
+            assert_eq!(connection.total_changes(), changes_before_rejection);
+        }
+    }
+
+    #[test]
+    fn sqlite_schema_guard_gives_reset_guidance_for_malformed_app_state_metadata() {
+        let connection =
+            rusqlite::Connection::open_in_memory().expect("in-memory sqlite should open");
+        ensure_sqlite_state_schema(&connection).expect("fresh current schema should initialize");
+        connection
+            .execute(
+                "INSERT INTO app_state(key, value_json) VALUES(?1, '{ not json')",
+                rusqlite::params![SQLITE_METADATA_KEY],
+            )
+            .expect("malformed app-state fixture should insert");
+
+        let error = ensure_sqlite_state_schema(&connection)
+            .expect_err("malformed app-state metadata should be rejected");
+        let rendered = format!("{error:#}");
+        assert!(rendered.contains("not valid JSON"), "{rendered}");
+        assert!(rendered.contains("Move or delete `termal.sqlite`"), "{rendered}");
+    }
+
+    #[test]
+    fn sqlite_schema_guard_rejects_missing_metadata_with_normalized_rows_without_rewriting() {
+        let state_root = TestTempRoot::create("termal-state-missing-metadata-guard");
+        let path = state_root.path().join("termal.sqlite");
+        {
+            let connection = open_sqlite_state_connection_unconfigured(&path)
+                .expect("file-backed sqlite should open");
+            ensure_sqlite_state_schema_for_path(&connection, &path)
+                .expect("fresh current schema should initialize");
+            connection
+                .execute(
+                    "INSERT INTO sessions(id, value_json) VALUES('session-existing', '{}')",
+                    [],
+                )
+                .expect("normalized session should seed");
+            connection
+                .execute(
+                    "INSERT INTO messages(
+                       session_id, position, message_id, value_json, overview_kind, is_user
+                     ) VALUES('session-existing', 0, 'message-existing', '{}', 0, 1)",
+                    [],
+                )
+                .expect("normalized message should seed");
+            connection
+                .execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
+                .expect("fixture WAL should checkpoint before byte comparison");
+        }
+        let bytes_before_rejection =
+            fs::read(&path).expect("missing-metadata fixture bytes should be readable");
+
+        let connection = open_sqlite_state_connection_unconfigured(&path)
+            .expect("missing-metadata fixture should reopen");
+        let error = ensure_sqlite_state_schema_for_path(&connection, &path)
+            .expect_err("normalized rows without metadata must be rejected");
+        let rendered = format!("{error:#}");
+        assert!(rendered.contains("missing app_state `metadataState`"), "{rendered}");
+        assert!(rendered.contains("sessions"), "{rendered}");
+        drop(connection);
+        assert_eq!(
+            fs::read(&path).expect("rejected database bytes should remain readable"),
+            bytes_before_rejection,
+            "missing-metadata rejection must occur before persistent PRAGMAs or maintenance"
+        );
+    }
+
+    #[test]
+    fn sqlite_schema_guard_rejects_structurally_invalid_metadata_without_rewriting() {
+        let state_root = TestTempRoot::create("termal-state-invalid-metadata-guard");
+        let path = state_root.path().join("termal.sqlite");
+        {
+            let connection = open_sqlite_state_connection_unconfigured(&path)
+                .expect("file-backed sqlite should open");
+            ensure_sqlite_state_schema_for_path(&connection, &path)
+                .expect("fresh current schema should initialize");
+            connection
+                .execute(
+                    "INSERT INTO app_state(key, value_json) VALUES(?1, ?2)",
+                    rusqlite::params![
+                        SQLITE_METADATA_KEY,
+                        r#"{"nextSessionNumber":1,"nextMessageNumber":1,"projects":"wrong","sessions":[]}"#
+                    ],
+                )
+                .expect("structurally invalid metadata should seed");
+            connection
+                .execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
+                .expect("fixture WAL should checkpoint before byte comparison");
+        }
+        let bytes_before_rejection =
+            fs::read(&path).expect("invalid-metadata fixture bytes should be readable");
+
+        let connection = open_sqlite_state_connection_unconfigured(&path)
+            .expect("invalid-metadata fixture should reopen");
+        let error = ensure_sqlite_state_schema_for_path(&connection, &path)
+            .expect_err("structurally invalid metadata must be rejected");
+        let rendered = format!("{error:#}");
+        assert!(rendered.contains("current metadata shape"), "{rendered}");
+        assert!(rendered.contains("Move or delete `termal.sqlite`"), "{rendered}");
+        drop(connection);
+        assert_eq!(
+            fs::read(&path).expect("rejected database bytes should remain readable"),
+            bytes_before_rejection,
+            "invalid-metadata rejection must occur before persistent PRAGMAs or maintenance"
+        );
+    }
+
+    #[test]
+    fn sqlite_schema_guard_accepts_normalized_rows_with_current_metadata() {
+        let connection =
+            rusqlite::Connection::open_in_memory().expect("in-memory sqlite should open");
+        ensure_sqlite_state_schema(&connection).expect("fresh current schema should initialize");
+        seed_current_state_metadata(&connection);
+        connection
+            .execute(
+                "INSERT INTO sessions(id, value_json) VALUES('session-existing', '{}')",
+                [],
+            )
+            .expect("normalized session should seed");
+        connection
+            .execute(
+                "INSERT INTO messages(
+                   session_id, position, message_id, value_json, overview_kind, is_user
+                 ) VALUES('session-existing', 0, 'message-existing', '{}', 0, 1)",
+                [],
+            )
+            .expect("normalized message should seed");
+
+        ensure_sqlite_state_schema(&connection)
+            .expect("current metadata and normalized rows should validate");
+        for table_name in ["sessions", "messages"] {
+            let count = connection
+                .query_row(
+                    &format!("SELECT COUNT(*) FROM {table_name}"),
+                    [],
+                    |row| row.get::<_, u32>(0),
+                )
+                .expect("normalized row count should remain readable");
+            assert_eq!(count, 1, "schema validation must preserve `{table_name}` rows");
+        }
+    }
+
+    #[test]
+    fn sqlite_schema_guard_rejects_embedded_prompt_history_but_not_malformed_rows() {
+        let connection =
+            rusqlite::Connection::open_in_memory().expect("in-memory sqlite should open");
+        ensure_sqlite_state_schema(&connection).expect("fresh current schema should initialize");
+        seed_current_state_metadata(&connection);
+        for (label, prompt_history) in
+            [("populated", r#"["remember me"]"#), ("empty", "[]")]
+        {
+            let encoded = format!(r#"{{"session":{{"promptHistory":{prompt_history}}}}}"#);
+            connection
+                .execute(
+                    "INSERT INTO sessions(id, value_json) VALUES(?1, ?2)",
+                    rusqlite::params![label, encoded],
+                )
+                .expect("embedded prompt-history fixture should insert");
+
+            let error = ensure_sqlite_state_schema(&connection)
+                .expect_err("an embedded prompt-history array should be rejected");
+            let rendered = format!("{error:#}");
+            assert!(rendered.contains("session.promptHistory"), "{rendered}");
+            assert!(rendered.contains(label), "{rendered}");
+
+            connection
+                .execute("DELETE FROM sessions WHERE id = ?1", [label])
+                .expect("embedded prompt-history fixture should delete");
+        }
+        for (label, prompt_history) in [
+            ("null", "null"),
+            ("string", r#""damaged""#),
+            ("object", r#"{"damaged":true}"#),
+        ] {
+            let encoded = format!(r#"{{"session":{{"promptHistory":{prompt_history}}}}}"#);
+            connection
+                .execute(
+                    "INSERT INTO sessions(id, value_json) VALUES(?1, ?2)",
+                    rusqlite::params![label, encoded],
+                )
+                .expect("non-array prompt-history fixture should insert");
+        }
+        ensure_sqlite_state_schema(&connection)
+            .expect("non-array prompt-history values are row corruption, not legacy authority");
+        connection
+            .execute(
+                "INSERT INTO sessions(id, value_json) VALUES('damaged', '{ not json')",
+                [],
+            )
+            .expect("malformed quarantinable row should insert");
+        ensure_sqlite_state_schema(&connection)
+            .expect("malformed session JSON is not obsolete-schema evidence");
+        connection
+            .execute(
+                "INSERT INTO sessions(id, value_json) VALUES('current', '{\"session\":{}}')",
+                [],
+            )
+            .expect("current session fixture should insert");
+        ensure_sqlite_state_schema(&connection)
+            .expect("a session without the embedded prompt-history key should remain current");
+    }
+
+    #[test]
+    fn sqlite_schema_guard_rejects_foreign_column_shape_without_rewriting_the_database() {
+        let state_root = TestTempRoot::create("termal-state-column-guard");
+        let path = state_root.path().join("termal.sqlite");
+        {
+            let connection = open_sqlite_state_connection_unconfigured(&path)
+                .expect("file-backed sqlite should open");
+            ensure_sqlite_state_schema_for_path(&connection, &path)
+                .expect("fresh current schema should initialize");
+            connection
+                .execute("ALTER TABLE messages ADD COLUMN foreign_shape TEXT", [])
+                .expect("foreign column fixture should add");
+            connection
+                .execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
+                .expect("fixture WAL should checkpoint before byte comparison");
+        }
+        let bytes_before_rejection =
+            fs::read(&path).expect("foreign-column fixture bytes should be readable");
+
+        let connection = open_sqlite_state_connection_unconfigured(&path)
+            .expect("foreign-column fixture should reopen");
+        let error = ensure_sqlite_state_schema_for_path(&connection, &path)
+            .expect_err("foreign current-table columns should be rejected");
+        let rendered = format!("{error:#}");
+        assert!(rendered.contains("unexpected columns"), "{rendered}");
+        assert!(rendered.contains("foreign_shape"), "{rendered}");
+        drop(connection);
+        assert_eq!(
+            fs::read(&path).expect("rejected database bytes should remain readable"),
+            bytes_before_rejection,
+            "column-shape rejection must occur before persistent PRAGMAs or maintenance"
+        );
+    }
+
+    #[test]
+    fn sqlite_schema_guard_accepts_extra_ignored_tables() {
+        let connection =
+            rusqlite::Connection::open_in_memory().expect("in-memory sqlite should open");
+        ensure_sqlite_state_schema(&connection).expect("fresh current schema should initialize");
+        connection
+            .execute_batch("CREATE TABLE mailboxes (id TEXT PRIMARY KEY);")
+            .expect("ignored legacy table should seed");
+
+        ensure_sqlite_state_schema(&connection)
+            .expect("extra ignored tables must not invalidate current v2 state");
+        assert!(
+            sqlite_state_user_table_names(&connection)
+                .expect("table inventory should remain readable")
+                .contains("mailboxes")
+        );
+    }
+
+    #[test]
+    fn current_schema_backfills_compact_session_overview_metadata() {
         let connection =
             rusqlite::Connection::open_in_memory().expect("in-memory sqlite should open");
         connection
@@ -1354,6 +1831,8 @@ mod sqlite_schema_tests {
                   value TEXT NOT NULL
                 );
                 INSERT INTO meta(key, value) VALUES('schema_version', '2');
+                INSERT INTO meta(key, value)
+                VALUES('prompt_history_storage_version', '1');
                 CREATE TABLE sessions (
                   id TEXT PRIMARY KEY,
                   value_json TEXT NOT NULL
@@ -1393,9 +1872,24 @@ mod sqlite_schema_tests {
                 ",
             )
             .expect("legacy v2 fixture should initialize");
+        seed_current_state_auxiliary_tables(&connection);
+        seed_current_state_metadata(&connection);
 
         ensure_sqlite_state_schema(&connection)
             .expect("v2 overview metadata should backfill");
+        assert_eq!(
+            sqlite_state_table_columns(&connection, "messages")
+                .expect("post-maintenance message columns should be readable"),
+            BTreeSet::from([
+                "is_user".to_owned(),
+                "message_id".to_owned(),
+                "overview_kind".to_owned(),
+                "position".to_owned(),
+                "session_id".to_owned(),
+                "value_json".to_owned(),
+            ]),
+            "the two tolerated missing message columns must be restored before boot continues"
+        );
 
         let value_blob: Vec<u8> = connection
             .query_row(
@@ -1426,7 +1920,90 @@ mod sqlite_schema_tests {
     }
 
     #[test]
-    fn schema_v2_isolates_malformed_overview_backfill_per_session() {
+    fn current_schema_restores_response_board_partition_columns() {
+        let connection =
+            rusqlite::Connection::open_in_memory().expect("in-memory sqlite should open");
+        ensure_sqlite_state_schema(&connection).expect("fresh current schema should initialize");
+        seed_current_state_metadata(&connection);
+        connection
+            .execute_batch(
+                "
+                DROP TABLE board_cards;
+                CREATE TABLE board_cards (
+                  id TEXT PRIMARY KEY,
+                  x REAL NOT NULL,
+                  y REAL NOT NULL,
+                  w REAL NOT NULL,
+                  h REAL NOT NULL,
+                  snapshot_json TEXT NOT NULL,
+                  source_session_id TEXT NOT NULL,
+                  source_message_id TEXT NOT NULL,
+                  created_at TEXT NOT NULL
+                );
+                INSERT INTO board_cards(
+                  id, x, y, w, h, snapshot_json,
+                  source_session_id, source_message_id, created_at
+                ) VALUES(
+                  'legacy-card', 1.0, 2.0, 3.0, 4.0, '{}',
+                  'session-1', 'message-1', '2026-01-01T00:00:00Z'
+                );
+                ",
+            )
+            .expect("pre-partition response-board fixture should initialize");
+
+        ensure_sqlite_state_schema(&connection)
+            .expect("current response-board maintenance should restore partition columns");
+
+        assert_eq!(
+            sqlite_state_table_columns(&connection, "board_cards")
+                .expect("post-maintenance board-card columns should be readable"),
+            BTreeSet::from([
+                "created_at".to_owned(),
+                "h".to_owned(),
+                "has_canvas_position".to_owned(),
+                "id".to_owned(),
+                "placement".to_owned(),
+                "snapshot_json".to_owned(),
+                "source_message_id".to_owned(),
+                "source_session_id".to_owned(),
+                "tab_id".to_owned(),
+                "w".to_owned(),
+                "x".to_owned(),
+                "y".to_owned(),
+            ]),
+            "the three tolerated missing board-card columns must be restored before boot continues"
+        );
+        let restored_partition: (String, String, bool) = connection
+            .query_row(
+                "SELECT tab_id, placement, has_canvas_position
+                 FROM board_cards WHERE id = 'legacy-card'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("restored response-board partition values should be readable");
+        assert_eq!(
+            restored_partition,
+            (
+                RESPONSE_BOARD_DEFAULT_TAB_ID.to_owned(),
+                "placed".to_owned(),
+                true
+            )
+        );
+        let board_index_count: u32 = connection
+            .query_row(
+                "SELECT COUNT(*)
+                 FROM sqlite_master
+                 WHERE type = 'index'
+                   AND name = 'board_cards_tab_placement_created_idx'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("response-board index should be queryable after maintenance");
+        assert_eq!(board_index_count, 1);
+    }
+
+    #[test]
+    fn current_schema_isolates_malformed_overview_backfill_per_session() {
         let connection =
             rusqlite::Connection::open_in_memory().expect("in-memory sqlite should open");
         connection
@@ -1438,6 +2015,8 @@ mod sqlite_schema_tests {
                   value TEXT NOT NULL
                 );
                 INSERT INTO meta(key, value) VALUES('schema_version', '2');
+                INSERT INTO meta(key, value)
+                VALUES('prompt_history_storage_version', '1');
                 CREATE TABLE sessions (
                   id TEXT PRIMARY KEY,
                   value_json TEXT NOT NULL
@@ -1473,6 +2052,8 @@ mod sqlite_schema_tests {
                 ",
             )
             .expect("mixed local fixture should initialize");
+        seed_current_state_auxiliary_tables(&connection);
+        seed_current_state_metadata(&connection);
 
         ensure_sqlite_state_schema(&connection)
             .expect("one malformed session must not abort global schema startup");
@@ -1589,207 +2170,13 @@ mod sqlite_schema_tests {
         );
     }
 
-    #[test]
-    fn schema_v1_migration_moves_embedded_transcript_without_loss() {
-        let expected_message_count = SQLITE_TRANSCRIPT_MIGRATION_MESSAGE_BATCH * 2 + 3;
-        let mut inner = StateInner::new();
-        let record = inner.create_session(
-            Agent::Claude,
-            Some("Migration".to_owned()),
-            "/tmp".to_owned(),
-            None,
-            None,
-        );
-        let index = inner
-            .find_session_index(&record.session.id)
-            .expect("created session should exist");
-        for sequence in 0..expected_message_count {
-            let message = Message::Text {
-                attachments: Vec::new(),
-                id: format!("message-{sequence}"),
-                timestamp: stamp_now(),
-                author: Author::You,
-                text: format!("body-{sequence}"),
-                expanded_text: None,
-                source: None,
-            };
-            let record = inner
-                .session_mut_by_index(index)
-                .expect("created session index should stay valid");
-            let insert_at = record.session.messages.len();
-            insert_message_on_record(record, insert_at, message);
-        }
-        let persisted = PersistedState::from_inner(&inner);
-        let old_record = persisted
-            .sessions
-            .first()
-            .expect("persisted session should exist");
-        let old_encoded =
-            serde_json::to_string(old_record).expect("v1 session should serialize");
-
-        let connection =
-            rusqlite::Connection::open_in_memory().expect("in-memory sqlite should open");
-        connection
-            .execute_batch(
-                "
-                PRAGMA foreign_keys = ON;
-                CREATE TABLE meta (
-                  key TEXT PRIMARY KEY,
-                  value TEXT NOT NULL
-                );
-                INSERT INTO meta(key, value) VALUES('schema_version', '1');
-                CREATE TABLE sessions (
-                  id TEXT PRIMARY KEY,
-                  value_json TEXT NOT NULL
-                );
-                ",
-            )
-            .expect("v1 schema should initialize");
-        connection
-            .execute(
-                "INSERT INTO sessions(id, value_json) VALUES(?1, ?2)",
-                rusqlite::params![old_record.session.id, old_encoded],
-            )
-            .expect("v1 session should insert");
-
-        ensure_sqlite_state_schema(&connection).expect("v1 schema should migrate");
-
-        let schema_version: String = connection
-            .query_row(
-                "SELECT value FROM meta WHERE key = 'schema_version'",
-                [],
-                |row| row.get(0),
-            )
-            .expect("schema version should load");
-        assert_eq!(schema_version, SQLITE_SCHEMA_VERSION);
-        let migrated_metadata: String = connection
-            .query_row(
-                "SELECT value_json FROM sessions WHERE id = ?1",
-                rusqlite::params![old_record.session.id],
-                |row| row.get(0),
-            )
-            .expect("migrated metadata should load");
-        let migrated_record: PersistedSessionRecord =
-            serde_json::from_str(&migrated_metadata).expect("migrated metadata should parse");
-        assert!(migrated_record.session.messages.is_empty());
-        assert_eq!(
-            usize::try_from(migrated_record.session.message_count).unwrap(),
-            expected_message_count
-        );
-
-        let migrated_messages: Vec<(i64, String, String)> = connection
-            .prepare(
-                "SELECT position, message_id, value_json
-                 FROM messages
-                 WHERE session_id = ?1
-                 ORDER BY position",
-            )
-            .expect("migrated transcript query should prepare")
-            .query_map(rusqlite::params![old_record.session.id], |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
-            })
-            .expect("migrated transcript query should execute")
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .expect("migrated transcript rows should decode");
-        assert_eq!(migrated_messages.len(), expected_message_count);
-        for (sequence, (position, message_id, encoded)) in
-            migrated_messages.into_iter().enumerate()
-        {
-            assert_eq!(position, i64::try_from(sequence).unwrap());
-            assert_eq!(message_id, format!("message-{sequence}"));
-            let message: Message =
-                serde_json::from_str(&encoded).expect("migrated message should parse");
-            assert_eq!(message.id(), message_id);
-            assert!(matches!(
-                message,
-                Message::Text { text, .. } if text == format!("body-{sequence}")
-            ));
-        }
-    }
-
-    #[test]
-    fn schema_v1_migration_skips_one_invalid_session_without_blocking_valid_rows() {
-        let mut inner = StateInner::new();
-        inner.create_session(
-            Agent::Claude,
-            Some("Migration sibling".to_owned()),
-            "/tmp".to_owned(),
-            None,
-            None,
-        );
-        let valid_record = PersistedState::from_inner(&inner)
-            .sessions
-            .into_iter()
-            .next()
-            .expect("persisted session should exist");
-        let valid_session_id = valid_record.session.id.clone();
-        let valid_encoded =
-            serde_json::to_string(&valid_record).expect("valid v1 session should serialize");
-        let mut invalid_value =
-            serde_json::to_value(&valid_record).expect("invalid v1 fixture should encode");
-        invalid_value["session"]["id"] = Value::String("embedded-other-session".to_owned());
-        let invalid_encoded =
-            serde_json::to_string(&invalid_value).expect("invalid v1 fixture should serialize");
-
-        let connection =
-            rusqlite::Connection::open_in_memory().expect("in-memory sqlite should open");
-        connection
-            .execute_batch(
-                "
-                PRAGMA foreign_keys = ON;
-                CREATE TABLE meta (
-                  key TEXT PRIMARY KEY,
-                  value TEXT NOT NULL
-                );
-                INSERT INTO meta(key, value) VALUES('schema_version', '1');
-                CREATE TABLE sessions (
-                  id TEXT PRIMARY KEY,
-                  value_json TEXT NOT NULL
-                );
-                ",
-            )
-            .expect("v1 schema should initialize");
-        connection
-            .execute(
-                "INSERT INTO sessions(id, value_json) VALUES(?1, ?2)",
-                rusqlite::params![valid_session_id, valid_encoded],
-            )
-            .expect("valid v1 session should insert");
-        connection
-            .execute(
-                "INSERT INTO sessions(id, value_json) VALUES('invalid-row', ?1)",
-                rusqlite::params![invalid_encoded],
-            )
-            .expect("invalid sibling v1 session should insert");
-
-        ensure_sqlite_state_schema(&connection)
-            .expect("one invalid sibling must not abort the v1 migration");
-
-        let schema_version: String = connection
-            .query_row(
-                "SELECT value FROM meta WHERE key = 'schema_version'",
-                [],
-                |row| row.get(0),
-            )
-            .expect("schema version should load");
-        assert_eq!(schema_version, SQLITE_SCHEMA_VERSION);
-        let valid_metadata: String = connection
-            .query_row(
-                "SELECT value_json FROM sessions WHERE id = ?1",
-                rusqlite::params![valid_session_id],
-                |row| row.get(0),
-            )
-            .expect("valid migrated sibling should remain readable");
-        let valid_migrated: PersistedSessionRecord =
-            serde_json::from_str(&valid_metadata).expect("valid migrated metadata should parse");
-        assert_eq!(valid_migrated.session.id, valid_session_id);
-    }
 }
 
 fn load_state_from_sqlite(path: &FsPath) -> Result<Option<StateInner>> {
-    let connection = open_sqlite_state_connection(path)?;
+    let connection = open_sqlite_state_connection_unconfigured(path)?;
     ensure_sqlite_state_schema_for_path(&connection, path)?;
-    // `open_sqlite_state_connection` already hardens the fresh handle, but
+    // `open_sqlite_state_connection_unconfigured` already hardens the fresh
+    // handle, but
     // schema initialization can create or recreate SQLite sidecars, so the
     // startup read path deliberately re-runs the full main/sidecar pass.
     harden_sqlite_state_file_permissions(path)?;
@@ -1799,11 +2186,8 @@ fn load_state_from_sqlite(path: &FsPath) -> Result<Option<StateInner>> {
         mut skipped_session_records,
     ) =
         load_session_records_from_sqlite_with_skipped(&connection, path)?;
-    let (
-        delegation_records,
-        quarantined_delegation_ids,
-        delegation_table_row_count,
-    ) = load_delegation_records_from_sqlite(&connection, path)?;
+    let (delegation_records, quarantined_delegation_ids) =
+        load_delegation_records_from_sqlite(&connection, path)?;
     let Some(encoded) = sqlite_app_state_value(&connection, SQLITE_METADATA_KEY, path)? else {
         return Ok(None);
     };
@@ -1841,30 +2225,11 @@ fn load_state_from_sqlite(path: &FsPath) -> Result<Option<StateInner>> {
     persisted.sessions = session_records;
     persisted.quarantined_persisted_session_ids = quarantined_session_ids;
     persisted.quarantined_persisted_delegation_ids = quarantined_delegation_ids;
-    let loaded_delegations_from_table = apply_sqlite_delegation_records(
-        &mut persisted,
-        delegation_records,
-        delegation_table_row_count > 0,
-    );
-    let mut inner = persisted.into_inner().with_context(|| {
+    persisted.delegations = delegation_records;
+    let inner = persisted.into_inner().with_context(|| {
         format!("failed to validate state from `{}`", path.display())
     })?;
-    if !loaded_delegations_from_table && !inner.delegations.is_empty() {
-        inner.mark_loaded_delegations_for_sqlite_migration();
-    }
     Ok(Some(inner))
-}
-
-fn apply_sqlite_delegation_records(
-    persisted: &mut PersistedState,
-    delegation_records: Vec<DelegationRecord>,
-    table_had_rows: bool,
-) -> bool {
-    if !table_had_rows {
-        return false;
-    }
-    persisted.delegations = delegation_records;
-    true
 }
 
 fn sqlite_app_state_value(
@@ -1984,86 +2349,17 @@ fn load_persisted_prompt_history(
                 path.display()
             )
         })?;
-    if let Some(encoded) = stored_history {
-        let prompts = serde_json::from_str::<Vec<String>>(&encoded).with_context(|| {
-            format!(
-                "failed to parse persisted prompt history for `{}`",
-                record.session.id
-            )
-        })?;
-        record.session.prompt_history = normalize_prompt_history(prompts);
-        return Ok(());
-    }
-
-    // Compatibility fallback for a database created before the separate
-    // history row was introduced. The schema migration normally moves this
-    // value first, but keeping the fallback makes isolated row loads robust.
-    if !record.session.prompt_history.is_empty() {
-        record.session.prompt_history =
-            normalize_prompt_history(std::mem::take(&mut record.session.prompt_history));
-        return Ok(());
-    }
-
-    let mut statement = connection
-        .prepare(
-            "SELECT value_json
-             FROM messages
-             WHERE session_id = ?1 AND is_user = 1
-             ORDER BY position DESC
-             LIMIT ?2",
-        )
-        .with_context(|| {
-            format!(
-                "failed to prepare persisted prompt history for `{}`",
-                record.session.id
-            )
-        })?;
-    let rows = statement
-        .query_map(
-            rusqlite::params![
-                record.session.id,
-                i64::try_from(SESSION_PROMPT_HISTORY_LIMIT)
-                    .context("prompt history limit exceeds SQLite integer range")?
-            ],
-            |row| row.get::<_, String>(0),
-        )
-        .with_context(|| {
-            format!(
-                "failed to query persisted prompt history for `{}`",
-                record.session.id
-            )
-        })?;
-
-    let mut prompts = Vec::new();
-    for row in rows {
-        let encoded = row.with_context(|| {
-            format!(
-                "failed to read persisted prompt history for `{}` from `{}`",
-                record.session.id,
-                path.display()
-            )
-        })?;
-        match serde_json::from_str::<Message>(&encoded) {
-            Ok(message) => {
-                if let Some(prompt) = message.user_prompt_text() {
-                    prompts.push(prompt.to_owned());
-                }
-            }
-            Err(err) => {
-                // Prompt history is advisory. A malformed older row outside
-                // the validated startup tail must not quarantine an otherwise
-                // usable session; normal transcript paging will still surface
-                // the row-level failure if the user reaches that history.
-                eprintln!(
-                    "persist> skipping unreadable prompt-history message for `{}` from `{}`: {err:#}",
-                    record.session.id,
-                    path.display()
-                );
-            }
-        }
-    }
-    prompts.reverse();
-    record.session.prompt_history = normalize_prompt_history(prompts);
+    record.session.prompt_history = match stored_history {
+        Some(encoded) => normalize_prompt_history(
+            serde_json::from_str::<Vec<String>>(&encoded).with_context(|| {
+                format!(
+                    "failed to parse persisted prompt history for `{}`",
+                    record.session.id
+                )
+            })?,
+        ),
+        None => Vec::new(),
+    };
     Ok(())
 }
 
@@ -2376,7 +2672,7 @@ fn load_persisted_message_overview_with_connection(
 fn load_delegation_records_from_sqlite(
     connection: &rusqlite::Connection,
     path: &FsPath,
-) -> Result<(Vec<DelegationRecord>, BTreeSet<String>, usize)> {
+) -> Result<(Vec<DelegationRecord>, BTreeSet<String>)> {
     let mut statement = connection
         .prepare("SELECT id, value_json FROM delegations ORDER BY rowid")
         .with_context(|| format!("failed to prepare delegation load from `{}`", path.display()))?;
@@ -2393,7 +2689,6 @@ fn load_delegation_records_from_sqlite(
     let mut records = Vec::new();
     let mut quarantined_ids = BTreeSet::new();
     let mut skipped = 0_usize;
-    let mut row_count = 0_usize;
     for row in rows {
         let (delegation_id, encoded) = match row {
             Ok(row) => row,
@@ -2406,7 +2701,6 @@ fn load_delegation_records_from_sqlite(
                 continue;
             }
         };
-        row_count += 1;
         match serde_json::from_str::<DelegationRecord>(&encoded) {
             Ok(record) if record.id == delegation_id => records.push(record),
             Ok(record) => {
@@ -2433,7 +2727,7 @@ fn load_delegation_records_from_sqlite(
             path.display()
         );
     }
-    Ok((records, quarantined_ids, row_count))
+    Ok((records, quarantined_ids))
 }
 
 struct SerializedPersistedMessage {
@@ -2833,8 +3127,11 @@ fn persist_state_parts_to_sqlite(
         create_local_state_directory(parent)?;
     }
 
-    let mut connection = open_sqlite_state_connection(path)?;
+    let mut connection = open_sqlite_state_connection_unconfigured(path)?;
     ensure_sqlite_state_schema_for_path(&connection, path)?;
+    // Schema setup enables WAL and may create sidecars after the opener's
+    // initial permission pass, so harden them before the write transaction.
+    harden_sqlite_state_file_permissions(path)?;
     persist_state_parts_via_connection(
         &mut connection,
         path,
@@ -2949,8 +3246,7 @@ fn persist_state_parts_via_connection(
 /// Thread-local SQLite connection cache for the background persist thread.
 ///
 /// Every queued persist previously opened a fresh SQLite connection and
-/// re-ran `ensure_sqlite_state_schema`, which writes `schema_version`
-/// every call. The persist thread writes many times during an active
+/// re-ran `ensure_sqlite_state_schema`. The persist thread writes many times during an active
 /// session, so amortizing that fixed cost to one open-and-validate per
 /// thread lifetime removes the biggest per-persist overhead.
 struct SqlitePersistConnectionCache {
@@ -2978,11 +3274,12 @@ impl SqlitePersistConnectionCache {
             if let Some(parent) = path.parent() {
                 create_local_state_directory(parent)?;
             }
-            let connection = open_sqlite_state_connection(path)?;
+            let connection = open_sqlite_state_connection_unconfigured(path)?;
             ensure_sqlite_state_schema_for_path(&connection, path)?;
-            // Deliberately repeat the open-time hardening after schema
-            // validation because SQLite may create sidecars between the two
-            // points; cached reuses skip this until the next successful commit.
+            // Deliberately repeat the `_unconfigured` opener's hardening after
+            // schema validation because SQLite may create sidecars between the
+            // two points; cached reuses skip this until the next successful
+            // commit.
             harden_sqlite_state_file_permissions(path)?;
             self.path = Some(path.to_path_buf());
             self.connection = Some(connection);

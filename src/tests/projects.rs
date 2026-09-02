@@ -15,7 +15,7 @@
 use super::*;
 
 #[test]
-fn newly_created_project_ids_do_not_reuse_a_rewound_legacy_counter() {
+fn newly_created_project_ids_are_unique_uuids() {
     let mut inner = StateInner::new();
     let first = inner.create_project(
         Some("First".to_owned()),
@@ -28,10 +28,6 @@ fn newly_created_project_ids_do_not_reuse_a_rewound_legacy_counter() {
         .expect("project id should retain the public prefix");
     Uuid::parse_str(first_suffix).expect("new project id suffix should be a UUID");
 
-    // Simulate restoring an older termal.sqlite whose legacy allocator
-    // counter predates coordination.sqlite. The next project must still get a
-    // fresh identity rather than inheriting the first project's board scope.
-    inner.next_project_number = 1;
     let second = inner.create_project(
         Some("Second".to_owned()),
         "/tmp/second".to_owned(),
