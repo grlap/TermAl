@@ -200,12 +200,6 @@ fn write_claude_runtime_command(
         ClaudeRuntimeCommand::PermissionResponse(decision) => {
             write_claude_permission_response(writer, &decision)
         }
-        ClaudeRuntimeCommand::UserInputResponse(response) => {
-            write_claude_user_input_response(writer, &response)
-        }
-        ClaudeRuntimeCommand::ControlErrorResponse(response) => {
-            write_claude_control_error_response(writer, &response)
-        }
         ClaudeRuntimeCommand::SetModel(model) => write_claude_set_model(writer, &model),
         ClaudeRuntimeCommand::SetPermissionMode(mode) => {
             write_claude_set_permission_mode(writer, &mode)
@@ -762,17 +756,6 @@ fn spawn_claude_runtime(
                                                     )
                                                 })
                                         }
-                                        ClaudeControlRequestAction::RespondError(response) => {
-                                            reader_input_tx
-                                                .send(ClaudeRuntimeCommand::ControlErrorResponse(
-                                                    response,
-                                                ))
-                                                .map_err(|err| {
-                                                    anyhow!(
-                                                        "failed to reject malformed Claude control request: {err}"
-                                                    )
-                                                })
-                                        }
                                         ClaudeControlRequestAction::RecordSelfResolvedQuestion {
                                             title,
                                             detail,
@@ -784,11 +767,11 @@ fn spawn_claude_runtime(
                                             recorder.push_claude_self_resolved_user_input(
                                                 &title, &detail, questions,
                                             )?;
-                                            let command =
-                                                claude_self_resolved_question_runtime_command(
+                                            reader_input_tx
+                                                .send(ClaudeRuntimeCommand::PermissionResponse(
                                                     response,
-                                                );
-                                            reader_input_tx.send(command).map_err(|err| {
+                                                ))
+                                                .map_err(|err| {
                                                 anyhow!(
                                                     "failed to self-resolve Claude question: {err}"
                                                 )
@@ -799,15 +782,15 @@ fn spawn_claude_runtime(
                                             response,
                                         } => {
                                             recorder.error(&detail)?;
-                                            let command =
-                                                claude_self_resolved_question_runtime_command(
+                                            reader_input_tx
+                                                .send(ClaudeRuntimeCommand::PermissionResponse(
                                                     response,
-                                                );
-                                            reader_input_tx.send(command).map_err(|err| {
-                                                anyhow!(
-                                                    "failed to self-resolve malformed Claude question: {err}"
-                                                )
-                                            })
+                                                ))
+                                                .map_err(|err| {
+                                                    anyhow!(
+                                                        "failed to self-resolve malformed Claude question: {err}"
+                                                    )
+                                                })
                                         }
                                     }
                                 });
@@ -1040,7 +1023,6 @@ fn write_claude_initialize(writer: &mut impl Write) -> Result<()> {
                 "hooks": {},
                 "systemPrompt": "",
                 "appendSystemPrompt": "",
-                "supportedDialogKinds": ["permission_ask_user_question"],
             }
         }),
     )
@@ -1118,51 +1100,6 @@ fn write_claude_permission_response(
     };
 
     write_claude_message(writer, &message)
-}
-
-/// Writes the opaque completion envelope expected by Claude Code's
-/// `request_user_dialog` transport for AskUserQuestion.
-fn write_claude_user_input_response(
-    writer: &mut impl Write,
-    response: &ClaudeUserInputResponse,
-) -> Result<()> {
-    write_claude_message(
-        writer,
-        &json!({
-            "type": "control_response",
-            "response": {
-                "subtype": "success",
-                "request_id": response.request_id,
-                "response": {
-                    "behavior": "completed",
-                    "result": {
-                        "behavior": "allow",
-                        "updatedInput": response.updated_input,
-                    }
-                }
-            }
-        }),
-    )
-}
-
-/// Writes the protocol error envelope accepted by Claude Code for a malformed
-/// control request. Returning an error keeps Claude from waiting forever on a
-/// request that TermAl cannot safely render or answer.
-fn write_claude_control_error_response(
-    writer: &mut impl Write,
-    response: &ClaudeControlErrorResponse,
-) -> Result<()> {
-    write_claude_message(
-        writer,
-        &json!({
-            "type": "control_response",
-            "response": {
-                "subtype": "error",
-                "request_id": response.request_id,
-                "error": response.error,
-            }
-        }),
-    )
 }
 
 /// Writes Claude set permission mode.

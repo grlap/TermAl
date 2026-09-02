@@ -241,8 +241,8 @@ impl SessionRecorder {
         )
     }
 
-    /// Records a Claude AskUserQuestion dialog and retains its routing data
-    /// until the browser submits every answer.
+    /// Records a Claude AskUserQuestion permission request and retains its
+    /// routing data until the browser submits every answer or skips it.
     fn push_claude_user_input_request(
         &mut self,
         title: &str,
@@ -254,9 +254,6 @@ impl SessionRecorder {
         let state = self.state.clone();
         let session_id = self.session_id.clone();
         let message_id = state.allocate_message_id();
-        // Only the permission transport has a decline envelope (a permission
-        // deny); the legacy dialog channel would have nothing to send.
-        let declinable = pending_claude_user_input_is_declinable(&request);
         state.push_message(
             &session_id,
             Message::UserInputRequest {
@@ -267,7 +264,7 @@ impl SessionRecorder {
                 detail: detail.to_owned(),
                 questions,
                 state: InteractionRequestState::Pending,
-                declinable,
+                declinable: true,
                 submitted_answers: None,
             },
         )?;

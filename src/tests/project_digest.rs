@@ -320,7 +320,6 @@ fn project_digest_inputs_surface_pending_claude_user_questions() {
         record.pending_claude_user_inputs.insert(
             message_id.clone(),
             ClaudePendingUserInput {
-                transport: ClaudeUserInputTransport::Dialog,
                 input: json!({ "questions": [] }),
                 questions: Vec::new(),
                 request_id: "claude-project-digest-request".to_owned(),

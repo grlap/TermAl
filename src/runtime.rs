@@ -249,8 +249,6 @@ enum ClaudeRuntimeCommand {
         retry_detail: String,
     },
     PermissionResponse(ClaudePermissionDecision),
-    UserInputResponse(ClaudeUserInputResponse),
-    ControlErrorResponse(ClaudeControlErrorResponse),
     SetModel(String),
     SetPermissionMode(String),
 }
@@ -270,46 +268,12 @@ struct ClaudePendingApproval {
     tool_input: Value,
 }
 
-/// Selects the stdin channel that carries the user's AskUserQuestion answers
-/// back to Claude Code. Current CLIs deliver the questions as a
-/// `can_use_tool` permission request and read the answers from the
-/// permission decision's `updatedInput.answers`; the dedicated
-/// `request_user_dialog` channel is retained for compatibility with hosts
-/// that negotiated it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ClaudeUserInputTransport {
-    Dialog,
-    Permission,
-}
-
-/// Represents a Claude user-dialog request waiting for structured answers.
+/// Represents an AskUserQuestion permission request waiting for structured
+/// answers.
 #[derive(Clone)]
 struct ClaudePendingUserInput {
     input: Value,
     questions: Vec<UserInputQuestion>,
-    request_id: String,
-    transport: ClaudeUserInputTransport,
-}
-
-/// Whether the user may skip this request without answering. Only the
-/// permission transport carries a decline back to Claude (a permission
-/// deny); the legacy dialog channel has no decline envelope, so declining
-/// there would strand the request.
-fn pending_claude_user_input_is_declinable(pending: &ClaudePendingUserInput) -> bool {
-    matches!(pending.transport, ClaudeUserInputTransport::Permission)
-}
-
-/// Represents the completed Claude user-dialog response written to stdin.
-#[derive(Clone)]
-struct ClaudeUserInputResponse {
-    request_id: String,
-    updated_input: Value,
-}
-
-/// Represents a protocol-level rejection of a malformed Claude control request.
-#[derive(Clone)]
-struct ClaudeControlErrorResponse {
-    error: String,
     request_id: String,
 }
 
@@ -324,31 +288,6 @@ enum ClaudePermissionDecision {
         request_id: String,
         message: String,
     },
-}
-
-/// The runtime answer that accompanies a self-resolved question: the
-/// permission transport denies, the legacy dialog channel (which has no deny
-/// decision) answers with a control error. The latter is a compatibility-only
-/// fallback rather than a live-verified equivalent of the permission deny.
-enum ClaudeSelfResolvedQuestionResponse {
-    PermissionDeny(ClaudePermissionDecision),
-    DialogError(ClaudeControlErrorResponse),
-}
-
-/// Maps a self-resolved question response back onto the control channel that
-/// delivered it. The permission transport has a deny envelope; the legacy
-/// dialog transport reports a protocol-level control error instead.
-fn claude_self_resolved_question_runtime_command(
-    response: ClaudeSelfResolvedQuestionResponse,
-) -> ClaudeRuntimeCommand {
-    match response {
-        ClaudeSelfResolvedQuestionResponse::PermissionDeny(decision) => {
-            ClaudeRuntimeCommand::PermissionResponse(decision)
-        }
-        ClaudeSelfResolvedQuestionResponse::DialogError(error) => {
-            ClaudeRuntimeCommand::ControlErrorResponse(error)
-        }
-    }
 }
 
 /// Enumerates Claude control request actions.
@@ -368,22 +307,21 @@ enum ClaudeControlRequestAction {
     /// Self-resolves an unattended AskUserQuestion: records a resolved
     /// (`Declined`, non-declinable) transcript card with the parsed
     /// questions — no pending claim, nothing waits for the browser — and
-    /// answers the runtime exactly as a plain deny/error would.
+    /// denies the permission request after recording the audit card.
     RecordSelfResolvedQuestion {
         title: String,
         detail: String,
         questions: Vec<UserInputQuestion>,
-        response: ClaudeSelfResolvedQuestionResponse,
+        response: ClaudePermissionDecision,
     },
     /// Records a protocol diagnostic before denying an unattended malformed
     /// question. There are no parsed questions to put on an audit card, but
     /// the transcript must still explain why TermAl answered automatically.
     RecordSelfResolvedQuestionError {
         detail: String,
-        response: ClaudeSelfResolvedQuestionResponse,
+        response: ClaudePermissionDecision,
     },
     Respond(ClaudePermissionDecision),
-    RespondError(ClaudeControlErrorResponse),
 }
 
 /// Represents a ACP runtime command.

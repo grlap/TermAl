@@ -466,7 +466,6 @@ async fn submit_codex_user_input_route_updates_message_and_publishes_message_upd
 
 fn claude_user_input_validation_fixture() -> ClaudePendingUserInput {
     ClaudePendingUserInput {
-        transport: ClaudeUserInputTransport::Dialog,
         input: json!({"questions": [], "metadata": {"source": "validation-test"}}),
         questions: vec![
             UserInputQuestion {
@@ -565,7 +564,7 @@ fn validate_claude_user_input_answers_rejects_invalid_answer_shapes() {
 }
 
 #[test]
-fn validate_claude_user_input_answers_encodes_by_transport_and_masks_secrets() {
+fn validate_claude_user_input_answers_encodes_permission_shape_and_masks_secrets() {
     let answers = || {
         BTreeMap::from([
             ("scope".to_owned(), vec!["Focused".to_owned()]),
@@ -577,22 +576,10 @@ fn validate_claude_user_input_answers_encodes_by_transport_and_masks_secrets() {
         ])
     };
 
-    // The compatibility-only dialog channel retains its historical joined
-    // multi-select shape because that channel is not live-verified.
-    let dialog_pending = claude_user_input_validation_fixture();
-    let (dialog_input, display_answers) =
-        validate_claude_user_input_answers(&dialog_pending, answers())
-            .expect("valid legacy Claude answers should be normalized");
-    assert_eq!(
-        dialog_input["answers"]["Which checks should I run?"],
-        "Tests, custom smoke check"
-    );
-
-    // The current permission transport uses the live-verified label array.
-    let mut permission_pending = claude_user_input_validation_fixture();
-    permission_pending.transport = ClaudeUserInputTransport::Permission;
-    let (permission_input, _) = validate_claude_user_input_answers(&permission_pending, answers())
-        .expect("valid permission Claude answers should be normalized");
+    let permission_pending = claude_user_input_validation_fixture();
+    let (permission_input, display_answers) =
+        validate_claude_user_input_answers(&permission_pending, answers())
+            .expect("valid permission Claude answers should be normalized");
     assert_eq!(
         permission_input["answers"]["Which checks should I run?"],
         json!(["Tests", "custom smoke check"])
@@ -626,7 +613,7 @@ fn validate_claude_user_input_answers_rejects_non_object_pending_input_without_p
 }
 
 #[tokio::test]
-async fn submit_claude_user_input_route_delivers_all_dialog_answers() {
+async fn submit_claude_user_input_route_delivers_all_permission_answers() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Claude);
     let (runtime, input_rx) = test_claude_runtime_handle("claude-user-input-route");
@@ -688,7 +675,7 @@ async fn submit_claude_user_input_route_delivers_all_dialog_answers() {
                 detail: "Answer Claude's 2 questions to continue.".to_owned(),
                 questions: questions.clone(),
                 state: InteractionRequestState::Pending,
-                declinable: false,
+                declinable: true,
                 submitted_answers: None,
             },
         )
@@ -698,10 +685,9 @@ async fn submit_claude_user_input_route_delivers_all_dialog_answers() {
             &session_id,
             message_id.clone(),
             ClaudePendingUserInput {
-                transport: ClaudeUserInputTransport::Dialog,
                 input: original_input.clone(),
                 questions,
-                request_id: "claude-dialog-request".to_owned(),
+                request_id: "claude-permission-request-with-other".to_owned(),
             },
         )
         .expect("pending Claude user input should be registered");
@@ -751,23 +737,23 @@ async fn submit_claude_user_input_route_delivers_all_dialog_answers() {
     ));
 
     match input_rx.recv_timeout(Duration::from_millis(50)) {
-        Ok(ClaudeRuntimeCommand::UserInputResponse(response)) => {
-            assert_eq!(response.request_id, "claude-dialog-request");
-            // The compatibility-only dialog channel keeps its historical
-            // comma-joined multi-select encoding; the live permission channel
-            // is covered separately below.
+        Ok(ClaudeRuntimeCommand::PermissionResponse(ClaudePermissionDecision::Allow {
+            request_id,
+            updated_input,
+        })) => {
+            assert_eq!(request_id, "claude-permission-request-with-other");
             let mut expected_input = original_input;
             expected_input.as_object_mut().unwrap().insert(
                 "answers".to_owned(),
                 json!({
                     "Which scope should I use?": "Focused",
-                    "Which checks should I run?": "Tests, custom smoke check"
+                    "Which checks should I run?": ["Tests", "custom smoke check"]
                 }),
             );
-            assert_eq!(response.updated_input, expected_input);
+            assert_eq!(updated_input, expected_input);
         }
-        Ok(_) => panic!("expected Claude user-dialog response"),
-        Err(err) => panic!("Claude user-dialog response should arrive: {err}"),
+        Ok(_) => panic!("expected Claude permission response"),
+        Err(err) => panic!("Claude permission response should arrive: {err}"),
     }
     let expected_preview =
         user_input_request_preview_text(session.agent.name(), InteractionRequestState::Submitted);
@@ -878,7 +864,6 @@ async fn submit_claude_user_input_route_answers_permission_transport_via_allow()
             &session_id,
             message_id.clone(),
             ClaudePendingUserInput {
-                transport: ClaudeUserInputTransport::Permission,
                 input: original_input.clone(),
                 questions,
                 request_id: "claude-permission-request".to_owned(),
@@ -1030,7 +1015,6 @@ async fn submit_claude_user_input_route_decline_permission_transport_sends_deny(
             &session_id,
             message_id.clone(),
             ClaudePendingUserInput {
-                transport: ClaudeUserInputTransport::Permission,
                 input: json!({ "questions": [{ "question": "Which scope should I use?" }] }),
                 questions,
                 request_id: "claude-decline-request".to_owned(),
@@ -1121,62 +1105,6 @@ async fn submit_claude_user_input_route_decline_permission_transport_sends_deny(
 }
 
 #[test]
-fn submit_claude_user_input_decline_is_rejected_off_the_permission_transport() {
-    // The legacy dialog channel has no decline envelope, and a decline can
-    // never smuggle answers. Both rejections must leave the pending claim
-    // and the card untouched.
-    let state = test_app_state();
-    let session_id = test_session_id(&state, Agent::Claude);
-    let message_id = "claude-dialog-decline-message".to_owned();
-    let input_rx = register_single_question_claude_input(
-        &state,
-        &session_id,
-        "claude-dialog-decline",
-        &message_id,
-    );
-
-    let error = match state.submit_user_input(&session_id, &message_id, BTreeMap::new(), true) {
-        Ok(_) => panic!("the dialog transport must reject a decline"),
-        Err(error) => error,
-    };
-    assert_eq!(error.status, StatusCode::CONFLICT);
-    assert!(error.message.contains("legacy Claude question dialog"));
-
-    let error = match state.submit_user_input(
-        &session_id,
-        &message_id,
-        BTreeMap::from([("scope".to_owned(), vec!["Focused".to_owned()])]),
-        true,
-    ) {
-        Ok(_) => panic!("a decline carrying answers must be rejected"),
-        Err(error) => error,
-    };
-    assert_eq!(error.status, StatusCode::BAD_REQUEST);
-    assert!(error.message.contains("cannot carry answers"));
-
-    let inner = state.inner.lock().expect("state mutex poisoned");
-    let record = inner
-        .sessions
-        .iter()
-        .find(|record| record.session.id == session_id)
-        .expect("Claude session should exist");
-    assert!(record.pending_claude_user_inputs.contains_key(&message_id));
-    assert!(matches!(
-        record.session.messages.last(),
-        Some(Message::UserInputRequest {
-            state: InteractionRequestState::Pending,
-            ..
-        })
-    ));
-    drop(inner);
-    assert!(
-        input_rx.try_recv().is_err(),
-        "a rejected decline must not reach the runtime"
-    );
-    let _ = fs::remove_file(state.persistence_path.as_path());
-}
-
-#[test]
 fn submit_codex_user_input_decline_is_rejected() {
     // Codex's request_user_input protocol has no decline response; the
     // route must refuse instead of inventing one.
@@ -1236,7 +1164,7 @@ fn register_single_question_claude_input(
                 detail: "Choose a scope.".to_owned(),
                 questions: vec![question.clone()],
                 state: InteractionRequestState::Pending,
-                declinable: false,
+                declinable: true,
                 submitted_answers: None,
             },
         )
@@ -1246,7 +1174,6 @@ fn register_single_question_claude_input(
             session_id,
             message_id.to_owned(),
             ClaudePendingUserInput {
-                transport: ClaudeUserInputTransport::Dialog,
                 input: json!({ "questions": [{ "question": "Which scope?" }] }),
                 questions: vec![question],
                 request_id: format!("request-{message_id}"),
@@ -1294,7 +1221,9 @@ fn concurrent_claude_user_input_submissions_deliver_exactly_one_runtime_response
     assert_eq!(results.iter().filter(|result| result.is_err()).count(), 1);
     assert!(matches!(
         input_rx.recv_timeout(Duration::from_millis(50)),
-        Ok(ClaudeRuntimeCommand::UserInputResponse(_))
+        Ok(ClaudeRuntimeCommand::PermissionResponse(
+            ClaudePermissionDecision::Allow { .. }
+        ))
     ));
     assert!(
         input_rx.try_recv().is_err(),

@@ -54,14 +54,6 @@ struct ClaudeToolPermissionRequest {
     tool_input: Value,
 }
 
-/// Represents Claude Code's blocking AskUserQuestion dialog payload.
-struct ClaudeUserInputDialogRequest {
-    detail: String,
-    questions: Vec<UserInputQuestion>,
-    request: ClaudePendingUserInput,
-    title: String,
-}
-
 /// Denial for `AskUserQuestion` on sessions that are genuinely
 /// noninteractive (see [`claude_question_is_unattended`]): nobody is
 /// watching, so a parked question card would stall the run forever. The
@@ -91,16 +83,6 @@ const CLAUDE_SELF_RESOLVED_QUESTION_DETAIL: &str = "TermAl asked Claude to decid
      input: this session runs unattended (a read-only reviewer or a non-interactive delegation \
      child), so no question card was shown.";
 
-/// Compatibility-only audit detail for the legacy dialog channel. Unlike a
-/// permission request it has no deny decision, so TermAl can only return a
-/// protocol control error carrying the self-decide instruction. Current
-/// Claude CLIs no longer emit this channel, so that fallback is not backed by
-/// the live permission-transport capture.
-const CLAUDE_SELF_RESOLVED_LEGACY_QUESTION_DETAIL: &str = "TermAl asked Claude to decide without \
-     human input: this session runs unattended, so no question card was shown. The legacy \
-     question-dialog protocol has no deny envelope; TermAl returned a control error carrying \
-     the same self-decide instruction.";
-
 /// A headless turn may ask a small number of self-resolved questions, but the
 /// fourth attempt fails the turn instead of looping forever.
 const MAX_CLAUDE_UNATTENDED_QUESTIONS_PER_TURN: usize = 3;
@@ -122,8 +104,7 @@ fn reserve_claude_unattended_question_self_resolution(
     Ok(())
 }
 
-/// Attendedness policy for `AskUserQuestion`, applied identically to the
-/// `can_use_tool` permission transport and the legacy dialog channel.
+/// Attendedness policy for `AskUserQuestion` permission requests.
 ///
 /// Unattended means: the internal `ReadOnlyAutoApprove` mode (currently
 /// assigned only to read-only reviewer delegations), or a delegation child
@@ -158,85 +139,21 @@ fn classify_claude_control_request(
     cwd: &str,
     delegation_control_plane_access: bool,
 ) -> Result<Option<ClaudeControlRequestAction>> {
-    let parsed_dialog = match parse_claude_user_input_dialog_request(message) {
-        Ok(request) => request,
-        Err(err) => {
-            let Some(request_id) = claude_user_input_dialog_request_id(message).map(str::to_owned)
-            else {
-                return Err(err);
-            };
-            if claude_question_is_unattended(approval_mode, delegation_child) {
-                let key = format!("user-dialog-legacy\n{request_id}");
-                if !state.approval_keys_this_turn.insert(key) {
-                    return Ok(None);
-                }
-                reserve_claude_unattended_question_self_resolution(state)?;
-                return Ok(Some(
-                    ClaudeControlRequestAction::RecordSelfResolvedQuestionError {
-                        detail: format!(
-                            "Claude AskUserQuestion legacy dialog was malformed and TermAl rejected it in this unattended session: {err:#}"
-                        ),
-                        response: ClaudeSelfResolvedQuestionResponse::DialogError(
-                            ClaudeControlErrorResponse {
-                                error: CLAUDE_UNATTENDED_QUESTION_DENIAL.to_owned(),
-                                request_id,
-                            },
-                        ),
-                    },
-                ));
-            }
-            return Ok(Some(ClaudeControlRequestAction::RespondError(
-                ClaudeControlErrorResponse {
-                    error: format!("invalid Claude AskUserQuestion dialog: {err:#}"),
-                    request_id,
-                },
-            )));
-        }
-    };
-    if let Some(request) = parsed_dialog {
-        // Dedupe keys are namespaced per transport so a legacy dialog and a
-        // permission request that happen to share a request id within one
-        // turn never suppress each other.
-        let key = format!("user-dialog-legacy\n{}", request.request.request_id);
-        if !state.approval_keys_this_turn.insert(key) {
-            return Ok(None);
-        }
-        // The no-park invariant covers both question transports: an
-        // unattended session must not queue a question card on the legacy
-        // dialog channel either. The dialog protocol has no deny decision,
-        // so the control error envelope carries the self-decide wording
-        // back to the agent.
-        if claude_question_is_unattended(approval_mode, delegation_child) {
-            reserve_claude_unattended_question_self_resolution(state)?;
-            return Ok(Some(
-                ClaudeControlRequestAction::RecordSelfResolvedQuestion {
-                    title: CLAUDE_SELF_RESOLVED_QUESTION_TITLE.to_owned(),
-                    detail: CLAUDE_SELF_RESOLVED_LEGACY_QUESTION_DETAIL.to_owned(),
-                    questions: request.questions,
-                    response: ClaudeSelfResolvedQuestionResponse::DialogError(
-                        ClaudeControlErrorResponse {
-                            error: CLAUDE_UNATTENDED_QUESTION_DENIAL.to_owned(),
-                            request_id: request.request.request_id,
-                        },
-                    ),
-                },
-            ));
-        }
-        return Ok(Some(ClaudeControlRequestAction::QueueUserInput {
-            title: request.title,
-            detail: request.detail,
-            questions: request.questions,
-            request: request.request,
-        }));
+    if message.get("type").and_then(Value::as_str) == Some("control_request")
+        && message.pointer("/request/subtype").and_then(Value::as_str)
+            == Some("request_user_dialog")
+    {
+        bail!(
+            "unsupported Claude control request subtype `request_user_dialog`; AskUserQuestion must arrive through `can_use_tool`"
+        );
     }
 
     let Some(mut request) = parse_claude_tool_permission_request(message) else {
         return Ok(None);
     };
 
-    // Claude Code no longer opens the `request_user_dialog` channel for
-    // AskUserQuestion in stream-json sessions: the questions arrive inside
-    // this very `can_use_tool` payload and the user's answers must travel
+    // AskUserQuestion in stream-json sessions arrives inside this
+    // `can_use_tool` payload, and the user's answers must travel
     // back in the permission decision's `updatedInput.answers` (verified
     // against real CLI 2.1.250/2.1.251 captures). Route the questions to the
     // user-input card in every attended approval mode — including Plan,
@@ -257,7 +174,7 @@ fn classify_claude_control_request(
     // takes the ordinary permission flow.
     if request.tool_name == "AskUserQuestion" {
         if claude_question_is_unattended(approval_mode, delegation_child) {
-            let key = format!("user-dialog-permission\n{}", request.request_id);
+            let key = format!("ask-user-question\n{}", request.request_id);
             if !state.approval_keys_this_turn.insert(key) {
                 return Ok(None);
             }
@@ -275,7 +192,7 @@ fn classify_claude_control_request(
                         title: CLAUDE_SELF_RESOLVED_QUESTION_TITLE.to_owned(),
                         detail: CLAUDE_SELF_RESOLVED_QUESTION_DETAIL.to_owned(),
                         questions,
-                        response: ClaudeSelfResolvedQuestionResponse::PermissionDeny(decision),
+                        response: decision,
                     },
                     Err(err) => {
                         eprintln!(
@@ -285,7 +202,7 @@ fn classify_claude_control_request(
                             detail: format!(
                                 "Claude AskUserQuestion payload was malformed and TermAl denied it in this unattended session: {err:#}"
                             ),
-                            response: ClaudeSelfResolvedQuestionResponse::PermissionDeny(decision),
+                            response: decision,
                         }
                     }
                 },
@@ -294,7 +211,7 @@ fn classify_claude_control_request(
         let parsed = parse_claude_ask_user_question_payload(&request.tool_input);
         match parsed {
             Ok(questions) => {
-                let key = format!("user-dialog-permission\n{}", request.request_id);
+                let key = format!("ask-user-question\n{}", request.request_id);
                 if !state.approval_keys_this_turn.insert(key) {
                     return Ok(None);
                 }
@@ -306,7 +223,6 @@ fn classify_claude_control_request(
                         input: request.tool_input,
                         questions,
                         request_id: request.request_id,
-                        transport: ClaudeUserInputTransport::Permission,
                     },
                 }));
             }
@@ -372,83 +288,6 @@ fn classify_claude_control_request(
     }))
 }
 
-fn claude_user_input_dialog_request_id(message: &Value) -> Option<&str> {
-    let request = message.get("request")?;
-    (message.get("type").and_then(Value::as_str) == Some("control_request")
-        && request.get("subtype").and_then(Value::as_str) == Some("request_user_dialog")
-        && request.get("dialog_kind").and_then(Value::as_str)
-            == Some("permission_ask_user_question"))
-    .then(|| {
-        message
-            .get("request_id")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|request_id| !request_id.is_empty())
-    })
-    .flatten()
-}
-
-/// Parses the Claude Code 2.1 user-dialog channel used by AskUserQuestion.
-///
-/// The host opts into this exact dialog kind during `initialize`. Claude's
-/// opaque payload contains the original tool input plus one to four questions;
-/// TermAl gives each question a stable transport id while retaining the
-/// original question text because Claude indexes `updatedInput.answers` by
-/// that text rather than by an id.
-fn parse_claude_user_input_dialog_request(
-    message: &Value,
-) -> Result<Option<ClaudeUserInputDialogRequest>> {
-    if message.get("type").and_then(Value::as_str) != Some("control_request") {
-        return Ok(None);
-    }
-    let Some(request) = message.get("request") else {
-        return Ok(None);
-    };
-    if request.get("subtype").and_then(Value::as_str) != Some("request_user_dialog")
-        || request.get("dialog_kind").and_then(Value::as_str)
-            != Some("permission_ask_user_question")
-    {
-        return Ok(None);
-    }
-
-    let request_id = message
-        .get("request_id")
-        .and_then(Value::as_str)
-        .filter(|request_id| !request_id.trim().is_empty())
-        .ok_or_else(|| anyhow!("Claude user dialog is missing request_id"))?
-        .to_owned();
-    let payload = request
-        .get("payload")
-        .and_then(Value::as_object)
-        .ok_or_else(|| anyhow!("Claude AskUserQuestion dialog is missing its payload"))?;
-    let input = payload
-        .get("input")
-        .filter(|input| input.is_object())
-        .cloned()
-        .ok_or_else(|| anyhow!("Claude AskUserQuestion dialog is missing its original input"))?;
-    let raw_questions = payload
-        .get("questions")
-        .and_then(Value::as_array)
-        .ok_or_else(|| anyhow!("Claude AskUserQuestion dialog is missing questions"))?;
-    let questions = parse_claude_ask_user_question_list(
-        raw_questions,
-        ClaudeUserInputTransport::Dialog,
-    )?;
-
-    let question_count = questions.len();
-    Ok(Some(ClaudeUserInputDialogRequest {
-        detail: claude_user_input_detail(question_count),
-        request: ClaudePendingUserInput {
-            input,
-            questions: questions.clone(),
-            request_id,
-            transport: ClaudeUserInputTransport::Dialog,
-        },
-        questions,
-        title: "Claude needs your input".to_owned(),
-    }))
-}
-
 fn claude_user_input_detail(question_count: usize) -> String {
     if question_count == 1 {
         "Answer Claude's question to continue.".to_owned()
@@ -465,22 +304,13 @@ fn parse_claude_ask_user_question_payload(tool_input: &Value) -> Result<Vec<User
         .get("questions")
         .and_then(Value::as_array)
         .ok_or_else(|| anyhow!("AskUserQuestion payload has no `questions` array"))
-        .and_then(|raw_questions| {
-            parse_claude_ask_user_question_list(
-                raw_questions,
-                ClaudeUserInputTransport::Permission,
-            )
-        })
+        .and_then(|raw_questions| parse_claude_ask_user_question_list(raw_questions))
 }
 
 /// Parses an AskUserQuestion question list (1 to 4 unique questions with
-/// optional labeled options) into TermAl's transport shape. Shared by the
-/// legacy `request_user_dialog` channel and the `can_use_tool` permission
-/// payload, which carry the same array.
-fn parse_claude_ask_user_question_list(
-    raw_questions: &[Value],
-    transport: ClaudeUserInputTransport,
-) -> Result<Vec<UserInputQuestion>> {
+/// optional labeled options) from the `can_use_tool` permission payload into
+/// TermAl's transport shape.
+fn parse_claude_ask_user_question_list(raw_questions: &[Value]) -> Result<Vec<UserInputQuestion>> {
     if !(1..=4).contains(&raw_questions.len()) {
         return Err(anyhow!(
             "Claude AskUserQuestion payload contained {} questions; expected 1 to 4",
@@ -499,14 +329,9 @@ fn parse_claude_ask_user_question_list(
             .and_then(Value::as_str)
             .filter(|question| !question.trim().is_empty())
             .ok_or_else(|| anyhow!("Claude question {} has no text", index + 1))?;
-        // The permission transport is live-verified to index
-        // `updatedInput.answers` by the exact question string, so preserve it
-        // byte-for-byte. The compatibility-only dialog transport retains its
-        // historical trimming rather than changing an unverified contract.
-        let question = match transport {
-            ClaudeUserInputTransport::Dialog => raw_question_text.trim(),
-            ClaudeUserInputTransport::Permission => raw_question_text,
-        };
+        // Claude indexes `updatedInput.answers` by the exact question string,
+        // so preserve it byte-for-byte.
+        let question = raw_question_text;
         if !question_texts.insert(question.to_owned()) {
             return Err(anyhow!(
                 "Claude AskUserQuestion payload contains duplicate question text"
@@ -553,14 +378,9 @@ fn parse_claude_ask_user_question_list(
                                     option_index + 1
                                 )
                             })?;
-                        // Match question-text normalization per transport: the
-                        // permission channel returns exact option labels to
-                        // Claude, while the dialog fallback keeps historical
-                        // trimming.
-                        let label = match transport {
-                            ClaudeUserInputTransport::Dialog => raw_label.trim(),
-                            ClaudeUserInputTransport::Permission => raw_label,
-                        };
+                        // Claude matches returned answers against the exact
+                        // option labels, so preserve them byte-for-byte.
+                        let label = raw_label;
                             if !option_labels.insert(label.to_owned()) {
                                 return Err(anyhow!(
                                     "Claude question {} contains duplicate option label `{label}`",

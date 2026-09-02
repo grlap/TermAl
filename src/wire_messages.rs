@@ -407,13 +407,13 @@ enum Message {
         detail: String,
         questions: Vec<UserInputQuestion>,
         state: InteractionRequestState,
-        /// Whether the browser may skip this request without answers. Only
-        /// Claude questions that arrived over the `can_use_tool` permission
-        /// channel are declinable — a permission deny carries the skip back
-        /// to the agent. Codex `request_user_input` and the legacy Claude
-        /// dialog channel have no decline envelope. Always serialized (the
-        /// backend owns the flag; `default` only covers payloads persisted
-        /// before it existed) so the UI treats it as a required boolean.
+        /// Whether the browser may skip this request without answers. Pending
+        /// Claude AskUserQuestion permission requests are declinable — a
+        /// permission deny carries the skip back to the agent. Codex
+        /// `request_user_input` and already self-resolved audit cards are not.
+        /// Always serialized (the backend owns the flag; `default` only
+        /// covers payloads persisted before it existed) so the UI treats it
+        /// as a required boolean.
         #[serde(default)]
         declinable: bool,
         #[serde(

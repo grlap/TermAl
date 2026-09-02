@@ -7,9 +7,9 @@
 // `/user-input/`, `/mcp-elicitation/`, `/codex/requests/`), and these
 // methods route the response back into the still-running agent.
 //
-// Per-agent split: Claude uses a `ClaudePermissionDecision` or completed
-// user-dialog response queued onto the runtime's input channel (ultimately
-// an NDJSON control_response over the CLI pipe); Codex uses a JSON-RPC `sendResponse`
+// Per-agent split: Claude uses a `ClaudePermissionDecision` queued onto the
+// runtime's input channel (ultimately an NDJSON control_response over the CLI
+// pipe); Codex uses a JSON-RPC `sendResponse`
 // whose `result` shape depends on the approval kind — built here by
 // `codex_approval_result` and sent via `send_codex_json_rpc_request`
 // from `src/codex_rpc.rs`; ACP uses an `AcpRuntimeCommand::JsonRpcMessage`
@@ -19,16 +19,11 @@
 // `update_approval` searches `pending_claude_approvals` (keyed by
 // message_id), `pending_codex_approvals`, and `pending_acp_approvals`
 // to find the right response channel. `submit_user_input` handles both
-// Claude and Codex; Claude answers are additionally routed by
-// `ClaudeUserInputTransport` — the legacy `request_user_dialog` completion
-// envelope, or (for questions that arrived as a `can_use_tool` permission
-// request, the current AskUserQuestion contract) a permission allow whose
-// `updatedInput.answers` carries the user's answers: exact question text
-// as the key, a label string for single-select, and a label array for
-// multi-select. The compatibility-only legacy dialog keeps its historical
-// comma-joined multi-select encoding because that channel is not live-verified. A declined
-// submission maps to a permission deny on that same channel (permission
-// transport only) and resolves the card as declined.
+// Claude and Codex. Claude AskUserQuestion answers return through the
+// `can_use_tool` permission response: an allow decision whose
+// `updatedInput.answers` carries exact question text as the key, a label
+// string for single-select, and a label array for multi-select. A declined
+// submission maps to a permission deny and resolves the card as declined.
 // The remaining `submit_codex_*` methods look up their
 // Codex-specific maps (`pending_codex_mcp_elicitations` / `pending_codex_app_requests`),
 // validate payloads through `src/codex_validation.rs`, then dispatch
@@ -67,28 +62,19 @@ enum PendingUserInputRuntimeAction {
     },
 }
 
-/// Maps a completed Claude user-input response onto the stdin channel the
-/// request arrived on: the legacy dialog envelope, or — for questions that
-/// arrived as a `can_use_tool` permission request — an allow decision whose
-/// `updatedInput` carries the answers.
+/// Maps completed Claude user input onto an AskUserQuestion permission allow
+/// whose `updatedInput` carries the answers.
 fn claude_user_input_runtime_command(
-    transport: ClaudeUserInputTransport,
-    response: ClaudeUserInputResponse,
+    request_id: String,
+    updated_input: Value,
 ) -> ClaudeRuntimeCommand {
-    match transport {
-        ClaudeUserInputTransport::Dialog => ClaudeRuntimeCommand::UserInputResponse(response),
-        ClaudeUserInputTransport::Permission => {
-            ClaudeRuntimeCommand::PermissionResponse(ClaudePermissionDecision::Allow {
-                request_id: response.request_id,
-                updated_input: response.updated_input,
-            })
-        }
-    }
+    ClaudeRuntimeCommand::PermissionResponse(ClaudePermissionDecision::Allow {
+        request_id,
+        updated_input,
+    })
 }
 
-/// Maps a declined Claude user-input request onto a permission deny. Only
-/// the permission transport can carry a decline; callers must have checked
-/// `pending_claude_user_input_is_declinable` first.
+/// Maps a declined Claude user-input request onto a permission deny.
 fn claude_user_input_decline_runtime_command(
     pending: &ClaudePendingUserInput,
 ) -> ClaudeRuntimeCommand {
@@ -225,25 +211,17 @@ fn validate_claude_user_input_answers(
             }
         }
 
-        // The permission transport uses the live-verified answer encoding:
-        // a label string for single-select and a JSON label array for
-        // multi-select, keyed by exact question text. The compatibility-only
-        // dialog channel has no current live capture, so preserve its
-        // historical comma-joined multi-select shape rather than changing an
-        // unverified contract.
+        // The permission transport uses the live-verified answer encoding: a
+        // label string for single-select and a JSON label array for
+        // multi-select, keyed by exact question text.
         let answer_value = if question.multi_select {
-            match pending.transport {
-                ClaudeUserInputTransport::Permission => Value::Array(
-                    normalized_answers
-                        .iter()
-                        .cloned()
-                        .map(Value::String)
-                        .collect(),
-                ),
-                ClaudeUserInputTransport::Dialog => {
-                    Value::String(normalized_answers.join(", "))
-                }
-            }
+            Value::Array(
+                normalized_answers
+                    .iter()
+                    .cloned()
+                    .map(Value::String)
+                    .collect(),
+            )
         } else {
             Value::String(normalized_answers.first().cloned().ok_or_else(|| {
                 ApiError::internal("Claude single-select answer normalization produced no answer")
@@ -609,10 +587,8 @@ impl AppState {
     }
 
     /// Submits a structured user-input response to the live Claude or Codex
-    /// runtime that owns the transcript card. Claude receives either a
-    /// completed `request_user_dialog` response or a permission allow/deny,
-    /// according to the pending request's transport; Codex receives its
-    /// JSON-RPC result.
+    /// runtime that owns the transcript card. Claude receives a permission
+    /// allow/deny; Codex receives its JSON-RPC result.
     fn submit_user_input(
         &self,
         session_id: &str,
@@ -666,25 +642,14 @@ impl AppState {
                         }
                     };
                     let (command, display_answers) = if declined {
-                        if !pending_claude_user_input_is_declinable(&pending) {
-                            // Conflict, not bad-request: the payload is
-                            // well-formed, it just targets a request whose
-                            // transport has no decline envelope.
-                            return Err(ApiError::conflict(
-                                "the legacy Claude question dialog cannot be declined; answer the questions instead",
-                            ));
-                        }
                         (claude_user_input_decline_runtime_command(&pending), None)
                     } else {
                         let (updated_input, display_answers) =
                             validate_claude_user_input_answers(&pending, answers)?;
                         (
                             claude_user_input_runtime_command(
-                                pending.transport,
-                                ClaudeUserInputResponse {
-                                    request_id: pending.request_id.clone(),
-                                    updated_input,
-                                },
+                                pending.request_id.clone(),
+                                updated_input,
                             ),
                             Some(display_answers),
                         )
@@ -704,8 +669,8 @@ impl AppState {
                 }
                 Agent::Codex => {
                     if declined {
-                        // Conflict, not bad-request: see the dialog-transport
-                        // decline rejection above.
+                        // Conflict, not bad-request: the payload is
+                        // well-formed, but this request kind cannot decline.
                         return Err(ApiError::conflict(
                             "Codex user input requests do not support declining; answer the questions instead",
                         ));
