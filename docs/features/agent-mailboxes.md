@@ -14,6 +14,9 @@ Both durable coordination surfaces live in the isolated database described by
 Mailbox wakes that enter premium local Engram control retain the delivery and
 Stop restoration rules described by the
 [Engram Host Adapter](engram-host-adapter.md#mailbox-and-stop-behavior).
+Agents whose MCP configuration is locked can drive the same send, read and
+acknowledge operations from the shell through the
+[coordination CLI](coordination-cli.md), which reuses the MCP bridge contracts.
 
 ## Delivery contract
 
