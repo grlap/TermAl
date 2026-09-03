@@ -1,6 +1,6 @@
 //! Remote terminal proxy and terminal-stream framing tests.
 //!
-//! Split out of remote.rs so terminal forwarding limits and stream fallback
+//! Split out of remote.rs so terminal forwarding limits and stream protocol
 //! behavior stay isolated from state-sync coverage.
 
 use super::*;
@@ -21,24 +21,6 @@ fn replace_remote_settings_for_terminal_authority_test(state: &AppState, remote:
             remotes: Some(vec![RemoteConfig::local(), remote]),
         })
         .expect("remote settings replacement should succeed");
-}
-
-fn remove_remote_settings_for_terminal_authority_test(state: &AppState) {
-    state
-        .update_app_settings(UpdateAppSettingsRequest {
-            default_codex_model: None,
-            default_claude_model: None,
-            default_cursor_model: None,
-            default_gemini_model: None,
-            default_opencode_model: None,
-            default_codex_reasoning_effort: None,
-            default_codex_sandbox_mode: None,
-            default_codex_approval_policy: None,
-            default_claude_approval_mode: None,
-            default_claude_effort: None,
-            remotes: Some(vec![RemoteConfig::local()]),
-        })
-        .expect("remote settings removal should succeed");
 }
 
 // Pins that when a remote responds 200 OK to /api/terminal/run/stream
@@ -94,7 +76,7 @@ async fn remote_terminal_stream_rejects_successful_non_sse_without_json_fallback
             if request_line.starts_with("GET /api/health ") {
                 stream
                     .write_all(
-                        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: 11\r\n\r\n{\"ok\":true}",
+                        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: 53\r\n\r\n{\"ok\":true,\"serverInstanceId\":\"remote-test-instance\"}",
                     )
                     .expect("health response should write");
                 continue;
@@ -157,7 +139,6 @@ async fn remote_terminal_stream_rejects_successful_non_sse_without_json_fallback
                 process: Mutex::new(None),
                 event_bridge_started: AtomicBool::new(true),
                 event_bridge_shutdown: AtomicBool::new(false),
-                supports_inline_orchestrator_templates: Mutex::new(None),
             }),
         );
     let app = app_router(state);
@@ -199,6 +180,178 @@ async fn remote_terminal_stream_rejects_successful_non_sse_without_json_fallback
     );
     assert!(saw_stream_request.load(Ordering::SeqCst));
     join_test_server(server);
+}
+
+// Pins that 404 and 405 from the current remote stream route are surfaced
+// directly and never retried through the JSON endpoint. Guards against
+// restoring the removed legacy-route fallback and double-executing commands.
+#[tokio::test]
+async fn remote_terminal_stream_never_retries_404_or_405_through_json() {
+    assert_remote_terminal_stream_status_is_not_retried(StatusCode::NOT_FOUND).await;
+    assert_remote_terminal_stream_status_is_not_retried(StatusCode::METHOD_NOT_ALLOWED).await;
+}
+
+async fn assert_remote_terminal_stream_status_is_not_retried(stream_status: StatusCode) {
+    let request_lines = Arc::new(Mutex::new(Vec::<String>::new()));
+    let request_lines_for_server = request_lines.clone();
+    let client_observed_result = Arc::new(AtomicBool::new(false));
+    let client_observed_result_for_server = client_observed_result.clone();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("test listener should bind");
+    let port = listener.local_addr().expect("listener addr").port();
+    let fallback_response = serde_json::to_string(&TerminalCommandResponse {
+        command: "echo no retry".to_owned(),
+        duration_ms: 1,
+        exit_code: Some(0),
+        output_truncated: false,
+        shell: "sh".to_owned(),
+        stderr: String::new(),
+        stdout: "unexpected fallback\n".to_owned(),
+        success: true,
+        timed_out: false,
+        workdir: "/remote/repo".to_owned(),
+    })
+    .expect("terminal response should encode");
+    let server = std::thread::spawn(move || {
+        let mut stream_response_sent = false;
+        loop {
+            let mut stream = if stream_response_sent {
+                loop {
+                    if client_observed_result_for_server.load(Ordering::SeqCst) {
+                        return;
+                    }
+                    match listener.accept() {
+                        Ok((stream, _)) => {
+                            stream
+                                .set_nonblocking(false)
+                                .expect("accepted test socket should support blocking mode");
+                            break stream;
+                        }
+                        Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                            std::thread::sleep(std::time::Duration::from_millis(10));
+                        }
+                        Err(err) => panic!("remote terminal no-retry listener failed: {err}"),
+                    }
+                }
+            } else {
+                accept_test_connection_with_timeout(
+                    &listener,
+                    "remote terminal no-retry listener",
+                    std::time::Duration::from_secs(10),
+                )
+            };
+            let request = read_test_http_request(&mut stream);
+            request_lines_for_server
+                .lock()
+                .expect("request lines mutex poisoned")
+                .push(request.request_line.clone());
+
+            if request.request_line.starts_with("GET /api/health ") {
+                write_test_http_response(
+                    &mut stream,
+                    StatusCode::OK,
+                    "application/json",
+                    r#"{"ok":true,"serverInstanceId":"remote-test-instance"}"#,
+                );
+                continue;
+            }
+
+            if request
+                .request_line
+                .starts_with("POST /api/terminal/run/stream ")
+            {
+                write_test_http_response(
+                    &mut stream,
+                    stream_status,
+                    "application/json",
+                    r#"{"error":"stream route unavailable"}"#,
+                );
+                stream_response_sent = true;
+                continue;
+            }
+
+            if request.request_line.starts_with("POST /api/terminal/run ") {
+                write_test_http_response(
+                    &mut stream,
+                    StatusCode::OK,
+                    "application/json",
+                    &fallback_response,
+                );
+                return;
+            }
+
+            panic!("unexpected request: {}", request.request_line);
+        }
+    });
+
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: format!("ssh-stream-no-retry-{}", stream_status.as_u16()),
+        name: format!("SSH Stream No Retry {}", stream_status.as_u16()),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("example.com".to_owned()),
+        port: Some(22),
+        user: Some("alice".to_owned()),
+    };
+    let project_id = create_test_remote_project(
+        &state,
+        &remote,
+        "/remote/repo",
+        &format!("Remote Stream No Retry {}", stream_status.as_u16()),
+        &format!("remote-stream-no-retry-project-{}", stream_status.as_u16()),
+    );
+    insert_test_remote_connection(
+        &state,
+        &remote,
+        port,
+        TestRemoteBridgeOwnership::RequestOnly,
+    );
+    let app = app_router(state);
+
+    let response = request_response(
+        &app,
+        Request::builder()
+            .method("POST")
+            .uri("/api/terminal/run/stream")
+            .header(axum::http::header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                json!({
+                    "command": "echo no retry",
+                    "projectId": project_id,
+                    "workdir": "/remote/repo",
+                })
+                .to_string(),
+            ))
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let mut body = Box::pin(response.into_body().into_data_stream());
+    let event = next_sse_event(&mut body).await;
+    client_observed_result.store(true, Ordering::SeqCst);
+    let (event_name, event_data) = parse_sse_event(&event);
+    assert_eq!(event_name, "error");
+    let payload: Value = serde_json::from_str(&event_data).expect("error event should decode");
+    assert_eq!(payload["status"], Value::from(stream_status.as_u16()));
+    assert_eq!(payload["error"], "stream route unavailable");
+
+    join_test_server(server);
+    let request_lines = request_lines.lock().expect("request lines mutex poisoned");
+    assert_eq!(
+        request_lines
+            .iter()
+            .filter(|line| line.starts_with("POST /api/terminal/run/stream "))
+            .count(),
+        1,
+        "remote stream route should be requested once: {request_lines:?}"
+    );
+    assert!(
+        request_lines
+            .iter()
+            .all(|line| !line.starts_with("POST /api/terminal/run ")),
+        "remote JSON route must not be retried: {request_lines:?}"
+    );
 }
 
 // Pins that a remote SSE response to /api/terminal/run/stream is
@@ -243,7 +396,7 @@ async fn remote_terminal_stream_proxies_successful_sse_output() {
                     &mut stream,
                     StatusCode::OK,
                     "application/json",
-                    r#"{"ok":true}"#,
+                    r#"{"ok":true,"serverInstanceId":"remote-test-instance"}"#,
                 );
                 continue;
             }
@@ -356,559 +509,6 @@ async fn remote_terminal_stream_proxies_successful_sse_output() {
             .all(|line| !line.starts_with("POST /api/terminal/run ")),
         "remote JSON fallback should not run on successful SSE: {request_lines:?}"
     );
-}
-
-// Pins that 404 and 405 on the stream route both trigger the JSON
-// fallback via POST /api/terminal/run (exercising assert_remote_terminal_stream_fallback_for_status).
-// Guards against only one of those statuses being treated as
-// "remote lacks streaming" and the other propagating as an error.
-#[tokio::test]
-async fn remote_terminal_stream_falls_back_to_json_when_stream_route_is_404_or_405() {
-    assert_remote_terminal_stream_fallback_for_status(StatusCode::NOT_FOUND).await;
-    assert_remote_terminal_stream_fallback_for_status(StatusCode::METHOD_NOT_ALLOWED).await;
-}
-
-async fn assert_remote_terminal_stream_fallback_for_status(stream_status: StatusCode) {
-    let request_lines = Arc::new(Mutex::new(Vec::<String>::new()));
-    let request_lines_for_server = request_lines.clone();
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("test listener should bind");
-    let port = listener.local_addr().expect("listener addr").port();
-    let remote_response = serde_json::to_string(&TerminalCommandResponse {
-        command: "echo fallback".to_owned(),
-        duration_ms: 17,
-        exit_code: Some(0),
-        output_truncated: false,
-        shell: "sh".to_owned(),
-        stderr: String::new(),
-        stdout: format!("fallback {}\n", stream_status.as_u16()),
-        success: true,
-        timed_out: false,
-        workdir: "/remote/repo".to_owned(),
-    })
-    .expect("terminal response should encode");
-    let server = std::thread::spawn(move || {
-        loop {
-            let mut stream = accept_test_connection_with_timeout(
-                &listener,
-                "remote terminal fallback listener",
-                std::time::Duration::from_secs(10),
-            );
-            let request = read_test_http_request(&mut stream);
-            request_lines_for_server
-                .lock()
-                .expect("request lines mutex poisoned")
-                .push(request.request_line.clone());
-
-            if request.request_line.starts_with("GET /api/health ") {
-                write_test_http_response(
-                    &mut stream,
-                    StatusCode::OK,
-                    "application/json",
-                    r#"{"ok":true}"#,
-                );
-                continue;
-            }
-
-            if request
-                .request_line
-                .starts_with("POST /api/terminal/run/stream ")
-            {
-                write_test_http_response(
-                    &mut stream,
-                    stream_status,
-                    "application/json",
-                    r#"{"error":"stream route unavailable"}"#,
-                );
-                continue;
-            }
-
-            if request.request_line.starts_with("POST /api/terminal/run ") {
-                let body: Value =
-                    serde_json::from_str(&request.body).expect("fallback request should decode");
-                assert_eq!(body["command"], Value::String("echo fallback".to_owned()));
-                write_test_http_response(
-                    &mut stream,
-                    StatusCode::OK,
-                    "application/json",
-                    &remote_response,
-                );
-                break;
-            }
-
-            panic!("unexpected request: {}", request.request_line);
-        }
-    });
-
-    let state = test_app_state();
-    let remote = RemoteConfig {
-        id: format!("ssh-stream-fallback-{}", stream_status.as_u16()),
-        name: format!("SSH Stream Fallback {}", stream_status.as_u16()),
-        transport: RemoteTransport::Ssh,
-        enabled: true,
-        host: Some("example.com".to_owned()),
-        port: Some(22),
-        user: Some("alice".to_owned()),
-    };
-    let project_id = create_test_remote_project(
-        &state,
-        &remote,
-        "/remote/repo",
-        &format!("Remote Stream Fallback {}", stream_status.as_u16()),
-        &format!("remote-stream-fallback-project-{}", stream_status.as_u16()),
-    );
-    insert_test_remote_connection(
-        &state,
-        &remote,
-        port,
-        TestRemoteBridgeOwnership::RequestOnly,
-    );
-    let app = app_router(state);
-
-    let response = request_response(
-        &app,
-        Request::builder()
-            .method("POST")
-            .uri("/api/terminal/run/stream")
-            .header(axum::http::header::CONTENT_TYPE, "application/json")
-            .body(Body::from(
-                json!({
-                    "command": "echo fallback",
-                    "projectId": project_id,
-                    "workdir": "/remote/repo",
-                })
-                .to_string(),
-            ))
-            .unwrap(),
-    )
-    .await;
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let events = collect_sse_events(response).await;
-    assert!(
-        events.iter().all(|(event_name, _)| event_name != "error"),
-        "fallback stream should not emit an error: {events:?}"
-    );
-    let complete_events = events
-        .iter()
-        .filter(|(event_name, _)| event_name == "complete")
-        .collect::<Vec<_>>();
-    assert_eq!(complete_events.len(), 1, "events: {events:?}");
-    let complete = serde_json::from_str::<TerminalCommandResponse>(&complete_events[0].1)
-        .expect("complete event should decode");
-    assert_eq!(
-        complete.stdout,
-        format!("fallback {}\n", stream_status.as_u16())
-    );
-    assert!(complete.success);
-
-    join_test_server(server);
-    let request_lines = request_lines.lock().expect("request lines mutex poisoned");
-    assert!(
-        request_lines
-            .iter()
-            .any(|line| line.starts_with("POST /api/terminal/run/stream ")),
-        "stream route was not attempted: {request_lines:?}"
-    );
-    assert!(
-        request_lines
-            .iter()
-            .any(|line| line.starts_with("POST /api/terminal/run ")),
-        "fallback JSON route was not attempted: {request_lines:?}"
-    );
-}
-
-#[tokio::test]
-async fn remote_terminal_legacy_fallback_rejects_display_name_retirement() {
-    assert_remote_terminal_legacy_fallback_rejects_retired_lease(false).await;
-}
-
-#[tokio::test]
-async fn remote_terminal_legacy_fallback_rejects_a_to_b_to_a_retirement() {
-    assert_remote_terminal_legacy_fallback_rejects_retired_lease(true).await;
-}
-
-#[tokio::test]
-async fn remote_terminal_legacy_fallback_completion_rejects_endpoint_replacement() {
-    assert_remote_terminal_legacy_fallback_completion_rechecks_authority(false).await;
-}
-
-#[tokio::test]
-async fn remote_terminal_legacy_fallback_completion_rejects_remote_removal() {
-    assert_remote_terminal_legacy_fallback_completion_rechecks_authority(true).await;
-}
-
-async fn assert_remote_terminal_legacy_fallback_completion_rechecks_authority(remove_remote: bool) {
-    let request_lines = Arc::new(Mutex::new(Vec::<String>::new()));
-    let request_lines_for_server = request_lines.clone();
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("test listener should bind");
-    let port = listener.local_addr().expect("listener addr").port();
-    let fallback_response = serde_json::to_string(&TerminalCommandResponse {
-        command: "echo completion authority".to_owned(),
-        duration_ms: 1,
-        exit_code: Some(0),
-        output_truncated: false,
-        shell: "sh".to_owned(),
-        stderr: String::new(),
-        stdout: "retired completion\n".to_owned(),
-        success: true,
-        timed_out: false,
-        workdir: "/remote/repo".to_owned(),
-    })
-    .expect("terminal response should encode");
-    let server = std::thread::spawn(move || {
-        loop {
-            let mut stream = accept_test_connection_with_timeout(
-                &listener,
-                "remote terminal fallback completion listener",
-                std::time::Duration::from_secs(10),
-            );
-            let request = read_test_http_request(&mut stream);
-            request_lines_for_server
-                .lock()
-                .expect("request lines mutex poisoned")
-                .push(request.request_line.clone());
-
-            if request.request_line.starts_with("GET /api/health ") {
-                write_test_http_response(
-                    &mut stream,
-                    StatusCode::OK,
-                    "application/json",
-                    r#"{"ok":true}"#,
-                );
-                continue;
-            }
-            if request
-                .request_line
-                .starts_with("POST /api/terminal/run/stream ")
-            {
-                write_test_http_response(
-                    &mut stream,
-                    StatusCode::NOT_FOUND,
-                    "application/json",
-                    r#"{"error":"stream route unavailable"}"#,
-                );
-                continue;
-            }
-            if request.request_line.starts_with("POST /api/terminal/run ") {
-                write_test_http_response(
-                    &mut stream,
-                    StatusCode::OK,
-                    "application/json",
-                    &fallback_response,
-                );
-                break;
-            }
-            panic!("unexpected request: {}", request.request_line);
-        }
-    });
-
-    let state = test_app_state();
-    let remote = RemoteConfig {
-        id: if remove_remote {
-            "ssh-stream-fallback-completion-removal".to_owned()
-        } else {
-            "ssh-stream-fallback-completion-replacement".to_owned()
-        },
-        name: "SSH Stream Fallback Completion Authority".to_owned(),
-        transport: RemoteTransport::Ssh,
-        enabled: true,
-        host: Some("example.com".to_owned()),
-        port: Some(22),
-        user: Some("alice".to_owned()),
-    };
-    let project_id = create_test_remote_project(
-        &state,
-        &remote,
-        "/remote/repo",
-        "Remote Stream Fallback Completion Authority",
-        if remove_remote {
-            "remote-stream-fallback-completion-removal-project"
-        } else {
-            "remote-stream-fallback-completion-replacement-project"
-        },
-    );
-    insert_test_remote_connection(
-        &state,
-        &remote,
-        port,
-        TestRemoteBridgeOwnership::RequestOnly,
-    );
-    let state_for_hook = state.clone();
-    let project_id_for_hook = project_id.clone();
-    let mut replacement = remote.clone();
-    replacement.host = Some("replacement.example.com".to_owned());
-    replacement.port = Some(2222);
-    state.remote_registry.set_test_after_json_decode(move || {
-        if remove_remote {
-            state_for_hook
-                .delete_project(&project_id_for_hook)
-                .expect("project deletion should detach the remote");
-            remove_remote_settings_for_terminal_authority_test(&state_for_hook);
-        } else {
-            replace_remote_settings_for_terminal_authority_test(&state_for_hook, replacement);
-        }
-    });
-    let app = app_router(state.clone());
-
-    let response = request_response(
-        &app,
-        Request::builder()
-            .method("POST")
-            .uri("/api/terminal/run/stream")
-            .header(axum::http::header::CONTENT_TYPE, "application/json")
-            .body(Body::from(
-                json!({
-                    "command": "echo completion authority",
-                    "projectId": project_id,
-                    "workdir": "/remote/repo",
-                })
-                .to_string(),
-            ))
-            .unwrap(),
-    )
-    .await;
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let events = collect_sse_events(response).await;
-    let error_events = events
-        .iter()
-        .filter(|(event_name, _)| event_name == "error")
-        .collect::<Vec<_>>();
-    assert_eq!(error_events.len(), 1, "events: {events:?}");
-    let error: Value = serde_json::from_str(&error_events[0].1).expect("error event should decode");
-    if remove_remote {
-        assert_eq!(
-            error["status"],
-            Value::from(StatusCode::BAD_REQUEST.as_u16())
-        );
-        assert_eq!(
-            error["error"],
-            Value::String(format!("unknown remote `{}`", remote.id))
-        );
-    } else {
-        assert_eq!(error["status"], Value::from(StatusCode::CONFLICT.as_u16()));
-        assert_eq!(
-            error["error"],
-            Value::String(REMOTE_CONNECTION_CHANGED_BEFORE_REQUEST.to_owned())
-        );
-    }
-    assert!(
-        events
-            .iter()
-            .all(|(event_name, _)| event_name != "complete"),
-        "retired fallback completion must not be emitted: {events:?}"
-    );
-
-    join_test_server(server);
-    let request_lines = request_lines.lock().expect("request lines mutex poisoned");
-    assert!(
-        request_lines
-            .iter()
-            .any(|line| line.starts_with("POST /api/terminal/run/stream ")),
-        "stream route was not attempted: {request_lines:?}"
-    );
-    assert!(
-        request_lines
-            .iter()
-            .any(|line| line.starts_with("POST /api/terminal/run ")),
-        "fallback JSON route was not attempted: {request_lines:?}"
-    );
-
-    let _ = fs::remove_file(state.persistence_path.as_path());
-}
-
-async fn assert_remote_terminal_legacy_fallback_rejects_retired_lease(
-    restore_original_route: bool,
-) {
-    let request_lines = Arc::new(Mutex::new(Vec::<String>::new()));
-    let request_lines_for_server = request_lines.clone();
-    let fallback_executed = Arc::new(AtomicBool::new(false));
-    let fallback_executed_for_server = fallback_executed.clone();
-    let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("test listener should bind");
-    let port = listener.local_addr().expect("listener addr").port();
-    let fallback_response = serde_json::to_string(&TerminalCommandResponse {
-        command: "echo authority fence".to_owned(),
-        duration_ms: 1,
-        exit_code: Some(0),
-        output_truncated: false,
-        shell: "sh".to_owned(),
-        stderr: String::new(),
-        stdout: "must not execute\n".to_owned(),
-        success: true,
-        timed_out: false,
-        workdir: "/remote/repo".to_owned(),
-    })
-    .expect("terminal response should encode");
-    let server = std::thread::spawn(move || {
-        let mut stream_response_sent = false;
-        listener
-            .set_nonblocking(true)
-            .expect("test listener should support nonblocking mode");
-        loop {
-            match listener.accept() {
-                Ok((mut stream, _)) => {
-                    stream
-                        .set_nonblocking(false)
-                        .expect("accepted test socket should support blocking mode");
-                    let request = read_test_http_request(&mut stream);
-                    request_lines_for_server
-                        .lock()
-                        .expect("request lines mutex poisoned")
-                        .push(request.request_line.clone());
-                    if request.request_line.starts_with("GET /api/health ") {
-                        write_test_http_response(
-                            &mut stream,
-                            StatusCode::OK,
-                            "application/json",
-                            r#"{"ok":true}"#,
-                        );
-                    } else if request
-                        .request_line
-                        .starts_with("POST /api/terminal/run/stream ")
-                    {
-                        write_test_http_response(
-                            &mut stream,
-                            StatusCode::NOT_FOUND,
-                            "application/json",
-                            r#"{"error":"stream route unavailable"}"#,
-                        );
-                        stream_response_sent = true;
-                    } else if request.request_line.starts_with("POST /api/terminal/run ") {
-                        fallback_executed_for_server.store(true, Ordering::SeqCst);
-                        write_test_http_response(
-                            &mut stream,
-                            StatusCode::OK,
-                            "application/json",
-                            &fallback_response,
-                        );
-                    } else {
-                        panic!("unexpected request: {}", request.request_line);
-                    }
-                }
-                Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
-                    if stream_response_sent && done_rx.try_recv().is_ok() {
-                        break;
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(5));
-                }
-                Err(err) => panic!("remote terminal authority listener failed: {err}"),
-            }
-        }
-    });
-
-    let state = test_app_state();
-    let remote = RemoteConfig {
-        id: if restore_original_route {
-            "ssh-stream-fallback-cycle".to_owned()
-        } else {
-            "ssh-stream-fallback-rename".to_owned()
-        },
-        name: "SSH Stream Fallback Authority".to_owned(),
-        transport: RemoteTransport::Ssh,
-        enabled: true,
-        host: Some("example.com".to_owned()),
-        port: Some(22),
-        user: Some("alice".to_owned()),
-    };
-    let project_id = create_test_remote_project(
-        &state,
-        &remote,
-        "/remote/repo",
-        "Remote Stream Fallback Authority",
-        if restore_original_route {
-            "remote-stream-fallback-cycle-project"
-        } else {
-            "remote-stream-fallback-rename-project"
-        },
-    );
-    insert_test_remote_connection(
-        &state,
-        &remote,
-        port,
-        TestRemoteBridgeOwnership::RequestOnly,
-    );
-    let state_for_hook = state.clone();
-    let remote_for_hook = remote.clone();
-    state
-        .remote_registry
-        .set_test_before_remote_terminal_fallback(move || {
-            if restore_original_route {
-                let mut replacement = remote_for_hook.clone();
-                replacement.host = Some("replacement.example.com".to_owned());
-                replacement.port = Some(2222);
-                replace_remote_settings_for_terminal_authority_test(&state_for_hook, replacement);
-                replace_remote_settings_for_terminal_authority_test(
-                    &state_for_hook,
-                    remote_for_hook,
-                );
-            } else {
-                let mut renamed = remote_for_hook;
-                renamed.name = "Renamed SSH Stream Fallback Authority".to_owned();
-                replace_remote_settings_for_terminal_authority_test(&state_for_hook, renamed);
-            }
-        });
-    let app = app_router(state.clone());
-
-    let response = request_response(
-        &app,
-        Request::builder()
-            .method("POST")
-            .uri("/api/terminal/run/stream")
-            .header(axum::http::header::CONTENT_TYPE, "application/json")
-            .body(Body::from(
-                json!({
-                    "command": "echo authority fence",
-                    "projectId": project_id,
-                    "workdir": "/remote/repo",
-                })
-                .to_string(),
-            ))
-            .unwrap(),
-    )
-    .await;
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let events = collect_sse_events(response).await;
-    let error_events = events
-        .iter()
-        .filter(|(event_name, _)| event_name == "error")
-        .collect::<Vec<_>>();
-    assert_eq!(error_events.len(), 1, "events: {events:?}");
-    let error: Value = serde_json::from_str(&error_events[0].1).expect("error event should decode");
-    assert_eq!(error["status"], Value::from(StatusCode::CONFLICT.as_u16()));
-    assert_eq!(
-        error["error"],
-        Value::String(REMOTE_CONNECTION_CHANGED_BEFORE_REQUEST.to_owned())
-    );
-    assert!(
-        events
-            .iter()
-            .all(|(event_name, _)| event_name != "complete"),
-        "retired fallback must not complete: {events:?}"
-    );
-
-    done_tx.send(()).expect("server completion should send");
-    join_test_server(server);
-    assert!(
-        !fallback_executed.load(Ordering::SeqCst),
-        "the JSON fallback must not execute through a fresh connection"
-    );
-    let request_lines = request_lines.lock().expect("request lines mutex poisoned");
-    assert!(
-        request_lines
-            .iter()
-            .any(|line| line.starts_with("POST /api/terminal/run/stream ")),
-        "stream route was not attempted: {request_lines:?}"
-    );
-    assert!(
-        request_lines
-            .iter()
-            .all(|line| !line.starts_with("POST /api/terminal/run ")),
-        "retired lease reached fallback execution: {request_lines:?}"
-    );
-
-    let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
 // Pins parse_terminal_sse_frame's handling of default `message` event
@@ -2071,7 +1671,7 @@ async fn terminal_run_route_proxies_valid_remote_multibyte_commands() {
             if request_line.starts_with("GET /api/health ") {
                 stream
                     .write_all(
-                        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: 11\r\n\r\n{\"ok\":true}",
+                        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: 53\r\n\r\n{\"ok\":true,\"serverInstanceId\":\"remote-test-instance\"}",
                     )
                     .expect("health response should write");
                 continue;
@@ -2129,7 +1729,6 @@ async fn terminal_run_route_proxies_valid_remote_multibyte_commands() {
                 process: Mutex::new(None),
                 event_bridge_started: AtomicBool::new(true),
                 event_bridge_shutdown: AtomicBool::new(false),
-                supports_inline_orchestrator_templates: Mutex::new(None),
             }),
         );
     let app = app_router(state);

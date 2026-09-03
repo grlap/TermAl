@@ -359,18 +359,18 @@ fn validate_remote_ssh_user_value(user: &str, remote_name: &str) -> Result<(), A
 /// Polls the forwarded `/api/health` endpoint every
 /// `REMOTE_HEALTH_POLL_INTERVAL` until the remote reports `ok:true`, the
 /// ssh child exits, or `REMOTE_STARTUP_TIMEOUT` elapses. On success
-/// returns the `(handle, HealthResponse)` pair so the caller keeps the
-/// live child; on failure the child is reaped and a human-readable error
-/// (with the ssh stderr tail when available) is returned.
+/// returns the handle so the caller keeps the live child; on failure the child
+/// is reaped and a human-readable error (with the ssh stderr tail when
+/// available) is returned.
 fn wait_for_remote_health(
     client: &BlockingHttpClient,
     base_url: &str,
     mut handle: RemoteProcessHandle,
-) -> std::result::Result<(RemoteProcessHandle, HealthResponse), String> {
+) -> std::result::Result<RemoteProcessHandle, String> {
     let started_at = Instant::now();
     loop {
-        if let Ok(payload) = remote_healthcheck(client, base_url) {
-            return Ok((handle, payload));
+        if remote_healthcheck(client, base_url).is_ok() {
+            return Ok(handle);
         }
         match handle.child.try_wait() {
             Ok(Some(status)) => {

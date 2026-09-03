@@ -216,50 +216,20 @@ async fn run_terminal_command_stream(
                 let response = state.remote_post_response_without_timeout(
                     &scope,
                     "/api/terminal/run/stream",
-                    payload.clone(),
+                    payload,
                 )?;
-                if matches!(
-                    response.status(),
-                    StatusCode::NOT_FOUND | StatusCode::METHOD_NOT_ALLOWED
-                )
-                {
-                    #[cfg(test)]
-                    state
-                        .remote_registry
-                        .run_test_before_remote_terminal_fallback();
-                    let fallback_lease = response.into_lease()?;
-                    let (response, authority) = state
-                        .remote_post_json_with_timeout_and_authority_for_lease(
-                            &scope,
-                            fallback_lease,
-                            "/api/terminal/run",
-                            payload,
-                            REMOTE_TERMINAL_COMMAND_TIMEOUT,
-                        )
-                        .map_err(|err| annotate_remote_terminal_429(err, &remote_name))?;
-                    send_remote_terminal_stream_event(
-                        &remote_stream_tx,
-                        TerminalCommandStreamEvent::Complete(response),
-                        Some(&task_cancellation),
-                        Some(&authority),
-                    )?;
-                    return Ok(None);
-                }
-
                 forward_remote_terminal_stream_response(
                     response,
                     &remote_stream_tx,
                     &task_cancellation,
                 )
-                .map(|()| None)
                 .map_err(|err| annotate_remote_terminal_429(err, &remote_name))
             })
             .await
             .map_err(|err| ApiError::internal(format!("terminal command task failed: {err}")))
             .and_then(|result| result);
             match result {
-                Ok(Some(response)) => send_terminal_stream_result(&task_tx, Ok(response)).await,
-                Ok(None) => {}
+                Ok(()) => {}
                 Err(error) => send_terminal_stream_result(&task_tx, Err(error)).await,
             }
         });

@@ -290,7 +290,6 @@ enum PeerMessageDisposition {
 async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
     Json(HealthResponse {
         ok: true,
-        supports_inline_orchestrator_templates: true,
         server_instance_id: state.server_instance_id.clone(),
     })
 }

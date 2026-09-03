@@ -102,7 +102,8 @@ same exact-delivery rule applies when a runtime accepts the command but the turn
 later fails or is explicitly stopped: TermAl records the mailbox boundary on
 that active turn, restores it before draining any successor prompt, and never
 uses a session-wide recovery scan that could duplicate a newer delivery. At
-that point automatic dispatch is paused until an explicit user resume or a new
+that point the rejected-accepted-dispatch recovery pass pauses automatic
+dispatch until an explicit user resume or a new
 user action explicitly recovers the queue. This keeps a poisoned mailbox wake
 from looping and intentionally pauses all already-queued work behind it,
 including user prompts as well as automatic work. At

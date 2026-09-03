@@ -316,29 +316,6 @@ impl AppState {
         )
     }
 
-    fn remote_post_json_with_timeout_and_authority_for_lease<T: DeserializeOwned>(
-        &self,
-        scope: &RemoteScope,
-        lease: RemoteRequestLease,
-        path: &str,
-        body: Value,
-        timeout: Duration,
-    ) -> Result<(T, RemoteStreamingAuthority), ApiError> {
-        if !same_remote_routing_config(&lease.pinned, &scope.remote) {
-            return Err(ApiError::internal(
-                "remote terminal fallback lease does not match its resolved scope",
-            ));
-        }
-        self.remote_registry.request_json_with_timeout_for_lease(
-            lease,
-            Method::POST,
-            path,
-            &[],
-            Some(apply_remote_scope_to_body(scope, body)),
-            timeout,
-        )
-    }
-
     fn remote_post_response_without_timeout(
         &self,
         scope: &RemoteScope,

@@ -54,19 +54,6 @@ fn registry_publication_fences_requests_before_connection_reconciliation() {
     };
     assert_eq!(error.status, StatusCode::CONFLICT);
     assert_eq!(error.message, REMOTE_CONNECTION_CHANGED_BEFORE_REQUEST);
-    let capability_error = match state
-        .remote_registry
-        .cached_supports_inline_orchestrator_templates(&original)
-    {
-        Ok(_) => panic!("capability lookup must propagate stale routing authority"),
-        Err(error) => error,
-    };
-    assert_eq!(capability_error.status, StatusCode::CONFLICT);
-    assert_eq!(
-        capability_error.message,
-        REMOTE_CONNECTION_CHANGED_BEFORE_REQUEST
-    );
-
     let current_lease = state
         .remote_registry
         .connection(&replacement)
@@ -945,7 +932,7 @@ fn streaming_response_stops_before_forwarding_replaced_endpoint_bytes() {
                     &mut stream,
                     StatusCode::OK,
                     "application/json",
-                    r#"{"ok":true}"#,
+                    r#"{"ok":true,"serverInstanceId":"remote-test-instance"}"#,
                 );
                 continue;
             }

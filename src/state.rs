@@ -638,7 +638,7 @@ enum RemoteDeltaReplayPayload {
         message_id: String,
         message_index: usize,
         message_count: u32,
-        text_start_byte: Option<usize>,
+        text_start_byte: usize,
         delta_fingerprint: String,
         preview_fingerprint: Option<String>,
         session_mutation_stamp: Option<u64>,

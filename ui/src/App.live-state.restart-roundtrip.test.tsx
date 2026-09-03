@@ -508,6 +508,7 @@ describe("App live state — restart roundtrip (canonical)", () => {
             messageId: "message-assistant-1",
             messageIndex: 1,
             messageCount: 2,
+            textStartByte: 14,
             delta: "lp you with that.",
             preview: "Hello, I'll help you with that.",
           });

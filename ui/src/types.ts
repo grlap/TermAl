@@ -922,7 +922,7 @@ export type TextDeltaEvent = {
   messageId: string;
   messageIndex: number;
   messageCount: number;
-  textStartByte?: number | null;
+  textStartByte: number;
   delta: string;
   preview?: string | null;
   sessionMutationStamp?: number | null;

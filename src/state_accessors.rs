@@ -488,29 +488,25 @@ mod visible_session_hydration_error_tests {
             &explorer_record.child_session_id,
         ));
 
-        let mut older_remote_json = json.clone();
-        let older_remote_delegation = older_remote_json["delegations"]
+        let mut incomplete_remote_json = json.clone();
+        let incomplete_remote_delegation = incomplete_remote_json["delegations"]
             .as_array_mut()
             .expect("delegation links should be mutable")
             .iter_mut()
             .find(|delegation| delegation["id"] == record.id)
             .and_then(serde_json::Value::as_object_mut)
             .expect("reviewer delegation link should be mutable");
-        older_remote_delegation.remove("mode");
-        older_remote_delegation.remove("reviewResultRequired");
+        incomplete_remote_delegation.remove("mode");
+        incomplete_remote_delegation.remove("reviewResultRequired");
         assert!(!delegation_child_requires_structured_review_result(
-            &older_remote_json,
+            &incomplete_remote_json,
             &record.child_session_id,
         ));
-        let older_remote_snapshot: StateResponse = serde_json::from_value(older_remote_json)
-            .expect("older remote state should deserialize with hidden capabilities");
-        let older_remote_summary = older_remote_snapshot
-            .delegations
-            .iter()
-            .find(|delegation| delegation.id == record.id)
-            .expect("older remote delegation link should remain available");
-        assert_eq!(older_remote_summary.mode, DelegationMode::Explorer);
-        assert!(!older_remote_summary.review_result_required);
+        let error = match serde_json::from_value::<StateResponse>(incomplete_remote_json) {
+            Ok(_) => panic!("current delegation summaries must carry capability metadata"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("missing field `mode`"));
 
         let scoped = serde_json::to_value(delegation_summary_from_record(&record))
             .expect("scoped delegation summary should serialize");

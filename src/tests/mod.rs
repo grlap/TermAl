@@ -1053,7 +1053,6 @@ fn insert_test_remote_connection(
                     TestRemoteBridgeOwnership::Claimed
                 )),
                 event_bridge_shutdown: AtomicBool::new(false),
-                supports_inline_orchestrator_templates: Mutex::new(None),
             }),
         );
 }
@@ -2764,12 +2763,10 @@ async fn api_router_sets_local_cors_headers() {
     );
 }
 
-// Tests that health route reports inline orchestrator template compatibility
-// and emits a non-empty `serverInstanceId` that clients use for
-// restart-detection (pairs with the new state-revision server-instance
-// mismatch branch).
+// Tests that the health route emits the current wire shape and a non-empty
+// `serverInstanceId` that clients use for restart detection.
 #[tokio::test]
-async fn health_route_reports_inline_orchestrator_template_support() {
+async fn health_route_reports_current_server_instance() {
     let state = test_app_state();
     let expected_server_instance_id = state.server_instance_id.clone();
     let (status, response): (StatusCode, Value) = request_json(
@@ -2787,7 +2784,6 @@ async fn health_route_reports_inline_orchestrator_template_support() {
         response,
         json!({
             "ok": true,
-            "supportsInlineOrchestratorTemplates": true,
             "serverInstanceId": expected_server_instance_id,
         })
     );

@@ -74,11 +74,10 @@ impl AppState {
 
     /// Commits a narrow streaming delta while preserving recovery state if the
     /// post-shutdown synchronous full-snapshot fallback fails. These mutations
-    /// are already authoritative in memory, and legacy `TextDelta` frames may
-    /// omit a byte offset, so exact replay is not necessarily idempotent. Mark
-    /// the remote revision applied on failure as well as arming persistence
-    /// debt; the next remote frame or recovery snapshot first persists and
-    /// publishes the current full state before the watermark can skip replay.
+    /// are already authoritative in memory. Mark the remote revision applied
+    /// on failure as well as arming persistence debt; the next remote frame or
+    /// recovery snapshot first persists and publishes the current full state
+    /// before the watermark can skip replay.
     fn commit_remote_streaming_delta_locked(
         &self,
         inner: &mut StateInner,
@@ -604,29 +603,27 @@ impl AppState {
                     let index = inner
                         .find_remote_session_index(remote_id, &session_id)
                         .ok_or_else(|| anyhow!("remote session `{session_id}` not found"))?;
-                    if let Some(expected) = remote_text_start_byte {
-                        let record = inner
-                            .session_by_index(index)
-                            .expect("remote session index should be valid");
-                        let message = record
-                            .session
-                            .messages
-                            .iter()
-                            .find(|message| message.id() == message_id)
-                            .ok_or_else(|| anyhow!("remote message `{message_id}` not found"))?;
-                        let actual = match message {
-                            Message::Text { text, .. } => text.len(),
-                            _ => {
-                                return Err(anyhow!(
-                                    "remote message `{message_id}` is not a text message"
-                                ));
-                            }
-                        };
-                        if expected != actual {
+                    let record = inner
+                        .session_by_index(index)
+                        .expect("remote session index should be valid");
+                    let message = record
+                        .session
+                        .messages
+                        .iter()
+                        .find(|message| message.id() == message_id)
+                        .ok_or_else(|| anyhow!("remote message `{message_id}` not found"))?;
+                    let actual = match message {
+                        Message::Text { text, .. } => text.len(),
+                        _ => {
                             return Err(anyhow!(
-                                "remote text delta for message `{message_id}` starts at byte {expected} but the local mirror is at byte {actual}"
+                                "remote message `{message_id}` is not a text message"
                             ));
                         }
+                    };
+                    if remote_text_start_byte != actual {
+                        return Err(anyhow!(
+                            "remote text delta for message `{message_id}` starts at byte {remote_text_start_byte} but the local mirror is at byte {actual}"
+                        ));
                     }
                     let (
                         local_session_id,
@@ -694,7 +691,7 @@ impl AppState {
                     message_id,
                     message_index,
                     message_count,
-                    text_start_byte: Some(text_start_byte),
+                    text_start_byte,
                     delta,
                     preview,
                     session_mutation_stamp: Some(session_mutation_stamp),

@@ -10,6 +10,43 @@ use super::remote::{
 use super::remote_delta_replay::local_replay_test_remote;
 use super::*;
 
+// Pins the current TermAl-to-TermAl wire contract at deserialization time.
+// Remote peers must send both their process identity and the byte boundary
+// needed to apply an incremental text append safely; neither field has a
+// compatibility default.
+#[test]
+fn current_remote_wire_requires_instance_id_and_text_delta_offset() {
+    let health_error = match serde_json::from_value::<HealthResponse>(json!({
+        "ok": true,
+    })) {
+        Ok(_) => panic!("current health responses must carry serverInstanceId"),
+        Err(error) => error,
+    };
+    assert!(
+        health_error
+            .to_string()
+            .contains("missing field `serverInstanceId`")
+    );
+
+    let delta_error = match serde_json::from_value::<DeltaEvent>(json!({
+        "type": "textDelta",
+        "revision": 2,
+        "sessionId": "remote-session-1",
+        "messageId": "remote-message-1",
+        "messageIndex": 0,
+        "messageCount": 1,
+        "delta": " world"
+    })) {
+        Ok(_) => panic!("current text deltas must carry textStartByte"),
+        Err(error) => error,
+    };
+    assert!(
+        delta_error
+            .to_string()
+            .contains("missing field `textStartByte`")
+    );
+}
+
 // Pins the live SSE consumer recovery path, not only the low-level delta
 // validator. A byte-offset gap must reject the incremental mutation and fetch
 // one bounded authoritative tail before any corrupt text can become visible.
@@ -96,7 +133,7 @@ fn remote_text_delta_gap_triggers_bounded_authoritative_tail_repair() {
         message_count: 1,
         // The producer had already emitted one byte that this proxy missed.
         // Appending at local byte 5 would silently produce corrupt text.
-        text_start_byte: Some(6),
+        text_start_byte: 6,
         delta: " world".to_owned(),
         preview: Some("Hello world".to_owned()),
         session_mutation_stamp: Some(11),
@@ -207,7 +244,7 @@ fn remote_tail_repair_failure_falls_back_to_full_state_resync() {
                     &mut stream,
                     StatusCode::OK,
                     "application/json",
-                    r#"{"ok":true}"#,
+                    r#"{"ok":true,"serverInstanceId":"remote-test-instance"}"#,
                 );
             } else if request
                 .request_line
@@ -244,7 +281,7 @@ fn remote_tail_repair_failure_falls_back_to_full_state_resync() {
         message_id: "remote-message-1".to_owned(),
         message_index: 0,
         message_count: 1,
-        text_start_byte: Some(6),
+        text_start_byte: 6,
         delta: " world".to_owned(),
         preview: Some("Hello world".to_owned()),
         session_mutation_stamp: Some(11),
@@ -379,7 +416,7 @@ fn remote_state_event_dedupes_marked_sse_fallback_resyncs_by_revision() {
             if request_line.starts_with("GET /api/health ") {
                 stream
                     .write_all(
-                        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: 11\r\n\r\n{\"ok\":true}",
+                        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: 53\r\n\r\n{\"ok\":true,\"serverInstanceId\":\"remote-test-instance\"}",
                     )
                     .expect("health response should write");
                 continue;
@@ -421,7 +458,6 @@ fn remote_state_event_dedupes_marked_sse_fallback_resyncs_by_revision() {
                 process: Mutex::new(None),
                 event_bridge_started: AtomicBool::new(false),
                 event_bridge_shutdown: AtomicBool::new(false),
-                supports_inline_orchestrator_templates: Mutex::new(None),
             }),
         );
 
@@ -1987,7 +2023,7 @@ fn remote_delta_hydration_burst_uses_one_fetch_and_skips_duplicate_delta() {
                     &mut stream,
                     StatusCode::OK,
                     "application/json",
-                    r#"{"ok":true}"#,
+                    r#"{"ok":true,"serverInstanceId":"remote-test-instance"}"#,
                 );
                 continue;
             }
@@ -2055,7 +2091,7 @@ fn remote_delta_hydration_burst_uses_one_fetch_and_skips_duplicate_delta() {
                 message_id: "remote-message-1".to_owned(),
                 message_index: 0,
                 message_count: 1,
-                text_start_byte: None,
+                text_start_byte: "Hydrated body".len(),
                 delta: " duplicate".to_owned(),
                 preview: Some("Hydrated body duplicate".to_owned()),
                 session_mutation_stamp: Some(11),

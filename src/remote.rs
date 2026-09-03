@@ -67,17 +67,6 @@ struct RemoteRegistry {
     #[cfg(test)]
     test_before_remote_delta_hydration_target:
         Arc<Mutex<Option<Box<dyn FnOnce() + Send>>>>,
-    /// One-shot deterministic interleaving seam for tests that retire the
-    /// streaming request's route after a legacy terminal status is observed
-    /// but before the JSON fallback is dispatched.
-    #[cfg(test)]
-    test_before_remote_terminal_fallback: Arc<Mutex<Option<Box<dyn FnOnce() + Send>>>>,
-    /// One-shot deterministic interleaving seam for tests that change remote
-    /// authority after an orchestrator create returns 404 but before the
-    /// cached capability is classified through that response's lease.
-    #[cfg(test)]
-    test_before_remote_orchestrator_capability_classification:
-        Arc<Mutex<Option<Box<dyn FnOnce() + Send>>>>,
     /// One-shot deterministic interleaving seam for tests that delete or
     /// rebind a project after an existing-project fast path first resolves it
     /// but before that path performs its final state-locked revalidation.
@@ -257,15 +246,6 @@ impl RemoteStreamingResponse {
         self.authority.clone()
     }
 
-    /// Consumes the unused streaming body while preserving the exact request
-    /// lease for a legacy-route fallback. A fresh registry lookup here would
-    /// let a rename or A -> B -> A publication silently move the command onto
-    /// a replacement connection.
-    fn into_lease(self) -> Result<RemoteRequestLease, ApiError> {
-        self.ensure_current()?;
-        Ok(self.authority.lease)
-    }
-
     fn decode_json<T: DeserializeOwned>(mut self) -> Result<T, ApiError> {
         self.ensure_current()?;
         let response = self
@@ -354,10 +334,6 @@ impl RemoteRegistry {
             test_after_json_decode: Arc::new(Mutex::new(None)),
             #[cfg(test)]
             test_before_remote_delta_hydration_target: Arc::new(Mutex::new(None)),
-            #[cfg(test)]
-            test_before_remote_terminal_fallback: Arc::new(Mutex::new(None)),
-            #[cfg(test)]
-            test_before_remote_orchestrator_capability_classification: Arc::new(Mutex::new(None)),
             #[cfg(test)]
             test_before_existing_remote_project_revalidation: Arc::new(Mutex::new(None)),
             #[cfg(test)]
@@ -450,52 +426,6 @@ impl RemoteRegistry {
             .test_before_remote_informational_delta_watermark
             .lock()
             .expect("remote informational delta watermark hook mutex poisoned")
-            .take();
-        if let Some(hook) = hook {
-            hook();
-        }
-    }
-
-    #[cfg(test)]
-    fn set_test_before_remote_terminal_fallback(
-        &self,
-        hook: impl FnOnce() + Send + 'static,
-    ) {
-        *self
-            .test_before_remote_terminal_fallback
-            .lock()
-            .expect("remote terminal fallback hook mutex poisoned") = Some(Box::new(hook));
-    }
-
-    #[cfg(test)]
-    fn run_test_before_remote_terminal_fallback(&self) {
-        let hook = self
-            .test_before_remote_terminal_fallback
-            .lock()
-            .expect("remote terminal fallback hook mutex poisoned")
-            .take();
-        if let Some(hook) = hook {
-            hook();
-        }
-    }
-
-    #[cfg(test)]
-    fn set_test_before_remote_orchestrator_capability_classification(
-        &self,
-        hook: impl FnOnce() + Send + 'static,
-    ) {
-        *self
-            .test_before_remote_orchestrator_capability_classification
-            .lock()
-            .expect("remote orchestrator capability hook mutex poisoned") = Some(Box::new(hook));
-    }
-
-    #[cfg(test)]
-    fn run_test_before_remote_orchestrator_capability_classification(&self) {
-        let hook = self
-            .test_before_remote_orchestrator_capability_classification
-            .lock()
-            .expect("remote orchestrator capability hook mutex poisoned")
             .take();
         if let Some(hook) = hook {
             hook();
@@ -751,23 +681,6 @@ impl RemoteRegistry {
         )
     }
 
-    /// Returns JSON decoding as an inner result so callers that classify an
-    /// HTTP error can retain the exact request lease. Transport and dispatch
-    /// failures remain outer errors because no response exists to classify.
-    fn request_json_result_with_lease<T: DeserializeOwned>(
-        &self,
-        remote: &RemoteConfig,
-        method: Method,
-        path: &str,
-        query: &[(String, String)],
-        body: Option<Value>,
-    ) -> Result<(Result<T, ApiError>, RemoteRequestLease), ApiError> {
-        let (response, lease) =
-            self.request_with_timeout(remote, method, path, query, body, REMOTE_REQUEST_TIMEOUT)?;
-        let response = self.prefer_current_lease(&lease, decode_remote_json(response));
-        Ok((response, lease))
-    }
-
     fn request_json_with_timeout<T: DeserializeOwned>(
         &self,
         remote: &RemoteConfig,
@@ -779,37 +692,6 @@ impl RemoteRegistry {
     ) -> Result<T, ApiError> {
         self.request_json_with_timeout_and_lease(remote, method, path, query, body, timeout)
             .map(|(response, _lease)| response)
-    }
-
-    /// Sends a follow-up request through an already-issued lease. Legacy
-    /// endpoint fallbacks use this path so a settings publication cannot
-    /// replace the connection between capability detection and dispatch.
-    fn request_json_with_timeout_for_lease<T: DeserializeOwned>(
-        &self,
-        lease: RemoteRequestLease,
-        method: Method,
-        path: &str,
-        query: &[(String, String)],
-        body: Option<Value>,
-        timeout: Duration,
-    ) -> Result<(T, RemoteStreamingAuthority), ApiError> {
-        let (response, lease) = self.request_with_optional_timeout_for_lease(
-            lease,
-            method,
-            path,
-            query,
-            body,
-            Some(timeout),
-        )?;
-        let response = self.prefer_current_lease(&lease, decode_remote_json(response))?;
-        #[cfg(test)]
-        self.run_test_after_json_decode();
-        let authority = RemoteStreamingAuthority::new(
-            lease,
-            self.configs.clone(),
-            self.config_generation.clone(),
-        );
-        Ok((response, authority))
     }
 
     fn request_json_with_timeout_and_lease<T: DeserializeOwned>(
@@ -1052,33 +934,6 @@ impl RemoteRegistry {
         }
         Ok(Some(connection))
     }
-    /// Returns the cached inline-template capability for the active remote.
-    #[cfg(test)]
-    fn cached_supports_inline_orchestrator_templates(
-        &self,
-        remote: &RemoteConfig,
-    ) -> Result<Option<bool>, ApiError> {
-        Ok(self
-            .connection(remote)?
-            .connection
-            .cached_supports_inline_orchestrator_templates())
-    }
-
-    /// Reads the capability cached by the health check that established this
-    /// exact request lease. Authority is checked on both sides of the lookup
-    /// so endpoint replacement (including A -> B -> A) wins over a stale 404
-    /// classification.
-    fn cached_supports_inline_orchestrator_templates_for_lease(
-        &self,
-        lease: &RemoteRequestLease,
-    ) -> Result<Option<bool>, ApiError> {
-        self.ensure_lease_current(lease)?;
-        let capability = lease
-            .connection
-            .cached_supports_inline_orchestrator_templates();
-        self.ensure_lease_current(lease)?;
-        Ok(capability)
-    }
 }
 
 
@@ -1102,7 +957,6 @@ struct RemoteConnection {
     process: Mutex<Option<RemoteProcessHandle>>,
     event_bridge_started: AtomicBool,
     event_bridge_shutdown: AtomicBool,
-    supports_inline_orchestrator_templates: Mutex<Option<bool>>,
 }
 
 impl RemoteConnection {
@@ -1117,7 +971,6 @@ impl RemoteConnection {
             process: Mutex::new(None),
             event_bridge_started: AtomicBool::new(false),
             event_bridge_shutdown: AtomicBool::new(false),
-            supports_inline_orchestrator_templates: Mutex::new(None),
         }
     }
 
@@ -1131,10 +984,6 @@ impl RemoteConnection {
             let _ = handle.child.kill();
             let _ = handle.child.wait();
         }
-        *self
-            .supports_inline_orchestrator_templates
-            .lock()
-            .expect("remote capability mutex poisoned") = None;
     }
 
     /// Stops event bridge.
@@ -1162,23 +1011,6 @@ impl RemoteConnection {
 
     fn base_url(&self) -> String {
         format!("http://127.0.0.1:{}", self.forwarded_port)
-    }
-
-    /// Returns the cached inline-template capability.
-    fn cached_supports_inline_orchestrator_templates(&self) -> Option<bool> {
-        *self
-            .supports_inline_orchestrator_templates
-            .lock()
-            .expect("remote capability mutex poisoned")
-    }
-
-    /// Caches capabilities reported by the remote health endpoint.
-    fn cache_health_response(&self, payload: &HealthResponse) {
-        *self
-            .supports_inline_orchestrator_templates
-            .lock()
-            .expect("remote capability mutex poisoned") =
-            Some(payload.supports_inline_orchestrator_templates);
     }
 
     fn ensure_pinned_route(&self, pinned: &RemoteConfig) -> Result<(), ApiError> {
@@ -1224,9 +1056,8 @@ impl RemoteConnection {
         }
         let base_url = self.base_url();
 
-        if let Ok(payload) = remote_healthcheck(client, &base_url) {
+        if remote_healthcheck(client, &base_url).is_ok() {
             self.ensure_pinned_route(pinned)?;
-            self.cache_health_response(&payload);
             return Ok(base_url);
         }
 
@@ -1237,9 +1068,8 @@ impl RemoteConnection {
                     *process = None;
                 }
                 Ok(None) => {
-                    if let Ok(payload) = remote_healthcheck(client, &base_url) {
+                    if remote_healthcheck(client, &base_url).is_ok() {
                         self.ensure_pinned_route(pinned)?;
-                        self.cache_health_response(&payload);
                         return Ok(base_url);
                     }
                     if let Some(mut handle) = process.take() {
@@ -1256,13 +1086,12 @@ impl RemoteConnection {
         self.ensure_pinned_route(pinned)?;
         let managed_attempt = self.start_process(pinned, RemoteProcessMode::ManagedServer)?;
         match wait_for_remote_health(client, &base_url, managed_attempt) {
-            Ok((mut handle, health)) => {
+            Ok(mut handle) => {
                 if let Err(err) = self.ensure_pinned_route(pinned) {
                     let _ = handle.child.kill();
                     let _ = handle.child.wait();
                     return Err(err);
                 }
-                self.cache_health_response(&health);
                 *process = Some(handle);
                 Ok(base_url)
             }
@@ -1270,13 +1099,12 @@ impl RemoteConnection {
                 self.ensure_pinned_route(pinned)?;
                 let tunnel_attempt = self.start_process(pinned, RemoteProcessMode::TunnelOnly)?;
                 match wait_for_remote_health(client, &base_url, tunnel_attempt) {
-                    Ok((mut handle, health)) => {
+                    Ok(mut handle) => {
                         if let Err(err) = self.ensure_pinned_route(pinned) {
                             let _ = handle.child.kill();
                             let _ = handle.child.wait();
                             return Err(err);
                         }
-                        self.cache_health_response(&health);
                         *process = Some(handle);
                         Ok(base_url)
                     }

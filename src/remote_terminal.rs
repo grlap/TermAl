@@ -8,7 +8,7 @@
 // `forward_remote_terminal_stream_reader`, `_capped`, SSE frame handler),
 // the cancellable reader that lets the local SSE client drop the stream
 // and kill the remote proxy mid-flight (`InterruptibleRemoteStreamReader`),
-// the JSON-fallback reader (`read_remote_stream_response`,
+// the interruptible response-body reader (`read_remote_stream_response`,
 // `remote_response_is_event_stream`), output-cap utilities
 // (`cap_terminal_response_output`, `truncate_string_to_byte_limit`),
 // and the SSE frame parser (`parse_terminal_sse_frame`,

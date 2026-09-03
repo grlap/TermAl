@@ -797,10 +797,7 @@ export function applyDeltaToSessions(
       // The offset is UTF-8 bytes (Rust String::len), not JavaScript UTF-16
       // code units, so emoji and other astral characters need explicit byte
       // counting here.
-      if (
-        delta.textStartByte != null &&
-        utf8ByteLength(message.text) !== delta.textStartByte
-      ) {
+      if (utf8ByteLength(message.text) !== delta.textStartByte) {
         return { kind: "needsResync" };
       }
 

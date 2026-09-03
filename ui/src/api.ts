@@ -68,7 +68,7 @@ export type StateResponse = {
    * on every restart. Carried on every snapshot so the client can
    * distinguish "revision decreased because the server just restarted"
    * from "revision decreased because this response is stale". Empty
-   * string means "unknown" (older server or fallback payload) — treat
+   * string is reserved for the fallback SSE payload and means "unknown" — treat
    * as NOT a restart signal. See `shouldAdoptSnapshotRevision`.
    */
   serverInstanceId: string;

@@ -258,7 +258,7 @@ All routes are under `/api`. The backend serves JSON, and the frontend proxies r
 | POST | `/api/git/push` | Push the current repo |
 | POST | `/api/git/sync` | Pull, rebase, or otherwise sync the current repo |
 | POST | `/api/terminal/run` | Run a shell command in a project- or session-scoped working directory. Request body enforces `command` ≤ 20,000 chars and `workdir` ≤ 4,096 chars (no interior NUL bytes), and captured output is capped. There is no process timeout. Returns 429 (`{ "error": ... }`) when the concurrency cap for that destination is exhausted; local and remote commands have independent budgets of 4 in-flight requests each. When the destination is remote, a 429 emitted by the remote host is re-emitted locally with the remote's display name prefixed onto the error message (e.g. `remote alice: too many local terminal commands are already running; limit is 4`), so the caller can distinguish a local cap rejection from a remote-side propagation. |
-| POST | `/api/terminal/run/stream` | Run the same terminal command as `/api/terminal/run`, but return an SSE stream. `output` events carry `{ "stream": "stdout" \| "stderr", "text": string }`, `complete` carries the normal terminal response, and `error` carries `{ "error": string, "status": number }` for failures after the stream has started. Validation, workdir/scope resolution, and local concurrency-cap failures are returned as normal HTTP errors before the stream starts; local cap failures use HTTP 429 with `{ "error": ... }` and the same independent local/remote 4-in-flight budgets as the JSON route. Remote 429s discovered by the proxy are surfaced with `status: 429` and the remote display-name prefix in the error message; after the local SSE response has started they travel as SSE `error` frames rather than changing the local HTTP status. There is no process timeout. Remote-scoped commands proxy this streamed route when the remote supports it and fall back to the JSON route only for 404/405 older-remotes responses; successful non-SSE stream responses are treated as remote protocol errors to avoid double-running commands. |
+| POST | `/api/terminal/run/stream` | Run the same terminal command as `/api/terminal/run`, but return an SSE stream. `output` events carry `{ "stream": "stdout" \| "stderr", "text": string }`, `complete` carries the normal terminal response, and `error` carries `{ "error": string, "status": number }` for failures after the stream has started. Validation, workdir/scope resolution, and local concurrency-cap failures are returned as normal HTTP errors before the stream starts; local cap failures use HTTP 429 with `{ "error": ... }` and the same independent local/remote 4-in-flight budgets as the JSON route. Remote 429s discovered by the proxy are surfaced with `status: 429` and the remote display-name prefix in the error message; after the local SSE response has started they travel as SSE `error` frames rather than changing the local HTTP status. There is no process timeout. Remote-scoped commands require and proxy the same streamed route; successful non-SSE responses are remote protocol errors and commands are never retried through the JSON endpoint. |
 | GET | `/api/state` | Metadata-first state snapshot; sessions are summary shells with `messagesLoaded: false` and no transcript payload. A premium Engram control session whose binding is still being restored exposes `engramBootRecoveryPending: true`, allowing clients to disable only that session's prompt controls while state and health routes remain available. Eager Engram recovery is backgrounded and bounded by the persisted host `bootRecoveryBudgetMs` (default 5,000 ms); workers that finish after the deadline still clear their marker, while targets not yet started retry lazily when the session is opened or otherwise used. Delegations carry `id`/`childSessionId` ownership links plus the `mode`/`reviewResultRequired` capability metadata needed for delegation MCP tool gating. Full delegation lifecycle/result summaries come from the parent-scoped delegation endpoints. |
 | GET | `/api/workspaces` | List saved workspace layout summaries |
 | GET | `/api/workspaces/{id}` | Read a persisted workspace layout |
@@ -384,7 +384,10 @@ position plus `limit`, and overview requests forward the bucket count. They do
 not fetch a whole remote transcript and slice it locally, and a targeted
 transcript read does not trigger a broad remote `/api/state` side fetch.
 
-`GET /api/health` currently returns `{ ok: true, supportsInlineOrchestratorTemplates: true }`. Remote launchers use `supportsInlineOrchestratorTemplates` during health probes to decide whether a remote can accept inline local orchestrator templates or must be upgraded first.
+`GET /api/health` returns `{ ok: true, serverInstanceId: string }`. Remote
+TermAl peers use one current wire contract with no capability downgrade or
+protocol-version negotiation. A mismatched remote is unsupported until it is
+updated through `POST /api/remotes/{id}/upgrade`.
 
 ### Terminal Command Execution
 
@@ -403,9 +406,8 @@ Design constraints:
 - Captured stdout/stderr are bounded and marked truncated when the cap is hit.
 - Local streamed commands observe SSE disconnects and kill the local process
   tree when the user leaves the stream.
-- Remote streamed commands proxy the remote `/api/terminal/run/stream` SSE
-  contract when available, and fall back to the JSON route only when the remote
-  returns 404 or 405 for the stream route.
+- Remote streamed commands require and proxy the remote
+  `/api/terminal/run/stream` SSE contract.
 - Remote successful non-SSE responses are protocol errors rather than a reason
   to run the command again through the JSON endpoint.
 
@@ -441,7 +443,7 @@ The frontend has two recovery paths that intentionally use different revision ga
 
 The asymmetry is deliberate. Reconnect probes answer "can this snapshot repair the exact request I made?", so they key off request revision, server instance id, and response metadata. The watchdog answers "has an active stream been silent too long after the browser may have slept?", so it keys off wall-clock activity and session status. Do not collapse those into a single `>= latest revision` check: same-revision repair is required for missed incremental Markdown/text deltas, while stale watchdog polling must back off as soon as live data resumes.
 
-`state` events and every snapshot-bearing response (`StateResponse`, `HealthResponse`, `CreateSessionResponse`, `SessionResponse`) additionally carry a `serverInstanceId: string` — a per-process UUID generated once via `Uuid::new_v4()` at `AppState::new_with_paths`. The id is not a secret and not a protocol boundary; it exists so the frontend can detect a server restart deterministically. After a restart, the revision counter rewinds to whatever SQLite held (usually lower than the browser's last-seen revision), which would otherwise cause every monotonic check in `shouldAdoptStateRevision` to reject the fresh state. `isServerInstanceMismatch` in `ui/src/state-revision.ts` returns `true` only when both the last-seen and incoming ids are non-empty AND differ; `shouldAdoptSnapshotRevision` accepts only unseen mismatched ids as restarts; mismatched ids already seen by the tab are rejected as late responses from older server processes. The unseen-restart branch overrides both the monotonic check and any `allowRevisionDowngrade` gate. The empty-string sentinel (`#[serde(default)]` on Rust, `""` fallback on older servers or fallback SSE payloads) means "unknown instance" and cannot trigger a restart branch — this is what lets `empty_state_events_response()` send a fallback payload without masquerading as a restart. New endpoints that return state-shaped responses must emit a non-empty `serverInstanceId` sourced from `AppState::server_instance_id`; otherwise a session hydration in flight across a restart gets silently rejected by the revision guard until the safety-net pollers re-fetch.
+`state` events and every snapshot-bearing response (`StateResponse`, `HealthResponse`, `CreateSessionResponse`, `SessionResponse`) additionally carry a `serverInstanceId: string` — a per-process UUID generated once via `Uuid::new_v4()` at `AppState::new_with_paths`. The id is not a secret and not a protocol boundary; it exists so the frontend can detect a server restart deterministically. After a restart, the revision counter rewinds to whatever SQLite held (usually lower than the browser's last-seen revision), which would otherwise cause every monotonic check in `shouldAdoptStateRevision` to reject the fresh state. `isServerInstanceMismatch` in `ui/src/state-revision.ts` returns `true` only when both the last-seen and incoming ids are non-empty AND differ; `shouldAdoptSnapshotRevision` accepts only unseen mismatched ids as restarts; mismatched ids already seen by the tab are rejected as late responses from prior server processes. The unseen-restart branch overrides both the monotonic check and any `allowRevisionDowngrade` gate. The empty-string sentinel emitted by `empty_state_events_response()` for its `_sseFallback` payload means "unknown instance" and cannot trigger a restart branch, so fallback recovery never masquerades as a restart. All ordinary current endpoints that return state-shaped responses must emit a non-empty `serverInstanceId` sourced from `AppState::server_instance_id`; otherwise a session hydration in flight across a restart gets silently rejected by the revision guard until the safety-net pollers re-fetch.
 
 HTTP error responses intentionally carry only `{ "error": string }`. The backend's `ApiErrorKind` is in-process classifier metadata used before a response is serialized; `decode_remote_json` in `src/remote_ssh.rs` reconstructs forwarded remote errors from status plus message with no typed kind. Recovery code that depends on a typed kind must therefore tag the error on the local proxy side after a successful remote response, not rely on typed metadata surviving another HTTP hop. In a chained-remote topology, every intermediate hop reconstructs `ApiError` with `kind: None`, so typed recovery is effectively single-hop.
 
@@ -463,7 +465,7 @@ bridges that omit delta counts are treated as a hard protocol break;
 see `docs/metadata-first-state-plan.md` Contract Precisions -> Field semantics.
 
 ```
-DeltaEvent::TextDelta            { revision, session_id, message_id, message_index, message_count, text_start_byte?, delta, preview, session_mutation_stamp? }
+DeltaEvent::TextDelta            { revision, session_id, message_id, message_index, message_count, text_start_byte, delta, preview, session_mutation_stamp? }
 DeltaEvent::TextReplace          { revision, session_id, message_id, message_index, message_count, text, preview, session_mutation_stamp? }
 DeltaEvent::CommandUpdate        { revision, session_id, message_id, message_index, message_count, command, output, status, preview, session_mutation_stamp?, ... }
 DeltaEvent::ParallelAgentsUpdate { revision, session_id, message_id, message_index, message_count, agents, preview, session_mutation_stamp? }
@@ -529,8 +531,7 @@ unscoped events still carry the absolute changed path as a fallback.
 include `textStartByte`, the UTF-8 byte length of the exact message prefix the
 delta extends. Clients append only when their retained prefix has that byte
 length; a mismatch proves an earlier streaming event was missed and must trigger
-authoritative session hydration instead of displaying a corrupted draft. The
-field is optional only for soft rollout across existing remote TermAl peers.
+authoritative session hydration instead of displaying a corrupted draft.
 `TextReplace` overwrites the full message text when the backend receives an
 authoritative completed payload that diverges from the streamed draft, so
 clients should replace the target message body instead of appending.

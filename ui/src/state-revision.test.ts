@@ -192,7 +192,7 @@ describe("state revision helpers", () => {
     });
 
     it("treats an empty incoming instance id as unknown, preserving the monotonic guard", () => {
-      // Fallback SSE payload / older server — do NOT infer a restart.
+      // Fallback SSE payload — do NOT infer a restart.
       expect(
         shouldAdoptSnapshotRevision(5, 3, {
           lastSeenServerInstanceId: "uuid-known",

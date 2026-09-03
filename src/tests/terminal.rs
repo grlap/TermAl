@@ -1378,7 +1378,7 @@ async fn terminal_run_route_limits_concurrent_commands() {
             if request_line.starts_with("GET /api/health ") {
                 stream
                     .write_all(
-                        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: 11\r\n\r\n{\"ok\":true}",
+                        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: 53\r\n\r\n{\"ok\":true,\"serverInstanceId\":\"remote-test-instance\"}",
                     )
                     .expect("health response should write");
                 continue;
@@ -1436,7 +1436,6 @@ async fn terminal_run_route_limits_concurrent_commands() {
                 process: Mutex::new(None),
                 event_bridge_started: AtomicBool::new(true),
                 event_bridge_shutdown: AtomicBool::new(false),
-                supports_inline_orchestrator_templates: Mutex::new(None),
             }),
         );
     let mut permits = (0..TERMINAL_LOCAL_COMMAND_CONCURRENCY_LIMIT)

@@ -276,7 +276,7 @@ impl AppState {
             message_id: message_id.to_owned(),
             message_index,
             message_count,
-            text_start_byte: Some(text_start_byte),
+            text_start_byte,
             delta: delta.to_owned(),
             preview,
             session_mutation_stamp: Some(session_mutation_stamp),

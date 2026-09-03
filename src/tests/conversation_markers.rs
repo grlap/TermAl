@@ -184,7 +184,7 @@ fn spawn_remote_marker_proxy_server(
                     &mut stream,
                     StatusCode::OK,
                     "application/json",
-                    r#"{"ok":true}"#,
+                    r#"{"ok":true,"serverInstanceId":"remote-test-instance"}"#,
                 );
                 continue;
             }
@@ -228,7 +228,7 @@ fn spawn_remote_marker_create_server(
                     &mut stream,
                     StatusCode::OK,
                     "application/json",
-                    r#"{"ok":true}"#,
+                    r#"{"ok":true,"serverInstanceId":"remote-test-instance"}"#,
                 );
                 continue;
             }
@@ -1792,7 +1792,7 @@ fn ephemeral_remote_delta_retries_dirty_persistence_before_mutation() {
                 message_id: "remote-message-1".to_owned(),
                 message_index: 0,
                 message_count: 1,
-                text_start_byte: Some("Remote message".len()),
+                text_start_byte: "Remote message".len(),
                 delta: " updated".to_owned(),
                 preview: Some("Remote message updated".to_owned()),
                 session_mutation_stamp: Some(13),

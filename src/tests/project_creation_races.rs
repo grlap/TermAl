@@ -87,7 +87,7 @@ fn spawn_remote_create_response_server(
                     &mut stream,
                     StatusCode::OK,
                     "application/json",
-                    r#"{"ok":true}"#,
+                    r#"{"ok":true,"serverInstanceId":"remote-test-instance"}"#,
                 );
                 continue;
             }
@@ -104,43 +104,6 @@ fn spawn_remote_create_response_server(
                 StatusCode::CREATED,
                 "application/json",
                 &response_body,
-            );
-            break;
-        }
-    });
-    (port, server)
-}
-
-fn spawn_remote_create_error_response_server(
-    expected_request_prefix: &'static str,
-    status: StatusCode,
-) -> (u16, std::thread::JoinHandle<()>) {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0")
-        .expect("remote create error race listener should bind");
-    let port = listener.local_addr().expect("listener addr").port();
-    let server = std::thread::spawn(move || {
-        loop {
-            let mut stream = accept_test_connection(&listener, "remote create error race listener");
-            let request = read_test_http_request(&mut stream);
-            if request.request_line.starts_with("GET /api/health ") {
-                write_test_http_response(
-                    &mut stream,
-                    StatusCode::OK,
-                    "application/json",
-                    r#"{"ok":true,"supportsInlineOrchestratorTemplates":false}"#,
-                );
-                continue;
-            }
-            assert!(
-                request.request_line.starts_with(expected_request_prefix),
-                "unexpected request: {}",
-                request.request_line
-            );
-            write_test_http_response(
-                &mut stream,
-                status,
-                "application/json",
-                r#"{"error":"remote route not found"}"#,
             );
             break;
         }
@@ -171,7 +134,7 @@ pub(super) fn spawn_remote_request_failure_after_replacement_server(
                     &mut stream,
                     StatusCode::OK,
                     "application/json",
-                    r#"{"ok":true}"#,
+                    r#"{"ok":true,"serverInstanceId":"remote-test-instance"}"#,
                 );
                 continue;
             }
@@ -1503,107 +1466,6 @@ fn remote_orchestrator_rejects_endpoint_replaced_during_create_request() {
             .is_none(),
         "request-only fixtures must not manufacture a replacement bridge connection"
     );
-
-    join_test_server(server);
-    let _ = fs::remove_file(state.persistence_path.as_path());
-}
-
-#[test]
-fn remote_orchestrator_404_classification_rejects_endpoint_replacement() {
-    assert_remote_orchestrator_404_classification_rejects_retired_lease(false);
-}
-
-#[test]
-fn remote_orchestrator_404_classification_rejects_a_to_b_to_a_retirement() {
-    assert_remote_orchestrator_404_classification_rejects_retired_lease(true);
-}
-
-fn assert_remote_orchestrator_404_classification_rejects_retired_lease(
-    restore_original_route: bool,
-) {
-    let state = test_app_state();
-    let remote = remote_config(if restore_original_route {
-        "remote-orchestrator-404-cycle"
-    } else {
-        "remote-orchestrator-404-replacement"
-    });
-    let mut replacement = remote.clone();
-    replacement.host = Some("replacement.example.com".to_owned());
-    replacement.port = Some(2222);
-    replacement.user = Some("bob".to_owned());
-    let local_project_id = create_test_remote_project(
-        &state,
-        &remote,
-        "/remote/orchestrator-404-authority",
-        "Remote Orchestrator 404 Authority",
-        if restore_original_route {
-            "remote-project-orchestrator-404-cycle"
-        } else {
-            "remote-project-orchestrator-404-replacement"
-        },
-    );
-    let template = state
-        .create_orchestrator_template(OrchestratorTemplateDraft {
-            project_id: Some(local_project_id.clone()),
-            ..sample_orchestrator_template_draft()
-        })
-        .expect("template should be created")
-        .template;
-    let (port, server) = spawn_remote_create_error_response_server(
-        "POST /api/orchestrators ",
-        StatusCode::NOT_FOUND,
-    );
-    insert_test_remote_connection(
-        &state,
-        &remote,
-        port,
-        TestRemoteBridgeOwnership::RequestOnly,
-    );
-    let state_for_hook = state.clone();
-    let remote_for_hook = remote.clone();
-    let replacement_for_hook = replacement.clone();
-    state
-        .remote_registry
-        .set_test_before_remote_orchestrator_capability_classification(move || {
-            replace_remote_settings(&state_for_hook, replacement_for_hook);
-            if restore_original_route {
-                replace_remote_settings(&state_for_hook, remote_for_hook);
-            }
-        });
-    let (session_count_before, orchestrator_count_before) = {
-        let inner = state.inner.lock().expect("state mutex poisoned");
-        (inner.sessions.len(), inner.orchestrator_instances.len())
-    };
-
-    let error = match state.create_orchestrator_instance(CreateOrchestratorInstanceRequest {
-        template_id: template.id,
-        project_id: Some(local_project_id),
-        template: None,
-    }) {
-        Ok(_) => panic!("retired 404 lease must win over capability classification"),
-        Err(error) => error,
-    };
-
-    assert_eq!(error.status, StatusCode::CONFLICT);
-    assert_eq!(error.message, REMOTE_CONNECTION_CHANGED_DURING_CREATE);
-    let inner = state.inner.lock().expect("state mutex poisoned");
-    assert_eq!(inner.sessions.len(), session_count_before);
-    assert_eq!(
-        inner.orchestrator_instances.len(),
-        orchestrator_count_before
-    );
-    drop(inner);
-    let configs = state
-        .remote_registry
-        .configs
-        .lock()
-        .expect("remote registry config mutex poisoned");
-    if restore_original_route {
-        assert_eq!(configs.get(&remote.id), Some(&remote));
-    } else {
-        assert_eq!(configs.get(&remote.id), Some(&replacement));
-    }
-    drop(configs);
 
     join_test_server(server);
     let _ = fs::remove_file(state.persistence_path.as_path());

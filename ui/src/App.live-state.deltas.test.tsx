@@ -994,6 +994,7 @@ describe("App live state - delta-gap core", () => {
             messageId: "message-assistant-1",
             messageIndex: 1,
             messageCount: 2,
+            textStartByte: 13,
             delta: " continued",
             preview: "Stable answer continued",
           });
@@ -1166,6 +1167,7 @@ describe("App live state - delta-gap core", () => {
           messageId: "message-assistant-1",
           messageIndex: 1,
           messageCount: 2,
+          textStartByte: 0,
           delta: " reply.",
           preview: "Recovered assistant reply.",
           sessionMutationStamp: 12,
@@ -1503,6 +1505,7 @@ describe("App live state - delta-gap core", () => {
           messageId: "message-assistant-1",
           messageIndex: 1,
           messageCount: 2,
+          textStartByte: 0,
           delta: " chunk.",
           preview: "Recovered assistant chunk.",
           sessionMutationStamp: 12,

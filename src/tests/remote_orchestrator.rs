@@ -118,7 +118,7 @@ fn create_orchestrator_instance_proxies_remote_projects_and_localizes_response()
             if request_line.starts_with("GET /api/health ") {
                 stream
                     .write_all(
-                        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: 11\r\n\r\n{\"ok\":true}",
+                        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: 53\r\n\r\n{\"ok\":true,\"serverInstanceId\":\"remote-test-instance\"}",
                     )
                     .expect("health response should write");
                 continue;
@@ -160,7 +160,6 @@ fn create_orchestrator_instance_proxies_remote_projects_and_localizes_response()
                 process: Mutex::new(None),
                 event_bridge_started: AtomicBool::new(true),
                 event_bridge_shutdown: AtomicBool::new(false),
-                supports_inline_orchestrator_templates: Mutex::new(None),
             }),
         );
 
@@ -313,7 +312,7 @@ fn create_remote_orchestrator_proxy_localizes_launch_and_notes_revision() {
             if request_line.starts_with("GET /api/health ") {
                 stream
                     .write_all(
-                        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: 11\r\n\r\n{\"ok\":true}",
+                        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: 53\r\n\r\n{\"ok\":true,\"serverInstanceId\":\"remote-test-instance\"}",
                     )
                     .expect("health response should write");
                 continue;
@@ -353,7 +352,6 @@ fn create_remote_orchestrator_proxy_localizes_launch_and_notes_revision() {
                 process: Mutex::new(None),
                 event_bridge_started: AtomicBool::new(true),
                 event_bridge_shutdown: AtomicBool::new(false),
-                supports_inline_orchestrator_templates: Mutex::new(None),
             }),
         );
 
@@ -483,7 +481,7 @@ fn create_remote_orchestrator_proxy_rolls_back_on_localization_failure() {
             if request_line.starts_with("GET /api/health ") {
                 stream
                     .write_all(
-                        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: 11\r\n\r\n{\"ok\":true}",
+                        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: 53\r\n\r\n{\"ok\":true,\"serverInstanceId\":\"remote-test-instance\"}",
                     )
                     .expect("health response should write");
                 continue;
@@ -523,7 +521,6 @@ fn create_remote_orchestrator_proxy_rolls_back_on_localization_failure() {
                 process: Mutex::new(None),
                 event_bridge_started: AtomicBool::new(true),
                 event_bridge_shutdown: AtomicBool::new(false),
-                supports_inline_orchestrator_templates: Mutex::new(None),
             }),
         );
 
@@ -667,7 +664,7 @@ fn create_orchestrator_instance_materializes_stale_remote_launch_response() {
             if request_line.starts_with("GET /api/health ") {
                 stream
                     .write_all(
-                        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: 11\r\n\r\n{\"ok\":true}",
+                        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: 53\r\n\r\n{\"ok\":true,\"serverInstanceId\":\"remote-test-instance\"}",
                     )
                     .expect("health response should write");
                 continue;
@@ -707,7 +704,6 @@ fn create_orchestrator_instance_materializes_stale_remote_launch_response() {
                 process: Mutex::new(None),
                 event_bridge_started: AtomicBool::new(true),
                 event_bridge_shutdown: AtomicBool::new(false),
-                supports_inline_orchestrator_templates: Mutex::new(None),
             }),
         );
     {
@@ -749,343 +745,6 @@ fn create_orchestrator_instance_materializes_stale_remote_launch_response() {
     assert!(inner.should_skip_remote_applied_revision(&remote.id, 3));
     assert!(!inner.should_skip_remote_applied_revision(&remote.id, 4));
     drop(inner);
-
-    join_test_server(server);
-    let _ = fs::remove_file(state.persistence_path.as_path());
-}
-
-// Pins that when a remote replies 404 to POST /api/orchestrators with
-// an inline template body, the error is translated to a BAD_GATEWAY
-// "must be upgraded" message and only the expected health + create
-// requests are made (no extra diagnostic probe loop).
-// Guards against silent failure when a remote lacks inline-template
-// support and against accidentally hammering it with retries.
-#[test]
-fn remote_orchestrator_create_requires_upgrade_when_remote_lacks_inline_template_support() {
-    let state = test_app_state();
-    let remote = RemoteConfig {
-        id: "ssh-lab".to_owned(),
-        name: "SSH Lab".to_owned(),
-        transport: RemoteTransport::Ssh,
-        enabled: true,
-        host: Some("example.com".to_owned()),
-        port: Some(22),
-        user: Some("alice".to_owned()),
-    };
-    let local_project_id = create_test_remote_project(
-        &state,
-        &remote,
-        "/remote/repo",
-        "Remote Project",
-        "remote-project-1",
-    );
-    let template = state
-        .create_orchestrator_template(OrchestratorTemplateDraft {
-            project_id: Some(local_project_id.clone()),
-            ..sample_orchestrator_template_draft()
-        })
-        .expect("template should be created")
-        .template;
-
-    let captured = Arc::new(Mutex::new(None::<String>));
-    let captured_for_server = captured.clone();
-    let requests = Arc::new(Mutex::new(Vec::<String>::new()));
-    let requests_for_server = requests.clone();
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("test listener should bind");
-    let port = listener.local_addr().expect("listener addr").port();
-    let server = std::thread::spawn(move || {
-        for _ in 0..2 {
-            let mut stream = accept_test_connection(&listener, "test listener");
-            let mut buffer = Vec::new();
-            let mut chunk = [0u8; 4096];
-            let header_end = loop {
-                let bytes_read = stream.read(&mut chunk).expect("request should read");
-                assert!(bytes_read > 0, "request closed before headers completed");
-                buffer.extend_from_slice(&chunk[..bytes_read]);
-                if let Some(end) = buffer.windows(4).position(|window| window == b"\r\n\r\n") {
-                    break end;
-                }
-            };
-            let headers = String::from_utf8_lossy(&buffer[..header_end]);
-            let content_length = headers
-                .lines()
-                .find_map(|line| {
-                    let (name, value) = line.split_once(':')?;
-                    name.trim()
-                        .eq_ignore_ascii_case("content-length")
-                        .then_some(value.trim())
-                        .and_then(|value| value.parse::<usize>().ok())
-                })
-                .unwrap_or(0);
-            let body_start = header_end + 4;
-            while buffer.len() < body_start + content_length {
-                let bytes_read = stream.read(&mut chunk).expect("request body should read");
-                if bytes_read == 0 {
-                    break;
-                }
-                buffer.extend_from_slice(&chunk[..bytes_read]);
-            }
-
-            let request_head = String::from_utf8_lossy(&buffer[..body_start]).to_string();
-            let request_line = request_head
-                .lines()
-                .next()
-                .expect("request line should exist")
-                .to_owned();
-            requests_for_server
-                .lock()
-                .expect("capture mutex poisoned")
-                .push(request_line.clone());
-            let body = String::from_utf8_lossy(&buffer[body_start..body_start + content_length])
-                .to_string();
-
-            if request_line.starts_with("GET /api/health ") {
-                stream
-                    .write_all(
-                        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: 11\r\n\r\n{\"ok\":true}",
-                    )
-                    .expect("health response should write");
-                continue;
-            }
-
-            if request_line.starts_with("POST /api/orchestrators ") {
-                *captured_for_server.lock().expect("capture mutex poisoned") = Some(body);
-                let error_body =
-                    "{\"error\":\"Inline template launch unavailable on this remote\"}";
-                stream
-                    .write_all(
-                        format!(
-                            "HTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
-                            error_body.len(),
-                            error_body
-                        )
-                        .as_bytes(),
-                    )
-                    .expect("remote error response should write");
-                continue;
-            }
-
-            panic!("unexpected request: {request_line}");
-        }
-    });
-
-    state
-        .remote_registry
-        .connections
-        .lock()
-        .expect("remote registry mutex poisoned")
-        .insert(
-            remote.id.clone(),
-            Arc::new(RemoteConnection {
-                config: remote.clone(),
-                authority_generation: 0,
-                retired: AtomicBool::new(false),
-                state_continuity_generation: AtomicU64::new(1),
-                forwarded_port: port,
-                process: Mutex::new(None),
-                event_bridge_started: AtomicBool::new(true),
-                event_bridge_shutdown: AtomicBool::new(false),
-                supports_inline_orchestrator_templates: Mutex::new(None),
-            }),
-        );
-
-    let err = match state.create_orchestrator_instance(CreateOrchestratorInstanceRequest {
-        template_id: template.id.clone(),
-        project_id: Some(local_project_id),
-        template: None,
-    }) {
-        Ok(_) => panic!("old remote should require an upgrade for inline templates"),
-        Err(err) => err,
-    };
-
-    assert_eq!(err.status, StatusCode::BAD_GATEWAY);
-    assert!(err.message.contains("must be upgraded"));
-    // The cached capability should suppress only the post-404 diagnostic probe;
-    // the normal pre-request availability probe still happens in ensure_available.
-    assert_eq!(
-        requests.lock().expect("capture mutex poisoned").clone(),
-        vec![
-            "GET /api/health HTTP/1.1".to_owned(),
-            "POST /api/orchestrators HTTP/1.1".to_owned(),
-        ]
-    );
-    let body = captured
-        .lock()
-        .expect("capture mutex poisoned")
-        .clone()
-        .expect("captured request should exist");
-    let parsed_body: Value = serde_json::from_str(&body).expect("request body should decode");
-    assert_eq!(
-        parsed_body["templateId"],
-        Value::String(template.id.clone())
-    );
-    assert_eq!(
-        parsed_body["template"]["name"],
-        Value::String(template.name.clone())
-    );
-
-    join_test_server(server);
-    let _ = fs::remove_file(state.persistence_path.as_path());
-}
-
-// Pins that a pre-cached supports_inline_orchestrator_templates=false
-// still returns the upgrade-required error on a 404, without issuing
-// a second post-404 capability probe, while still performing the
-// normal pre-request availability check.
-// Guards against the capability cache causing either misleading
-// success or an extra round-trip on repeated failures.
-#[test]
-fn remote_orchestrator_create_requires_upgrade_when_inline_template_support_is_precached_false() {
-    let state = test_app_state();
-    let remote = RemoteConfig {
-        id: "ssh-lab".to_owned(),
-        name: "SSH Lab".to_owned(),
-        transport: RemoteTransport::Ssh,
-        enabled: true,
-        host: Some("example.com".to_owned()),
-        port: Some(22),
-        user: Some("alice".to_owned()),
-    };
-    let local_project_id = create_test_remote_project(
-        &state,
-        &remote,
-        "/remote/repo",
-        "Remote Project",
-        "remote-project-1",
-    );
-    let template = state
-        .create_orchestrator_template(OrchestratorTemplateDraft {
-            project_id: Some(local_project_id.clone()),
-            ..sample_orchestrator_template_draft()
-        })
-        .expect("template should be created")
-        .template;
-
-    let requests = Arc::new(Mutex::new(Vec::<String>::new()));
-    let requests_for_server = requests.clone();
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("test listener should bind");
-    let port = listener.local_addr().expect("listener addr").port();
-    let server = std::thread::spawn(move || {
-        for _ in 0..2 {
-            let mut stream = accept_test_connection(&listener, "test listener");
-            let mut buffer = Vec::new();
-            let mut chunk = [0u8; 4096];
-            let header_end = loop {
-                let bytes_read = stream.read(&mut chunk).expect("request should read");
-                assert!(bytes_read > 0, "request closed before headers completed");
-                buffer.extend_from_slice(&chunk[..bytes_read]);
-                if let Some(end) = buffer.windows(4).position(|window| window == b"\r\n\r\n") {
-                    break end;
-                }
-            };
-            let headers = String::from_utf8_lossy(&buffer[..header_end]);
-            let content_length = headers
-                .lines()
-                .find_map(|line| {
-                    let (name, value) = line.split_once(':')?;
-                    name.trim()
-                        .eq_ignore_ascii_case("content-length")
-                        .then_some(value.trim())
-                        .and_then(|value| value.parse::<usize>().ok())
-                })
-                .unwrap_or(0);
-            let body_start = header_end + 4;
-            while buffer.len() < body_start + content_length {
-                let bytes_read = stream.read(&mut chunk).expect("request body should read");
-                if bytes_read == 0 {
-                    break;
-                }
-                buffer.extend_from_slice(&chunk[..bytes_read]);
-            }
-
-            let request_head = String::from_utf8_lossy(&buffer[..body_start]).to_string();
-            let request_line = request_head
-                .lines()
-                .next()
-                .expect("request line should exist")
-                .to_owned();
-            requests_for_server
-                .lock()
-                .expect("capture mutex poisoned")
-                .push(request_line.clone());
-
-            if request_line.starts_with("GET /api/health ") {
-                stream
-                    .write_all(
-                        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: 11\r\n\r\n{\"ok\":true}",
-                    )
-                    .expect("health response should write");
-                continue;
-            }
-
-            if request_line.starts_with("POST /api/orchestrators ") {
-                let error_body =
-                    "{\"error\":\"Inline template launch unavailable on this remote\"}";
-                stream
-                    .write_all(
-                        format!(
-                            "HTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
-                            error_body.len(),
-                            error_body
-                        )
-                        .as_bytes(),
-                    )
-                    .expect("remote error response should write");
-                continue;
-            }
-
-            panic!("unexpected request: {request_line}");
-        }
-    });
-
-    state
-        .remote_registry
-        .connections
-        .lock()
-        .expect("remote registry mutex poisoned")
-        .insert(
-            remote.id.clone(),
-            Arc::new(RemoteConnection {
-                config: remote.clone(),
-                authority_generation: 0,
-                retired: AtomicBool::new(false),
-                state_continuity_generation: AtomicU64::new(1),
-                forwarded_port: port,
-                process: Mutex::new(None),
-                event_bridge_started: AtomicBool::new(true),
-                event_bridge_shutdown: AtomicBool::new(false),
-                supports_inline_orchestrator_templates: Mutex::new(Some(false)),
-            }),
-        );
-
-    assert_eq!(
-        state
-            .remote_registry
-            .cached_supports_inline_orchestrator_templates(&remote)
-            .expect("current remote capability lookup should succeed"),
-        Some(false)
-    );
-
-    let err = match state.create_orchestrator_instance(CreateOrchestratorInstanceRequest {
-        template_id: template.id.clone(),
-        project_id: Some(local_project_id),
-        template: None,
-    }) {
-        Ok(_) => panic!("old remote should require an upgrade for inline templates"),
-        Err(err) => err,
-    };
-
-    assert_eq!(err.status, StatusCode::BAD_GATEWAY);
-    assert!(err.message.contains("must be upgraded"));
-    // The cached Some(false) capability skips any extra post-404 health probe, but the
-    // initial ensure_available probe still happens before the launch attempt.
-    assert_eq!(
-        requests.lock().expect("capture mutex poisoned").clone(),
-        vec![
-            "GET /api/health HTTP/1.1".to_owned(),
-            "POST /api/orchestrators HTTP/1.1".to_owned(),
-        ]
-    );
 
     join_test_server(server);
     let _ = fs::remove_file(state.persistence_path.as_path());
@@ -1254,7 +913,7 @@ fn remote_orchestrator_lifecycle_actions_proxy_to_remote_backend_and_resync_loca
             if request_line.starts_with("GET /api/health ") {
                 stream
                     .write_all(
-                        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: 11\r\n\r\n{\"ok\":true}",
+                        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: 53\r\n\r\n{\"ok\":true,\"serverInstanceId\":\"remote-test-instance\"}",
                     )
                     .expect("health response should write");
                 continue;
@@ -1292,7 +951,6 @@ fn remote_orchestrator_lifecycle_actions_proxy_to_remote_backend_and_resync_loca
                 process: Mutex::new(None),
                 event_bridge_started: AtomicBool::new(false),
                 event_bridge_shutdown: AtomicBool::new(false),
-                supports_inline_orchestrator_templates: Mutex::new(None),
             }),
         );
 
@@ -1832,7 +1490,7 @@ fn equal_remote_orchestrator_action_snapshot_retries_dirty_persistence() {
                     &mut stream,
                     StatusCode::OK,
                     "application/json",
-                    r#"{"ok":true}"#,
+                    r#"{"ok":true,"serverInstanceId":"remote-test-instance"}"#,
                 );
                 continue;
             }

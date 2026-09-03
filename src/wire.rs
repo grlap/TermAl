@@ -1360,18 +1360,8 @@ struct DelegationSummary {
 struct DelegationStateSummary {
     id: String,
     child_session_id: String,
-    #[serde(default = "default_delegation_state_mode")]
     mode: DelegationMode,
-    #[serde(default)]
     review_result_required: bool,
-}
-
-/// Missing capability metadata from an older remote must not make the whole
-/// state snapshot fail to deserialize. Explorer is the fail-closed typed
-/// default; the delegation MCP bridge independently gates review submission
-/// against the raw JSON in `delegation_mcp.rs`.
-fn default_delegation_state_mode() -> DelegationMode {
-    DelegationMode::Explorer
 }
 
 /// Request payload for creating a Phase 1 read-only delegation.
@@ -1399,7 +1389,6 @@ struct DelegationResponse {
     revision: u64,
     delegation: DelegationRecord,
     child_session: Session,
-    #[serde(default)]
     server_instance_id: String,
 }
 
@@ -1408,7 +1397,6 @@ struct DelegationResponse {
 struct DelegationStatusResponse {
     revision: u64,
     delegation: DelegationRecord,
-    #[serde(default)]
     server_instance_id: String,
 }
 
@@ -1418,7 +1406,6 @@ struct DelegationStatusResponse {
 struct DelegationListResponse {
     revision: u64,
     delegations: Vec<DelegationSummary>,
-    #[serde(default)]
     server_instance_id: String,
 }
 
@@ -1427,7 +1414,6 @@ struct DelegationListResponse {
 struct DelegationResultResponse {
     revision: u64,
     result: DelegationResult,
-    #[serde(default)]
     server_instance_id: String,
 }
 
@@ -1458,7 +1444,6 @@ struct DelegationResultOutputResponse {
     /// True only when the child transcript no longer contains an assistant
     /// candidate and the compact result summary had to be used instead.
     summary_fallback: bool,
-    #[serde(default)]
     server_instance_id: String,
 }
 
@@ -1492,12 +1477,6 @@ enum DelegationWaitConsumedReason {
     ParentSessionStopped,
     ParentSessionUnavailable,
     ParentSessionRemoved,
-}
-
-impl Default for DelegationWaitConsumedReason {
-    fn default() -> Self {
-        Self::Completed
-    }
 }
 
 /// Represents the create project request payload.
@@ -1821,16 +1800,11 @@ struct ErrorResponse {
 #[serde(rename_all = "camelCase")]
 struct HealthResponse {
     ok: bool,
-    #[serde(default)]
-    supports_inline_orchestrator_templates: bool,
     /// UUID generated at `AppState::new_with_paths` boot. Stable for
     /// the lifetime of the process, changes on every restart. Clients
     /// use a mismatch between this and their last-seen id to detect a
     /// server restart deterministically — see `shouldAdoptSnapshotRevision`
-    /// in the frontend. `#[serde(default)]` so older servers that do
-    /// not emit the field still deserialize to an empty string
-    /// (treated as "unknown — do not trust for restart detection").
-    #[serde(default)]
+    /// in the frontend.
     server_instance_id: String,
 }
 
@@ -2049,9 +2023,7 @@ struct StateResponse {
     /// `HealthResponse::server_instance_id` for semantics. Carried on
     /// every snapshot so clients can distinguish "revision decreased
     /// because the server restarted" from "revision decreased because
-    /// this response is stale". `#[serde(default)]` for forward-compat
-    /// with older servers.
-    #[serde(default)]
+    /// this response is stale".
     server_instance_id: String,
     #[serde(default)]
     codex: CodexState,
@@ -2093,9 +2065,6 @@ struct SessionResponse {
     /// restart. Without this field, a session hydration in flight
     /// across a restart could be silently rejected by the monotonic
     /// revision guard until the safety-net pollers re-fetch.
-    /// `#[serde(default)]` for forward-compat with older servers that
-    /// do not emit the field.
-    #[serde(default)]
     server_instance_id: String,
 }
 
@@ -2288,9 +2257,7 @@ struct CreateSessionResponse {
     /// against the last-seen id to accept a revision downgrade after
     /// a server restart, which is the common case for this response
     /// (POST sent from a stale browser tab against a freshly started
-    /// server). `#[serde(default)]` for forward-compat with older
-    /// servers that do not emit the field.
-    #[serde(default)]
+    /// server).
     server_instance_id: String,
 }
 
@@ -2576,12 +2543,8 @@ enum DeltaEvent {
         message_index: usize,
         #[serde(rename = "messageCount")]
         message_count: u32,
-        #[serde(
-            rename = "textStartByte",
-            default,
-            skip_serializing_if = "Option::is_none"
-        )]
-        text_start_byte: Option<usize>,
+        #[serde(rename = "textStartByte")]
+        text_start_byte: usize,
         delta: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         preview: Option<String>,
@@ -2702,7 +2665,6 @@ enum DeltaEvent {
         revision: u64,
         wait_id: String,
         parent_session_id: String,
-        #[serde(default)]
         reason: DelegationWaitConsumedReason,
     },
     DelegationWaitResumeDispatchFailed {

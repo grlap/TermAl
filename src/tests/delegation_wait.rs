@@ -565,28 +565,18 @@ fn boot_reconciliation_drops_unsatisfied_wait_with_missing_parent_and_running_ta
 }
 
 #[test]
-fn legacy_delegation_wait_consumed_delta_defaults_reason_to_completed() {
-    let event: DeltaEvent = serde_json::from_value(json!({
+fn delegation_wait_consumed_delta_requires_reason() {
+    let error = match serde_json::from_value::<DeltaEvent>(json!({
         "type": "delegationWaitConsumed",
         "revision": 42,
-        "waitId": "delegation-wait-legacy",
-        "parentSessionId": "session-legacy"
-    }))
-    .expect("legacy wait-consumed delta should deserialize");
+        "waitId": "delegation-wait-current",
+        "parentSessionId": "session-current"
+    })) {
+        Ok(_) => panic!("current wait-consumed deltas must carry their reason"),
+        Err(error) => error,
+    };
 
-    match event {
-        DeltaEvent::DelegationWaitConsumed {
-            wait_id,
-            parent_session_id,
-            reason,
-            ..
-        } => {
-            assert_eq!(wait_id, "delegation-wait-legacy");
-            assert_eq!(parent_session_id, "session-legacy");
-            assert_eq!(reason, DelegationWaitConsumedReason::Completed);
-        }
-        _ => panic!("expected delegation wait consumed delta"),
-    }
+    assert!(error.to_string().contains("missing field `reason`"));
 }
 
 #[test]

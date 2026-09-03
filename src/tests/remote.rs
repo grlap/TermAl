@@ -20,8 +20,8 @@
 //! Security matters here: a remote backend might be misbehaving or
 //! compromised, so error bodies are sanitized and size-capped before logging,
 //! terminal stream output is capped before forwarding, 429s are annotated to
-//! surface remote throttling, and SSE framing is preserved (with JSON
-//! fallback for older remotes). Central production helpers in `src/remote.rs`:
+//! surface remote throttling, and SSE framing is preserved without retrying a
+//! streamed command through another endpoint. Central production helpers in `src/remote.rs`:
 //! `sync_remote_state_inner`, `apply_remote_state_snapshot`,
 //! `apply_remote_delta_event_locked`, `decode_remote_json`,
 //! `forward_remote_terminal_stream_reader`, `cap_terminal_response_output`.
@@ -758,7 +758,6 @@ fn removing_remote_stops_event_bridge_worker_and_resets_started_guard() {
         process: Mutex::new(None),
         event_bridge_started: AtomicBool::new(false),
         event_bridge_shutdown: AtomicBool::new(false),
-        supports_inline_orchestrator_templates: Mutex::new(None),
     });
     state
         .remote_registry
@@ -857,7 +856,6 @@ fn remote_event_bridge_retry_clears_fallback_resync_tracking() {
         process: Mutex::new(None),
         event_bridge_started: AtomicBool::new(false),
         event_bridge_shutdown: AtomicBool::new(false),
-        supports_inline_orchestrator_templates: Mutex::new(None),
     });
     state
         .remote_registry
@@ -937,7 +935,6 @@ fn remote_event_bridge_retry_clears_applied_revision_tracking() {
         process: Mutex::new(None),
         event_bridge_started: AtomicBool::new(false),
         event_bridge_shutdown: AtomicBool::new(false),
-        supports_inline_orchestrator_templates: Mutex::new(None),
     });
     state
         .remote_registry
@@ -2408,7 +2405,7 @@ pub(super) fn spawn_remote_session_response_server(
                     &mut stream,
                     StatusCode::OK,
                     "application/json",
-                    r#"{"ok":true}"#,
+                    r#"{"ok":true,"serverInstanceId":"remote-test-instance"}"#,
                 );
                 continue;
             }
@@ -2457,7 +2454,7 @@ pub(super) fn spawn_remote_session_history_response_server(
                     &mut stream,
                     StatusCode::OK,
                     "application/json",
-                    r#"{"ok":true}"#,
+                    r#"{"ok":true,"serverInstanceId":"remote-test-instance"}"#,
                 );
                 continue;
             }
@@ -2506,7 +2503,7 @@ pub(super) fn spawn_remote_session_overview_response_server(
                     &mut stream,
                     StatusCode::OK,
                     "application/json",
-                    r#"{"ok":true}"#,
+                    r#"{"ok":true,"serverInstanceId":"remote-test-instance"}"#,
                 );
                 continue;
             }
@@ -2553,7 +2550,7 @@ pub(super) fn spawn_remote_state_response_server(
                     &mut stream,
                     StatusCode::OK,
                     "application/json",
-                    r#"{"ok":true}"#,
+                    r#"{"ok":true,"serverInstanceId":"remote-test-instance"}"#,
                 );
                 continue;
             }
@@ -2621,7 +2618,6 @@ fn remote_review_put_sends_scope_via_query_params() {
                 process: Mutex::new(None),
                 event_bridge_started: AtomicBool::new(false),
                 event_bridge_shutdown: AtomicBool::new(false),
-                supports_inline_orchestrator_templates: Mutex::new(None),
             }),
         );
     let server = std::thread::spawn(move || {
@@ -2669,7 +2665,7 @@ fn remote_review_put_sends_scope_via_query_params() {
             if request_line.starts_with("GET /api/health ") {
                 stream
                     .write_all(
-                        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: 11\r\n\r\n{\"ok\":true}",
+                        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: 53\r\n\r\n{\"ok\":true,\"serverInstanceId\":\"remote-test-instance\"}",
                     )
                     .expect("health response should write");
                 continue;
@@ -2813,7 +2809,7 @@ fn remote_user_input_decline_forwards_declined_flag() {
                     &mut stream,
                     StatusCode::OK,
                     "application/json",
-                    r#"{"ok":true}"#,
+                    r#"{"ok":true,"serverInstanceId":"remote-test-instance"}"#,
                 );
                 continue;
             }

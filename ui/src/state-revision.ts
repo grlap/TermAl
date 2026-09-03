@@ -21,14 +21,14 @@ export function shouldAdoptSnapshotRevision(
     /**
      * The `serverInstanceId` carried by the incoming snapshot. When
      * both ids are non-empty and differ, the caller must also opt into
-     * accepting unknown ids via `allowUnknownServerInstance`. Empty ids (from
-     * older servers or fallback payloads) are treated as "unknown" and cannot
+     * accepting unknown ids via `allowUnknownServerInstance`. The fallback
+     * payload's empty id is treated as "unknown" and cannot
      * trigger the restart branch.
      */
     nextServerInstanceId?: string | null;
     /**
      * All non-empty server instance ids this browser tab has already
-     * adopted. Used to reject late responses from older server
+     * adopted. Used to reject late responses from prior server
      * instances after a newer restart was already adopted.
      */
     seenServerInstanceIds?: ReadonlySet<string>;
@@ -106,7 +106,7 @@ export function isStaleSameInstanceSnapshot(
 
 /**
  * Returns true when both ids are non-empty AND differ. Empty ids mean
- * "unknown instance" (older server, fallback payload) and cannot
+ * "unknown instance" (the fallback SSE payload) and cannot
  * trigger a restart branch — the caller stays on the revision-ordered
  * path.
  */

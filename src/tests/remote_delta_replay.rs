@@ -26,7 +26,7 @@ fn remote_text_delta_exact_replay_is_skipped_for_loaded_proxy_session() {
             message_id: "remote-message-1".to_owned(),
             message_index: 0,
             message_count: 1,
-            text_start_byte: None,
+            text_start_byte: "Hello".len(),
             delta: " world".to_owned(),
             preview: Some("Hello world".to_owned()),
             session_mutation_stamp: Some(11),
@@ -78,7 +78,7 @@ fn remote_text_delta_rejects_a_gap_before_mutating_the_local_proxy() {
                 message_count: 1,
                 // The remote generated this after one byte that the proxy
                 // never received. Applying it would corrupt the local draft.
-                text_start_byte: Some(6),
+                text_start_byte: 6,
                 delta: " world".to_owned(),
                 preview: Some("Hello world".to_owned()),
                 session_mutation_stamp: Some(11),
@@ -249,7 +249,7 @@ fn remote_text_delta_persist_failure_replay_is_durable_and_not_duplicated() {
             message_id: "remote-message-1".to_owned(),
             message_index: 0,
             message_count: 1,
-            text_start_byte: None,
+            text_start_byte: "Hello".len(),
             delta: " world".to_owned(),
             preview: Some("Hello world".to_owned()),
             session_mutation_stamp: Some(11),
@@ -822,7 +822,7 @@ fn remote_delta_replay_key_includes_state_mutating_payload_fields() {
         message_id: "remote-message-1".to_owned(),
         message_index: 0,
         message_count: 1,
-        text_start_byte: None,
+        text_start_byte: 0,
         delta: delta.to_owned(),
         preview: preview.map(str::to_owned),
         session_mutation_stamp: Some(12),
@@ -843,7 +843,7 @@ fn remote_delta_replay_key_includes_state_mutating_payload_fields() {
         message_id: "remote-message-1".to_owned(),
         message_index: 0,
         message_count: 1,
-        text_start_byte: Some(text_start_byte),
+        text_start_byte,
         delta: " repeated".to_owned(),
         preview: Some("same preview".to_owned()),
         session_mutation_stamp: Some(12),
@@ -1046,7 +1046,7 @@ fn remote_delta_replay_key_isolates_individual_fingerprinted_fields() {
         message_id: "remote-message-1".to_owned(),
         message_index: 0,
         message_count: 1,
-        text_start_byte: None,
+        text_start_byte: 0,
         delta: delta.to_owned(),
         preview: preview.map(str::to_owned),
         session_mutation_stamp: Some(12),
@@ -1563,7 +1563,7 @@ fn remote_delta_replay_key_includes_revision_and_routing_fields() {
             message_id: message_id.to_owned(),
             message_index,
             message_count,
-            text_start_byte: None,
+            text_start_byte: 0,
             delta: " same delta".to_owned(),
             preview: Some("same preview".to_owned()),
             session_mutation_stamp: stamp,
@@ -1605,7 +1605,7 @@ fn remote_delta_replay_key_includes_revision_and_routing_fields() {
         message_id: "remote-message-1".to_owned(),
         message_index: 0,
         message_count: 1,
-        text_start_byte: Some(text_start_byte),
+        text_start_byte,
         delta: " same delta".to_owned(),
         preview: Some("same preview".to_owned()),
         session_mutation_stamp: Some(12),
@@ -2038,7 +2038,7 @@ fn clear_remote_applied_revision_preserves_other_remote_replay_keys() {
 }
 
 #[test]
-fn remote_delta_replay_cache_clears_with_remote_revision_watermark() {
+fn cleared_remote_replay_cache_still_rejects_duplicate_text_by_offset() {
     let state = test_app_state();
     let remote = RemoteConfig {
         id: "ssh-lab".to_owned(),
@@ -2089,7 +2089,7 @@ fn remote_delta_replay_cache_clears_with_remote_revision_watermark() {
         message_id: "remote-message-1".to_owned(),
         message_index: 0,
         message_count: 1,
-        text_start_byte: None,
+        text_start_byte: "Hello".len(),
         delta: " world".to_owned(),
         preview: Some("Hello world".to_owned()),
         session_mutation_stamp: Some(11),
@@ -2099,9 +2099,11 @@ fn remote_delta_replay_cache_clears_with_remote_revision_watermark() {
         .apply_remote_delta_event(&remote.id, text_delta())
         .expect("first text delta should apply and seed replay cache");
     state.clear_remote_applied_revision(&remote.id);
-    state
+    let error = state
         .apply_remote_delta_event(&remote.id, text_delta())
-        .expect("same key should be evaluated again after continuity reset");
+        .expect_err("the mandatory byte offset must reject a duplicate append");
+    assert!(error.to_string().contains("starts at byte 5"));
+    assert!(error.to_string().contains("local mirror is at byte 11"));
 
     let inner = state.inner.lock().expect("state mutex poisoned");
     let index = inner
@@ -2110,9 +2112,9 @@ fn remote_delta_replay_cache_clears_with_remote_revision_watermark() {
     let record = &inner.sessions[index];
     assert!(matches!(
         &record.session.messages[0],
-        Message::Text { text, .. } if text == "Hello world world"
+        Message::Text { text, .. } if text == "Hello world"
     ));
-    assert_eq!(inner.remote_applied_revisions.get(&remote.id), Some(&3));
+    assert!(!inner.remote_applied_revisions.contains_key(&remote.id));
     drop(inner);
 
     let _ = fs::remove_file(state.persistence_path.as_path());

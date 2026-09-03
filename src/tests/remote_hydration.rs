@@ -1722,7 +1722,7 @@ fn get_session_hydration_suppresses_same_revision_delta_for_hydrated_session_onl
                 message_id: "remote-message-1".to_owned(),
                 message_index: 0,
                 message_count: 1,
-                text_start_byte: None,
+                text_start_byte: "Hello".len(),
                 delta: " world".to_owned(),
                 preview: Some("Hello world".to_owned()),
                 session_mutation_stamp: Some(10),
@@ -1743,7 +1743,7 @@ fn get_session_hydration_suppresses_same_revision_delta_for_hydrated_session_onl
                 message_id: "remote-message-2".to_owned(),
                 message_index: 0,
                 message_count: 1,
-                text_start_byte: None,
+                text_start_byte: "Other".len(),
                 delta: " updated".to_owned(),
                 preview: Some("Other updated".to_owned()),
                 session_mutation_stamp: Some(21),
@@ -1957,7 +1957,7 @@ fn get_session_surfaces_remote_tail_transport_failure_without_summary_fallback()
                     &mut stream,
                     StatusCode::OK,
                     "application/json",
-                    r#"{"ok":true}"#,
+                    r#"{"ok":true,"serverInstanceId":"remote-test-instance"}"#,
                 );
                 continue;
             }
@@ -2325,7 +2325,7 @@ fn remote_text_delta_targeted_hydration_accepts_newer_global_revision_with_match
         message_id: "remote-message-1".to_owned(),
         message_index: 0,
         message_count: 1,
-        text_start_byte: None,
+        text_start_byte: "Hello".len(),
         delta: " world".to_owned(),
         preview: Some("Hello world".to_owned()),
         session_mutation_stamp: Some(10),
@@ -2409,7 +2409,7 @@ fn remote_text_delta_targeted_hydration_accepts_newer_global_revision_with_match
                 message_id: "remote-message-2".to_owned(),
                 message_index: 0,
                 message_count: 1,
-                text_start_byte: None,
+                text_start_byte: "Other".len(),
                 delta: " updated".to_owned(),
                 preview: Some("Other updated".to_owned()),
                 session_mutation_stamp: Some(21),
@@ -2544,7 +2544,7 @@ fn remote_session_create_forwards_configured_default_model() {
                     &mut stream,
                     StatusCode::OK,
                     "application/json",
-                    r#"{"ok":true}"#,
+                    r#"{"ok":true,"serverInstanceId":"remote-test-instance"}"#,
                 );
                 continue;
             }
@@ -2823,7 +2823,7 @@ fn metadata_remote_state_snapshot_allows_same_revision_transcript_delta() {
                 message_id: "remote-message-1".to_owned(),
                 message_index: 0,
                 message_count: 1,
-                text_start_byte: None,
+                text_start_byte: "Hello".len(),
                 delta: " world".to_owned(),
                 preview: Some("Hello world".to_owned()),
                 session_mutation_stamp: Some(11),
@@ -2933,7 +2933,7 @@ fn targeted_remote_hydration_rejects_message_count_length_mismatch() {
                 message_id: "remote-message-1".to_owned(),
                 message_index: 0,
                 message_count: 1,
-                text_start_byte: None,
+                text_start_byte: "Hello".len(),
                 delta: " world".to_owned(),
                 preview: Some("Hello world".to_owned()),
                 session_mutation_stamp: Some(10),

@@ -49,6 +49,7 @@ describe("sessionDeltaAdvancesCurrentMutationStamp", () => {
     messageId: "message-1",
     messageIndex: 0,
     messageCount: 1,
+    textStartByte: 0,
     delta: "ocused",
     sessionMutationStamp: 11,
   };
@@ -2329,6 +2330,7 @@ describe("applyDeltaToSessions", () => {
         messageId: "message-1",
         messageIndex: 0,
         messageCount: 1,
+        textStartByte: 9,
         delta: " answer",
         preview: "Streaming answer",
         sessionMutationStamp: 202,
@@ -2492,6 +2494,7 @@ describe("applyDeltaToSessions", () => {
       messageId: "missing-message",
       messageIndex: 1,
       messageCount: 2,
+      textStartByte: 0,
       delta: " unseen chunk",
       preview: "Updated preview",
       sessionMutationStamp: 206,
@@ -2682,6 +2685,7 @@ describe("applyDeltaToSessions", () => {
       messageId: "message-1",
       messageIndex: 0,
       messageCount: 1,
+      textStartByte: 2,
       delta: " there",
       preview: "Hi there",
     };
@@ -3536,6 +3540,7 @@ describe("applyDeltaToSessions", () => {
       messageId: "message-1",
       messageIndex: 0,
       messageCount: 2,
+      textStartByte: 2,
       delta: " there",
       preview: "Hi there",
     };
@@ -3563,6 +3568,7 @@ describe("applyDeltaToSessions", () => {
       messageId: "missing-message",
       messageIndex: 0,
       messageCount: 1,
+      textStartByte: 0,
       delta: "hello",
     };
 

@@ -369,8 +369,8 @@ impl AppState {
 
     /// Posts an orchestrator create to the remote, localizes the returned
     /// orchestrator + sessions into local proxy records, and starts the
-    /// event bridge. Reports a specific 'upgrade required' error when the
-    /// remote returns 404 and is known not to support inline templates.
+    /// event bridge. Remote errors retain their status and message after
+    /// authority-aware error classification.
     fn create_remote_orchestrator_proxy(
         &self,
         template: &OrchestratorTemplate,
@@ -394,34 +394,16 @@ impl AppState {
                 "failed to encode remote orchestrator create request: {err}"
             ))
         })?;
-        let (remote_result, response_lease) = self.remote_registry.request_json_result_with_lease(
-            &binding.remote,
-            Method::POST,
-            "/api/orchestrators",
-            &[],
-            Some(request_body),
-        )
-        .map_err(remote_create_authority_error)?;
-        let remote_response: CreateOrchestratorInstanceResponse = match remote_result {
-            Ok(response) => response,
-            Err(err) if err.status == StatusCode::NOT_FOUND => {
-                #[cfg(test)]
-                self.remote_registry
-                    .run_test_before_remote_orchestrator_capability_classification();
-                let capability = self
-                    .remote_registry
-                    .cached_supports_inline_orchestrator_templates_for_lease(&response_lease)
-                    .map_err(remote_create_authority_error)?;
-                if !matches!(capability, Some(true)) {
-                    return Err(ApiError::bad_gateway(format!(
-                        "remote `{}` must be upgraded before it can launch local orchestrator templates",
-                        binding.remote.name
-                    )));
-                }
-                return Err(err);
-            }
-            Err(err) => return Err(remote_create_authority_error(err)),
-        };
+        let (remote_response, response_lease): (CreateOrchestratorInstanceResponse, _) = self
+            .remote_registry
+            .request_json_with_lease(
+                &binding.remote,
+                Method::POST,
+                "/api/orchestrators",
+                &[],
+                Some(request_body),
+            )
+            .map_err(remote_create_authority_error)?;
         // The remote-side orchestrator now exists. Claim the exact response
         // connection before local persistence for the same reason as remote
         // session creation.

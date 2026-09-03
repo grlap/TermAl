@@ -388,7 +388,7 @@ async fn get_session_route_returns_bounded_session_detail() {
     // `serverInstanceId` is carried on `SessionResponse` so
     // `adoptFetchedSession` can detect a server restart mid-hydration
     // and accept a revision downgrade. The per-process id must be
-    // non-empty (the frontend treats `""` as "unknown / older server"
+    // non-empty (the frontend reserves `""` for the unknown fallback payload
     // and cannot trigger the restart branch on it).
     assert_eq!(response.server_instance_id, state.server_instance_id);
     assert!(!response.server_instance_id.is_empty());
@@ -1651,7 +1651,7 @@ fn local_streaming_delta_events_include_message_count() {
             ..
         } => {
             assert_eq!(message_count, 1);
-            assert_eq!(text_start_byte, Some(0));
+            assert_eq!(text_start_byte, 0);
         }
         _ => panic!("expected TextDelta"),
     }
@@ -1662,7 +1662,7 @@ fn local_streaming_delta_events_include_message_count() {
     match next_delta_event(&mut delta_events) {
         DeltaEvent::TextDelta {
             text_start_byte, ..
-        } => assert_eq!(text_start_byte, Some(5)),
+        } => assert_eq!(text_start_byte, 5),
         _ => panic!("expected TextDelta"),
     }
 
@@ -2683,7 +2683,7 @@ async fn codex_mcp_servers_route_proxies_remote_sessions_to_their_owner() {
                     &mut stream,
                     StatusCode::OK,
                     "application/json",
-                    r#"{"ok":true}"#,
+                    r#"{"ok":true,"serverInstanceId":"remote-test-instance"}"#,
                 );
             } else if request.request_line.starts_with(&expected_request_prefix) {
                 write_test_http_response(
