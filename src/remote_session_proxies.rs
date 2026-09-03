@@ -146,6 +146,29 @@ impl AppState {
         Ok(self.snapshot())
     }
 
+    fn proxy_remote_resume_session_queue(
+        &self,
+        session_id: &str,
+    ) -> Result<StateResponse, ApiError> {
+        let Some(target) = self.remote_session_target(session_id)? else {
+            return Err(ApiError::bad_request("session is not assigned to a remote"));
+        };
+        let (remote_state, response_lease): (StateResponse, RemoteRequestLease) = self
+            .remote_registry
+            .request_json_with_lease(
+            &target.remote,
+            Method::POST,
+            &format!(
+                "/api/sessions/{}/queue/resume",
+                encode_uri_component(&target.remote_session_id)
+            ),
+            &[],
+            None,
+        )?;
+        self.sync_remote_state_for_target(&target, remote_state, &response_lease)?;
+        Ok(self.snapshot())
+    }
+
     fn proxy_remote_stop_session(&self, session_id: &str) -> Result<StateResponse, ApiError> {
         let Some(target) = self.remote_session_target(session_id)? else {
             return Err(ApiError::bad_request("session is not assigned to a remote"));

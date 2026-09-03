@@ -13,6 +13,9 @@
 //     Agent commands stay in transcript command cards and never replace
 //     the user intent summarized here. Emits `role="status"` +
 //     `aria-live="polite"`.
+//   - `QueuePausedIndicator` — the no-spinner card shown while the
+//     backend reports `queuePaused` (queued prompts parked behind the
+//     explicit-resume latch a Stop leaves); offers a Resume action.
 //   - `PendingPromptCard` — the user-side queued-prompt bubble
 //     shown in the transcript while a prompt is waiting to be
 //     submitted. Reuses `<MessageMeta>` + `<MessageAttachmentList>`
@@ -154,6 +157,52 @@ export function QueuedTurnHandoffIndicator({
         <div className="activity-tooltip-label">Queued prompt</div>
         <p>{normalizedPrompt}</p>
       </div>
+    </article>
+  );
+}
+
+// Rendered instead of the handoff spinner while the backend reports
+// `queuePaused`: a user Stop parked the queued prompts behind the
+// explicit-resume latch, so nothing starts until the user sends a new
+// prompt or presses Resume. Deliberately no spinner — nothing is running.
+export function QueuePausedIndicator({
+  agent,
+  queuedCount,
+  onResume,
+}: {
+  agent: Session["agent"];
+  queuedCount: number;
+  onResume?: () => void;
+}) {
+  const waitingLabel =
+    queuedCount === 1 ? "1 prompt waiting" : `${queuedCount} prompts waiting`;
+
+  return (
+    <article
+      className="activity-card activity-card-queue-paused"
+      role="status"
+      aria-live="polite"
+    >
+      <div className="activity-pause-glyph" aria-hidden="true" />
+      <div className="activity-card-copy">
+        <div className="activity-card-heading">
+          <div className="card-label">Queue paused</div>
+        </div>
+        <h3>{agent} was stopped; the queue is paused</h3>
+        <p>
+          {waitingLabel}. Send a new prompt or resume the queue to continue.
+        </p>
+      </div>
+      {onResume ? (
+        <button
+          className="queue-resume-button"
+          type="button"
+          onClick={onResume}
+          aria-label="Resume queued prompts"
+        >
+          Resume
+        </button>
+      ) : null}
     </article>
   );
 }

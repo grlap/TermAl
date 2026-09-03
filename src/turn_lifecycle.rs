@@ -587,8 +587,10 @@ impl AppState {
                 }
                 record.clear_runtime_stop();
                 record.deferred_stop_callbacks.clear();
-                record.orchestrator_auto_dispatch_blocked |=
-                    shutdown_error.is_some() || suppress_automatic_resume;
+                let auto_dispatch_blocked = record.orchestrator_auto_dispatch_blocked
+                    || shutdown_error.is_some()
+                    || suppress_automatic_resume;
+                record.set_auto_dispatch_blocked(auto_dispatch_blocked);
                 if suppress_automatic_resume {
                     clear_queued_prompts_by_source(record, QueuedPromptSource::Orchestrator);
                 }
@@ -709,7 +711,7 @@ impl AppState {
                     inner
                         .session_mut_by_index(index)
                         .expect("session index should be valid")
-                        .orchestrator_auto_dispatch_blocked = true;
+                        .set_auto_dispatch_blocked(true);
                     self.publish_state_locked(&inner);
                     (
                         None,
@@ -864,7 +866,7 @@ impl AppState {
                 // Restore the durable wake below, but do not immediately run
                 // the same poisoned queue head again. An explicit resume can
                 // retry it after the operator has inspected the failure.
-                record.orchestrator_auto_dispatch_blocked = true;
+                record.set_auto_dispatch_blocked(true);
             }
 
             if let Some(message_id) = message_id {
@@ -1254,7 +1256,7 @@ impl AppState {
                     // A failed mailbox turn is recoverable, but immediately
                     // draining the restored wake would retry the same poisoned
                     // queue head forever and starve every prompt behind it.
-                    record.orchestrator_auto_dispatch_blocked = true;
+                    record.set_auto_dispatch_blocked(true);
                 }
                 // Synchronous command-channel rejection is requeued by
                 // `record_rejected_turn_dispatch`, which still owns the exact
@@ -1575,7 +1577,7 @@ impl AppState {
             take_and_abandon_engram_pending_dispatch(record);
             let failed_mailbox_notification = record.active_turn_mailbox_notification.take();
             if failed_mailbox_notification.is_some() {
-                record.orchestrator_auto_dispatch_blocked = true;
+                record.set_auto_dispatch_blocked(true);
             }
 
             record.session.status = SessionStatus::Error;
@@ -1928,8 +1930,9 @@ impl AppState {
                 take_and_abandon_engram_pending_dispatch(record);
                 record.clear_runtime();
                 record.clear_runtime_reset();
-                record.orchestrator_auto_dispatch_blocked =
-                    preserve_automatic_resume_block || exited_mailbox_notification.is_some();
+                record.set_auto_dispatch_blocked(
+                    preserve_automatic_resume_block || exited_mailbox_notification.is_some(),
+                );
                 record.clear_runtime_stop();
                 record.deferred_stop_callbacks.clear();
                 if quarantined_exit {
@@ -1980,7 +1983,7 @@ impl AppState {
                     let record = inner
                         .session_mut_by_index(index)
                         .expect("session index should be valid");
-                    record.orchestrator_auto_dispatch_blocked = true;
+                    record.set_auto_dispatch_blocked(true);
                     clear_active_turn_file_change_tracking(record);
             }
             (

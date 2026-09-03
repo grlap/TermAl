@@ -409,6 +409,10 @@ export type Session = {
   hasNewerHistory?: boolean;
   markers?: ConversationMarker[];
   pendingPrompts?: PendingPrompt[];
+  /** True while queued prompts are parked behind the explicit-resume latch a
+   * Stop leaves behind; nothing starts until the user resumes the queue or
+   * sends a new prompt. */
+  queuePaused?: boolean;
   sessionMutationStamp?: number | null;
   parentDelegationId?: string | null;
 };

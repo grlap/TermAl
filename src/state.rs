@@ -1657,10 +1657,97 @@ struct SessionRecord {
     prompt_history_mutation_stamp: u64,
 }
 
+/// Pre-promotion state captured before a queued prompt is promoted to an
+/// active turn, so a failed persist commit can put the record back exactly
+/// where it was instead of leaving a half-started turn in memory: head gone,
+/// latch cleared, status Active, and nothing delivered to the runtime.
+struct QueuePromotionSnapshot {
+    status: SessionStatus,
+    preview: String,
+    live_activity: Option<SessionLiveActivity>,
+    auto_dispatch_blocked: bool,
+    active_turn_mailbox_notification: Option<MailboxNotificationDelivery>,
+    active_turn_start_message_count: Option<usize>,
+    // Appending the prompt message also appends composer history and resyncs
+    // the retained-transcript projections; the rollback must undo those too.
+    prompt_history: Vec<String>,
+    prompt_history_mutation_stamp: u64,
+    message_count: u32,
+    messages_loaded: bool,
+}
+
 impl SessionRecord {
     fn clear_runtime(&mut self) {
         self.runtime = SessionRuntime::None;
         self.engram_mcp_installed = None;
+    }
+
+    fn capture_queue_promotion_snapshot(&self) -> QueuePromotionSnapshot {
+        QueuePromotionSnapshot {
+            status: self.session.status,
+            preview: self.session.preview.clone(),
+            live_activity: self.session.live_activity.clone(),
+            auto_dispatch_blocked: self.orchestrator_auto_dispatch_blocked,
+            active_turn_mailbox_notification: self.active_turn_mailbox_notification.clone(),
+            active_turn_start_message_count: self.active_turn_start_message_count,
+            prompt_history: self.session.prompt_history.clone(),
+            prompt_history_mutation_stamp: self.prompt_history_mutation_stamp,
+            message_count: self.session.message_count,
+            messages_loaded: self.session.messages_loaded,
+        }
+    }
+
+    /// Undoes a promotion whose persist commit failed: drops the prompt
+    /// message the promotion appended, returns the queue head to the front,
+    /// abandons the pending Engram dispatch, and restores the captured
+    /// fields including the explicit-resume latch. A runtime spawned for the
+    /// attempt is left attached; an idle session with a live runtime is an
+    /// ordinary state and the next promotion reuses it.
+    fn restore_queue_promotion(
+        &mut self,
+        snapshot: QueuePromotionSnapshot,
+        queued: QueuedPromptRecord,
+        started_message_id: &str,
+    ) {
+        if let Some(position) = self
+            .session
+            .messages
+            .iter()
+            .rposition(|message| message.id() == started_message_id)
+        {
+            self.session.messages.remove(position);
+            self.message_positions = build_message_positions(&self.session.messages);
+            // Mirror of insert_message_on_record: the retained-window
+            // projections follow the transcript, and the composer history
+            // the insertion appended goes back to its captured contents and
+            // persistence stamp so the retry does not record it twice.
+            sync_retained_transcript_metadata(self);
+        }
+        self.session.message_count = snapshot.message_count;
+        self.session.messages_loaded = snapshot.messages_loaded;
+        self.session.prompt_history = snapshot.prompt_history;
+        self.prompt_history_mutation_stamp = snapshot.prompt_history_mutation_stamp;
+        take_and_abandon_engram_pending_dispatch(self);
+        self.queued_prompts.push_front(queued);
+        sync_pending_prompts(self);
+        self.session.status = snapshot.status;
+        self.session.preview = snapshot.preview;
+        self.session.live_activity = snapshot.live_activity;
+        self.active_turn_mailbox_notification = snapshot.active_turn_mailbox_notification;
+        self.active_turn_start_message_count = snapshot.active_turn_start_message_count;
+        self.set_auto_dispatch_blocked(snapshot.auto_dispatch_blocked);
+    }
+
+    /// Sets the explicit-resume latch and mirrors it onto the embedded
+    /// session shape in the same step. The record flag is the authority;
+    /// wire projections (`wire_session_from_record`, the metadata summary)
+    /// re-derive `queue_paused` from it on every build, so the mirror here
+    /// only keeps the in-record copy honest for readers that inspect
+    /// `record.session` directly. Production code must flip the latch only
+    /// through this helper.
+    fn set_auto_dispatch_blocked(&mut self, blocked: bool) {
+        self.orchestrator_auto_dispatch_blocked = blocked;
+        self.session.queue_paused = blocked;
     }
 
     fn clear_runtime_reset(&mut self) {

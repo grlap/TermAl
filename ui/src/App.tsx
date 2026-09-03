@@ -982,6 +982,7 @@ export default function App() {
     handleMcpElicitationSubmit,
     handleCodexAppRequestSubmit,
     handleCancelQueuedPrompt,
+    handleResumeSessionQueue,
     handleStopSession,
     executeKillSession,
     handleRenameSession,
@@ -2213,6 +2214,7 @@ export default function App() {
               onComposerError={setRequestError}
               onSend={handleSend}
               onCancelQueuedPrompt={handleCancelQueuedPrompt}
+              onResumeSessionQueue={handleResumeSessionQueue}
               onApprovalDecision={handleApprovalDecision}
               onUserInputSubmit={handleUserInputSubmit}
               onMcpElicitationSubmit={handleMcpElicitationSubmit}

@@ -1510,6 +1510,17 @@ export function stopSession(sessionId: string) {
   );
 }
 
+/** Releases the explicit-resume latch a Stop leaves behind and dispatches
+ * the queued prompts that were parked behind it. */
+export function resumeSessionQueue(sessionId: string) {
+  return request<StateResponse>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/queue/resume`,
+    {
+      method: "POST",
+    },
+  );
+}
+
 export function fetchReviewDocument(changeSetId: string, scope?: RequestScope) {
   return request<ReviewDocumentResponse>(
     buildScopedPath(`/api/reviews/${encodeURIComponent(changeSetId)}`, scope),

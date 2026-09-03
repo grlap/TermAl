@@ -625,7 +625,7 @@ impl AppState {
             }
         };
 
-        record.orchestrator_auto_dispatch_blocked = false;
+        record.set_auto_dispatch_blocked(false);
         record.active_turn_file_changes.clear();
         record.active_turn_file_change_grace_deadline = None;
         let message = Message::Text {
@@ -975,6 +975,7 @@ impl AppState {
                 let Some(queued) = record.queued_prompts.front().cloned() else {
                     return Ok(None);
                 };
+                let promotion_snapshot = record.capture_queue_promotion_snapshot();
                 let Some(started) = self.start_next_queued_turn_locked(
                     &mut inner,
                     index,
@@ -983,7 +984,24 @@ impl AppState {
                 )? else {
                     return Ok(None);
                 };
-                let revision = self.commit_persisted_delta_locked(&mut inner)?;
+                let revision = match self.commit_persisted_delta_locked(&mut inner) {
+                    Ok(revision) => revision,
+                    Err(err) => {
+                        // The promotion is only real once it is durable. Put
+                        // the record back so the head, the latch, and the
+                        // transcript match what the runtime actually saw:
+                        // nothing.
+                        inner
+                            .session_mut_by_index(index)
+                            .expect("session index should be valid")
+                            .restore_queue_promotion(
+                                promotion_snapshot,
+                                queued,
+                                &started.message_delta.message_id,
+                            );
+                        return Err(err.context("failed to persist the promoted queue head"));
+                    }
+                };
                 drop(inner);
                 let StartedTurn {
                     dispatch,
@@ -1116,6 +1134,7 @@ impl AppState {
                 }
                 continue;
             }
+            let promotion_snapshot = inner.sessions[index].capture_queue_promotion_snapshot();
             let Some(started) = self.start_next_queued_turn_locked(
                 &mut inner,
                 index,
@@ -1124,7 +1143,22 @@ impl AppState {
             )? else {
                 return Ok(None);
             };
-            let revision = self.commit_persisted_delta_locked(&mut inner)?;
+            let revision = match self.commit_persisted_delta_locked(&mut inner) {
+                Ok(revision) => revision,
+                Err(err) => {
+                    // Same rollback as the zero-transport path: an undurable
+                    // promotion must not strand the head or drop the latch.
+                    inner
+                        .session_mut_by_index(index)
+                        .expect("session index should be valid")
+                        .restore_queue_promotion(
+                            promotion_snapshot,
+                            snapshot.0,
+                            &started.message_delta.message_id,
+                        );
+                    return Err(err.context("failed to persist the promoted queue head"));
+                }
+            };
             drop(inner);
             let StartedTurn {
                 dispatch,
@@ -1300,7 +1334,7 @@ impl AppState {
             inner
                 .session_mut_by_index(index)
                 .expect("session index should be valid")
-                .orchestrator_auto_dispatch_blocked = false;
+                .set_auto_dispatch_blocked(false);
         }
         // Stop leaves a persisted explicit-resume latch. Routine mailbox
         // notifications must join the durable queue even when it was empty at

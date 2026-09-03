@@ -1381,6 +1381,15 @@ async fn cancel_queued_prompt(
     Ok(Json(response))
 }
 
+/// Resumes a queue paused by Stop.
+async fn resume_session_queue(
+    AxumPath(session_id): AxumPath<String>,
+    State(state): State<AppState>,
+) -> Result<Json<StateResponse>, ApiError> {
+    let response = run_blocking_api(move || state.resume_session_queue(&session_id)).await?;
+    Ok(Json(response))
+}
+
 /// Stops session.
 async fn stop_session(
     AxumPath(session_id): AxumPath<String>,

@@ -275,6 +275,7 @@ mod visible_session_hydration_error_tests {
             message_count: 0,
             markers: Vec::new(),
             pending_prompts: Vec::new(),
+            queue_paused: false,
             session_mutation_stamp: Some(7),
             parent_delegation_id: None,
         };
@@ -607,6 +608,10 @@ impl AppState {
         // The record owns remote-proxy identity; the wire field is a derived
         // UI/API projection and embedded session snapshots are not authoritative.
         session.remote_id = record.remote_id.clone();
+        // The explicit-resume latch is record authority; every wire build
+        // derives the projection from it so no code path can publish a
+        // stale `queuePaused`, whichever site last flipped the latch.
+        session.queue_paused = record.orchestrator_auto_dispatch_blocked;
         session.prompt_history_redacted = false;
         session.messages_loaded = record.session.messages_loaded;
         session.message_count = session_message_count(record);
@@ -702,6 +707,11 @@ impl AppState {
             // contain user-authored prompt bodies, so expose them only through
             // targeted bounded session-detail responses.
             pending_prompts: Vec::new(),
+            // The paused-queue latch is metadata, not prompt content: the
+            // pane needs it from the global snapshot to render the paused
+            // card even before targeted detail hydrates the prompt bodies.
+            // Derived from record authority, like the full projection.
+            queue_paused: record.orchestrator_auto_dispatch_blocked,
             session_mutation_stamp: Some(record.mutation_stamp),
             parent_delegation_id: session.parent_delegation_id.clone(),
         };
@@ -743,6 +753,7 @@ impl AppState {
             full.opencode_effort_options
         );
         debug_assert_eq!(summary.opencode_mode, full.opencode_mode);
+        debug_assert_eq!(summary.queue_paused, full.queue_paused);
         debug_assert_eq!(
             summary.opencode_current_mode,
             full.opencode_current_mode

@@ -145,6 +145,7 @@ export function WorkspaceNodeView({
   onComposerError,
   onSend,
   onCancelQueuedPrompt,
+  onResumeSessionQueue,
   onApprovalDecision,
   onUserInputSubmit,
   onMcpElicitationSubmit,
@@ -327,6 +328,7 @@ export function WorkspaceNodeView({
     expandedText?: string | null,
   ) => boolean;
   onCancelQueuedPrompt: (sessionId: string, promptId: string) => void;
+  onResumeSessionQueue?: (sessionId: string) => void;
   onApprovalDecision: (
     sessionId: string,
     messageId: string,
@@ -515,6 +517,7 @@ export function WorkspaceNodeView({
         onComposerError={onComposerError}
         onSend={onSend}
         onCancelQueuedPrompt={onCancelQueuedPrompt}
+        onResumeSessionQueue={onResumeSessionQueue}
         onApprovalDecision={onApprovalDecision}
         onUserInputSubmit={onUserInputSubmit}
         onMcpElicitationSubmit={onMcpElicitationSubmit}
@@ -650,6 +653,7 @@ export function WorkspaceNodeView({
           onComposerError={onComposerError}
           onSend={onSend}
           onCancelQueuedPrompt={onCancelQueuedPrompt}
+          onResumeSessionQueue={onResumeSessionQueue}
           onApprovalDecision={onApprovalDecision}
           onUserInputSubmit={onUserInputSubmit}
           onMcpElicitationSubmit={onMcpElicitationSubmit}
@@ -751,6 +755,7 @@ export function WorkspaceNodeView({
           onComposerError={onComposerError}
           onSend={onSend}
           onCancelQueuedPrompt={onCancelQueuedPrompt}
+          onResumeSessionQueue={onResumeSessionQueue}
           onApprovalDecision={onApprovalDecision}
           onUserInputSubmit={onUserInputSubmit}
           onMcpElicitationSubmit={onMcpElicitationSubmit}

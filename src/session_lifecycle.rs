@@ -319,6 +319,57 @@ impl AppState {
         Ok(self.snapshot())
     }
 
+    /// Resumes a queue that a user Stop left parked behind the explicit-resume
+    /// latch. The latch is NOT cleared up front: the queue head is promoted
+    /// with `allow_blocked_dispatch`, and only the promotion path clears the
+    /// latch when the turn actually starts, so a spawn, persist, or delivery
+    /// failure leaves the session paused and a later Resume retries the same
+    /// head instead of finding an unblocked idle queue that nobody drains.
+    /// Only an empty paused queue is released directly, because there is
+    /// nothing to promote. Idempotent on an unpaused session. Remote sessions
+    /// forward to their owning server so the latch stays authoritative there.
+    fn resume_session_queue(
+        &self,
+        session_id: &str,
+    ) -> std::result::Result<StateResponse, ApiError> {
+        if self.remote_session_target(session_id)?.is_some() {
+            return self.proxy_remote_resume_session_queue(session_id);
+        }
+        {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let index = inner
+                .find_visible_session_index(session_id)
+                .ok_or_else(|| ApiError::not_found("session not found"))?;
+            let record = inner
+                .session_mut_by_index(index)
+                .expect("session index should be valid");
+            if !record.orchestrator_auto_dispatch_blocked {
+                drop(inner);
+                return Ok(self.snapshot());
+            }
+            if record.queued_prompts.is_empty() {
+                record.set_auto_dispatch_blocked(false);
+                inner.stamp_session_at_index(index);
+                self.commit_locked(&mut inner).map_err(|err| {
+                    ApiError::internal(format!("failed to persist session state: {err:#}"))
+                })?;
+                drop(inner);
+                return Ok(self.snapshot());
+            }
+        }
+        let dispatch = self
+            .dispatch_next_queued_turn(session_id, true)
+            .map_err(|err| {
+                ApiError::internal(format!(
+                    "failed to dispatch the resumed queue head: {err:#}"
+                ))
+            })?;
+        if let Some(dispatch) = dispatch {
+            deliver_turn_dispatch(self, dispatch)?;
+        }
+        Ok(self.snapshot())
+    }
+
     /// Public entry point for stopping a session's current turn while
     /// keeping the session alive. Convenience wrapper around
     /// `stop_session_with_options` with `StopSessionOptions::default()`
@@ -420,7 +471,7 @@ impl AppState {
             record.session.status = SessionStatus::Stopping;
             record.session.preview = SESSION_STOPPING_MESSAGE.to_owned();
             if options.pause_automatic_resumes_on_success {
-                record.orchestrator_auto_dispatch_blocked = true;
+                record.set_auto_dispatch_blocked(true);
                 clear_queued_prompts_by_source(record, QueuedPromptSource::Orchestrator);
             }
             owner_generation
@@ -813,7 +864,7 @@ impl AppState {
                         inner
                             .session_mut_by_index(index)
                             .expect("session index should be valid")
-                            .orchestrator_auto_dispatch_blocked = true;
+                            .set_auto_dispatch_blocked(true);
                         self.publish_state_locked(&inner);
                         return Err(ApiError::internal(format!(
                             "failed to persist abandoned queued dispatch after Stop ownership changed: {error:#}"
@@ -844,7 +895,7 @@ impl AppState {
                 record.clear_runtime_stop();
                 record.deferred_stop_callbacks.clear();
                 if suppress_automatic_resume {
-                    record.orchestrator_auto_dispatch_blocked = true;
+                    record.set_auto_dispatch_blocked(true);
                     // A wait may already have completed and queued its fan-in
                     // before Stop acquired the state lock. Drop all automatic
                     // workflow continuations here; user and mailbox prompts
@@ -1071,7 +1122,7 @@ impl AppState {
                     let record = inner
                         .session_mut_by_index(index)
                         .expect("session index should be valid");
-                    record.orchestrator_auto_dispatch_blocked = true;
+                    record.set_auto_dispatch_blocked(true);
                     clear_active_turn_file_change_tracking(record);
                     Err((
                         ApiError::internal(format!("failed to persist session state: {err:#}")),

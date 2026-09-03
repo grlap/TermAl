@@ -4531,7 +4531,7 @@ impl AppState {
             record.engram.pending_dispatch = None;
             record.clear_runtime();
             record.clear_runtime_reset();
-            record.orchestrator_auto_dispatch_blocked = false;
+            record.set_auto_dispatch_blocked(false);
             record.clear_runtime_stop();
             record.deferred_stop_callbacks.clear();
             clear_active_turn_file_change_tracking(record);

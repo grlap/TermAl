@@ -829,6 +829,57 @@ describe("AgentSessionPanel conversation caching", () => {
     ).toBe(true);
   });
 
+  it("shows the paused-queue card with a Resume action instead of the handoff spinner after Stop", () => {
+    const onResumeSessionQueue = vi.fn();
+    renderSessionPanelWithDefaults({
+      activeSession: makeSession("session-a", {
+        status: "idle",
+        queuePaused: true,
+        messages: [
+          {
+            id: "message-user",
+            type: "text",
+            timestamp: "10:00",
+            author: "you",
+            text: "First prompt",
+          },
+          {
+            id: "message-stopped",
+            type: "text",
+            timestamp: "10:01",
+            author: "assistant",
+            text: "Turn stopped by user.",
+          },
+        ],
+        pendingPrompts: [
+          {
+            id: "pending-prompt-a",
+            timestamp: "10:02",
+            text: "[TermAl mailbox notification] durable wake",
+          },
+        ],
+      }),
+      showWaitingIndicator: false,
+      onResumeSessionQueue,
+    });
+
+    const pausedCard = screen
+      .getByText("Queue paused")
+      .closest(".activity-card-queue-paused");
+    expect(pausedCard).not.toBeNull();
+    expect(
+      screen.getByText("Codex was stopped; the queue is paused"),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/1 prompt waiting/)).toBeInTheDocument();
+    expect(
+      screen.queryByText("Codex is starting the next turn"),
+    ).not.toBeInTheDocument();
+    expect(pausedCard?.querySelector(".activity-spinner")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Resume queued prompts" }));
+    expect(onResumeSessionQueue).toHaveBeenCalledWith("session-a");
+  });
+
   it("labels a queued peer prompt with its sender session name", () => {
     renderSessionPanelWithDefaults({
       activeSession: makeSession("session-a", {

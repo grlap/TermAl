@@ -772,6 +772,44 @@ describe("useAppSessionActions", () => {
     expect(reportRequestError).toHaveBeenCalledWith(originalError);
   });
 
+  it("adopts the snapshot returned by a queue resume", async () => {
+    const resumedState = {
+      ...makeStateResponse(5),
+      sessions: [
+        makeSession("session-1", {
+          sessionMutationStamp: 3,
+          queuePaused: false,
+        }),
+      ],
+    };
+    const resumeSpy = vi
+      .spyOn(api, "resumeSessionQueue")
+      .mockResolvedValue(resumedState);
+    const adoptState = vi.fn(() => true);
+    const params = makeSessionActionsParams({ adoptState });
+    const actions = useAppSessionActions(params);
+
+    await actions.handleResumeSessionQueue("session-1");
+
+    expect(resumeSpy).toHaveBeenCalledWith("session-1");
+    expect(adoptState).toHaveBeenCalledTimes(1);
+    expect(adoptState).toHaveBeenCalledWith(resumedState, undefined);
+    expect(params.setters.setRequestError).toHaveBeenCalledWith(null);
+  });
+
+  it("reports a failed queue resume without a recovery resync", async () => {
+    const originalError = new Error("resume failed");
+    vi.spyOn(api, "resumeSessionQueue").mockRejectedValue(originalError);
+    const reportRequestError = vi.fn();
+    const params = makeSessionActionsParams({ reportRequestError });
+    const actions = useAppSessionActions(params);
+
+    await actions.handleResumeSessionQueue("session-1");
+
+    expect(reportRequestError).toHaveBeenCalledWith(originalError);
+    expect(params.requestActionRecoveryResync).not.toHaveBeenCalled();
+  });
+
   it("treats a model refresh conflict as a benign lifecycle deferral", async () => {
     vi.spyOn(api, "refreshSessionModelOptions").mockRejectedValue(
       new api.ApiRequestError(

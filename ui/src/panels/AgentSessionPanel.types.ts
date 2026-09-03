@@ -116,6 +116,9 @@ export type AgentSessionPanelProps = {
   onMcpElicitationSubmit: McpElicitationSubmitHandler;
   onCodexAppRequestSubmit: CodexAppRequestSubmitHandler;
   onCancelQueuedPrompt: (sessionId: string, promptId: string) => void;
+  /** Releases the queue a Stop left paused; optional so presentational
+   * harnesses without the action still type-check. */
+  onResumeSessionQueue?: (sessionId: string) => void;
   onCreateConversationMarker?: (
     sessionId: string,
     messageId: string,
@@ -176,6 +179,9 @@ export type SessionBodyProps = {
   onMcpElicitationSubmit: McpElicitationSubmitHandler;
   onCodexAppRequestSubmit: CodexAppRequestSubmitHandler;
   onCancelQueuedPrompt: (sessionId: string, promptId: string) => void;
+  /** Releases the queue a Stop left paused; optional so presentational
+   * harnesses without the action still type-check. */
+  onResumeSessionQueue?: (sessionId: string) => void;
   onCreateConversationMarker: (
     sessionId: string,
     messageId: string,
@@ -316,6 +322,9 @@ export type SessionConversationPageProps = {
   onMcpElicitationSubmit: McpElicitationSubmitHandler;
   onCodexAppRequestSubmit: CodexAppRequestSubmitHandler;
   onCancelQueuedPrompt: (sessionId: string, promptId: string) => void;
+  /** Releases the queue a Stop left paused; optional so presentational
+   * harnesses without the action still type-check. */
+  onResumeSessionQueue?: (sessionId: string) => void;
   onCreateConversationMarker: (
     sessionId: string,
     messageId: string,

@@ -358,6 +358,359 @@ fn stop_session_recovers_an_active_session_with_no_runtime() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
+// The explicit-resume latch is backend authority the UI cannot infer: after
+// Stop the queued mailbox prompt stays parked and nothing will start on its
+// own, so the session wire must say so (`queuePaused`) instead of letting the
+// UI guess that a turn is about to begin. Resuming clears the latch and the
+// projection together.
+#[test]
+fn stop_projects_the_paused_queue_and_resume_clears_it() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::None;
+        inner.sessions[index].session.status = SessionStatus::Active;
+        inner.sessions[index]
+            .queued_prompts
+            .push_back(QueuedPromptRecord {
+                source: QueuedPromptSource::Mailbox,
+                attachments: Vec::new(),
+                pending_prompt: PendingPrompt {
+                    attachments: Vec::new(),
+                    id: "mailbox-parked-by-stop".to_owned(),
+                    timestamp: stamp_now(),
+                    text: "[TermAl mailbox notification] durable wake".to_owned(),
+                    expanded_text: None,
+                    source: None,
+                },
+            });
+        sync_pending_prompts(&mut inner.sessions[index]);
+    }
+
+    let snapshot = state
+        .stop_session(&session_id)
+        .expect("Stop should recover the active session");
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("stopped session should remain visible");
+    assert_eq!(session.status, SessionStatus::Idle);
+    // The global snapshot is metadata-first: it omits queued prompt bodies
+    // but must still carry the latch, because the pane decides between the
+    // paused card and the handoff card from this projection.
+    assert!(session.queue_paused, "Stop must project the paused queue");
+    let wire = serde_json::to_value(session).expect("session should serialize");
+    assert_eq!(
+        wire.get("queuePaused"),
+        Some(&serde_json::Value::Bool(true)),
+        "queuePaused must always be serialized so the UI can rely on it"
+    );
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let record = inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == session_id)
+            .expect("Codex session should exist");
+        assert!(record.orchestrator_auto_dispatch_blocked);
+        assert!(record.session.queue_paused);
+        assert_eq!(record.session.pending_prompts.len(), 1);
+    }
+
+    // Resume with a queued head and no runtime that can take it: the latch
+    // must survive the failed promotion so the operator can retry, instead
+    // of leaving an unblocked idle queue that nothing drains.
+    let _ = state.resume_session_queue(&session_id);
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let record = inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == session_id)
+            .expect("Codex session should exist");
+        assert!(
+            record.orchestrator_auto_dispatch_blocked,
+            "a failed resume must keep the latch armed"
+        );
+        assert!(record.session.queue_paused);
+        assert_eq!(record.queued_prompts.len(), 1);
+        assert_eq!(
+            record.queued_prompts[0].pending_prompt.id,
+            "mailbox-parked-by-stop"
+        );
+    }
+
+    // Empty paused queue: nothing to promote, so Resume releases the latch
+    // directly and the projection follows.
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].queued_prompts.clear();
+        sync_pending_prompts(&mut inner.sessions[index]);
+    }
+    let snapshot = state
+        .resume_session_queue(&session_id)
+        .expect("resume of an empty paused queue should release the latch");
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("resumed session should remain visible");
+    assert!(!session.queue_paused, "resume must clear the projection");
+    let wire = serde_json::to_value(session).expect("session should serialize");
+    assert_eq!(
+        wire.get("queuePaused"),
+        Some(&serde_json::Value::Bool(false))
+    );
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let record = inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == session_id)
+            .expect("Codex session should exist");
+        assert!(!record.orchestrator_auto_dispatch_blocked);
+        assert!(!record.session.queue_paused);
+    }
+
+    // Resuming an unpaused session is a no-op that still answers with a
+    // snapshot, so a double click on Resume cannot error.
+    state
+        .resume_session_queue(&session_id)
+        .expect("resume must be idempotent");
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// The happy path: a paused Claude session with a queued head and a live
+// runtime. Resume promotes the head with the latch still armed; the
+// promotion clears the latch and the projection, and the prompt reaches the
+// runtime.
+#[test]
+fn resume_promotes_the_paused_queue_head_and_delivers_it() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let input_rx = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let prompt_id = inner.next_message_id();
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Claude session should exist");
+        let (runtime, input_rx) = test_claude_runtime_handle("resume-paused-queue-runtime");
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
+        queue_prompt_on_record(
+            record,
+            PendingPrompt {
+                attachments: Vec::new(),
+                id: prompt_id,
+                timestamp: stamp_now(),
+                text: "resume me".to_owned(),
+                expanded_text: None,
+                source: None,
+            },
+            Vec::new(),
+        );
+        record.session.status = SessionStatus::Idle;
+        record.runtime = SessionRuntime::Claude(runtime);
+        record.set_auto_dispatch_blocked(true);
+        input_rx
+    };
+
+    // The automatic drain refuses the parked head; only Resume may lift it.
+    assert!(
+        state
+            .dispatch_next_queued_turn(&session_id, false)
+            .expect("blocked queue inspection should succeed")
+            .is_none()
+    );
+
+    let snapshot = state
+        .resume_session_queue(&session_id)
+        .expect("resume should promote the queue head");
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("resumed session should remain visible");
+    assert!(
+        !session.queue_paused,
+        "a started turn clears the projection"
+    );
+    assert_eq!(session.status, SessionStatus::Active);
+    assert!(matches!(
+        input_rx.recv_timeout(Duration::from_secs(1)),
+        Ok(ClaudeRuntimeCommand::Prompt(_))
+    ));
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == session_id)
+        .expect("Claude session should exist");
+    assert!(!record.orchestrator_auto_dispatch_blocked);
+    assert!(record.queued_prompts.is_empty());
+    assert!(record.session.pending_prompts.is_empty());
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+// A promotion whose persist commit fails must not strand the session: the
+// head goes back to the front of the queue, the latch stays armed, no prompt
+// message or dispatch leaks, and a later Resume promotes the same head once
+// persistence works again.
+#[test]
+fn resume_persist_failure_rolls_back_the_promotion_and_keeps_the_queue_paused() {
+    let mut state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let original_persistence_path = Arc::clone(&state.persistence_path);
+    let input_rx = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let prompt_id = inner.next_message_id();
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Claude session should exist");
+        let (runtime, input_rx) = test_claude_runtime_handle("resume-persist-failure-runtime");
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
+        queue_prompt_on_record(
+            record,
+            PendingPrompt {
+                attachments: Vec::new(),
+                id: prompt_id,
+                timestamp: stamp_now(),
+                text: "survive the failed commit".to_owned(),
+                expanded_text: None,
+                source: None,
+            },
+            Vec::new(),
+        );
+        record.session.status = SessionStatus::Idle;
+        record.session.preview = "Turn stopped by user.".to_owned();
+        record.runtime = SessionRuntime::Claude(runtime);
+        record.set_auto_dispatch_blocked(true);
+        // Distinguishable composer history so the rollback assertion can tell
+        // "restored exactly" from "merely non-empty".
+        record.session.prompt_history = vec!["earlier prompt".to_owned()];
+        input_rx
+    };
+    let (message_count_before, projected_count_before, queued_id) = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let record = inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == session_id)
+            .expect("Claude session should exist");
+        (
+            record.session.messages.len(),
+            record.session.message_count,
+            record.queued_prompts[0].pending_prompt.id.clone(),
+        )
+    };
+
+    // Point persistence at a directory so the promotion's commit fails.
+    let failing_persistence_path =
+        std::env::temp_dir().join(format!("termal-resume-persist-failure-{}", Uuid::new_v4()));
+    fs::create_dir_all(&failing_persistence_path)
+        .expect("failing persistence directory should exist");
+    state.shutdown_persist_blocking();
+    state.persistence_path = Arc::new(failing_persistence_path.clone());
+
+    let error = match state.resume_session_queue(&session_id) {
+        Err(error) => error,
+        Ok(_) => panic!("a failing promotion commit must surface as an error"),
+    };
+    assert!(
+        error.message.contains("persist") || error.message.contains("dispatch"),
+        "unexpected error: {}",
+        error.message
+    );
+    assert!(
+        input_rx.try_recv().is_err(),
+        "no dispatch may reach the runtime when the promotion did not commit"
+    );
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let record = inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == session_id)
+            .expect("Claude session should exist");
+        assert!(
+            record.orchestrator_auto_dispatch_blocked,
+            "latch must stay armed"
+        );
+        assert!(record.session.queue_paused);
+        assert_eq!(record.session.status, SessionStatus::Idle);
+        assert_eq!(record.session.preview, "Turn stopped by user.");
+        assert!(record.session.live_activity.is_none());
+        assert_eq!(record.session.messages.len(), message_count_before);
+        assert_eq!(
+            record.session.message_count, projected_count_before,
+            "the embedded count must not keep the removed prompt"
+        );
+        assert!(record.session.messages_loaded);
+        assert_eq!(
+            record.session.prompt_history,
+            vec!["earlier prompt".to_owned()],
+            "composer history must be exactly the pre-promotion history"
+        );
+        assert_eq!(record.queued_prompts.len(), 1);
+        assert_eq!(record.queued_prompts[0].pending_prompt.id, queued_id);
+        assert_eq!(record.session.pending_prompts.len(), 1);
+        assert!(record.engram.pending_dispatch.is_none());
+    }
+
+    // Persistence works again: the same head promotes and reaches the runtime.
+    state.persistence_path = original_persistence_path;
+    let snapshot = state
+        .resume_session_queue(&session_id)
+        .expect("resume should promote the queue head once persistence works");
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("resumed session should remain visible");
+    assert!(!session.queue_paused);
+    assert_eq!(session.status, SessionStatus::Active);
+    assert!(matches!(
+        input_rx.recv_timeout(Duration::from_secs(1)),
+        Ok(ClaudeRuntimeCommand::Prompt(_))
+    ));
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let record = inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == session_id)
+            .expect("Claude session should exist");
+        assert_eq!(
+            record.session.prompt_history,
+            vec![
+                "earlier prompt".to_owned(),
+                "survive the failed commit".to_owned()
+            ],
+            "the retried head must appear in composer history exactly once"
+        );
+        assert_eq!(record.session.messages.len(), message_count_before + 1);
+        assert_eq!(record.session.message_count, projected_count_before + 1);
+    }
+
+    let _ = fs::remove_dir_all(&failing_persistence_path);
+    let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
 // A rejected runtime-channel handoff must clear the dead runtime and record
 // the terminal turn failure in one state transaction. Separate commits leave
 // a crash-recoverable Active+None snapshot between those operations.

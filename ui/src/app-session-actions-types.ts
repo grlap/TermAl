@@ -204,6 +204,7 @@ export type UseAppSessionActionsReturn = {
     sessionId: string,
     promptId: string,
   ) => Promise<void>;
+  handleResumeSessionQueue: (sessionId: string) => Promise<void>;
   handleStopSession: (sessionId: string) => Promise<void>;
   executeKillSession: (sessionId: string) => Promise<void>;
   handleRenameSession: (

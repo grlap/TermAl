@@ -191,6 +191,8 @@ export type SessionPaneViewProps = {
     expandedText?: string | null,
   ) => boolean;
   onCancelQueuedPrompt: (sessionId: string, promptId: string) => void;
+  /** Releases the queue a Stop left paused (`Session.queuePaused`). */
+  onResumeSessionQueue?: (sessionId: string) => void;
   onApprovalDecision: (
     sessionId: string,
     messageId: string,

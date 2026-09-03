@@ -203,6 +203,7 @@ export function SessionPaneView({
   onComposerError,
   onSend,
   onCancelQueuedPrompt,
+  onResumeSessionQueue,
   onApprovalDecision,
   onUserInputSubmit,
   onMcpElicitationSubmit,
@@ -1921,6 +1922,7 @@ export function SessionPaneView({
             onMcpElicitationSubmit={onMcpElicitationSubmit}
             onCodexAppRequestSubmit={onCodexAppRequestSubmit}
             onCancelQueuedPrompt={onCancelQueuedPrompt}
+            onResumeSessionQueue={onResumeSessionQueue}
             onCreateConversationMarker={onCreateConversationMarker}
             onDeleteConversationMarker={onDeleteConversationMarker}
             onPinResponseBoardMessage={handlePinResponseBoardMessage}

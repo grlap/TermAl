@@ -14,6 +14,7 @@
 import {
   ApiRequestError,
   cancelQueuedPrompt,
+  resumeSessionQueue,
   createProject,
   createSession,
   fetchAgentCommands,
@@ -1079,6 +1080,31 @@ export function useAppSessionActions(
     }
   }
 
+  // No optimistic update: whether the queue head actually starts is the
+  // backend's decision, so the card flips only when the adopted snapshot
+  // reports `queuePaused: false`.
+  async function handleResumeSessionQueue(sessionId: string) {
+    try {
+      const state = await resumeSessionQueue(sessionId);
+      if (!isMountedRef.current) {
+        return;
+      }
+      if (
+        !isSuccessfulAdoptActionStateOutcome(
+          adoptSessionActionState(sessionId, state),
+        )
+      ) {
+        return;
+      }
+      setRequestError(null);
+    } catch (error) {
+      if (!isMountedRef.current) {
+        return;
+      }
+      reportRequestError(error);
+    }
+  }
+
   async function handleCancelQueuedPrompt(sessionId: string, promptId: string) {
     const previousSessions = sessionsRef.current;
     const next = removeQueuedPromptFromSessions(
@@ -1538,6 +1564,7 @@ export function useAppSessionActions(
     handleMcpElicitationSubmit,
     handleCodexAppRequestSubmit,
     handleCancelQueuedPrompt,
+    handleResumeSessionQueue,
     handleStopSession,
     executeKillSession,
     handleRenameSession,

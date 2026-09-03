@@ -5535,6 +5535,58 @@ textarea {
   border-width: 2.25px;
 }
 
+/* Paused queue: same footprint as the live card, but a static glyph instead
+   of a spinner so it never reads as work in progress. */
+.activity-card-queue-paused {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: calc(0.72rem * var(--density-scale));
+  padding: calc(0.68rem * var(--density-scale))
+    calc(0.95rem * var(--density-scale));
+}
+
+.activity-card-queue-paused .activity-pause-glyph {
+  flex: none;
+  width: calc(1.9rem * var(--density-scale));
+  height: calc(1.9rem * var(--density-scale));
+  border-radius: 999px;
+  border: 2.25px solid var(--spinner-track);
+  background:
+    linear-gradient(var(--pending-dismiss-fg), var(--pending-dismiss-fg))
+      calc(50% - 0.22rem) 50% / 0.16rem 0.7rem no-repeat,
+    linear-gradient(var(--pending-dismiss-fg), var(--pending-dismiss-fg))
+      calc(50% + 0.22rem) 50% / 0.16rem 0.7rem no-repeat;
+}
+
+.activity-card-queue-paused h3 {
+  font-size: 0.92rem;
+  margin: 0;
+}
+
+.activity-card-queue-paused p {
+  margin: 0;
+  opacity: 0.8;
+}
+
+.queue-resume-button {
+  flex: none;
+  margin-left: auto;
+  padding: 0.3rem 0.8rem;
+  border: 1px solid var(--pending-dismiss-border);
+  border-radius: var(--control-radius-button);
+  background: var(--pending-dismiss-bg);
+  color: var(--pending-dismiss-fg);
+  cursor: pointer;
+  font: inherit;
+  line-height: 1.2;
+}
+
+.queue-resume-button:hover {
+  background: var(--pending-dismiss-hover-bg);
+  color: var(--pending-dismiss-hover-fg);
+}
+
 .activity-card-copy {
   display: grid;
   gap: 0.08rem;

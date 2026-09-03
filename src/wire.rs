@@ -636,6 +636,13 @@ struct Session {
     markers: Vec<ConversationMarker>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pending_prompts: Vec<PendingPrompt>,
+    /// True while queued prompts are parked behind the explicit-resume latch:
+    /// a user Stop (or a failed stop persistence) keeps user and mailbox
+    /// prompts durable but refuses to auto-dispatch them until the user sends
+    /// a new prompt or resumes the queue. Always serialized so the UI can
+    /// distinguish "paused, waiting for the user" from "about to start".
+    #[serde(default)]
+    queue_paused: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     session_mutation_stamp: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

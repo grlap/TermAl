@@ -23,6 +23,7 @@ import {
   ConversationTailPresence,
   PendingPromptCard,
   QueuedTurnHandoffIndicator,
+  QueuePausedIndicator,
   RunningIndicator,
 } from "./session-activity-cards";
 import {
@@ -106,6 +107,7 @@ const NOOP_CREATE_CONVERSATION_MARKER = () => {};
 const NOOP_DELETE_CONVERSATION_MARKER = () => {};
 const NOOP_PIN_RESPONSE_BOARD_MESSAGE = () => {};
 const NOOP_OPEN_MAILBOX = () => {};
+const NOOP_RESUME_SESSION_QUEUE = () => {};
 
 // The transcript virtualizer and overview rail intentionally share the same
 // size threshold. The rail may still defer its first paint, but marker jumps
@@ -167,6 +169,7 @@ export function AgentSessionPanel({
   onMcpElicitationSubmit,
   onCodexAppRequestSubmit,
   onCancelQueuedPrompt,
+  onResumeSessionQueue = NOOP_RESUME_SESSION_QUEUE,
   onCreateConversationMarker = NOOP_CREATE_CONVERSATION_MARKER,
   onDeleteConversationMarker = NOOP_DELETE_CONVERSATION_MARKER,
   onPinResponseBoardMessage = NOOP_PIN_RESPONSE_BOARD_MESSAGE,
@@ -196,6 +199,7 @@ export function AgentSessionPanel({
   const stableOnMcpElicitationSubmit = useStableEvent(onMcpElicitationSubmit);
   const stableOnCodexAppRequestSubmit = useStableEvent(onCodexAppRequestSubmit);
   const stableOnCancelQueuedPrompt = useStableEvent(onCancelQueuedPrompt);
+  const stableOnResumeSessionQueue = useStableEvent(onResumeSessionQueue);
   const stableOnCreateConversationMarker = useStableEvent(
     onCreateConversationMarker,
   );
@@ -230,6 +234,7 @@ export function AgentSessionPanel({
       onMcpElicitationSubmit={stableOnMcpElicitationSubmit}
       onCodexAppRequestSubmit={stableOnCodexAppRequestSubmit}
       onCancelQueuedPrompt={stableOnCancelQueuedPrompt}
+      onResumeSessionQueue={stableOnResumeSessionQueue}
       onCreateConversationMarker={stableOnCreateConversationMarker}
       onDeleteConversationMarker={stableOnDeleteConversationMarker}
       onPinResponseBoardMessage={stableOnPinResponseBoardMessage}
@@ -348,6 +353,7 @@ const SessionBody = memo(
     onMcpElicitationSubmit,
     onCodexAppRequestSubmit,
     onCancelQueuedPrompt,
+    onResumeSessionQueue,
     onCreateConversationMarker,
     onDeleteConversationMarker,
     onPinResponseBoardMessage,
@@ -448,6 +454,7 @@ const SessionBody = memo(
             onMcpElicitationSubmit={onMcpElicitationSubmit}
             onCodexAppRequestSubmit={onCodexAppRequestSubmit}
             onCancelQueuedPrompt={onCancelQueuedPrompt}
+            onResumeSessionQueue={onResumeSessionQueue}
             onCreateConversationMarker={onCreateConversationMarker}
             onDeleteConversationMarker={onDeleteConversationMarker}
             onPinResponseBoardMessage={onPinResponseBoardMessage}
@@ -538,6 +545,7 @@ const SessionBody = memo(
     previous.onPinResponseBoardMessage === next.onPinResponseBoardMessage &&
     previous.onOpenMailbox === next.onOpenMailbox &&
     previous.onCancelQueuedPrompt === next.onCancelQueuedPrompt &&
+    previous.onResumeSessionQueue === next.onResumeSessionQueue &&
     previous.onCreateConversationMarker === next.onCreateConversationMarker &&
     previous.onDeleteConversationMarker === next.onDeleteConversationMarker &&
     previous.onSessionSettingsChange === next.onSessionSettingsChange &&
@@ -584,6 +592,7 @@ const SessionConversationPage = memo(
     onMcpElicitationSubmit,
     onCodexAppRequestSubmit,
     onCancelQueuedPrompt,
+    onResumeSessionQueue,
     onCreateConversationMarker,
     onDeleteConversationMarker,
     onPinResponseBoardMessage,
@@ -1251,8 +1260,17 @@ const SessionConversationPage = memo(
         forceVirtualized={hasOlderHistory || hasNewerHistory}
       />
     );
+    // The backend projects its explicit-resume latch as `queuePaused`. While
+    // it is set nothing will start on its own, so the paused card must win
+    // over the "starting the next turn" handoff, which is only an inference
+    // from an idle session that still has queued prompts.
+    const queuePaused =
+      !effectiveShowWaitingIndicator &&
+      Boolean(session.queuePaused) &&
+      visiblePendingPrompts.length > 0;
     const queueHandoffPrompt =
       !effectiveShowWaitingIndicator &&
+      !queuePaused &&
       session.status === "idle" &&
       visibleMessages.length > 0
         ? (visiblePendingPrompts[0]?.text ?? null)
@@ -1262,6 +1280,12 @@ const SessionConversationPage = memo(
         agent={session.agent}
         activity={waitingIndicatorActivity}
         lastPrompt={waitingIndicatorPrompt}
+      />
+    ) : queuePaused ? (
+      <QueuePausedIndicator
+        agent={session.agent}
+        queuedCount={visiblePendingPrompts.length}
+        onResume={() => onResumeSessionQueue?.(session.id)}
       />
     ) : queueHandoffPrompt ? (
       <QueuedTurnHandoffIndicator

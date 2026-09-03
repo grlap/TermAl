@@ -488,6 +488,10 @@ fn app_router(state: AppState) -> Router {
             "/api/sessions/{id}/queued-prompts/{prompt_id}/cancel",
             post(cancel_queued_prompt),
         )
+        .route(
+            "/api/sessions/{id}/queue/resume",
+            post(resume_session_queue),
+        )
         .route("/api/sessions/{id}/stop", post(stop_session))
         .route("/api/sessions/{id}/kill", post(kill_session))
         .route(

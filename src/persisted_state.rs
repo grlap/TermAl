@@ -458,6 +458,10 @@ impl PersistedSessionRecord {
             prompt_history_mutation_stamp: 0,
             session,
         };
+        // The persisted record flag is the authority; the wire projection
+        // is rebuilt from it so a loaded session never advertises a stale
+        // paused/unpaused state from an older snapshot.
+        record.session.queue_paused = record.orchestrator_auto_dispatch_blocked;
         sync_codex_thread_state(&mut record);
         sync_pending_prompts(&mut record);
         Ok(record)
