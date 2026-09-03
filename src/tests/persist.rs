@@ -2683,6 +2683,77 @@ fn sqlite_persist_connection_cache_reuses_matching_connection_until_invalidated(
 }
 
 #[test]
+fn sqlite_boot_load_hands_its_validated_connection_to_the_persist_cache() {
+    let state_root = PersistTestRoot::new("boot-connection-handoff");
+    let path = state_root.path().join("termal.sqlite");
+    persist_state(&path, &StateInner::new()).expect("initial state should persist");
+
+    let (loaded, boot_connection) =
+        load_state_for_boot(&path).expect("boot state and connection should load");
+    assert!(loaded.is_some(), "persisted state should be present");
+    let boot_connection = boot_connection.expect("existing state should retain its connection");
+    boot_connection
+        .execute("CREATE TEMP TABLE boot_connection_probe(value TEXT)", [])
+        .expect("connection-local boot probe should be created");
+    boot_connection
+        .execute(
+            "INSERT INTO boot_connection_probe(value) VALUES('retained')",
+            [],
+        )
+        .expect("connection-local boot probe should be populated");
+
+    let path_for_worker = path.clone();
+    let value = std::thread::spawn(move || {
+        let mut cache = SqlitePersistConnectionCache::from_validated_connection(Some((
+            path_for_worker.clone(),
+            boot_connection,
+        )));
+        cache
+            .connection_for(&path_for_worker)
+            .expect("persist cache should adopt the boot connection")
+            .query_row("SELECT value FROM boot_connection_probe", [], |row| {
+                row.get::<_, String>(0)
+            })
+            .expect("the adopted connection should retain connection-local state")
+    })
+    .join()
+    .expect("persist-connection handoff worker should not panic");
+    assert_eq!(value, "retained");
+}
+
+#[test]
+fn coordination_bootstrap_hands_its_connection_to_the_mailbox_store() {
+    let state_root = PersistTestRoot::new("coordination-connection-handoff");
+    let path = state_root.path().join("coordination.sqlite");
+    let connection =
+        bootstrap_coordination_database(&path).expect("coordination database should bootstrap");
+    connection
+        .execute("CREATE TEMP TABLE coordination_boot_probe(value TEXT)", [])
+        .expect("connection-local coordination probe should be created");
+    connection
+        .execute(
+            "INSERT INTO coordination_boot_probe(value) VALUES('retained')",
+            [],
+        )
+        .expect("connection-local coordination probe should be populated");
+
+    let store = MailboxStore::from_validated_connection(
+        &path,
+        connection,
+        MAILBOX_WRITER_ADMISSION_TIMEOUT,
+    )
+    .expect("mailbox store should adopt the bootstrap connection");
+    let value: String = store
+        .connection()
+        .expect("mailbox connection should remain available")
+        .query_row("SELECT value FROM coordination_boot_probe", [], |row| {
+            row.get(0)
+        })
+        .expect("the mailbox store should retain bootstrap connection-local state");
+    assert_eq!(value, "retained");
+}
+
+#[test]
 fn sqlite_delta_upserts_only_changed_session_rows_and_removes_hidden_or_deleted_rows() {
     let state_root = std::env::temp_dir().join(format!("termal-sqlite-delta-{}", Uuid::new_v4()));
     let _state_temp_root = TestTempRoot::own(state_root.clone());

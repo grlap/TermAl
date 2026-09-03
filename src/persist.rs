@@ -849,11 +849,25 @@ mod state_permission_hardening_tests {
 }
 
 /// Loads state from SQLite.
+#[cfg(test)]
 fn load_state(path: &FsPath) -> Result<Option<StateInner>> {
+    let (state, _connection) = load_state_for_boot(path)?;
+    Ok(state)
+}
+
+/// Loads state while retaining the validated SQLite connection for the
+/// production boot path. Handing this connection directly to the background
+/// persistence worker prevents a last-connection close between loading and
+/// serving. On Windows, that close can synchronously checkpoint and remove a
+/// large WAL/SHM pair and make startup appear hung in `DeleteFileW`.
+fn load_state_for_boot(
+    path: &FsPath,
+) -> Result<(Option<StateInner>, Option<rusqlite::Connection>)> {
     if !path.exists() {
-        return Ok(None);
+        return Ok((None, None));
     }
-    load_state_from_sqlite(path)
+    let (state, connection) = load_state_from_sqlite_with_connection(path)?;
+    Ok((state, Some(connection)))
 }
 
 fn sqlite_state_user_table_names(connection: &rusqlite::Connection) -> Result<BTreeSet<String>> {
@@ -2172,7 +2186,9 @@ mod sqlite_schema_tests {
 
 }
 
-fn load_state_from_sqlite(path: &FsPath) -> Result<Option<StateInner>> {
+fn load_state_from_sqlite_with_connection(
+    path: &FsPath,
+) -> Result<(Option<StateInner>, rusqlite::Connection)> {
     let connection = open_sqlite_state_connection_unconfigured(path)?;
     ensure_sqlite_state_schema_for_path(&connection, path)?;
     // `open_sqlite_state_connection_unconfigured` already hardens the fresh
@@ -2189,7 +2205,7 @@ fn load_state_from_sqlite(path: &FsPath) -> Result<Option<StateInner>> {
     let (delegation_records, quarantined_delegation_ids) =
         load_delegation_records_from_sqlite(&connection, path)?;
     let Some(encoded) = sqlite_app_state_value(&connection, SQLITE_METADATA_KEY, path)? else {
-        return Ok(None);
+        return Ok((None, connection));
     };
     let mut persisted: PersistedState = serde_json::from_str(&encoded)
         .with_context(|| format!("failed to parse persisted state from `{}`", path.display()))?;
@@ -2229,7 +2245,7 @@ fn load_state_from_sqlite(path: &FsPath) -> Result<Option<StateInner>> {
     let inner = persisted.into_inner().with_context(|| {
         format!("failed to validate state from `{}`", path.display())
     })?;
-    Ok(Some(inner))
+    Ok((Some(inner), connection))
 }
 
 fn sqlite_app_state_value(
@@ -3259,6 +3275,22 @@ impl SqlitePersistConnectionCache {
         Self {
             path: None,
             connection: None,
+        }
+    }
+
+    /// Seeds the cache with the connection that already loaded and validated
+    /// startup state. Ownership moves into the persistence thread without a
+    /// zero-connection interval, so SQLite never performs last-close sidecar
+    /// cleanup on the startup thread.
+    fn from_validated_connection(
+        validated: Option<(PathBuf, rusqlite::Connection)>,
+    ) -> Self {
+        match validated {
+            Some((path, connection)) => Self {
+                path: Some(path),
+                connection: Some(connection),
+            },
+            None => Self::new(),
         }
     }
 

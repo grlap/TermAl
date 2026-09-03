@@ -1143,16 +1143,26 @@ fn mailbox_api_error(err: anyhow::Error) -> ApiError {
 }
 
 impl MailboxStore {
+    #[cfg(test)]
     fn open(path: &FsPath) -> Result<Self> {
         Self::open_with_write_admission_timeout(path, MAILBOX_WRITER_ADMISSION_TIMEOUT)
     }
 
+    #[cfg(test)]
     fn open_with_write_admission_timeout(
         path: &FsPath,
         write_admission_timeout: Duration,
     ) -> Result<Self> {
         let connection = open_sqlite_state_connection(path)?;
         ensure_sqlite_coordination_schema_for_path(&connection, path)?;
+        Self::from_validated_connection(path, connection, write_admission_timeout)
+    }
+
+    fn from_validated_connection(
+        path: &FsPath,
+        connection: rusqlite::Connection,
+        write_admission_timeout: Duration,
+    ) -> Result<Self> {
         connection
             .execute_batch("PRAGMA foreign_keys = ON;")
             .with_context(|| {

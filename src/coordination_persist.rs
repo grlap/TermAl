@@ -325,7 +325,9 @@ fn ensure_sqlite_coordination_schema_for_path(
     ensure_sqlite_coordination_schema(connection)
 }
 
-fn bootstrap_coordination_database(coordination_path: &FsPath) -> Result<()> {
+fn bootstrap_coordination_database(
+    coordination_path: &FsPath,
+) -> Result<rusqlite::Connection> {
     if let Some(parent) = coordination_path.parent() {
         create_local_state_directory(parent)?;
     }
@@ -340,7 +342,8 @@ fn bootstrap_coordination_database(coordination_path: &FsPath) -> Result<()> {
                 coordination_path.display()
             )
         })?;
-    verify_persist_commit_integrity(coordination_path)
+    verify_persist_commit_integrity(coordination_path)?;
+    Ok(connection)
 }
 
 #[cfg(test)]

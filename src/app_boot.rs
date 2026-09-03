@@ -399,7 +399,9 @@ impl AppState {
     ) -> Result<Self> {
         // Defensive: tests and other direct callers may pass an un-normalized workdir.
         let default_workdir = normalize_local_user_facing_path(&default_workdir);
-        let mut inner = load_state(&persistence_path)?
+        let (loaded_state, boot_persistence_connection) =
+            load_state_for_boot(&persistence_path)?;
+        let mut inner = loaded_state
             .unwrap_or_else(|| bootstrap_default_local_state(&default_workdir));
         #[cfg(test)]
         TEST_ENGRAM_BOOT_TRANSPORT.with(|slot| {
@@ -430,8 +432,13 @@ impl AppState {
         // store exists, before the persist worker starts, and therefore before
         // run_server can expose an HTTP listener. Legacy local schemas are
         // rejected with reset guidance rather than migrated.
-        bootstrap_coordination_database(&coordination_path)?;
-        let mailbox_store = Arc::new(MailboxStore::open(&coordination_path)?);
+        let coordination_bootstrap_connection =
+            bootstrap_coordination_database(&coordination_path)?;
+        let mailbox_store = Arc::new(MailboxStore::from_validated_connection(
+            &coordination_path,
+            coordination_bootstrap_connection,
+            MAILBOX_WRITER_ADMISSION_TIMEOUT,
+        )?);
         // Mailboxes and the level-triggered board deliberately share the small
         // coordination database and its FIFO writer admission, while session
         // and transcript persistence remain isolated in termal.sqlite.
@@ -492,10 +499,13 @@ impl AppState {
         // every queued write — previously every persist opened a fresh
         // connection and re-ran the schema validation and maintenance
         // checks.
+        let boot_persist_cache_seed = boot_persistence_connection
+            .map(|connection| (persistence_path.clone(), connection));
         let persist_thread_handle = std::thread::Builder::new()
             .name("termal-persist".to_owned())
             .spawn(move || {
-                let mut cache = SqlitePersistConnectionCache::new();
+                let mut cache =
+                    SqlitePersistConnectionCache::from_validated_connection(boot_persist_cache_seed);
                 let mut watermark: u64 = 0;
                 let mut prompt_history_carry = BTreeSet::new();
                 let mut retry_state = PersistWorkerRetryState::default();
