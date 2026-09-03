@@ -331,6 +331,7 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
         let writer_sessions = sessions.clone();
         let writer_thread_sessions = thread_sessions.clone();
         let writer_runtime_id = runtime_id.clone();
+        let writer_codex_home = codex_home.clone();
         let writer_runtime_token = RuntimeToken::Codex(runtime_id.clone());
         let writer_input_tx = input_tx.clone();
         let writer_activity: SharedCodexStdinActivityState = Arc::new(Mutex::new(None));
@@ -406,6 +407,7 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
                                 &writer_pending_requests,
                                 &writer_state,
                                 &writer_runtime_id,
+                                &writer_codex_home,
                                 &writer_sessions,
                                 &writer_thread_sessions,
                                 &writer_input_tx,
@@ -1032,6 +1034,7 @@ fn handle_shared_codex_prompt_command(
     pending_requests: &CodexPendingRequestMap,
     state: &AppState,
     runtime_id: &str,
+    codex_home: &FsPath,
     sessions: &SharedCodexSessionMap,
     thread_sessions: &SharedCodexThreadMap,
     input_tx: &Sender<CodexRuntimeCommand>,
@@ -1178,9 +1181,10 @@ fn handle_shared_codex_prompt_command(
     let setup_guard = PendingCodexThreadSetupGuard::new(sessions, session_id, &request_id);
 
     let mcp_config = state
-        .termal_delegation_mcp_codex_config_for_runtime(
+        .termal_delegation_mcp_codex_config_for_shared_runtime(
             session_id,
             &RuntimeToken::Codex(runtime_id.to_owned()),
+            codex_home,
         )
         .context("failed to build Codex delegation MCP config")?;
 

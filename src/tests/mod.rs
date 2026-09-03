@@ -773,6 +773,13 @@ fn test_remote_registry() -> Arc<RemoteRegistry> {
 static TEST_HOME_ENV_MUTEX: std::sync::LazyLock<std::sync::Mutex<()>> =
     std::sync::LazyLock::new(|| std::sync::Mutex::new(()));
 
+fn test_missing_shared_codex_home() -> PathBuf {
+    std::env::temp_dir().join(format!(
+        "termal-missing-shared-codex-home-{}",
+        Uuid::new_v4()
+    ))
+}
+
 struct ScopedEnvVar {
     key: &'static str,
     original: Option<std::ffi::OsString>,

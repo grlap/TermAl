@@ -31,6 +31,23 @@ Because the process is shared and long-lived, **its identity cannot answer
 per-session questions**. That single fact is the source of nearly every bug in this
 area.
 
+## Shared CODEX_HOME and MCP configuration
+
+The shared app-server runs with a writable, TermAl-owned `CODEX_HOME` at
+`~/.termal/codex-home/shared-app-server`. When TermAl starts that process it seeds
+the directory from the user's ordinary Codex home (normally `~/.codex`), including
+`config.toml`. Changes to the source file therefore propagate when the shared
+app-server is next spawned and its home is seeded; they are not a live-config
+channel into an already-running process.
+
+At every `thread/start` and `thread/resume`, TermAl reads `[mcp_servers]` from that
+seeded `config.toml` and passes the merged table in the thread-level `config`.
+User-defined servers are preserved. TermAl then overlays its owned
+`termal-delegation` entry and the optional `engram` entry, so those two names always
+use TermAl's descriptors if the user configuration contains a collision. A missing
+or malformed seeded file is diagnosed on stderr and falls back to the TermAl-owned
+entries; it never prevents thread setup.
+
 ## Approval policy ownership
 
 Codex's `never` policy is native: Codex decides not to emit approval requests.

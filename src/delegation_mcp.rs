@@ -272,6 +272,27 @@ fn termal_delegation_mcp_codex_config_with_command(
     })
 }
 
+#[derive(Deserialize)]
+struct SeededCodexMcpConfig {
+    #[serde(default)]
+    mcp_servers: serde_json::Map<String, Value>,
+}
+
+fn load_seeded_shared_codex_mcp_servers(
+    codex_home: &FsPath,
+) -> Result<serde_json::Map<String, Value>> {
+    let config_path = codex_home.join("config.toml");
+    let encoded = fs::read_to_string(&config_path)
+        .with_context(|| format!("failed to read `{}`", config_path.display()))?;
+    let config = toml_edit::de::from_str::<SeededCodexMcpConfig>(&encoded).map_err(|_| {
+        anyhow!(
+            "`{}` is not valid Codex TOML configuration",
+            config_path.display()
+        )
+    })?;
+    Ok(config.mcp_servers)
+}
+
 impl AppState {
     fn set_local_http_base_url(&self, base_url: String) {
         *self
@@ -377,9 +398,11 @@ impl AppState {
         self.termal_delegation_mcp_codex_config_with_engram(
             parent_session_id,
             self.engram_mcp_stdio_config_for_session(parent_session_id),
+            None,
         )
     }
 
+    #[cfg(test)]
     fn termal_delegation_mcp_codex_config_for_runtime(
         &self,
         parent_session_id: &str,
@@ -388,6 +411,20 @@ impl AppState {
         self.termal_delegation_mcp_codex_config_with_engram(
             parent_session_id,
             self.engram_mcp_stdio_config_for_runtime(parent_session_id, runtime_token),
+            None,
+        )
+    }
+
+    fn termal_delegation_mcp_codex_config_for_shared_runtime(
+        &self,
+        parent_session_id: &str,
+        runtime_token: &RuntimeToken,
+        codex_home: &FsPath,
+    ) -> Result<Value> {
+        self.termal_delegation_mcp_codex_config_with_engram(
+            parent_session_id,
+            self.engram_mcp_stdio_config_for_runtime(parent_session_id, runtime_token),
+            Some(codex_home),
         )
     }
 
@@ -395,26 +432,41 @@ impl AppState {
         &self,
         parent_session_id: &str,
         engram: Option<TermalDelegationMcpStdioConfig>,
+        codex_home: Option<&FsPath>,
     ) -> Result<Value> {
         let command = termal_delegation_mcp_current_exe()?;
-        let mut config = termal_delegation_mcp_codex_config_with_command(
+        let mut servers = match codex_home.map(load_seeded_shared_codex_mcp_servers) {
+            Some(Ok(servers)) => servers,
+            Some(Err(err)) => {
+                eprintln!("codex MCP config warning> {err:#}; using TermAl-owned MCP servers only");
+                serde_json::Map::new()
+            }
+            None => serde_json::Map::new(),
+        };
+
+        // Thread-level `config.mcp_servers` replaces Codex's whole configured
+        // table. Begin with the user table copied into the shared CODEX_HOME,
+        // then overlay TermAl-owned names so a seeded collision cannot redirect
+        // delegation or Engram traffic to an arbitrary process.
+        let termal_config = termal_delegation_mcp_codex_config_with_command(
             &command,
             parent_session_id,
             &self.local_http_base_url(),
         );
-        let Some(engram) = engram else {
-            return Ok(config);
-        };
-        config
-            .get_mut("mcp_servers")
-            .and_then(Value::as_object_mut)
-            .context("TermAl Codex delegation MCP baseline should contain mcp_servers")?
-            .insert(
+        let termal_servers = termal_config
+            .get("mcp_servers")
+            .and_then(Value::as_object)
+            .context("TermAl Codex delegation MCP baseline should contain mcp_servers")?;
+        servers.extend(termal_servers.clone());
+        if let Some(engram) = engram {
+            servers.insert(
                 ENGRAM_MCP_SERVER_NAME.to_owned(),
                 serde_json::to_value(engram)
                     .context("Engram Codex MCP descriptor should serialize")?,
             );
-        Ok(config)
+        }
+
+        Ok(json!({ "mcp_servers": servers }))
     }
 }
 

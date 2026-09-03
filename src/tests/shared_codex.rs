@@ -72,6 +72,7 @@ fn prompt_during_codex_thread_setup_does_not_start_a_second_thread() {
         &pending_requests,
         &state,
         &runtime.runtime_id,
+        &test_missing_shared_codex_home(),
         &runtime.sessions,
         &runtime.thread_sessions,
         &input_tx,
@@ -88,6 +89,7 @@ fn prompt_during_codex_thread_setup_does_not_start_a_second_thread() {
         &pending_requests,
         &state,
         &runtime.runtime_id,
+        &test_missing_shared_codex_home(),
         &runtime.sessions,
         &runtime.thread_sessions,
         &input_tx,
@@ -215,6 +217,7 @@ fn detach_removes_the_in_flight_thread_setup_so_the_next_prompt_starts_fresh() {
         &pending_requests,
         &state,
         &runtime.runtime_id,
+        &test_missing_shared_codex_home(),
         &runtime.sessions,
         &runtime.thread_sessions,
         &input_tx,
@@ -260,6 +263,7 @@ fn detach_removes_the_in_flight_thread_setup_so_the_next_prompt_starts_fresh() {
         &pending_requests,
         &state,
         &runtime.runtime_id,
+        &test_missing_shared_codex_home(),
         &runtime.sessions,
         &runtime.thread_sessions,
         &input_tx,
@@ -385,6 +389,7 @@ fn prompt_resuming_the_thread_its_own_setup_just_started_parks_instead_of_supers
         &pending_requests,
         &state,
         &runtime.runtime_id,
+        &test_missing_shared_codex_home(),
         &runtime.sessions,
         &runtime.thread_sessions,
         &input_tx,
@@ -411,6 +416,7 @@ fn prompt_resuming_the_thread_its_own_setup_just_started_parks_instead_of_supers
         &pending_requests,
         &state,
         &runtime.runtime_id,
+        &test_missing_shared_codex_home(),
         &runtime.sessions,
         &runtime.thread_sessions,
         &input_tx,
@@ -486,6 +492,7 @@ fn failed_thread_setup_write_releases_the_setup_slot() {
         &pending_requests,
         &state,
         &runtime.runtime_id,
+        &test_missing_shared_codex_home(),
         &runtime.sessions,
         &runtime.thread_sessions,
         &input_tx,
@@ -766,6 +773,7 @@ fn shared_codex_prompt_dispatch_clears_stale_command_state_before_turn_started_n
         &pending_requests,
         &state,
         &runtime.runtime_id,
+        &test_missing_shared_codex_home(),
         &runtime.sessions,
         &runtime.thread_sessions,
         &dummy_input_tx,
@@ -1145,6 +1153,132 @@ fn shared_codex_standard_turn_start_serializes_explicit_null_service_tier() {
 // Pins that shared Codex thread setup includes TermAl's parent-scoped
 // delegation MCP bridge in the app-server `thread/start` config. This is the
 // hook that makes `/review-changes` available inside Codex sessions.
+fn shared_codex_setup_request_for_mcp_test(
+    codex_home: &FsPath,
+    resume_thread_id: Option<&str>,
+) -> Value {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, _runtime_input_rx, _process) =
+        test_shared_codex_runtime("shared-codex-seeded-mcp-config");
+    let pending_requests: CodexPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
+    let mut writer = Vec::new();
+    let (input_tx, _input_rx) = mpsc::channel::<CodexRuntimeCommand>();
+
+    handle_shared_codex_prompt_command(
+        &mut writer,
+        &pending_requests,
+        &state,
+        &runtime.runtime_id,
+        codex_home,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+        &input_tx,
+        None,
+        &session_id,
+        CodexPromptCommand {
+            active_turn_generation: 0,
+            approval_policy: CodexApprovalPolicy::AutoApprove,
+            attachments: Vec::new(),
+            cwd: "/tmp".to_owned(),
+            model: "gpt-5.4".to_owned(),
+            prompt: "start with seeded MCP servers".to_owned(),
+            reasoning_effort: CodexReasoningEffort::Medium,
+            service_tier: None,
+            resume_thread_id: resume_thread_id.map(str::to_owned),
+            sandbox_mode: CodexSandboxMode::WorkspaceWrite,
+        },
+    )
+    .expect("seeded MCP config must not prevent Codex thread setup");
+
+    retire_pending_codex_thread_setups(&pending_requests);
+    String::from_utf8(writer)
+        .expect("Codex request should be UTF-8")
+        .lines()
+        .find_map(|line| serde_json::from_str::<Value>(line).ok())
+        .expect("Codex thread setup should be valid JSON-RPC")
+}
+
+#[test]
+fn shared_codex_thread_setup_merges_seeded_user_mcp_servers_with_termal_precedence() {
+    let root = TestTempRoot::create("termal-shared-codex-user-mcp");
+    fs::write(
+        root.path().join("config.toml"),
+        r#"
+[mcp_servers.user-tools]
+command = "user-mcp"
+args = ["--from-config"]
+
+[mcp_servers.user-tools.env]
+USER_TOKEN = "keep-me"
+
+[mcp_servers.termal-delegation]
+command = "untrusted-collision"
+args = ["--wrong-parent"]
+"#,
+    )
+    .expect("seeded Codex config should write");
+
+    for (expected_method, resume_thread_id) in [
+        ("thread/start", None),
+        ("thread/resume", Some("thread-existing")),
+    ] {
+        let request = shared_codex_setup_request_for_mcp_test(root.path(), resume_thread_id);
+        assert_eq!(request["method"], expected_method);
+        assert_eq!(
+            request.pointer("/params/config/mcp_servers/user-tools/command"),
+            Some(&json!("user-mcp")),
+            "user-configured MCP servers must survive the thread-level config override"
+        );
+        assert_eq!(
+            request.pointer("/params/config/mcp_servers/user-tools/env/USER_TOKEN"),
+            Some(&json!("keep-me")),
+            "nested user MCP settings must survive without reshaping"
+        );
+        assert_ne!(
+            request.pointer("/params/config/mcp_servers/termal-delegation/command"),
+            Some(&json!("untrusted-collision")),
+            "TermAl must replace a colliding user definition for its owned server name"
+        );
+        assert!(
+            request
+                .pointer("/params/config/mcp_servers/termal-delegation/args")
+                .and_then(Value::as_array)
+                .is_some_and(|args| args.iter().any(|arg| arg == "delegation-mcp")),
+            "the winning TermAl descriptor must launch the delegation bridge"
+        );
+    }
+}
+
+#[test]
+fn shared_codex_thread_setup_falls_back_when_seeded_config_is_missing_or_malformed() {
+    let root = TestTempRoot::create("termal-shared-codex-invalid-mcp");
+    let missing_home = root.path().join("missing-home");
+    let missing_request = shared_codex_setup_request_for_mcp_test(&missing_home, None);
+    let missing_servers = missing_request
+        .pointer("/params/config/mcp_servers")
+        .and_then(Value::as_object)
+        .expect("fallback config should contain mcp_servers");
+    assert_eq!(missing_servers.len(), 1);
+    assert!(missing_servers.contains_key(TERMAL_DELEGATION_MCP_SERVER_NAME));
+
+    let malformed_home = root.path().join("malformed-home");
+    fs::create_dir_all(&malformed_home).expect("malformed Codex home should be created");
+    fs::write(
+        malformed_home.join("config.toml"),
+        "[mcp_servers.user-tools",
+    )
+    .expect("malformed Codex config should write");
+    let malformed_request =
+        shared_codex_setup_request_for_mcp_test(&malformed_home, Some("thread-existing"));
+    let malformed_servers = malformed_request
+        .pointer("/params/config/mcp_servers")
+        .and_then(Value::as_object)
+        .expect("fallback config should contain mcp_servers");
+    assert_eq!(malformed_servers.len(), 1);
+    assert!(malformed_servers.contains_key(TERMAL_DELEGATION_MCP_SERVER_NAME));
+}
+
 #[test]
 fn shared_codex_thread_start_includes_delegation_mcp_config() {
     let state = test_app_state();
@@ -1171,13 +1305,14 @@ fn shared_codex_thread_start_includes_delegation_mcp_config() {
 
     let pending_requests: CodexPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
     let mut writer = Vec::new();
-    let (input_tx, input_rx) = mpsc::channel::<CodexRuntimeCommand>();
+    let (input_tx, _input_rx) = mpsc::channel::<CodexRuntimeCommand>();
 
     handle_shared_codex_prompt_command(
         &mut writer,
         &pending_requests,
         &state,
         &runtime.runtime_id,
+        &test_missing_shared_codex_home(),
         &runtime.sessions,
         &runtime.thread_sessions,
         &input_tx,
@@ -1226,25 +1361,10 @@ fn shared_codex_thread_start_includes_delegation_mcp_config() {
         "TermAl AutoApprove must keep native Codex approval requests enabled at thread start"
     );
 
-    let (_request_id, sender) =
-        take_pending_codex_request(&pending_requests, Duration::from_secs(1));
-    sender
-        .send(Ok(json!({
-            "thread": {
-                "id": "conversation-mcp-config"
-            }
-        })))
-        .expect("thread/start response should send");
-
-    match input_rx
-        .recv_timeout(Duration::from_secs(1))
-        .expect("thread setup should queue StartTurnAfterSetup")
-    {
-        CodexRuntimeCommand::StartTurnAfterSetup { thread_id, .. } => {
-            assert_eq!(thread_id, "conversation-mcp-config");
-        }
-        _ => panic!("expected StartTurnAfterSetup"),
-    }
+    // This test owns only the setup request shape. Retire its waiter instead
+    // of adding a scheduler-sensitive hand-off assertion already covered by
+    // the dedicated setup lifecycle tests in this module.
+    retire_pending_codex_thread_setups(&pending_requests);
 }
 
 // Pins that if the StartTurnAfterSetup channel hand-off fails (input_rx
@@ -1286,6 +1406,7 @@ fn shared_codex_thread_setup_handoff_failure_rolls_back_registration() {
         &pending_requests,
         &state,
         &runtime.runtime_id,
+        &test_missing_shared_codex_home(),
         &runtime.sessions,
         &runtime.thread_sessions,
         &input_tx,
@@ -1415,6 +1536,7 @@ fn shared_codex_thread_setup_persist_failure_does_not_tear_down_runtime() {
         &pending_requests,
         &state,
         &runtime.runtime_id,
+        &test_missing_shared_codex_home(),
         &runtime.sessions,
         &runtime.thread_sessions,
         &input_tx,
@@ -2359,6 +2481,7 @@ fn shared_codex_prompt_command_keeps_writer_loop_responsive_while_turn_start_is_
                             &thread_pending_requests,
                             &thread_state,
                             &thread_runtime.runtime_id,
+                            &test_missing_shared_codex_home(),
                             &thread_runtime.sessions,
                             &thread_runtime.thread_sessions,
                             &thread_input_tx,
