@@ -109,11 +109,12 @@ fixtures can encode the same incorrect assumption on both sides.
 
 ### Entry Points
 
-The binary has three modes:
+The binary has four modes:
 
 1. **Server mode** (default) - starts an axum HTTP server on `127.0.0.1:8787` by default, serves the API, and manages long-lived agent processes. `TERMAL_PORT` can override the port.
 2. **REPL mode** (`repl`, `cli`, or a REPL-capable agent shortcut such as `codex`) - interactive terminal loop. Reads prompts from stdin and runs one turn at a time via `run_turn_blocking()`. Claude is intentionally excluded because Claude Code runs through the long-lived server-side stdio runtime.
 3. **Delegation MCP mode** (`delegation-mcp --parent-session-id <id> [--base-url <origin>]`) - stdio JSON-RPC bridge exposing parent-scoped delegation tools plus the root-only peer-messaging tools to agent runtimes.
+4. **Coordination CLI mode** (`sessions list`, `mailbox list|send|read|read-message|acknowledge`) - a one-shot loopback HTTP client that mirrors the root-only peer-discovery and durable-mailbox MCP tools for agents whose MCP configuration is locked down. It runs the same bridge code as mode 3 against a running server, so identity resolution, guards, idempotency and acknowledgement semantics are identical; see `docs/features/coordination-cli.md`.
 
 The Telegram relay is not a CLI mode. It is configured from Settings ->
 Telegram and supervised inside server mode.

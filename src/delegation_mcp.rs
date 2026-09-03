@@ -592,6 +592,24 @@ struct TermalDelegationMcpBridge {
     safe_replay_retry_sleeper: fn(Duration),
 }
 
+/// Root-versus-child classification of the session a bridge serves. The
+/// reviewer-only capability derived alongside it stays in the bridge cache;
+/// callers outside the MCP gate only need the root/child answer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct CallerClassification {
+    is_delegation_child: bool,
+}
+
+/// Why a caller could not be classified. Neither variant is cached.
+#[derive(Debug, PartialEq, Eq)]
+enum CallerClassificationFailure {
+    /// `/api/state` could not be fetched or decoded (detail is the transport
+    /// or response error text).
+    BackendUnavailable(String),
+    /// The state snapshot has no session with the serving id yet.
+    SessionNotVisible,
+}
+
 fn delegation_child_session_ids(state: &Value) -> HashSet<&str> {
     state
         .get("delegations")
@@ -1442,25 +1460,47 @@ impl TermalDelegationMcpBridge {
     /// Fail SAFE: if the backend can't be reached or the caller can't be found, treat it as
     /// a child (deny peer tools).
     fn caller_is_delegation_child(&self) -> bool {
+        self.caller_classification()
+            .map_or(true, |classification| classification.is_delegation_child)
+    }
+
+    /// Resolves the serving session's classification from `/api/state`, caching
+    /// a successful answer for the bridge lifetime. Failures are returned, not
+    /// cached, so a transient backend outage or a state snapshot that does not
+    /// yet show the caller can be retried on a later call. The MCP gate maps
+    /// every failure to "child" (fail closed); the coordination CLI reports the
+    /// exact reason instead.
+    fn caller_classification(
+        &self,
+    ) -> std::result::Result<CallerClassification, CallerClassificationFailure> {
         if let Some(is_child) = self.caller_is_delegation_child.get() {
-            return *is_child;
+            return Ok(CallerClassification {
+                is_delegation_child: *is_child,
+            });
         }
-        let Ok(state) = self.get_json("/api/state") else {
-            // Fail safe without caching a transient backend failure. A later
-            // call may retry the eligibility lookup after the backend recovers.
-            return true;
+        let state = match self.get_json("/api/state") {
+            Ok(state) => state,
+            Err(err) => {
+                return Err(CallerClassificationFailure::BackendUnavailable(format!(
+                    "{err:#}"
+                )));
+            }
         };
         let delegation_child_ids = delegation_child_session_ids(&state);
+        // A snapshot without a sessions array is an unusable response from
+        // the backend, not evidence about the caller.
         let Some(sessions) = state.get("sessions").and_then(Value::as_array) else {
-            return true;
+            return Err(CallerClassificationFailure::BackendUnavailable(
+                "the state snapshot has no `sessions` array".to_owned(),
+            ));
         };
+        // State delivery can briefly lag the caller's runtime startup, so an
+        // absent caller is reported for this call only, never cached as a
+        // lifetime denial.
         let Some(session) = sessions.iter().find(|session| {
             session.get("id").and_then(Value::as_str) == Some(self.serving_session_id.as_str())
         }) else {
-            // State delivery can briefly lag the caller's runtime startup. Fail
-            // closed for this call without caching the absence as a lifetime
-            // denial; a later request may observe the parent session.
-            return true;
+            return Err(CallerClassificationFailure::SessionNotVisible);
         };
         let is_child = !is_root_peer_session(session, &delegation_child_ids);
         let requires_structured_review_result = is_child
@@ -1472,7 +1512,9 @@ impl TermalDelegationMcpBridge {
         let _ = self
             .caller_requires_structured_review_result
             .set(requires_structured_review_result);
-        is_child
+        Ok(CallerClassification {
+            is_delegation_child: is_child,
+        })
     }
 
     fn caller_requires_structured_review_result(&self) -> bool {

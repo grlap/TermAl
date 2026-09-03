@@ -16,10 +16,10 @@ use std::thread;
 const TEST_MCP_HTTP_ACCEPT_DEADLINE: Duration = Duration::from_secs(10);
 
 #[derive(Clone, Debug)]
-struct TestMcpHttpRequest {
-    method: String,
-    path: String,
-    body: String,
+pub(crate) struct TestMcpHttpRequest {
+    pub(crate) method: String,
+    pub(crate) path: String,
+    pub(crate) body: String,
 }
 
 fn serialized_delegation_child_state(
@@ -177,7 +177,7 @@ fn accept_test_mcp_http_stream(
     Ok(stream)
 }
 
-fn spawn_test_mcp_http_server(
+pub(crate) fn spawn_test_mcp_http_server(
     expected_requests: usize,
     handler: impl Fn(TestMcpHttpRequest) -> (u16, Value) + Send + Sync + 'static,
 ) -> (

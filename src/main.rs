@@ -10,6 +10,7 @@ CLI args
      -> server    -> run_server() -> app_router() -> AppState + HTTP/SSE handlers
      -> repl      -> run_turn_blocking() -> recorder callbacks -> stdout
      -> delegation-mcp -> run_delegation_mcp_bridge() -> parent-scoped MCP tools
+     -> sessions / mailbox -> run_coordination_cli() -> loopback mailbox and session tools
 The crate still compiles as one module so shared backend types stay crate-visible
 without a dense web of pub mod exports, but the behavior is split across
 src/api.rs, src/state.rs, src/runtime.rs, src/turns.rs, src/remote.rs,
@@ -67,7 +68,9 @@ async fn main() {
     ignore_sigpipe();
     if let Err(err) = run().await {
         eprintln!("fatal: {err:#}");
-        std::process::exit(1);
+        // Usage errors of the coordination CLI exit with 2; every other
+        // failure keeps the historical exit code 1.
+        std::process::exit(coordination_cli_exit_code(&err));
     }
 }
 
@@ -91,7 +94,9 @@ fn ignore_sigpipe() {
 #[cfg(not(unix))]
 fn ignore_sigpipe() {}
 
-/// Runs the selected CLI mode.
+/// Runs the selected entry-point mode: the HTTP server (default), an
+/// interactive REPL, the stdio delegation MCP bridge, or the one-shot
+/// coordination CLI (`sessions` / `mailbox`) that talks to a running server.
 async fn run() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match Mode::parse(args)? {
@@ -108,6 +113,11 @@ async fn run() -> Result<()> {
         })
         .await
         .map_err(|err| anyhow!("delegation MCP bridge task failed: {err}"))?,
+        Mode::CoordinationCli(invocation) => {
+            tokio::task::spawn_blocking(move || run_coordination_cli(invocation))
+                .await
+                .map_err(|err| anyhow!("coordination CLI task failed: {err}"))?
+        }
     }
 }
 
@@ -599,17 +609,23 @@ enum Mode {
         parent_session_id: String,
         base_url: Option<String>,
     },
+    /// `sessions ...` / `mailbox ...`: the coordination CLI, a loopback HTTP
+    /// client for agents whose MCP configuration is locked down.
+    CoordinationCli(CoordinationCliInvocation),
 }
 
 impl Mode {
     /// Parses CLI arguments into an entry-point `Mode`. First arg
     /// selects between the HTTP server (`server`, default), the
-    /// delegation MCP bridge (`delegation-mcp`), or a REPL session
-    /// (`repl` / `cli` + agent name, or a bare REPL-capable agent
-    /// name like `codex`).
+    /// delegation MCP bridge (`delegation-mcp`), the coordination CLI
+    /// (`sessions` / `mailbox`), or a REPL session (`repl` / `cli` +
+    /// agent name, or a bare REPL-capable agent name like `codex`).
     fn parse(args: Vec<String>) -> Result<Self> {
         match args.first().map(String::as_str) {
             None | Some("server") => Ok(Self::Server),
+            Some("sessions") | Some("mailbox") => {
+                Ok(Self::CoordinationCli(parse_coordination_cli_args(args)?))
+            }
             // Legacy standalone Telegram aliases are intentionally rejected:
             // the relay is owned by server mode and configured from Settings.
             Some("telegram") | Some("telegram-bot") => bail!(
@@ -654,6 +670,7 @@ include!("test_temp_root.rs");
 include!("state.rs");
 include!("engram_host_adapter.rs");
 include!("delegation_mcp.rs");
+include!("coordination_cli.rs");
 include!("engram_mcp_config.rs");
 include!("session_runtime.rs");
 include!("session_interaction.rs");
