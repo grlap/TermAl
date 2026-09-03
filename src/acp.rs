@@ -84,6 +84,7 @@ fn spawn_acp_runtime(
     cwd: String,
     agent: AcpAgent,
     gemini_approval_mode: Option<GeminiApprovalMode>,
+    engram_mcp: Option<&TermalDelegationMcpStdioConfig>,
 ) -> Result<AcpRuntimeHandle> {
     if !state.agent_runtime_spawning_enabled {
         bail!("agent runtime spawning is disabled for this AppState");
@@ -103,6 +104,7 @@ fn spawn_acp_runtime(
             }
         }
     }
+    apply_engram_agent_process_env(&mut command, engram_mcp)?;
     command
         .current_dir(&cwd)
         .stdin(Stdio::piped())
@@ -132,6 +134,7 @@ fn spawn_acp_runtime(
     let pending_requests: AcpPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
     let runtime_state = Arc::new(Mutex::new(AcpRuntimeState::default()));
     let turn_lifecycle: AcpTurnLifecycle = Arc::new((Mutex::new(false), Condvar::new()));
+    let runtime_engram_mcp = engram_mcp.cloned();
 
     {
         let writer_session_id = session_id.clone();
@@ -140,6 +143,7 @@ fn spawn_acp_runtime(
         let writer_runtime_state = runtime_state.clone();
         let writer_turn_lifecycle = turn_lifecycle.clone();
         let writer_runtime_token = RuntimeToken::Acp(runtime_id.clone());
+        let writer_engram_mcp = runtime_engram_mcp.clone();
         let writer_cwd = cwd.clone();
         std::thread::spawn(move || {
             let mut stdin = stdin;
@@ -191,6 +195,7 @@ fn spawn_acp_runtime(
                         &writer_runtime_state,
                         &writer_turn_lifecycle,
                         &writer_runtime_token,
+                        writer_engram_mcp.as_ref(),
                         agent,
                         prompt,
                     ),
@@ -213,6 +218,7 @@ fn spawn_acp_runtime(
                             &writer_session_id,
                             &writer_runtime_state,
                             &writer_runtime_token,
+                            writer_engram_mcp.as_ref(),
                             agent,
                             command,
                         )
@@ -554,6 +560,15 @@ fn select_acp_auth_method(
 }
 
 /// Handles ACP prompt command.
+enum AcpEngramMcpSource<'a> {
+    Runtime {
+        token: &'a RuntimeToken,
+        engram: Option<&'a TermalDelegationMcpStdioConfig>,
+    },
+    #[cfg(test)]
+    LiveState,
+}
+
 fn handle_acp_prompt_command(
     writer: &mut impl Write,
     pending_requests: &AcpPendingRequestMap,
@@ -562,6 +577,7 @@ fn handle_acp_prompt_command(
     runtime_state: &Arc<Mutex<AcpRuntimeState>>,
     turn_lifecycle: &AcpTurnLifecycle,
     runtime_token: &RuntimeToken,
+    runtime_engram_mcp: Option<&TermalDelegationMcpStdioConfig>,
     agent: AcpAgent,
     command: AcpPromptCommand,
 ) -> Result<()> {
@@ -572,6 +588,7 @@ fn handle_acp_prompt_command(
         session_id,
         runtime_state,
         runtime_token,
+        runtime_engram_mcp,
         agent,
         &command,
     ) {
@@ -713,6 +730,7 @@ fn handle_acp_session_config_refresh_for_runtime(
     session_id: &str,
     runtime_state: &Arc<Mutex<AcpRuntimeState>>,
     runtime_token: &RuntimeToken,
+    runtime_engram_mcp: Option<&TermalDelegationMcpStdioConfig>,
     agent: AcpAgent,
     command: AcpPromptCommand,
 ) -> Result<()> {
@@ -722,7 +740,10 @@ fn handle_acp_session_config_refresh_for_runtime(
         state,
         session_id,
         runtime_state,
-        Some(runtime_token),
+        AcpEngramMcpSource::Runtime {
+            token: runtime_token,
+            engram: runtime_engram_mcp,
+        },
         agent,
         command,
     )
@@ -744,7 +765,7 @@ fn handle_acp_session_config_refresh(
         state,
         session_id,
         runtime_state,
-        None,
+        AcpEngramMcpSource::LiveState,
         agent,
         command,
     )
@@ -756,7 +777,7 @@ fn handle_acp_session_config_refresh_inner(
     state: &AppState,
     session_id: &str,
     runtime_state: &Arc<Mutex<AcpRuntimeState>>,
-    runtime_token: Option<&RuntimeToken>,
+    engram_mcp_source: AcpEngramMcpSource<'_>,
     agent: AcpAgent,
     command: AcpPromptCommand,
 ) -> Result<()> {
@@ -783,7 +804,7 @@ fn handle_acp_session_config_refresh_inner(
         state,
         session_id,
         runtime_state,
-        runtime_token,
+        engram_mcp_source,
         agent,
         &command,
     )?;
@@ -798,6 +819,7 @@ fn ensure_acp_session_ready_for_runtime(
     session_id: &str,
     runtime_state: &Arc<Mutex<AcpRuntimeState>>,
     runtime_token: &RuntimeToken,
+    runtime_engram_mcp: Option<&TermalDelegationMcpStdioConfig>,
     agent: AcpAgent,
     command: &AcpPromptCommand,
 ) -> Result<String> {
@@ -807,7 +829,10 @@ fn ensure_acp_session_ready_for_runtime(
         state,
         session_id,
         runtime_state,
-        Some(runtime_token),
+        AcpEngramMcpSource::Runtime {
+            token: runtime_token,
+            engram: runtime_engram_mcp,
+        },
         agent,
         command,
     )
@@ -829,7 +854,7 @@ fn ensure_acp_session_ready(
         state,
         session_id,
         runtime_state,
-        None,
+        AcpEngramMcpSource::LiveState,
         agent,
         command,
     )
@@ -841,7 +866,7 @@ fn ensure_acp_session_ready_inner(
     state: &AppState,
     session_id: &str,
     runtime_state: &Arc<Mutex<AcpRuntimeState>>,
-    runtime_token: Option<&RuntimeToken>,
+    engram_mcp_source: AcpEngramMcpSource<'_>,
     agent: AcpAgent,
     command: &AcpPromptCommand,
 ) -> Result<String> {
@@ -868,10 +893,15 @@ fn ensure_acp_session_ready_inner(
     if let Some(existing_session_id) = existing_session_id {
         return Ok(existing_session_id);
     }
-    let mcp_servers = if let Some(runtime_token) = runtime_token {
-        state.termal_delegation_mcp_acp_servers_for_runtime(session_id, runtime_token)?
-    } else {
-        state.termal_delegation_mcp_acp_servers(session_id)?
+    let mcp_servers = match engram_mcp_source {
+        AcpEngramMcpSource::Runtime { token, engram } => state
+            .termal_delegation_mcp_acp_servers_for_runtime_snapshot(
+                session_id, token, engram,
+            )?,
+        #[cfg(test)]
+        AcpEngramMcpSource::LiveState => {
+            state.termal_delegation_mcp_acp_servers(session_id)?
+        }
     };
 
     let resume_session_id = command.resume_session_id.as_deref();

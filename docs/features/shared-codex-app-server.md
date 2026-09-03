@@ -48,6 +48,23 @@ use TermAl's descriptors if the user configuration contains a collision. A missi
 or malformed seeded file is diagnosed on stderr and falls back to the TermAl-owned
 entries; it never prevents thread setup.
 
+The shared app-server process itself has inherited `ENGRAM_HOME`,
+`ENGRAM_ACTOR_ID`, and `ENGRAM_SESSION_ID` removed because one process serves
+many TermAl sessions. A thread-level `shell_environment_policy` replaces the
+whole configured table, just like `mcp_servers`. For an Engram-eligible session,
+TermAl therefore reads the seeded policy, preserves its inheritance, filtering,
+unknown, and unrelated `set` entries, overlays the three session-specific
+values, and passes the result on both `thread/start` and `thread/resume`. Because
+Codex applies a non-empty `include_only` filter after `set`, TermAl also admits
+the three owned names through that existing allowlist. On Windows it removes
+case-insensitive aliases of the owned names before inserting their canonical
+uppercase spellings.
+
+Ineligible sessions receive no thread-level Engram shell-policy override. The
+shared process cannot leak an inherited TermAl/Engram identity because its own
+environment is scrubbed, while an explicit policy in the user's seeded Codex
+configuration remains user-owned and authoritative.
+
 ## Approval policy ownership
 
 Codex's `never` policy is native: Codex decides not to emit approval requests.

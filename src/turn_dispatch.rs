@@ -154,6 +154,7 @@ impl AppState {
         workdir: String,
         agent: AcpAgent,
         gemini_approval_mode: Option<GeminiApprovalMode>,
+        engram_mcp: Option<&TermalDelegationMcpStdioConfig>,
     ) -> Result<AcpRuntimeHandle> {
         #[cfg(test)]
         {
@@ -169,7 +170,14 @@ impl AppState {
             }
         }
 
-        spawn_acp_runtime(self.clone(), session_id, workdir, agent, gemini_approval_mode)
+        spawn_acp_runtime(
+            self.clone(),
+            session_id,
+            workdir,
+            agent,
+            gemini_approval_mode,
+            engram_mcp,
+        )
     }
 
     fn publish_started_turn_message_delta(&self, revision: u64, delta: StartedTurnMessageDelta) {
@@ -228,11 +236,7 @@ impl AppState {
 
         let pending_engram_for_abandon = pending_engram.clone();
         let session_id = inner.sessions[index].session.id.clone();
-        let engram_mcp = if inner.sessions[index].session.agent == Agent::Claude {
-            engram_mcp_runtime_config_for_session_locked(inner, &session_id)
-        } else {
-            None
-        };
+        let engram_mcp = engram_mcp_runtime_config_for_session_locked(inner, &session_id);
         let mut started = match self.start_turn_on_record(
                 inner
                     .session_mut_by_index(index)
@@ -425,6 +429,7 @@ impl AppState {
                                 .unwrap_or_else(default_claude_effort),
                             record.external_session_id.clone(),
                             delegation_mcp_config,
+                            engram_mcp.as_ref().map(|config| &config.stdio),
                             None,
                         )
                         .map_err(|err| {
@@ -585,6 +590,7 @@ impl AppState {
                             record.session.workdir.clone(),
                             expected_acp_agent,
                             record.session.gemini_approval_mode,
+                            engram_mcp.as_ref().map(|config| &config.stdio),
                         )
                         .map_err(|err| {
                             ApiError::internal(format!(
@@ -593,6 +599,8 @@ impl AppState {
                             ))
                         })?;
                         record.runtime = SessionRuntime::Acp(handle.clone());
+                        record.engram_mcp_installed =
+                            engram_mcp.as_ref().map(|config| config.installed.clone());
                         handle
                     }
                 };
@@ -1500,11 +1508,8 @@ impl AppState {
 
             if prioritize_manual_dispatch_over_blocked_queue {
                 let message_id = inner.next_message_id();
-                let engram_mcp = if inner.sessions[index].session.agent == Agent::Claude {
-                    engram_mcp_runtime_config_for_session_locked(&inner, session_id)
-                } else {
-                    None
-                };
+                let engram_mcp =
+                    engram_mcp_runtime_config_for_session_locked(&inner, session_id);
                 let started = self.start_turn_on_record(
                     inner
                         .session_mut_by_index(index)
@@ -1581,11 +1586,7 @@ impl AppState {
             }
 
             let message_id = inner.next_message_id();
-            let engram_mcp = if inner.sessions[index].session.agent == Agent::Claude {
-                engram_mcp_runtime_config_for_session_locked(&inner, session_id)
-            } else {
-                None
-            };
+            let engram_mcp = engram_mcp_runtime_config_for_session_locked(&inner, session_id);
             let started = self.start_turn_on_record(
                 inner
                     .session_mut_by_index(index)

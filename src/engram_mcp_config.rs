@@ -1,19 +1,49 @@
 // Engram's per-session MCP stdio descriptor for local agent runtimes.
 //
-// Owns descriptor selection plus the base-tier context refresh lifecycle and
-// its bounded `engram work next` child process. Runtime-specific JSON
-// composition remains in `delegation_mcp.rs`; premium turn-gated control and
-// project settings validation remain in `engram_host_adapter.rs`.
+// Owns descriptor selection, application or explicit removal of the descriptor
+// identity on per-session agent processes, plus the base-tier context refresh
+// lifecycle and its bounded `engram work next` child process. Runtime-specific
+// JSON composition remains in `delegation_mcp.rs`; premium turn-gated control
+// and project settings validation remain in `engram_host_adapter.rs`.
 
 const ENGRAM_MCP_SERVER_NAME: &str = "engram";
 const ENGRAM_HOME_ENV: &str = "ENGRAM_HOME";
 const ENGRAM_ACTOR_ID_ENV: &str = "ENGRAM_ACTOR_ID";
 const ENGRAM_SESSION_ID_ENV: &str = "ENGRAM_SESSION_ID";
+const ENGRAM_AGENT_PROCESS_ENV_NAMES: [&str; 3] = [
+    ENGRAM_HOME_ENV,
+    ENGRAM_ACTOR_ID_ENV,
+    ENGRAM_SESSION_ID_ENV,
+];
 const ENGRAM_CONTEXT_NUDGE_MAX_BYTES: usize = 32 * 1024;
 
 struct EngramMcpRuntimeConfig {
     stdio: TermalDelegationMcpStdioConfig,
     installed: EngramMcpInstalledDescriptor,
+}
+
+/// Applies the base-tier identity to a per-session agent process.
+///
+/// Clear inherited values even when Engram is ineligible. The TermAl server may
+/// itself have `ENGRAM_*` variables (for example during an operator smoke test),
+/// but an undeclared or disabled project must not inherit that unrelated identity.
+fn apply_engram_agent_process_env(
+    command: &mut Command,
+    engram: Option<&TermalDelegationMcpStdioConfig>,
+) -> Result<()> {
+    for name in ENGRAM_AGENT_PROCESS_ENV_NAMES {
+        command.env_remove(name);
+    }
+    let Some(engram) = engram else {
+        return Ok(());
+    };
+    for name in ENGRAM_AGENT_PROCESS_ENV_NAMES {
+        let value = engram.env.get(name).with_context(|| {
+            format!("Engram MCP descriptor is missing required agent environment `{name}`")
+        })?;
+        command.env(name, value);
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

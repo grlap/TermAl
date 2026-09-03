@@ -161,7 +161,7 @@ fn termal_delegation_mcp_args(parent_session_id: &str, base_url: &str) -> Vec<St
     ]
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 struct TermalDelegationMcpStdioConfig {
     command: String,
     args: Vec<String>,
@@ -272,25 +272,24 @@ fn termal_delegation_mcp_codex_config_with_command(
     })
 }
 
-#[derive(Deserialize)]
-struct SeededCodexMcpConfig {
+#[derive(Default, Deserialize)]
+struct SeededCodexThreadConfig {
     #[serde(default)]
     mcp_servers: serde_json::Map<String, Value>,
+    #[serde(default)]
+    shell_environment_policy: Option<serde_json::Map<String, Value>>,
 }
 
-fn load_seeded_shared_codex_mcp_servers(
-    codex_home: &FsPath,
-) -> Result<serde_json::Map<String, Value>> {
+fn load_seeded_shared_codex_thread_config(codex_home: &FsPath) -> Result<SeededCodexThreadConfig> {
     let config_path = codex_home.join("config.toml");
     let encoded = fs::read_to_string(&config_path)
         .with_context(|| format!("failed to read `{}`", config_path.display()))?;
-    let config = toml_edit::de::from_str::<SeededCodexMcpConfig>(&encoded).map_err(|_| {
+    toml_edit::de::from_str::<SeededCodexThreadConfig>(&encoded).map_err(|_| {
         anyhow!(
             "`{}` is not valid Codex TOML configuration",
             config_path.display()
         )
-    })?;
-    Ok(config.mcp_servers)
+    })
 }
 
 impl AppState {
@@ -358,15 +357,30 @@ impl AppState {
         )
     }
 
+    #[cfg(test)]
     fn termal_delegation_mcp_acp_servers_for_runtime(
         &self,
         parent_session_id: &str,
         runtime_token: &RuntimeToken,
     ) -> Result<Value> {
-        self.termal_delegation_mcp_acp_servers_with_engram(
+        let engram = self.engram_mcp_stdio_config_for_runtime(parent_session_id, runtime_token);
+        self.termal_delegation_mcp_acp_servers_for_runtime_snapshot(
             parent_session_id,
-            self.engram_mcp_stdio_config_for_runtime(parent_session_id, runtime_token),
+            runtime_token,
+            engram.as_ref(),
         )
+    }
+
+    fn termal_delegation_mcp_acp_servers_for_runtime_snapshot(
+        &self,
+        parent_session_id: &str,
+        runtime_token: &RuntimeToken,
+        engram: Option<&TermalDelegationMcpStdioConfig>,
+    ) -> Result<Value> {
+        if !self.session_matches_runtime_token(parent_session_id, runtime_token) {
+            bail!("ACP runtime changed before its session setup completed");
+        }
+        self.termal_delegation_mcp_acp_servers_with_engram(parent_session_id, engram.cloned())
     }
 
     fn termal_delegation_mcp_acp_servers_with_engram(
@@ -435,14 +449,20 @@ impl AppState {
         codex_home: Option<&FsPath>,
     ) -> Result<Value> {
         let command = termal_delegation_mcp_current_exe()?;
-        let mut servers = match codex_home.map(load_seeded_shared_codex_mcp_servers) {
-            Some(Ok(servers)) => servers,
+        let seeded_config = match codex_home.map(load_seeded_shared_codex_thread_config) {
+            Some(Ok(config)) => config,
             Some(Err(err)) => {
-                eprintln!("codex MCP config warning> {err:#}; using TermAl-owned MCP servers only");
-                serde_json::Map::new()
+                eprintln!(
+                    "codex thread config warning> {err:#}; using TermAl-owned configuration only"
+                );
+                SeededCodexThreadConfig::default()
             }
-            None => serde_json::Map::new(),
+            None => SeededCodexThreadConfig::default(),
         };
+        let SeededCodexThreadConfig {
+            mcp_servers: mut servers,
+            shell_environment_policy,
+        } = seeded_config;
 
         // Thread-level `config.mcp_servers` replaces Codex's whole configured
         // table. Begin with the user table copied into the shared CODEX_HOME,
@@ -458,16 +478,94 @@ impl AppState {
             .and_then(Value::as_object)
             .context("TermAl Codex delegation MCP baseline should contain mcp_servers")?;
         servers.extend(termal_servers.clone());
+        let mut config = json!({ "mcp_servers": servers });
         if let Some(engram) = engram {
-            servers.insert(
-                ENGRAM_MCP_SERVER_NAME.to_owned(),
-                serde_json::to_value(engram)
-                    .context("Engram Codex MCP descriptor should serialize")?,
-            );
+            if let Some(policy) = shell_environment_policy {
+                config
+                    .as_object_mut()
+                    .context("TermAl Codex config should be an object")?
+                    .insert(
+                        "shell_environment_policy".to_owned(),
+                        Value::Object(policy),
+                    );
+            }
+            config
+                .get_mut("mcp_servers")
+                .and_then(Value::as_object_mut)
+                .context("TermAl Codex delegation MCP config should contain mcp_servers")?
+                .insert(
+                    ENGRAM_MCP_SERVER_NAME.to_owned(),
+                    serde_json::to_value(&engram)
+                        .context("Engram Codex MCP descriptor should serialize")?,
+                );
+            merge_engram_agent_shell_env_into_codex_config(&mut config, &engram.env)?;
         }
 
-        Ok(json!({ "mcp_servers": servers }))
+        Ok(config)
     }
+}
+
+/// Codex uses one app-server for many TermAl sessions, so process-global
+/// `ENGRAM_SESSION_ID` would attribute every shell to whichever session spawned
+/// the server. A thread-scoped shell policy gives each start/resume request the
+/// same three values as its Engram MCP child while retaining unrelated policy
+/// entries a future config composer may add.
+fn merge_engram_agent_shell_env_into_codex_config(
+    config: &mut Value,
+    engram_env: &BTreeMap<String, String>,
+) -> Result<()> {
+    let config = config
+        .as_object_mut()
+        .context("TermAl Codex config should be an object")?;
+    let policy = config
+        .entry("shell_environment_policy")
+        .or_insert_with(|| json!({}));
+    let policy = policy
+        .as_object_mut()
+        .context("Codex shell_environment_policy should be an object")?;
+    if let Some(include_only) = policy.get_mut("include_only") {
+        let include_only = include_only
+            .as_array_mut()
+            .context("Codex shell_environment_policy.include_only should be an array")?;
+        if !include_only.is_empty() {
+            for name in ENGRAM_AGENT_PROCESS_ENV_NAMES {
+                if !include_only.iter().any(|entry| {
+                    entry
+                        .as_str()
+                        .is_some_and(|entry| entry == name)
+                }) {
+                    include_only.push(Value::String(name.to_owned()));
+                }
+            }
+        }
+    }
+    let explicit = policy.entry("set").or_insert_with(|| json!({}));
+    let explicit = explicit
+        .as_object_mut()
+        .context("Codex shell_environment_policy.set should be an object")?;
+    remove_engram_agent_shell_env_collisions(explicit, cfg!(windows));
+    for name in ENGRAM_AGENT_PROCESS_ENV_NAMES {
+        let value = engram_env.get(name).with_context(|| {
+            format!("Engram MCP descriptor is missing required agent environment `{name}`")
+        })?;
+        explicit.insert(name.to_owned(), Value::String(value.clone()));
+    }
+    Ok(())
+}
+
+fn remove_engram_agent_shell_env_collisions(
+    explicit: &mut serde_json::Map<String, Value>,
+    case_insensitive: bool,
+) {
+    explicit.retain(|existing, _| {
+        !ENGRAM_AGENT_PROCESS_ENV_NAMES.iter().any(|owned| {
+            if case_insensitive {
+                existing.eq_ignore_ascii_case(owned)
+            } else {
+                existing == owned
+            }
+        })
+    });
 }
 
 struct TermalDelegationMcpBridge {

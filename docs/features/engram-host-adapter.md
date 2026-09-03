@@ -76,8 +76,18 @@ ENGRAM_SESSION_ID=<termal-session-id>
 ```
 
 No authority credential is placed in argv, environment, MCP JSON, state
-snapshots, logs, or private Claude MCP files. Claude, the shared Codex app
-server, and ACP runtimes all receive the same per-session descriptor.
+snapshots, logs, or private Claude MCP files. The same three values are also
+available to commands run from the agent session: Claude and ACP receive them
+on their per-session process, while the shared Codex app server receives no
+process-global Engram identity and applies them through the thread-scoped
+`shell_environment_policy.set` on both `thread/start` and `thread/resume`.
+On each runtime spawn, disabled, undeclared, remote, and globally killed
+projects explicitly remove inherited `ENGRAM_*` identity from per-session agent
+processes. The shared Codex process is always scrubbed; when a Codex thread is
+not eligible, TermAl emits no thread-level override and leaves any explicit
+user-authored Codex shell policy intact. Settings changes mark an existing
+runtime for the reset described under **Settings transitions**; they do not
+rewrite the environment of an already-running process in place.
 
 ## Start and post-compaction context
 
@@ -182,6 +192,9 @@ releases the fence, TermAl drains the queue against the new settings:
 
 Binary/home changes and project deletion retain the same generation-fenced
 runtime teardown and checkpoint ordering as other premium transitions.
+Affected local runtimes are marked for reset so the next turn spawns the agent
+process with the new base-tier identity instead of rewriting a live process
+environment in place.
 
 ## Mailbox and Stop behavior
 

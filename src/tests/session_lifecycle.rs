@@ -225,6 +225,7 @@ fn lightweight_test_state_rejects_direct_claude_runtime_spawning() {
         None,
         String::new(),
         None,
+        None,
     );
 
     let err = match result {
@@ -235,6 +236,58 @@ fn lightweight_test_state_rejects_direct_claude_runtime_spawning() {
         err.to_string(),
         "agent runtime spawning is disabled for this AppState"
     );
+}
+
+#[test]
+fn apply_engram_agent_process_env_matches_mcp_and_clears_ineligible_inheritance() {
+    let expected = BTreeMap::from([
+        (ENGRAM_HOME_ENV.to_owned(), "C:/engram-home".to_owned()),
+        (ENGRAM_ACTOR_ID_ENV.to_owned(), "termal".to_owned()),
+        (
+            ENGRAM_SESSION_ID_ENV.to_owned(),
+            "session-agent-env".to_owned(),
+        ),
+    ]);
+    let descriptor = TermalDelegationMcpStdioConfig {
+        command: "engram".to_owned(),
+        args: Vec::new(),
+        env: expected.clone(),
+    };
+
+    let explicit_env = |command: &Command, name: &str| {
+        command
+            .get_envs()
+            .find(|(key, _)| *key == std::ffi::OsStr::new(name))
+            .map(|(_, value)| value.map(|value| value.to_string_lossy().into_owned()))
+    };
+
+    let mut eligible = Command::new("eligible-agent");
+    for name in ENGRAM_AGENT_PROCESS_ENV_NAMES {
+        eligible.env(name, "stale-parent-value");
+    }
+    apply_engram_agent_process_env(&mut eligible, Some(&descriptor))
+        .expect("eligible agent environment should apply");
+    for (name, value) in &expected {
+        assert_eq!(
+            explicit_env(&eligible, name),
+            Some(Some(value.clone())),
+            "eligible agent must receive the same `{name}` value as its MCP child"
+        );
+    }
+
+    let mut ineligible = Command::new("ineligible-agent");
+    for name in ENGRAM_AGENT_PROCESS_ENV_NAMES {
+        ineligible.env(name, "stale-parent-value");
+    }
+    apply_engram_agent_process_env(&mut ineligible, None)
+        .expect("ineligible agent environment should be cleared");
+    for name in ENGRAM_AGENT_PROCESS_ENV_NAMES {
+        assert_eq!(
+            explicit_env(&ineligible, name),
+            Some(None),
+            "ineligible agents must explicitly remove inherited `{name}`"
+        );
+    }
 }
 
 #[test]
@@ -396,6 +449,7 @@ fn lightweight_test_state_rejects_direct_acp_runtime_spawning() {
         "session-no-real-acp".to_owned(),
         "/tmp".to_owned(),
         AcpAgent::Cursor,
+        None,
         None,
     );
 

@@ -1203,6 +1203,8 @@ Send message (POST /api/sessions/{id}/messages)
   → If session is Active or Approval: queue the prompt, return Queued
   → Otherwise: start turn immediately
     → Spawn agent process if runtime is None
+      → Eligible Engram Base sessions inject the same home/actor/session identity
+        into the agent shell and MCP child (Codex uses thread-scoped shell policy)
     → Run initialize handshake
     → Send user message to agent stdin
     → Status = Active

@@ -672,11 +672,7 @@ impl AppState {
             ));
         }
         let agent = inner.sessions[index].session.agent;
-        let engram_mcp = if agent == Agent::Claude {
-            engram_mcp_runtime_config_for_session_locked(&inner, session_id)
-        } else {
-            None
-        };
+        let engram_mcp = engram_mcp_runtime_config_for_session_locked(&inner, session_id);
         let record = inner
             .session_mut_by_index(index)
             .expect("session index should be valid");
@@ -746,6 +742,7 @@ impl AppState {
                     .unwrap_or_else(default_claude_effort),
                 record.external_session_id.clone(),
                 delegation_mcp_config,
+                engram_mcp.as_ref().map(|config| &config.stdio),
                 Some(response_tx),
             )
             .map_err(|err| {
@@ -956,6 +953,7 @@ impl AppState {
                     record.session.workdir.clone(),
                     expected_acp_agent,
                     record.session.gemini_approval_mode,
+                    engram_mcp.as_ref().map(|config| &config.stdio),
                 )
                 .map_err(|err| {
                     ApiError::internal(format!(
@@ -964,6 +962,8 @@ impl AppState {
                     ))
                 })?;
                 record.runtime = SessionRuntime::Acp(handle.clone());
+                record.engram_mcp_installed =
+                    engram_mcp.as_ref().map(|config| config.installed.clone());
                 handle
             }
         };

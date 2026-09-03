@@ -7,6 +7,40 @@
 
 use super::*;
 
+fn create_test_engram_codex_session(state: &AppState, suffix: &str) -> String {
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join(suffix);
+    fs::create_dir_all(&root).expect("Engram test project root should exist");
+    fs::write(root.join(".engram-project"), "fixture-ready\n")
+        .expect("Engram test repository should be declared");
+    let project_id = create_test_project(state, &root, "Shared Codex Engram project");
+    let session_id = create_test_project_session(state, Agent::Codex, &project_id, &root);
+    let mut inner = state.inner.lock().expect("state mutex poisoned");
+    inner
+        .projects
+        .iter_mut()
+        .find(|project| project.id == project_id)
+        .expect("Engram test project should exist")
+        .engram = Some(EngramProjectSettings {
+        enabled: true,
+        turn_gated_control: false,
+        binary_path: Some("engram".to_owned()),
+        home: Some("test-engram-home".to_owned()),
+        work_authority_grant: None,
+        authority_store_key: None,
+        deadline_ms: None,
+    });
+    inner.engram_declared_project_ids.insert(project_id.clone());
+    inner
+        .engram_declaration_checked_project_ids
+        .insert(project_id);
+    session_id
+}
+
 // Pins the duplicate-Codex-thread leak at its source: a prompt that arrives
 // while a `thread/start` is still in flight must NOT start a second thread.
 //
@@ -191,8 +225,24 @@ fn prompt_during_codex_thread_setup_does_not_start_a_second_thread() {
 #[test]
 fn detach_removes_the_in_flight_thread_setup_so_the_next_prompt_starts_fresh() {
     let state = test_app_state();
-    let session_id = test_session_id(&state, Agent::Codex);
-    let (runtime, _input_rx, _process) = test_shared_codex_runtime("codex-thread-setup-detach");
+    let session_id = create_test_engram_codex_session(&state, "codex-thread-setup-detach");
+    let (runtime, _input_rx, process) = test_shared_codex_runtime("codex-thread-setup-detach");
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process,
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+    }
 
     let pending_requests: CodexPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
     let (input_tx, _dummy_input_rx) = mpsc::channel::<CodexRuntimeCommand>();
@@ -301,6 +351,15 @@ fn detach_removes_the_in_flight_thread_setup_so_the_next_prompt_starts_fresh() {
         "Standard must explicitly clear a service tier inherited by the resumed thread"
     );
     assert_eq!(
+        resume_request.pointer("/params/config/shell_environment_policy/set"),
+        Some(&json!({
+            "ENGRAM_ACTOR_ID": "termal",
+            "ENGRAM_HOME": "test-engram-home",
+            "ENGRAM_SESSION_ID": session_id,
+        })),
+        "thread/resume must give Codex shell commands the MCP child's exact identity"
+    );
+    assert_eq!(
         written.matches("thread/start").count(),
         1,
         "after a detach there is no setup to park on, so the next prompt starts a FRESH thread"
@@ -314,6 +373,15 @@ fn detach_removes_the_in_flight_thread_setup_so_the_next_prompt_starts_fresh() {
         start_request.pointer("/params/serviceTier"),
         Some(&Value::Null),
         "Standard thread/start must serialize the service tier explicitly"
+    );
+    assert_eq!(
+        start_request.pointer("/params/config/shell_environment_policy/set"),
+        Some(&json!({
+            "ENGRAM_ACTOR_ID": "termal",
+            "ENGRAM_HOME": "test-engram-home",
+            "ENGRAM_SESSION_ID": session_id,
+        })),
+        "thread/start must give Codex shell commands the MCP child's exact identity"
     );
 
     retire_pending_codex_thread_setups(&pending_requests);
@@ -1156,11 +1224,31 @@ fn shared_codex_standard_turn_start_serializes_explicit_null_service_tier() {
 fn shared_codex_setup_request_for_mcp_test(
     codex_home: &FsPath,
     resume_thread_id: Option<&str>,
+    engram_enabled: bool,
 ) -> Value {
     let state = test_app_state();
-    let session_id = test_session_id(&state, Agent::Codex);
-    let (runtime, _runtime_input_rx, _process) =
+    let session_id = if engram_enabled {
+        create_test_engram_codex_session(&state, "shared-codex-seeded-mcp-config")
+    } else {
+        test_session_id(&state, Agent::Codex)
+    };
+    let (runtime, _runtime_input_rx, process) =
         test_shared_codex_runtime("shared-codex-seeded-mcp-config");
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Codex session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process,
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime: runtime.clone(),
+                session_id: session_id.clone(),
+            }),
+        });
+    }
     let pending_requests: CodexPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
     let mut writer = Vec::new();
     let (input_tx, _input_rx) = mpsc::channel::<CodexRuntimeCommand>();
@@ -1200,7 +1288,7 @@ fn shared_codex_setup_request_for_mcp_test(
 }
 
 #[test]
-fn shared_codex_thread_setup_merges_seeded_user_mcp_servers_with_termal_precedence() {
+fn shared_codex_thread_setup_merges_seeded_user_config_with_termal_precedence() {
     let root = TestTempRoot::create("termal-shared-codex-user-mcp");
     fs::write(
         root.path().join("config.toml"),
@@ -1215,6 +1303,20 @@ USER_TOKEN = "keep-me"
 [mcp_servers.termal-delegation]
 command = "untrusted-collision"
 args = ["--wrong-parent"]
+
+[shell_environment_policy]
+inherit = "none"
+ignore_default_excludes = false
+exclude = ["DROP_ME"]
+include_only = ["KEEP_ONLY"]
+future_policy = { mode = "preserve-me" }
+
+[shell_environment_policy.set]
+KEEP_ME = "present"
+ENGRAM_HOME = "stale-home"
+ENGRAM_ACTOR_ID = "stale-actor"
+ENGRAM_SESSION_ID = "stale-session"
+engram_home = "case-colliding-home"
 "#,
     )
     .expect("seeded Codex config should write");
@@ -1223,7 +1325,7 @@ args = ["--wrong-parent"]
         ("thread/start", None),
         ("thread/resume", Some("thread-existing")),
     ] {
-        let request = shared_codex_setup_request_for_mcp_test(root.path(), resume_thread_id);
+        let request = shared_codex_setup_request_for_mcp_test(root.path(), resume_thread_id, true);
         assert_eq!(request["method"], expected_method);
         assert_eq!(
             request.pointer("/params/config/mcp_servers/user-tools/command"),
@@ -1247,20 +1349,161 @@ args = ["--wrong-parent"]
                 .is_some_and(|args| args.iter().any(|arg| arg == "delegation-mcp")),
             "the winning TermAl descriptor must launch the delegation bridge"
         );
+        assert_eq!(
+            request.pointer("/params/config/shell_environment_policy/inherit"),
+            Some(&json!("none")),
+            "the seeded inheritance policy must survive the thread-level override"
+        );
+        assert_eq!(
+            request.pointer("/params/config/shell_environment_policy/exclude"),
+            Some(&json!(["DROP_ME"])),
+            "the seeded exclusion policy must survive the thread-level override"
+        );
+        assert_eq!(
+            request.pointer("/params/config/shell_environment_policy/include_only"),
+            Some(&json!([
+                "KEEP_ONLY",
+                "ENGRAM_HOME",
+                "ENGRAM_ACTOR_ID",
+                "ENGRAM_SESSION_ID",
+            ])),
+            "an active seeded allowlist must retain its entries and admit the owned identity"
+        );
+        assert_eq!(
+            request.pointer("/params/config/shell_environment_policy/ignore_default_excludes"),
+            Some(&json!(false)),
+            "the seeded default-exclusion setting must survive the thread-level override"
+        );
+        assert_eq!(
+            request.pointer("/params/config/shell_environment_policy/future_policy"),
+            Some(&json!({ "mode": "preserve-me" })),
+            "unknown seeded policy keys must survive without reshaping"
+        );
+        assert_eq!(
+            request.pointer("/params/config/shell_environment_policy/set/KEEP_ME"),
+            Some(&json!("present")),
+            "unrelated seeded environment entries must survive the Engram overlay"
+        );
+        #[cfg(windows)]
+        assert!(
+            request
+                .pointer("/params/config/shell_environment_policy/set/engram_home")
+                .is_none(),
+            "Windows must remove case-insensitive aliases before inserting the canonical name"
+        );
+        #[cfg(not(windows))]
+        assert_eq!(
+            request.pointer("/params/config/shell_environment_policy/set/engram_home"),
+            Some(&json!("case-colliding-home")),
+            "Unix environment names are case-sensitive, so the lowercase entry is unrelated"
+        );
+        for name in ENGRAM_AGENT_PROCESS_ENV_NAMES {
+            assert_eq!(
+                request.pointer(&format!(
+                    "/params/config/shell_environment_policy/set/{name}"
+                )),
+                request.pointer(&format!("/params/config/mcp_servers/engram/env/{name}")),
+                "{expected_method} must overlay `{name}` with the MCP child's exact value"
+            );
+        }
     }
+
+    let ineligible_request = shared_codex_setup_request_for_mcp_test(root.path(), None, false);
+    assert!(
+        ineligible_request
+            .pointer("/params/config/shell_environment_policy")
+            .is_none(),
+        "an ineligible thread must not receive a thread-level Engram shell policy"
+    );
+}
+
+#[test]
+fn codex_engram_shell_env_collision_matching_follows_platform_semantics() {
+    let seeded = json!({
+        "ENGRAM_HOME": "canonical-stale",
+        "engram_home": "mixed-case-stale",
+        "KEEP_ME": "unrelated",
+    });
+
+    let mut case_sensitive = seeded
+        .as_object()
+        .expect("seeded set should be an object")
+        .clone();
+    remove_engram_agent_shell_env_collisions(&mut case_sensitive, false);
+    assert!(!case_sensitive.contains_key("ENGRAM_HOME"));
+    assert_eq!(
+        case_sensitive.get("engram_home"),
+        Some(&json!("mixed-case-stale"))
+    );
+    assert_eq!(case_sensitive.get("KEEP_ME"), Some(&json!("unrelated")));
+
+    let mut case_insensitive = seeded
+        .as_object()
+        .expect("seeded set should be an object")
+        .clone();
+    remove_engram_agent_shell_env_collisions(&mut case_insensitive, true);
+    assert!(!case_insensitive.contains_key("ENGRAM_HOME"));
+    assert!(!case_insensitive.contains_key("engram_home"));
+    assert_eq!(case_insensitive.get("KEEP_ME"), Some(&json!("unrelated")));
+}
+
+#[test]
+fn codex_engram_shell_env_include_only_admits_exact_canonical_names() {
+    let mut config = json!({
+        "shell_environment_policy": {
+            "include_only": ["engram_home"],
+        },
+    });
+    let engram_env = BTreeMap::from([
+        (ENGRAM_HOME_ENV.to_owned(), "test-home".to_owned()),
+        (ENGRAM_ACTOR_ID_ENV.to_owned(), "termal".to_owned()),
+        (ENGRAM_SESSION_ID_ENV.to_owned(), "test-session".to_owned()),
+    ]);
+
+    merge_engram_agent_shell_env_into_codex_config(&mut config, &engram_env)
+        .expect("Engram shell identity should merge into the allowlist");
+
+    assert_eq!(
+        config.pointer("/shell_environment_policy/include_only"),
+        Some(&json!([
+            "engram_home",
+            "ENGRAM_HOME",
+            "ENGRAM_ACTOR_ID",
+            "ENGRAM_SESSION_ID",
+        ])),
+        "a differently-cased allowlist entry must not suppress the exact canonical name"
+    );
 }
 
 #[test]
 fn shared_codex_thread_setup_falls_back_when_seeded_config_is_missing_or_malformed() {
     let root = TestTempRoot::create("termal-shared-codex-invalid-mcp");
     let missing_home = root.path().join("missing-home");
-    let missing_request = shared_codex_setup_request_for_mcp_test(&missing_home, None);
+    let missing_request = shared_codex_setup_request_for_mcp_test(&missing_home, None, true);
     let missing_servers = missing_request
         .pointer("/params/config/mcp_servers")
         .and_then(Value::as_object)
         .expect("fallback config should contain mcp_servers");
-    assert_eq!(missing_servers.len(), 1);
+    assert_eq!(missing_servers.len(), 2);
     assert!(missing_servers.contains_key(TERMAL_DELEGATION_MCP_SERVER_NAME));
+    assert!(missing_servers.contains_key(ENGRAM_MCP_SERVER_NAME));
+    let missing_policy = missing_request
+        .pointer("/params/config/shell_environment_policy")
+        .and_then(Value::as_object)
+        .expect("eligible fallback config should contain a shell policy");
+    assert_eq!(missing_policy.len(), 1);
+    assert_eq!(
+        missing_policy
+            .get("set")
+            .and_then(Value::as_object)
+            .map(|set| set.len()),
+        Some(ENGRAM_AGENT_PROCESS_ENV_NAMES.len()),
+        "a missing seeded policy must fall back to exactly the three TermAl-owned values"
+    );
+    assert!(
+        missing_policy.get("include_only").is_none(),
+        "an absent allowlist must stay absent instead of enabling allowlist mode"
+    );
 
     let malformed_home = root.path().join("malformed-home");
     fs::create_dir_all(&malformed_home).expect("malformed Codex home should be created");
@@ -1270,19 +1513,38 @@ fn shared_codex_thread_setup_falls_back_when_seeded_config_is_missing_or_malform
     )
     .expect("malformed Codex config should write");
     let malformed_request =
-        shared_codex_setup_request_for_mcp_test(&malformed_home, Some("thread-existing"));
+        shared_codex_setup_request_for_mcp_test(&malformed_home, Some("thread-existing"), true);
     let malformed_servers = malformed_request
         .pointer("/params/config/mcp_servers")
         .and_then(Value::as_object)
         .expect("fallback config should contain mcp_servers");
-    assert_eq!(malformed_servers.len(), 1);
+    assert_eq!(malformed_servers.len(), 2);
     assert!(malformed_servers.contains_key(TERMAL_DELEGATION_MCP_SERVER_NAME));
+    assert!(malformed_servers.contains_key(ENGRAM_MCP_SERVER_NAME));
+    let malformed_policy = malformed_request
+        .pointer("/params/config/shell_environment_policy")
+        .and_then(Value::as_object)
+        .expect("eligible malformed fallback should contain a shell policy");
+    assert_eq!(malformed_policy.len(), 1);
+    assert_eq!(
+        malformed_policy
+            .get("set")
+            .and_then(Value::as_object)
+            .map(|set| set.len()),
+        Some(ENGRAM_AGENT_PROCESS_ENV_NAMES.len()),
+        "a malformed seeded config must fall back to exactly the three TermAl-owned values"
+    );
+    assert!(
+        malformed_policy.get("include_only").is_none(),
+        "a malformed fallback must not enable allowlist mode"
+    );
 }
 
 #[test]
 fn shared_codex_thread_start_includes_delegation_mcp_config() {
     let state = test_app_state();
-    let session_id = test_session_id(&state, Agent::Codex);
+    let session_id =
+        create_test_engram_codex_session(&state, "shared-codex-thread-start-mcp-config");
     let (runtime, _runtime_input_rx, process) =
         test_shared_codex_runtime("shared-codex-thread-start-mcp-config");
 
@@ -1359,6 +1621,15 @@ fn shared_codex_thread_start_includes_delegation_mcp_config() {
         start_request.pointer("/params/approvalPolicy"),
         Some(&json!("on-request")),
         "TermAl AutoApprove must keep native Codex approval requests enabled at thread start"
+    );
+    assert_eq!(
+        start_request.pointer("/params/config/shell_environment_policy/set"),
+        Some(&json!({
+            "ENGRAM_ACTOR_ID": "termal",
+            "ENGRAM_HOME": "test-engram-home",
+            "ENGRAM_SESSION_ID": session_id,
+        })),
+        "the real thread/start request must carry the Engram shell identity"
     );
 
     // This test owns only the setup request shape. Retire its waiter instead

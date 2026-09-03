@@ -304,6 +304,7 @@ fn acp_prompt_command_keeps_writer_loop_responsive_while_waiting_for_response() 
                     &thread_runtime_state,
                     &thread_turn_lifecycle,
                     &runtime_token,
+                    None,
                     AcpAgent::Cursor,
                     prompt,
                 )

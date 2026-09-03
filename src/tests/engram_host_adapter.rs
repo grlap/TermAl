@@ -14770,6 +14770,10 @@ fn project_actor_engram_mcp_is_added_to_claude_acp_and_codex_configs() {
             "ENGRAM_SESSION_ID": codex_session,
         })
     );
+    assert_eq!(
+        codex["shell_environment_policy"]["set"], codex["mcp_servers"]["engram"]["env"],
+        "Codex shell commands and its Engram MCP child must share exact attribution"
+    );
     assert!(
         !codex["mcp_servers"]["engram"]["args"]
             .to_string()
@@ -14783,6 +14787,181 @@ fn project_actor_engram_mcp_is_added_to_claude_acp_and_codex_configs() {
         .and_then(|project| project.get("engram"))
         .expect("client project should retain public Engram settings");
     assert!(client_engram.get("workAuthorityGrant").is_none());
+}
+
+#[test]
+fn acp_session_setup_uses_the_engram_snapshot_that_spawned_its_process() {
+    let state = test_app_state();
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("engram-acp-runtime-snapshot-project");
+    fs::create_dir_all(&root).expect("project root should exist");
+    let project_id = create_test_project(&state, &root, "Engram ACP runtime snapshot");
+    set_test_project_engram_mcp_settings(&state, &project_id, true, None);
+    let session_id = create_test_project_session(&state, Agent::Cursor, &project_id, &root);
+    let runtime_id = "engram-acp-runtime-snapshot";
+    let (runtime, _runtime_rx) = test_acp_runtime_handle(AcpAgent::Cursor, runtime_id);
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("ACP session should exist");
+        inner.sessions[index].runtime = SessionRuntime::Acp(runtime);
+    }
+    let frozen_engram = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        engram_mcp_runtime_config_for_session_locked(&inner, &session_id)
+            .expect("eligible ACP session should have an Engram descriptor")
+            .stdio
+    };
+    let mut process_command = Command::new("engram-acp-runtime-snapshot-fixture");
+    apply_engram_agent_process_env(&mut process_command, Some(&frozen_engram))
+        .expect("frozen descriptor should configure the ACP process environment");
+    let process_engram_env = process_command
+        .get_envs()
+        .filter_map(|(name, value)| {
+            let name = name.to_string_lossy().into_owned();
+            ENGRAM_AGENT_PROCESS_ENV_NAMES
+                .contains(&name.as_str())
+                .then(|| {
+                    (
+                        name,
+                        value
+                            .expect("eligible ACP identity should set a value")
+                            .to_string_lossy()
+                            .into_owned(),
+                    )
+                })
+        })
+        .collect::<BTreeMap<_, _>>();
+
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        inner
+            .projects
+            .iter_mut()
+            .find(|project| project.id == project_id)
+            .and_then(|project| project.engram.as_mut())
+            .expect("Engram settings should exist")
+            .home = Some("C:/engram-home-after-spawn".to_owned());
+    }
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        assert_eq!(
+            engram_mcp_runtime_config_for_session_locked(&inner, &session_id)
+                .expect("live Engram descriptor should still be eligible")
+                .stdio
+                .env
+                .get(ENGRAM_HOME_ENV)
+                .map(String::as_str),
+            Some("C:/engram-home-after-spawn"),
+            "the regression requires live state to differ from the runtime snapshot"
+        );
+    }
+
+    let pending_requests = Arc::new(Mutex::new(HashMap::new()));
+    let runtime_state = Arc::new(Mutex::new(AcpRuntimeState {
+        current_session_id: None,
+        is_loading_history: false,
+        opencode_reconcile_fingerprints: VecDeque::new(),
+        opencode_config_notification_tx: None,
+        capabilities: Some(AcpCapabilities {
+            supports_session_load: Some(false),
+            supports_session_resume: None,
+        }),
+    }));
+    let writer = SharedBufferWriter::default();
+    let thread_writer = writer.clone();
+    let thread_pending_requests = pending_requests.clone();
+    let thread_state = state.clone();
+    let thread_runtime_state = runtime_state.clone();
+    let thread_session_id = session_id.clone();
+    let runtime_token = RuntimeToken::Acp(runtime_id.to_owned());
+    let setup = std::thread::spawn(move || {
+        let mut stdin = thread_writer;
+        ensure_acp_session_ready_inner(
+            &mut stdin,
+            &thread_pending_requests,
+            &thread_state,
+            &thread_session_id,
+            &thread_runtime_state,
+            AcpEngramMcpSource::Runtime {
+                token: &runtime_token,
+                engram: Some(&frozen_engram),
+            },
+            AcpAgent::Cursor,
+            &AcpPromptCommand {
+                cwd: root.to_string_lossy().into_owned(),
+                cursor_mode: Some(CursorMode::Ask),
+                model: "auto".to_owned(),
+                opencode_effort: None,
+                opencode_mode: None,
+                prompt: "Use the frozen Engram identity.".to_owned(),
+                resume_session_id: None,
+            },
+        )
+    });
+
+    let (_request_id, response_tx) =
+        take_pending_acp_request(&pending_requests, Duration::from_secs(1));
+    response_tx
+        .send(Ok(json!({
+            "sessionId": "cursor-runtime-snapshot",
+            "configOptions": [],
+        })))
+        .expect("session/new response should send");
+    setup
+        .join()
+        .expect("ACP setup worker should finish")
+        .expect("ACP session setup should succeed");
+
+    let request = writer
+        .contents()
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .find(|request| request["method"] == "session/new")
+        .expect("ACP session/new request should be emitted");
+    let engram = request["params"]["mcpServers"]
+        .as_array()
+        .and_then(|servers| {
+            servers
+                .iter()
+                .find(|server| server["name"] == ENGRAM_MCP_SERVER_NAME)
+        })
+        .expect("ACP session setup should include Engram MCP");
+    let mcp_engram_env = engram["env"]
+        .as_array()
+        .expect("ACP Engram environment should be an array")
+        .iter()
+        .map(|entry| {
+            (
+                entry["name"]
+                    .as_str()
+                    .expect("ACP environment name should be a string")
+                    .to_owned(),
+                entry["value"]
+                    .as_str()
+                    .expect("ACP environment value should be a string")
+                    .to_owned(),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    assert_eq!(
+        mcp_engram_env, process_engram_env,
+        "ACP process and MCP child must use one frozen descriptor snapshot"
+    );
+    assert_eq!(
+        engram["env"],
+        json!([
+            { "name": "ENGRAM_ACTOR_ID", "value": "termal" },
+            { "name": "ENGRAM_HOME", "value": "C:/engram-home" },
+            { "name": "ENGRAM_SESSION_ID", "value": session_id },
+        ]),
+        "MCP setup must use the descriptor that also configured the ACP process environment"
+    );
 }
 
 #[test]
@@ -15281,6 +15460,10 @@ fn per_session_engram_mcp_uses_base_context_and_preserves_ineligible_baselines()
             "ENGRAM_HOME": "C:/engram-home",
             "ENGRAM_SESSION_ID": enabled_session,
         })
+    );
+    assert_eq!(
+        enabled["shell_environment_policy"]["set"],
+        enabled["mcp_servers"]["engram"]["env"]
     );
 
     set_test_project_engram_mcp_settings(&state, &project_id, false, None);

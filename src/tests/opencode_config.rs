@@ -669,6 +669,7 @@ fn opencode_structured_missing_session_error_preserves_continuity_after_failure(
             &thread_runtime_state,
             &Arc::new((Mutex::new(false), Condvar::new())),
             &RuntimeToken::Acp("opencode-structured-missing".to_owned()),
+            None,
             AcpAgent::OpenCode,
             AcpPromptCommand {
                 cwd: "/tmp".to_owned(),
