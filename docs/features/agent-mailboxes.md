@@ -310,10 +310,16 @@ classification instead of an internal-error `500`.
 
 Before either coordination store or the HTTP listener is available, TermAl
 initializes an empty `coordination.sqlite` with the current schema or validates
-that an existing file already has the exact current version, tables, and
-columns. It does not inspect or attach `termal.sqlite` for mailbox or board
-rows. Obsolete unreleased developer schemas are rejected with a clear
-move/delete-and-reset instruction instead of being migrated.
+that an existing file already has the exact current version and canonical
+schema definitions, including column types and constraints, foreign keys, and
+named indexes. Empty-state initialization is decided again while holding an
+SQLite `BEGIN IMMEDIATE` transaction, so independent TermAl processes cannot
+both attempt to create the schema. It does not inspect or attach
+`termal.sqlite` for mailbox or board rows. Obsolete unreleased developer
+schemas are rejected with a clear move/delete-and-reset instruction instead of
+being migrated. SQLite read, lock, corruption, and I/O failures retain their
+operational error and the actual database path rather than being mislabeled as
+schema drift.
 
 While an original dispatch is still finalizing, duplicate requests may receive
 repeated retryable `503` responses; retrying the same idempotency key remains

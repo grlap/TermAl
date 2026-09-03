@@ -24,7 +24,9 @@ and lazy session/message loading.
 
 - Do not fully relationalize every message subtype in the first pass.
 - Do not add a complex migration framework before it is needed.
-- Do not require users to manually migrate or copy files.
+- Do not require row-by-row manual migration or file copying for a supported
+  current schema. Unsupported unreleased local schemas may require moving the
+  named database aside or deleting it to reset that local state.
 - Do not change agent protocols as part of this work.
 
 ## Storage Layout
@@ -232,8 +234,13 @@ On startup:
    in one immediate transaction.
 2. Bootstrap `coordination.sqlite` before any coordination stores, background
    persistence worker, or HTTP listener. An empty file receives the complete
-   current schema atomically; an existing file must already match the current
-   schema version, table set, and columns.
+   current schema atomically after emptiness is rechecked under an SQLite
+   immediate transaction. An existing file must already match the current
+   schema version and canonical schema definitions, including column types and
+   constraints, foreign keys, and named indexes. Only a genuinely absent or
+   unsupported version/schema receives reset guidance; lock, corruption, I/O,
+   and other SQLite read failures remain operational errors naming the actual
+   path.
 3. Open the long-lived mailbox and board connections and start a dedicated
    coordination-cleanup worker alongside the primary-state persist worker.
 4. Queue the boot-state persistence tick. Once it confirms any durable

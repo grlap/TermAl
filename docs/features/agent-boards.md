@@ -159,4 +159,4 @@ Convention: coordinate *who does what next* through the mailbox; publish
 "board key `gates.union` changed — read it when convenient."
 
 See [SQLite session storage](sqlite-session-storage.md) for the two-database
-layout, migration, and boot ordering.
+layout, unsupported-schema reset policy, and boot ordering.

@@ -150,10 +150,29 @@ fn app_state_boot_ignores_legacy_coordination_tables_and_initializes_current_sto
             .is_empty(),
         "obsolete primary-database coordination rows must not be imported"
     );
+    let primary_connection = rusqlite::Connection::open(&persistence_path)
+        .expect("primary state database should remain readable during boot");
+    let obsolete_mailbox_id: String = primary_connection
+        .query_row(
+            "SELECT id FROM mailboxes WHERE id = 'mailbox-obsolete-boot'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("obsolete primary-database mailbox row should remain untouched");
+    assert_eq!(obsolete_mailbox_id, "mailbox-obsolete-boot");
+    drop(primary_connection);
+
     let connection = state
         .mailbox_store
         .connection()
         .expect("current mailbox connection should be available");
+    let mailbox_count: u32 = connection
+        .query_row("SELECT COUNT(*) FROM mailboxes", [], |row| row.get(0))
+        .expect("current mailbox count should read");
+    assert_eq!(
+        mailbox_count, 0,
+        "the independent current coordination database must start empty"
+    );
     let mut metadata_statement = connection
         .prepare("SELECT key, value FROM meta ORDER BY key")
         .expect("metadata query should prepare");
@@ -194,6 +213,72 @@ fn app_state_boot_ignores_legacy_coordination_tables_and_initializes_current_sto
     );
     drop(first);
     state.shutdown_persist_blocking();
+}
+
+#[test]
+fn app_state_boot_rejects_obsolete_coordination_schema_without_rewrite() {
+    let state_root = PersistTestRoot::new("boot-reject-obsolete-coordination");
+    let persistence_path = state_root.path().join("termal.sqlite");
+    let coordination_path = resolve_coordination_persistence_path(&persistence_path);
+    let templates_path = state_root.path().join("orchestrators.json");
+    persist_state(&persistence_path, &StateInner::new())
+        .expect("empty application state should persist");
+    {
+        let connection = rusqlite::Connection::open(&coordination_path)
+            .expect("obsolete coordination fixture should open");
+        connection
+            .execute_batch(
+                "
+                CREATE TABLE mailboxes (
+                  id TEXT PRIMARY KEY,
+                  participant_key TEXT NOT NULL UNIQUE,
+                  created_at TEXT NOT NULL,
+                  next_sequence INTEGER NOT NULL
+                );
+                INSERT INTO mailboxes(id, participant_key, created_at, next_sequence)
+                VALUES(
+                  'mailbox-obsolete-coordination',
+                  'session-old-a\\nsession-old-b',
+                  '2026-09-03T00:00:00Z',
+                  2
+                );
+                ",
+            )
+            .expect("obsolete coordination fixture should initialize");
+    }
+    let before =
+        fs::read(&coordination_path).expect("obsolete coordination bytes should read before boot");
+
+    let error = match AppState::new_with_paths(
+        state_root.path().to_string_lossy().into_owned(),
+        persistence_path,
+        templates_path,
+    ) {
+        Ok(state) => {
+            state.shutdown_persist_blocking();
+            panic!("AppState boot must reject an obsolete coordination schema");
+        }
+        Err(error) => error,
+    };
+    let rendered = format!("{error:#}");
+    assert!(
+        rendered.contains("unsupported coordination database schema"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("Move or delete that coordination database"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains(&coordination_path.display().to_string()),
+        "boot error must name the actual coordination database path: {rendered}"
+    );
+    assert_eq!(
+        fs::read(&coordination_path)
+            .expect("obsolete coordination bytes should remain readable after rejection"),
+        before,
+        "boot validation must reject obsolete coordination state without rewriting it"
+    );
 }
 
 #[test]
