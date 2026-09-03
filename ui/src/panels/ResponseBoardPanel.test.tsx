@@ -1,15 +1,14 @@
 import { useState } from "react";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   createResponseBoardTab,
-  createResponseBoardCard,
   deleteResponseBoardTab,
   deleteResponseBoardCard,
-  fetchResponseBoard,
   fetchResponseBoardTab,
   fetchResponseBoardTabs,
+  RESPONSE_BOARD_DEFAULT_TAB_ID,
   reorderResponseBoardTabs,
   stageResponseBoardCard,
   updateResponseBoardCard,
@@ -22,7 +21,6 @@ import {
   writeResponseBoardMessageDragData,
 } from "../response-board";
 import {
-  RESPONSE_BOARD_ZOOM_STORAGE_KEY,
   ResponseBoardPanel,
   responseBoardViewShowsAnyCard,
 } from "./ResponseBoardPanel";
@@ -30,10 +28,8 @@ import {
 vi.mock("../api", () => ({
   RESPONSE_BOARD_DEFAULT_TAB_ID: "response-board-default",
   createResponseBoardTab: vi.fn(),
-  createResponseBoardCard: vi.fn(),
   deleteResponseBoardTab: vi.fn(),
   deleteResponseBoardCard: vi.fn(),
-  fetchResponseBoard: vi.fn(),
   fetchResponseBoardTab: vi.fn(),
   fetchResponseBoardTabs: vi.fn(),
   reorderResponseBoardTabs: vi.fn(),
@@ -84,6 +80,24 @@ const pinnedCard: ResponseBoardCard = {
   createdAt: "2026-07-31T12:34:56Z",
 };
 
+const defaultBoardTab = {
+  id: "response-board-default",
+  name: "Board",
+  kind: "custom" as const,
+  projectId: null,
+  sortOrder: 0,
+  createdAt: "2026-07-31T12:00:00Z",
+  placedCardCount: 0,
+};
+
+function mockDefaultBoardCards(cards: ResponseBoardCard[]) {
+  vi.mocked(fetchResponseBoardTab).mockResolvedValue({
+    tab: { ...defaultBoardTab, placedCardCount: cards.length },
+    cards,
+    stagedCards: [],
+  });
+}
+
 function mockSurfaceRect(surface: Element) {
   vi.spyOn(surface, "getBoundingClientRect").mockReturnValue({
     bottom: 650,
@@ -123,18 +137,24 @@ function deferred<T>() {
 describe("ResponseBoardPanel", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    window.localStorage.removeItem(RESPONSE_BOARD_ZOOM_STORAGE_KEY);
-    vi.mocked(fetchResponseBoard).mockReset();
     vi.mocked(fetchResponseBoardTabs).mockReset();
     vi.mocked(fetchResponseBoardTab).mockReset();
     vi.mocked(reorderResponseBoardTabs).mockReset();
-    vi.mocked(createResponseBoardCard).mockReset();
     vi.mocked(stageResponseBoardCard).mockReset();
     vi.mocked(createResponseBoardTab).mockReset();
     vi.mocked(updateResponseBoardTab).mockReset();
     vi.mocked(deleteResponseBoardTab).mockReset();
     vi.mocked(updateResponseBoardCard).mockReset();
     vi.mocked(deleteResponseBoardCard).mockReset();
+    vi.mocked(fetchResponseBoardTabs).mockResolvedValue({
+      stagedCardCount: 0,
+      tabs: [defaultBoardTab],
+    });
+    vi.mocked(fetchResponseBoardTab).mockResolvedValue({
+      tab: defaultBoardTab,
+      cards: [],
+      stagedCards: [],
+    });
   });
 
   it("renders partition tabs and places a staged snapshot without changing it", async () => {
@@ -1888,13 +1908,19 @@ describe("ResponseBoardPanel", () => {
     expect(screen.queryByText("Second immutable response")).toBeNull();
   });
 
-  afterEach(() => {
-    window.localStorage.removeItem(RESPONSE_BOARD_ZOOM_STORAGE_KEY);
-  });
-
   it("mounts beside a session fixture and replaces an ids-only drop with the server snapshot", async () => {
-    vi.mocked(fetchResponseBoard).mockResolvedValue({ cards: [] });
-    vi.mocked(createResponseBoardCard).mockResolvedValue(pinnedCard);
+    vi.mocked(fetchResponseBoardTab)
+      .mockResolvedValueOnce({
+        tab: defaultBoardTab,
+        cards: [],
+        stagedCards: [],
+      })
+      .mockResolvedValue({
+        tab: { ...defaultBoardTab, placedCardCount: 1 },
+        cards: [pinnedCard],
+        stagedCards: [],
+      });
+    vi.mocked(stageResponseBoardCard).mockResolvedValue(pinnedCard);
     const dataTransfer = new MemoryDataTransfer();
     writeResponseBoardMessageDragData(dataTransfer as unknown as DataTransfer, {
       sessionId: "session-1",
@@ -1904,12 +1930,18 @@ describe("ResponseBoardPanel", () => {
     const { container } = render(
       <div className="response-board-test-workspace">
         <section data-testid="session-pane-fixture">Session transcript</section>
-        <ResponseBoardPanel refreshToken="refresh-1" onOpenSource={() => {}} />
+        <ResponseBoardPanel
+          refreshToken="refresh-1"
+          workspaceTabId="workspace-board-1"
+          onOpenSource={() => {}}
+        />
       </div>,
     );
 
     expect(
-      await screen.findByText("Drop an agent response anywhere on the board."),
+      await screen.findByText(
+        "Drag a staged response here, or drop a transcript message.",
+      ),
     ).toBeTruthy();
     const surface = container.querySelector(".response-board-surface");
     expect(surface).toBeTruthy();
@@ -1919,11 +1951,13 @@ describe("ResponseBoardPanel", () => {
       clientY: 180,
     });
 
-    await waitFor(() => expect(createResponseBoardCard).toHaveBeenCalledOnce());
-    const request = vi.mocked(createResponseBoardCard).mock.calls[0]?.[0];
+    await waitFor(() => expect(stageResponseBoardCard).toHaveBeenCalledOnce());
+    const request = vi.mocked(stageResponseBoardCard).mock.calls[0]?.[0];
     expect(request).toMatchObject({
       sessionId: "session-1",
       messageId: "message-1",
+      tabId: RESPONSE_BOARD_DEFAULT_TAB_ID,
+      placement: "placed",
     });
     expect(Number.isFinite(request?.x)).toBe(true);
     expect(Number.isFinite(request?.y)).toBe(true);
@@ -1932,6 +1966,37 @@ describe("ResponseBoardPanel", () => {
     expect(dataTransfer.getData(RESPONSE_BOARD_MESSAGE_MIME)).not.toContain(
       "Server-owned immutable response",
     );
+  });
+
+  it("explains that a transcript drop must wait for board tabs to load", async () => {
+    const tabs = deferred<Awaited<ReturnType<typeof fetchResponseBoardTabs>>>();
+    vi.mocked(fetchResponseBoardTabs).mockReturnValue(tabs.promise);
+    const dataTransfer = new MemoryDataTransfer();
+    writeResponseBoardMessageDragData(dataTransfer as unknown as DataTransfer, {
+      sessionId: "session-1",
+      messageId: "message-1",
+    });
+    const { container } = render(
+      <ResponseBoardPanel
+        refreshToken="drop-before-tabs-load"
+        workspaceTabId="workspace-board-1"
+        onOpenSource={() => {}}
+      />,
+    );
+
+    fireEvent.drop(
+      container.querySelector(".response-board-surface") as Element,
+      {
+        dataTransfer,
+        clientX: 300,
+        clientY: 180,
+      },
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Response board tabs are still loading. Drop again when the board is ready.",
+    );
+    expect(stageResponseBoardCard).not.toHaveBeenCalled();
   });
 
   it("atomically places a transcript drop on the selected partitioned tab", async () => {
@@ -2411,18 +2476,24 @@ describe("ResponseBoardPanel", () => {
   it("debounces explicit move geometry and removes cards through the API", async () => {
     vi.useFakeTimers();
     try {
-      vi.mocked(fetchResponseBoard).mockResolvedValue({ cards: [pinnedCard] });
+      mockDefaultBoardCards([pinnedCard]);
       vi.mocked(updateResponseBoardCard).mockImplementation(
         async (_cardId, geometry) => ({
           ...pinnedCard,
           ...geometry,
         }),
       );
-      vi.mocked(deleteResponseBoardCard).mockResolvedValue();
+      vi.mocked(deleteResponseBoardCard).mockImplementation(async () => {
+        mockDefaultBoardCards([]);
+      });
       const { container } = render(
         <div className="response-board-test-workspace">
           <section data-testid="session-pane-fixture">Session transcript</section>
-          <ResponseBoardPanel refreshToken="refresh-1" onOpenSource={() => {}} />
+          <ResponseBoardPanel
+            refreshToken="refresh-1"
+            workspaceTabId="workspace-board-1"
+            onOpenSource={() => {}}
+          />
         </div>,
       );
       await act(async () => Promise.resolve());
@@ -2468,12 +2539,16 @@ describe("ResponseBoardPanel", () => {
   });
 
   it("sizes the board from its cards without forcing an oversized scroll plane", async () => {
-    vi.mocked(fetchResponseBoard).mockResolvedValue({ cards: [pinnedCard] });
+    mockDefaultBoardCards([pinnedCard]);
 
     const { container } = render(
       <div className="response-board-test-workspace">
         <section data-testid="session-pane-fixture">Session transcript</section>
-        <ResponseBoardPanel refreshToken="refresh-1" onOpenSource={() => {}} />
+        <ResponseBoardPanel
+          refreshToken="refresh-1"
+          workspaceTabId="workspace-board-1"
+          onOpenSource={() => {}}
+        />
       </div>,
     );
 
@@ -2487,15 +2562,22 @@ describe("ResponseBoardPanel", () => {
   });
 
   it("suppresses selection only while an empty-canvas pan gesture is active", async () => {
-    window.localStorage.setItem(RESPONSE_BOARD_ZOOM_STORAGE_KEY, "0.5");
-    vi.mocked(fetchResponseBoard).mockResolvedValue({ cards: [pinnedCard] });
+    mockDefaultBoardCards([pinnedCard]);
     const removeAllRanges = vi.fn();
     vi.spyOn(window, "getSelection").mockReturnValue({
       removeAllRanges,
     } as unknown as Selection);
 
     const { container } = render(
-      <ResponseBoardPanel refreshToken="refresh-1" onOpenSource={() => {}} />,
+      <ResponseBoardPanel
+        refreshToken="refresh-1"
+        workspaceTabId="workspace-board-1"
+        activeBoardTabId={RESPONSE_BOARD_DEFAULT_TAB_ID}
+        boardViews={{
+          [RESPONSE_BOARD_DEFAULT_TAB_ID]: { panX: 0, panY: 0, zoom: 0.5 },
+        }}
+        onOpenSource={() => {}}
+      />,
     );
     expect(await screen.findByText("Server-owned immutable response")).toBeTruthy();
     const surface = container.querySelector(".response-board-surface") as HTMLElement;
@@ -2534,9 +2616,13 @@ describe("ResponseBoardPanel", () => {
   });
 
   it("keeps the logical point under the cursor stationary during ctrl-wheel zoom", async () => {
-    vi.mocked(fetchResponseBoard).mockResolvedValue({ cards: [pinnedCard] });
+    mockDefaultBoardCards([pinnedCard]);
     const { container } = render(
-      <ResponseBoardPanel refreshToken="refresh-1" onOpenSource={() => {}} />,
+      <ResponseBoardPanel
+        refreshToken="refresh-1"
+        workspaceTabId="workspace-board-1"
+        onOpenSource={() => {}}
+      />,
     );
     expect(await screen.findByText("Server-owned immutable response")).toBeTruthy();
     const surface = container.querySelector(".response-board-surface") as HTMLElement;
@@ -2560,15 +2646,16 @@ describe("ResponseBoardPanel", () => {
     expect(transform.zoom).toBeLessThan(1);
     expect(transform.panX + 200 * transform.zoom).toBeCloseTo(200, 5);
     expect(transform.panY + 200 * transform.zoom).toBeCloseTo(200, 5);
-    expect(
-      Number(window.localStorage.getItem(RESPONSE_BOARD_ZOOM_STORAGE_KEY)),
-    ).toBeCloseTo(transform.zoom, 5);
   });
 
   it("supports Fn-wheel zoom without intercepting an unmodified wheel", async () => {
-    vi.mocked(fetchResponseBoard).mockResolvedValue({ cards: [pinnedCard] });
+    mockDefaultBoardCards([pinnedCard]);
     const { container } = render(
-      <ResponseBoardPanel refreshToken="refresh-1" onOpenSource={() => {}} />,
+      <ResponseBoardPanel
+        refreshToken="refresh-1"
+        workspaceTabId="workspace-board-1"
+        onOpenSource={() => {}}
+      />,
     );
     expect(await screen.findByText("Server-owned immutable response")).toBeTruthy();
     const surface = container.querySelector(".response-board-surface") as HTMLElement;
@@ -2608,9 +2695,8 @@ describe("ResponseBoardPanel", () => {
 
   it("divides card drag deltas by the persisted view scale", async () => {
     vi.useFakeTimers();
-    window.localStorage.setItem(RESPONSE_BOARD_ZOOM_STORAGE_KEY, "0.5");
     try {
-      vi.mocked(fetchResponseBoard).mockResolvedValue({ cards: [pinnedCard] });
+      mockDefaultBoardCards([pinnedCard]);
       vi.mocked(updateResponseBoardCard).mockImplementation(
         async (_cardId, geometry) => ({
           ...pinnedCard,
@@ -2618,7 +2704,15 @@ describe("ResponseBoardPanel", () => {
         }),
       );
       const { container } = render(
-        <ResponseBoardPanel refreshToken="refresh-1" onOpenSource={() => {}} />,
+        <ResponseBoardPanel
+          refreshToken="refresh-1"
+          workspaceTabId="workspace-board-1"
+          activeBoardTabId={RESPONSE_BOARD_DEFAULT_TAB_ID}
+          boardViews={{
+            [RESPONSE_BOARD_DEFAULT_TAB_ID]: { panX: 0, panY: 0, zoom: 0.5 },
+          }}
+          onOpenSource={() => {}}
+        />,
       );
       await act(async () => Promise.resolve());
 
@@ -2654,12 +2748,18 @@ describe("ResponseBoardPanel", () => {
   });
 
   it("supports keyboard and toolbar zoom controls with a 25%-200% range and reset", async () => {
-    vi.mocked(fetchResponseBoard).mockResolvedValue({ cards: [] });
+    mockDefaultBoardCards([]);
     const { container } = render(
-      <ResponseBoardPanel refreshToken="refresh-1" onOpenSource={() => {}} />,
+      <ResponseBoardPanel
+        refreshToken="refresh-1"
+        workspaceTabId="workspace-board-1"
+        onOpenSource={() => {}}
+      />,
     );
     expect(
-      await screen.findByText("Drop an agent response anywhere on the board."),
+      await screen.findByText(
+        "Drag a staged response here, or drop a transcript message.",
+      ),
     ).toBeTruthy();
     const surface = container.querySelector(".response-board-surface") as HTMLElement;
     mockSurfaceRect(surface);
@@ -2687,19 +2787,28 @@ describe("ResponseBoardPanel", () => {
   });
 
   it("converts drops back into logical coordinates at the active zoom", async () => {
-    window.localStorage.setItem(RESPONSE_BOARD_ZOOM_STORAGE_KEY, "0.5");
-    vi.mocked(fetchResponseBoard).mockResolvedValue({ cards: [] });
-    vi.mocked(createResponseBoardCard).mockResolvedValue(pinnedCard);
+    mockDefaultBoardCards([]);
+    vi.mocked(stageResponseBoardCard).mockResolvedValue(pinnedCard);
     const dataTransfer = new MemoryDataTransfer();
     writeResponseBoardMessageDragData(dataTransfer as unknown as DataTransfer, {
       sessionId: "session-1",
       messageId: "message-1",
     });
     const { container } = render(
-      <ResponseBoardPanel refreshToken="refresh-1" onOpenSource={() => {}} />,
+      <ResponseBoardPanel
+        refreshToken="refresh-1"
+        workspaceTabId="workspace-board-1"
+        activeBoardTabId={RESPONSE_BOARD_DEFAULT_TAB_ID}
+        boardViews={{
+          [RESPONSE_BOARD_DEFAULT_TAB_ID]: { panX: 0, panY: 0, zoom: 0.5 },
+        }}
+        onOpenSource={() => {}}
+      />,
     );
     expect(
-      await screen.findByText("Drop an agent response anywhere on the board."),
+      await screen.findByText(
+        "Drag a staged response here, or drop a transcript message.",
+      ),
     ).toBeTruthy();
     const surface = container.querySelector(".response-board-surface") as HTMLElement;
     mockSurfaceRect(surface);
@@ -2714,9 +2823,11 @@ describe("ResponseBoardPanel", () => {
       surface.dispatchEvent(dropEvent);
     });
     await waitFor(() =>
-      expect(createResponseBoardCard).toHaveBeenCalledWith({
+      expect(stageResponseBoardCard).toHaveBeenCalledWith({
         sessionId: "session-1",
         messageId: "message-1",
+        tabId: RESPONSE_BOARD_DEFAULT_TAB_ID,
+        placement: "placed",
         x: 220,
         y: 232,
       }),

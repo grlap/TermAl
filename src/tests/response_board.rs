@@ -74,75 +74,30 @@ fn attach_response_board_project(
     inner.sessions[session_index].session.project_id = Some(project_id.to_owned());
 }
 
-#[test]
-fn response_board_schema_migrates_legacy_cards_without_rewriting_them() {
-    let path = std::env::temp_dir().join(format!(
-        "termal-response-board-migration-{}.sqlite",
-        Uuid::new_v4()
-    ));
-    let connection = rusqlite::Connection::open(&path).expect("legacy database should open");
-    connection
-        .execute_batch(
-            "CREATE TABLE board_cards (
-               id TEXT PRIMARY KEY,
-               x REAL NOT NULL,
-               y REAL NOT NULL,
-               w REAL NOT NULL,
-               h REAL NOT NULL,
-               snapshot_json TEXT NOT NULL,
-               source_session_id TEXT NOT NULL,
-               source_message_id TEXT NOT NULL,
-               created_at TEXT NOT NULL
-             );
-             INSERT INTO board_cards VALUES(
-               'legacy-card', 11, 22, 333, 444, 'legacy-snapshot',
-               'legacy-session', 'legacy-message', '2026-08-22T00:00:00Z'
-             );",
-        )
-        .expect("legacy response-board schema should initialize");
+#[tokio::test]
+async fn response_board_singleton_routes_are_not_registered_on_api_router() {
+    let state = test_app_state();
+    let _files = ResponseBoardTestFiles::capture(&state);
+    let app = app_router(state);
 
-    ensure_sqlite_response_board_schema(&connection).expect("legacy board should migrate");
-    let migrated: (String, String, String, bool, f64, f64, String) = connection
-        .query_row(
-            "SELECT id, tab_id, placement, has_canvas_position, x, y, snapshot_json
-             FROM board_cards WHERE id = 'legacy-card'",
-            [],
-            |row| {
-                Ok((
-                    row.get(0)?,
-                    row.get(1)?,
-                    row.get(2)?,
-                    row.get(3)?,
-                    row.get(4)?,
-                    row.get(5)?,
-                    row.get(6)?,
-                ))
-            },
-        )
-        .expect("migrated legacy card should remain");
-    assert_eq!(
-        migrated,
-        (
-            "legacy-card".to_owned(),
-            "response-board-default".to_owned(),
-            "placed".to_owned(),
-            true,
-            11.0,
-            22.0,
-            "legacy-snapshot".to_owned(),
-        )
-    );
-    let default_tab_count: i64 = connection
-        .query_row(
-            "SELECT COUNT(*) FROM response_board_tabs
-             WHERE id = 'response-board-default'",
-            [],
-            |row| row.get(0),
-        )
-        .expect("default tab should exist");
-    assert_eq!(default_tab_count, 1);
-    drop(connection);
-    let _ = fs::remove_file(path);
+    // The production server may send unknown GETs through its SPA fallback;
+    // these 404s pin that neither singleton route belongs to the API router.
+    for request in [
+        Request::builder()
+            .method("GET")
+            .uri("/api/response-board")
+            .body(Body::empty())
+            .unwrap(),
+        Request::builder()
+            .method("POST")
+            .uri("/api/response-board/cards")
+            .header("content-type", "application/json")
+            .body(Body::from("{}"))
+            .unwrap(),
+    ] {
+        let response = request_response(&app, request).await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
 }
 
 #[tokio::test]
@@ -158,12 +113,14 @@ async fn response_board_snapshots_durable_messages_and_survives_source_pruning()
         &app,
         Request::builder()
             .method("POST")
-            .uri("/api/response-board/cards")
+            .uri("/api/response-board/cards/stage")
             .header("content-type", "application/json")
             .body(Body::from(
                 serde_json::to_vec(&json!({
                     "sessionId": session_id,
                     "messageId": message_id,
+                    "tabId": RESPONSE_BOARD_DEFAULT_TAB_ID,
+                    "placement": "placed",
                     "x": 120.0,
                     "y": 80.0
                 }))
@@ -227,7 +184,7 @@ async fn response_board_snapshots_durable_messages_and_survives_source_pruning()
         &app,
         Request::builder()
             .method("GET")
-            .uri("/api/response-board")
+            .uri("/api/response-board/tabs/response-board-default")
             .body(Body::empty())
             .unwrap(),
     )
@@ -257,7 +214,7 @@ async fn response_board_snapshots_durable_messages_and_survives_source_pruning()
         &restarted_app,
         Request::builder()
             .method("GET")
-            .uri("/api/response-board")
+            .uri("/api/response-board/tabs/response-board-default")
             .body(Body::empty())
             .unwrap(),
     )
@@ -287,7 +244,7 @@ async fn response_board_snapshots_durable_messages_and_survives_source_pruning()
         &restarted_app,
         Request::builder()
             .method("GET")
-            .uri("/api/response-board")
+            .uri("/api/response-board/tabs/response-board-default")
             .body(Body::empty())
             .unwrap(),
     )
@@ -296,7 +253,7 @@ async fn response_board_snapshots_durable_messages_and_survives_source_pruning()
 }
 
 #[tokio::test]
-async fn response_board_tabs_stage_cards_idempotently_and_keep_legacy_view_placed_only() {
+async fn response_board_tabs_stage_cards_idempotently_and_track_placement() {
     let state = test_app_state();
     let _files = ResponseBoardTestFiles::capture(&state);
     let session_id = test_session_id(&state, Agent::Codex);
@@ -364,20 +321,6 @@ async fn response_board_tabs_stage_cards_idempotently_and_keep_legacy_view_place
     .await;
     assert_eq!(custom_view["cards"].as_array().map(Vec::len), Some(0));
     assert_eq!(custom_view["stagedCards"].as_array().map(Vec::len), Some(1));
-
-    let (_, legacy_before_place): (StatusCode, Value) = request_json(
-        &app,
-        Request::builder()
-            .method("GET")
-            .uri("/api/response-board")
-            .body(Body::empty())
-            .unwrap(),
-    )
-    .await;
-    assert_eq!(
-        legacy_before_place["cards"].as_array().map(Vec::len),
-        Some(0)
-    );
 
     let card_id = staged["id"]
         .as_str()
@@ -788,7 +731,7 @@ async fn response_board_stage_route_enforces_global_staging_capacity() {
 }
 
 #[tokio::test]
-async fn response_board_rejects_duplicate_source_on_legacy_create_and_same_tab_place() {
+async fn response_board_rejects_duplicate_source_on_same_tab_place() {
     let state = test_app_state();
     let _files = ResponseBoardTestFiles::capture(&state);
     let persistence_path = state.persistence_path.as_ref().clone();
@@ -815,30 +758,6 @@ async fn response_board_rejects_duplicate_source_on_legacy_create_and_same_tab_p
     .await;
     assert_eq!(stage_status, StatusCode::CREATED);
 
-    let (legacy_status, legacy_error): (StatusCode, Value) = request_json(
-        &app,
-        Request::builder()
-            .method("POST")
-            .uri("/api/response-board/cards")
-            .header("content-type", "application/json")
-            .body(Body::from(
-                serde_json::to_vec(&json!({
-                    "sessionId": session_id,
-                    "messageId": message_id,
-                    "x": 10.0,
-                    "y": 20.0,
-                }))
-                .unwrap(),
-            ))
-            .unwrap(),
-    )
-    .await;
-    assert_eq!(legacy_status, StatusCode::CONFLICT);
-    assert_eq!(
-        legacy_error["error"],
-        "that response is already on the response board"
-    );
-
     let connection = rusqlite::Connection::open(&persistence_path).unwrap();
     connection
         .execute(
@@ -846,7 +765,7 @@ async fn response_board_rejects_duplicate_source_on_legacy_create_and_same_tab_p
                id, tab_id, placement, has_canvas_position, x, y, w, h,
                snapshot_json, source_session_id, source_message_id, created_at
              ) VALUES (
-               'legacy-placed-duplicate', ?1, 'placed', 1, 30, 40, ?2, ?3,
+               'placed-duplicate', ?1, 'placed', 1, 30, 40, ?2, ?3,
                ?4, ?5, ?6, '2026-08-23T00:00:00Z'
              )",
             rusqlite::params![
@@ -969,12 +888,14 @@ async fn response_board_return_to_staging_enforces_the_global_capacity() {
         &app,
         Request::builder()
             .method("POST")
-            .uri("/api/response-board/cards")
+            .uri("/api/response-board/cards/stage")
             .header("content-type", "application/json")
             .body(Body::from(
                 serde_json::to_vec(&json!({
                     "sessionId": session_id,
                     "messageId": message_id,
+                    "tabId": RESPONSE_BOARD_DEFAULT_TAB_ID,
+                    "placement": "placed",
                     "x": 40.0,
                     "y": 60.0,
                 }))
@@ -1089,12 +1010,14 @@ async fn response_board_return_to_staging_rejects_a_duplicate_staged_source() {
         &app,
         Request::builder()
             .method("POST")
-            .uri("/api/response-board/cards")
+            .uri("/api/response-board/cards/stage")
             .header("content-type", "application/json")
             .body(Body::from(
                 serde_json::to_vec(&json!({
                     "sessionId": session_id,
                     "messageId": message_id,
+                    "tabId": RESPONSE_BOARD_DEFAULT_TAB_ID,
+                    "placement": "placed",
                     "x": 10.0,
                     "y": 20.0,
                 }))
@@ -1112,7 +1035,7 @@ async fn response_board_return_to_staging_rejects_a_duplicate_staged_source() {
                id, tab_id, placement, has_canvas_position, x, y, w, h,
                snapshot_json, source_session_id, source_message_id, created_at
              ) VALUES (
-               'legacy-staged-duplicate', ?1, 'staged', 0, 0, 0, ?2, ?3,
+               'staged-duplicate', ?1, 'staged', 0, 0, 0, ?2, ?3,
                ?4, ?5, ?6, '2026-08-23T00:00:00Z'
              )",
             rusqlite::params![
@@ -1159,52 +1082,6 @@ async fn response_board_return_to_staging_rejects_a_duplicate_staged_source() {
         error["error"],
         "that response is already waiting in staging"
     );
-}
-
-#[tokio::test]
-async fn response_board_legacy_cards_migrate_into_the_default_tab_as_placed() {
-    let state = test_app_state();
-    let _files = ResponseBoardTestFiles::capture(&state);
-    let session_id = test_session_id(&state, Agent::Claude);
-    let message_id = push_response_board_message(&state, &session_id, "Legacy response");
-    persist_response_board_fixture(&state);
-    let app = app_router(state);
-
-    let (create_status, card): (StatusCode, Value) = request_json(
-        &app,
-        Request::builder()
-            .method("POST")
-            .uri("/api/response-board/cards")
-            .header("content-type", "application/json")
-            .body(Body::from(
-                serde_json::to_vec(&json!({
-                    "sessionId": session_id,
-                    "messageId": message_id,
-                    "x": 40.0,
-                    "y": 60.0,
-                }))
-                .expect("legacy create request should serialize"),
-            ))
-            .unwrap(),
-    )
-    .await;
-    assert_eq!(create_status, StatusCode::CREATED);
-    assert_eq!(card["placement"], "placed");
-
-    let (tabs_status, tabs): (StatusCode, Value) = request_json(
-        &app,
-        Request::builder()
-            .method("GET")
-            .uri("/api/response-board/tabs")
-            .body(Body::empty())
-            .unwrap(),
-    )
-    .await;
-    assert_eq!(tabs_status, StatusCode::OK);
-    assert_eq!(tabs["tabs"].as_array().map(Vec::len), Some(1));
-    assert_eq!(tabs["tabs"][0]["id"], "response-board-default");
-    assert_eq!(tabs["tabs"][0]["placedCardCount"], 1);
-    assert_eq!(tabs["stagedCardCount"], 0);
 }
 
 #[tokio::test]

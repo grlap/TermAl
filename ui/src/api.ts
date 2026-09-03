@@ -173,10 +173,6 @@ export type ResponseBoardCard = {
   createdAt: string;
 };
 
-export type ResponseBoard = {
-  cards: ResponseBoardCard[];
-};
-
 export type ResponseBoardTab = {
   id: string;
   name: string;
@@ -635,10 +631,6 @@ export function fetchSessionHistory(
   );
 }
 
-export function fetchResponseBoard() {
-  return requestJsonFirst<ResponseBoard>("/api/response-board");
-}
-
 export function fetchResponseBoardTabs() {
   return requestJsonFirst<ResponseBoardTabs>("/api/response-board/tabs");
 }
@@ -697,18 +689,6 @@ export function stageResponseBoardCard(payload: {
       ...(payload.x !== undefined ? { x: payload.x } : {}),
       ...(payload.y !== undefined ? { y: payload.y } : {}),
     }),
-  });
-}
-
-export function createResponseBoardCard(payload: {
-  sessionId: string;
-  messageId: string;
-  x: number;
-  y: number;
-}) {
-  return request<ResponseBoardCard>("/api/response-board/cards", {
-    method: "POST",
-    body: JSON.stringify(payload),
   });
 }
 

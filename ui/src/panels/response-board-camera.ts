@@ -1,4 +1,4 @@
-// Owns Response Board camera math and legacy zoom persistence.
+// Owns Response Board camera math.
 // Deliberately does not own React state, DOM gestures, or workspace layout writes.
 // Split from ResponseBoardPanel.tsx.
 
@@ -9,22 +9,8 @@ const BOARD_PADDING = 72;
 const MIN_BOARD_ZOOM = 0.25;
 const MAX_BOARD_ZOOM = 2;
 
-export const RESPONSE_BOARD_ZOOM_STORAGE_KEY =
-  "termal.response-board.zoom.v1";
-
 export function clampBoardZoom(value: number) {
   return Math.min(MAX_BOARD_ZOOM, Math.max(MIN_BOARD_ZOOM, value));
-}
-
-export function readStoredBoardZoom() {
-  try {
-    const stored = Number(
-      window.localStorage.getItem(RESPONSE_BOARD_ZOOM_STORAGE_KEY),
-    );
-    return Number.isFinite(stored) && stored > 0 ? clampBoardZoom(stored) : 1;
-  } catch {
-    return 1;
-  }
 }
 
 export function wheelRequestsBoardZoom(event: WheelEvent) {

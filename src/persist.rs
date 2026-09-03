@@ -970,10 +970,6 @@ fn sqlite_state_column_may_be_added_by_maintenance(table_name: &str, column_name
     matches!(
         (table_name, column_name),
         ("messages", "overview_kind" | "is_user")
-            | (
-                "board_cards",
-                "tab_id" | "placement" | "has_canvas_position"
-            )
     )
 }
 
@@ -1934,86 +1930,62 @@ mod sqlite_schema_tests {
     }
 
     #[test]
-    fn current_schema_restores_response_board_partition_columns() {
-        let connection =
-            rusqlite::Connection::open_in_memory().expect("in-memory sqlite should open");
-        ensure_sqlite_state_schema(&connection).expect("fresh current schema should initialize");
-        seed_current_state_metadata(&connection);
-        connection
-            .execute_batch(
-                "
-                DROP TABLE board_cards;
-                CREATE TABLE board_cards (
-                  id TEXT PRIMARY KEY,
-                  x REAL NOT NULL,
-                  y REAL NOT NULL,
-                  w REAL NOT NULL,
-                  h REAL NOT NULL,
-                  snapshot_json TEXT NOT NULL,
-                  source_session_id TEXT NOT NULL,
-                  source_message_id TEXT NOT NULL,
-                  created_at TEXT NOT NULL
-                );
-                INSERT INTO board_cards(
-                  id, x, y, w, h, snapshot_json,
-                  source_session_id, source_message_id, created_at
-                ) VALUES(
-                  'legacy-card', 1.0, 2.0, 3.0, 4.0, '{}',
-                  'session-1', 'message-1', '2026-01-01T00:00:00Z'
-                );
-                ",
-            )
-            .expect("pre-partition response-board fixture should initialize");
+    fn current_schema_rejects_singleton_response_board_without_rewriting() {
+        let state_root = TestTempRoot::create("termal-state-singleton-response-board-guard");
+        let path = state_root.database_path();
+        {
+            let connection = open_sqlite_state_connection_unconfigured(&path)
+                .expect("file-backed sqlite should open");
+            ensure_sqlite_state_schema_for_path(&connection, &path)
+                .expect("fresh current schema should initialize");
+            seed_current_state_metadata(&connection);
+            connection
+                .execute_batch(
+                    "
+                    DROP TABLE board_cards;
+                    CREATE TABLE board_cards (
+                      id TEXT PRIMARY KEY,
+                      x REAL NOT NULL,
+                      y REAL NOT NULL,
+                      w REAL NOT NULL,
+                      h REAL NOT NULL,
+                      snapshot_json TEXT NOT NULL,
+                      source_session_id TEXT NOT NULL,
+                      source_message_id TEXT NOT NULL,
+                      created_at TEXT NOT NULL
+                    );
+                    INSERT INTO board_cards(
+                      id, x, y, w, h, snapshot_json,
+                      source_session_id, source_message_id, created_at
+                    ) VALUES(
+                      'legacy-card', 1.0, 2.0, 3.0, 4.0, '{}',
+                      'session-1', 'message-1', '2026-01-01T00:00:00Z'
+                    );
+                    PRAGMA wal_checkpoint(TRUNCATE);
+                    ",
+                )
+                .expect("singleton response-board fixture should initialize");
+        }
+        let bytes_before_rejection =
+            fs::read(&path).expect("singleton response-board fixture should be readable");
 
-        ensure_sqlite_state_schema(&connection)
-            .expect("current response-board maintenance should restore partition columns");
-
+        let connection = open_sqlite_state_connection_unconfigured(&path)
+            .expect("singleton response-board fixture should reopen");
+        let error = ensure_sqlite_state_schema_for_path(&connection, &path)
+            .expect_err("singleton response-board schema must be rejected");
+        let rendered = format!("{error:#}");
+        assert!(rendered.contains("table `board_cards` has missing columns"), "{rendered}");
+        assert!(rendered.contains("has_canvas_position"), "{rendered}");
+        assert!(rendered.contains("placement"), "{rendered}");
+        assert!(rendered.contains("tab_id"), "{rendered}");
+        assert!(rendered.contains("not migrated"), "{rendered}");
+        assert!(rendered.contains("Move or delete `termal.sqlite`"), "{rendered}");
+        drop(connection);
         assert_eq!(
-            sqlite_state_table_columns(&connection, "board_cards")
-                .expect("post-maintenance board-card columns should be readable"),
-            BTreeSet::from([
-                "created_at".to_owned(),
-                "h".to_owned(),
-                "has_canvas_position".to_owned(),
-                "id".to_owned(),
-                "placement".to_owned(),
-                "snapshot_json".to_owned(),
-                "source_message_id".to_owned(),
-                "source_session_id".to_owned(),
-                "tab_id".to_owned(),
-                "w".to_owned(),
-                "x".to_owned(),
-                "y".to_owned(),
-            ]),
-            "the three tolerated missing board-card columns must be restored before boot continues"
+            fs::read(&path).expect("rejected response-board database should remain readable"),
+            bytes_before_rejection,
+            "singleton response-board rejection must precede persistent PRAGMAs or maintenance"
         );
-        let restored_partition: (String, String, bool) = connection
-            .query_row(
-                "SELECT tab_id, placement, has_canvas_position
-                 FROM board_cards WHERE id = 'legacy-card'",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .expect("restored response-board partition values should be readable");
-        assert_eq!(
-            restored_partition,
-            (
-                RESPONSE_BOARD_DEFAULT_TAB_ID.to_owned(),
-                "placed".to_owned(),
-                true
-            )
-        );
-        let board_index_count: u32 = connection
-            .query_row(
-                "SELECT COUNT(*)
-                 FROM sqlite_master
-                 WHERE type = 'index'
-                   AND name = 'board_cards_tab_placement_created_idx'",
-                [],
-                |row| row.get(0),
-            )
-            .expect("response-board index should be queryable after maintenance");
-        assert_eq!(board_index_count, 1);
     }
 
     #[test]

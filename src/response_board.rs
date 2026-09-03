@@ -4,8 +4,7 @@ Response board storage and HTTP handlers.
 The board is deliberately one durable SQLite collection with a global staging
 inbox and placed-card canvases partitioned by inner tabs. Cards keep immutable
 message snapshots and an explicit staged/placed state; geometry never doubles
-as workflow state. The legacy board endpoint is the placed-card view of the
-deterministic default tab.
+as workflow state.
 */
 
 const RESPONSE_BOARD_DEFAULT_TAB_ID: &str = "response-board-default";
@@ -100,12 +99,6 @@ struct ResponseBoardCard {
     created_at: String,
 }
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ResponseBoard {
-    cards: Vec<ResponseBoardCard>,
-}
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ResponseBoardTab {
@@ -131,15 +124,6 @@ struct ResponseBoardTabView {
     tab: ResponseBoardTab,
     cards: Vec<ResponseBoardCard>,
     staged_cards: Vec<ResponseBoardCard>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct CreateResponseBoardCardRequest {
-    session_id: String,
-    message_id: String,
-    x: f64,
-    y: f64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -243,43 +227,10 @@ fn response_board_invalid_data(message: String) -> rusqlite::Error {
     )
 }
 
-/// Upgrades legacy singleton-board databases in place. Existing cards remain
-/// byte-for-byte snapshots and become placed cards in the default partition.
+/// Establishes the non-table invariants of the current tabbed/staging schema.
+/// The canonical state schema owns the tables and columns; this helper owns the
+/// default-tab row and the board-card lookup index.
 fn ensure_sqlite_response_board_schema(connection: &rusqlite::Connection) -> anyhow::Result<()> {
-    connection.execute_batch(
-        "CREATE TABLE IF NOT EXISTS response_board_tabs (
-           id TEXT PRIMARY KEY,
-           name TEXT NOT NULL,
-           kind TEXT NOT NULL,
-           project_id TEXT UNIQUE,
-           sort_order INTEGER NOT NULL,
-           created_at TEXT NOT NULL
-         );",
-    )?;
-
-    let columns = connection
-        .prepare("PRAGMA table_info(board_cards)")?
-        .query_map([], |row| row.get::<_, String>(1))?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    if !columns.iter().any(|column| column == "tab_id") {
-        connection.execute_batch(
-            "ALTER TABLE board_cards
-             ADD COLUMN tab_id TEXT NOT NULL DEFAULT 'response-board-default';",
-        )?;
-    }
-    if !columns.iter().any(|column| column == "placement") {
-        connection.execute_batch(
-            "ALTER TABLE board_cards
-             ADD COLUMN placement TEXT NOT NULL DEFAULT 'placed';",
-        )?;
-    }
-    if !columns.iter().any(|column| column == "has_canvas_position") {
-        connection.execute_batch(
-            "ALTER TABLE board_cards
-             ADD COLUMN has_canvas_position INTEGER NOT NULL DEFAULT 1;",
-        )?;
-    }
-
     connection.execute(
         "INSERT OR IGNORE INTO response_board_tabs(
            id, name, kind, project_id, sort_order, created_at
@@ -349,28 +300,6 @@ fn response_board_tab_select_sql() -> &'static str {
             COUNT(c.id)
        FROM response_board_tabs t
        LEFT JOIN board_cards c ON c.tab_id = t.id AND c.placement = 'placed'"
-}
-
-fn load_response_board(path: &FsPath) -> Result<ResponseBoard, ApiError> {
-    let connection = open_sqlite_state_read_connection(path)
-        .map_err(|err| response_board_storage_error("open the response board", err))?;
-    let sql = format!(
-        "SELECT {} FROM board_cards
-         WHERE tab_id = ?1 AND placement = 'placed'
-         ORDER BY created_at ASC, id ASC",
-        response_board_select_columns()
-    );
-    let mut statement = connection
-        .prepare(&sql)
-        .map_err(|err| response_board_storage_error("prepare the response board", err))?;
-    let cards = statement
-        .query_map(
-            rusqlite::params![RESPONSE_BOARD_DEFAULT_TAB_ID],
-            decode_response_board_card_row,
-        )
-        .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
-        .map_err(|err| response_board_storage_error("read the response board", err))?;
-    Ok(ResponseBoard { cards })
 }
 
 struct PreparedResponseBoardSnapshot {
@@ -501,90 +430,6 @@ fn enforce_response_board_staging_capacity(
         )));
     }
     Ok(())
-}
-
-fn insert_response_board_card(
-    path: &FsPath,
-    request: CreateResponseBoardCardRequest,
-) -> Result<ResponseBoardCard, ApiError> {
-    validate_response_board_identifier("sessionId", &request.session_id)?;
-    validate_response_board_identifier("messageId", &request.message_id)?;
-    validate_response_board_coordinate("x", request.x)?;
-    validate_response_board_coordinate("y", request.y)?;
-
-    let connection = open_sqlite_state_connection(path)
-        .map_err(|err| response_board_storage_error("open the response board", err))?;
-    let write_lock = sqlite_state_write_lock(path);
-    let _write_guard = lock_sqlite_state_writer(&write_lock);
-    let transaction = connection
-        .unchecked_transaction()
-        .map_err(|err| response_board_storage_error("start a response board update", err))?;
-    let duplicate: bool = transaction
-        .query_row(
-            "SELECT EXISTS(
-               SELECT 1 FROM board_cards
-               WHERE source_session_id = ?1 AND source_message_id = ?2
-             )",
-            rusqlite::params![&request.session_id, &request.message_id],
-            |row| row.get(0),
-        )
-        .map_err(|err| response_board_storage_error("check response-board duplicates", err))?;
-    if duplicate {
-        return Err(ApiError::conflict(
-            "that response is already on the response board",
-        ));
-    }
-    enforce_response_board_tab_capacity(&transaction, RESPONSE_BOARD_DEFAULT_TAB_ID)?;
-    let snapshot = prepare_response_board_snapshot(
-        &transaction,
-        &request.session_id,
-        &request.message_id,
-    )?;
-
-    let card = ResponseBoardCard {
-        id: Uuid::new_v4().to_string(),
-        tab_id: RESPONSE_BOARD_DEFAULT_TAB_ID.to_owned(),
-        placement: ResponseBoardCardPlacement::Placed,
-        has_canvas_position: true,
-        x: request.x,
-        y: request.y,
-        w: RESPONSE_BOARD_DEFAULT_WIDTH,
-        h: RESPONSE_BOARD_DEFAULT_HEIGHT,
-        snapshot: snapshot.message,
-        source_session_id: request.session_id,
-        source_message_id: request.message_id,
-        source_message_position: snapshot.source_message_position,
-        source_session_name: snapshot.source_session_name,
-        source_agent: snapshot.source_agent,
-        created_at: chrono::Utc::now()
-            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-    };
-    transaction
-        .execute(
-            "INSERT INTO board_cards(
-               id, tab_id, placement, has_canvas_position, x, y, w, h,
-               snapshot_json, source_session_id, source_message_id, created_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
-            rusqlite::params![
-                card.id,
-                card.tab_id,
-                card.placement.as_db_str(),
-                card.has_canvas_position,
-                card.x,
-                card.y,
-                card.w,
-                card.h,
-                snapshot.snapshot_json,
-                card.source_session_id,
-                card.source_message_id,
-                card.created_at,
-            ],
-        )
-        .map_err(|err| response_board_storage_error("store the response-board card", err))?;
-    transaction
-        .commit()
-        .map_err(|err| response_board_storage_error("commit the response-board card", err))?;
-    Ok(card)
 }
 
 fn patch_response_board_card(
@@ -1443,25 +1288,6 @@ async fn stage_response_board_card(
     })
     .await?;
     Ok((status, Json(card)))
-}
-
-async fn get_response_board(
-    State(state): State<AppState>,
-) -> Result<Json<ResponseBoard>, ApiError> {
-    let path = state.persistence_path.as_ref().clone();
-    let board = run_blocking_api(move || load_response_board(&path)).await?;
-    Ok(Json(board))
-}
-
-async fn create_response_board_card(
-    State(state): State<AppState>,
-    request: Result<Json<CreateResponseBoardCardRequest>, JsonRejection>,
-) -> Result<(StatusCode, Json<ResponseBoardCard>), ApiError> {
-    let Json(request) =
-        request.map_err(|rejection| api_json_rejection("response-board card", rejection))?;
-    let path = state.persistence_path.as_ref().clone();
-    let card = run_blocking_api(move || insert_response_board_card(&path, request)).await?;
-    Ok((StatusCode::CREATED, Json(card)))
 }
 
 async fn update_response_board_card(

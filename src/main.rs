@@ -457,7 +457,6 @@ fn app_router(state: AppState) -> Router {
             "/api/sessions/{id}/board/set",
             post(set_coordination_board_key),
         )
-        .route("/api/response-board", get(get_response_board))
         .route(
             "/api/response-board/tabs",
             get(list_response_board_tabs).post(create_response_board_tab),
@@ -475,10 +474,6 @@ fn app_router(state: AppState) -> Router {
         .route(
             "/api/response-board/cards/stage",
             post(stage_response_board_card),
-        )
-        .route(
-            "/api/response-board/cards",
-            post(create_response_board_card),
         )
         .route(
             "/api/response-board/cards/{id}",

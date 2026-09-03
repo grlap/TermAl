@@ -64,6 +64,10 @@ dimensions, placement, and tab membership are persisted in `termal.sqlite`.
 The workspace layout persists the active inner tab and each tab's camera, so
 two board panes remain independent.
 
+Fresh state initializes only the tabbed/staging schema. A database containing
+the obsolete singleton `board_cards` shape is unsupported and rejected at boot
+with the standard move/delete reset guidance; TermAl does not convert it.
+
 The durable collection remains global and does not wake sessions. Tabs provide
 project organization without creating separate board databases. Card snapshots
 are capped at 1 MiB; the shared staging inbox and each placed-card canvas are
@@ -78,12 +82,10 @@ as custom for subsequent create requests.
 
 | Method | Route | Purpose |
 | --- | --- | --- |
-| GET | `/api/response-board` | Legacy view: placed cards in the default tab. |
 | GET/POST | `/api/response-board/tabs` | List tabs or create a custom tab. |
 | POST | `/api/response-board/tabs/reorder` | Persist the complete tab order. |
 | GET/PATCH/DELETE | `/api/response-board/tabs/{id}` | Read a tab's placed cards plus the shared staged cards, rename it, or delete a custom tab without placed cards. |
 | POST | `/api/response-board/cards/stage` | Idempotently stage `{ sessionId, messageId, tabId? | projectId? }`, or atomically place it when `placement: "placed"` and finite `x`/`y` are supplied. |
-| POST | `/api/response-board/cards` | Legacy create in the default tab from `{ sessionId, messageId, x, y }`. |
 | PATCH | `/api/response-board/cards/{id}` | Update supplied geometry, `placement`, or `tabId`. |
 | DELETE | `/api/response-board/cards/{id}` | Remove a card; returns `204`. |
 
@@ -99,7 +101,7 @@ The route returns `409` when the destination already contains another placed
 card for the same source, when the destination canvas has reached its 256-card
 limit, or when a staging action would exceed the 256-card global inbox limit.
 
-The create route returns `404` when the requested source message is not yet in
+The staging route returns `404` when the requested source message is not yet in
 durable history. Geometry is finite and bounded: coordinates are limited to
 the board range, width to 240–1600 px, and height to 160–1600 px.
 

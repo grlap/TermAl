@@ -9,10 +9,8 @@ import {
 } from "react";
 import {
   createResponseBoardTab,
-  createResponseBoardCard,
   deleteResponseBoardTab,
   deleteResponseBoardCard,
-  fetchResponseBoard,
   fetchResponseBoardTab,
   reorderResponseBoardTabs,
   stageResponseBoardCard,
@@ -34,8 +32,6 @@ import type { WorkspaceResponseBoardView } from "../workspace";
 import {
   clampBoardZoom,
   fitResponseBoardCardsInView,
-  readStoredBoardZoom,
-  RESPONSE_BOARD_ZOOM_STORAGE_KEY,
   responseBoardViewShowsAnyCard,
   wheelRequestsBoardZoom,
   zoomBoardViewAtPoint,
@@ -53,7 +49,6 @@ import { useResponseBoardTabs } from "./use-response-board-tabs";
 
 export {
   fitResponseBoardCardsInView,
-  RESPONSE_BOARD_ZOOM_STORAGE_KEY,
   responseBoardViewShowsAnyCard,
 } from "./response-board-camera";
 
@@ -91,14 +86,14 @@ type PendingCameraRepair = {
 
 export function ResponseBoardPanel({
   refreshToken,
-  workspaceTabId = "",
+  workspaceTabId,
   activeBoardTabId = null,
   boardViews = {},
   onWorkspaceStateChange = () => {},
   onOpenSource,
 }: {
   refreshToken: string;
-  workspaceTabId?: string;
+  workspaceTabId: string;
   activeBoardTabId?: string | null;
   boardViews?: Record<string, WorkspaceResponseBoardView>;
   onWorkspaceStateChange?: (
@@ -109,7 +104,6 @@ export function ResponseBoardPanel({
   ) => void;
   onOpenSource: (card: ResponseBoardCard) => void;
 }) {
-  const usesPartitionedBoard = workspaceTabId.length > 0;
   const [cards, setCards] = useState<ResponseBoardCard[]>([]);
   const [stagedCards, setStagedCards] = useState<ResponseBoardCard[]>([]);
   const [previewCardId, setPreviewCardId] = useState<string | null>(null);
@@ -129,7 +123,7 @@ export function ResponseBoardPanel({
       stored ?? {
         panX: 0,
         panY: 0,
-        zoom: usesPartitionedBoard ? 1 : readStoredBoardZoom(),
+        zoom: 1,
       }
     );
   });
@@ -205,7 +199,7 @@ export function ResponseBoardPanel({
   const finishCommittedCardMutation = useCallback(
     (refreshFailureMessage: string) => {
       notifySiblingBoards();
-      if (!isMountedRef.current || !usesPartitionedBoard) {
+      if (!isMountedRef.current) {
         return;
       }
       // Ignore any tab view served before the mutation committed and follow it
@@ -217,11 +211,7 @@ export function ResponseBoardPanel({
         refreshFailureMessage,
       );
     },
-    [
-      notifySiblingBoards,
-      refreshTabsAfterCommittedMutation,
-      usesPartitionedBoard,
-    ],
+    [notifySiblingBoards, refreshTabsAfterCommittedMutation],
   );
 
   useEffect(
@@ -254,29 +244,6 @@ export function ResponseBoardPanel({
   useEffect(() => {
     let active = true;
     setError(null);
-    if (!usesPartitionedBoard) {
-      setIsLoading(true);
-      void fetchResponseBoard().then(
-        (board) => {
-          if (!active) {
-            return;
-          }
-          replaceCards(board.cards);
-          replaceStagedCards([]);
-          setIsLoading(false);
-        },
-        (reason) => {
-          if (!active) {
-            return;
-          }
-          setError(getErrorMessage(reason));
-          setIsLoading(false);
-        },
-      );
-      return () => {
-        active = false;
-      };
-    }
     void refreshTabs({
       onFailure: (reason) => {
         if (!active) {
@@ -293,22 +260,19 @@ export function ResponseBoardPanel({
     invalidationRevision,
     refreshTabs,
     refreshToken,
-    replaceCards,
-    replaceStagedCards,
-    usesPartitionedBoard,
   ]);
 
   useEffect(() => {
-    if (!usesPartitionedBoard || !selectedTabId) {
+    if (!selectedTabId) {
       return;
     }
     setView(
       boardViewsRef.current[selectedTabId] ?? { panX: 0, panY: 0, zoom: 1 },
     );
-  }, [boardViewsRef, selectedTabId, usesPartitionedBoard]);
+  }, [boardViewsRef, selectedTabId]);
 
   useEffect(() => {
-    if (!usesPartitionedBoard || !selectedTabId) {
+    if (!selectedTabId) {
       return;
     }
     let active = true;
@@ -386,7 +350,6 @@ export function ResponseBoardPanel({
     replaceCards,
     replaceStagedCards,
     selectedTabId,
-    usesPartitionedBoard,
   ]);
 
   useEffect(() => {
@@ -452,7 +415,7 @@ export function ResponseBoardPanel({
   }, [pendingCameraRepair, selectedTabId]);
 
   useEffect(() => {
-    if (!usesPartitionedBoard || !selectedTabId) {
+    if (!selectedTabId) {
       return;
     }
     if (viewPersistTimerRef.current !== null) {
@@ -493,7 +456,6 @@ export function ResponseBoardPanel({
     onWorkspaceStateChangeRef,
     selectedTabId,
     selectedTabIdRef,
-    usesPartitionedBoard,
     view,
     workspaceTabId,
   ]);
@@ -508,20 +470,6 @@ export function ResponseBoardPanel({
     },
     [],
   );
-
-  useEffect(() => {
-    if (usesPartitionedBoard) {
-      return;
-    }
-    try {
-      window.localStorage.setItem(
-        RESPONSE_BOARD_ZOOM_STORAGE_KEY,
-        String(view.zoom),
-      );
-    } catch {
-      // View persistence is best-effort; board data remains server-owned.
-    }
-  }, [usesPartitionedBoard, view.zoom]);
 
   const scheduleCardPatch = useCallback(
     (card: ResponseBoardCard) => {
@@ -550,7 +498,7 @@ export function ResponseBoardPanel({
             // those older snapshots even after the local pending marker clears,
             // then replace them with an authoritative read of the visible board.
             tabViewRequestVersionRef.current += 1;
-            if (isMountedRef.current && usesPartitionedBoard) {
+            if (isMountedRef.current) {
               setTabViewRefreshRevision((current) => current + 1);
             }
             finishRequest();
@@ -580,7 +528,7 @@ export function ResponseBoardPanel({
       }, CARD_PATCH_DEBOUNCE_MS);
       patchTimersRef.current.set(card.id, timer);
     },
-    [notifySiblingBoards, replaceCards, usesPartitionedBoard],
+    [notifySiblingBoards, replaceCards],
   );
 
   const updateCardGeometry = useCallback(
@@ -984,7 +932,7 @@ export function ResponseBoardPanel({
       const stagedCardId = event.dataTransfer.getData(
         RESPONSE_BOARD_STAGED_CARD_MIME,
       );
-      if (usesPartitionedBoard && stagedCardId) {
+      if (stagedCardId) {
         const card = stagedCardsRef.current.find(
           (candidate) => candidate.id === stagedCardId,
         );
@@ -997,19 +945,9 @@ export function ResponseBoardPanel({
       if (!source) {
         return;
       }
-      if (!usesPartitionedBoard || !selectedTabId) {
-        void createResponseBoardCard({ ...source, x, y }).then(
-          (card) => {
-            notifySiblingBoards();
-            if (isMountedRef.current) {
-              replaceCards([...cardsRef.current, card]);
-            }
-          },
-          (reason) => {
-            if (isMountedRef.current) {
-              setError(getErrorMessage(reason));
-            }
-          },
+      if (!selectedTabId) {
+        setError(
+          "Response board tabs are still loading. Drop again when the board is ready.",
         );
         return;
       }
@@ -1055,7 +993,6 @@ export function ResponseBoardPanel({
       replaceCards,
       replaceStagedCards,
       selectedTabId,
-      usesPartitionedBoard,
       view.panX,
       view.panY,
       view.zoom,
@@ -1189,11 +1126,8 @@ export function ResponseBoardPanel({
   }, []);
 
   const placedCards = useMemo(
-    () =>
-      usesPartitionedBoard
-        ? cards.filter((card) => card.placement === "placed")
-        : cards,
-    [cards, usesPartitionedBoard],
+    () => cards.filter((card) => card.placement === "placed"),
+    [cards],
   );
   const stagedCardsNewestFirst = useMemo(
     () => [...stagedCards].reverse(),
@@ -1260,42 +1194,38 @@ export function ResponseBoardPanel({
             </button>
           </div>
           <span className="response-board-card-count">
-            {usesPartitionedBoard
-              ? `${placedCards.length} placed`
-              : `${cards.length} cards`}
+            {placedCards.length} placed
           </span>
         </div>
       </header>
-      {usesPartitionedBoard ? (
-        <ResponseBoardTabStrip
-          tabs={tabs}
-          workspaceTabId={workspaceTabId}
-          selectedTabId={selectedTabId}
-          renamingTabId={renamingTabId}
-          renameValue={renameValue}
-          isAddingTab={isAddingTab}
-          newTabName={newTabName}
-          isReorderingTabs={isReorderingTabs}
-          tabButtonRefs={tabButtonRefs}
-          onSelectTab={selectResponseBoardTab}
-          onRenameValueChange={setRenameValue}
-          onCancelRename={() => setRenamingTabId(null)}
-          onSubmitRename={handleRenameTab}
-          onStartRename={(tab) => {
-            setRenameValue(tab.name);
-            setRenamingTabId(tab.id);
-          }}
-          onReorderTab={handleReorderTab}
-          onDeleteTab={handleDeleteTab}
-          onNewTabNameChange={setNewTabName}
-          onCancelAdd={() => {
-            setIsAddingTab(false);
-            setNewTabName("");
-          }}
-          onSubmitAdd={handleCreateTab}
-          onStartAdd={() => setIsAddingTab(true)}
-        />
-      ) : null}
+      <ResponseBoardTabStrip
+        tabs={tabs}
+        workspaceTabId={workspaceTabId}
+        selectedTabId={selectedTabId}
+        renamingTabId={renamingTabId}
+        renameValue={renameValue}
+        isAddingTab={isAddingTab}
+        newTabName={newTabName}
+        isReorderingTabs={isReorderingTabs}
+        tabButtonRefs={tabButtonRefs}
+        onSelectTab={selectResponseBoardTab}
+        onRenameValueChange={setRenameValue}
+        onCancelRename={() => setRenamingTabId(null)}
+        onSubmitRename={handleRenameTab}
+        onStartRename={(tab) => {
+          setRenameValue(tab.name);
+          setRenamingTabId(tab.id);
+        }}
+        onReorderTab={handleReorderTab}
+        onDeleteTab={handleDeleteTab}
+        onNewTabNameChange={setNewTabName}
+        onCancelAdd={() => {
+          setIsAddingTab(false);
+          setNewTabName("");
+        }}
+        onSubmitAdd={handleCreateTab}
+        onStartAdd={() => setIsAddingTab(true)}
+      />
       {displayedError ? (
         <div className="response-board-error" role="alert">
           {displayedError}
@@ -1311,7 +1241,7 @@ export function ResponseBoardPanel({
           </button>
         </div>
       ) : null}
-      {usesPartitionedBoard && selectedTab ? (
+      {selectedTab ? (
         <ResponseBoardStagingTray
           cards={stagedCardsNewestFirst}
           previewCardId={previewCardId}
@@ -1321,13 +1251,13 @@ export function ResponseBoardPanel({
       <div
         ref={surfaceRef}
         id={
-          usesPartitionedBoard && selectedTabId
+          selectedTabId
             ? `response-board-tabpanel-${workspaceTabId}-${selectedTabId}`
             : undefined
         }
-        role={usesPartitionedBoard ? "tabpanel" : undefined}
+        role="tabpanel"
         aria-labelledby={
-          usesPartitionedBoard && selectedTabId
+          selectedTabId
             ? `response-board-tab-${workspaceTabId}-${selectedTabId}`
             : undefined
         }
@@ -1351,7 +1281,7 @@ export function ResponseBoardPanel({
         onLostPointerCapture={finishPan}
         onKeyDown={handleBoardKeyDown}
       >
-        {usesPartitionedBoard && previewCard ? (
+        {previewCard ? (
           <ResponseBoardPreview
             card={previewCard}
             selectedTabName={selectedTab?.name ?? null}
@@ -1375,9 +1305,7 @@ export function ResponseBoardPanel({
             <div className="response-board-empty">Loading response board…</div>
           ) : placedCards.length === 0 ? (
             <div className="response-board-empty">
-              {usesPartitionedBoard
-                ? "Drag a staged response here, or drop a transcript message."
-                : "Drop an agent response anywhere on the board."}
+              Drag a staged response here, or drop a transcript message.
             </div>
           ) : null}
           {placedCards.map((card) => (
@@ -1430,31 +1358,27 @@ export function ResponseBoardPanel({
                 </div>
               </div>
               <footer className="response-board-card-footer">
-                {usesPartitionedBoard ? (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => handleReturnToStaging(card)}
-                    >
-                      Return to staging
-                    </button>
-                    <label>
-                      Move
-                      <select
-                        value={card.tabId}
-                        onChange={(event) =>
-                          handleMoveCard(card, event.target.value)
-                        }
-                      >
-                        {tabs.map((tab) => (
-                          <option key={tab.id} value={tab.id}>
-                            {tab.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  </>
-                ) : null}
+                <button
+                  type="button"
+                  onClick={() => handleReturnToStaging(card)}
+                >
+                  Return to staging
+                </button>
+                <label>
+                  Move
+                  <select
+                    value={card.tabId}
+                    onChange={(event) =>
+                      handleMoveCard(card, event.target.value)
+                    }
+                  >
+                    {tabs.map((tab) => (
+                      <option key={tab.id} value={tab.id}>
+                        {tab.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <button type="button" onClick={() => onOpenSource(card)}>
                   Open in session
                 </button>
