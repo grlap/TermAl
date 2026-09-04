@@ -58,6 +58,7 @@ describe("updateEngramHostSettings", () => {
 
     await expect(
       updateEngramHostSettings({
+        developerName: "dev",
         binaryPath: "C:\\tools\\engram.exe",
         home: "C:\\EngramHome",
         bootRecoveryBudgetMs: 5_000,
@@ -70,6 +71,7 @@ describe("updateEngramHostSettings", () => {
     );
     const [, init] = fetchMock.mock.calls[0] ?? [];
     expect(JSON.parse(String(init?.body))).toEqual({
+      developerName: "dev",
       binaryPath: "C:\\tools\\engram.exe",
       home: "C:\\EngramHome",
       bootRecoveryBudgetMs: 5_000,

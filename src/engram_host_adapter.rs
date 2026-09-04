@@ -42,7 +42,6 @@ const ENGRAM_WAIVER_REASON_MAX_BYTES: usize = 4 * 1024;
 const ENGRAM_WAIVER_IDEMPOTENCY_KEY_MAX_BYTES: usize = 256;
 const ENGRAM_GLOBAL_DISABLE_ENV: &str = "TERMAL_ENGRAM_DISABLED";
 const ENGRAM_CONTROL_ASSURANCE: &str = "turn_gated";
-const ENGRAM_PROJECT_ACTOR_ID: &str = "termal";
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -366,121 +365,6 @@ fn validate_engram_doctor_result(
         database_path: normalize_user_facing_path(&result.database),
         project_id,
     })
-}
-
-#[derive(Clone, Deserialize)]
-struct EngramAuthorityShowResult {
-    installed: bool,
-    subject_actor_id: Option<String>,
-    valid_from: Option<String>,
-    valid_until: Option<String>,
-    revoked_at: Option<String>,
-}
-
-fn validate_engram_project_work_authority(
-    project: &Project,
-    settings: &EngramProjectSettings,
-) -> std::result::Result<(), ApiError> {
-    let Some(grant) = settings.work_authority_grant.as_deref() else {
-        return Ok(());
-    };
-    let binary_path = settings
-        .binary_path
-        .as_deref()
-        .map(PathBuf::from)
-        .ok_or_else(|| ApiError::bad_request("Engram work-authority grant requires binaryPath"))?;
-    let home = settings
-        .home
-        .as_deref()
-        .map(PathBuf::from)
-        .ok_or_else(|| ApiError::bad_request("Engram work-authority grant requires home"))?;
-    let project_root = PathBuf::from(&project.root_path);
-    let connection = EngramConnectionConfig {
-        binary_path,
-        project_file: project_root.join(".engram-project"),
-        home,
-        project_root,
-        actor_id: ENGRAM_PROJECT_ACTOR_ID.to_owned(),
-        session_id: "termal-authority-validation".to_owned(),
-    };
-    let result = run_engram_authority_show(&connection, grant)?;
-    validate_engram_authority_show_result(&result)
-}
-
-fn run_engram_authority_show(
-    connection: &EngramConnectionConfig,
-    grant: &str,
-) -> std::result::Result<EngramAuthorityShowResult, ApiError> {
-    let value = run_engram_json_command_with_lock_retry(
-        &connection,
-        &["authority", "show", grant, "--json"],
-        ENGRAM_WORK_BINDING_COMMAND_TIMEOUT,
-    )
-    .map_err(|_| {
-        ApiError::bad_request(
-            "cannot configure Engram work-authority grant because its status could not be verified",
-        )
-    })?;
-    serde_json::from_value::<EngramAuthorityShowResult>(value).map_err(|_| {
-        ApiError::bad_request(
-            "cannot configure Engram work-authority grant because authority show returned an invalid response",
-        )
-    })
-}
-
-fn validate_engram_authority_show_result(
-    result: &EngramAuthorityShowResult,
-) -> std::result::Result<(), ApiError> {
-    if !result.installed {
-        return Err(ApiError::bad_request(
-            "cannot configure Engram work-authority grant because it is not installed",
-        ));
-    }
-    if result.revoked_at.is_some() {
-        return Err(ApiError::bad_request(
-            "cannot configure Engram work-authority grant because it is revoked",
-        ));
-    }
-    let subject_actor_id = result.subject_actor_id.as_deref().ok_or_else(|| {
-        ApiError::bad_request(
-            "cannot configure Engram work-authority grant because its subject actor is missing",
-        )
-    })?;
-    if subject_actor_id != ENGRAM_PROJECT_ACTOR_ID {
-        return Err(ApiError::bad_request(format!(
-            "cannot configure Engram work-authority grant because its subject actor must be `{ENGRAM_PROJECT_ACTOR_ID}`"
-        )));
-    }
-    let valid_from = result
-        .valid_from
-        .as_deref()
-        .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
-        .ok_or_else(|| {
-            ApiError::bad_request(
-                "cannot configure Engram work-authority grant because valid_from is missing or invalid",
-            )
-        })?;
-    let valid_until = result
-        .valid_until
-        .as_deref()
-        .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
-        .ok_or_else(|| {
-            ApiError::bad_request(
-                "cannot configure Engram work-authority grant because valid_until is missing or invalid",
-            )
-        })?;
-    let now = chrono::Utc::now();
-    if valid_from > now {
-        return Err(ApiError::bad_request(
-            "cannot configure Engram work-authority grant before its valid_from time",
-        ));
-    }
-    if valid_until <= now {
-        return Err(ApiError::bad_request(
-            "cannot configure Engram work-authority grant because it is expired",
-        ));
-    }
-    Ok(())
 }
 
 fn engram_command(binary_path: &FsPath) -> Command {
@@ -869,6 +753,7 @@ struct EngramConnectionConfig {
     home: PathBuf,
     project_root: PathBuf,
     actor_id: String,
+    actor_context: Option<String>,
     session_id: String,
 }
 
@@ -1666,20 +1551,20 @@ fn read_engram_work_binding_from_cli(
     trace_boot_recovery: bool,
 ) -> std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError> {
     let next_started_at = std::time::Instant::now();
+    let mut next_args = vec![
+        "work",
+        "--actor-id",
+        connection.actor_id.as_str(),
+        "--session-id",
+        connection.session_id.as_str(),
+    ];
+    if let Some(actor_context) = connection.actor_context.as_deref() {
+        next_args.extend(["--actor-context", actor_context]);
+    }
+    next_args.extend(["core", "next", "--sections", "focus", "--json"]);
     let next = run_engram_json_command_with_lock_retry(
         connection,
-        &[
-            "work",
-            "--actor-id",
-            &connection.actor_id,
-            "--session-id",
-            &connection.session_id,
-            "core",
-            "next",
-            "--sections",
-            "focus",
-            "--json",
-        ],
+        &next_args,
         timeout,
     );
     if trace_boot_recovery {
@@ -1702,19 +1587,20 @@ fn read_engram_work_binding_from_cli(
         return Ok(None);
     };
     let focus_started_at = std::time::Instant::now();
+    let mut focus_args = vec![
+        "work",
+        "--actor-id",
+        connection.actor_id.as_str(),
+        "--session-id",
+        connection.session_id.as_str(),
+    ];
+    if let Some(actor_context) = connection.actor_context.as_deref() {
+        focus_args.extend(["--actor-context", actor_context]);
+    }
+    focus_args.extend(["core", "focus", work_id, "--json"]);
     let focus = run_engram_json_command_with_lock_retry(
         connection,
-        &[
-            "work",
-            "--actor-id",
-            &connection.actor_id,
-            "--session-id",
-            &connection.session_id,
-            "core",
-            "focus",
-            work_id,
-            "--json",
-        ],
+        &focus_args,
         timeout,
     );
     if trace_boot_recovery {
@@ -1912,6 +1798,7 @@ fn run_engram_json_command(
 ) -> std::result::Result<Value, EngramTransportError> {
     let mut command = engram_command(&connection.binary_path);
     configure_terminal_process_tree(&mut command);
+    apply_engram_connection_environment(&mut command, connection);
     let mut child = command
         .arg("--project-file")
         .arg(&connection.project_file)
@@ -1995,6 +1882,21 @@ fn run_engram_json_command(
             "invalid Engram work-binding response: {error}"
         ))
     })
+}
+
+fn apply_engram_connection_environment(
+    command: &mut Command,
+    connection: &EngramConnectionConfig,
+) {
+    command
+        .env(ENGRAM_HOME_ENV, &connection.home)
+        .env(ENGRAM_ACTOR_ID_ENV, &connection.actor_id)
+        .env(ENGRAM_SESSION_ID_ENV, &connection.session_id);
+    if let Some(actor_context) = connection.actor_context.as_deref() {
+        command.env(ENGRAM_ACTOR_CONTEXT_ENV, actor_context);
+    } else {
+        command.env_remove(ENGRAM_ACTOR_CONTEXT_ENV);
+    }
 }
 
 fn read_engram_cli_output(
@@ -2123,14 +2025,19 @@ fn spawn_engram_control_process(
 ) -> std::result::Result<EngramControlProcess, EngramTransportError> {
     let mut command = engram_command(&connection.binary_path);
     configure_terminal_process_tree(&mut command);
-    let mut child = command
+    apply_engram_connection_environment(&mut command, connection);
+    command
         .arg("--project-file")
         .arg(&connection.project_file)
         .arg("--home")
         .arg(&connection.home)
         .arg("control")
         .arg("--actor-id")
-        .arg(&connection.actor_id)
+        .arg(&connection.actor_id);
+    if let Some(actor_context) = connection.actor_context.as_deref() {
+        command.arg("--actor-context").arg(actor_context);
+    }
+    let mut child = command
         .arg("--session-id")
         .arg(&connection.session_id)
         .current_dir(&connection.project_root)
@@ -2636,8 +2543,118 @@ fn parse_engram_result<T: for<'de> Deserialize<'de>>(
     })
 }
 
-fn engram_actor_id(_agent: Agent) -> String {
-    ENGRAM_PROJECT_ACTOR_ID.to_owned()
+/// Builds the Engram principal for one hosted agent kind. Display names and
+/// model aliases are never identity inputs; exact runtime detail is carried in
+/// the separate actor context.
+fn engram_seat_id(developer_name: &str, session: &Session) -> String {
+    format!(
+        "{developer_name}/{}",
+        engram_agent_context_kind(session.agent)
+    )
+}
+
+fn engram_agent_context_kind(agent: Agent) -> &'static str {
+    match agent {
+        Agent::Codex => "codex",
+        Agent::Claude => "claude",
+        Agent::Cursor => "cursor",
+        Agent::Gemini => "gemini",
+        Agent::OpenCode => "opencode",
+    }
+}
+
+const ENGRAM_ACTOR_CONTEXT_MAX_BYTES: usize = 200;
+
+fn normalize_engram_actor_context_value(value: &str) -> String {
+    let mut normalized = String::new();
+    let mut previous_was_collapsed_control = false;
+    for character in value.trim().chars() {
+        if character.is_control() {
+            if !previous_was_collapsed_control && !normalized.is_empty() {
+                normalized.push(' ');
+            }
+            previous_was_collapsed_control = true;
+        } else {
+            match character {
+                '%' => normalized.push_str("%25"),
+                ';' => normalized.push_str("%3B"),
+                '=' => normalized.push_str("%3D"),
+                _ => normalized.push(character),
+            }
+            previous_was_collapsed_control = false;
+        }
+    }
+    normalized.trim().to_owned()
+}
+
+fn append_engram_actor_context_field(context: &mut String, key: &str, value: &str) {
+    let value = normalize_engram_actor_context_value(value);
+    if value.is_empty() {
+        return;
+    }
+    let separator_bytes = usize::from(!context.is_empty());
+    let field_bytes = key.len() + 1 + value.len();
+    if context.len() + separator_bytes + field_bytes > ENGRAM_ACTOR_CONTEXT_MAX_BYTES {
+        return;
+    }
+    if !context.is_empty() {
+        context.push(';');
+    }
+    context.push_str(key);
+    context.push('=');
+    context.push_str(&value);
+}
+
+/// Renders exact agent/model/reasoning detail separately from the stable agent
+/// principal. The 200-byte local limit stays below Engram's 256-byte boundary,
+/// and fields that do not fit are omitted instead of being cut mid-value.
+fn engram_actor_context(session: &Session) -> Option<String> {
+    let mut context = String::new();
+    append_engram_actor_context_field(
+        &mut context,
+        "agent",
+        engram_agent_context_kind(session.agent),
+    );
+    append_engram_actor_context_field(&mut context, "model", &session.model);
+    let reasoning = match session.agent {
+        Agent::Codex => session
+            .reasoning_effort
+            .map(CodexReasoningEffort::as_api_value),
+        Agent::Claude => session.claude_effort.and_then(ClaudeEffortLevel::as_cli_value),
+        Agent::OpenCode => session
+            .opencode_effort
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty() && *value != OPENCODE_CONFIG_AUTO),
+        Agent::Cursor | Agent::Gemini => None,
+    };
+    if let Some(reasoning) = reasoning {
+        append_engram_actor_context_field(&mut context, "reasoning", reasoning);
+    }
+    (!context.is_empty()).then_some(context)
+}
+
+/// Returns the actor identity that Engram operations must use for this
+/// runtime. A live installed descriptor is authoritative even when an ACP
+/// handshake later resolves `session.model` to a more specific display value.
+/// Once rotation is pending, the next runtime's identity is derived from the
+/// newly committed session settings instead.
+fn engram_runtime_actor_identity(
+    developer_name: &str,
+    record: &SessionRecord,
+) -> (String, Option<String>) {
+    if !record.runtime_reset_required
+        && let Some(installed) = record.engram_mcp_installed.as_ref()
+    {
+        return (
+            installed.actor_id.clone(),
+            installed.actor_context.clone(),
+        );
+    }
+    (
+        engram_seat_id(developer_name, &record.session),
+        engram_actor_context(&record.session),
+    )
 }
 
 fn engram_effects_for_write_policy(write_policy: &DelegationWritePolicy) -> Vec<EngramEffect> {
@@ -4664,6 +4681,10 @@ impl AppState {
             .map(PathBuf::from)
             .ok_or_else(|| "enabled Engram project is missing home".to_owned())?;
         let root = PathBuf::from(&project.root_path);
+        let (actor_id, actor_context) = engram_runtime_actor_identity(
+            &inner.preferences.engram.developer_name,
+            child,
+        );
         Ok(Some(EngramBindingTarget {
             adapter: inner.engram_host_adapter.clone(),
             connection: EngramConnectionConfig {
@@ -4671,7 +4692,8 @@ impl AppState {
                 project_file: root.join(".engram-project"),
                 home,
                 project_root: root,
-                actor_id: engram_actor_id(child.session.agent),
+                actor_id,
+                actor_context,
                 session_id: session_id.to_owned(),
             },
             settings: settings.clone(),
@@ -4744,6 +4766,10 @@ impl AppState {
             .map(PathBuf::from)
             .ok_or_else(|| "enabled Engram project is missing home".to_owned())?;
         let root = PathBuf::from(&project.root_path);
+        let (actor_id, actor_context) = engram_runtime_actor_identity(
+            &inner.preferences.engram.developer_name,
+            parent,
+        );
         Ok(Some(EngramBindingTarget {
             adapter: inner.engram_host_adapter.clone(),
             connection: EngramConnectionConfig {
@@ -4751,7 +4777,8 @@ impl AppState {
                 project_file: root.join(".engram-project"),
                 home,
                 project_root: root,
-                actor_id: engram_actor_id(parent.session.agent),
+                actor_id,
+                actor_context,
                 session_id: parent_session_id.to_owned(),
             },
             settings: settings.clone(),

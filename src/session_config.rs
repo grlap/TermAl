@@ -18,6 +18,12 @@
 // propagate to the live session via `session/set_config_option`
 // JSON-RPC messages (see `src/acp.rs::handle_acp_session_config_refresh`
 // for the writer side); Gemini approval-mode changes require a restart.
+// An installed Engram MCP descriptor tightens those rules for per-session
+// Claude/ACP processes: model or reasoning changes that alter the process's
+// Engram actor context require rotation so the agent process and MCP child
+// keep one frozen identity. Shared Codex applies that identity per thread, so
+// an identity-changing update detaches the logical session and re-sends the
+// thread-scoped configuration without restarting the shared app-server.
 //
 // Codex reasoning-effort normalization: changing the model can
 // invalidate the current effort. `normalized_codex_reasoning_effort` in
@@ -76,13 +82,25 @@ impl AppState {
         let index = inner
             .find_visible_session_index(session_id)
             .ok_or_else(|| ApiError::not_found("session not found"))?;
+        let engram_developer_name = inner.preferences.engram.developer_name.clone();
         let record = inner
             .session_mut_by_index(index)
             .expect("session index should be valid");
+        // Detect only identity changes made by this settings request. ACP may
+        // synchronize a configured model alias to the runtime's resolved id,
+        // so the live session can legitimately differ from the immutable
+        // identity installed in the current process before this call begins.
+        let previous_engram_process_identity = record.engram_mcp_installed.as_ref().map(|_| {
+            (
+                engram_seat_id(&engram_developer_name, &record.session),
+                engram_actor_context(&record.session),
+            )
+        });
         let mut claude_model_update: Option<(ClaudeRuntimeHandle, String)> = None;
         let mut claude_permission_mode_update: Option<(ClaudeRuntimeHandle, String)> = None;
         let mut acp_config_updates: Vec<(AcpRuntimeHandle, Value)> = Vec::new();
         let mut opencode_config_update: Option<(AcpRuntimeHandle, OpenCodeConfigSelections)> = None;
+        let mut force_engram_process_rotation = false;
 
         match record.session.agent {
             agent if agent.supports_opencode_settings() => {
@@ -314,7 +332,23 @@ impl AppState {
                 let changed_mode = requested_opencode_mode.clone().filter(|mode| {
                     record.session.opencode_mode.as_deref() != Some(mode.as_str())
                 });
-                if let Some(handle) = live_handle
+                let engram_identity_change_requested = record.engram_mcp_installed.is_some()
+                    && (changed_model.is_some() || changed_effort.is_some());
+                if engram_identity_change_requested {
+                    force_engram_process_rotation = true;
+                    if let Some(model) = changed_model {
+                        record.session.opencode_model = Some(model.clone());
+                        if model != OPENCODE_CONFIG_AUTO {
+                            record.session.model = model;
+                        }
+                    }
+                    if let Some(effort) = changed_effort {
+                        record.session.opencode_effort = Some(effort);
+                    }
+                    if let Some(mode) = changed_mode {
+                        record.session.opencode_mode = Some(mode);
+                    }
+                } else if let Some(handle) = live_handle
                     && (changed_model.is_some()
                         || changed_effort.is_some()
                         || changed_mode.is_some())
@@ -533,6 +567,26 @@ impl AppState {
                 }
             }
             _ => {}
+        }
+
+        let engram_process_identity_changed = previous_engram_process_identity.is_some_and(
+            |previous| {
+                previous
+                    != (
+                        engram_seat_id(&engram_developer_name, &record.session),
+                        engram_actor_context(&record.session),
+                    )
+            },
+        );
+        if force_engram_process_rotation || engram_process_identity_changed {
+            // The descriptor supplied to the current agent process and its MCP
+            // child is immutable. Do not hot-apply a model/config update that
+            // would make session state disagree with that frozen identity.
+            record.runtime_reset_required = true;
+            record.engram.invalidate_context_nudge();
+            claude_model_update = None;
+            acp_config_updates.clear();
+            opencode_config_update = None;
         }
 
         self.commit_locked(&mut inner).map_err(|err| {

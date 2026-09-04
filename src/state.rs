@@ -1502,6 +1502,11 @@ impl StateInner {
 struct EngramMcpInstalledDescriptor {
     binary_path: String,
     home: String,
+    /// Exact principal installed into the live agent process/thread and its
+    /// Engram MCP child. Runtime-reported model synchronization must not
+    /// silently change this frozen identity.
+    actor_id: String,
+    actor_context: Option<String>,
     store_key: Option<EngramAuthorityStoreKey>,
     work_authority_grant: Option<String>,
 }
@@ -1534,6 +1539,8 @@ impl std::fmt::Debug for EngramMcpInstalledDescriptor {
             .debug_struct("EngramMcpInstalledDescriptor")
             .field("binary_path", &self.binary_path)
             .field("home", &self.home)
+            .field("actor_id", &self.actor_id)
+            .field("actor_context", &self.actor_context)
             .field("store_key", &self.store_key)
             .field(
                 "work_authority_grant",
@@ -1598,7 +1605,8 @@ struct SessionRecord {
     /// runtime/thread. This process-local capability record is deliberately
     /// omitted from persistence and wire snapshots; it exists so a later
     /// clear/disable/delete can revoke a superseded grant against the binary
-    /// and home that received it.
+    /// and home that received it, and so Engram control/context work keeps the
+    /// exact actor identity installed into that runtime.
     engram_mcp_installed: Option<EngramMcpInstalledDescriptor>,
     runtime_reset_required: bool,
     /// A stale Engram MCP runtime whose process termination failed and whose

@@ -49,16 +49,21 @@ or malformed seeded file is diagnosed on stderr and falls back to the TermAl-own
 entries; it never prevents thread setup.
 
 The shared app-server process itself has inherited `ENGRAM_HOME`,
-`ENGRAM_ACTOR_ID`, and `ENGRAM_SESSION_ID` removed because one process serves
-many TermAl sessions. A thread-level `shell_environment_policy` replaces the
+`ENGRAM_ACTOR_ID`, `ENGRAM_ACTOR_CONTEXT`, and `ENGRAM_SESSION_ID` removed
+because one process serves many TermAl sessions. A thread-level
+`shell_environment_policy` replaces the
 whole configured table, just like `mcp_servers`. For an Engram-eligible session,
 TermAl therefore reads the seeded policy, preserves its inheritance, filtering,
-unknown, and unrelated `set` entries, overlays the three session-specific
-values, and passes the result on both `thread/start` and `thread/resume`. Because
+unknown, and unrelated `set` entries, overlays the required session-specific
+identity values plus optional actor context, and passes the result on both
+`thread/start` and `thread/resume`. Because
 Codex applies a non-empty `include_only` filter after `set`, TermAl also admits
-the three owned names through that existing allowlist. On Windows it removes
+each present owned name through that existing allowlist. On Windows it removes
 case-insensitive aliases of the owned names before inserting their canonical
-uppercase spellings.
+uppercase spellings. A model or reasoning change that alters this actor context
+detaches the logical TermAl session from its bound thread setup; the next turn
+resumes the same external thread with freshly composed thread-scoped
+configuration while the shared app-server process remains alive.
 
 Ineligible sessions receive no thread-level Engram shell-policy override. The
 shared process cannot leak an inherited TermAl/Engram identity because its own

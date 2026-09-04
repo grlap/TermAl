@@ -9,8 +9,15 @@
 const ENGRAM_MCP_SERVER_NAME: &str = "engram";
 const ENGRAM_HOME_ENV: &str = "ENGRAM_HOME";
 const ENGRAM_ACTOR_ID_ENV: &str = "ENGRAM_ACTOR_ID";
+const ENGRAM_ACTOR_CONTEXT_ENV: &str = "ENGRAM_ACTOR_CONTEXT";
 const ENGRAM_SESSION_ID_ENV: &str = "ENGRAM_SESSION_ID";
-const ENGRAM_AGENT_PROCESS_ENV_NAMES: [&str; 3] = [
+const ENGRAM_AGENT_PROCESS_ENV_NAMES: [&str; 4] = [
+    ENGRAM_HOME_ENV,
+    ENGRAM_ACTOR_ID_ENV,
+    ENGRAM_ACTOR_CONTEXT_ENV,
+    ENGRAM_SESSION_ID_ENV,
+];
+const ENGRAM_REQUIRED_AGENT_PROCESS_ENV_NAMES: [&str; 3] = [
     ENGRAM_HOME_ENV,
     ENGRAM_ACTOR_ID_ENV,
     ENGRAM_SESSION_ID_ENV,
@@ -37,11 +44,14 @@ fn apply_engram_agent_process_env(
     let Some(engram) = engram else {
         return Ok(());
     };
-    for name in ENGRAM_AGENT_PROCESS_ENV_NAMES {
+    for name in ENGRAM_REQUIRED_AGENT_PROCESS_ENV_NAMES {
         let value = engram.env.get(name).with_context(|| {
             format!("Engram MCP descriptor is missing required agent environment `{name}`")
         })?;
         command.env(name, value);
+    }
+    if let Some(actor_context) = engram.env.get(ENGRAM_ACTOR_CONTEXT_ENV) {
+        command.env(ENGRAM_ACTOR_CONTEXT_ENV, actor_context);
     }
     Ok(())
 }
@@ -60,6 +70,7 @@ struct EngramContextNudgeTarget {
     project_file: PathBuf,
     project_root: PathBuf,
     actor_id: String,
+    actor_context: Option<String>,
     session_id: String,
     generation: u64,
     timeout: Duration,
@@ -244,7 +255,10 @@ impl AppState {
                     return EngramContextNudgePreparation::NotApplicable;
                 };
                 let generation = record.engram.context_nudge_generation.max(1);
-                let actor_id = engram_actor_id(record.session.agent);
+                let (actor_id, actor_context) = engram_runtime_actor_identity(
+                    &inner.preferences.engram.developer_name,
+                    record,
+                );
                 let project_root = PathBuf::from(&project.root_path);
                 let project_file = project_root.join(".engram-project");
                 if !project_declared {
@@ -256,6 +270,7 @@ impl AppState {
                     project_file,
                     project_root,
                     actor_id,
+                    actor_context,
                     session_id: session_id.to_owned(),
                     generation,
                     timeout: ENGRAM_WORK_BINDING_COMMAND_TIMEOUT,
@@ -300,6 +315,15 @@ impl AppState {
                         && settings.binary_path.as_deref()
                             == Some(target.command.to_string_lossy().as_ref())
                         && settings.home.as_deref() == Some(target.home.as_str())
+                        && inner
+                            .find_session_index(session_id)
+                            .and_then(|index| inner.sessions.get(index))
+                            .is_some_and(|record| {
+                                engram_runtime_actor_identity(
+                                    &inner.preferences.engram.developer_name,
+                                    record,
+                                ) == (target.actor_id.clone(), target.actor_context.clone())
+                            })
                         && project_declared
                 });
             let record = inner
@@ -368,18 +392,32 @@ fn run_engram_context_nudge(
     let context_generation = format!("termal-{}", target.generation);
     let mut command = engram_command(&target.command);
     configure_terminal_process_tree(&mut command);
-    let mut child = command
+    command
         .arg("--project-file")
         .arg(&target.project_file)
         .arg("--home")
         .arg(&target.home)
         .arg("work")
+        .arg("--actor-id")
+        .arg(&target.actor_id)
+        .arg("--session-id")
+        .arg(&target.session_id);
+    if let Some(actor_context) = target.actor_context.as_deref() {
+        command.arg("--actor-context").arg(actor_context);
+    }
+    command
         .arg("next")
         .arg("--context-generation")
         .arg(context_generation)
         .env(ENGRAM_HOME_ENV, &target.home)
         .env(ENGRAM_ACTOR_ID_ENV, &target.actor_id)
-        .env(ENGRAM_SESSION_ID_ENV, &target.session_id)
+        .env(ENGRAM_SESSION_ID_ENV, &target.session_id);
+    if let Some(actor_context) = target.actor_context.as_deref() {
+        command.env(ENGRAM_ACTOR_CONTEXT_ENV, actor_context);
+    } else {
+        command.env_remove(ENGRAM_ACTOR_CONTEXT_ENV);
+    }
+    let mut child = command
         .current_dir(&target.project_root)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -501,27 +539,45 @@ fn engram_mcp_runtime_config_for_session_locked(
         return None;
     }
     let project_file = PathBuf::from(&project.root_path).join(".engram-project");
-    let args = vec![
+    let actor_id = engram_seat_id(
+        &inner.preferences.engram.developer_name,
+        &session.session,
+    );
+    let actor_context = engram_actor_context(&session.session);
+    let mut args = vec![
         "--project-file".to_owned(),
         project_file.to_string_lossy().into_owned(),
         "--home".to_owned(),
         home.to_owned(),
         "mcp".to_owned(),
         "--actor-id".to_owned(),
-        engram_actor_id(session.session.agent),
+        actor_id.clone(),
+    ];
+    if let Some(actor_context) = actor_context.as_ref() {
+        args.extend([
+            "--actor-context".to_owned(),
+            actor_context.clone(),
+        ]);
+    }
+    args.extend([
         "--session-id".to_owned(),
         session_id.to_owned(),
-    ];
+    ]);
     let mut env = BTreeMap::new();
     env.insert(ENGRAM_HOME_ENV.to_owned(), home.to_owned());
-    env.insert(
-        ENGRAM_ACTOR_ID_ENV.to_owned(),
-        engram_actor_id(session.session.agent),
-    );
+    env.insert(ENGRAM_ACTOR_ID_ENV.to_owned(), actor_id.clone());
+    if let Some(actor_context) = actor_context.as_ref() {
+        env.insert(
+            ENGRAM_ACTOR_CONTEXT_ENV.to_owned(),
+            actor_context.clone(),
+        );
+    }
     env.insert(ENGRAM_SESSION_ID_ENV.to_owned(), session_id.to_owned());
     let installed = EngramMcpInstalledDescriptor {
         binary_path: command.clone(),
         home: home.to_owned(),
+        actor_id,
+        actor_context,
         store_key: settings.authority_store_key.clone(),
         work_authority_grant: settings.work_authority_grant.clone(),
     };

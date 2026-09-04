@@ -35,6 +35,7 @@ describe("EngramPreferencesPanel", () => {
     render(
       <EngramPreferencesPanel
         hostSettings={{
+          developerName: "dev",
           binaryPath: "engram",
           home: "C:\\Engram",
           bootRecoveryBudgetMs: 5_000,
@@ -62,6 +63,9 @@ describe("EngramPreferencesPanel", () => {
     fireEvent.change(screen.getByLabelText("Engram host binary path"), {
       target: { value: "C:\\tools\\engram.exe" },
     });
+    fireEvent.change(screen.getByLabelText("Engram developer name"), {
+      target: { value: "Greg" },
+    });
     fireEvent.change(screen.getByLabelText("Engram host home"), {
       target: { value: "C:\\EngramHome" },
     });
@@ -72,6 +76,7 @@ describe("EngramPreferencesPanel", () => {
 
     await waitFor(() =>
       expect(mockUpdateEngramHostSettings).toHaveBeenCalledWith({
+        developerName: "greg",
         binaryPath: "C:\\tools\\engram.exe",
         home: "C:\\EngramHome",
         bootRecoveryBudgetMs: 7_500,
@@ -84,6 +89,7 @@ describe("EngramPreferencesPanel", () => {
     render(
       <EngramPreferencesPanel
         hostSettings={{
+          developerName: "dev",
           binaryPath: "engram",
           home: "C:\\Engram",
           bootRecoveryBudgetMs: 5_000,

@@ -3,6 +3,7 @@ $ErrorActionPreference = "Stop"
 $projectFile = $null
 $engramHome = $null
 $actorId = $null
+$actorContext = $null
 $sessionId = $null
 $operation = $null
 $workRef = $null
@@ -12,6 +13,7 @@ for ($index = 0; $index -lt $args.Count; $index += 1) {
         "--project-file" { $projectFile = $args[++$index] }
         "--home" { $engramHome = $args[++$index] }
         "--actor-id" { $actorId = $args[++$index] }
+        "--actor-context" { $actorContext = $args[++$index] }
         "--session-id" { $sessionId = $args[++$index] }
         "--sections" { $sections = $args[++$index] }
         "next" { $operation = "next" }
@@ -31,8 +33,11 @@ for ($index = 0; $index -lt $args.Count; $index += 1) {
 if (-not $projectFile -or -not $engramHome -or -not $actorId -or -not $sessionId) {
     exit 2
 }
-if ($actorId -ne "termal" -or $sessionId -ne "fixture-session") {
+if ($actorId -ne "dev/codex" -or $actorContext -ne "agent=codex;model=test;reasoning=high" -or $sessionId -ne "fixture-session") {
     exit 3
+}
+if ($env:ENGRAM_HOME -ne $engramHome -or $env:ENGRAM_ACTOR_ID -ne $actorId -or $env:ENGRAM_ACTOR_CONTEXT -ne $actorContext -or $env:ENGRAM_SESSION_ID -ne $sessionId) {
+    exit 7
 }
 $mode = (Get-Content -LiteralPath $projectFile -Raw).Trim()
 $marker = Join-Path $engramHome "work-next-read"

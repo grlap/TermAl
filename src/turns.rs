@@ -399,11 +399,14 @@ struct AppPreferences {
     engram: EngramHostSettings,
 }
 
-/// Machine-scoped Engram process configuration. Repositories opt in through
-/// `.engram-project`; this host record only selects the executable and store.
+/// Machine-scoped Engram process and principal configuration. Repositories opt
+/// in through `.engram-project`; this host record selects the executable,
+/// store, and stable developer principal shared by every local project.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct EngramHostSettings {
+    #[serde(default = "default_engram_developer_name")]
+    developer_name: String,
     #[serde(default = "default_engram_binary_path")]
     binary_path: String,
     #[serde(default = "default_engram_host_home")]
@@ -418,6 +421,7 @@ struct EngramHostSettings {
 impl Default for EngramHostSettings {
     fn default() -> Self {
         Self {
+            developer_name: default_engram_developer_name(),
             binary_path: default_engram_binary_path(),
             home: default_engram_host_home(),
             boot_recovery_budget_ms: default_engram_boot_recovery_budget_ms(),
@@ -434,6 +438,10 @@ fn default_engram_boot_recovery_budget_ms() -> u64 {
 
 fn default_engram_binary_path() -> String {
     "engram".to_owned()
+}
+
+fn default_engram_developer_name() -> String {
+    "dev".to_owned()
 }
 
 fn default_engram_host_home() -> String {

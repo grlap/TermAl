@@ -4,13 +4,12 @@
 // new sessions, and per-session overrides applied via
 // `update_session_settings`.
 //
-// Update semantics diverge by agent. Codex model + reasoning-effort swaps
-// and Cursor mode changes take effect live on the running runtime, so
-// `runtime_reset_required` stays false. Claude model + effort changes flip
-// `runtime_reset_required` because the Claude CLI does not support hot
-// reconfig — the next send restarts the child. Model swaps push a
-// `SetModel` command to the live Claude process, but effort changes and
-// the `default` sentinel never do.
+// Update semantics diverge by agent. Codex model + reasoning-effort swaps and
+// Cursor mode changes take effect live on the running runtime. Claude model
+// swaps can push a `SetModel` command, while effort changes and the `default`
+// sentinel restart. Once a per-session runtime has an installed Engram MCP
+// descriptor, any model/reasoning change that alters its frozen actor context
+// rotates Claude/ACP instead of hot-applying only half of that identity.
 //
 // Codex reasoning-effort normalization guards a subtle edge: when the
 // model changes, the current effort must be re-validated against the new
@@ -27,6 +26,17 @@
 // `set_external_session_id`, `sync_claude_model_options_for_session`.
 
 use super::*;
+
+fn test_engram_mcp_installed_descriptor(session: &Session) -> EngramMcpInstalledDescriptor {
+    EngramMcpInstalledDescriptor {
+        binary_path: "C:/tools/engram.exe".to_owned(),
+        home: "C:/engram-home".to_owned(),
+        actor_id: engram_seat_id("dev", session),
+        actor_context: engram_actor_context(session),
+        store_key: None,
+        work_authority_grant: None,
+    }
+}
 
 // Remote settings proxy the typed request instead of maintaining a parallel
 // field allowlist. Pin the two OpenCode-dependent fields and the transport
@@ -2048,6 +2058,462 @@ fn updates_claude_session_model_settings_without_restarting_runtime() {
         ClaudeRuntimeCommand::SetModel(model) => assert_eq!(model, "opus"),
         _ => panic!("expected Claude model update command"),
     }
+}
+
+// Pins the Engram identity snapshot boundary for every per-session runtime
+// family. Model/reasoning settings normally support a live update, but once an
+// Engram MCP descriptor is installed the agent process and MCP child carry one
+// immutable actor id/context pair. An identity-changing update must therefore
+// persist the new setting, suppress the live RPC, and rotate on the next turn.
+#[test]
+fn installed_engram_agent_runtimes_rotate_on_identity_changes() {
+    let claude_state = test_app_state();
+    let claude = claude_state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Claude),
+            name: Some("Claude Engram identity".to_owned()),
+            workdir: Some("/tmp".to_owned()),
+            project_id: None,
+            model: Some("claude-sonnet-4".to_owned()),
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: None,
+            claude_approval_mode: Some(ClaudeApprovalMode::Ask),
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .expect("Claude session should be created");
+    let (runtime, claude_rx) = test_claude_runtime_handle("claude-engram-identity");
+    {
+        let mut inner = claude_state.inner.lock().expect("state mutex poisoned");
+        let record = inner
+            .sessions
+            .iter_mut()
+            .find(|record| record.session.id == claude.session_id)
+            .expect("Claude session should exist");
+        record.runtime = SessionRuntime::Claude(runtime);
+        record.engram_mcp_installed = Some(test_engram_mcp_installed_descriptor(&record.session));
+        record.engram.context_nudge_generation = 7;
+        record.engram.context_nudge_pending = false;
+        record.engram.context_nudge_in_progress = true;
+        record.engram.context_nudge_in_progress_generation = Some(7);
+        record.engram.pending_context_nudge = Some("stale actor context".to_owned());
+    }
+    claude_state
+        .update_session_settings(
+            &claude.session_id,
+            UpdateSessionSettingsRequest {
+                name: None,
+                model: Some("claude-sonnet-4-1".to_owned()),
+                sandbox_mode: None,
+                approval_policy: None,
+                reasoning_effort: None,
+                cursor_mode: None,
+                claude_approval_mode: None,
+                claude_effort: None,
+                gemini_approval_mode: None,
+                opencode_effort: None,
+                opencode_mode: None,
+                codex_fast_mode: None,
+            },
+        )
+        .expect("Claude model authority should persist");
+    {
+        let inner = claude_state.inner.lock().expect("state mutex poisoned");
+        let record = inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == claude.session_id)
+            .expect("Claude session should remain present");
+        assert_eq!(record.session.model, "claude-sonnet-4-1");
+        assert!(record.runtime_reset_required);
+        assert_eq!(record.engram.context_nudge_generation, 8);
+        assert!(record.engram.context_nudge_pending);
+        assert!(record.engram.context_nudge_in_progress);
+        assert_eq!(
+            record.engram.context_nudge_in_progress_generation,
+            Some(7),
+            "the old in-flight refresh must remain generation-fenced"
+        );
+        assert!(record.engram.pending_context_nudge.is_none());
+    }
+    assert!(matches!(
+        claude_rx.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
+
+    let cursor_state = test_app_state();
+    let cursor = cursor_state
+        .create_session(CreateSessionRequest {
+            agent: Some(Agent::Cursor),
+            name: Some("Cursor Engram identity".to_owned()),
+            workdir: Some("/tmp".to_owned()),
+            project_id: None,
+            model: Some("cursor-auto".to_owned()),
+            approval_policy: None,
+            reasoning_effort: None,
+            sandbox_mode: None,
+            cursor_mode: Some(CursorMode::Agent),
+            claude_approval_mode: None,
+            claude_effort: None,
+            gemini_approval_mode: None,
+        })
+        .expect("Cursor session should be created");
+    cursor_state
+        .set_external_session_id(&cursor.session_id, "cursor-engram-external".to_owned())
+        .expect("Cursor external id should persist");
+    let (runtime, cursor_rx) = test_acp_runtime_handle(AcpAgent::Cursor, "cursor-engram-identity");
+    {
+        let mut inner = cursor_state.inner.lock().expect("state mutex poisoned");
+        let record = inner
+            .sessions
+            .iter_mut()
+            .find(|record| record.session.id == cursor.session_id)
+            .expect("Cursor session should exist");
+        record.runtime = SessionRuntime::Acp(runtime);
+        record.engram_mcp_installed = Some(test_engram_mcp_installed_descriptor(&record.session));
+    }
+    cursor_state
+        .update_session_settings(
+            &cursor.session_id,
+            UpdateSessionSettingsRequest {
+                name: None,
+                model: Some("cursor-next".to_owned()),
+                sandbox_mode: None,
+                approval_policy: None,
+                reasoning_effort: None,
+                cursor_mode: None,
+                claude_approval_mode: None,
+                claude_effort: None,
+                gemini_approval_mode: None,
+                opencode_effort: None,
+                opencode_mode: None,
+                codex_fast_mode: None,
+            },
+        )
+        .expect("Cursor model authority should persist");
+    {
+        let inner = cursor_state.inner.lock().expect("state mutex poisoned");
+        let record = inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == cursor.session_id)
+            .expect("Cursor session should remain present");
+        assert_eq!(record.session.model, "cursor-next");
+        assert!(record.runtime_reset_required);
+    }
+    assert!(matches!(
+        cursor_rx.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
+
+    let opencode_state = test_app_state();
+    let opencode_id = test_session_id(&opencode_state, Agent::OpenCode);
+    opencode_state
+        .set_external_session_id(&opencode_id, "opencode-engram-external".to_owned())
+        .expect("OpenCode external id should persist");
+    let (runtime, opencode_rx) =
+        test_acp_runtime_handle(AcpAgent::OpenCode, "opencode-engram-identity");
+    {
+        let mut inner = opencode_state.inner.lock().expect("state mutex poisoned");
+        let record = inner
+            .sessions
+            .iter_mut()
+            .find(|record| record.session.id == opencode_id)
+            .expect("OpenCode session should exist");
+        record.session.model = "anthropic/claude-sonnet".to_owned();
+        record.session.opencode_model = Some("anthropic/claude-sonnet".to_owned());
+        record.session.opencode_effort = Some("medium".to_owned());
+        record.runtime = SessionRuntime::Acp(runtime);
+        record.engram_mcp_installed = Some(test_engram_mcp_installed_descriptor(&record.session));
+    }
+    opencode_state
+        .update_session_settings(
+            &opencode_id,
+            UpdateSessionSettingsRequest {
+                name: None,
+                model: None,
+                sandbox_mode: None,
+                approval_policy: None,
+                reasoning_effort: None,
+                cursor_mode: None,
+                claude_approval_mode: None,
+                claude_effort: None,
+                gemini_approval_mode: None,
+                opencode_effort: Some("high".to_owned()),
+                opencode_mode: None,
+                codex_fast_mode: None,
+            },
+        )
+        .expect("OpenCode effort authority should persist");
+    {
+        let inner = opencode_state.inner.lock().expect("state mutex poisoned");
+        let record = inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == opencode_id)
+            .expect("OpenCode session should remain present");
+        assert_eq!(record.session.opencode_effort.as_deref(), Some("high"));
+        assert!(record.runtime_reset_required);
+    }
+    assert!(matches!(
+        opencode_rx.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
+
+    let codex_state = test_app_state();
+    let codex_id = test_session_id(&codex_state, Agent::Codex);
+    codex_state
+        .set_external_session_id(&codex_id, "codex-engram-thread".to_owned())
+        .expect("Codex thread id should persist");
+    let (runtime, codex_rx) = test_codex_runtime_handle("codex-engram-identity");
+    {
+        let mut inner = codex_state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&codex_id)
+            .expect("Codex session should exist");
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("Codex session index should be valid");
+        record.session.model = "gpt-5.4".to_owned();
+        record.session.reasoning_effort = Some(CodexReasoningEffort::Medium);
+        record.codex_reasoning_effort = CodexReasoningEffort::Medium;
+        record.runtime = SessionRuntime::Codex(runtime);
+        record.engram_mcp_installed = Some(test_engram_mcp_installed_descriptor(&record.session));
+    }
+    codex_state
+        .update_session_settings(
+            &codex_id,
+            UpdateSessionSettingsRequest {
+                name: None,
+                model: Some("gpt-5.5".to_owned()),
+                sandbox_mode: None,
+                approval_policy: None,
+                reasoning_effort: Some(CodexReasoningEffort::High),
+                cursor_mode: None,
+                claude_approval_mode: None,
+                claude_effort: None,
+                gemini_approval_mode: None,
+                opencode_effort: None,
+                opencode_mode: None,
+                codex_fast_mode: None,
+            },
+        )
+        .expect("Codex identity settings should persist");
+    {
+        let inner = codex_state.inner.lock().expect("state mutex poisoned");
+        let record = inner
+            .find_session_index(&codex_id)
+            .and_then(|index| inner.sessions.get(index))
+            .expect("Codex session should remain present");
+        assert_eq!(record.session.model, "gpt-5.5");
+        assert_eq!(
+            record.session.reasoning_effort,
+            Some(CodexReasoningEffort::High)
+        );
+        assert!(
+            record.runtime_reset_required,
+            "the bound thread must detach so resume re-sends actor context"
+        );
+        assert_eq!(
+            record.external_session_id.as_deref(),
+            Some("codex-engram-thread"),
+            "rotation must retain the external thread selected for resume"
+        );
+    }
+    assert!(matches!(
+        codex_rx.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
+
+    let gemini_state = test_app_state();
+    let gemini_id = test_session_id(&gemini_state, Agent::Gemini);
+    let (runtime, gemini_rx) = test_acp_runtime_handle(AcpAgent::Gemini, "gemini-engram-identity");
+    {
+        let mut inner = gemini_state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&gemini_id)
+            .expect("Gemini session should exist");
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("Gemini session index should be valid");
+        record.session.model = "gemini-old".to_owned();
+        record.runtime = SessionRuntime::Acp(runtime);
+        record.engram_mcp_installed = Some(test_engram_mcp_installed_descriptor(&record.session));
+    }
+    gemini_state
+        .update_session_settings(
+            &gemini_id,
+            UpdateSessionSettingsRequest {
+                name: None,
+                model: Some("gemini-new".to_owned()),
+                sandbox_mode: None,
+                approval_policy: None,
+                reasoning_effort: None,
+                cursor_mode: None,
+                claude_approval_mode: None,
+                claude_effort: None,
+                gemini_approval_mode: None,
+                opencode_effort: None,
+                opencode_mode: None,
+                codex_fast_mode: None,
+            },
+        )
+        .expect("Gemini model authority should persist");
+    {
+        let inner = gemini_state.inner.lock().expect("state mutex poisoned");
+        let record = inner
+            .find_session_index(&gemini_id)
+            .and_then(|index| inner.sessions.get(index))
+            .expect("Gemini session should remain present");
+        assert_eq!(record.session.model, "gemini-new");
+        assert!(record.runtime_reset_required);
+    }
+    assert!(matches!(
+        gemini_rx.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
+}
+
+// ACP handshakes may replace a configured model alias with the runtime's
+// resolved model id. That display-state synchronization must not change the
+// identity already installed into the process and MCP child, and an unrelated
+// hot settings update must not mistake the pre-existing drift for a new
+// identity change. A later user model change must still rotate the runtime.
+#[test]
+fn runtime_model_sync_preserves_the_installed_engram_actor_identity() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Cursor);
+    state
+        .set_external_session_id(&session_id, "cursor-model-sync-external".to_owned())
+        .expect("Cursor external id should persist");
+    let (runtime, runtime_rx) = test_acp_runtime_handle(AcpAgent::Cursor, "cursor-model-sync");
+    let installed_identity = {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&session_id)
+            .expect("Cursor session should exist");
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("Cursor session index should be valid");
+        record.session.model = "auto".to_owned();
+        record.session.cursor_mode = Some(CursorMode::Agent);
+        record.runtime = SessionRuntime::Acp(runtime);
+        let descriptor = test_engram_mcp_installed_descriptor(&record.session);
+        let identity = (
+            descriptor.actor_id.clone(),
+            descriptor.actor_context.clone(),
+        );
+        record.engram_mcp_installed = Some(descriptor);
+        identity
+    };
+
+    state
+        .sync_session_model_options(
+            &session_id,
+            Some("cursor-resolved-model".to_owned()),
+            vec![],
+        )
+        .expect("runtime model synchronization should persist");
+
+    state
+        .update_session_settings(
+            &session_id,
+            UpdateSessionSettingsRequest {
+                name: None,
+                model: None,
+                sandbox_mode: None,
+                approval_policy: None,
+                reasoning_effort: None,
+                cursor_mode: Some(CursorMode::Ask),
+                claude_approval_mode: None,
+                claude_effort: None,
+                gemini_approval_mode: None,
+                opencode_effort: None,
+                opencode_mode: None,
+                codex_fast_mode: None,
+            },
+        )
+        .expect("unrelated Cursor mode update should persist");
+
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let record = inner
+            .find_session_index(&session_id)
+            .and_then(|index| inner.sessions.get(index))
+            .expect("Cursor session should remain present");
+        assert_eq!(record.session.model, "cursor-resolved-model");
+        assert_eq!(record.session.cursor_mode, Some(CursorMode::Ask));
+        assert!(
+            !record.runtime_reset_required,
+            "pre-existing display-model drift must not rotate an unrelated settings update"
+        );
+        assert_eq!(
+            engram_runtime_actor_identity("dev", record),
+            installed_identity,
+            "control and context-nudge work must keep the process's frozen identity"
+        );
+        assert_ne!(
+            engram_actor_context(&record.session),
+            installed_identity.1,
+            "the regression requires live display state to differ from the frozen runtime"
+        );
+    }
+
+    match runtime_rx
+        .recv_timeout(Duration::from_millis(100))
+        .expect("Cursor mode change should remain a hot ACP update")
+    {
+        AcpRuntimeCommand::JsonRpcMessage(message) => {
+            assert_eq!(
+                message.get("method").and_then(Value::as_str),
+                Some("session/set_config_option")
+            );
+            assert_eq!(
+                message.pointer("/params/sessionId"),
+                Some(&json!("cursor-model-sync-external"))
+            );
+            assert_eq!(message.pointer("/params/optionId"), Some(&json!("mode")));
+            assert_eq!(message.pointer("/params/value"), Some(&json!("ask")));
+        }
+        _ => panic!("expected live Cursor mode update request"),
+    }
+
+    state
+        .update_session_settings(
+            &session_id,
+            UpdateSessionSettingsRequest {
+                name: None,
+                model: Some("cursor-user-model".to_owned()),
+                sandbox_mode: None,
+                approval_policy: None,
+                reasoning_effort: None,
+                cursor_mode: None,
+                claude_approval_mode: None,
+                claude_effort: None,
+                gemini_approval_mode: None,
+                opencode_effort: None,
+                opencode_mode: None,
+                codex_fast_mode: None,
+            },
+        )
+        .expect("user model change should persist");
+
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = inner
+        .find_session_index(&session_id)
+        .and_then(|index| inner.sessions.get(index))
+        .expect("Cursor session should remain present");
+    assert_eq!(record.session.model, "cursor-user-model");
+    assert!(
+        record.runtime_reset_required,
+        "a user model change must rotate the frozen Engram identity"
+    );
+    assert!(matches!(
+        runtime_rx.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
 }
 
 // pins that switching a running Claude session to the "default"

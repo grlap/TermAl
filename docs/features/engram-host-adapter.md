@@ -25,19 +25,18 @@ context:
 - A local repository is declared only while its root contains a non-empty
   `.engram-project` file. Teams normally commit this marker so declaration is
   consistent across machines; TermAl validates the file, not Git index state.
-- The host stores one machine-wide `binaryPath`, `home`, and
-  `bootRecoveryBudgetMs`. The binary defaults to `engram` on the server
-  process `PATH`; home defaults to the server user's `.engram` directory.
+- The host stores one machine-wide `developerName`, `binaryPath`, `home`, and
+  `bootRecoveryBudgetMs`. The developer name defaults to `dev`, is normalized
+  to lowercase, and accepts only ASCII letters, digits, `.`, `_`, and `-`.
+  The binary defaults to `engram` on the server process `PATH`; home defaults
+  to the server user's `.engram` directory.
 - Each project stores `enabled` and the default-off `turnGatedControl` flag.
-
-There is no TermAl authority-grant setting, grant file, grant environment
-variable, or grant-installing verification step. Existing persisted grant
-fields from development builds are ignored and are not written again.
 
 ## Settings and verification
 
-Open **Settings > Engram** to configure the host-global binary, home, and boot
-recovery budget. Declared local projects expose **Engram settings** with:
+Open **Settings > Engram** to configure the host-global developer principal,
+binary, home, and boot recovery budget. Declared local projects expose
+**Engram settings** with:
 
 - the Base Enabled/Disable switch;
 - a separate **Turn-gated control** checkbox;
@@ -53,8 +52,11 @@ engram --project-file <project>/.engram-project --home <home> doctor --json
 
 Doctor must report a healthy store, a non-empty project id, and an absolute
 database path. Only the premium toggle additionally requires
-`control.required_assurance == "turn_gated"`. Base mode does not require or
-install mutation authority.
+`control.required_assurance == "turn_gated"`. Base mode requires no additional
+installation step. There is no TermAl authority-grant setting, grant file,
+grant environment variable, or grant-installing verification step; obsolete
+persisted grant fields from development builds are ignored and are not written
+again.
 
 ## Base MCP composition
 
@@ -63,7 +65,9 @@ invokes:
 
 ```text
 engram --project-file <project>/.engram-project --home <home> \
-  mcp --actor-id termal --session-id <termal-session-id>
+  mcp --actor-id <developer>/<agent-kind> \
+  --actor-context 'agent=<kind>;model=<model>;reasoning=<effort>' \
+  --session-id <termal-session-id>
 ```
 
 The child environment contains exactly the host context Engram also exposes to
@@ -71,16 +75,31 @@ its shell words:
 
 ```text
 ENGRAM_HOME=<home>
-ENGRAM_ACTOR_ID=termal
+ENGRAM_ACTOR_ID=<developer>/<agent-kind>
+ENGRAM_ACTOR_CONTEXT=agent=<kind>;model=<model>;reasoning=<effort>
 ENGRAM_SESSION_ID=<termal-session-id>
 ```
 
-No authority credential is placed in argv, environment, MCP JSON, state
-snapshots, logs, or private Claude MCP files. The same three values are also
-available to commands run from the agent session: Claude and ACP receive them
-on their per-session process, while the shared Codex app server receives no
-process-global Engram identity and applies them through the thread-scoped
-`shell_environment_policy.set` on both `thread/start` and `thread/resume`.
+`ENGRAM_ACTOR_ID` is the principal: the developer's own seat is the bare host
+`developerName`, while hosted agents append the lowercase TermAl agent kind
+(`codex`, `claude`, `cursor`, `gemini`, or `opencode`). Session display names
+and model aliases are never identity inputs. Engram matches actor ids exactly:
+the bare developer and every `<developer>/<agent-kind>` seat are distinct, and
+all hosted agent operations (including premium control) use the suffixed seat.
+Exact agent kind, model id, and reasoning selection are rendered separately in
+optional free-text `ENGRAM_ACTOR_CONTEXT`; empty or unknown detail keys are
+omitted. TermAl collapses control characters and caps this context at 200 bytes,
+below Engram's 256-byte limit. `%`, `;`, and `=` inside values are encoded as
+`%25`, `%3B`, and `%3D`, so they cannot impersonate field separators. Any field
+that does not fit is omitted whole; later, smaller fields may still be appended.
+
+No credential is placed in argv, environment, MCP JSON, state snapshots, logs,
+or private Claude MCP files. The same required identity values and optional
+actor context are also available to commands run from the agent session: Claude
+and ACP receive them on their per-session process, while the shared Codex app
+server receives no process-global Engram identity and applies them through the
+thread-scoped `shell_environment_policy.set` on both `thread/start` and
+`thread/resume`.
 On each runtime spawn, disabled, undeclared, remote, and globally killed
 projects explicitly remove inherited `ENGRAM_*` identity from per-session agent
 processes. The shared Codex process is always scrubbed; when a Codex thread is
@@ -97,11 +116,15 @@ off-lock:
 
 ```text
 engram --project-file <project>/.engram-project --home <home> \
-  work next --context-generation termal-<generation>
+  work --actor-id <developer>/<agent-kind> \
+  --session-id <termal-session-id> \
+  --actor-context 'agent=<kind>;model=<model>;reasoning=<effort>' next \
+  --context-generation termal-<generation>
 ```
 
-The command receives the same three `ENGRAM_*` environment values as the MCP
-child. Its trimmed text is capped at 32 KiB, escapes the host fence terminator,
+The command receives the same `ENGRAM_*` environment values as the MCP child,
+and its actor/context flags are byte-identical to that environment. Its trimmed
+text is capped at 32 KiB, escapes the host fence terminator,
 is wrapped in an `<engram-work-context>` block, and is prepended only to the
 runtime prompt; the user's durable message remains unchanged. The cold-start
 command uses the bounded Engram CLI/store-open budget (six seconds in
@@ -145,10 +168,9 @@ obligation_waive(routing_token, obligation_id, expected_definition,
                  waived_by, reason, idempotency_key)
 ```
 
-The removed `authority_grant` field is never sent. Exact replay returns the
-same typed decision; a changed intent under one key surfaces
-`control_operation_idempotency_conflict`. Policy refusals are successful typed
-responses (`waiver_not_admitted`, `obligation_not_open`, or
+Exact replay returns the same typed decision; a changed intent under one key
+surfaces `control_operation_idempotency_conflict`. Policy refusals are
+successful typed responses (`waiver_not_admitted`, `obligation_not_open`, or
 `definition_changed`) and retain Engram's remedy. Waived receipts expose the
 human attribution but omit the reason.
 
@@ -190,8 +212,10 @@ releases the fence, TermAl drains the queue against the new settings:
   delivery resumes; and
 - with Engram disabled, neither Base nor premium work is composed.
 
-Binary/home changes and project deletion retain the same generation-fenced
-runtime teardown and checkpoint ordering as other premium transitions.
+Developer-principal, binary/home changes and project deletion retain the same
+generation-fenced runtime teardown and checkpoint ordering as other premium
+transitions. Host principal or path changes require every Engram project to be
+disabled first.
 Affected local runtimes are marked for reset so the next turn spawns the agent
 process with the new base-tier identity instead of rewriting a live process
 environment in place.

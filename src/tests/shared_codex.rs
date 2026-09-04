@@ -353,7 +353,8 @@ fn detach_removes_the_in_flight_thread_setup_so_the_next_prompt_starts_fresh() {
     assert_eq!(
         resume_request.pointer("/params/config/shell_environment_policy/set"),
         Some(&json!({
-            "ENGRAM_ACTOR_ID": "termal",
+            "ENGRAM_ACTOR_CONTEXT": "agent=codex;model=gpt-5.4;reasoning=medium",
+            "ENGRAM_ACTOR_ID": "dev/codex",
             "ENGRAM_HOME": "test-engram-home",
             "ENGRAM_SESSION_ID": session_id,
         })),
@@ -377,7 +378,8 @@ fn detach_removes_the_in_flight_thread_setup_so_the_next_prompt_starts_fresh() {
     assert_eq!(
         start_request.pointer("/params/config/shell_environment_policy/set"),
         Some(&json!({
-            "ENGRAM_ACTOR_ID": "termal",
+            "ENGRAM_ACTOR_CONTEXT": "agent=codex;model=gpt-5.4;reasoning=medium",
+            "ENGRAM_ACTOR_ID": "dev/codex",
             "ENGRAM_HOME": "test-engram-home",
             "ENGRAM_SESSION_ID": session_id,
         })),
@@ -1315,6 +1317,7 @@ future_policy = { mode = "preserve-me" }
 KEEP_ME = "present"
 ENGRAM_HOME = "stale-home"
 ENGRAM_ACTOR_ID = "stale-actor"
+ENGRAM_ACTOR_CONTEXT = "stale-context"
 ENGRAM_SESSION_ID = "stale-session"
 engram_home = "case-colliding-home"
 "#,
@@ -1365,6 +1368,7 @@ engram_home = "case-colliding-home"
                 "KEEP_ONLY",
                 "ENGRAM_HOME",
                 "ENGRAM_ACTOR_ID",
+                "ENGRAM_ACTOR_CONTEXT",
                 "ENGRAM_SESSION_ID",
             ])),
             "an active seeded allowlist must retain its entries and admit the owned identity"
@@ -1456,7 +1460,11 @@ fn codex_engram_shell_env_include_only_admits_exact_canonical_names() {
     });
     let engram_env = BTreeMap::from([
         (ENGRAM_HOME_ENV.to_owned(), "test-home".to_owned()),
-        (ENGRAM_ACTOR_ID_ENV.to_owned(), "termal".to_owned()),
+        (ENGRAM_ACTOR_ID_ENV.to_owned(), "dev/codex".to_owned()),
+        (
+            ENGRAM_ACTOR_CONTEXT_ENV.to_owned(),
+            "agent=codex;model=test;reasoning=high".to_owned(),
+        ),
         (ENGRAM_SESSION_ID_ENV.to_owned(), "test-session".to_owned()),
     ]);
 
@@ -1469,6 +1477,7 @@ fn codex_engram_shell_env_include_only_admits_exact_canonical_names() {
             "engram_home",
             "ENGRAM_HOME",
             "ENGRAM_ACTOR_ID",
+            "ENGRAM_ACTOR_CONTEXT",
             "ENGRAM_SESSION_ID",
         ])),
         "a differently-cased allowlist entry must not suppress the exact canonical name"
@@ -1492,14 +1501,21 @@ fn shared_codex_thread_setup_falls_back_when_seeded_config_is_missing_or_malform
         .and_then(Value::as_object)
         .expect("eligible fallback config should contain a shell policy");
     assert_eq!(missing_policy.len(), 1);
+    let missing_set = missing_policy
+        .get("set")
+        .and_then(Value::as_object)
+        .expect("fallback policy set should be an object");
     assert_eq!(
-        missing_policy
-            .get("set")
-            .and_then(Value::as_object)
-            .map(|set| set.len()),
-        Some(ENGRAM_AGENT_PROCESS_ENV_NAMES.len()),
-        "a missing seeded policy must fall back to exactly the three TermAl-owned values"
+        missing_set.len(),
+        ENGRAM_AGENT_PROCESS_ENV_NAMES.len(),
+        "a missing seeded policy must fall back to exactly the four TermAl-owned values"
     );
+    for name in ENGRAM_AGENT_PROCESS_ENV_NAMES {
+        assert!(
+            missing_set.contains_key(name),
+            "fallback policy must contain the exact owned key `{name}`"
+        );
+    }
     assert!(
         missing_policy.get("include_only").is_none(),
         "an absent allowlist must stay absent instead of enabling allowlist mode"
@@ -1526,14 +1542,21 @@ fn shared_codex_thread_setup_falls_back_when_seeded_config_is_missing_or_malform
         .and_then(Value::as_object)
         .expect("eligible malformed fallback should contain a shell policy");
     assert_eq!(malformed_policy.len(), 1);
+    let malformed_set = malformed_policy
+        .get("set")
+        .and_then(Value::as_object)
+        .expect("malformed fallback policy set should be an object");
     assert_eq!(
-        malformed_policy
-            .get("set")
-            .and_then(Value::as_object)
-            .map(|set| set.len()),
-        Some(ENGRAM_AGENT_PROCESS_ENV_NAMES.len()),
-        "a malformed seeded config must fall back to exactly the three TermAl-owned values"
+        malformed_set.len(),
+        ENGRAM_AGENT_PROCESS_ENV_NAMES.len(),
+        "a malformed seeded config must fall back to exactly the four TermAl-owned values"
     );
+    for name in ENGRAM_AGENT_PROCESS_ENV_NAMES {
+        assert!(
+            malformed_set.contains_key(name),
+            "malformed fallback policy must contain the exact owned key `{name}`"
+        );
+    }
     assert!(
         malformed_policy.get("include_only").is_none(),
         "a malformed fallback must not enable allowlist mode"
@@ -1625,7 +1648,8 @@ fn shared_codex_thread_start_includes_delegation_mcp_config() {
     assert_eq!(
         start_request.pointer("/params/config/shell_environment_policy/set"),
         Some(&json!({
-            "ENGRAM_ACTOR_ID": "termal",
+            "ENGRAM_ACTOR_CONTEXT": "agent=codex;model=gpt-5.4;reasoning=medium",
+            "ENGRAM_ACTOR_ID": "dev/codex",
             "ENGRAM_HOME": "test-engram-home",
             "ENGRAM_SESSION_ID": session_id,
         })),

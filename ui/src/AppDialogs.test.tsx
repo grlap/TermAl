@@ -143,6 +143,7 @@ function createBaseProps(
     onSaveRemotes: vi.fn(),
     telegramConfig: undefined,
     engramHostSettings: {
+      developerName: "dev",
       binaryPath: "engram",
       home: "C:\\Users\\greg\\.engram",
       bootRecoveryBudgetMs: 5_000,

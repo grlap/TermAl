@@ -194,6 +194,7 @@ export function normalizeEngramHostSettings(
       ? "%USERPROFILE%\\.engram"
       : "~/.engram";
   return {
+    developerName: settings?.developerName?.trim().toLowerCase() || "dev",
     binaryPath: settings?.binaryPath?.trim() || "engram",
     home: settings?.home?.trim() || defaultHome,
     bootRecoveryBudgetMs:

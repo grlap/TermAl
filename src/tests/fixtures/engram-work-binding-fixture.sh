@@ -4,6 +4,7 @@ set -eu
 project_file=""
 engram_home=""
 actor_id=""
+actor_context=""
 session_id=""
 operation=""
 work_ref=""
@@ -13,6 +14,7 @@ while [ "$#" -gt 0 ]; do
     --project-file) project_file=$2; shift 2 ;;
     --home) engram_home=$2; shift 2 ;;
     --actor-id) actor_id=$2; shift 2 ;;
+    --actor-context) actor_context=$2; shift 2 ;;
     --session-id) session_id=$2; shift 2 ;;
     --sections) sections=$2; shift 2 ;;
     work) shift ;;
@@ -33,8 +35,13 @@ done
 
 [ -n "$project_file" ] || exit 2
 [ -n "$engram_home" ] || exit 2
-[ "$actor_id" = "termal" ] || exit 3
+[ "$actor_id" = "dev/codex" ] || exit 3
+[ "$actor_context" = "agent=codex;model=test;reasoning=high" ] || exit 3
 [ "$session_id" = "fixture-session" ] || exit 3
+[ "${ENGRAM_HOME:-}" = "$engram_home" ] || exit 7
+[ "${ENGRAM_ACTOR_ID:-}" = "$actor_id" ] || exit 7
+[ "${ENGRAM_ACTOR_CONTEXT:-}" = "$actor_context" ] || exit 7
+[ "${ENGRAM_SESSION_ID:-}" = "$session_id" ] || exit 7
 mode=$(tr -d '\r\n' < "$project_file")
 marker="$engram_home/work-next-read"
 lock_retry_marker="$engram_home/work-lock-retried"

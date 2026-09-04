@@ -1,5 +1,6 @@
-// Global Settings > Engram surface. Host binary/home are machine-scoped;
-// repositories appear automatically when their root contains `.engram-project`.
+// Global Settings > Engram surface. Developer identity, binary, and home are
+// machine-scoped; repositories appear automatically when their root contains
+// `.engram-project`.
 
 import { useEffect, useMemo, useState } from "react";
 
@@ -36,6 +37,9 @@ export function EngramPreferencesPanel({
   const [selectedProjectId, setSelectedProjectId] = useState(
     () => declaredProjects[0]?.id ?? "",
   );
+  const [developerName, setDeveloperName] = useState(
+    hostSettings.developerName,
+  );
   const [binaryPath, setBinaryPath] = useState(hostSettings.binaryPath);
   const [home, setHome] = useState(hostSettings.home);
   const [bootRecoveryBudgetMs, setBootRecoveryBudgetMs] = useState(
@@ -49,12 +53,14 @@ export function EngramPreferencesPanel({
   >({});
 
   useEffect(() => {
+    setDeveloperName(hostSettings.developerName);
     setBinaryPath(hostSettings.binaryPath);
     setHome(hostSettings.home);
     setBootRecoveryBudgetMs(hostSettings.bootRecoveryBudgetMs);
   }, [
     hostSettings.binaryPath,
     hostSettings.bootRecoveryBudgetMs,
+    hostSettings.developerName,
     hostSettings.home,
   ]);
 
@@ -78,6 +84,7 @@ export function EngramPreferencesPanel({
     setHostError(null);
     try {
       const state = await updateEngramHostSettings({
+        developerName: developerName.trim().toLowerCase(),
         binaryPath: binaryPath.trim() || "engram",
         home: home.trim(),
         bootRecoveryBudgetMs,
@@ -99,14 +106,38 @@ export function EngramPreferencesPanel({
             <div className="card-label">Host-global</div>
             <h3>Engram runtime</h3>
             <p className="settings-panel-copy">
-              Configure the executable and Engram home once for this machine.
-              Projects never override these paths.
+              Configure the developer principal, executable, and Engram home
+              once for this machine. Projects never override these values.
             </p>
           </div>
           <span className="remote-settings-badge">This machine</span>
         </div>
 
         <div className="project-engram-form">
+          <label
+            className="create-session-field"
+            htmlFor="settings-engram-developer-name"
+          >
+            <span>Developer name</span>
+            <input
+              id="settings-engram-developer-name"
+              aria-label="Engram developer name"
+              className="themed-input"
+              value={developerName}
+              disabled={isSavingHost}
+              maxLength={64}
+              pattern="[a-z0-9._-]+"
+              onChange={(event) => {
+                setDeveloperName(event.target.value);
+                setHostNotice(null);
+                setHostError(null);
+              }}
+            />
+            <span className="create-session-field-hint">
+              Stable host principal prefix. Agent seats append their kind, such
+              as <code> /codex</code> or <code> /claude</code>.
+            </span>
+          </label>
           <label
             className="create-session-field"
             htmlFor="settings-engram-host-binary"

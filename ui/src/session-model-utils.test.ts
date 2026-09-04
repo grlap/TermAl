@@ -57,11 +57,13 @@ describe("normalizeEngramHostSettings", () => {
   it("normalizes the machine-scoped binary and home values", () => {
     expect(
       normalizeEngramHostSettings({
+        developerName: "  Greg.Dev  ",
         binaryPath: "  C:\\tools\\engram.exe  ",
         home: "  C:\\EngramHome  ",
         bootRecoveryBudgetMs: 7_500,
       }),
     ).toEqual({
+      developerName: "greg.dev",
       binaryPath: "C:\\tools\\engram.exe",
       home: "C:\\EngramHome",
       bootRecoveryBudgetMs: 7_500,

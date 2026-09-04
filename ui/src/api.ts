@@ -833,6 +833,7 @@ export function updateAppSettings(payload: {
 }
 
 export function updateEngramHostSettings(payload: {
+  developerName: string;
   binaryPath: string;
   home: string;
   bootRecoveryBudgetMs: number;

@@ -2,6 +2,9 @@ $ErrorActionPreference = "Stop"
 
 $projectFile = $null
 $engramHome = $null
+$actorId = $null
+$actorContext = $null
+$sessionId = $null
 for ($index = 0; $index -lt $args.Count - 1; $index += 1) {
     if ($args[$index] -eq "--project-file") {
         $projectFile = $args[$index + 1]
@@ -9,45 +12,35 @@ for ($index = 0; $index -lt $args.Count - 1; $index += 1) {
     if ($args[$index] -eq "--home") {
         $engramHome = $args[$index + 1]
     }
+    if ($args[$index] -eq "--actor-id") {
+        $actorId = $args[$index + 1]
+    }
+    if ($args[$index] -eq "--actor-context") {
+        $actorContext = $args[$index + 1]
+    }
+    if ($args[$index] -eq "--session-id") {
+        $sessionId = $args[$index + 1]
+    }
 }
 if (-not $projectFile -or -not $engramHome) {
     exit 2
 }
 
 $workIndex = [Array]::IndexOf($args, "work")
-if ($workIndex -ge 0 -and ($workIndex + 1) -lt $args.Count -and $args[$workIndex + 1] -eq "next") {
-    if (-not $env:ENGRAM_HOME -or -not $env:ENGRAM_ACTOR_ID -or -not $env:ENGRAM_SESSION_ID) {
+if ($workIndex -ge 0 -and ($args -contains "next") -and ($args -contains "--context-generation")) {
+    if (-not $env:ENGRAM_HOME -or -not $env:ENGRAM_ACTOR_ID -or -not $env:ENGRAM_ACTOR_CONTEXT -or -not $env:ENGRAM_SESSION_ID) {
         [Console]::Error.WriteLine("missing Engram base context environment")
         exit 8
+    }
+    if ($env:ENGRAM_HOME -ne $engramHome -or $env:ENGRAM_ACTOR_ID -ne $actorId -or $env:ENGRAM_ACTOR_CONTEXT -ne $actorContext -or $env:ENGRAM_SESSION_ID -ne $sessionId) {
+        [Console]::Error.WriteLine("Engram base context argv/environment mismatch")
+        exit 9
     }
     $mode = (Get-Content -LiteralPath $projectFile -Raw).Trim()
     if ($mode -eq "fixture-work-next-slow") {
         Start-Sleep -Milliseconds 400
     }
     [Console]::Out.WriteLine("Engram work context for $($env:ENGRAM_SESSION_ID) as $($env:ENGRAM_ACTOR_ID)")
-    exit 0
-}
-
-if (($args -contains "authority") -and ($args -contains "show")) {
-    $mode = (Get-Content -LiteralPath $projectFile -Raw).Trim()
-    $result = [ordered]@{
-        installed = $true
-        subject_actor_id = "termal"
-        issued_by = "test"
-        valid_from = "2020-01-01T00:00:00Z"
-        valid_until = "2099-01-01T00:00:00Z"
-        revoked_at = $null
-        operations = @("root_create", "plan", "claim", "dispose", "root_complete", "completion_drain")
-        scope = @{ kind = "project" }
-    }
-    switch ($mode) {
-        "fixture-authority-unknown" { $result.installed = $false; $result.subject_actor_id = $null; $result.valid_from = $null; $result.valid_until = $null; $result.operations = $null; $result.scope = $null }
-        "fixture-authority-revoked" { $result.revoked_at = "2026-08-30T22:26:46.8Z" }
-        "fixture-authority-expired" { $result.valid_until = "2020-01-02T00:00:00Z" }
-        "fixture-authority-future" { $result.valid_from = "2098-01-01T00:00:00Z" }
-        "fixture-authority-subject-mismatch" { $result.subject_actor_id = "another-actor" }
-    }
-    [Console]::Out.WriteLine(($result | ConvertTo-Json -Compress -Depth 10))
     exit 0
 }
 
@@ -93,6 +86,15 @@ if ($args -contains "doctor") {
         project_id = $mode
     } | ConvertTo-Json -Compress -Depth 10))
     exit 0
+}
+
+if (-not $actorId -or -not $sessionId -or
+    $env:ENGRAM_HOME -ne $engramHome -or
+    $env:ENGRAM_ACTOR_ID -ne $actorId -or
+    $env:ENGRAM_ACTOR_CONTEXT -ne $actorContext -or
+    $env:ENGRAM_SESSION_ID -ne $sessionId) {
+    [Console]::Error.WriteLine("Engram control argv/environment mismatch")
+    exit 10
 }
 
 $routingToken = "fixture-token"

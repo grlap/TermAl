@@ -906,6 +906,7 @@ fn stateful_engram_connection(session_id: &str) -> EngramConnectionConfig {
         home: PathBuf::from("stateful-engram-home"),
         project_root: PathBuf::from("stateful-engram-root"),
         actor_id: "termal-stateful-test".to_owned(),
+        actor_context: None,
         session_id: session_id.to_owned(),
     }
 }
@@ -2271,7 +2272,8 @@ fn real_process_work_binding_reader_uses_next_then_exact_focus() {
         project_file: project_file.clone(),
         home: temp.path().to_path_buf(),
         project_root: temp.path().to_path_buf(),
-        actor_id: "termal".to_owned(),
+        actor_id: "dev/codex".to_owned(),
+        actor_context: Some("agent=codex;model=test;reasoning=high".to_owned()),
         session_id: "fixture-session".to_owned(),
     };
     let binding = read_engram_work_binding_from_cli(&connection, Duration::from_secs(2), false)
@@ -3830,6 +3832,7 @@ fn real_process_fixture_covers_spawn_eof_timeout_kill_and_respawn() {
         home: temp_root.path().to_path_buf(),
         project_root: temp_root.path().to_path_buf(),
         actor_id: "termal-fixture".to_owned(),
+        actor_context: None,
         session_id: "engram-fixture-session".to_owned(),
     };
     let request = EngramControlRequest::SessionBind {
@@ -3887,6 +3890,7 @@ fn real_process_timeout_kills_the_entire_control_process_tree() {
         home: temp_root.path().to_path_buf(),
         project_root: temp_root.path().to_path_buf(),
         actor_id: "termal-fixture".to_owned(),
+        actor_context: None,
         session_id: "engram-fixture-process-tree".to_owned(),
     };
     let request = EngramControlRequest::SessionBind {
@@ -4034,6 +4038,7 @@ fn engram_control_process_tree_connection(
         home: temp_root.path().to_path_buf(),
         project_root: temp_root.path().to_path_buf(),
         actor_id: "termal-fixture".to_owned(),
+        actor_context: None,
         session_id: format!("engram-fixture-process-tree-{suffix}"),
     }
 }
@@ -4208,6 +4213,7 @@ fn real_process_fixture_persists_idempotency_and_unknown_grant_semantics() {
         home: temp_root.path().to_path_buf(),
         project_root: temp_root.path().to_path_buf(),
         actor_id: "termal-fixture".to_owned(),
+        actor_context: None,
         session_id: "engram-fixture-idempotency".to_owned(),
     };
     let transport = real_process_fixture_transport();
@@ -4403,6 +4409,7 @@ fn real_process_fixture_enforces_stale_begin_and_unbegun_grant_recovery() {
         home: temp_root.path().to_path_buf(),
         project_root: temp_root.path().to_path_buf(),
         actor_id: "termal-fixture".to_owned(),
+        actor_context: None,
         session_id: "engram-fixture-stale-begin".to_owned(),
     };
     let transport = real_process_fixture_transport();
@@ -4731,6 +4738,7 @@ fn real_fixture_engram_settings(root: &FsPath) -> EngramProjectSettings {
 fn install_fixture_engram_host_settings(state: &AppState, home: &FsPath) {
     let mut inner = state.inner.lock().expect("state mutex poisoned");
     inner.preferences.engram = EngramHostSettings {
+        developer_name: default_engram_developer_name(),
         binary_path: real_engram_control_fixture_path()
             .to_string_lossy()
             .into_owned(),
@@ -4814,52 +4822,6 @@ fn project_engram_verification_is_redacted_and_does_not_mutate_settings() {
             .engram
             .is_none(),
         "Verify must not persist the proposed settings"
-    );
-}
-
-#[test]
-fn project_engram_verification_does_not_probe_removed_authority_grants() {
-    let state = test_app_state();
-    let root = state
-        .test_temp_root
-        .as_ref()
-        .expect("test root should exist")
-        .path()
-        .join("engram-project-settings-revoked");
-    fs::create_dir_all(&root).expect("project root should exist");
-    fs::write(root.join(".engram-project"), "fixture-authority-revoked\n")
-        .expect("fixture mode should write");
-    install_fixture_engram_host_settings(&state, &root);
-    let project_id = create_test_project(&state, &root, "Revoked Engram settings");
-
-    let verification = state
-        .verify_project_engram_settings(
-            &project_id,
-            UpdateProjectEngramSettingsRequest {
-                enabled: true,
-                turn_gated_control: false,
-                binary_path: Some(
-                    real_engram_control_fixture_path()
-                        .to_string_lossy()
-                        .into_owned(),
-                ),
-                home: Some(root.to_string_lossy().into_owned()),
-                deadline_ms: Some(250),
-            },
-        )
-        .expect("domain validation should return a structured result");
-
-    assert!(verification.verified);
-    assert!(verification.errors.is_empty());
-    assert!(
-        state
-            .inner
-            .lock()
-            .expect("state mutex poisoned")
-            .find_project(&project_id)
-            .expect("project should remain")
-            .engram
-            .is_none()
     );
 }
 
@@ -4970,6 +4932,7 @@ fn host_engram_settings_are_machine_scoped_and_cannot_rotate_while_enabled() {
 
     state
         .update_engram_host_settings(UpdateEngramHostSettingsRequest {
+            developer_name: "DEV".to_owned(),
             binary_path: real_engram_control_fixture_path()
                 .to_string_lossy()
                 .into_owned(),
@@ -4977,6 +4940,17 @@ fn host_engram_settings_are_machine_scoped_and_cannot_rotate_while_enabled() {
             boot_recovery_budget_ms: default_engram_boot_recovery_budget_ms(),
         })
         .expect("host Engram settings should persist");
+    assert_eq!(
+        state
+            .inner
+            .lock()
+            .expect("state mutex poisoned")
+            .preferences
+            .engram
+            .developer_name,
+        "dev",
+        "the stable principal is stored in its canonical lowercase form"
+    );
     let project_id = create_test_project(&state, &project_root, "Host settings project");
     let mut settings = real_fixture_engram_settings(&root);
     settings.work_authority_grant = Some("host-settings-grant".to_owned());
@@ -4985,6 +4959,7 @@ fn host_engram_settings_are_machine_scoped_and_cannot_rotate_while_enabled() {
         .expect("fixture Engram settings should enable");
     state
         .update_engram_host_settings(UpdateEngramHostSettingsRequest {
+            developer_name: "dev".to_owned(),
             binary_path: real_engram_control_fixture_path()
                 .to_string_lossy()
                 .into_owned(),
@@ -4993,7 +4968,25 @@ fn host_engram_settings_are_machine_scoped_and_cannot_rotate_while_enabled() {
         })
         .expect("budget-only host settings changes should remain live-configurable");
 
+    let identity_error = match state.update_engram_host_settings(UpdateEngramHostSettingsRequest {
+        developer_name: "greg".to_owned(),
+        binary_path: real_engram_control_fixture_path()
+            .to_string_lossy()
+            .into_owned(),
+        home: root.to_string_lossy().into_owned(),
+        boot_recovery_budget_ms: 7_500,
+    }) {
+        Ok(_) => panic!("enabled projects must fence host principal rotation"),
+        Err(error) => error,
+    };
+    assert!(
+        identity_error
+            .message
+            .contains("disable every enabled Engram project")
+    );
+
     let error = match state.update_engram_host_settings(UpdateEngramHostSettingsRequest {
+        developer_name: "dev".to_owned(),
         binary_path: real_engram_control_fixture_path()
             .to_string_lossy()
             .into_owned(),
@@ -5021,6 +5014,41 @@ fn host_engram_settings_reject_out_of_range_boot_recovery_budgets() {
     let error = normalize_engram_host_settings(settings)
         .expect_err("too-small boot recovery budgets should fail validation");
     assert!(error.message.contains("boot_recovery_budget_ms"));
+}
+
+#[test]
+fn host_engram_settings_validate_the_developer_principal() {
+    assert_eq!(default_engram_developer_name(), "dev");
+    let missing_developer_name = serde_json::from_value::<UpdateEngramHostSettingsRequest>(json!({
+        "binaryPath": "engram",
+        "home": "C:/engram-home",
+        "bootRecoveryBudgetMs": 5_000,
+    }));
+    let error = match missing_developer_name {
+        Ok(_) => panic!("the full-replace request must require developerName"),
+        Err(error) => error,
+    };
+    assert!(
+        error.to_string().contains("missing field `developerName`"),
+        "unexpected missing-principal error: {error}"
+    );
+
+    for developer_name in ["", "two words", "dev/slash", "dev@host", "żółw"] {
+        let mut settings = EngramHostSettings::default();
+        settings.developer_name = developer_name.to_owned();
+        let error = normalize_engram_host_settings(settings)
+            .expect_err("invalid developer principals must fail validation");
+        assert!(
+            error.message.contains("developerName"),
+            "unexpected validation error for {developer_name:?}: {error:?}"
+        );
+    }
+
+    let mut settings = EngramHostSettings::default();
+    settings.developer_name = " Greg.Dev_1-Local ".to_owned();
+    let normalized = normalize_engram_host_settings(settings)
+        .expect("valid developer principals should normalize");
+    assert_eq!(normalized.developer_name, "greg.dev_1-local");
 }
 
 #[test]
@@ -9549,12 +9577,15 @@ fn immediate_revocation_covers_current_and_runtime_installed_engram_descriptors(
         let index = inner
             .find_session_index(&session_id)
             .expect("session should exist");
-        inner
+        let developer_name = inner.preferences.engram.developer_name.clone();
+        let record = inner
             .session_mut_by_index(index)
-            .expect("session index should be valid")
-            .engram_mcp_installed = Some(EngramMcpInstalledDescriptor {
+            .expect("session index should be valid");
+        record.engram_mcp_installed = Some(EngramMcpInstalledDescriptor {
             binary_path: binary_path.clone(),
             home: older_runtime_home.to_string_lossy().into_owned(),
+            actor_id: engram_seat_id(&developer_name, &record.session),
+            actor_context: engram_actor_context(&record.session),
             store_key: None,
             work_authority_grant: Some("grant-runtime-older".to_owned()),
         });
@@ -9935,62 +9966,6 @@ fn enablement_rejects_real_doctor_output_without_required_assurance() {
             .and_then(|project| project.engram.as_ref())
             .is_none(),
         "invalid doctor output must not enable the project"
-    );
-}
-
-#[test]
-fn project_settings_ingress_validates_authority_show_status_and_subject() {
-    let state = test_app_state();
-    let root = state
-        .test_temp_root
-        .as_ref()
-        .expect("test root should exist")
-        .path()
-        .join("engram-authority-show-ingress");
-    fs::create_dir_all(&root).expect("project root should exist");
-    let project_file = root.join(".engram-project");
-    let project_id = create_test_project(&state, &root, "Engram authority show ingress");
-    let grant = "a".repeat(64);
-
-    for (mode, expected) in [
-        ("fixture-authority-unknown", "because it is not installed"),
-        ("fixture-authority-revoked", "because it is revoked"),
-        ("fixture-authority-expired", "because it is expired"),
-        ("fixture-authority-future", "before its valid_from time"),
-        (
-            "fixture-authority-subject-mismatch",
-            "subject actor must be `termal`",
-        ),
-    ] {
-        fs::write(&project_file, format!("{mode}\n")).expect("fixture mode should write");
-        let mut settings = real_fixture_engram_settings(&root);
-        settings.work_authority_grant = Some(grant.clone());
-        let error = match state.update_project_engram_settings(&project_id, settings) {
-            Ok(_) => panic!("invalid authority status must reject settings ingress"),
-            Err(error) => error,
-        };
-        assert_eq!(error.status, StatusCode::BAD_REQUEST);
-        assert!(
-            error.message.contains(expected),
-            "unexpected error: {error:?}"
-        );
-        assert!(!error.message.contains(&grant));
-    }
-
-    fs::write(&project_file, "fixture-authority-active\n")
-        .expect("active fixture mode should write");
-    let mut settings = real_fixture_engram_settings(&root);
-    settings.work_authority_grant = Some(grant.clone());
-    state
-        .update_project_engram_settings(&project_id, settings)
-        .expect("active matching authority should persist");
-    let inner = state.inner.lock().expect("state mutex poisoned");
-    assert_eq!(
-        inner
-            .find_project(&project_id)
-            .and_then(|project| project.engram.as_ref())
-            .and_then(|settings| settings.work_authority_grant.as_deref()),
-        Some(grant.as_str())
     );
 }
 
@@ -14689,7 +14664,7 @@ fn project_actor_engram_mcp_is_added_to_claude_acp_and_codex_configs() {
         claude["mcpServers"]["engram"]["command"],
         "C:/tools/engram.exe"
     );
-    // Base integration supplies only the non-secret host context environment.
+    // Base integration supplies only the non-secret host identity/context.
     assert_eq!(
         claude["mcpServers"]["engram"]["args"],
         json!([
@@ -14699,7 +14674,9 @@ fn project_actor_engram_mcp_is_added_to_claude_acp_and_codex_configs() {
             "C:/engram-home",
             "mcp",
             "--actor-id",
-            "termal",
+            "dev/claude",
+            "--actor-context",
+            "agent=claude;model=default",
             "--session-id",
             claude_session,
         ])
@@ -14707,7 +14684,8 @@ fn project_actor_engram_mcp_is_added_to_claude_acp_and_codex_configs() {
     assert_eq!(
         claude["mcpServers"]["engram"]["env"],
         json!({
-            "ENGRAM_ACTOR_ID": "termal",
+            "ENGRAM_ACTOR_CONTEXT": "agent=claude;model=default",
+            "ENGRAM_ACTOR_ID": "dev/claude",
             "ENGRAM_HOME": "C:/engram-home",
             "ENGRAM_SESSION_ID": claude_session,
         })
@@ -14729,13 +14707,15 @@ fn project_actor_engram_mcp_is_added_to_claude_acp_and_codex_configs() {
     );
     assert_eq!(acp[1]["name"], ENGRAM_MCP_SERVER_NAME);
     assert_eq!(acp[1]["command"], "C:/tools/engram.exe");
-    assert_eq!(acp[1]["args"][6], "termal");
-    assert_eq!(acp[1]["args"][8], acp_session);
-    assert_eq!(acp[1]["args"].as_array().map(Vec::len), Some(9));
+    assert_eq!(acp[1]["args"][6], "dev/cursor");
+    assert_eq!(acp[1]["args"][8], "agent=cursor;model=auto");
+    assert_eq!(acp[1]["args"][10], acp_session);
+    assert_eq!(acp[1]["args"].as_array().map(Vec::len), Some(11));
     assert_eq!(
         acp[1]["env"],
         json!([
-            { "name": "ENGRAM_ACTOR_ID", "value": "termal" },
+            { "name": "ENGRAM_ACTOR_CONTEXT", "value": "agent=cursor;model=auto" },
+            { "name": "ENGRAM_ACTOR_ID", "value": "dev/cursor" },
             { "name": "ENGRAM_HOME", "value": "C:/engram-home" },
             { "name": "ENGRAM_SESSION_ID", "value": acp_session },
         ])
@@ -14752,18 +14732,23 @@ fn project_actor_engram_mcp_is_added_to_claude_acp_and_codex_configs() {
             .len(),
         2
     );
-    assert_eq!(codex["mcp_servers"]["engram"]["args"][6], "termal");
-    assert_eq!(codex["mcp_servers"]["engram"]["args"][8], codex_session);
+    assert_eq!(codex["mcp_servers"]["engram"]["args"][6], "dev/codex");
+    assert_eq!(
+        codex["mcp_servers"]["engram"]["args"][8],
+        "agent=codex;model=gpt-5.4;reasoning=medium"
+    );
+    assert_eq!(codex["mcp_servers"]["engram"]["args"][10], codex_session);
     assert_eq!(
         codex["mcp_servers"]["engram"]["args"]
             .as_array()
             .map(Vec::len),
-        Some(9)
+        Some(11)
     );
     assert_eq!(
         codex["mcp_servers"]["engram"]["env"],
         json!({
-            "ENGRAM_ACTOR_ID": "termal",
+            "ENGRAM_ACTOR_CONTEXT": "agent=codex;model=gpt-5.4;reasoning=medium",
+            "ENGRAM_ACTOR_ID": "dev/codex",
             "ENGRAM_HOME": "C:/engram-home",
             "ENGRAM_SESSION_ID": codex_session,
         })
@@ -14785,6 +14770,161 @@ fn project_actor_engram_mcp_is_added_to_claude_acp_and_codex_configs() {
         .and_then(|project| project.get("engram"))
         .expect("client project should retain public Engram settings");
     assert!(client_engram.get("workAuthorityGrant").is_none());
+}
+
+#[test]
+fn engram_actor_context_collapses_controls_and_omits_oversized_fields() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let mut session = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == session_id)
+            .expect("Claude session should exist")
+            .session
+            .clone()
+    };
+    session.model = "claude\nopus".to_owned();
+    session.claude_effort = Some(ClaudeEffortLevel::High);
+    assert_eq!(
+        engram_actor_context(&session).as_deref(),
+        Some("agent=claude;model=claude opus;reasoning=high")
+    );
+
+    session.model = "claude;agent=root=spoof%raw".to_owned();
+    assert_eq!(
+        engram_actor_context(&session).as_deref(),
+        Some("agent=claude;model=claude%3Bagent%3Droot%3Dspoof%25raw;reasoning=high"),
+        "reserved actor-context delimiters must be encoded inside values"
+    );
+
+    session.model = "x".repeat(ENGRAM_ACTOR_CONTEXT_MAX_BYTES);
+    assert_eq!(
+        engram_actor_context(&session).as_deref(),
+        Some("agent=claude;reasoning=high"),
+        "an oversized model field must be omitted at a field boundary"
+    );
+}
+
+#[test]
+fn engram_mcp_and_agent_process_identity_match_for_every_agent_kind() {
+    let state = test_app_state();
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("engram-every-agent-identity");
+    fs::create_dir_all(&root).expect("project root should exist");
+    let project_id = create_test_project(&state, &root, "Engram every-agent identity");
+    set_test_project_engram_mcp_settings(&state, &project_id, true, None);
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        inner.preferences.engram.developer_name = "greg.dev".to_owned();
+    }
+
+    for (agent, model, reasoning, expected_actor, expected_context) in [
+        (
+            Agent::Codex,
+            "gpt-5.4",
+            Some("xhigh"),
+            "greg.dev/codex",
+            "agent=codex;model=gpt-5.4;reasoning=xhigh",
+        ),
+        (
+            Agent::Claude,
+            "claude-opus-4-1",
+            Some("high"),
+            "greg.dev/claude",
+            "agent=claude;model=claude-opus-4-1;reasoning=high",
+        ),
+        (
+            Agent::Cursor,
+            "cursor-auto",
+            None,
+            "greg.dev/cursor",
+            "agent=cursor;model=cursor-auto",
+        ),
+        (
+            Agent::Gemini,
+            "gemini-pro",
+            None,
+            "greg.dev/gemini",
+            "agent=gemini;model=gemini-pro",
+        ),
+        (
+            Agent::OpenCode,
+            "anthropic/claude-sonnet",
+            Some("high"),
+            "greg.dev/opencode",
+            "agent=opencode;model=anthropic/claude-sonnet;reasoning=high",
+        ),
+    ] {
+        let session_id = create_test_project_session(&state, agent, &project_id, &root);
+        let descriptor = {
+            let mut inner = state.inner.lock().expect("state mutex poisoned");
+            let index = inner
+                .find_session_index(&session_id)
+                .expect("agent session should exist");
+            let record = inner
+                .session_mut_by_index(index)
+                .expect("agent session index should remain valid");
+            record.session.model = model.to_owned();
+            match agent {
+                Agent::Codex => record.session.reasoning_effort = Some(CodexReasoningEffort::XHigh),
+                Agent::Claude => record.session.claude_effort = Some(ClaudeEffortLevel::High),
+                Agent::OpenCode => record.session.opencode_effort = reasoning.map(str::to_owned),
+                Agent::Cursor | Agent::Gemini => {}
+            }
+            engram_mcp_runtime_config_for_session_locked(&inner, &session_id)
+                .expect("eligible agent should receive Engram MCP")
+                .stdio
+        };
+
+        assert_eq!(
+            descriptor.env.get(ENGRAM_ACTOR_ID_ENV).map(String::as_str),
+            Some(expected_actor),
+            "{agent:?} must receive its stable developer/seat principal"
+        );
+        assert_eq!(
+            descriptor
+                .env
+                .get(ENGRAM_ACTOR_CONTEXT_ENV)
+                .map(String::as_str),
+            Some(expected_context),
+            "{agent:?} model/reasoning metadata belongs only in actor context"
+        );
+        let argument_after = |flag: &str| {
+            descriptor
+                .args
+                .windows(2)
+                .find(|pair| pair[0] == flag)
+                .map(|pair| pair[1].as_str())
+        };
+        assert_eq!(argument_after("--actor-id"), Some(expected_actor));
+        assert_eq!(argument_after("--actor-context"), Some(expected_context));
+        assert_eq!(argument_after("--session-id"), Some(session_id.as_str()));
+
+        let mut process = Command::new("engram-agent-environment-fixture");
+        apply_engram_agent_process_env(&mut process, Some(&descriptor))
+            .expect("agent process environment should apply");
+        let process_env = process
+            .get_envs()
+            .filter_map(|(name, value)| {
+                let name = name.to_string_lossy().into_owned();
+                ENGRAM_AGENT_PROCESS_ENV_NAMES
+                    .contains(&name.as_str())
+                    .then(|| value.map(|value| (name, value.to_string_lossy().into_owned())))
+                    .flatten()
+            })
+            .collect::<BTreeMap<_, _>>();
+        assert_eq!(
+            process_env, descriptor.env,
+            "{agent:?} process shell and MCP child must receive byte-identical Engram variables"
+        );
+    }
 }
 
 #[test]
@@ -14954,7 +15094,8 @@ fn acp_session_setup_uses_the_engram_snapshot_that_spawned_its_process() {
     assert_eq!(
         engram["env"],
         json!([
-            { "name": "ENGRAM_ACTOR_ID", "value": "termal" },
+            { "name": "ENGRAM_ACTOR_CONTEXT", "value": "agent=cursor;model=auto" },
+            { "name": "ENGRAM_ACTOR_ID", "value": "dev/cursor" },
             { "name": "ENGRAM_HOME", "value": "C:/engram-home" },
             { "name": "ENGRAM_SESSION_ID", "value": session_id },
         ]),
@@ -15374,7 +15515,7 @@ fn claude_private_mcp_config_file_carries_only_non_secret_engram_context() {
     assert!(!argv_value.contains("operator-secret-grant"));
     assert!(!argv_value.contains("mcpServers"));
 
-    // The file carries the three base-tier context values and no authority
+    // The file carries the four base-tier context values and no authority
     // credential anywhere.
     let stored: Value = serde_json::from_str(
         &fs::read_to_string(&guard.path).expect("the file should be readable"),
@@ -15383,7 +15524,8 @@ fn claude_private_mcp_config_file_carries_only_non_secret_engram_context() {
     assert_eq!(
         stored["mcpServers"]["engram"]["env"],
         json!({
-            "ENGRAM_ACTOR_ID": "termal",
+            "ENGRAM_ACTOR_CONTEXT": "agent=claude;model=default",
+            "ENGRAM_ACTOR_ID": "dev/claude",
             "ENGRAM_HOME": "C:/engram-home",
             "ENGRAM_SESSION_ID": claude_session,
         })
@@ -15422,7 +15564,8 @@ fn claude_private_mcp_config_file_carries_only_non_secret_engram_context() {
     assert_eq!(
         stored["mcpServers"]["engram"]["env"],
         json!({
-            "ENGRAM_ACTOR_ID": "termal",
+            "ENGRAM_ACTOR_CONTEXT": "agent=claude;model=default",
+            "ENGRAM_ACTOR_ID": "dev/claude",
             "ENGRAM_HOME": "C:/engram-home",
             "ENGRAM_SESSION_ID": claude_session,
         })
@@ -15454,7 +15597,8 @@ fn per_session_engram_mcp_uses_base_context_and_preserves_ineligible_baselines()
     assert_eq!(
         enabled["mcp_servers"]["engram"]["env"],
         json!({
-            "ENGRAM_ACTOR_ID": "termal",
+            "ENGRAM_ACTOR_CONTEXT": "agent=codex;model=gpt-5.4;reasoning=medium",
+            "ENGRAM_ACTOR_ID": "dev/codex",
             "ENGRAM_HOME": "C:/engram-home",
             "ENGRAM_SESSION_ID": enabled_session,
         })

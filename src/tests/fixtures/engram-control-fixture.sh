@@ -3,6 +3,9 @@ set -eu
 
 project_file=""
 engram_home=""
+actor_id=""
+actor_context=""
+session_id=""
 is_doctor=0
 original_args=$*
 while [ "$#" -gt 0 ]; do
@@ -16,6 +19,21 @@ while [ "$#" -gt 0 ]; do
     shift 2
     continue
   fi
+  if [ "$1" = "--actor-id" ]; then
+    actor_id="$2"
+    shift 2
+    continue
+  fi
+  if [ "$1" = "--actor-context" ]; then
+    actor_context="$2"
+    shift 2
+    continue
+  fi
+  if [ "$1" = "--session-id" ]; then
+    session_id="$2"
+    shift 2
+    continue
+  fi
   if [ "$1" = "doctor" ]; then
     is_doctor=1
   fi
@@ -25,42 +43,20 @@ done
 [ -n "$engram_home" ] || exit 2
 
 case " $original_args " in
-  *" work next "*)
+  *" --context-generation "*)
     [ -n "${ENGRAM_HOME:-}" ] || exit 8
     [ -n "${ENGRAM_ACTOR_ID:-}" ] || exit 8
+    [ -n "${ENGRAM_ACTOR_CONTEXT:-}" ] || exit 8
     [ -n "${ENGRAM_SESSION_ID:-}" ] || exit 8
+    [ "$ENGRAM_HOME" = "$engram_home" ] || exit 9
+    [ "$ENGRAM_ACTOR_ID" = "$actor_id" ] || exit 9
+    [ "$ENGRAM_ACTOR_CONTEXT" = "$actor_context" ] || exit 9
+    [ "$ENGRAM_SESSION_ID" = "$session_id" ] || exit 9
     mode=$(tr -d '\r\n' < "$project_file")
     if [ "$mode" = "fixture-work-next-slow" ]; then
       sleep 1
     fi
     printf 'Engram work context for %s as %s\n' "$ENGRAM_SESSION_ID" "$ENGRAM_ACTOR_ID"
-    exit 0
-    ;;
-esac
-
-case " $original_args " in
-  *" authority show "*)
-    mode=$(tr -d '\r\n' < "$project_file")
-    case "$mode" in
-      fixture-authority-unknown)
-        printf '%s\n' '{"installed":false,"subject_actor_id":null,"issued_by":null,"valid_from":null,"valid_until":null,"revoked_at":null,"operations":null,"scope":null}'
-        ;;
-      fixture-authority-revoked)
-        printf '%s\n' '{"installed":true,"subject_actor_id":"termal","issued_by":"test","valid_from":"2020-01-01T00:00:00Z","valid_until":"2099-01-01T00:00:00Z","revoked_at":"2026-08-30T22:26:46.8Z","operations":["root_create"],"scope":{"kind":"project"}}'
-        ;;
-      fixture-authority-expired)
-        printf '%s\n' '{"installed":true,"subject_actor_id":"termal","issued_by":"test","valid_from":"2020-01-01T00:00:00Z","valid_until":"2020-01-02T00:00:00Z","revoked_at":null,"operations":["root_create"],"scope":{"kind":"project"}}'
-        ;;
-      fixture-authority-future)
-        printf '%s\n' '{"installed":true,"subject_actor_id":"termal","issued_by":"test","valid_from":"2098-01-01T00:00:00Z","valid_until":"2099-01-01T00:00:00Z","revoked_at":null,"operations":["root_create"],"scope":{"kind":"project"}}'
-        ;;
-      fixture-authority-subject-mismatch)
-        printf '%s\n' '{"installed":true,"subject_actor_id":"another-actor","issued_by":"test","valid_from":"2020-01-01T00:00:00Z","valid_until":"2099-01-01T00:00:00Z","revoked_at":null,"operations":["root_create"],"scope":{"kind":"project"}}'
-        ;;
-      *)
-        printf '%s\n' '{"installed":true,"subject_actor_id":"termal","issued_by":"test","valid_from":"2020-01-01T00:00:00Z","valid_until":"2099-01-01T00:00:00Z","revoked_at":null,"operations":["root_create","plan","claim","dispose","root_complete","completion_drain"],"scope":{"kind":"project"}}'
-        ;;
-    esac
     exit 0
     ;;
 esac
@@ -104,6 +100,13 @@ if [ "$is_doctor" -eq 1 ]; then
   printf '{"healthy":true,"control":%s,"database":"%s","project_id":"%s"}\n' "$control" "$database" "$mode"
   exit 0
 fi
+
+[ -n "$actor_id" ] || exit 10
+[ -n "$session_id" ] || exit 10
+[ "${ENGRAM_HOME:-}" = "$engram_home" ] || exit 10
+[ "${ENGRAM_ACTOR_ID:-}" = "$actor_id" ] || exit 10
+[ "${ENGRAM_ACTOR_CONTEXT:-}" = "$actor_context" ] || exit 10
+[ "${ENGRAM_SESSION_ID:-}" = "$session_id" ] || exit 10
 
 routing_token="fixture-token"
 issued_grant=""

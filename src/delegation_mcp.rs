@@ -508,12 +508,17 @@ impl AppState {
 /// Codex uses one app-server for many TermAl sessions, so process-global
 /// `ENGRAM_SESSION_ID` would attribute every shell to whichever session spawned
 /// the server. A thread-scoped shell policy gives each start/resume request the
-/// same three values as its Engram MCP child while retaining unrelated policy
-/// entries a future config composer may add.
+/// same required identity and optional actor context as its Engram MCP child
+/// while retaining unrelated policy entries a future config composer may add.
 fn merge_engram_agent_shell_env_into_codex_config(
     config: &mut Value,
     engram_env: &BTreeMap<String, String>,
 ) -> Result<()> {
+    for name in ENGRAM_REQUIRED_AGENT_PROCESS_ENV_NAMES {
+        if !engram_env.contains_key(name) {
+            bail!("Engram MCP descriptor is missing required agent environment `{name}`");
+        }
+    }
     let config = config
         .as_object_mut()
         .context("TermAl Codex config should be an object")?;
@@ -529,6 +534,9 @@ fn merge_engram_agent_shell_env_into_codex_config(
             .context("Codex shell_environment_policy.include_only should be an array")?;
         if !include_only.is_empty() {
             for name in ENGRAM_AGENT_PROCESS_ENV_NAMES {
+                if !engram_env.contains_key(name) {
+                    continue;
+                }
                 if !include_only.iter().any(|entry| {
                     entry
                         .as_str()
@@ -545,10 +553,9 @@ fn merge_engram_agent_shell_env_into_codex_config(
         .context("Codex shell_environment_policy.set should be an object")?;
     remove_engram_agent_shell_env_collisions(explicit, cfg!(windows));
     for name in ENGRAM_AGENT_PROCESS_ENV_NAMES {
-        let value = engram_env.get(name).with_context(|| {
-            format!("Engram MCP descriptor is missing required agent environment `{name}`")
-        })?;
-        explicit.insert(name.to_owned(), Value::String(value.clone()));
+        if let Some(value) = engram_env.get(name) {
+            explicit.insert(name.to_owned(), Value::String(value.clone()));
+        }
     }
     Ok(())
 }

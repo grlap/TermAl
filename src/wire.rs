@@ -1554,11 +1554,13 @@ struct VerifyProjectEngramSettingsResponse {
     errors: Vec<String>,
 }
 
-/// Updates the machine-scoped Engram executable and home. Repository
-/// declaration and per-project tier selection remain separate concerns.
+/// Updates the machine-scoped Engram principal, executable, and home.
+/// Repository declaration and per-project tier selection remain separate
+/// concerns.
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct UpdateEngramHostSettingsRequest {
+    developer_name: String,
     binary_path: String,
     home: String,
     #[serde(default = "default_engram_boot_recovery_budget_ms")]

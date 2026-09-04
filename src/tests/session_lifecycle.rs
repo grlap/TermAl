@@ -242,7 +242,11 @@ fn lightweight_test_state_rejects_direct_claude_runtime_spawning() {
 fn apply_engram_agent_process_env_matches_mcp_and_clears_ineligible_inheritance() {
     let expected = BTreeMap::from([
         (ENGRAM_HOME_ENV.to_owned(), "C:/engram-home".to_owned()),
-        (ENGRAM_ACTOR_ID_ENV.to_owned(), "termal".to_owned()),
+        (ENGRAM_ACTOR_ID_ENV.to_owned(), "dev/claude".to_owned()),
+        (
+            ENGRAM_ACTOR_CONTEXT_ENV.to_owned(),
+            "agent=claude;model=test;reasoning=high".to_owned(),
+        ),
         (
             ENGRAM_SESSION_ID_ENV.to_owned(),
             "session-agent-env".to_owned(),
@@ -274,6 +278,23 @@ fn apply_engram_agent_process_env_matches_mcp_and_clears_ineligible_inheritance(
             "eligible agent must receive the same `{name}` value as its MCP child"
         );
     }
+
+    let mut context_free_env = expected.clone();
+    context_free_env.remove(ENGRAM_ACTOR_CONTEXT_ENV);
+    let context_free_descriptor = TermalDelegationMcpStdioConfig {
+        command: "engram".to_owned(),
+        args: Vec::new(),
+        env: context_free_env,
+    };
+    let mut context_free = Command::new("context-free-agent");
+    context_free.env(ENGRAM_ACTOR_CONTEXT_ENV, "stale-parent-value");
+    apply_engram_agent_process_env(&mut context_free, Some(&context_free_descriptor))
+        .expect("optional actor context may be absent");
+    assert_eq!(
+        explicit_env(&context_free, ENGRAM_ACTOR_CONTEXT_ENV),
+        Some(None),
+        "an absent optional context must still erase an inherited stale value"
+    );
 
     let mut ineligible = Command::new("ineligible-agent");
     for name in ENGRAM_AGENT_PROCESS_ENV_NAMES {

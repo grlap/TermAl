@@ -644,6 +644,25 @@ fn normalize_engram_host_settings(
             "boot_recovery_budget_ms must be between {MIN_ENGRAM_BOOT_RECOVERY_BUDGET_MS} and {MAX_ENGRAM_BOOT_RECOVERY_BUDGET_MS}"
         )));
     }
+    let developer_name = settings.developer_name.trim().to_ascii_lowercase();
+    if developer_name.is_empty() {
+        return Err(ApiError::bad_request(
+            "developerName must contain at least one character",
+        ));
+    }
+    if developer_name.len() > 64 {
+        return Err(ApiError::bad_request(
+            "developerName must contain at most 64 characters",
+        ));
+    }
+    if !developer_name
+        .bytes()
+        .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"._-".contains(&byte))
+    {
+        return Err(ApiError::bad_request(
+            "developerName may contain only lowercase ASCII letters, digits, `.`, `_`, and `-`",
+        ));
+    }
     let binary_path = settings.binary_path.trim();
     let binary_path = if binary_path.is_empty() {
         default_engram_binary_path()
@@ -667,6 +686,7 @@ fn normalize_engram_host_settings(
     };
     let (binary_path, home) = validate_engram_host_connection_paths(&project_settings)?;
     Ok(EngramHostSettings {
+        developer_name,
         binary_path: binary_path.to_string_lossy().into_owned(),
         home: home.to_string_lossy().into_owned(),
         boot_recovery_budget_ms: settings.boot_recovery_budget_ms,
@@ -1902,7 +1922,6 @@ impl AppState {
             });
         }
         reject_retired_engram_work_authority_grant(&settings, &retired_work_authority_grants)?;
-        validate_engram_project_work_authority(&project_snapshot, &settings)?;
 
         let mut updated_project_snapshot = project_snapshot.clone();
         updated_project_snapshot.engram = Some(settings.clone());
@@ -4019,6 +4038,7 @@ impl AppState {
         request: UpdateEngramHostSettingsRequest,
     ) -> Result<StateResponse, ApiError> {
         let normalized = normalize_engram_host_settings(EngramHostSettings {
+            developer_name: request.developer_name,
             binary_path: request.binary_path,
             home: request.home,
             boot_recovery_budget_ms: request.boot_recovery_budget_ms,
@@ -4027,16 +4047,18 @@ impl AppState {
         if inner.preferences.engram == normalized {
             return Ok(self.snapshot_from_inner(&inner));
         }
-        let host_paths_changed = inner.preferences.engram.binary_path != normalized.binary_path
+        let host_identity_or_paths_changed = inner.preferences.engram.developer_name
+            != normalized.developer_name
+            || inner.preferences.engram.binary_path != normalized.binary_path
             || inner.preferences.engram.home != normalized.home;
-        if host_paths_changed && inner.projects.iter().any(|project| {
+        if host_identity_or_paths_changed && inner.projects.iter().any(|project| {
             project
                 .engram
                 .as_ref()
                 .is_some_and(EngramProjectSettings::is_base_enabled)
         }) {
             return Err(ApiError::bad_request(
-                "disable every enabled Engram project before changing the host binary path or home",
+                "disable every enabled Engram project before changing the host developer name, binary path, or home",
             ));
         }
         inner.preferences.engram = normalized;

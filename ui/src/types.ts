@@ -223,6 +223,7 @@ export type AppPreferences = {
 };
 
 export type EngramHostSettings = {
+  developerName: string;
   binaryPath: string;
   home: string;
   bootRecoveryBudgetMs: number;
