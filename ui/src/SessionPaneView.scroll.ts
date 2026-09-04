@@ -741,13 +741,14 @@ export function useSessionPaneScrollState({
   useLayoutEffect(
     () => () => {
       // Live follow survives ordinary message/status commits, but never owns a
-      // pane after its scroll scope changes or becomes inactive. Keeping this
-      // cleanup separate from content effects prevents status-only commits
-      // from cancelling convergence without scheduling a replacement.
+      // pane after its scroll scope changes or its tab is hidden. Keyboard
+      // focus moving to another visible pane does not release ownership.
+      // Keeping this cleanup separate from content effects prevents status-only
+      // commits from cancelling convergence without scheduling a replacement.
       cancelSettledScrollToBottom();
       cancelPaneProgrammaticBottomFollow();
     },
-    [isActive, isSessionTabActive, paneViewMode, scrollStateKey],
+    [isSessionTabActive, paneViewMode, scrollStateKey],
   );
 
   useLayoutEffect(
@@ -1018,6 +1019,8 @@ export function useSessionPaneScrollState({
     const ResizeObserverCtor = globalThis.ResizeObserver;
     // Every visible selected tab owns its layout, not just the focused pane.
     // Short transcripts have no virtualizer to repin late card/image growth.
+    // The callback reads follow/flow latches through refs, so a focus edge
+    // needs no observer re-registration to refresh captured activation state.
     if (
       !node ||
       typeof ResizeObserverCtor !== "function" ||
@@ -1272,7 +1275,6 @@ export function useSessionPaneScrollState({
     if (
       (!receivedFirstOutputForPrompt && !changedLiveContent) ||
       hasUnloadedNewerHistory ||
-      !isActive ||
       !isSessionTabActive ||
       paneViewMode !== "session" ||
       !getTailFollowIntent()
@@ -1296,7 +1298,6 @@ export function useSessionPaneScrollState({
     activeSession?.messages,
     activeSession?.pendingPrompts,
     hasUnloadedNewerHistory,
-    isActive,
     isSessionTabActive,
     paneViewMode,
     scrollStateKey,
@@ -2557,6 +2558,16 @@ export function useSessionPaneScrollState({
           : previousTop;
     const nativeScrollOwnership =
       peekMessageStackNativeScrollOwnership(node);
+    // A bottom-boundary reveal owns the viewport until its mounted pages
+    // settle. Chromium can clamp scrollTop during a temporary spacer shrink,
+    // then deliver the scroll event after the height has grown back. Comparing
+    // only the two final geometries would invent upward reader input and
+    // cancel that reveal. Preserve its existing FOLLOW intent; newer real
+    // input still wins through detachment or a native-input ownership lease.
+    const isBottomBoundaryReveal =
+      node.dataset.virtualizedBottomBoundaryReveal === "true" &&
+      nativeScrollOwnership === null &&
+      getTailFollowIntent();
     const contentDidNotShrink =
       previousGeometry !== undefined &&
       node.scrollHeight >= previousGeometry.scrollHeight;
@@ -2586,6 +2597,7 @@ export function useSessionPaneScrollState({
     // height by one pixel between two frames), which the recorded geometry
     // cannot always witness; such a frame must not detach tail-follow.
     const movedUpFromRecordedPosition =
+      !isBottomBoundaryReveal &&
       contentDidNotShrink &&
       !isViewportGrowthClamp &&
       !isAtPhysicalBottom &&
@@ -2954,7 +2966,6 @@ export function useSessionPaneScrollState({
       deferContentScrollEffects ||
       !activeSession ||
       activeSession.hasNewerHistory === true ||
-      !isActive ||
       !isSessionTabActive ||
       paneViewMode !== "session"
     ) {
@@ -2978,7 +2989,6 @@ export function useSessionPaneScrollState({
     activeSession?.id,
     activeSession?.hasNewerHistory,
     deferContentScrollEffects,
-    isActive,
     isSessionTabActive,
     paneViewMode,
     scrollStateKey,
@@ -3208,8 +3218,9 @@ export function useSessionPaneScrollState({
     }
 
     // The accepted composer submit explicitly requests FOLLOW. This status
-    // effect only maintains that intent through later layout: it must not
-    // reattach after newer reader input or when switching to a sending tab.
+    // effect follows the tab's recorded intent, including after a tab switch
+    // (unvisited tabs default to FOLLOW). Newer reader input takes precedence:
+    // a sending-status change alone must never reattach a detached reader.
     return followLatestMessageForPromptSend();
   }, [isSending, paneViewMode, scrollStateKey]);
 

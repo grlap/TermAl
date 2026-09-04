@@ -384,3 +384,4 @@
 {"id":"int-4f9558188095b9ed397944a6a6fe0d14","kind":"field_change","created_at":"2026-09-04T13:34:22.1788617Z","actor":"Greg Lapinski","issue_id":"tm-1b9a","extra":{"field":"assignee","new_value":"Termal::Codex","old_value":"Greg Lapinski"}}
 {"id":"int-b301557c71337364ace1a8d4069a15f8","kind":"field_change","created_at":"2026-09-04T15:11:43.1767198Z","actor":"Greg Lapinski","issue_id":"tm-7p9z.12","extra":{"field":"status","new_value":"in_progress","old_value":"open"}}
 {"id":"int-956de29135186a8f53417ae4d3eb6814","kind":"field_change","created_at":"2026-09-04T15:11:43.1767198Z","actor":"Greg Lapinski","issue_id":"tm-7p9z.12","extra":{"field":"assignee","new_value":"Termal::Codex","old_value":""}}
+{"id":"int-e30c2c4af297e4a34b2c70100ee3e309","kind":"field_change","created_at":"2026-09-04T20:41:37.7546532Z","actor":"Termal::Codex","issue_id":"tm-7cu.34","extra":{"field":"assignee","new_value":"Termal::Codex","old_value":"Greg Lapinski"}}

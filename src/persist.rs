@@ -3428,10 +3428,15 @@ fn persist_state_parts_via_connection(
 /// re-ran `ensure_sqlite_state_schema`. The persist thread writes many times during an active
 /// session, so amortizing that fixed cost to one open-and-validate per
 /// thread lifetime removes the biggest per-persist overhead.
+///
 /// Production seeds this cache from the connection validated during process
 /// startup. Reopens after invalidation assume the same store path (including a
 /// path observed as absent at boot) was startup-validated by this process; they
 /// deliberately repeat only bounded write-path schema setup.
+/// `AppState::new_with_paths` captures that path once for the persist worker and
+/// reuses it for every queued write; production does not switch stores at
+/// runtime. The cache's path-change support alone does not establish startup
+/// validation for a different store.
 struct SqlitePersistConnectionCache {
     path: Option<PathBuf>,
     connection: Option<rusqlite::Connection>,
