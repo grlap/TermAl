@@ -124,25 +124,7 @@ export function DiffCard({
               )}
             </p>
           </div>
-        </div>
-        <div className="command-row diff-row">
-          <div className="command-row-label">DIFF</div>
-          <div className="command-row-body">
-            <div
-              className={`diff-preview-shell ${isExpanded ? "expanded" : "collapsed"}`}
-            >
-              <DeferredHighlightedCodeBlock
-                className="diff-block diff-preview-text"
-                code={message.diff}
-                language={message.language ?? "diff"}
-                pathHint={message.filePath}
-                preferImmediateRender={preferImmediateHeavyRender}
-                searchQuery={searchQuery}
-                searchHighlightTone={searchHighlightTone}
-              />
-            </div>
-          </div>
-          <div className="command-row-actions">
+          <div className="command-row-actions diff-card-actions">
             <button
               className="command-icon-button"
               type="button"
@@ -173,6 +155,24 @@ export function DiffCard({
                 {isExpanded ? <CollapseIcon /> : <ExpandIcon />}
               </button>
             ) : null}
+          </div>
+        </div>
+        <div className="command-row diff-row">
+          <div className="command-row-label">DIFF</div>
+          <div className="command-row-body diff-row-body">
+            <div
+              className={`diff-preview-shell ${isExpanded ? "expanded" : "collapsed"}`}
+            >
+              <DeferredHighlightedCodeBlock
+                className="diff-block diff-preview-text"
+                code={message.diff}
+                language={message.language ?? "diff"}
+                pathHint={message.filePath}
+                preferImmediateRender={preferImmediateHeavyRender}
+                searchQuery={searchQuery}
+                searchHighlightTone={searchHighlightTone}
+              />
+            </div>
           </div>
         </div>
       </div>

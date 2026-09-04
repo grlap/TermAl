@@ -2553,6 +2553,56 @@ describe("MessageCard", () => {
     expect(screen.getByText("-2")).toBeInTheDocument();
   });
 
+  it("keeps diff actions in the file header and lets the diff body span the remaining columns", () => {
+    const message: DiffMessage = {
+      id: "message-diff-layout",
+      type: "diff",
+      author: "assistant",
+      timestamp: "10:03",
+      changeType: "create",
+      diff: Array.from(
+        { length: 16 },
+        (_, index) => `+const value${index + 1} = "${"x".repeat(120)}";`,
+      ).join("\n"),
+      filePath: "/repo/src/wide.ts",
+      summary: "Added a wide fixture",
+    };
+
+    const { container } = render(
+      <MessageCard
+        message={message}
+        onApprovalDecision={vi.fn()}
+        onOpenDiffPreview={vi.fn()}
+        onUserInputSubmit={vi.fn()}
+        workspaceRoot="/repo"
+      />,
+    );
+
+    const fileRow = container.querySelector(".diff-file-row");
+    const diffRow = container.querySelector(".diff-row");
+    const actions = fileRow?.querySelector(".diff-card-actions");
+
+    expect(fileRow).not.toBeNull();
+    expect(diffRow).not.toBeNull();
+    expect(actions).not.toBeNull();
+    expect(
+      within(actions as HTMLElement).getByRole("button", {
+        name: "Open diff preview",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      within(actions as HTMLElement).getByRole("button", { name: "Copy diff" }),
+    ).toBeInTheDocument();
+    expect(
+      within(actions as HTMLElement).getByRole("button", {
+        name: "Expand diff",
+      }),
+    ).toBeInTheDocument();
+    expect(diffRow?.querySelector(".command-row-actions")).toBeNull();
+    expect(diffRow?.querySelector(".diff-row-body")).not.toBeNull();
+    expect(diffRow?.children).toHaveLength(2);
+  });
+
   it("renders agent changed files with open actions", () => {
     const onOpenSourceLink = vi.fn();
     const message: FileChangesMessage = {

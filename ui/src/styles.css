@@ -5922,6 +5922,7 @@ textarea {
 
 .diff-card {
   width: fit-content;
+  max-width: min(96rem, 96%);
   justify-self: start;
 }
 
@@ -8641,6 +8642,9 @@ textarea {
 .diff-block {
   background: linear-gradient(180deg, var(--diff-bg-start), var(--diff-bg-end));
   color: var(--diff-fg);
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: pre;
 }
 
 .diff-preview-shell {
@@ -8651,11 +8655,14 @@ textarea {
 }
 
 .diff-file-row .command-row-body {
-  grid-column: 2 / -1;
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
   gap: 0.32rem;
+}
+
+.diff-row-body {
+  grid-column: 2 / -1;
 }
 
 .diff-file-label {
@@ -8697,6 +8704,10 @@ textarea {
   overflow: hidden;
 }
 
+.diff-preview-shell.collapsed .diff-block {
+  max-height: 10.5rem;
+}
+
 .diff-preview-shell.collapsed::after {
   content: "";
   position: absolute;
@@ -8710,7 +8721,12 @@ textarea {
 
 .diff-preview-shell.expanded {
   max-height: min(24rem, 60vh);
-  overflow: auto;
+  overflow: hidden;
+}
+
+.diff-preview-shell.expanded .diff-block {
+  max-height: min(24rem, 60vh);
+  overflow-y: auto;
 }
 
 .diff-preview-text {

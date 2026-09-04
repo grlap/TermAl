@@ -248,6 +248,9 @@
 }
 
 [data-ui-style="terminal-style"] .message-card.utility-card.diff-card {
+  width: fit-content;
+  max-width: min(96rem, 96%);
+  justify-self: start;
   background: var(--terminal-diff-card-bg);
   background-color: var(--terminal-diff-card-bg-color);
 }
