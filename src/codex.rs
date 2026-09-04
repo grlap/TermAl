@@ -298,10 +298,10 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    // This process hosts many TermAl sessions. Never let a process-global
-    // Engram identity leak into all of them; eligible threads receive their
-    // exact identity through `shell_environment_policy.set` instead.
-    apply_engram_agent_process_env(&mut command, None)?;
+    // This process hosts many TermAl sessions. Never let process-global
+    // TermAl or Engram identity leak into all of them; each thread receives
+    // its exact identity through `shell_environment_policy.set` instead.
+    apply_agent_process_env(&mut command, None, None)?;
 
     let mut child = command
         .spawn()

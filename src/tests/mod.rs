@@ -22,6 +22,7 @@ mod claude;
 mod cli;
 mod codex_bin;
 mod codex_discovery;
+mod codex_home;
 mod codex_protocol;
 mod codex_threads;
 mod conversation_markers;
@@ -1547,6 +1548,55 @@ fn take_pending_acp_request(
         );
         std::thread::sleep(Duration::from_millis(10));
     }
+}
+
+fn expected_codex_shell_environment_set(
+    config: &Value,
+    session_id: &str,
+) -> serde_json::Map<String, Value> {
+    let engram_env = config["mcp_servers"][ENGRAM_MCP_SERVER_NAME]["env"]
+        .as_object()
+        .expect("Engram MCP environment should be an object");
+    assert_eq!(
+        engram_env.len(),
+        ENGRAM_AGENT_PROCESS_ENV_NAMES.len(),
+        "Engram MCP environment must contain exactly its four owned names"
+    );
+    for name in ENGRAM_AGENT_PROCESS_ENV_NAMES {
+        assert!(
+            engram_env.contains_key(name),
+            "Engram MCP environment must contain `{name}`"
+        );
+    }
+
+    let termal_server = &config["mcp_servers"][TERMAL_DELEGATION_MCP_SERVER_NAME];
+    let termal_args = termal_server["args"]
+        .as_array()
+        .expect("TermAl delegation arguments should be an array");
+    let argument_after = |flag: &str| {
+        termal_args
+            .windows(2)
+            .find(|pair| pair[0] == flag)
+            .and_then(|pair| pair[1].as_str())
+            .unwrap_or_else(|| panic!("TermAl delegation arguments should contain `{flag}`"))
+    };
+
+    let mut expected = engram_env.clone();
+    expected.insert(
+        TERMAL_SESSION_ID_ENV.to_owned(),
+        Value::String(session_id.to_owned()),
+    );
+    expected.insert(
+        TERMAL_BASE_URL_ENV.to_owned(),
+        Value::String(argument_after("--base-url").to_owned()),
+    );
+    expected.insert(TERMAL_CLI_ENV.to_owned(), termal_server["command"].clone());
+    assert_eq!(
+        expected.len(),
+        ENGRAM_AGENT_PROCESS_ENV_NAMES.len() + TERMAL_AGENT_PROCESS_ENV_NAMES.len(),
+        "Codex shell policy should expect exactly the seven TermAl-owned names"
+    );
+    expected
 }
 
 fn take_pending_codex_request(

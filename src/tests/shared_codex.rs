@@ -350,15 +350,14 @@ fn detach_removes_the_in_flight_thread_setup_so_the_next_prompt_starts_fresh() {
         Some(&Value::Null),
         "Standard must explicitly clear a service tier inherited by the resumed thread"
     );
+    let resume_set = resume_request
+        .pointer("/params/config/shell_environment_policy/set")
+        .and_then(Value::as_object)
+        .expect("thread/resume should carry a shell environment policy");
     assert_eq!(
-        resume_request.pointer("/params/config/shell_environment_policy/set"),
-        Some(&json!({
-            "ENGRAM_ACTOR_CONTEXT": "agent=codex;model=gpt-5.4;reasoning=medium",
-            "ENGRAM_ACTOR_ID": "dev/codex",
-            "ENGRAM_HOME": "test-engram-home",
-            "ENGRAM_SESSION_ID": session_id,
-        })),
-        "thread/resume must give Codex shell commands the MCP child's exact identity"
+        resume_set,
+        &expected_codex_shell_environment_set(&resume_request["params"]["config"], &session_id),
+        "thread/resume must carry exactly the seven owned identity values"
     );
     assert_eq!(
         written.matches("thread/start").count(),
@@ -375,15 +374,14 @@ fn detach_removes_the_in_flight_thread_setup_so_the_next_prompt_starts_fresh() {
         Some(&Value::Null),
         "Standard thread/start must serialize the service tier explicitly"
     );
+    let start_set = start_request
+        .pointer("/params/config/shell_environment_policy/set")
+        .and_then(Value::as_object)
+        .expect("thread/start should carry a shell environment policy");
     assert_eq!(
-        start_request.pointer("/params/config/shell_environment_policy/set"),
-        Some(&json!({
-            "ENGRAM_ACTOR_CONTEXT": "agent=codex;model=gpt-5.4;reasoning=medium",
-            "ENGRAM_ACTOR_ID": "dev/codex",
-            "ENGRAM_HOME": "test-engram-home",
-            "ENGRAM_SESSION_ID": session_id,
-        })),
-        "thread/start must give Codex shell commands the MCP child's exact identity"
+        start_set,
+        &expected_codex_shell_environment_set(&start_request["params"]["config"], &session_id),
+        "thread/start must carry exactly the seven owned identity values"
     );
 
     retire_pending_codex_thread_setups(&pending_requests);
@@ -1315,6 +1313,10 @@ future_policy = { mode = "preserve-me" }
 
 [shell_environment_policy.set]
 KEEP_ME = "present"
+TERMAL_SESSION_ID = "stale-termal-session"
+TERMAL_BASE_URL = "http://stale.invalid"
+TERMAL_CLI = "stale-termal"
+termal_session_id = "case-colliding-termal-session"
 ENGRAM_HOME = "stale-home"
 ENGRAM_ACTOR_ID = "stale-actor"
 ENGRAM_ACTOR_CONTEXT = "stale-context"
@@ -1366,6 +1368,9 @@ engram_home = "case-colliding-home"
             request.pointer("/params/config/shell_environment_policy/include_only"),
             Some(&json!([
                 "KEEP_ONLY",
+                "TERMAL_SESSION_ID",
+                "TERMAL_BASE_URL",
+                "TERMAL_CLI",
                 "ENGRAM_HOME",
                 "ENGRAM_ACTOR_ID",
                 "ENGRAM_ACTOR_CONTEXT",
@@ -1387,6 +1392,44 @@ engram_home = "case-colliding-home"
             request.pointer("/params/config/shell_environment_policy/set/KEEP_ME"),
             Some(&json!("present")),
             "unrelated seeded environment entries must survive the Engram overlay"
+        );
+        let termal_server = request
+            .pointer("/params/config/mcp_servers/termal-delegation")
+            .expect("TermAl delegation server should be present");
+        let termal_args = termal_server["args"]
+            .as_array()
+            .expect("TermAl delegation args should be an array");
+        let parent_index = termal_args
+            .iter()
+            .position(|value| value == "--parent-session-id")
+            .expect("parent-session-id argument should be present");
+        let base_url_index = termal_args
+            .iter()
+            .position(|value| value == "--base-url")
+            .expect("base-url argument should be present");
+        assert_eq!(
+            request.pointer("/params/config/shell_environment_policy/set/TERMAL_SESSION_ID"),
+            termal_args.get(parent_index + 1),
+        );
+        assert_eq!(
+            request.pointer("/params/config/shell_environment_policy/set/TERMAL_BASE_URL"),
+            termal_args.get(base_url_index + 1),
+        );
+        assert_eq!(
+            request.pointer("/params/config/shell_environment_policy/set/TERMAL_CLI"),
+            termal_server.get("command"),
+        );
+        #[cfg(windows)]
+        assert!(
+            request
+                .pointer("/params/config/shell_environment_policy/set/termal_session_id")
+                .is_none(),
+            "Windows must remove case-insensitive TermAl aliases before inserting canonical names"
+        );
+        #[cfg(not(windows))]
+        assert_eq!(
+            request.pointer("/params/config/shell_environment_policy/set/termal_session_id"),
+            Some(&json!("case-colliding-termal-session")),
         );
         #[cfg(windows)]
         assert!(
@@ -1415,10 +1458,20 @@ engram_home = "case-colliding-home"
     let ineligible_request = shared_codex_setup_request_for_mcp_test(root.path(), None, false);
     assert!(
         ineligible_request
-            .pointer("/params/config/shell_environment_policy")
+            .pointer("/params/config/mcp_servers/engram")
             .is_none(),
-        "an ineligible thread must not receive a thread-level Engram shell policy"
+        "an ineligible thread must not receive the Engram MCP server"
     );
+    for name in TERMAL_AGENT_PROCESS_ENV_NAMES {
+        assert!(
+            ineligible_request
+                .pointer(&format!(
+                    "/params/config/shell_environment_policy/set/{name}"
+                ))
+                .is_some(),
+            "every Codex thread must receive TermAl identity `{name}`"
+        );
+    }
 }
 
 #[test]
@@ -1433,7 +1486,11 @@ fn codex_engram_shell_env_collision_matching_follows_platform_semantics() {
         .as_object()
         .expect("seeded set should be an object")
         .clone();
-    remove_engram_agent_shell_env_collisions(&mut case_sensitive, false);
+    remove_owned_agent_shell_env_collisions(
+        &mut case_sensitive,
+        &ENGRAM_AGENT_PROCESS_ENV_NAMES,
+        false,
+    );
     assert!(!case_sensitive.contains_key("ENGRAM_HOME"));
     assert_eq!(
         case_sensitive.get("engram_home"),
@@ -1445,7 +1502,11 @@ fn codex_engram_shell_env_collision_matching_follows_platform_semantics() {
         .as_object()
         .expect("seeded set should be an object")
         .clone();
-    remove_engram_agent_shell_env_collisions(&mut case_insensitive, true);
+    remove_owned_agent_shell_env_collisions(
+        &mut case_insensitive,
+        &ENGRAM_AGENT_PROCESS_ENV_NAMES,
+        true,
+    );
     assert!(!case_insensitive.contains_key("ENGRAM_HOME"));
     assert!(!case_insensitive.contains_key("engram_home"));
     assert_eq!(case_insensitive.get("KEEP_ME"), Some(&json!("unrelated")));
@@ -1468,8 +1529,14 @@ fn codex_engram_shell_env_include_only_admits_exact_canonical_names() {
         (ENGRAM_SESSION_ID_ENV.to_owned(), "test-session".to_owned()),
     ]);
 
-    merge_engram_agent_shell_env_into_codex_config(&mut config, &engram_env)
-        .expect("Engram shell identity should merge into the allowlist");
+    merge_owned_agent_shell_env_into_codex_config(
+        &mut config,
+        &engram_env,
+        &ENGRAM_AGENT_PROCESS_ENV_NAMES,
+        &ENGRAM_REQUIRED_AGENT_PROCESS_ENV_NAMES,
+        "Engram MCP descriptor",
+    )
+    .expect("Engram shell identity should merge into the allowlist");
 
     assert_eq!(
         config.pointer("/shell_environment_policy/include_only"),
@@ -1507,9 +1574,12 @@ fn shared_codex_thread_setup_falls_back_when_seeded_config_is_missing_or_malform
         .expect("fallback policy set should be an object");
     assert_eq!(
         missing_set.len(),
-        ENGRAM_AGENT_PROCESS_ENV_NAMES.len(),
-        "a missing seeded policy must fall back to exactly the four TermAl-owned values"
+        TERMAL_AGENT_PROCESS_ENV_NAMES.len() + ENGRAM_AGENT_PROCESS_ENV_NAMES.len(),
+        "a missing seeded policy must contain exactly the TermAl and Engram owned values"
     );
+    for name in TERMAL_AGENT_PROCESS_ENV_NAMES {
+        assert!(missing_set.contains_key(name));
+    }
     for name in ENGRAM_AGENT_PROCESS_ENV_NAMES {
         assert!(
             missing_set.contains_key(name),
@@ -1548,9 +1618,12 @@ fn shared_codex_thread_setup_falls_back_when_seeded_config_is_missing_or_malform
         .expect("malformed fallback policy set should be an object");
     assert_eq!(
         malformed_set.len(),
-        ENGRAM_AGENT_PROCESS_ENV_NAMES.len(),
-        "a malformed seeded config must fall back to exactly the four TermAl-owned values"
+        TERMAL_AGENT_PROCESS_ENV_NAMES.len() + ENGRAM_AGENT_PROCESS_ENV_NAMES.len(),
+        "a malformed seeded config must contain exactly the TermAl and Engram owned values"
     );
+    for name in TERMAL_AGENT_PROCESS_ENV_NAMES {
+        assert!(malformed_set.contains_key(name));
+    }
     for name in ENGRAM_AGENT_PROCESS_ENV_NAMES {
         assert!(
             malformed_set.contains_key(name),
@@ -1645,15 +1718,14 @@ fn shared_codex_thread_start_includes_delegation_mcp_config() {
         Some(&json!("on-request")),
         "TermAl AutoApprove must keep native Codex approval requests enabled at thread start"
     );
+    let shell_env = start_request
+        .pointer("/params/config/shell_environment_policy/set")
+        .and_then(Value::as_object)
+        .expect("the real thread/start request must carry shell identity");
     assert_eq!(
-        start_request.pointer("/params/config/shell_environment_policy/set"),
-        Some(&json!({
-            "ENGRAM_ACTOR_CONTEXT": "agent=codex;model=gpt-5.4;reasoning=medium",
-            "ENGRAM_ACTOR_ID": "dev/codex",
-            "ENGRAM_HOME": "test-engram-home",
-            "ENGRAM_SESSION_ID": session_id,
-        })),
-        "the real thread/start request must carry the Engram shell identity"
+        shell_env,
+        &expected_codex_shell_environment_set(&start_request["params"]["config"], &session_id),
+        "thread/start must carry exactly the seven owned identity values"
     );
 
     // This test owns only the setup request shape. Retire its waiter instead

@@ -36,9 +36,13 @@ area.
 The shared app-server runs with a writable, TermAl-owned `CODEX_HOME` at
 `~/.termal/codex-home/shared-app-server`. When TermAl starts that process it seeds
 the directory from the user's ordinary Codex home (normally `~/.codex`), including
-`config.toml`. Changes to the source file therefore propagate when the shared
-app-server is next spawned and its home is seeded; they are not a live-config
-channel into an already-running process.
+`config.toml`. The seed also regenerates `AGENTS.md`: the user's source
+instructions remain first, followed by one marked TermAl-managed section that
+teaches the environment-only coordination CLI receive/reply/acknowledge loop.
+Refreshing an already managed home replaces that section rather than appending
+duplicates. Changes to source files therefore propagate when the shared app-server
+is next spawned and its home is seeded; they are not a live-config channel into an
+already-running process.
 
 At every `thread/start` and `thread/resume`, TermAl reads `[mcp_servers]` from that
 seeded `config.toml` and passes the merged table in the thread-level `config`.
@@ -48,14 +52,17 @@ use TermAl's descriptors if the user configuration contains a collision. A missi
 or malformed seeded file is diagnosed on stderr and falls back to the TermAl-owned
 entries; it never prevents thread setup.
 
-The shared app-server process itself has inherited `ENGRAM_HOME`,
-`ENGRAM_ACTOR_ID`, `ENGRAM_ACTOR_CONTEXT`, and `ENGRAM_SESSION_ID` removed
-because one process serves many TermAl sessions. A thread-level
+The shared app-server process itself has inherited `TERMAL_SESSION_ID`,
+`TERMAL_BASE_URL`, `TERMAL_CLI`, `ENGRAM_HOME`, `ENGRAM_ACTOR_ID`,
+`ENGRAM_ACTOR_CONTEXT`, and `ENGRAM_SESSION_ID` removed because one process
+serves many TermAl sessions. A thread-level
 `shell_environment_policy` replaces the
-whole configured table, just like `mcp_servers`. For an Engram-eligible session,
-TermAl therefore reads the seeded policy, preserves its inheritance, filtering,
-unknown, and unrelated `set` entries, overlays the required session-specific
-identity values plus optional actor context, and passes the result on both
+whole configured table, just like `mcp_servers`. TermAl therefore reads the
+seeded policy, preserves its inheritance, filtering, unknown, and unrelated
+`set` entries, and overlays `TERMAL_SESSION_ID`, the normalized loopback
+`TERMAL_BASE_URL`, and the absolute `TERMAL_CLI` on every thread. An
+Engram-eligible session additionally overlays its required session-specific
+identity values plus optional actor context. The result is passed on both
 `thread/start` and `thread/resume`. Because
 Codex applies a non-empty `include_only` filter after `set`, TermAl also admits
 each present owned name through that existing allowlist. On Windows it removes
@@ -65,10 +72,11 @@ detaches the logical TermAl session from its bound thread setup; the next turn
 resumes the same external thread with freshly composed thread-scoped
 configuration while the shared app-server process remains alive.
 
-Ineligible sessions receive no thread-level Engram shell-policy override. The
-shared process cannot leak an inherited TermAl/Engram identity because its own
-environment is scrubbed, while an explicit policy in the user's seeded Codex
-configuration remains user-owned and authoritative.
+Ineligible sessions receive the TermAl coordination identity but no
+thread-level Engram shell-policy overlay. The shared process cannot leak an
+inherited per-session identity because its own environment is scrubbed, while
+unrelated policy in the user's seeded Codex configuration remains user-owned
+and authoritative.
 
 ## Approval policy ownership
 

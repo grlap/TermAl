@@ -1,4 +1,12 @@
 const TERMAL_DELEGATION_MCP_SERVER_NAME: &str = "termal-delegation";
+const TERMAL_SESSION_ID_ENV: &str = "TERMAL_SESSION_ID";
+const TERMAL_BASE_URL_ENV: &str = "TERMAL_BASE_URL";
+const TERMAL_CLI_ENV: &str = "TERMAL_CLI";
+const TERMAL_AGENT_PROCESS_ENV_NAMES: [&str; 3] = [
+    TERMAL_SESSION_ID_ENV,
+    TERMAL_BASE_URL_ENV,
+    TERMAL_CLI_ENV,
+];
 const TERMAL_SUBMIT_REVIEW_RESULT_TOOL_NAME: &str = "termal_submit_review_result";
 const TERMAL_SUBMIT_REVIEW_RESULT_QUALIFIED_TOOL_NAME: &str =
     "mcp__termal-delegation__termal_submit_review_result";
@@ -129,7 +137,7 @@ fn parse_delegation_mcp_mode_args(
 }
 
 fn default_termal_http_base_url() -> String {
-    if let Ok(value) = std::env::var("TERMAL_BASE_URL") {
+    if let Ok(value) = std::env::var(TERMAL_BASE_URL_ENV) {
         let value = value.trim();
         if !value.is_empty() {
             return value.trim_end_matches('/').to_owned();
@@ -201,6 +209,31 @@ fn termal_delegation_mcp_current_exe() -> Result<String> {
         .into_owned())
 }
 
+fn termal_agent_process_env_with_command(
+    command: &str,
+    session_id: &str,
+    base_url: &str,
+) -> BTreeMap<String, String> {
+    BTreeMap::from([
+        (TERMAL_SESSION_ID_ENV.to_owned(), session_id.to_owned()),
+        (
+            TERMAL_BASE_URL_ENV.to_owned(),
+            normalize_termal_http_base_url(base_url),
+        ),
+        (TERMAL_CLI_ENV.to_owned(), command.to_owned()),
+    ])
+}
+
+fn termal_agent_process_env(
+    session_id: &str,
+    base_url: &str,
+) -> Result<BTreeMap<String, String>> {
+    let command = termal_delegation_mcp_current_exe()?;
+    Ok(termal_agent_process_env_with_command(
+        &command, session_id, base_url,
+    ))
+}
+
 fn termal_delegation_mcp_claude_config_json_with_command(
     command: &str,
     parent_session_id: &str,
@@ -265,9 +298,14 @@ fn termal_delegation_mcp_codex_config_with_command(
 ) -> Value {
     let server =
         termal_delegation_mcp_stdio_config_with_command(command, parent_session_id, base_url);
+    let termal_env =
+        termal_agent_process_env_with_command(command, parent_session_id, base_url);
     json!({
         "mcp_servers": {
             TERMAL_DELEGATION_MCP_SERVER_NAME: server,
+        },
+        "shell_environment_policy": {
+            "set": termal_env,
         },
     })
 }
@@ -449,6 +487,9 @@ impl AppState {
         codex_home: Option<&FsPath>,
     ) -> Result<Value> {
         let command = termal_delegation_mcp_current_exe()?;
+        let base_url = self.local_http_base_url();
+        let termal_env =
+            termal_agent_process_env_with_command(&command, parent_session_id, &base_url);
         let seeded_config = match codex_home.map(load_seeded_shared_codex_thread_config) {
             Some(Ok(config)) => config,
             Some(Err(err)) => {
@@ -471,7 +512,7 @@ impl AppState {
         let termal_config = termal_delegation_mcp_codex_config_with_command(
             &command,
             parent_session_id,
-            &self.local_http_base_url(),
+            &base_url,
         );
         let termal_servers = termal_config
             .get("mcp_servers")
@@ -479,16 +520,23 @@ impl AppState {
             .context("TermAl Codex delegation MCP baseline should contain mcp_servers")?;
         servers.extend(termal_servers.clone());
         let mut config = json!({ "mcp_servers": servers });
+        if let Some(policy) = shell_environment_policy {
+            config
+                .as_object_mut()
+                .context("TermAl Codex config should be an object")?
+                .insert(
+                    "shell_environment_policy".to_owned(),
+                    Value::Object(policy),
+                );
+        }
+        merge_owned_agent_shell_env_into_codex_config(
+            &mut config,
+            &termal_env,
+            &TERMAL_AGENT_PROCESS_ENV_NAMES,
+            &TERMAL_AGENT_PROCESS_ENV_NAMES,
+            "TermAl",
+        )?;
         if let Some(engram) = engram {
-            if let Some(policy) = shell_environment_policy {
-                config
-                    .as_object_mut()
-                    .context("TermAl Codex config should be an object")?
-                    .insert(
-                        "shell_environment_policy".to_owned(),
-                        Value::Object(policy),
-                    );
-            }
             config
                 .get_mut("mcp_servers")
                 .and_then(Value::as_object_mut)
@@ -498,7 +546,13 @@ impl AppState {
                     serde_json::to_value(&engram)
                         .context("Engram Codex MCP descriptor should serialize")?,
                 );
-            merge_engram_agent_shell_env_into_codex_config(&mut config, &engram.env)?;
+            merge_owned_agent_shell_env_into_codex_config(
+                &mut config,
+                &engram.env,
+                &ENGRAM_AGENT_PROCESS_ENV_NAMES,
+                &ENGRAM_REQUIRED_AGENT_PROCESS_ENV_NAMES,
+                "Engram MCP descriptor",
+            )?;
         }
 
         Ok(config)
@@ -506,17 +560,20 @@ impl AppState {
 }
 
 /// Codex uses one app-server for many TermAl sessions, so process-global
-/// `ENGRAM_SESSION_ID` would attribute every shell to whichever session spawned
-/// the server. A thread-scoped shell policy gives each start/resume request the
-/// same required identity and optional actor context as its Engram MCP child
-/// while retaining unrelated policy entries a future config composer may add.
-fn merge_engram_agent_shell_env_into_codex_config(
+/// identity would attribute every shell to whichever session spawned the
+/// server. A thread-scoped shell policy gives each start/resume request the
+/// required TermAl identity and any present Engram identity while retaining
+/// unrelated policy entries a future config composer may add.
+fn merge_owned_agent_shell_env_into_codex_config(
     config: &mut Value,
-    engram_env: &BTreeMap<String, String>,
+    source_env: &BTreeMap<String, String>,
+    owned_names: &[&str],
+    required_names: &[&str],
+    source_label: &str,
 ) -> Result<()> {
-    for name in ENGRAM_REQUIRED_AGENT_PROCESS_ENV_NAMES {
-        if !engram_env.contains_key(name) {
-            bail!("Engram MCP descriptor is missing required agent environment `{name}`");
+    for name in required_names {
+        if !source_env.contains_key(*name) {
+            bail!("{source_label} is missing required agent environment `{name}`");
         }
     }
     let config = config
@@ -533,16 +590,16 @@ fn merge_engram_agent_shell_env_into_codex_config(
             .as_array_mut()
             .context("Codex shell_environment_policy.include_only should be an array")?;
         if !include_only.is_empty() {
-            for name in ENGRAM_AGENT_PROCESS_ENV_NAMES {
-                if !engram_env.contains_key(name) {
+            for name in owned_names {
+                if !source_env.contains_key(*name) {
                     continue;
                 }
                 if !include_only.iter().any(|entry| {
                     entry
                         .as_str()
-                        .is_some_and(|entry| entry == name)
+                        .is_some_and(|entry| entry == *name)
                 }) {
-                    include_only.push(Value::String(name.to_owned()));
+                    include_only.push(Value::String((*name).to_owned()));
                 }
             }
         }
@@ -551,25 +608,26 @@ fn merge_engram_agent_shell_env_into_codex_config(
     let explicit = explicit
         .as_object_mut()
         .context("Codex shell_environment_policy.set should be an object")?;
-    remove_engram_agent_shell_env_collisions(explicit, cfg!(windows));
-    for name in ENGRAM_AGENT_PROCESS_ENV_NAMES {
-        if let Some(value) = engram_env.get(name) {
-            explicit.insert(name.to_owned(), Value::String(value.clone()));
+    remove_owned_agent_shell_env_collisions(explicit, owned_names, cfg!(windows));
+    for name in owned_names {
+        if let Some(value) = source_env.get(*name) {
+            explicit.insert((*name).to_owned(), Value::String(value.clone()));
         }
     }
     Ok(())
 }
 
-fn remove_engram_agent_shell_env_collisions(
+fn remove_owned_agent_shell_env_collisions(
     explicit: &mut serde_json::Map<String, Value>,
+    owned_names: &[&str],
     case_insensitive: bool,
 ) {
     explicit.retain(|existing, _| {
-        !ENGRAM_AGENT_PROCESS_ENV_NAMES.iter().any(|owned| {
+        !owned_names.iter().any(|owned| {
             if case_insensitive {
                 existing.eq_ignore_ascii_case(owned)
             } else {
-                existing == owned
+                existing == *owned
             }
         })
     });

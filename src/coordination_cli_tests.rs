@@ -17,6 +17,14 @@ fn cli_args(list: &[&str]) -> Vec<String> {
     list.iter().map(|argument| (*argument).to_owned()).collect()
 }
 
+// Most parser tests pin the explicit CLI grammar independently of the process
+// hosting the test. Environment-default behavior has focused coverage below.
+fn parse_coordination_cli_args(
+    args: impl IntoIterator<Item = String>,
+) -> Result<CoordinationCliInvocation> {
+    super::parse_coordination_cli_args_with_default_session_id(args, None)
+}
+
 fn usage_message(err: &anyhow::Error) -> String {
     err.downcast_ref::<CoordinationCliUsageError>()
         .map(|usage| usage.0.clone())
@@ -69,6 +77,52 @@ fn coordination_cli_parses_sessions_list_variants() {
             base_url: Some("http://127.0.0.1:9999/".to_owned()),
         }
     );
+}
+
+#[test]
+fn coordination_cli_mailbox_round_trip_uses_environment_identity_default() {
+    let invocation = super::parse_coordination_cli_args_with_default_session_id(
+        cli_args(&["mailbox", "list", "--json"]),
+        Some("session-env".to_owned()),
+    )
+    .expect("TERMAL_SESSION_ID should satisfy the caller identity");
+    assert_eq!(
+        invocation.command,
+        CoordinationCliCommand::MailboxList {
+            as_session: "session-env".to_owned(),
+        }
+    );
+
+    let (base_url, requests, server) = spawn_test_mcp_http_server(2, |request| {
+        if request.path == "/api/state" {
+            return (
+                200,
+                json!({
+                    "sessions": [
+                        { "id": "session-env", "name": "Env caller", "status": "idle" }
+                    ],
+                    "delegations": []
+                }),
+            );
+        }
+        assert_eq!(request.path, "/api/sessions/session-env/mailboxes");
+        (200, json!({ "mailboxes": [] }))
+    });
+    let output = execute_coordination_cli(&invocation.command, &base_url)
+        .expect("environment-only identity should reach the mailbox bridge");
+    server.join().expect("test server should join");
+    assert_eq!(output, json!({ "mailboxes": { "mailboxes": [] } }));
+    assert_eq!(requests.lock().expect("requests lock").len(), 2);
+}
+
+#[test]
+fn coordination_cli_explicit_empty_identity_does_not_fall_back_to_environment() {
+    let err = super::parse_coordination_cli_args_with_default_session_id(
+        cli_args(&["mailbox", "list", "--as-session="]),
+        Some("session-env".to_owned()),
+    )
+    .expect_err("an explicitly empty identity must remain a usage error");
+    assert!(usage_message(&err).contains("`--as-session` is empty"));
 }
 
 #[test]

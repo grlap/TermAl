@@ -1,10 +1,11 @@
 // Engram's per-session MCP stdio descriptor for local agent runtimes.
 //
-// Owns descriptor selection, application or explicit removal of the descriptor
-// identity on per-session agent processes, plus the base-tier context refresh
-// lifecycle and its bounded `engram work next` child process. Runtime-specific
-// JSON composition remains in `delegation_mcp.rs`; premium turn-gated control
-// and project settings validation remain in `engram_host_adapter.rs`.
+// Owns descriptor selection, application or explicit removal of TermAl-owned
+// environment on per-session agent processes, plus the base-tier context
+// refresh lifecycle and its bounded `engram work next` child process.
+// Runtime-specific JSON composition remains in `delegation_mcp.rs`; premium
+// turn-gated control and project settings validation remain in
+// `engram_host_adapter.rs`.
 
 const ENGRAM_MCP_SERVER_NAME: &str = "engram";
 const ENGRAM_HOME_ENV: &str = "ENGRAM_HOME";
@@ -34,10 +35,22 @@ struct EngramMcpRuntimeConfig {
 /// Clear inherited values even when Engram is ineligible. The TermAl server may
 /// itself have `ENGRAM_*` variables (for example during an operator smoke test),
 /// but an undeclared or disabled project must not inherit that unrelated identity.
-fn apply_engram_agent_process_env(
+fn apply_agent_process_env(
     command: &mut Command,
+    termal: Option<&BTreeMap<String, String>>,
     engram: Option<&TermalDelegationMcpStdioConfig>,
 ) -> Result<()> {
+    for name in TERMAL_AGENT_PROCESS_ENV_NAMES {
+        command.env_remove(name);
+    }
+    if let Some(termal) = termal {
+        for name in TERMAL_AGENT_PROCESS_ENV_NAMES {
+            let value = termal.get(name).with_context(|| {
+                format!("TermAl session environment is missing required value `{name}`")
+            })?;
+            command.env(name, value);
+        }
+    }
     for name in ENGRAM_AGENT_PROCESS_ENV_NAMES {
         command.env_remove(name);
     }

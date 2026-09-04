@@ -421,7 +421,8 @@ fn spawn_claude_runtime(
     ));
     command.arg("--mcp-config").arg(&mcp_config_file.path);
     command.env("CLAUDE_CODE_ENTRYPOINT", "termal");
-    apply_engram_agent_process_env(&mut command, engram_mcp)?;
+    let termal_env = termal_agent_process_env(&session_id, &state.local_http_base_url())?;
+    apply_agent_process_env(&mut command, Some(&termal_env), engram_mcp)?;
 
     let mut child = command
         .stdin(Stdio::piped())

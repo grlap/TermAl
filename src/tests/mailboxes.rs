@@ -159,6 +159,9 @@ fn mailbox_send_commits_body_before_metadata_only_wake_and_retry_does_not_rewake
         assert!(pending.text.contains("termal_list_mailboxes"));
         assert!(pending.text.contains("termal_read_mailbox"));
         assert!(pending.text.contains("expectedProcessedThrough"));
+        assert!(pending.text.contains("TERMAL_CLI"));
+        assert!(pending.text.contains("TERMAL_SESSION_ID"));
+        assert!(pending.text.contains("mailbox acknowledge --expected"));
         assert!(
             !pending.text.contains("durable body"),
             "wake-up prompt must contain metadata only"
@@ -1773,6 +1776,7 @@ fn reopened_mailbox_store_recovers_lost_wake_before_receivers_next_turn() {
     };
     assert!(runtime_prompt.contains(&committed.mailbox_id));
     assert!(runtime_prompt.contains("termal_read_mailbox"));
+    assert!(runtime_prompt.contains("TERMAL_CLI"));
     assert!(
         !runtime_prompt.contains("Committed before a simulated crash."),
         "recovery wake must remain metadata-only"

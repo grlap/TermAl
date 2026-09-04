@@ -20,18 +20,18 @@ not re-implementations. The CLI never opens `termal.sqlite` or
 
 ```
 termal sessions list [--as-session <id>] [--json] [--base-url <url>]
-termal mailbox list --as-session <id> [--json] [--base-url <url>]
-termal mailbox send --as-session <id> --to <session-id-or-name>
+termal mailbox list [--as-session <id>] [--json] [--base-url <url>]
+termal mailbox send [--as-session <id>] --to <session-id-or-name>
                     (--message <text> | --message-file <path or ->)
                     --idempotency-key <key> [--topic <text>]
                     [--state-stamp <text>] [--class <class>]
                     [--json] [--base-url <url>]
-termal mailbox read --as-session <id> --mailbox-id <id>
+termal mailbox read [--as-session <id>] --mailbox-id <id>
                     [--after <sequence>] [--limit <count>]
                     [--json] [--base-url <url>]
-termal mailbox read-message --as-session <id> --message-id <id>
+termal mailbox read-message [--as-session <id>] --message-id <id>
                     [--json] [--base-url <url>]
-termal mailbox acknowledge --as-session <id> --mailbox-id <id>
+termal mailbox acknowledge [--as-session <id>] --mailbox-id <id>
                     --expected <processedThrough> --through <processedThrough>
                     [--json] [--base-url <url>]
 ```
@@ -57,8 +57,10 @@ request. Exactly one of `--message` and `--message-file` must be given.
 ### Identity and authorization
 
 `--as-session` is the root session the command acts as; it is the same
-identity the delegation MCP bridge receives through `--parent-session-id`. The
-CLI looks the session up in `/api/state` before any mailbox request:
+identity the delegation MCP bridge receives through `--parent-session-id`.
+It defaults to `TERMAL_SESSION_ID`, which TermAl injects into every hosted
+agent runtime. The CLI looks the session up in `/api/state` before any mailbox
+request:
 
 - a delegation-child session (a spawned reviewer, explorer or worker) is
   refused, exactly as the peer MCP tools are hidden from and refused to
@@ -123,22 +125,31 @@ the acknowledged mailbox summary).
 | `1` | A request was attempted and failed: transport error, backend rejection (`4xx`/`5xx` message forwarded), or a successful response whose shape is not the tool contract (validated before anything is printed, so a malformed `2xx` never exits `0` as an empty listing). Details on stderr, flattened to one line with control characters neutralized because server errors can quote peer text. A consumer that closes stdout early (`| head`) is not a failure. |
 
 `--base-url` defaults to `TERMAL_BASE_URL`, then
-`http://127.0.0.1:<TERMAL_PORT or 8787>`.
+`http://127.0.0.1:<TERMAL_PORT or 8787>`. Hosted agent runtimes also receive
+`TERMAL_CLI`, the absolute path of the running TermAl executable. On PowerShell
+invoke it as `& $env:TERMAL_CLI`; on POSIX shells use `"$TERMAL_CLI"`. This
+avoids PATH ambiguity and lets an MCP-locked runtime coordinate without
+hardcoding its session id or server address.
 
 ## Examples
 
 ```
 termal sessions list --json
-termal mailbox list --as-session session-4983
-termal mailbox send --as-session=session-4983 --to="Termal::Codex" \
+termal mailbox list
+termal mailbox send --to="Termal::Codex" \
   --message-file=handback.txt --idempotency-key=fable-handback-r3 \
   --topic="tm-7p9z.4 hand-back" --state-stamp=HEAD=4cacf05 --json
-termal mailbox read --as-session session-4983 --mailbox-id mailbox-312caf7d \
+termal mailbox read --mailbox-id mailbox-312caf7d \
   --after 645 --limit 5
-termal mailbox acknowledge --as-session session-4983 --mailbox-id mailbox-312caf7d \
+termal mailbox acknowledge --mailbox-id mailbox-312caf7d \
   --expected 645 --through 647
 ```
 
 A typical receive loop is `mailbox list` (read the current `processedThrough`),
 `mailbox read --after <processedThrough>`, act on the bodies, then
 `mailbox acknowledge --expected <processedThrough> --through <last sequence>`.
+When a reply is required, use `mailbox send` with a stable idempotency key
+derived from the hosted session and inbound message or task. Retry an ambiguous
+send with the exact same intent and key. Prefer `--json` for this automated
+loop; a CAS conflict means list again and continue from the newly observed
+cursor.

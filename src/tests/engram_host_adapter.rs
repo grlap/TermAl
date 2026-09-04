@@ -14754,8 +14754,9 @@ fn project_actor_engram_mcp_is_added_to_claude_acp_and_codex_configs() {
         })
     );
     assert_eq!(
-        codex["shell_environment_policy"]["set"], codex["mcp_servers"]["engram"]["env"],
-        "Codex shell commands and its Engram MCP child must share exact attribution"
+        codex["shell_environment_policy"]["set"],
+        Value::Object(expected_codex_shell_environment_set(&codex, &codex_session)),
+        "Codex shell policy must contain exactly the Engram and TermAl owned identities"
     );
     assert!(
         !codex["mcp_servers"]["engram"]["args"]
@@ -14908,7 +14909,7 @@ fn engram_mcp_and_agent_process_identity_match_for_every_agent_kind() {
         assert_eq!(argument_after("--session-id"), Some(session_id.as_str()));
 
         let mut process = Command::new("engram-agent-environment-fixture");
-        apply_engram_agent_process_env(&mut process, Some(&descriptor))
+        apply_agent_process_env(&mut process, None, Some(&descriptor))
             .expect("agent process environment should apply");
         let process_env = process
             .get_envs()
@@ -14956,7 +14957,7 @@ fn acp_session_setup_uses_the_engram_snapshot_that_spawned_its_process() {
             .stdio
     };
     let mut process_command = Command::new("engram-acp-runtime-snapshot-fixture");
-    apply_engram_agent_process_env(&mut process_command, Some(&frozen_engram))
+    apply_agent_process_env(&mut process_command, None, Some(&frozen_engram))
         .expect("frozen descriptor should configure the ACP process environment");
     let process_engram_env = process_command
         .get_envs()
@@ -15605,7 +15606,11 @@ fn per_session_engram_mcp_uses_base_context_and_preserves_ineligible_baselines()
     );
     assert_eq!(
         enabled["shell_environment_policy"]["set"],
-        enabled["mcp_servers"]["engram"]["env"]
+        Value::Object(expected_codex_shell_environment_set(
+            &enabled,
+            &enabled_session
+        )),
+        "enabled Codex shell policy must contain exactly seven owned identity values"
     );
 
     set_test_project_engram_mcp_settings(&state, &project_id, false, None);

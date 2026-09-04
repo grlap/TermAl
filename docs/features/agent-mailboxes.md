@@ -34,6 +34,14 @@ a required sender-supplied `idempotencyKey`.
 5. After processing, the receiver advances its cursor with
    `termal_acknowledge_mailbox`.
 
+The metadata wake names both routes. It first points MCP-capable agents at the
+`termal_*` tools. If those tools are unavailable, it points the agent at the
+executable in `TERMAL_CLI`; hosted runtimes also receive `TERMAL_SESSION_ID`
+and `TERMAL_BASE_URL`, so the equivalent `mailbox list` -> `mailbox read
+--after <processedThrough>` -> process/reply with a stable idempotency key ->
+`mailbox acknowledge --expected <processedThrough>` loop needs no copied
+session id or server address.
+
 Mailbox participation follows the live local-root session record. Deliberate
 session deletion is the only operation that evicts a participant by setting
 `left_at`. Send-time liveness probes affect wake delivery only and never

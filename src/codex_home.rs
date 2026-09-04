@@ -23,6 +23,39 @@
 // to tag every line with `[YYYY-MM-DDTHH:MM:SS label]` so interleaved
 // subprocess output is navigable.
 
+const TERMAL_CODEX_AGENTS_SECTION_START: &str =
+    "<!-- BEGIN TERMAL MANAGED COORDINATION INSTRUCTIONS -->";
+const TERMAL_CODEX_AGENTS_SECTION_END: &str =
+    "<!-- END TERMAL MANAGED COORDINATION INSTRUCTIONS -->";
+const TERMAL_CODEX_AGENTS_SECTION: &str = r#"<!-- BEGIN TERMAL MANAGED COORDINATION INSTRUCTIONS -->
+## TermAl coordination
+
+This Codex session is hosted by TermAl. Its environment provides
+`TERMAL_SESSION_ID`, `TERMAL_BASE_URL`, and `TERMAL_CLI` (the absolute path to
+the running TermAl executable). When the TermAl delegation MCP tools are not
+available, invoke that executable from the shell (PowerShell:
+`& $env:TERMAL_CLI`; POSIX: `"$TERMAL_CLI"`). The coordination CLI defaults
+`--as-session` and `--base-url` from those environment values.
+
+Use the durable mailbox protocol in this order:
+
+1. Run `mailbox list --json` and record your participant's
+   `processedThrough` cursor.
+2. Run `mailbox read --mailbox-id <id> --after <processedThrough> --json`.
+3. Process each body. Reply, when needed, with `mailbox send --to <session>
+   --message ... --idempotency-key <stable-key> --json`. Derive a stable key
+   from your session and the inbound message or task, and retry the exact same
+   intent with the same key after an ambiguous failure.
+4. After processing, run `mailbox acknowledge --mailbox-id <id> --expected
+   <processedThrough> --through <last-sequence> --json`. On a CAS conflict,
+   list again and continue from the newly observed cursor.
+
+Prefer `--json` for automation. Exit code 0 means success, 2 means a usage
+error before a request, and 1 means a request or response-contract failure.
+The loopback CLI identity is a local misuse guard, not an authentication
+boundary; do not claim another session id.
+<!-- END TERMAL MANAGED COORDINATION INSTRUCTIONS -->"#;
+
 
 /// Resolves source Codex home dir.
 fn resolve_source_codex_home_dir() -> Result<PathBuf> {
@@ -80,38 +113,105 @@ fn prepare_termal_codex_home(default_workdir: &str, scope: &str) -> Result<PathB
     let target_home = resolve_termal_codex_home(default_workdir, scope);
     fs::create_dir_all(&target_home)
         .with_context(|| format!("failed to create `{}`", target_home.display()))?;
-    if let Ok(source_home) = resolve_source_codex_home_dir() {
-        seed_termal_codex_home_from(&source_home, &target_home)?;
+    match resolve_source_codex_home_dir() {
+        Ok(source_home) => seed_termal_codex_home_from(&source_home, &target_home)?,
+        Err(_) => {
+            let target_agents = target_home.join("AGENTS.md");
+            write_termal_codex_agents_file(Some(&target_agents), &target_agents)?;
+        }
     }
     Ok(target_home)
 }
 
 /// Seeds TermAl Codex home from.
 fn seed_termal_codex_home_from(source_home: &FsPath, target_home: &FsPath) -> Result<()> {
-    if !source_home.exists() {
-        return Ok(());
-    }
-
+    fs::create_dir_all(target_home)
+        .with_context(|| format!("failed to create `{}`", target_home.display()))?;
+    let source_exists = source_home.exists();
     let source_home = fs::canonicalize(source_home).unwrap_or_else(|_| source_home.to_path_buf());
     let target_home = fs::canonicalize(target_home).unwrap_or_else(|_| target_home.to_path_buf());
 
-    if source_home == target_home {
+    if source_exists && source_home != target_home {
+        for name in [
+            "auth.json",
+            "config.toml",
+            "models_cache.json",
+            ".codex-global-state.json",
+        ] {
+            sync_codex_home_entry(&source_home.join(name), &target_home.join(name))?;
+        }
+
+        for name in ["rules", "memories", "skills"] {
+            sync_codex_home_entry(&source_home.join(name), &target_home.join(name))?;
+        }
+    }
+
+    let target_agents = target_home.join("AGENTS.md");
+    let source_agents = source_exists
+        .then(|| source_home.join("AGENTS.md"))
+        .unwrap_or_else(|| target_agents.clone());
+    write_termal_codex_agents_file(Some(&source_agents), &target_agents)?;
+
+    Ok(())
+}
+
+fn strip_termal_codex_agents_section(contents: &str) -> String {
+    let mut remaining = contents;
+    let mut stripped = String::with_capacity(contents.len());
+    while let Some(start) = remaining.find(TERMAL_CODEX_AGENTS_SECTION_START) {
+        stripped.push_str(&remaining[..start]);
+        let section_tail = &remaining[start + TERMAL_CODEX_AGENTS_SECTION_START.len()..];
+        let Some(end_offset) = section_tail.find(TERMAL_CODEX_AGENTS_SECTION_END) else {
+            stripped.push_str(&remaining[start..]);
+            return stripped;
+        };
+        if section_tail
+            .find(TERMAL_CODEX_AGENTS_SECTION_START)
+            .is_some_and(|next_start| next_start < end_offset)
+        {
+            stripped.push_str(TERMAL_CODEX_AGENTS_SECTION_START);
+            remaining = section_tail;
+            continue;
+        }
+        remaining = &section_tail[end_offset + TERMAL_CODEX_AGENTS_SECTION_END.len()..];
+    }
+    stripped.push_str(remaining);
+    stripped
+}
+
+fn write_termal_codex_agents_file(source: Option<&FsPath>, target: &FsPath) -> Result<()> {
+    let source_contents = match source {
+        Some(source) if source == target => fs::read_to_string(target).unwrap_or_default(),
+        Some(source) => match fs::read_to_string(source) {
+            Ok(contents) => contents,
+            Err(err) if err.kind() == io::ErrorKind::NotFound => String::new(),
+            Err(err) => {
+                return Err(err).with_context(|| format!("failed to read `{}`", source.display()));
+            }
+        },
+        None => String::new(),
+    };
+    let user_contents = strip_termal_codex_agents_section(&source_contents);
+    let user_contents = user_contents.trim_end_matches(['\r', '\n']);
+    let contents = if user_contents.is_empty() {
+        format!("{TERMAL_CODEX_AGENTS_SECTION}\n")
+    } else {
+        format!("{user_contents}\n\n{TERMAL_CODEX_AGENTS_SECTION}\n")
+    };
+
+    if fs::read_to_string(target).ok().as_deref() == Some(contents.as_str()) {
         return Ok(());
     }
-
-    for name in [
-        "auth.json",
-        "config.toml",
-        "models_cache.json",
-        ".codex-global-state.json",
-    ] {
-        sync_codex_home_entry(&source_home.join(name), &target_home.join(name))?;
+    if target.is_dir() {
+        fs::remove_dir_all(target)
+            .with_context(|| format!("failed to remove `{}`", target.display()))?;
     }
-
-    for name in ["rules", "memories", "skills"] {
-        sync_codex_home_entry(&source_home.join(name), &target_home.join(name))?;
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create `{}`", parent.display()))?;
     }
-
+    fs::write(target, contents)
+        .with_context(|| format!("failed to write `{}`", target.display()))?;
     Ok(())
 }
 

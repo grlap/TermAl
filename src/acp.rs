@@ -104,7 +104,8 @@ fn spawn_acp_runtime(
             }
         }
     }
-    apply_engram_agent_process_env(&mut command, engram_mcp)?;
+    let termal_env = termal_agent_process_env(&session_id, &state.local_http_base_url())?;
+    apply_agent_process_env(&mut command, Some(&termal_env), engram_mcp)?;
     command
         .current_dir(&cwd)
         .stdin(Stdio::piped())

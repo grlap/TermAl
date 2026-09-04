@@ -239,8 +239,17 @@ fn lightweight_test_state_rejects_direct_claude_runtime_spawning() {
 }
 
 #[test]
-fn apply_engram_agent_process_env_matches_mcp_and_clears_ineligible_inheritance() {
-    let expected = BTreeMap::from([
+fn apply_agent_process_env_sets_termal_identity_and_clears_ineligible_engram_identity() {
+    let termal = termal_agent_process_env_with_command(
+        "C:/TermAl/termal.exe",
+        "session-agent-env",
+        "http://127.0.0.1:9876/",
+    );
+    assert_eq!(termal[TERMAL_SESSION_ID_ENV], "session-agent-env");
+    assert_eq!(termal[TERMAL_BASE_URL_ENV], "http://127.0.0.1:9876");
+    assert_eq!(termal[TERMAL_CLI_ENV], "C:/TermAl/termal.exe");
+
+    let expected_engram = BTreeMap::from([
         (ENGRAM_HOME_ENV.to_owned(), "C:/engram-home".to_owned()),
         (ENGRAM_ACTOR_ID_ENV.to_owned(), "dev/claude".to_owned()),
         (
@@ -255,7 +264,7 @@ fn apply_engram_agent_process_env_matches_mcp_and_clears_ineligible_inheritance(
     let descriptor = TermalDelegationMcpStdioConfig {
         command: "engram".to_owned(),
         args: Vec::new(),
-        env: expected.clone(),
+        env: expected_engram.clone(),
     };
 
     let explicit_env = |command: &Command, name: &str| {
@@ -266,12 +275,15 @@ fn apply_engram_agent_process_env_matches_mcp_and_clears_ineligible_inheritance(
     };
 
     let mut eligible = Command::new("eligible-agent");
+    for name in TERMAL_AGENT_PROCESS_ENV_NAMES {
+        eligible.env(name, "stale-parent-value");
+    }
     for name in ENGRAM_AGENT_PROCESS_ENV_NAMES {
         eligible.env(name, "stale-parent-value");
     }
-    apply_engram_agent_process_env(&mut eligible, Some(&descriptor))
+    apply_agent_process_env(&mut eligible, Some(&termal), Some(&descriptor))
         .expect("eligible agent environment should apply");
-    for (name, value) in &expected {
+    for (name, value) in termal.iter().chain(&expected_engram) {
         assert_eq!(
             explicit_env(&eligible, name),
             Some(Some(value.clone())),
@@ -279,7 +291,7 @@ fn apply_engram_agent_process_env_matches_mcp_and_clears_ineligible_inheritance(
         );
     }
 
-    let mut context_free_env = expected.clone();
+    let mut context_free_env = expected_engram.clone();
     context_free_env.remove(ENGRAM_ACTOR_CONTEXT_ENV);
     let context_free_descriptor = TermalDelegationMcpStdioConfig {
         command: "engram".to_owned(),
@@ -288,8 +300,12 @@ fn apply_engram_agent_process_env_matches_mcp_and_clears_ineligible_inheritance(
     };
     let mut context_free = Command::new("context-free-agent");
     context_free.env(ENGRAM_ACTOR_CONTEXT_ENV, "stale-parent-value");
-    apply_engram_agent_process_env(&mut context_free, Some(&context_free_descriptor))
-        .expect("optional actor context may be absent");
+    apply_agent_process_env(
+        &mut context_free,
+        Some(&termal),
+        Some(&context_free_descriptor),
+    )
+    .expect("optional actor context may be absent");
     assert_eq!(
         explicit_env(&context_free, ENGRAM_ACTOR_CONTEXT_ENV),
         Some(None),
@@ -300,13 +316,36 @@ fn apply_engram_agent_process_env_matches_mcp_and_clears_ineligible_inheritance(
     for name in ENGRAM_AGENT_PROCESS_ENV_NAMES {
         ineligible.env(name, "stale-parent-value");
     }
-    apply_engram_agent_process_env(&mut ineligible, None)
+    apply_agent_process_env(&mut ineligible, Some(&termal), None)
         .expect("ineligible agent environment should be cleared");
+    for (name, value) in &termal {
+        assert_eq!(explicit_env(&ineligible, name), Some(Some(value.clone())));
+    }
     for name in ENGRAM_AGENT_PROCESS_ENV_NAMES {
         assert_eq!(
             explicit_env(&ineligible, name),
             Some(None),
             "ineligible agents must explicitly remove inherited `{name}`"
+        );
+    }
+
+    let mut shared_process = Command::new("shared-agent-process");
+    for name in TERMAL_AGENT_PROCESS_ENV_NAMES
+        .into_iter()
+        .chain(ENGRAM_AGENT_PROCESS_ENV_NAMES)
+    {
+        shared_process.env(name, "stale-parent-value");
+    }
+    apply_agent_process_env(&mut shared_process, None, None)
+        .expect("a shared process should scrub session-scoped identity");
+    for name in TERMAL_AGENT_PROCESS_ENV_NAMES
+        .into_iter()
+        .chain(ENGRAM_AGENT_PROCESS_ENV_NAMES)
+    {
+        assert_eq!(
+            explicit_env(&shared_process, name),
+            Some(None),
+            "shared processes must explicitly remove inherited `{name}`"
         );
     }
 }

@@ -18,25 +18,25 @@
 
 const COORDINATION_CLI_USAGE: &str = "usage:
   termal sessions list [--as-session <id>] [--json] [--base-url <url>]
-  termal mailbox list --as-session <id> [--json] [--base-url <url>]
-  termal mailbox send --as-session <id> --to <session-id-or-name>
+  termal mailbox list [--as-session <id>] [--json] [--base-url <url>]
+  termal mailbox send [--as-session <id>] --to <session-id-or-name>
                       (--message <text> | --message-file <path or ->)
                       --idempotency-key <key> [--topic <text>]
                       [--state-stamp <text>] [--class <class>]
                       [--json] [--base-url <url>]
-  termal mailbox read --as-session <id> --mailbox-id <id>
+  termal mailbox read [--as-session <id>] --mailbox-id <id>
                       [--after <sequence>] [--limit <count>]
                       [--json] [--base-url <url>]
-  termal mailbox read-message --as-session <id> --message-id <id>
+  termal mailbox read-message [--as-session <id>] --message-id <id>
                       [--json] [--base-url <url>]
-  termal mailbox acknowledge --as-session <id> --mailbox-id <id>
+  termal mailbox acknowledge [--as-session <id>] --mailbox-id <id>
                       --expected <processedThrough> --through <processedThrough>
                       [--json] [--base-url <url>]
 
 Flags accept `--flag value` and `--flag=value`. `--as-session` is the root
-session the command acts as; delegation-child sessions are rejected exactly
-as they are for the peer MCP tools. `--base-url` defaults to TERMAL_BASE_URL,
-then http://127.0.0.1:<TERMAL_PORT or 8787>.
+session the command acts as and defaults to TERMAL_SESSION_ID; delegation-child
+sessions are rejected exactly as they are for the peer MCP tools. `--base-url`
+defaults to TERMAL_BASE_URL, then http://127.0.0.1:<TERMAL_PORT or 8787>.
 Exit codes: 0 success; 2 usage or argument error (no request was sent);
 1 any failure after a request was attempted (details on stderr).";
 
@@ -211,10 +211,53 @@ fn coordination_cli_help() -> CoordinationCliInvocation {
     }
 }
 
+fn default_termal_session_id() -> Option<String> {
+    std::env::var(TERMAL_SESSION_ID_ENV)
+        .ok()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+}
+
+fn take_optional_coordination_cli_session_id(
+    flags: &mut CoordinationCliFlags,
+    default_session_id: Option<&str>,
+) -> Result<Option<String>> {
+    match flags.values.remove("--as-session") {
+        Some(value) => {
+            let value = value.trim();
+            if value.is_empty() {
+                Err(coordination_cli_usage_error("`--as-session` is empty"))
+            } else {
+                Ok(Some(value.to_owned()))
+            }
+        }
+        None => Ok(default_session_id.map(str::to_owned)),
+    }
+}
+
+fn take_coordination_cli_session_id(
+    flags: &mut CoordinationCliFlags,
+    default_session_id: Option<&str>,
+) -> Result<String> {
+    take_optional_coordination_cli_session_id(flags, default_session_id)?
+        .ok_or_else(|| {
+            coordination_cli_usage_error(
+                "`--as-session` is required when TERMAL_SESSION_ID is unavailable",
+            )
+        })
+}
+
 /// Parses `sessions ...` / `mailbox ...` arguments (the group word included).
 /// Every rejection is a `CoordinationCliUsageError`; nothing here performs I/O.
 fn parse_coordination_cli_args(
     args: impl IntoIterator<Item = String>,
+) -> Result<CoordinationCliInvocation> {
+    parse_coordination_cli_args_with_default_session_id(args, default_termal_session_id())
+}
+
+fn parse_coordination_cli_args_with_default_session_id(
+    args: impl IntoIterator<Item = String>,
+    default_session_id: Option<String>,
 ) -> Result<CoordinationCliInvocation> {
     let mut args = args.into_iter();
     let group = args.next().unwrap_or_default();
@@ -285,13 +328,22 @@ fn parse_coordination_cli_args(
     let command_label = format!("{group} {verb}");
     let command = match (group.as_str(), verb.as_str()) {
         ("sessions", "list") => CoordinationCliCommand::SessionsList {
-            as_session: flags.take_optional("--as-session"),
+            as_session: take_optional_coordination_cli_session_id(
+                &mut flags,
+                default_session_id.as_deref(),
+            )?,
         },
         ("mailbox", "list") => CoordinationCliCommand::MailboxList {
-            as_session: flags.take_required("--as-session")?,
+            as_session: take_coordination_cli_session_id(
+                &mut flags,
+                default_session_id.as_deref(),
+            )?,
         },
         ("mailbox", "send") => {
-            let as_session = flags.take_required("--as-session")?;
+            let as_session = take_coordination_cli_session_id(
+                &mut flags,
+                default_session_id.as_deref(),
+            )?;
             let to = flags.take_required("--to")?;
             let inline = flags.values.remove("--message");
             let file = flags.take_optional("--message-file");
@@ -336,17 +388,26 @@ fn parse_coordination_cli_args(
             }
         }
         ("mailbox", "read") => CoordinationCliCommand::MailboxRead {
-            as_session: flags.take_required("--as-session")?,
+            as_session: take_coordination_cli_session_id(
+                &mut flags,
+                default_session_id.as_deref(),
+            )?,
             mailbox_id: flags.take_required("--mailbox-id")?,
             after_sequence: flags.take_optional_u64("--after")?,
             limit: flags.take_optional_u64("--limit")?,
         },
         ("mailbox", "read-message") => CoordinationCliCommand::MailboxReadMessage {
-            as_session: flags.take_required("--as-session")?,
+            as_session: take_coordination_cli_session_id(
+                &mut flags,
+                default_session_id.as_deref(),
+            )?,
             message_id: flags.take_required("--message-id")?,
         },
         ("mailbox", "acknowledge") => CoordinationCliCommand::MailboxAcknowledge {
-            as_session: flags.take_required("--as-session")?,
+            as_session: take_coordination_cli_session_id(
+                &mut flags,
+                default_session_id.as_deref(),
+            )?,
             mailbox_id: flags.take_required("--mailbox-id")?,
             expected_processed_through: flags.take_required_u64("--expected")?,
             processed_through: flags.take_required_u64("--through")?,

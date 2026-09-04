@@ -1020,7 +1020,11 @@ fn mailbox_notification_text(
          First use `termal_list_mailboxes` to obtain your current `processedThrough` cursor, \
          then use `termal_read_mailbox` with this mailbox id to fetch durable message bodies. \
          After processing, call `termal_acknowledge_mailbox` with that cursor as \
-         `expectedProcessedThrough`."
+         `expectedProcessedThrough`. \
+         If the TermAl MCP tools are unavailable, invoke the executable in `TERMAL_CLI` \
+         from the shell. `TERMAL_SESSION_ID` and `TERMAL_BASE_URL` supply the CLI defaults; \
+         follow `mailbox list` -> `mailbox read --after <processedThrough>` -> process/reply \
+         with a stable idempotency key -> `mailbox acknowledge --expected <processedThrough>`."
     )
 }
 
