@@ -1016,11 +1016,12 @@ export function useSessionPaneScrollState({
   useLayoutEffect(() => {
     const node = messageStackRef.current;
     const ResizeObserverCtor = globalThis.ResizeObserver;
+    // Every visible selected tab owns its layout, not just the focused pane.
+    // Short transcripts have no virtualizer to repin late card/image growth.
     if (
       !node ||
       typeof ResizeObserverCtor !== "function" ||
       hasUnloadedNewerHistory ||
-      !isActive ||
       !isSessionTabActive ||
       paneViewMode !== "session"
     ) {
@@ -1157,7 +1158,6 @@ export function useSessionPaneScrollState({
   }, [
     activeSession?.id,
     hasUnloadedNewerHistory,
-    isActive,
     isSending,
     isSessionTabActive,
     paneViewMode,
@@ -3207,9 +3207,9 @@ export function useSessionPaneScrollState({
       return;
     }
 
-    // Sending starts new activity, but it is not a navigation command. A
-    // reader who moved away from the tail keeps the same viewport and gets an
-    // indicator instead of being pulled away from the text they are reading.
+    // The accepted composer submit explicitly requests FOLLOW. This status
+    // effect only maintains that intent through later layout: it must not
+    // reattach after newer reader input or when switching to a sending tab.
     return followLatestMessageForPromptSend();
   }, [isSending, paneViewMode, scrollStateKey]);
 

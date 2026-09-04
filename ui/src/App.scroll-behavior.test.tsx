@@ -2376,7 +2376,7 @@ describe("App scroll behaviour", () => {
     });
   });
 
-  it("keeps a detached viewport stable while a send is in flight", async () => {
+  it("reattaches on Send but preserves a later user scroll while the send is in flight", async () => {
     await withVerifiedNoReactActWarnings(async () => {
       const restoreScrollGeometry = stubElementScrollGeometry({
         clientHeight: 200,
@@ -2464,11 +2464,22 @@ describe("App scroll behaviour", () => {
         });
         await settleAsyncUi();
 
-        expect(scrollToTopsWithBehavior(scrollToMock, "auto")).toHaveLength(0);
-        expect(messageStack.scrollTop).toBe(0);
+        expect(messageStack.scrollTop).toBe(800);
+        expect(messageStack).toHaveClass("is-tail-following");
         expect(
-          screen.getByRole("button", { name: "New activity" }),
-        ).toBeInTheDocument();
+          screen.queryByRole("button", { name: "New activity" }),
+        ).not.toBeInTheDocument();
+
+        act(() => {
+          fireEvent.wheel(messageStack, { deltaY: -400 });
+          fireEvent.scroll(messageStack);
+        });
+        expect(messageStack.scrollTop).toBe(400);
+        expect(messageStack).not.toHaveClass("is-tail-following");
+        scrollToMock.mockClear();
+        await settleAsyncUi();
+        expect(messageStack.scrollTop).toBe(400);
+        expect(scrollToTopsWithBehavior(scrollToMock, "auto")).toHaveLength(0);
 
         context.cleanup();
         await flushUiWork();
@@ -2478,6 +2489,133 @@ describe("App scroll behaviour", () => {
       }
     });
   });
+
+  it.each([false, true])(
+    "loads the true tail on Send and respects intervening reader input (%s)",
+    async (navigateBeforeTailArrives) => {
+      await withVerifiedNoReactActWarnings(async () => {
+        const restoreScrollGeometry = stubElementScrollGeometry({
+          clientHeight: 200,
+          scrollHeight: 1000,
+        });
+        mockScrollToAndApplyTop();
+        const pendingTail = createDeferred<
+          Awaited<ReturnType<typeof api.fetchSessionHistory>>
+        >();
+        const historicalMessage = {
+          id: "historical-message",
+          type: "text" as const,
+          author: "assistant" as const,
+          timestamp: "10:00",
+          text: "Older response",
+        };
+        const fetchHistorySpy = vi
+          .spyOn(api, "fetchSessionHistory")
+          .mockImplementation((_sessionId, options) =>
+            options.around !== undefined
+              ? Promise.resolve({
+                  messages: [historicalMessage],
+                  nextBefore: historicalMessage.id,
+                  hasMore: true,
+                  nextAfter: historicalMessage.id,
+                  hasNewer: true,
+                  messageStartIndex: 500,
+                  messageCount: 1_000,
+                  revision: 2,
+                  sessionMutationStamp: 2,
+                  serverInstanceId: "test-instance",
+                })
+              : pendingTail.promise,
+          );
+        const pendingSend = createDeferred<
+          Awaited<ReturnType<typeof api.sendMessage>>
+        >();
+        vi.spyOn(api, "sendMessage").mockImplementation(
+          () => pendingSend.promise,
+        );
+        const context = await renderAppWithProjectAndSession();
+        try {
+          await act(async () => {
+            expect(
+              await requestSessionHistoryAroundPage("session-1", 500),
+            ).toBe(true);
+            await flushUiWork();
+          });
+          await settleAsyncUi();
+          fetchHistorySpy.mockClear();
+          const messageStack = document.querySelector(
+            ".workspace-pane.active .message-stack",
+          );
+          if (!(messageStack instanceof HTMLElement)) {
+            throw new Error("Message stack not found");
+          }
+          messageStack.scrollTop = 400;
+          expect(messageStack).not.toHaveClass("is-tail-following");
+          expect(fetchHistorySpy).not.toHaveBeenCalled();
+          await act(async () => {
+            fireEvent.change(screen.getByLabelText("Message Session 1"), {
+              target: { value: "Return to live output" },
+            });
+          });
+          await clickAndSettle(screen.getByRole("button", { name: "Send" }));
+          expect(fetchHistorySpy).toHaveBeenCalledTimes(1);
+          expect(fetchHistorySpy.mock.calls[0]?.[1].from).toBeUndefined();
+          expect(fetchHistorySpy.mock.calls[0]?.[1].before).toBeUndefined();
+          expect(fetchHistorySpy.mock.calls[0]?.[1].after).toBeUndefined();
+          expect(messageStack.scrollTop).toBe(400);
+
+          expect(
+            getSessionRecordSnapshotForTesting("session-1")?.hasNewerHistory,
+          ).toBe(true);
+
+          if (navigateBeforeTailArrives) {
+            act(() => {
+              fireEvent.keyDown(messageStack, {
+                key: "ArrowUp",
+                code: "ArrowUp",
+              });
+              fireEvent.scroll(messageStack);
+            });
+            expect(messageStack.scrollTop).toBe(360);
+          }
+          await act(async () => {
+            pendingTail.resolve({
+              messages: [
+                {
+                  ...historicalMessage,
+                  id: "tail-message",
+                  text: "Latest response",
+                },
+              ],
+              nextBefore: "tail-message",
+              hasMore: true,
+              nextAfter: null,
+              hasNewer: false,
+              messageStartIndex: 999,
+              messageCount: 1_000,
+              revision: 3,
+              sessionMutationStamp: 3,
+              serverInstanceId: "test-instance",
+            });
+            await flushUiWork();
+          });
+          await settleAsyncUi();
+          expect(
+            getSessionRecordSnapshotForTesting("session-1")?.hasNewerHistory,
+          ).toBe(false);
+          expect(messageStack.scrollTop).toBe(
+            navigateBeforeTailArrives ? 360 : 800,
+          );
+          expect(messageStack.classList.contains("is-tail-following")).toBe(
+            !navigateBeforeTailArrives,
+          );
+        } finally {
+          context.cleanup();
+          restoreScrollGeometry();
+        }
+      });
+    },
+  );
 
   it.each([
     ["before the first follow frame", 0],

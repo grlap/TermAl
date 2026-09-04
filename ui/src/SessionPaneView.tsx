@@ -778,7 +778,18 @@ export function SessionPaneView({
   const handleRefreshAgentCommandsFromFooter = useStableEvent(
     onRefreshAgentCommands,
   );
-  const handleSendFromFooter = useStableEvent(onSend);
+  const handleSendFromFooter = useStableEvent(
+    (...args: Parameters<typeof onSend>) => {
+      const accepted = onSend(...args);
+      if (accepted && args[0] === activeSession?.id) {
+        // A submitted prompt is explicit navigation. Use the same authority as
+        // End/New response, including bounded tail loading and cancellation by
+        // newer reader input. Sending status alone must never reattach a tab.
+        scrollMessageStackToBoundary("bottom");
+      }
+      return accepted;
+    },
+  );
   const handleSpawnDelegationFromFooter = useStableEvent(
     async (
       sessionId: string,

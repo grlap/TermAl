@@ -402,6 +402,83 @@ describe("session pane historical-window tail state", () => {
     ).toBe(false);
   });
 
+  it.each([
+    { isActive: true, shouldStick: true },
+    { isActive: false, shouldStick: true },
+    { isActive: true, shouldStick: false },
+    { isActive: false, shouldStick: false },
+  ])("preserves follow intent through late growth ($isActive focus, $shouldStick follow)", ({ isActive, shouldStick }) => {
+    const callbacks = new Set<ResizeObserverCallback>();
+    class ResizeObserverHarness {
+      constructor(private readonly callback: ResizeObserverCallback) {
+        callbacks.add(callback);
+      }
+      observe() {}
+      unobserve() {}
+      disconnect() {
+        callbacks.delete(this.callback);
+      }
+    }
+    vi.stubGlobal("ResizeObserver", ResizeObserverHarness);
+    vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    let height = 1_000;
+    const node = document.createElement("section");
+    const page = document.createElement("div");
+    page.className = "session-conversation-page";
+    node.append(page);
+    Object.defineProperties(node, {
+      clientHeight: { value: 200 },
+      scrollHeight: { get: () => height },
+      scrollTop: { writable: true, value: shouldStick ? 800 : 400 },
+      scrollTo: {
+        value: (options: ScrollToOptions) => {
+          if (typeof options.top === "number") {
+            node.scrollTop = options.top;
+          }
+        },
+      },
+    });
+    page.getBoundingClientRect = () => ({ height } as DOMRect);
+    const scrollStateKey = "pane-1:session-history";
+    const sharedParams = {
+      ...params(session(false)),
+      isActive,
+      paneRootRef: { current: node },
+      paneScrollPositions: {
+        [scrollStateKey]: { top: node.scrollTop, shouldStick },
+      },
+      paneShouldStickToBottomRef: { current: { [scrollStateKey]: shouldStick } },
+    };
+    const hook = renderHook(
+      ({ visible }) =>
+        useSessionPaneScrollState({
+          ...sharedParams,
+          isSessionTabActive: visible,
+        }),
+      { initialProps: { visible: false } },
+    );
+    hook.result.current.messageStackRef.current = node;
+    hook.rerender({ visible: true });
+
+    height = 1_300;
+    act(() => {
+      callbacks.forEach((callback) => callback([], {} as ResizeObserver));
+    });
+    expect(node.scrollTop).toBe(shouldStick ? 1_100 : 400);
+    expect(hook.result.current.liveTailPinned).toBe(shouldStick);
+
+    // A hidden tab must release layout ownership, even if it retains FOLLOW.
+    hook.rerender({ visible: false });
+    height = 1_600;
+    act(() => {
+      callbacks.forEach((callback) => callback([], {} as ResizeObserver));
+      window.dispatchEvent(new Event("resize"));
+    });
+    expect(callbacks.size).toBe(0);
+    expect(node.scrollTop).toBe(shouldStick ? 1_100 : 400);
+  });
+
   it("smoothly advances live bottom-follow without issuing an upward correction", () => {
     const regularFrame = resolveSessionBottomFollowScrollTop(800, 1_000);
     const delayedFrame = resolveSessionBottomFollowScrollTop(800, 1_000, 100);
@@ -5765,7 +5842,7 @@ describe("session pane historical-window tail state", () => {
     removeListener();
   });
 
-  it("keeps a historical window detached when a send starts", () => {
+  it("does not infer prompt navigation from sending status in a historical window", () => {
     const animationFrames: FrameRequestCallback[] = [];
     vi.stubGlobal("requestAnimationFrame", ((
       callback: FrameRequestCallback,

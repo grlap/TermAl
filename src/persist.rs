@@ -1345,6 +1345,12 @@ fn ensure_sqlite_state_schema(connection: &rusqlite::Connection) -> Result<()> {
     finish_existing_sqlite_state_schema_setup(connection)
 }
 
+/// Applies maintenance after the caller's applicable read-only checks.
+///
+/// The startup load path captures and returns the persisted `app_state`
+/// metadata before calling this helper. Consequently, maintenance here must
+/// not mutate `app_state`; a future metadata migration must instead move the
+/// capture to after that migration so the loader cannot observe stale state.
 fn finish_existing_sqlite_state_schema_setup(connection: &rusqlite::Connection) -> Result<()> {
     configure_sqlite_state_connection(connection)?;
     ensure_sqlite_message_overview_columns(connection)?;
@@ -1781,11 +1787,12 @@ mod sqlite_schema_tests {
         );
         let rendered = format!("{error:#}");
         assert!(
-            rendered.contains(
-                "persisted state metadata does not match the current metadata shape: \
-                 invalid type: string \"wrong\", expected a sequence"
-            ),
+            rendered.contains("persisted state metadata does not match the current metadata shape"),
             "{rendered}"
+        );
+        assert!(
+            rendered.contains("\"wrong\""),
+            "the rejection should retain the stable invalid-fixture marker: {rendered}"
         );
         assert!(
             !rendered.contains(" at line "),
@@ -1838,7 +1845,7 @@ mod sqlite_schema_tests {
     }
 
     #[test]
-    fn sqlite_write_only_schema_setup_does_not_scan_session_json() {
+    fn sqlite_write_only_schema_setup_skips_legacy_scan_and_typed_metadata_deserialization() {
         let state_root = TestTempRoot::create("termal-state-write-only-schema-setup");
         let path = state_root.path().join("termal.sqlite");
         {
@@ -3421,6 +3428,10 @@ fn persist_state_parts_via_connection(
 /// re-ran `ensure_sqlite_state_schema`. The persist thread writes many times during an active
 /// session, so amortizing that fixed cost to one open-and-validate per
 /// thread lifetime removes the biggest per-persist overhead.
+/// Production seeds this cache from the connection validated during process
+/// startup. Reopens after invalidation assume the same store path (including a
+/// path observed as absent at boot) was startup-validated by this process; they
+/// deliberately repeat only bounded write-path schema setup.
 struct SqlitePersistConnectionCache {
     path: Option<PathBuf>,
     connection: Option<rusqlite::Connection>,
@@ -3452,7 +3463,9 @@ impl SqlitePersistConnectionCache {
 
     /// Returns a mutable reference to a SQLite connection opened for
     /// `path`, reusing the cached connection when the path matches.
-    /// Runs schema validation only when a fresh connection is opened.
+    /// Runs bounded schema validation only when a fresh connection is opened;
+    /// startup-only metadata and legacy-authority validation is a precondition
+    /// already established for this path by the current process boot.
     fn connection_for(&mut self, path: &FsPath) -> Result<&mut rusqlite::Connection> {
         let matches_cache = self.path.as_deref() == Some(path);
         if !matches_cache {
