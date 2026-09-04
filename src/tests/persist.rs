@@ -2711,9 +2711,7 @@ fn make_persist_test_delegation(
         review_result_recovery_probe_attempt: None,
         review_result_recovery_error: None,
         review_result_schema_version: None,
-        review_result_required: false,
         review_result_submission_attempt: 0,
-        result_parser_version: 0,
     }
 }
 
@@ -3275,15 +3273,12 @@ fn sqlite_startup_loads_sessions_and_delegations_from_split_tables() {
     assert_eq!(loaded_delegation.started_at, delegation.started_at);
     assert_eq!(
         loaded_delegation.status,
-        DelegationStatus::Failed,
-        "startup load should finalize in-flight delegations without result packets"
+        DelegationStatus::Running,
+        "the state-only load must defer reviewer recovery until boot can inspect the coordination mailbox"
     );
-    assert_eq!(
-        loaded_delegation
-            .result
-            .as_ref()
-            .map(|result| result.summary.as_str()),
-        Some("child finished without a result packet")
+    assert!(
+        loaded_delegation.result.is_none(),
+        "state-only loading must not invent a reviewer result before mailbox recovery"
     );
 
     let _ = fs::remove_dir_all(state_root);

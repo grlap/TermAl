@@ -274,12 +274,15 @@ export function createAppLiveStateTransportEventHandlers(
         clearReconnectStateResyncTimeoutAfterConfirmedReopen();
         // A live SSE state payload proves the stream is healthy again, so it also
         // clears any residual watchdog retry cooldown from an earlier fallback probe.
-        syncLiveTransportActivityFromState(state.sessions, adoptedAt);
+        syncLiveTransportActivityFromState(sessionsRef.current, adoptedAt);
         pruneLiveTransportActivitySessions(
           lastLiveTransportActivityAtBySessionId,
-          state.sessions,
+          sessionsRef.current,
         );
-        syncLiveSessionResumeWatchdogBaselines(state.sessions, adoptedAt);
+        syncLiveSessionResumeWatchdogBaselines(
+          sessionsRef.current,
+          adoptedAt,
+        );
       }
       profiler?.mark("postAdoption");
       setBackendConnectionIssueDetail(null);

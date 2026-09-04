@@ -718,15 +718,15 @@ export function useAppLiveStateTransport(
                   resetReconnectStateResyncBackoff();
                 }
                 const adoptedAt = Date.now();
-                syncLiveTransportActivityFromState(state.sessions, adoptedAt, {
+                syncLiveTransportActivityFromState(sessionsRef.current, adoptedAt, {
                   clearWatchdogCooldown: !preserveWatchdogCooldown,
                 });
                 pruneLiveTransportActivitySessions(
                   lastLiveTransportActivityAtBySessionId,
-                  state.sessions,
+                  sessionsRef.current,
                 );
                 syncLiveSessionResumeWatchdogBaselines(
-                  state.sessions,
+                  sessionsRef.current,
                   adoptedAt,
                 );
                 if (

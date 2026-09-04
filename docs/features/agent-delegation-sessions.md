@@ -264,9 +264,10 @@ This separates protocol from presentation: the final assistant Markdown stays
 available through paged full-output reads, but its headings and bullets are not
 parsed to decide whether findings exist. If the required tool submission is
 missing, the review result fails closed as unavailable and includes an explicit
-`Unavailable` finding. It is never represented as a clean empty result. Only
-older persisted delegations that predate the required structured protocol retain
-the versioned prose parser as a legacy fallback.
+`Unavailable` finding. It is never represented as a clean empty result. There
+is no old-record or parser-version fallback for reviewer delegations; explorer
+and worker modes may still synthesize their ordinary compact result from final
+assistant prose because they do not claim the reviewer result contract.
 
 New reviewer delegations currently support Claude and Codex. Their native
 permission protocols let TermAl authenticate the injected MCP server/tool before
@@ -324,12 +325,11 @@ transcript.
 
 ### 3. Complete
 
-Completion happens when the child session is idle and has produced a final
-assistant response. TermAl extracts or requests a result packet from the final
-response.
-
-For v1, the result can be derived from the child final response using a clear
-prompt contract. Later, TermAl can add a native structured result message type.
+Completion happens when the child session is idle and its turn has settled.
+Reviewer delegations complete only from the validated
+`termal_submit_review_result` mailbox payload; missing structured data fails
+closed. Explorer and worker delegations synthesize their ordinary compact
+result from the final assistant response.
 
 ### 4. Resume / Yield
 
@@ -1153,6 +1153,9 @@ type CreateDelegationRequest = {
   writePolicy?: DelegationWritePolicyRequest;
 };
 
+// REST and MCP accept only this tagged-object writePolicy shape. String
+// aliases, snake_case tags, single-key objects, and unknown fields fail closed.
+
 type SpawnReviewerBatchItem = Omit<CreateDelegationRequest, "mode" | "writePolicy">;
 
 type SpawnReviewerBatchFailure = {
@@ -1410,9 +1413,12 @@ Spawner prompt should tell the child:
 - which files it owns
 - that other sessions may be active
 - not to revert unrelated changes
-- final answer must include structured result fields
+- reviewer mode must submit the injected typed result through
+  `termal_submit_review_result`; final prose remains presentation only
+- explorer/worker final answers should remain concise enough to synthesize a
+  useful compact result
 
-Example reviewer final shape:
+Example human-readable reviewer final shape (not the result protocol):
 
 ```markdown
 ## Result

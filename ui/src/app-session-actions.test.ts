@@ -3,12 +3,18 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import * as api from "./api";
 import { useAppSessionActions } from "./app-session-actions";
-import { reconcileSessions } from "./session-reconcile";
+import { reconcileStateSessionSummaries } from "./session-reconcile";
 import type { StateResponse } from "./api";
 import type { AgentType, ConversationMarker, Project, Session } from "./types";
 import type { WorkspaceState } from "./workspace";
 
-function makeSession(id: string, overrides: Partial<Session> = {}): Session {
+type TestSession = Session & { messageCount: number; queuePaused: boolean };
+
+function makeSession(
+  id: string,
+  overrides: Partial<Session> = {},
+): TestSession {
+  const messages = overrides.messages ?? [];
   return {
     id,
     name: "Session",
@@ -18,8 +24,10 @@ function makeSession(id: string, overrides: Partial<Session> = {}): Session {
     model: "gpt-5.4",
     status: "idle",
     preview: "Ready",
-    messages: [],
+    messages,
     ...overrides,
+    messageCount: overrides.messageCount ?? messages.length,
+    queuePaused: overrides.queuePaused ?? false,
   };
 }
 
@@ -588,7 +596,7 @@ describe("useAppSessionActions", () => {
     );
   });
 
-  it("adopts a send response without retaining a duplicate optimistic prompt", async () => {
+  it("keeps one optimistic prompt when the send response is transcript-free", async () => {
     const retainedMessage = {
       id: "message-79",
       type: "text" as const,
@@ -627,7 +635,7 @@ describe("useAppSessionActions", () => {
     vi.spyOn(api, "sendMessage").mockResolvedValue(response);
     let params!: ReturnType<typeof makeSessionActionsParams>;
     const adoptState = vi.fn((state: StateResponse) => {
-      const sessions = reconcileSessions(
+      const sessions = reconcileStateSessionSummaries(
         params.refs.sessionsRef.current,
         state.sessions,
       );
@@ -663,7 +671,12 @@ describe("useAppSessionActions", () => {
       (prompt) => prompt.text === "hello",
     ).length;
     expect(persistedCopies + queuedCopies).toBe(1);
-    expect(adoptedSession.pendingPrompts).toBeUndefined();
+    expect(adoptedSession.pendingPrompts).toEqual([
+      expect.objectContaining({
+        localOnly: true,
+        text: "hello",
+      }),
+    ]);
   });
 
   it("keeps the optimistic pending prompt after a stale send response", async () => {
@@ -770,6 +783,62 @@ describe("useAppSessionActions", () => {
     expect(adoptState).toHaveBeenCalledWith(staleState);
     expect(params.requestActionRecoveryResync).not.toHaveBeenCalled();
     expect(reportRequestError).toHaveBeenCalledWith(originalError);
+  });
+
+  it("resolves a local optimistic prompt before canceling its server queue entry", async () => {
+    const optimisticPrompt = {
+      id: "optimistic-send-session-1-abc-1",
+      timestamp: "10:00",
+      text: "queued follow-up",
+      localOnly: true,
+      transcriptEndIndexAtEnqueue: 4,
+    };
+    const authoritativePrompt = {
+      id: "pending-prompt-7",
+      timestamp: "10:00",
+      text: "queued follow-up",
+    };
+    const localSession = makeSession("session-1", {
+      status: "active",
+      pendingPrompts: [optimisticPrompt],
+    });
+    const authoritativeSession = makeSession("session-1", {
+      status: "active",
+      pendingPrompts: [authoritativePrompt],
+    });
+    const canceledState = {
+      ...makeStateResponse(7),
+      sessions: [
+        makeSession("session-1", {
+          status: "active",
+        }),
+      ],
+    };
+    const fetchSessionTail = vi.spyOn(api, "fetchSessionTail").mockResolvedValue({
+      revision: 6,
+      serverInstanceId: "server-a",
+      session: authoritativeSession,
+    });
+    const cancelQueuedPrompt = vi
+      .spyOn(api, "cancelQueuedPrompt")
+      .mockResolvedValue(canceledState);
+    const adoptState = vi.fn(() => true);
+    const params = makeSessionActionsParams({ adoptState });
+    params.refs.sessionsRef.current = [localSession];
+    const actions = useAppSessionActions(params);
+
+    await actions.handleCancelQueuedPrompt(
+      "session-1",
+      optimisticPrompt.id,
+    );
+
+    expect(fetchSessionTail).toHaveBeenCalledWith("session-1");
+    expect(cancelQueuedPrompt).toHaveBeenCalledWith(
+      "session-1",
+      authoritativePrompt.id,
+    );
+    expect(params.refs.sessionsRef.current[0]?.pendingPrompts).toBeUndefined();
+    expect(adoptState).toHaveBeenCalledWith(canceledState, undefined);
   });
 
   it("adopts the snapshot returned by a queue resume", async () => {
@@ -1635,7 +1704,7 @@ describe("useAppSessionActions", () => {
   });
 
   it("reads live sessions after stale same-instance settings success", async () => {
-    const previousSession: Session = {
+    const previousSession: TestSession = {
       ...makeSession("session-1"),
       model: "gpt-5.4",
       reasoningEffort: "high",
@@ -1648,13 +1717,13 @@ describe("useAppSessionActions", () => {
         },
       ],
     };
-    const staleSession: Session = {
+    const staleSession: TestSession = {
       ...previousSession,
       model: "gpt-small",
       reasoningEffort: "high",
       sessionMutationStamp: 2,
     };
-    const liveSession: Session = {
+    const liveSession: TestSession = {
       ...previousSession,
       model: "gpt-small",
       reasoningEffort: "low",
@@ -1691,7 +1760,7 @@ describe("useAppSessionActions", () => {
   });
 
   it("reads response sessions after adopted settings success", async () => {
-    const previousSession: Session = {
+    const previousSession: TestSession = {
       ...makeSession("session-1"),
       model: "gpt-5.4",
       reasoningEffort: "high",
@@ -1703,12 +1772,12 @@ describe("useAppSessionActions", () => {
         },
       ],
     };
-    const responseSession: Session = {
+    const responseSession: TestSession = {
       ...previousSession,
       model: "gpt-small",
       reasoningEffort: "low",
     };
-    const staleLocalSession: Session = {
+    const staleLocalSession: TestSession = {
       ...previousSession,
       model: "gpt-small",
       reasoningEffort: "high",

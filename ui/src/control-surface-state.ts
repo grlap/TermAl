@@ -54,7 +54,10 @@
 // does not re-export these symbols.
 
 import type { ControlPanelSectionId } from "./panels/ControlPanelSurface";
-import { reconcileSessions } from "./session-reconcile";
+import {
+  reconcileSingleStateSessionSummary,
+  reconcileStateSessionSummaries,
+} from "./session-reconcile";
 import {
   buildSessionListSearchResultFromIndex,
   buildSessionSearchIndex,
@@ -71,6 +74,7 @@ import type {
   OrchestratorInstance,
   Project,
   Session,
+  StateSessionSummary,
 } from "./types";
 import {
   createFilesystemTab,
@@ -287,7 +291,7 @@ export function buildControlSurfaceSessionListEntries(
 
 export function mergeOrchestratorDeltaSessions(
   previousSessions: Session[],
-  deltaSessions: Session[] | undefined,
+  deltaSessions: StateSessionSummary[] | undefined,
 ) {
   if (!deltaSessions?.length) {
     return previousSessions;
@@ -296,16 +300,22 @@ export function mergeOrchestratorDeltaSessions(
   const deltaSessionsById = new Map(
     deltaSessions.map((session) => [session.id, session]),
   );
-  const nextSessions = previousSessions.map(
-    (session) => deltaSessionsById.get(session.id) ?? session,
-  );
+  const nextSessions = previousSessions.map((session) => {
+    const summary = deltaSessionsById.get(session.id);
+    return summary
+      ? reconcileSingleStateSessionSummary(session, summary)
+      : session;
+  });
   const knownSessionIds = new Set(nextSessions.map((session) => session.id));
-  for (const session of deltaSessions) {
-    if (!knownSessionIds.has(session.id)) {
-      nextSessions.push(session);
-      knownSessionIds.add(session.id);
+  for (const summary of deltaSessions) {
+    if (!knownSessionIds.has(summary.id)) {
+      nextSessions.push(reconcileStateSessionSummaries([], [summary])[0]);
+      knownSessionIds.add(summary.id);
     }
   }
-
-  return reconcileSessions(previousSessions, nextSessions);
+  return nextSessions.every(
+    (session, index) => session === previousSessions[index],
+  )
+    ? previousSessions
+    : nextSessions;
 }

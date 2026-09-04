@@ -331,7 +331,7 @@ impl AppState {
                 "state warning> failed to refresh delegation after interaction response: {err:#}"
             );
         }
-        Ok(self.summary_snapshot_with_session_detail(session_id))
+        Ok(self.summary_snapshot())
     }
 
     /// Routes an approval decision back to the originating agent.

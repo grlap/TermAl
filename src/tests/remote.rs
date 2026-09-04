@@ -1021,7 +1021,8 @@ fn remote_snapshot_sync_localizes_orchestrators_and_creates_missing_proxy_sessio
                 "/remote/repo",
                 1,
                 OrchestratorInstanceStatus::Running,
-            ),
+            )
+            .into_state_response(),
         )
         .expect("remote snapshot should apply");
 
@@ -1107,7 +1108,8 @@ fn delete_project_then_resync_does_not_revive_empty_string_project_id_on_orchest
                 "/remote/repo",
                 1,
                 OrchestratorInstanceStatus::Running,
-            ),
+            )
+            .into_state_response(),
         )
         .expect("initial remote snapshot should apply");
     {
@@ -1168,7 +1170,8 @@ fn delete_project_then_resync_does_not_revive_empty_string_project_id_on_orchest
                 "/remote/repo",
                 2,
                 OrchestratorInstanceStatus::Running,
-            ),
+            )
+            .into_state_response(),
         )
         .expect("second remote snapshot should apply (errors are swallowed)");
 
@@ -1238,7 +1241,8 @@ fn successful_remote_snapshot_sync_queues_tombstones_for_dropped_proxy_sessions(
                 "/remote/repo",
                 1,
                 OrchestratorInstanceStatus::Stopped,
-            ),
+            )
+            .into_state_response(),
         )
         .expect("initial remote snapshot should apply");
 
@@ -1270,7 +1274,7 @@ fn successful_remote_snapshot_sync_queues_tombstones_for_dropped_proxy_sessions(
     trimmed_state.orchestrators.clear();
 
     state
-        .apply_remote_state_snapshot(&remote.id, trimmed_state)
+        .apply_remote_state_snapshot(&remote.id, trimmed_state.into_state_response())
         .expect("clean snapshot should apply without error");
 
     let inner = state.inner.lock().expect("state mutex poisoned");
@@ -1331,7 +1335,8 @@ fn failed_remote_snapshot_sync_restores_session_tombstones() {
                 "/remote/repo",
                 1,
                 OrchestratorInstanceStatus::Running,
-            ),
+            )
+            .into_state_response(),
         )
         .expect("initial remote snapshot should apply");
 
@@ -1380,7 +1385,7 @@ fn failed_remote_snapshot_sync_restores_session_tombstones() {
         .retain(|session| session.id != "remote-session-2");
 
     state
-        .apply_remote_state_snapshot(&remote.id, invalid_state)
+        .apply_remote_state_snapshot(&remote.id, invalid_state.into_state_response())
         .expect("orchestrator sync errors are logged and swallowed");
 
     let inner = state.inner.lock().expect("state mutex poisoned");
@@ -1506,7 +1511,8 @@ fn remote_mirrored_orchestrators_do_not_enqueue_local_pending_prompts_on_resume(
                 "/remote/repo",
                 1,
                 OrchestratorInstanceStatus::Running,
-            ),
+            )
+            .into_state_response(),
         )
         .expect("remote snapshot should apply");
 
@@ -1785,7 +1791,8 @@ fn remote_orchestrators_updated_delta_localizes_ids_and_preserves_proxy_identity
                 "/remote/repo",
                 1,
                 OrchestratorInstanceStatus::Running,
-            ),
+            )
+            .into_state_response(),
         )
         .expect("initial remote snapshot should apply");
 
@@ -1824,7 +1831,7 @@ fn remote_orchestrators_updated_delta_localizes_ids_and_preserves_proxy_identity
             DeltaEvent::OrchestratorsUpdated {
                 revision: 2,
                 orchestrators: remote_delta_state.orchestrators.clone(),
-                sessions: remote_delta_state.sessions.clone(),
+                sessions: remote_delta_state.session_summaries(),
             },
         )
         .expect("remote orchestrator delta should apply");
@@ -1876,11 +1883,6 @@ fn remote_orchestrators_updated_delta_localizes_ids_and_preserves_proxy_identity
             assert!(sessions.iter().all(|session| {
                 session.project_id.as_deref() == Some(local_project_id.as_str())
             }));
-            assert!(
-                sessions
-                    .iter()
-                    .all(|session| { session.messages.is_empty() && !session.messages_loaded })
-            );
         }
         _ => panic!("unexpected delta variant"),
     }
@@ -1938,7 +1940,7 @@ fn remote_orchestrators_updated_delta_creates_missing_proxy_sessions_from_payloa
             DeltaEvent::OrchestratorsUpdated {
                 revision: 1,
                 orchestrators: remote_delta_state.orchestrators.clone(),
-                sessions: remote_delta_state.sessions.clone(),
+                sessions: remote_delta_state.session_summaries(),
             },
         )
         .expect("remote orchestrator delta should create missing proxy sessions");
@@ -1950,16 +1952,7 @@ fn remote_orchestrators_updated_delta_creates_missing_proxy_sessions_from_payloa
         serde_json::from_str(&delta_payload).expect("delta payload should decode");
     match delta {
         DeltaEvent::OrchestratorsUpdated { sessions, .. } => {
-            assert!(
-                sessions
-                    .iter()
-                    .all(|session| session.messages.is_empty() && !session.messages_loaded)
-            );
-            let transcript_summary = sessions
-                .iter()
-                .find(|session| session.message_count == 1)
-                .expect("localized delta should carry transcript count summary");
-            assert!(transcript_summary.messages.is_empty());
+            assert!(sessions.iter().any(|session| session.message_count == 1));
         }
         _ => panic!("unexpected delta variant"),
     }
@@ -1992,8 +1985,9 @@ fn remote_orchestrators_updated_delta_creates_missing_proxy_sessions_from_payloa
             Some(local_project_id.as_str())
         );
         if remote_session_id == "remote-session-1" {
-            assert!(inner.sessions[index].session.messages_loaded);
-            assert_eq!(inner.sessions[index].session.messages.len(), 1);
+            assert!(!inner.sessions[index].session.messages_loaded);
+            assert!(inner.sessions[index].session.messages.is_empty());
+            assert_eq!(inner.sessions[index].session.message_count, 1);
         }
         assert!(localized_session_ids.contains(&inner.sessions[index].session.id));
     }
@@ -2058,7 +2052,7 @@ fn remote_orchestrators_updated_summary_sessions_preserve_unloaded_message_count
             DeltaEvent::OrchestratorsUpdated {
                 revision: 1,
                 orchestrators: remote_delta_state.orchestrators.clone(),
-                sessions: remote_delta_state.sessions.clone(),
+                sessions: remote_delta_state.session_summaries(),
             },
         )
         .expect("remote orchestrator summary delta should create missing proxy sessions");
@@ -2070,12 +2064,6 @@ fn remote_orchestrators_updated_summary_sessions_preserve_unloaded_message_count
     match delta {
         DeltaEvent::OrchestratorsUpdated { sessions, .. } => {
             assert_eq!(sessions.len(), expected_message_counts.len());
-            assert!(
-                sessions
-                    .iter()
-                    .all(|session| session.messages.is_empty() && !session.messages_loaded),
-                "all republished orchestrator sessions should be metadata-first: {sessions:?}"
-            );
             assert!(
                 sessions.iter().all(|session| {
                     session.project_id.as_deref() == Some(local_project_id.as_str())
@@ -2096,8 +2084,6 @@ fn remote_orchestrators_updated_summary_sessions_preserve_unloaded_message_count
                 localized_summary.project_id.as_deref(),
                 Some(local_project_id.as_str())
             );
-            assert!(!localized_summary.messages_loaded);
-            assert!(localized_summary.messages.is_empty());
         }
         _ => panic!("unexpected delta variant"),
     }
@@ -2156,7 +2142,7 @@ fn stale_remote_snapshot_does_not_overwrite_newer_orchestrator_delta_state() {
             DeltaEvent::OrchestratorsUpdated {
                 revision: 2,
                 orchestrators: remote_delta_state.orchestrators.clone(),
-                sessions: remote_delta_state.sessions.clone(),
+                sessions: remote_delta_state.session_summaries(),
             },
         )
         .expect("remote orchestrator delta should apply");
@@ -2170,7 +2156,8 @@ fn stale_remote_snapshot_does_not_overwrite_newer_orchestrator_delta_state() {
                 "/remote/repo",
                 1,
                 OrchestratorInstanceStatus::Running,
-            ),
+            )
+            .into_state_response(),
         )
         .expect("stale remote snapshot should be ignored");
 
@@ -2237,7 +2224,7 @@ fn remote_orchestrators_updated_delta_rolls_back_proxy_sessions_when_localizatio
             DeltaEvent::OrchestratorsUpdated {
                 revision: 1,
                 orchestrators: invalid_delta_state.orchestrators.clone(),
-                sessions: invalid_delta_state.sessions.clone(),
+                sessions: invalid_delta_state.session_summaries(),
             },
         )
         .expect_err("invalid remote orchestrator delta should fail localization");
@@ -2336,6 +2323,26 @@ pub(super) fn seed_remote_proxy_session_via_state_inner_upsert(
         .commit_locked(&mut inner)
         .expect("remote proxy session should persist");
     local_session_id
+}
+
+// Materializes one targeted full-session response after a metadata-only
+// SessionCreated/state seed. Broad remote payloads deliberately carry only
+// StateSessionSummary; tests that exercise transcript deltas must opt into the
+// same full-session hydration seam used by production.
+pub(super) fn materialize_remote_proxy_session_transcript_for_test(
+    state: &AppState,
+    remote: &RemoteConfig,
+    remote_session: &Session,
+) {
+    let mut inner = state.inner.lock().expect("state mutex poisoned");
+    let index = inner
+        .find_remote_session_index(&remote.id, &remote_session.id)
+        .expect("remote proxy session should exist before transcript materialization");
+    let local_project_id = inner.sessions[index].session.project_id.clone();
+    upsert_remote_proxy_session_record(&mut inner, &remote.id, remote_session, local_project_id);
+    state
+        .commit_locked(&mut inner)
+        .expect("materialized remote transcript should persist");
 }
 
 pub(super) fn remote_text_message(message_id: &str, text: &str) -> Message {
@@ -2529,9 +2536,10 @@ pub(super) fn spawn_remote_session_overview_response_server(
 }
 
 pub(super) fn spawn_remote_state_response_server(
-    response: StateResponse,
+    response: impl Into<StateResponse>,
 ) -> (u16, Arc<Mutex<Vec<String>>>, std::thread::JoinHandle<()>) {
-    let response_body = serde_json::to_string(&response).expect("state response should encode");
+    let response_body =
+        serde_json::to_string(&response.into()).expect("state response should encode");
     let requests = Arc::new(Mutex::new(Vec::<String>::new()));
     let requests_for_server = requests.clone();
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("test listener should bind");

@@ -417,6 +417,25 @@ export type Session = {
   parentDelegationId?: string | null;
 };
 
+/** Transcript-free metadata returned by broad state snapshots and summary
+ * lifecycle deltas. Targeted session endpoints return `Session` instead. */
+export type StateSessionSummary = Omit<
+  Session,
+  | "messages"
+  | "promptHistory"
+  | "promptHistoryRedacted"
+  | "messagesLoaded"
+  | "messageStartIndex"
+  | "hasOlderHistory"
+  | "hasNewerHistory"
+  | "pendingPrompts"
+  | "messageCount"
+  | "queuePaused"
+> & {
+  messageCount: number;
+  queuePaused: boolean;
+};
+
 export type SessionLiveActivity = {
   prompt: string;
   command?: string | null;
@@ -500,8 +519,7 @@ export type DelegationRecord = {
   startedAt?: string | null;
   completedAt?: string | null;
   result?: DelegationResult | null;
-  resultParserVersion: number;
-  reviewResultRequired?: boolean;
+  reviewResultRequired: boolean;
   postSubmissionTransportError?: string | null;
   reviewResultRecoveryError?: string | null;
 };
@@ -970,7 +988,7 @@ export type SessionCreatedEvent = {
   type: "sessionCreated";
   revision: number;
   sessionId: string;
-  session: Session;
+  session: StateSessionSummary;
 };
 
 export type CommandUpdateEvent = {
@@ -1029,7 +1047,7 @@ export type OrchestratorsUpdatedEvent = {
   type: "orchestratorsUpdated";
   revision: number;
   orchestrators: OrchestratorInstance[];
-  sessions?: Session[];
+  sessions?: StateSessionSummary[];
 };
 
 export type DelegationCreatedEvent = {

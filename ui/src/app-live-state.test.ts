@@ -35,7 +35,12 @@ import {
 } from "./session-history-demand";
 import { CONVERSATION_COMPOSER_INPUT_DATA_ATTRIBUTES } from "./panels/conversation-composer-focus";
 import type { StateResponse } from "./api";
-import type { DelegationSummary, Message, Session } from "./types";
+import type {
+  DelegationSummary,
+  Message,
+  Session,
+  StateSessionSummary,
+} from "./types";
 import type { WorkspaceState } from "./workspace";
 
 const PAGED_TRANSCRIPT_MESSAGE_COUNT =
@@ -102,7 +107,10 @@ function normalizeMessageEventListener(
   return (event: MessageEvent<string>) => listener.handleEvent(event);
 }
 
-function makeSession(overrides: Partial<Session> = {}): Session {
+type TestSession = Session & { messageCount: number; queuePaused: boolean };
+
+function makeSession(overrides: Partial<Session> = {}): TestSession {
+  const messages = overrides.messages ?? [];
   return {
     id: "session-1",
     name: "Session",
@@ -112,9 +120,19 @@ function makeSession(overrides: Partial<Session> = {}): Session {
     model: "codex",
     status: "idle",
     preview: "",
-    messages: [],
+    messages,
     messagesLoaded: false,
     ...overrides,
+    messageCount: overrides.messageCount ?? messages.length,
+    queuePaused: overrides.queuePaused ?? false,
+  };
+}
+
+function makeStateSessionSummary(session: Session): StateSessionSummary {
+  return {
+    ...session,
+    messageCount: session.messageCount ?? session.messages.length,
+    queuePaused: session.queuePaused ?? false,
   };
 }
 
@@ -145,7 +163,7 @@ function makeDelegationSummary(
     startedAt: "10:00",
     completedAt: null,
     result: null,
-    resultParserVersion: 0,
+    reviewResultRequired: overrides.reviewResultRequired ?? false,
     ...overrides,
   };
 }
@@ -231,7 +249,7 @@ function makeStateResponse(session: Session, revision = 2): StateResponse {
     projects: [],
     orchestrators: [],
     workspaces: [],
-    sessions: [session],
+    sessions: [makeStateSessionSummary(session)],
   } as StateResponse;
 }
 

@@ -4,7 +4,10 @@
 //! transport, hydration, orchestrator, and replay-cache coverage in focused
 //! files.
 
-use super::remote::{remote_command_message, remote_parallel_agents_message, remote_text_message};
+use super::remote::{
+    materialize_remote_proxy_session_transcript_for_test, remote_command_message,
+    remote_parallel_agents_message, remote_text_message,
+};
 use super::*;
 
 #[test]
@@ -150,10 +153,11 @@ fn seed_remote_proxy_session_via_apply_delta(
             DeltaEvent::SessionCreated {
                 revision: 2,
                 session_id: full_remote_session.id.clone(),
-                session: full_remote_session,
+                session: test_state_session_summary_from_session(&full_remote_session),
             },
         )
         .expect("remote full session create delta should apply");
+    materialize_remote_proxy_session_transcript_for_test(state, remote, &full_remote_session);
 }
 
 fn assert_streaming_delta_persist_failure_replays_durably<F>(
@@ -592,7 +596,7 @@ fn remote_delta_replay_cache_skips_exact_replays_for_remaining_variants() {
             || DeltaEvent::OrchestratorsUpdated {
                 revision: 3,
                 orchestrators: remote_state.orchestrators.clone(),
-                sessions: remote_state.sessions.clone(),
+                sessions: remote_state.session_summaries(),
             },
             |published| match published {
                 DeltaEvent::OrchestratorsUpdated { orchestrators, .. } => {
@@ -732,12 +736,12 @@ fn remote_delta_replay_key_includes_state_mutating_payload_fields() {
         replay_key(DeltaEvent::SessionCreated {
             revision: 3,
             session_id: session_a.id.clone(),
-            session: session_a.clone(),
+            session: test_state_session_summary_from_session(&session_a),
         }),
         replay_key(DeltaEvent::SessionCreated {
             revision: 3,
             session_id: session_a.id.clone(),
-            session: session_a.clone(),
+            session: test_state_session_summary_from_session(&session_a),
         }),
         "identical SessionCreated inputs must produce stable keys"
     );
@@ -749,12 +753,12 @@ fn remote_delta_replay_key_includes_state_mutating_payload_fields() {
         replay_key(DeltaEvent::SessionCreated {
             revision: 3,
             session_id: session_with_remote_a.id.clone(),
-            session: session_with_remote_a,
+            session: test_state_session_summary_from_session(&session_with_remote_a),
         }),
         replay_key(DeltaEvent::SessionCreated {
             revision: 3,
             session_id: session_with_remote_b.id.clone(),
-            session: session_with_remote_b,
+            session: test_state_session_summary_from_session(&session_with_remote_b),
         }),
         "SessionCreated replay identity must ignore inbound remote_id because localization discards it"
     );
@@ -762,12 +766,12 @@ fn remote_delta_replay_key_includes_state_mutating_payload_fields() {
         replay_key(DeltaEvent::SessionCreated {
             revision: 3,
             session_id: session_a.id.clone(),
-            session: session_a,
+            session: test_state_session_summary_from_session(&session_a),
         }),
         replay_key(DeltaEvent::SessionCreated {
             revision: 3,
             session_id: session_b.id.clone(),
-            session: session_b,
+            session: test_state_session_summary_from_session(&session_b),
         }),
         "SessionCreated replay identity must include the session payload"
     );
@@ -957,7 +961,7 @@ fn remote_delta_replay_key_includes_state_mutating_payload_fields() {
         DeltaEvent::OrchestratorsUpdated {
             revision: 8,
             orchestrators: vec![orchestrator],
-            sessions: vec![session],
+            sessions: vec![test_state_session_summary_from_session(&session)],
         }
     };
     assert_ne!(
@@ -973,7 +977,7 @@ fn remote_delta_replay_key_includes_state_mutating_payload_fields() {
         DeltaEvent::OrchestratorsUpdated {
             revision: 8,
             orchestrators: vec![orchestrator],
-            sessions: vec![session],
+            sessions: vec![test_state_session_summary_from_session(&session)],
         }
     };
     assert_eq!(
@@ -1390,7 +1394,7 @@ fn remote_delta_replay_key_isolates_individual_fingerprinted_fields() {
         DeltaEvent::OrchestratorsUpdated {
             revision: 8,
             orchestrators: vec![remote_state.orchestrators[0].clone()],
-            sessions: vec![session],
+            sessions: vec![test_state_session_summary_from_session(&session)],
         }
     };
     assert_ne!(
@@ -1440,7 +1444,7 @@ fn remote_delta_replay_key_includes_revision_and_routing_fields() {
     let session_created = |revision: u64, session_id: &str| DeltaEvent::SessionCreated {
         revision,
         session_id: session_id.to_owned(),
-        session: session.clone(),
+        session: test_state_session_summary_from_session(&session),
     };
     assert_changed(
         session_created(3, "remote-session-1"),
@@ -2078,10 +2082,11 @@ fn cleared_remote_replay_cache_still_rejects_duplicate_text_by_offset() {
             DeltaEvent::SessionCreated {
                 revision: 2,
                 session_id: full_remote_session.id.clone(),
-                session: full_remote_session,
+                session: test_state_session_summary_from_session(&full_remote_session),
             },
         )
         .expect("remote full session create delta should apply");
+    materialize_remote_proxy_session_transcript_for_test(&state, &remote, &full_remote_session);
 
     let text_delta = || DeltaEvent::TextDelta {
         revision: 3,

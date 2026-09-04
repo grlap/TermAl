@@ -21,9 +21,9 @@ export function shouldAdoptSnapshotRevision(
     /**
      * The `serverInstanceId` carried by the incoming snapshot. When
      * both ids are non-empty and differ, the caller must also opt into
-     * accepting unknown ids via `allowUnknownServerInstance`. The fallback
-     * payload's empty id is treated as "unknown" and cannot
-     * trigger the restart branch.
+     * accepting unknown ids via `allowUnknownServerInstance`. Empty or absent
+     * ids are malformed-input cases handled defensively and cannot trigger the
+     * restart branch.
      */
     nextServerInstanceId?: string | null;
     /**
@@ -105,10 +105,9 @@ export function isStaleSameInstanceSnapshot(
 }
 
 /**
- * Returns true when both ids are non-empty AND differ. Empty ids mean
- * "unknown instance" (the fallback SSE payload) and cannot
- * trigger a restart branch — the caller stays on the revision-ordered
- * path.
+ * Returns true when both ids are non-empty AND differ. Empty or absent ids are
+ * malformed input and cannot trigger a restart branch, so the caller stays on
+ * the revision-ordered path.
  */
 export function isServerInstanceMismatch(
   current: string | null | undefined,

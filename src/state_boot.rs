@@ -283,7 +283,7 @@ impl StateInner {
                 .delegations
                 .get(delegation_index)
                 .is_some_and(|delegation| {
-                    delegation.review_result_required
+                    delegation.mode == DelegationMode::Reviewer
                         && delegation.review_result_schema_version.is_none()
                         && delegation.submitted_review_result.is_none()
                 });

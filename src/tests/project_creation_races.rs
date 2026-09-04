@@ -804,7 +804,7 @@ fn remote_orchestrator_persist_failure_still_claims_the_current_event_bridge() {
     let remote_orchestrator_id = remote_state.orchestrators[0].id.clone();
     let response_body = serde_json::to_string(&CreateOrchestratorInstanceResponse {
         orchestrator: remote_state.orchestrators[0].clone(),
-        state: remote_state,
+        state: remote_state.into_state_response(),
     })
     .expect("remote orchestrator response should encode");
     let (port, server) =
@@ -875,7 +875,7 @@ fn remote_orchestrator_persist_failure_still_claims_the_current_event_bridge() {
         .expect("failing persistence directory should be removable");
     state.persistence_path = Arc::new(original_persistence_path.as_path().to_path_buf());
     state
-        .apply_remote_state_snapshot(&remote.id, recovery_state)
+        .apply_remote_state_snapshot(&remote.id, recovery_state.into_state_response())
         .expect("an equal-revision snapshot should retry the failed localization persistence");
 
     let inner = state.inner.lock().expect("state mutex poisoned");
@@ -922,7 +922,7 @@ fn remote_orchestrator_rejects_project_deleted_during_create_request() {
     );
     let response_body = serde_json::to_string(&CreateOrchestratorInstanceResponse {
         orchestrator: remote_state.orchestrators[0].clone(),
-        state: remote_state,
+        state: remote_state.into_state_response(),
     })
     .expect("remote orchestrator response should encode");
     let state_for_server = state.clone();
@@ -1069,7 +1069,7 @@ fn remote_orchestrator_rejects_project_rebound_during_create_request() {
     );
     let response_body = serde_json::to_string(&CreateOrchestratorInstanceResponse {
         orchestrator: remote_state.orchestrators[0].clone(),
-        state: remote_state,
+        state: remote_state.into_state_response(),
     })
     .expect("remote orchestrator response should encode");
     let state_for_server = state.clone();
@@ -1227,7 +1227,7 @@ fn remote_orchestrator_rejects_remote_removed_during_create_request() {
     );
     let response_body = serde_json::to_string(&CreateOrchestratorInstanceResponse {
         orchestrator: remote_state.orchestrators[0].clone(),
-        state: remote_state,
+        state: remote_state.into_state_response(),
     })
     .expect("remote orchestrator response should encode");
     let state_for_server = state.clone();
@@ -1409,7 +1409,7 @@ fn remote_orchestrator_rejects_endpoint_replaced_during_create_request() {
     );
     let response_body = serde_json::to_string(&CreateOrchestratorInstanceResponse {
         orchestrator: remote_state.orchestrators[0].clone(),
-        state: remote_state,
+        state: remote_state.into_state_response(),
     })
     .expect("remote orchestrator response should encode");
     let state_for_server = state.clone();
@@ -2102,7 +2102,7 @@ fn non_create_state_response_is_rejected_after_endpoint_replacement() {
         OrchestratorInstanceStatus::Running,
     );
     state
-        .apply_remote_state_snapshot(&remote.id, initial_state)
+        .apply_remote_state_snapshot(&remote.id, initial_state.into_state_response())
         .expect("initial remote state should localize");
     let local_session_id = {
         let inner = state.inner.lock().expect("state mutex poisoned");
@@ -2202,7 +2202,7 @@ fn non_create_state_response_is_rejected_after_post_decode_a_to_b_to_a_cycle() {
         OrchestratorInstanceStatus::Running,
     );
     state
-        .apply_remote_state_snapshot(&remote.id, initial_state)
+        .apply_remote_state_snapshot(&remote.id, initial_state.into_state_response())
         .expect("initial remote state should localize");
     let (local_session_id, initial_status) = {
         let inner = state.inner.lock().expect("state mutex poisoned");
@@ -2283,7 +2283,7 @@ fn non_create_state_response_preserves_unknown_remote_after_post_decode_removal(
         OrchestratorInstanceStatus::Running,
     );
     state
-        .apply_remote_state_snapshot(&remote.id, initial_state)
+        .apply_remote_state_snapshot(&remote.id, initial_state.into_state_response())
         .expect("initial remote state should localize");
     let (local_session_id, initial_status) = {
         let inner = state.inner.lock().expect("state mutex poisoned");
@@ -2725,7 +2725,7 @@ fn remote_codex_fork_inherits_source_attachment_after_project_deletion() {
     );
     let mut forked_remote_session = remote_state.sessions[0].clone();
     state
-        .apply_remote_state_snapshot(&remote.id, remote_state)
+        .apply_remote_state_snapshot(&remote.id, remote_state.into_state_response())
         .expect("source remote state should localize");
     let source_local_session_id = {
         let inner = state.inner.lock().expect("state mutex poisoned");
@@ -2810,7 +2810,7 @@ fn remote_codex_fork_rejects_endpoint_replacement_before_localization() {
     );
     let mut forked_remote_session = remote_state.sessions[0].clone();
     state
-        .apply_remote_state_snapshot(&remote.id, remote_state)
+        .apply_remote_state_snapshot(&remote.id, remote_state.into_state_response())
         .expect("source remote state should localize");
     let source_local_session_id = {
         let inner = state.inner.lock().expect("state mutex poisoned");
@@ -2893,7 +2893,7 @@ fn remote_codex_fork_is_rejected_after_post_decode_a_to_b_to_a_cycle() {
     );
     let mut forked_remote_session = remote_state.sessions[0].clone();
     state
-        .apply_remote_state_snapshot(&remote.id, remote_state)
+        .apply_remote_state_snapshot(&remote.id, remote_state.into_state_response())
         .expect("source remote state should localize");
     let source_local_session_id = {
         let inner = state.inner.lock().expect("state mutex poisoned");

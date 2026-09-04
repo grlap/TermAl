@@ -473,7 +473,7 @@ impl AppState {
         changed: bool,
         revision: u64,
         session_id: &str,
-        delta_session: Option<Session>,
+        delta_session: Option<StateSessionSummary>,
     ) {
         if !changed {
             return;

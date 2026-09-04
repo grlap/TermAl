@@ -454,6 +454,29 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       expect(stateFetchCallCount()).toBe(0);
 
       await clickAndSettle(screen.getByRole("button", { name: "Approve" }));
+      act(() => {
+        eventSource.dispatchNamedEvent("delta", {
+          type: "messageUpdated",
+          revision: 2,
+          sessionId: "session-1",
+          messageId: "message-approval-1",
+          messageIndex: 1,
+          messageCount: 2,
+          message: {
+            id: "message-approval-1",
+            type: "approval",
+            timestamp: "10:01",
+            author: "assistant",
+            title: "Codex needs approval",
+            command: "npm test",
+            detail: "Need permission to run the test suite.",
+            decision: "accepted",
+          },
+          preview: "Approval granted. Codex is continuing...",
+          status: "active",
+        });
+      });
+      await settleAsyncUi();
       expect(screen.getByText("Codex needs approval")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
       expect(
@@ -818,7 +841,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       await settleAsyncUi();
 
       expect(stateFetchCallCount()).toBe(1);
-      expect(screen.getAllByText("Current turn finished.")).toHaveLength(2);
+      expect(screen.getAllByText("Current turn finished.")).toHaveLength(1);
       expect(
         screen.getByRole("button", { name: "Cancel queued prompt" }),
       ).toBeInTheDocument();
@@ -1419,7 +1442,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       await settleAsyncUi();
 
       expect(stateFetchCallCount()).toBe(1);
-      expect(screen.getAllByText("Recovered after wake.")).toHaveLength(2);
+      expect(screen.getAllByText("Recovered after wake.")).toHaveLength(1);
       expect(
         screen.getByText("Working on the current turn..."),
       ).toBeInTheDocument();
@@ -1572,7 +1595,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
         });
       });
       await settleAsyncUi();
-      expect(screen.getAllByText("Recovered from live state.")).toHaveLength(2);
+      expect(screen.getAllByText("Recovered from live state.")).toHaveLength(1);
 
       await act(async () => {
         firstStateFetch.resolve(
@@ -1613,7 +1636,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       await settleAsyncUi();
 
       expect(stateFetchCallCount()).toBe(1);
-      expect(screen.getAllByText("Recovered from live state.")).toHaveLength(2);
+      expect(screen.getAllByText("Recovered from live state.")).toHaveLength(1);
       expect(
         screen.getByText("Working on the current turn..."),
       ).toBeInTheDocument();
@@ -1945,7 +1968,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       await settleAsyncUi();
 
       expect(stateFetchCallCount()).toBe(2);
-      expect(screen.getAllByText("Here after retry.")).toHaveLength(2);
+      expect(screen.getAllByText("Here after retry.")).toHaveLength(1);
       expect(
         screen.queryByText("Working on the current turn..."),
       ).not.toBeInTheDocument();
@@ -2126,7 +2149,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
 
       expect(stateFetchCallCount()).toBe(2);
       expect(screen.getAllByText("Here after enforced cooldown.")).toHaveLength(
-        2,
+        1,
       );
       expect(
         screen.queryByText("Working on the current turn..."),
@@ -2322,7 +2345,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       });
       await settleAsyncUi();
 
-      expect(screen.getAllByText("Fresh live output.")).toHaveLength(2);
+      expect(screen.getAllByText("Fresh live output.")).toHaveLength(1);
       expect(stateFetchCallCount()).toBe(1);
 
       await advanceTimers(LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS);
@@ -2339,7 +2362,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
 
       expect(stateFetchCallCount()).toBe(2);
       expect(screen.getAllByText("Here after cleared cooldown.")).toHaveLength(
-        2,
+        1,
       );
       expect(
         screen.queryByText("Working on the current turn..."),

@@ -41,7 +41,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "./api";
 import { ACTIVE_PROMPT_POLL_INTERVAL_MS } from "./active-prompt-poll";
 import App from "./App";
-import { upsertSessionStoreSession } from "./session-store";
+import {
+  getSessionRecordSnapshotForTesting,
+  upsertSessionStoreSession,
+} from "./session-store";
 import { ThemedCombobox } from "./preferences-panels";
 import {
   describeCodexModelAdjustmentNotice,
@@ -67,7 +70,10 @@ import {
   MESSAGE_STACK_USER_SCROLL_INTENT_EVENT,
   requestMessageStackBottomRepin,
 } from "./message-stack-scroll-sync";
-import { addSessionHistoryPageDemandListener } from "./session-history-demand";
+import {
+  addSessionHistoryPageDemandListener,
+  requestSessionHistoryAroundPage,
+} from "./session-history-demand";
 import {
   resolveAdoptedStateSlices,
   resolveRecoveredWorkspaceLayoutRequestError,
@@ -109,6 +115,8 @@ import {
   makeOrchestrator,
   makeReadiness,
   makeSession,
+  makeSessionHydrationResponse,
+  makeStateSessionSummary,
   makeStateResponse,
   makeWorkspaceLayoutResponse,
   mockScrollToAndApplyTop,
@@ -979,6 +987,9 @@ describe("App scroll behaviour", () => {
         name: "Session 1",
         projectId: "project-termal",
         workdir: "/projects/termal",
+        messagesLoaded: false,
+        messageStartIndex: 1,
+        messageCount: 2,
         hasOlderHistory: true,
         messages: [
           {
@@ -986,36 +997,63 @@ describe("App scroll behaviour", () => {
             type: "text",
             timestamp: "10:00",
             author: "assistant",
-            text: "Resident historical window",
+            text: "Resident historical window for Session 1",
           },
         ],
       });
+      const session2NewerMessage: Session["messages"][number] = {
+        id: "session-2-newer-message",
+        type: "text",
+        timestamp: "10:01",
+        author: "assistant",
+        text: "Newer historical message",
+      };
       const session2 = makeSession("session-2", {
         name: "Session 2",
         projectId: "project-termal",
         workdir: "/projects/termal",
-        hasNewerHistory: true,
-        messages: [
-          {
-            id: "session-2-resident-message",
-            type: "text",
-            timestamp: "10:00",
-            author: "assistant",
-            text: "Resident historical window",
-          },
-        ],
+        messagesLoaded: false,
+        messageStartIndex: 1,
+        messageCount: 2,
+        hasOlderHistory: true,
+        messages: [session2NewerMessage],
       });
+      const session1OlderMessage: Session["messages"][number] = {
+        id: "session-1-older-message",
+        type: "text",
+        timestamp: "09:59",
+        author: "assistant",
+        text: "Older historical message",
+      };
+      const session2HistoricalMessage: Session["messages"][number] = {
+        id: "session-2-resident-message",
+        type: "text",
+        timestamp: "10:00",
+        author: "assistant",
+        text: "Resident historical window for Session 2",
+      };
       const fetchHistorySpy = vi
         .spyOn(api, "fetchSessionHistory")
-        .mockImplementation(async (sessionId) => ({
+        .mockImplementation(async (sessionId, options) => ({
           messages:
-            sessionId === "session-1" ? session1.messages : session2.messages,
+            sessionId === "session-1"
+              ? [session1OlderMessage]
+              : options.around !== undefined
+                ? [session2HistoricalMessage]
+                : [session2NewerMessage],
           nextBefore: null,
           hasMore: false,
-          nextAfter: null,
-          hasNewer: false,
-          messageStartIndex: 0,
-          messageCount: session2.messages.length,
+          nextAfter:
+            sessionId === "session-1"
+              ? session1OlderMessage.id
+              : options.around !== undefined
+                ? session2HistoricalMessage.id
+                : null,
+          hasNewer:
+            sessionId === "session-1" || options.around !== undefined,
+          messageStartIndex:
+            sessionId === "session-1" || options.around !== undefined ? 0 : 1,
+          messageCount: 2,
           revision: 2,
           sessionMutationStamp: 2,
           serverInstanceId: "test-instance",
@@ -1032,8 +1070,17 @@ describe("App scroll behaviour", () => {
                 rootPath: "/projects/termal",
               },
             ],
-            sessions: [session1, session2],
+            sessions: [
+              makeStateSessionSummary(session1),
+              makeStateSessionSummary(session2),
+            ],
           });
+        }
+        if (requestUrl.pathname === "/api/sessions/session-1") {
+          return jsonResponse(makeSessionHydrationResponse(session1, 1));
+        }
+        if (requestUrl.pathname === "/api/sessions/session-2") {
+          return jsonResponse(makeSessionHydrationResponse(session2, 1));
         }
         throw new Error(`Unexpected fetch: ${requestUrl.pathname}`);
       });
@@ -1156,19 +1203,45 @@ describe("App scroll behaviour", () => {
             sessionId: "session-1",
           });
         });
-        expect(fetchHistorySpy).not.toHaveBeenCalled();
+        await waitFor(() => {
+          expect(fetchHistorySpy).toHaveBeenCalledTimes(1);
+        });
+        expect(fetchHistorySpy.mock.calls[0]?.[0]).toBe("session-1");
+        await settleAsyncUi();
         fetchHistorySpy.mockClear();
 
         messageStack.scrollTop = 150;
         act(() => {
           fireEvent.scroll(messageStack);
         });
+        await settleAsyncUi();
 
         await clickAndSettle(session2Tab);
-        expect(messageStack.scrollTop).toBe(800);
-        messageStack.scrollTop = 800;
+        await screen.findByText(session2NewerMessage.text);
+        let restoredDetachedWindow = false;
+        await act(async () => {
+          restoredDetachedWindow = await requestSessionHistoryAroundPage(
+            "session-2",
+            0,
+          );
+        });
+        expect(restoredDetachedWindow).toBe(true);
+        await screen.findByText("Resident historical window for Session 2");
+        await settleAsyncUi();
+        expect(
+          getSessionRecordSnapshotForTesting("session-2")?.hasNewerHistory,
+        ).toBe(true);
+        fetchHistorySpy.mockClear();
+        const session2MessageStack = document.querySelector(
+          ".workspace-pane.active .message-stack",
+        );
+        if (!(session2MessageStack instanceof HTMLElement)) {
+          throw new Error("Session 2 message stack not found");
+        }
+        expect(session2MessageStack.scrollTop).toBe(800);
+        session2MessageStack.scrollTop = 800;
         act(() => {
-          fireEvent.scroll(messageStack);
+          fireEvent.scroll(session2MessageStack);
         });
 
         const composer = await screen.findByLabelText("Message Session 2");
@@ -1198,10 +1271,23 @@ describe("App scroll behaviour", () => {
         await settleAsyncUi();
 
         await waitFor(() => {
-          expect(fetchHistorySpy).toHaveBeenCalledTimes(1);
+          expect(historyDemandListener).toHaveBeenCalledWith({
+            direction: "newer",
+            requestId: expect.any(Number),
+            sessionId: "session-2",
+          });
         });
-        expect(fetchHistorySpy.mock.calls[0]?.[0]).toBe("session-2");
-        expect(messageStack.scrollTop).toBe(800);
+        await waitFor(() => {
+          expect(
+            fetchHistorySpy.mock.calls.some(
+              ([requestedSessionId]) => requestedSessionId === "session-2",
+            ),
+          ).toBe(true);
+        });
+        expect(
+          fetchHistorySpy.mock.calls[fetchHistorySpy.mock.calls.length - 1]?.[0],
+        ).toBe("session-2");
+        expect(session2MessageStack.scrollTop).toBe(800);
 
         const currentTablist = screen
           .getAllByRole("tablist", { name: "Tile tabs" })
@@ -1217,7 +1303,13 @@ describe("App scroll behaviour", () => {
         await clickAndSettle(
           within(currentTablist).getByRole("tab", { name: "Session 1" }),
         );
-        expect(messageStack.scrollTop).toBe(150);
+        const restoredSession1MessageStack = document.querySelector(
+          ".workspace-pane.active .message-stack",
+        );
+        expect(restoredSession1MessageStack).toBeInstanceOf(HTMLElement);
+        expect((restoredSession1MessageStack as HTMLElement).scrollTop).toBe(
+          150,
+        );
       } finally {
         removeHistoryDemandListener();
         restoreScrollGeometry();
@@ -1247,6 +1339,18 @@ describe("App scroll behaviour", () => {
         }));
       const session1Messages = makeVirtualizedMessages("session-1");
       const session2Messages = makeVirtualizedMessages("session-2");
+      const session1 = makeSession("session-1", {
+        name: "Session 1",
+        projectId: "project-termal",
+        workdir: "/projects/termal",
+        messages: session1Messages,
+      });
+      const session2 = makeSession("session-2", {
+        name: "Session 2",
+        projectId: "project-termal",
+        workdir: "/projects/termal",
+        messages: session2Messages,
+      });
       const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
         const requestUrl = new URL(String(input), "http://localhost");
         if (requestUrl.pathname === "/api/state") {
@@ -1260,20 +1364,16 @@ describe("App scroll behaviour", () => {
               },
             ],
             sessions: [
-              makeSession("session-1", {
-                name: "Session 1",
-                projectId: "project-termal",
-                workdir: "/projects/termal",
-                messages: session1Messages,
-              }),
-              makeSession("session-2", {
-                name: "Session 2",
-                projectId: "project-termal",
-                workdir: "/projects/termal",
-                messages: session2Messages,
-              }),
+              makeStateSessionSummary(session1),
+              makeStateSessionSummary(session2),
             ],
           });
+        }
+        if (requestUrl.pathname === "/api/sessions/session-1") {
+          return jsonResponse(makeSessionHydrationResponse(session1, 1));
+        }
+        if (requestUrl.pathname === "/api/sessions/session-2") {
+          return jsonResponse(makeSessionHydrationResponse(session2, 1));
         }
         throw new Error(`Unexpected fetch: ${requestUrl.pathname}`);
       });
@@ -1642,6 +1742,15 @@ describe("App scroll behaviour", () => {
           author: "assistant" as const,
           text: `${sessionId} response ${index}`,
         }));
+      const sessions = ["session-1", "session-2", "session-3"].map(
+        (sessionId) =>
+          makeSession(sessionId, {
+            name: `Session ${sessionId.slice("session-".length)}`,
+            projectId: "project-termal",
+            workdir: "/projects/termal",
+            messages: makeMessages(sessionId),
+          }),
+      );
       const session1OverviewResolvers: Array<(response: Response) => void> = [];
       const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
         const requestUrl = new URL(String(input), "http://localhost");
@@ -1658,28 +1767,20 @@ describe("App scroll behaviour", () => {
               ],
               orchestrators: [],
               workspaces: [],
-              sessions: [
-                makeSession("session-1", {
-                  name: "Session 1",
-                  projectId: "project-termal",
-                  workdir: "/projects/termal",
-                  messages: makeMessages("session-1"),
-                }),
-                makeSession("session-2", {
-                  name: "Session 2",
-                  projectId: "project-termal",
-                  workdir: "/projects/termal",
-                  messages: makeMessages("session-2"),
-                }),
-                makeSession("session-3", {
-                  name: "Session 3",
-                  projectId: "project-termal",
-                  workdir: "/projects/termal",
-                  messages: makeMessages("session-3"),
-                }),
-              ],
+              sessions: sessions.map(makeStateSessionSummary),
             }),
           );
+        }
+        const sessionMatch = requestUrl.pathname.match(
+          /^\/api\/sessions\/([^/]+)$/,
+        );
+        if (sessionMatch) {
+          const sessionId = decodeURIComponent(sessionMatch[1] ?? "");
+          const session = sessions.find((candidate) => candidate.id === sessionId);
+          if (!session) {
+            throw new Error(`Missing session fixture for ${sessionId}`);
+          }
+          return jsonResponse(makeSessionHydrationResponse(session, 1));
         }
         const overviewMatch = requestUrl.pathname.match(
           /^\/api\/sessions\/([^/]+)\/overview$/,
@@ -1782,7 +1883,8 @@ describe("App scroll behaviour", () => {
           latestEventSource().dispatchError();
         });
         await settleAsyncUi();
-        expect(session1OverviewResolvers).toHaveLength(1);
+        const initialOverviewRequestCount = session1OverviewResolvers.length;
+        expect(initialOverviewRequestCount).toBeGreaterThanOrEqual(1);
 
         const session1Tab = screen.getByRole("tab", { name: "Session 1" });
         const session2Tab = screen.getByRole("tab", { name: "Session 2" });
@@ -1849,7 +1951,9 @@ describe("App scroll behaviour", () => {
           fireEvent.dragEnd(dragGrip, { dataTransfer });
         });
         await settleAsyncUi();
-        expect(session1OverviewResolvers).toHaveLength(2);
+        expect(session1OverviewResolvers).toHaveLength(
+          initialOverviewRequestCount + 1,
+        );
 
         const movedSessionTab = screen.getByRole("tab", {
           name: "Session 1",
@@ -1875,7 +1979,7 @@ describe("App scroll behaviour", () => {
         expect(targetScrollKinds).not.toContain("bottom_pin");
 
         targetScrollKinds.length = 0;
-        session1OverviewResolvers[1]?.(
+        session1OverviewResolvers[session1OverviewResolvers.length - 1]?.(
           jsonResponse({
             sessionId: "session-1",
             messageCount: 80,
@@ -1940,7 +2044,9 @@ describe("App scroll behaviour", () => {
           });
         });
         await settleAsyncUi();
-        expect(session1OverviewResolvers).toHaveLength(3);
+        expect(session1OverviewResolvers).toHaveLength(
+          initialOverviewRequestCount + 2,
+        );
 
         const edgeMovedSessionTab = screen.getByRole("tab", {
           name: "Session 1",
@@ -1990,7 +2096,7 @@ describe("App scroll behaviour", () => {
         expect((edgeMovedStack as HTMLElement).scrollTop).toBe(4_000);
         expect(edgeMovedStack).not.toHaveClass("is-tail-following");
 
-        session1OverviewResolvers[2]?.(
+        session1OverviewResolvers[session1OverviewResolvers.length - 1]?.(
           jsonResponse({
             sessionId: "session-1",
             messageCount: 80,
@@ -2278,6 +2384,10 @@ describe("App scroll behaviour", () => {
       });
       const scrollToMock = mockScrollToAndApplyTop();
       const context = await renderAppWithProjectAndSession();
+      const fixtureFetch = context.fetchMock.getMockImplementation();
+      if (!fixtureFetch) {
+        throw new Error("Expected the shared fetch fixture implementation");
+      }
       const pendingSend = createDeferred<Response>();
       const baseState = {
         revision: 2,
@@ -2315,7 +2425,7 @@ describe("App scroll behaviour", () => {
         if (requestUrl.pathname === "/api/sessions/session-1/messages") {
           return pendingSend.promise;
         }
-        throw new Error(`Unexpected fetch: ${requestUrl.pathname}`);
+        return fixtureFetch(input);
       });
 
       try {
@@ -2975,6 +3085,7 @@ describe("App scroll behaviour", () => {
             workdir: "/projects/termal",
             status: "active",
             preview: "Finish this turn",
+            sessionMutationStamp: 2,
             messages: [userMessage, commandMessage],
           }),
         ],
@@ -3020,6 +3131,7 @@ describe("App scroll behaviour", () => {
               workdir: "/projects/termal",
               status: "idle",
               preview: "Finishing",
+              sessionMutationStamp: 3,
               messages: [userMessage, commandMessage],
             }),
           ],
@@ -3046,6 +3158,7 @@ describe("App scroll behaviour", () => {
               workdir: "/projects/termal",
               status: "idle",
               preview: "Final response",
+              sessionMutationStamp: 4,
               messages: [
                 userMessage,
                 commandMessage,
@@ -3089,6 +3202,7 @@ describe("App scroll behaviour", () => {
               workdir: "/projects/termal",
               status: "idle",
               preview: "Final response with rendered detail",
+              sessionMutationStamp: 5,
               messages: [
                 userMessage,
                 commandMessage,
@@ -3731,6 +3845,7 @@ describe("App scroll behaviour", () => {
               workdir: "/projects/termal",
               status: "active",
               preview: "Current turn partial.",
+              sessionMutationStamp: 2,
               messages: [
                 {
                   id: "message-user-1",
@@ -3776,6 +3891,7 @@ describe("App scroll behaviour", () => {
               workdir: "/projects/termal",
               status: "active",
               preview: "Current turn partial.",
+              sessionMutationStamp: 3,
               messages: [
                 {
                   id: "message-user-1",
@@ -3884,6 +4000,7 @@ describe("App scroll behaviour", () => {
               workdir: "/projects/termal",
               status: "active",
               preview: "Current turn partial.",
+              sessionMutationStamp: 2,
               messages,
             }),
           ],
@@ -3914,6 +4031,7 @@ describe("App scroll behaviour", () => {
               workdir: "/projects/termal",
               status: "active",
               preview: "Current turn partial.",
+              sessionMutationStamp: 3,
               messages,
               pendingPrompts: [
                 {

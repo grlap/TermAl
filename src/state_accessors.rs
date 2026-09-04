@@ -236,7 +236,7 @@ mod visible_session_hydration_error_tests {
             })
             .expect("local session should be created")
             .session_id;
-        let remote_session = Session {
+        let remote_session = StateSessionSummary {
             id: "remote-session-1".to_owned(),
             name: "Remote Proxy".to_owned(),
             emoji: Agent::Codex.avatar().to_owned(),
@@ -268,13 +268,8 @@ mod visible_session_hydration_error_tests {
             engram_boot_recovery_pending: false,
             status: SessionStatus::Idle,
             preview: "Remote session ready.".to_owned(),
-            messages: Vec::new(),
-            prompt_history: Vec::new(),
-            prompt_history_redacted: false,
-            messages_loaded: true,
             message_count: 0,
             markers: Vec::new(),
-            pending_prompts: Vec::new(),
             queue_paused: false,
             session_mutation_stamp: Some(7),
             parent_delegation_id: None,
@@ -376,16 +371,18 @@ mod visible_session_hydration_error_tests {
             .iter()
             .find(|session| session.id == session_id)
             .expect("summary session should be present");
-        assert!(summary_session.pending_prompts.is_empty());
-        assert!(summary_session.prompt_history.is_empty());
-        assert!(summary_session.prompt_history_redacted);
+        let summary_json =
+            serde_json::to_value(summary_session).expect("summary should serialize");
+        assert!(summary_json.get("messages").is_none());
+        assert!(summary_json.get("messagesLoaded").is_none());
+        assert!(summary_json.get("pendingPrompts").is_none());
+        assert!(summary_json.get("promptHistory").is_none());
+        assert!(summary_json.get("promptHistoryRedacted").is_none());
 
-        let targeted = state.summary_snapshot_with_session_detail(&session_id);
-        let targeted_session = targeted
-            .sessions
-            .iter()
-            .find(|session| session.id == session_id)
-            .expect("targeted session should be present");
+        let targeted_session = state
+            .get_session(&session_id)
+            .expect("targeted session should be present")
+            .session;
         assert_eq!(targeted_session.pending_prompts.len(), 1);
         assert_eq!(
             targeted_session.prompt_history,
@@ -433,9 +430,7 @@ mod visible_session_hydration_error_tests {
             review_result_recovery_probe_attempt: None,
             review_result_recovery_error: None,
             review_result_schema_version: None,
-            review_result_required: true,
             review_result_submission_attempt: 1,
-            result_parser_version: 7,
         };
         let mut explorer_record = record.clone();
         explorer_record.id = "delegation-2".to_owned();
@@ -445,7 +440,6 @@ mod visible_session_hydration_error_tests {
         explorer_record.title = "Active exploration".to_owned();
         explorer_record.prompt = "Inspect the implementation".to_owned();
         explorer_record.completed_at = None;
-        explorer_record.review_result_required = false;
         explorer_record.review_result_submission_attempt = 0;
         {
             let mut inner = state.inner.lock().expect("state mutex poisoned");
@@ -512,7 +506,6 @@ mod visible_session_hydration_error_tests {
             .expect("scoped delegation summary should serialize");
         assert_eq!(scoped["status"], "completed");
         assert_eq!(scoped["title"], "Completed review");
-        assert_eq!(scoped["resultParserVersion"], 7);
     }
 
     #[test]
@@ -650,9 +643,9 @@ impl AppState {
         session
     }
 
-    fn wire_session_summary_from_record(record: &SessionRecord) -> Session {
+    fn wire_session_summary_from_record(record: &SessionRecord) -> StateSessionSummary {
         let session = &record.session;
-        let summary = Session {
+        let summary = StateSessionSummary {
             id: session.id.clone(),
             name: session.name.clone(),
             emoji: session.emoji.clone(),
@@ -691,18 +684,8 @@ impl AppState {
             engram_boot_recovery_pending: record.engram_boot_recovery_pending,
             status: session.status,
             preview: session.preview.clone(),
-            messages: Vec::new(),
-            // Composer history can contain substantial user text. It is
-            // available on targeted session-tail responses, not global state.
-            prompt_history: Vec::new(),
-            prompt_history_redacted: true,
-            messages_loaded: false,
             message_count: session_message_count(record),
             markers: session.markers.clone(),
-            // Global state snapshots are metadata-first. Pending prompts can
-            // contain user-authored prompt bodies, so expose them only through
-            // targeted bounded session-detail responses.
-            pending_prompts: Vec::new(),
             // The paused-queue latch is metadata, not prompt content: the
             // pane needs it from the global snapshot to render the paused
             // card even before targeted detail hydrates the prompt bodies.
@@ -718,7 +701,7 @@ impl AppState {
     #[cfg(debug_assertions)]
     fn debug_assert_session_summary_matches_full_projection(
         record: &SessionRecord,
-        summary: &Session,
+        summary: &StateSessionSummary,
     ) {
         let full = Self::wire_session_from_record(record);
         debug_assert_eq!(summary.id, full.id);
@@ -774,11 +757,8 @@ impl AppState {
         );
         debug_assert_eq!(summary.status, full.status);
         debug_assert_eq!(summary.preview, full.preview);
-        debug_assert!(summary.prompt_history_redacted);
-        debug_assert!(!full.prompt_history_redacted);
         debug_assert_eq!(summary.message_count, full.message_count);
         debug_assert_eq!(summary.markers, full.markers);
-        debug_assert!(summary.pending_prompts.is_empty());
         debug_assert_eq!(summary.session_mutation_stamp, full.session_mutation_stamp);
         debug_assert_eq!(summary.parent_delegation_id, full.parent_delegation_id);
     }
@@ -786,7 +766,7 @@ impl AppState {
     #[cfg(not(debug_assertions))]
     fn debug_assert_session_summary_matches_full_projection(
         _record: &SessionRecord,
-        _summary: &Session,
+        _summary: &StateSessionSummary,
     ) {
     }
 
@@ -807,19 +787,13 @@ impl AppState {
         self.snapshot_from_inner(&inner)
     }
 
-    fn summary_snapshot_with_session_detail(&self, session_id: &str) -> StateResponse {
-        let agent_readiness = self.agent_readiness_snapshot();
-        let inner = self.inner.lock().expect("state mutex poisoned");
-        self.snapshot_from_inner_with_session_detail(&inner, agent_readiness, session_id)
-    }
-
     /// Test-only full snapshot inspection helper.
     ///
     /// Production `/api/state`, action responses, and SSE state events are
     /// metadata-first. Tests that inspect retained session windows use this
     /// helper so `snapshot()` keeps the same shape in test and production.
     #[cfg(test)]
-    fn full_snapshot(&self) -> StateResponse {
+    fn full_snapshot(&self) -> FullStateSnapshot {
         let _ = self.agent_readiness_snapshot();
         let inner = self.inner.lock().expect("state mutex poisoned");
         self.full_snapshot_from_inner(&inner)
@@ -1474,46 +1448,8 @@ impl AppState {
         }
     }
 
-    fn snapshot_from_inner_with_session_detail(
-        &self,
-        inner: &StateInner,
-        agent_readiness: Vec<AgentReadiness>,
-        full_session_id: &str,
-    ) -> StateResponse {
-        StateResponse {
-            revision: inner.revision,
-            server_instance_id: self.server_instance_id.clone(),
-            codex: inner.codex.clone(),
-            agent_readiness,
-            preferences: inner.preferences.clone(),
-            projects: inner.projects.clone(),
-            orchestrators: inner.orchestrator_instances.clone(),
-            workspaces: collect_workspace_layout_summaries(inner.workspace_layouts.values()),
-            sessions: inner
-                .sessions
-                .iter()
-                .filter(|record| !record.hidden)
-                .map(|record| {
-                    if record.session.id == full_session_id {
-                        Self::wire_session_from_record(record)
-                    } else {
-                        Self::wire_session_summary_from_record(record)
-                    }
-                })
-                .collect(),
-            delegations: inner
-                .delegations
-                .iter()
-                .map(delegation_state_summary_from_record)
-                .collect(),
-            delegation_waits: inner.delegation_waits.clone(),
-            pending_engram_mcp_revocation_session_ids:
-                Self::pending_engram_mcp_revocation_session_ids(inner),
-        }
-    }
-
     #[cfg(test)]
-    fn full_snapshot_from_inner(&self, inner: &StateInner) -> StateResponse {
+    fn full_snapshot_from_inner(&self, inner: &StateInner) -> FullStateSnapshot {
         self.full_snapshot_from_inner_with_agent_readiness(inner, self.cached_agent_readiness())
     }
 
@@ -1522,8 +1458,8 @@ impl AppState {
         &self,
         inner: &StateInner,
         agent_readiness: Vec<AgentReadiness>,
-    ) -> StateResponse {
-        StateResponse {
+    ) -> FullStateSnapshot {
+        FullStateSnapshot {
             revision: inner.revision,
             server_instance_id: self.server_instance_id.clone(),
             codex: inner.codex.clone(),

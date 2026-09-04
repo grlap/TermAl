@@ -236,7 +236,7 @@ impl AppState {
                         &local_project_ids_by_remote_project_id,
                         session.project_id.as_deref(),
                     );
-                    let (local_session_id, changed) = ensure_remote_proxy_session_record(
+                    let (local_session_id, changed) = ensure_remote_proxy_session_summary_record(
                         &mut inner,
                         remote_id,
                         &session,

@@ -511,12 +511,26 @@ struct UpdateConversationMarkerRequest {
     end_message_id: Option<Option<String>>,
 }
 
+fn deserialize_nonempty_server_instance_id<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = String::deserialize(deserializer)?;
+    if value.trim().is_empty() {
+        return Err(serde::de::Error::custom(
+            "serverInstanceId must be a non-empty string",
+        ));
+    }
+    Ok(value)
+}
+
 /// Response containing all conversation markers for one session.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ConversationMarkersResponse {
     markers: Vec<ConversationMarker>,
     revision: u64,
+    #[serde(deserialize_with = "deserialize_nonempty_server_instance_id")]
     server_instance_id: String,
 }
 
@@ -526,6 +540,7 @@ struct ConversationMarkersResponse {
 struct ConversationMarkerResponse {
     marker: ConversationMarker,
     revision: u64,
+    #[serde(deserialize_with = "deserialize_nonempty_server_instance_id")]
     server_instance_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     session_mutation_stamp: Option<u64>,
@@ -537,6 +552,7 @@ struct ConversationMarkerResponse {
 struct DeleteConversationMarkerResponse {
     marker_id: String,
     revision: u64,
+    #[serde(deserialize_with = "deserialize_nonempty_server_instance_id")]
     server_instance_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     session_mutation_stamp: Option<u64>,
@@ -642,6 +658,74 @@ struct Session {
     /// a new prompt or resumes the queue. Always serialized so the UI can
     /// distinguish "paused, waiting for the user" from "about to start".
     #[serde(default)]
+    queue_paused: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    session_mutation_stamp: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    parent_delegation_id: Option<String>,
+}
+
+/// Transcript-free session metadata carried by broad state snapshots and
+/// summary lifecycle deltas. Full messages, prompt history, and queued prompt
+/// bodies are available only through targeted session endpoints.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct StateSessionSummary {
+    id: String,
+    name: String,
+    emoji: String,
+    agent: Agent,
+    workdir: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    project_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    remote_id: Option<String>,
+    model: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    model_options: Vec<SessionModelOption>,
+    approval_policy: Option<CodexApprovalPolicy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    reasoning_effort: Option<CodexReasoningEffort>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    codex_fast_mode: bool,
+    sandbox_mode: Option<CodexSandboxMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    cursor_mode: Option<CursorMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    claude_effort: Option<ClaudeEffortLevel>,
+    claude_approval_mode: Option<ClaudeApprovalMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    gemini_approval_mode: Option<GeminiApprovalMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    opencode_model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    opencode_effort: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    opencode_current_effort: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    opencode_effort_options: Vec<SessionModelOption>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    opencode_mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    opencode_current_mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    opencode_mode_options: Vec<SessionModelOption>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    external_session_id: Option<String>,
+    #[serde(default)]
+    agent_commands_revision: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    codex_thread_state: Option<CodexThreadState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    live_activity: Option<SessionLiveActivity>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    engram_boot_recovery_pending: bool,
+    status: SessionStatus,
+    preview: String,
+    #[serde(rename = "messageCount")]
+    message_count: u32,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    markers: Vec<ConversationMarker>,
     queue_paused: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     session_mutation_stamp: Option<u64>,
@@ -916,7 +1000,7 @@ enum ApprovalDecision {
 }
 
 /// Represents the approval request payload.
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ApprovalRequest {
     decision: ApprovalDecision,
@@ -995,7 +1079,8 @@ enum DelegationStatus {
 #[serde(
     tag = "kind",
     rename_all = "camelCase",
-    rename_all_fields = "camelCase"
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
 )]
 enum DelegationWritePolicy {
     ReadOnly,
@@ -1009,93 +1094,44 @@ enum DelegationWritePolicy {
     },
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct DelegationWritePolicyFields {
-    #[serde(default, alias = "owned_paths")]
-    owned_paths: Vec<String>,
-    #[serde(default, alias = "worktree_path")]
-    worktree_path: Option<String>,
-}
-
 impl<'de> serde::Deserialize<'de> for DelegationWritePolicy {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        let value = Value::deserialize(deserializer)?;
-        parse_delegation_write_policy_value(value).map_err(<D::Error as serde::de::Error>::custom)
-    }
-}
-
-fn parse_delegation_write_policy_value(value: Value) -> Result<DelegationWritePolicy, String> {
-    // The JSON request body is fed by CLI prompts and MCP clients, so accept
-    // legacy loose read-only shapes while keeping explicit write-capable kinds.
-    // The derived Serialize shape above remains canonical; metadata tests cover
-    // serialize-to-deserialize round trips for each variant.
-    match value {
-        Value::String(kind) => {
-            delegation_write_policy_from_kind(&kind, Value::Object(Default::default()))
+        // Serde's internally-tagged unit variants accept otherwise unknown
+        // sibling fields even under `deny_unknown_fields`. Decode through an
+        // empty struct variant so `{ "kind": "readOnly", ... }` is held to
+        // the same exact-shape contract as the variants with payload fields.
+        #[derive(Deserialize)]
+        #[serde(
+            tag = "kind",
+            rename_all = "camelCase",
+            rename_all_fields = "camelCase",
+            deny_unknown_fields
+        )]
+        enum WirePolicy {
+            ReadOnly {},
+            SharedWorktree {
+                owned_paths: Vec<String>,
+            },
+            IsolatedWorktree {
+                owned_paths: Vec<String>,
+                worktree_path: Option<String>,
+            },
         }
-        Value::Object(mut object) => {
-            if let Some(kind) = object.remove("kind") {
-                let kind = kind
-                    .as_str()
-                    .ok_or_else(|| "writePolicy.kind must be a string".to_owned())?;
-                return delegation_write_policy_from_kind(kind, Value::Object(object));
-            }
 
-            if object.is_empty() {
-                return Ok(DelegationWritePolicy::ReadOnly);
-            }
-
-            let mut entries = object.into_iter();
-            let Some((legacy_kind, fields)) = entries.next() else {
-                return Ok(DelegationWritePolicy::ReadOnly);
-            };
-            if entries.next().is_some() {
-                return Err("writePolicy object must include kind".to_owned());
-            }
-            delegation_write_policy_from_kind(&legacy_kind, fields)
-        }
-        _ => Err("writePolicy must be a string or object".to_owned()),
-    }
-}
-
-fn delegation_write_policy_from_kind(
-    kind: &str,
-    fields: Value,
-) -> Result<DelegationWritePolicy, String> {
-    match kind {
-        "readOnly" | "read_only" | "read-only" | "readonly" => Ok(DelegationWritePolicy::ReadOnly),
-        "sharedWorktree" | "shared_worktree" | "shared-worktree" => {
-            let fields = parse_delegation_write_policy_fields(fields)?;
-            Ok(DelegationWritePolicy::SharedWorktree {
-                owned_paths: fields.owned_paths,
-            })
-        }
-        "isolatedWorktree" | "isolated_worktree" | "isolated-worktree" => {
-            let fields = parse_delegation_write_policy_fields(fields)?;
-            Ok(DelegationWritePolicy::IsolatedWorktree {
-                owned_paths: fields.owned_paths,
-                worktree_path: fields.worktree_path,
-            })
-        }
-        _ => Err(format!("unsupported writePolicy kind `{kind}`")),
-    }
-}
-
-fn parse_delegation_write_policy_fields(
-    fields: Value,
-) -> Result<DelegationWritePolicyFields, String> {
-    match fields {
-        Value::Bool(_) | Value::Null => Ok(DelegationWritePolicyFields {
-            owned_paths: Vec::new(),
-            worktree_path: None,
-        }),
-        Value::Object(_) => serde_json::from_value(fields)
-            .map_err(|err| format!("invalid writePolicy fields: {err}")),
-        _ => Err("writePolicy fields must be an object".to_owned()),
+        Ok(match WirePolicy::deserialize(deserializer)? {
+            WirePolicy::ReadOnly {} => Self::ReadOnly,
+            WirePolicy::SharedWorktree { owned_paths } => Self::SharedWorktree { owned_paths },
+            WirePolicy::IsolatedWorktree {
+                owned_paths,
+                worktree_path,
+            } => Self::IsolatedWorktree {
+                owned_paths,
+                worktree_path,
+            },
+        })
     }
 }
 
@@ -1273,20 +1309,11 @@ struct DelegationRecord {
     /// arrived through the strict mailbox contract.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     review_result_schema_version: Option<u32>,
-    /// New `/review-code` delegations fail closed when their required
-    /// structured result is missing. Older and custom reviewer sessions keep
-    /// the legacy prose-parser behavior.
-    #[serde(default)]
-    review_result_required: bool,
     /// Backend-owned turn number for idempotent structured review submission.
     /// Required reviewer delegations start at one; other delegations keep zero.
     /// The value advances whenever a completed review is rearmed.
     #[serde(default)]
     review_result_submission_attempt: u32,
-    /// Version of the result parser that last examined this terminal record.
-    /// Zero denotes a record persisted before versioned repair existed.
-    #[serde(default)]
-    result_parser_version: u32,
 }
 
 /// Determines when a delegation wait resumes its parent session.
@@ -1330,13 +1357,10 @@ struct DelegationSummary {
     started_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     completed_at: Option<String>,
-    #[serde(default)]
-    result_parser_version: u32,
     /// Whether this child must publish a validated structured reviewer result.
     /// Parent-scoped delegation APIs, lifecycle deltas, and the minimal broad
     /// state capability summary expose this bit. Broad state still omits the
     /// delegation's lifecycle and result payloads.
-    #[serde(default)]
     review_result_required: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     post_submission_transport_error: Option<String>,
@@ -1387,8 +1411,10 @@ struct CreateDelegationRequest {
 #[serde(rename_all = "camelCase")]
 struct DelegationResponse {
     revision: u64,
+    #[serde(serialize_with = "serialize_delegation_record_for_api")]
     delegation: DelegationRecord,
     child_session: Session,
+    #[serde(deserialize_with = "deserialize_nonempty_server_instance_id")]
     server_instance_id: String,
 }
 
@@ -1396,7 +1422,9 @@ struct DelegationResponse {
 #[serde(rename_all = "camelCase")]
 struct DelegationStatusResponse {
     revision: u64,
+    #[serde(serialize_with = "serialize_delegation_record_for_api")]
     delegation: DelegationRecord,
+    #[serde(deserialize_with = "deserialize_nonempty_server_instance_id")]
     server_instance_id: String,
 }
 
@@ -1406,6 +1434,7 @@ struct DelegationStatusResponse {
 struct DelegationListResponse {
     revision: u64,
     delegations: Vec<DelegationSummary>,
+    #[serde(deserialize_with = "deserialize_nonempty_server_instance_id")]
     server_instance_id: String,
 }
 
@@ -1414,6 +1443,7 @@ struct DelegationListResponse {
 struct DelegationResultResponse {
     revision: u64,
     result: DelegationResult,
+    #[serde(deserialize_with = "deserialize_nonempty_server_instance_id")]
     server_instance_id: String,
 }
 
@@ -1444,6 +1474,7 @@ struct DelegationResultOutputResponse {
     /// True only when the child transcript no longer contains an assistant
     /// candidate and the compact result summary had to be used instead.
     summary_fallback: bool,
+    #[serde(deserialize_with = "deserialize_nonempty_server_instance_id")]
     server_instance_id: String,
 }
 
@@ -1805,7 +1836,32 @@ struct HealthResponse {
     /// use a mismatch between this and their last-seen id to detect a
     /// server restart deterministically — see `shouldAdoptSnapshotRevision`
     /// in the frontend.
+    #[serde(deserialize_with = "deserialize_nonempty_server_instance_id")]
     server_instance_id: String,
+}
+
+/// Serializes the persisted record for parent-scoped APIs while deriving the
+/// current reviewer-result capability from its canonical source, `mode`.
+fn serialize_delegation_record_for_api<S>(
+    record: &DelegationRecord,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct ApiDelegationRecord<'a> {
+        #[serde(flatten)]
+        record: &'a DelegationRecord,
+        review_result_required: bool,
+    }
+
+    ApiDelegationRecord {
+        record,
+        review_result_required: record.mode == DelegationMode::Reviewer,
+    }
+    .serialize(serializer)
 }
 
 /// Represents the send message request payload.
@@ -2015,7 +2071,7 @@ struct AgentReadiness {
 }
 
 /// Represents the state response payload.
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct StateResponse {
     revision: u64,
@@ -2024,6 +2080,7 @@ struct StateResponse {
     /// every snapshot so clients can distinguish "revision decreased
     /// because the server restarted" from "revision decreased because
     /// this response is stale".
+    #[serde(deserialize_with = "deserialize_nonempty_server_instance_id")]
     server_instance_id: String,
     #[serde(default)]
     codex: CodexState,
@@ -2040,7 +2097,7 @@ struct StateResponse {
     #[serde(default)]
     workspaces: Vec<WorkspaceLayoutSummary>,
     #[serde(default)]
-    sessions: Vec<Session>,
+    sessions: Vec<StateSessionSummary>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     delegations: Vec<DelegationStateSummary>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -2050,6 +2107,31 @@ struct StateResponse {
     /// SSE state events preserve this durable-in-memory pending state so a
     /// mixed cleanup failure cannot hide the sessions still awaiting Stop.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pending_engram_mcp_revocation_session_ids: Vec<String>,
+}
+
+/// Test-only view of retained state. This is deliberately a different type
+/// from `StateResponse`, so test introspection cannot accidentally weaken the
+/// transcript-free production wire contract.
+#[cfg(test)]
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FullStateSnapshot {
+    revision: u64,
+    server_instance_id: String,
+    codex: CodexState,
+    agent_readiness: Vec<AgentReadiness>,
+    preferences: AppPreferences,
+    #[serde(serialize_with = "serialize_client_projects_with_engram_status")]
+    projects: Vec<Project>,
+    orchestrators: Vec<OrchestratorInstance>,
+    workspaces: Vec<WorkspaceLayoutSummary>,
+    sessions: Vec<Session>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    delegations: Vec<DelegationStateSummary>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    delegation_waits: Vec<DelegationWaitRecord>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pending_engram_mcp_revocation_session_ids: Vec<String>,
 }
 
@@ -2065,6 +2147,7 @@ struct SessionResponse {
     /// restart. Without this field, a session hydration in flight
     /// across a restart could be silently rejected by the monotonic
     /// revision guard until the safety-net pollers re-fetch.
+    #[serde(deserialize_with = "deserialize_nonempty_server_instance_id")]
     server_instance_id: String,
 }
 
@@ -2089,6 +2172,7 @@ struct SessionHistoryResponse {
     message_count: u32,
     revision: u64,
     session_mutation_stamp: u64,
+    #[serde(deserialize_with = "deserialize_nonempty_server_instance_id")]
     server_instance_id: String,
 }
 
@@ -2258,6 +2342,7 @@ struct CreateSessionResponse {
     /// a server restart, which is the common case for this response
     /// (POST sent from a stale browser tab against a freshly started
     /// server).
+    #[serde(deserialize_with = "deserialize_nonempty_server_instance_id")]
     server_instance_id: String,
 }
 
@@ -2491,7 +2576,7 @@ enum DeltaEvent {
         revision: u64,
         #[serde(rename = "sessionId")]
         session_id: String,
-        session: Session,
+        session: StateSessionSummary,
     },
     MessageCreated {
         revision: u64,
@@ -2651,7 +2736,7 @@ enum DeltaEvent {
         revision: u64,
         orchestrators: Vec<OrchestratorInstance>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        sessions: Vec<Session>,
+        sessions: Vec<StateSessionSummary>,
     },
     DelegationCreated {
         revision: u64,

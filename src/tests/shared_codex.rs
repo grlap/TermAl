@@ -5035,9 +5035,7 @@ fn install_read_only_codex_delegation(state: &AppState, child_session_id: &str) 
         review_result_recovery_probe_attempt: None,
         review_result_recovery_error: None,
         review_result_schema_version: None,
-        review_result_required: false,
         review_result_submission_attempt: 1,
-        result_parser_version: 0,
     });
 }
 

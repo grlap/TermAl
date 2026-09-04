@@ -1328,9 +1328,9 @@ async fn get_session_route_query_rejection_uses_api_error_envelope() {
     assert!(message.contains("tail"));
 }
 
-// Pins `messageCount` on full snapshot-bearing routes. The count is computed
-// from the transcript at wire-projection time so reconnect/state adoption can
-// keep summary metadata without waiting for the next delta.
+// Pins the metadata-only `/api/state` summary beside the targeted full-session
+// route. The count is computed from the transcript at wire-projection time so
+// reconnect/state adoption does not need message bodies.
 #[tokio::test]
 async fn snapshot_bearing_routes_include_message_count() {
     let state = test_app_state();
@@ -1388,13 +1388,8 @@ async fn snapshot_bearing_routes_include_message_count() {
         .find(|session| session["id"] == session_id)
         .expect("state should include counted session");
     assert_eq!(state_session["messageCount"], 2);
-    assert_eq!(state_session["messagesLoaded"], false);
-    assert!(
-        state_session["messages"]
-            .as_array()
-            .expect("state session messages should stay adapter-compatible")
-            .is_empty()
-    );
+    assert!(state_session.get("messagesLoaded").is_none());
+    assert!(state_session.get("messages").is_none());
 
     let (session_status, session_body): (StatusCode, Value) = request_json(
         &app,
@@ -1510,7 +1505,7 @@ async fn targeted_session_tail_includes_pending_prompts_redacted_from_global_sta
 // transcript, and SSE carries a narrow `messageCreated` delta for other
 // subscribers.
 #[tokio::test]
-async fn send_message_route_returns_full_session_and_publishes_prompt_delta() {
+async fn send_message_route_returns_metadata_and_publishes_prompt_delta() {
     let state = test_app_state();
     let _files = HttpRouteTestFiles::capture(&state);
     let session_id = test_session_id(&state, Agent::Claude);
@@ -1557,8 +1552,15 @@ async fn send_message_route_returns_full_session_and_publishes_prompt_delta() {
         .iter()
         .find(|session| session.id == session_id)
         .expect("prompt session should be present");
-    assert!(session.messages_loaded);
     assert_eq!(session.message_count, 1);
+    let response_session =
+        serde_json::to_value(session).expect("metadata-only response session should serialize");
+    assert!(response_session.get("messages").is_none());
+    assert!(response_session.get("pendingPrompts").is_none());
+    let session = state
+        .get_session(&session_id)
+        .expect("prompt session detail should hydrate")
+        .session;
     assert_eq!(session.messages.len(), 1);
     assert!(matches!(
         &session.messages[0],
@@ -1612,6 +1614,207 @@ fn next_delta_event(delta_events: &mut broadcast::Receiver<String>) -> DeltaEven
         .try_recv()
         .expect("delta event should be published");
     serde_json::from_str(&payload).expect("delta event should decode")
+}
+
+fn transcript_delta_mutation_stamp(delta: &DeltaEvent) -> u64 {
+    let stamp = match delta {
+        DeltaEvent::MessageCreated {
+            session_mutation_stamp,
+            ..
+        }
+        | DeltaEvent::MessageUpdated {
+            session_mutation_stamp,
+            ..
+        }
+        | DeltaEvent::TextDelta {
+            session_mutation_stamp,
+            ..
+        }
+        | DeltaEvent::TextReplace {
+            session_mutation_stamp,
+            ..
+        }
+        | DeltaEvent::CommandUpdate {
+            session_mutation_stamp,
+            ..
+        }
+        | DeltaEvent::ParallelAgentsUpdate {
+            session_mutation_stamp,
+            ..
+        } => session_mutation_stamp,
+        _ => panic!("expected transcript delta"),
+    };
+    stamp.expect("local transcript delta should carry a mutation stamp")
+}
+
+fn assert_transcript_delta_advances_mutation_stamp(
+    state: &AppState,
+    session_id: &str,
+    delta_events: &mut broadcast::Receiver<String>,
+    previous_stamp: u64,
+) -> u64 {
+    let delta = next_delta_event(delta_events);
+    let next_stamp = transcript_delta_mutation_stamp(&delta);
+    assert!(
+        next_stamp > previous_stamp,
+        "transcript mutation stamp must advance: previous={previous_stamp}, next={next_stamp}"
+    );
+    assert_eq!(
+        state
+            .get_session(session_id)
+            .expect("targeted session should load")
+            .session
+            .session_mutation_stamp,
+        Some(next_stamp),
+        "targeted session and emitted delta must expose the same mutation stamp"
+    );
+    next_stamp
+}
+
+// Metadata-first broad snapshots cannot repair a resident transcript from
+// message bodies. This pins the backend invariant they rely on instead: every
+// local transcript create/insert/update path advances sessionMutationStamp.
+#[test]
+fn every_local_transcript_content_mutation_advances_session_mutation_stamp() {
+    let state = test_app_state();
+    let _files = HttpRouteTestFiles::capture(&state);
+    let session_id = test_session_id(&state, Agent::Claude);
+    let mut delta_events = state.subscribe_delta_events();
+    let mut previous_stamp = state
+        .get_session(&session_id)
+        .expect("targeted session should load")
+        .session
+        .session_mutation_stamp
+        .expect("created session should expose its mutation stamp");
+
+    state
+        .push_message(
+            &session_id,
+            Message::Text {
+                attachments: Vec::new(),
+                id: "text-anchor".to_owned(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                text: String::new(),
+                expanded_text: None,
+                source: None,
+            },
+        )
+        .expect("text placeholder should be recorded");
+    previous_stamp = assert_transcript_delta_advances_mutation_stamp(
+        &state,
+        &session_id,
+        &mut delta_events,
+        previous_stamp,
+    );
+
+    state
+        .insert_message_before(
+            &session_id,
+            "text-anchor",
+            Message::SubagentResult {
+                id: "subagent-before-anchor".to_owned(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                title: "Reviewer completed".to_owned(),
+                summary: "Reviewed before the final answer".to_owned(),
+                conversation_id: None,
+                turn_id: None,
+            },
+        )
+        .expect("subagent result should be inserted");
+    previous_stamp = assert_transcript_delta_advances_mutation_stamp(
+        &state,
+        &session_id,
+        &mut delta_events,
+        previous_stamp,
+    );
+
+    state
+        .append_text_delta(&session_id, "text-anchor", "draft")
+        .expect("text delta should append");
+    previous_stamp = assert_transcript_delta_advances_mutation_stamp(
+        &state,
+        &session_id,
+        &mut delta_events,
+        previous_stamp,
+    );
+
+    state
+        .replace_text_message(&session_id, "text-anchor", "final")
+        .expect("text replacement should publish");
+    previous_stamp = assert_transcript_delta_advances_mutation_stamp(
+        &state,
+        &session_id,
+        &mut delta_events,
+        previous_stamp,
+    );
+
+    state
+        .upsert_command_message(&session_id, "command-1", "pwd", "", CommandStatus::Running)
+        .expect("command message should be created");
+    previous_stamp = assert_transcript_delta_advances_mutation_stamp(
+        &state,
+        &session_id,
+        &mut delta_events,
+        previous_stamp,
+    );
+    state
+        .upsert_command_message(
+            &session_id,
+            "command-1",
+            "pwd",
+            "/tmp",
+            CommandStatus::Success,
+        )
+        .expect("command message should update");
+    previous_stamp = assert_transcript_delta_advances_mutation_stamp(
+        &state,
+        &session_id,
+        &mut delta_events,
+        previous_stamp,
+    );
+
+    state
+        .upsert_parallel_agents_message(
+            &session_id,
+            "agents-1",
+            vec![ParallelAgentProgress {
+                detail: Some("Checking files".to_owned()),
+                id: "agent-1".to_owned(),
+                source: ParallelAgentSource::Tool,
+                status: ParallelAgentStatus::Running,
+                title: "Reviewer".to_owned(),
+            }],
+        )
+        .expect("parallel-agents message should be created");
+    previous_stamp = assert_transcript_delta_advances_mutation_stamp(
+        &state,
+        &session_id,
+        &mut delta_events,
+        previous_stamp,
+    );
+    state
+        .upsert_parallel_agents_message(
+            &session_id,
+            "agents-1",
+            vec![ParallelAgentProgress {
+                detail: Some("Done".to_owned()),
+                id: "agent-1".to_owned(),
+                source: ParallelAgentSource::Tool,
+                status: ParallelAgentStatus::Completed,
+                title: "Reviewer".to_owned(),
+            }],
+        )
+        .expect("parallel-agents message should update");
+    let _final_stamp = assert_transcript_delta_advances_mutation_stamp(
+        &state,
+        &session_id,
+        &mut delta_events,
+        previous_stamp,
+    );
+
+    let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
 // Pins `message_count` and byte-continuity offsets on representative local
@@ -1729,14 +1932,17 @@ fn local_streaming_delta_events_include_message_count() {
 // Tests that the empty SSE fallback payload carries an explicit fallback marker.
 #[test]
 fn empty_state_events_payload_carries_explicit_fallback_marker() {
-    let payload: Value = serde_json::from_str(EMPTY_STATE_EVENTS_PAYLOAD.as_str())
-        .expect("SSE fallback payload should parse");
+    let payload_text = fallback_state_events_payload(0, "test-instance".to_owned())
+        .expect("SSE fallback payload should encode");
+    let payload: Value =
+        serde_json::from_str(&payload_text).expect("SSE fallback payload should parse");
     assert_eq!(payload["_sseFallback"], true);
     assert_eq!(payload["revision"], 0);
     assert!(payload.get("preferences").is_some());
     assert!(payload.get("sessions").is_some());
 
-    let decoded: StateEventPayload = serde_json::from_str(EMPTY_STATE_EVENTS_PAYLOAD.as_str())
+    assert_eq!(payload["serverInstanceId"], "test-instance");
+    let decoded: StateEventPayload = serde_json::from_str(&payload_text)
         .expect("fallback payload should decode as a state event payload");
     assert!(decoded.sse_fallback);
     assert_eq!(decoded.state.revision, 0);
@@ -1746,11 +1952,13 @@ fn empty_state_events_payload_carries_explicit_fallback_marker() {
 #[test]
 fn fallback_state_events_payload_uses_supplied_revision() {
     let decoded: StateEventPayload = serde_json::from_str(
-        &fallback_state_events_payload(42).expect("fallback payload should encode"),
+        &fallback_state_events_payload(42, "test-instance".to_owned())
+            .expect("fallback payload should encode"),
     )
     .expect("fallback payload should decode as a state event payload");
     assert!(decoded.sse_fallback);
     assert_eq!(decoded.state.revision, 42);
+    assert_eq!(decoded.state.server_instance_id, "test-instance");
 }
 
 // Pins `GET /api/events` when graceful shutdown was already triggered before
@@ -1839,21 +2047,23 @@ async fn state_events_route_streams_initial_state_and_live_deltas() {
     let initial_event = next_sse_event(&mut body).await;
     let (initial_name, initial_data) = parse_sse_event(&initial_event);
     assert_eq!(initial_name, "state");
+    let initial_json: Value =
+        serde_json::from_str(&initial_data).expect("initial SSE JSON should parse");
+    let initial_session_json = initial_json["sessions"]
+        .as_array()
+        .and_then(|sessions| sessions.iter().find(|session| session["id"] == session_id))
+        .expect("initial JSON should include test session");
+    assert!(initial_session_json.get("messages").is_none());
+    assert!(initial_session_json.get("messagesLoaded").is_none());
+    assert!(initial_session_json.get("pendingPrompts").is_none());
     let initial_state: StateResponse =
-        serde_json::from_str(&initial_data).expect("initial SSE payload should parse");
+        serde_json::from_value(initial_json).expect("initial SSE payload should parse");
     assert!(
         initial_state
             .sessions
             .iter()
             .any(|session| session.id == session_id)
     );
-    let initial_session = initial_state
-        .sessions
-        .iter()
-        .find(|session| session.id == session_id)
-        .expect("initial state should include test session");
-    assert!(!initial_session.messages_loaded);
-    assert!(initial_session.messages.is_empty());
     let message_id = state.allocate_message_id();
     state
         .push_message(
@@ -2912,8 +3122,7 @@ async fn codex_thread_action_routes_update_session_state() {
         .iter()
         .find(|session| session.id == session_id)
         .expect("updated session should be present");
-    assert!(!rollback_session.messages_loaded);
-    assert!(rollback_session.messages.is_empty());
+    assert_eq!(rollback_session.message_count, 2);
     let rollback_session = state
         .get_session(&session_id)
         .expect("rolled back session should hydrate")
@@ -3013,8 +3222,7 @@ async fn codex_thread_rollback_route_falls_back_when_history_is_unavailable() {
         .iter()
         .find(|session| session.id == session_id)
         .expect("updated session should be present");
-    assert!(!session.messages_loaded);
-    assert!(session.messages.is_empty());
+    assert_eq!(session.message_count, 2);
     let session = state
         .get_session(&session_id)
         .expect("rolled back fallback session should hydrate")

@@ -38,9 +38,7 @@ fn reviewer_delegation_prompt_injects_termal_owned_result_protocol() {
         review_result_recovery_probe_attempt: None,
         review_result_recovery_error: None,
         review_result_schema_version: None,
-        review_result_required: true,
         review_result_submission_attempt: 1,
-        result_parser_version: 0,
     };
     let prompt = build_delegation_prompt(&record);
 
@@ -85,9 +83,7 @@ fn non_reviewer_delegation_prompt_does_not_inject_review_result_protocol() {
         review_result_recovery_probe_attempt: None,
         review_result_recovery_error: None,
         review_result_schema_version: None,
-        review_result_required: false,
         review_result_submission_attempt: 0,
-        result_parser_version: 0,
     };
 
     let prompt = build_delegation_prompt(&record);
@@ -120,7 +116,7 @@ fn reviewer_spawn_requires_structured_result_without_repository_prompt_marker() 
         .iter()
         .find(|record| record.id == created.delegation.id)
         .expect("delegation should exist");
-    assert!(delegation.review_result_required);
+    assert_eq!(delegation.mode, DelegationMode::Reviewer);
     assert_eq!(delegation.review_result_submission_attempt, 1);
     drop(inner);
     assert!(state.delegation_control_plane_capability_allowed(
@@ -250,9 +246,7 @@ fn install_required_review_delegation(
         review_result_recovery_probe_attempt: None,
         review_result_recovery_error: None,
         review_result_schema_version: None,
-        review_result_required: true,
         review_result_submission_attempt: 1,
-        result_parser_version: 0,
     });
     state.commit_locked(&mut inner).unwrap();
     (delegation_id, child_session_id)
@@ -1207,55 +1201,6 @@ fn completed_structured_review_survives_child_session_removal() {
             .post_submission_transport_error
             .as_deref()
             .is_some_and(|detail| detail.contains("session was removed"))
-    );
-}
-
-#[test]
-fn structured_review_output_paging_ignores_legacy_parser_version_stamps() {
-    let (state, _root_sender_id, parent_session_id) = mailbox_test_state();
-    let (delegation_id, child_session_id) =
-        install_required_review_delegation(&state, &parent_session_id);
-    state
-        .submit_delegation_review_result(&child_session_id, structured_review_request())
-        .expect("structured result should be accepted");
-    finish_delegation_child_with_assistant_text(
-        &state,
-        &child_session_id,
-        &"structured full output ".repeat(300),
-    );
-    state
-        .refresh_delegation_for_child_session(&child_session_id)
-        .expect("structured review should complete");
-
-    let revision = {
-        let mut inner = state.inner.lock().expect("state mutex poisoned");
-        let index = inner
-            .find_delegation_index(&delegation_id)
-            .expect("delegation should exist");
-        inner.delegations[index].result_parser_version =
-            DELEGATION_RESULT_PARSER_VERSION.saturating_sub(1);
-        inner.mark_delegation_mutated(index);
-        state.commit_locked(&mut inner).unwrap()
-    };
-
-    let page = state
-        .get_delegation_result_output(
-            &parent_session_id,
-            &delegation_id,
-            0,
-            MIN_DELEGATION_RESULT_OUTPUT_PAGE_BYTES,
-        )
-        .expect("structured full output should page without parser repair");
-    assert_eq!(page.revision, revision);
-    let inner = state.inner.lock().expect("state mutex poisoned");
-    let record = inner
-        .delegations
-        .iter()
-        .find(|record| record.id == delegation_id)
-        .expect("delegation should remain available");
-    assert_eq!(
-        record.result_parser_version,
-        DELEGATION_RESULT_PARSER_VERSION.saturating_sub(1)
     );
 }
 

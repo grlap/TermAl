@@ -4519,10 +4519,11 @@ describe("Backend connection state", () => {
     }
   });
 
-  it("renders externally queued prompts from live state without a tab switch", async () => {
+  it("rehydrates externally queued prompts after a summary mutation without a tab switch", async () => {
     const originalFetch = globalThis.fetch;
     const originalEventSource = globalThis.EventSource;
     const originalResizeObserver = globalThis.ResizeObserver;
+    let hydrationRevision = 1;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const target = String(input);
       if (target === "/api/state") {
@@ -4533,19 +4534,52 @@ describe("Backend connection state", () => {
             preview: "Original preview",
             session: {
               sessionMutationStamp: 1,
-              messages: [
-                {
-                  id: "message-user-1",
-                  type: "text",
-                  timestamp: "10:00",
-                  author: "you",
-                  text: "Original prompt",
-                },
-              ],
               messageCount: 1,
             },
           }),
         );
+      }
+      if (target.startsWith("/api/sessions/session-1?")) {
+        return jsonResponse({
+          revision: hydrationRevision,
+          serverInstanceId: "test-instance",
+          session: {
+            id: "session-1",
+            name: "Telegram Session",
+            emoji: "1f9ea",
+            agent: "Codex",
+            workdir: "/repo",
+            projectId: null,
+            model: "gpt-5",
+            status: hydrationRevision === 1 ? "idle" : "active",
+            preview:
+              hydrationRevision === 1
+                ? "Original preview"
+                : "Streaming reply...",
+            messages: [
+              {
+                id: "message-user-1",
+                type: "text",
+                timestamp: "10:00",
+                author: "you",
+                text: "Original prompt",
+              },
+            ],
+            messagesLoaded: true,
+            messageCount: 1,
+            pendingPrompts:
+              hydrationRevision === 1
+                ? []
+                : [
+                    {
+                      id: "pending-telegram-1",
+                      timestamp: "10:01",
+                      text: "Queued from mobile Telegram",
+                    },
+                  ],
+            sessionMutationStamp: hydrationRevision,
+          },
+        });
       }
       if (target.startsWith("/api/workspaces/")) {
         if (init?.method === "PUT") {
@@ -4588,15 +4622,6 @@ describe("Backend connection state", () => {
             preview: "Original preview",
             session: {
               sessionMutationStamp: 1,
-              messages: [
-                {
-                  id: "message-user-1",
-                  type: "text",
-                  timestamp: "10:00",
-                  author: "you",
-                  text: "Original prompt",
-                },
-              ],
               messageCount: 1,
             },
           }),
@@ -4612,9 +4637,10 @@ describe("Backend connection state", () => {
       }
       fireEvent.click(sessionRowButton);
       expect(
-        await within(activeConversationPage()).findByText("Original prompt"),
+        await screen.findByText("Original prompt"),
       ).toBeInTheDocument();
 
+      hydrationRevision = 2;
       act(() => {
         eventSource.dispatchState(
           makeBackendStateResponse({
@@ -4623,24 +4649,7 @@ describe("Backend connection state", () => {
             preview: "Streaming reply...",
             session: {
               status: "active",
-              messages: [
-                {
-                  id: "message-user-1",
-                  type: "text",
-                  timestamp: "10:00",
-                  author: "you",
-                  text: "Original prompt",
-                },
-              ],
-              messagesLoaded: true,
               messageCount: 1,
-              pendingPrompts: [
-                {
-                  id: "pending-telegram-1",
-                  timestamp: "10:01",
-                  text: "Queued from mobile Telegram",
-                },
-              ],
               sessionMutationStamp: 2,
             },
           }),
@@ -4648,18 +4657,16 @@ describe("Backend connection state", () => {
       });
 
       expect(
-        await within(activeConversationPage()).findByText(
-          "Queued from mobile Telegram",
-        ),
+        await screen.findByText("Queued from mobile Telegram"),
       ).toBeInTheDocument();
       expect(
         within(activeConversationPage()).getAllByText("Original prompt").length,
       ).toBeGreaterThan(0);
       expect(
-        fetchMock.mock.calls.some(
-          ([input]) => String(input) === "/api/sessions/session-1",
-        ),
-      ).toBe(false);
+        fetchMock.mock.calls.filter(([input]) =>
+          String(input).startsWith("/api/sessions/session-1?"),
+        ).length,
+      ).toBeGreaterThanOrEqual(2);
     } finally {
       restoreGlobal("fetch", originalFetch);
       restoreGlobal("EventSource", originalEventSource);
@@ -4834,9 +4841,8 @@ function makeBackendStateResponse({
         model: "gpt-5",
         status: "idle" as const,
         preview,
-        messages: [],
-        messagesLoaded: true,
-        pendingPrompts: [],
+        messageCount: 0,
+        queuePaused: false,
         ...session,
       },
     ],

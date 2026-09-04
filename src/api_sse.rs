@@ -21,8 +21,8 @@
 //
 // The `fallback_*` helpers exist for the degraded case where the
 // state subscription hasn't emitted yet: we synthesize a minimal
-// `StateResponse` carrying just the current revision so the client
-// can ack + wait. `stable_text_hash` is a tiny FNV-1a hash used to
+// `StateResponse` carrying the current revision and server identity so the
+// client can ack + wait. `stable_text_hash` is a tiny FNV-1a hash used to
 // tag fallback payloads so clients can dedup retransmits.
 // `empty_state_events_response` is the minimal skeleton.
 
@@ -36,14 +36,11 @@ fn stable_text_hash(value: &str) -> String {
     format!("{hash:016x}")
 }
 
-fn empty_state_events_response() -> StateResponse {
+fn empty_state_events_response(server_instance_id: String) -> StateResponse {
+    debug_assert!(!server_instance_id.trim().is_empty());
     StateResponse {
         revision: 0,
-        // Empty string signals "unknown instance" — the client's
-        // restart-detection logic only accepts a revision downgrade
-        // when the id is non-empty AND changed, so this fallback
-        // snapshot cannot accidentally masquerade as a restart signal.
-        server_instance_id: String::new(),
+        server_instance_id,
         codex: CodexState::default(),
         agent_readiness: Vec::new(),
         preferences: AppPreferences::default(),
@@ -115,8 +112,11 @@ struct WorkspaceFilesChangedEvent {
     changes: Vec<WorkspaceFileChangeEvent>,
 }
 
-fn fallback_state_events_response(revision: u64) -> FallbackStateEventPayload {
-    let mut state = empty_state_events_response();
+fn fallback_state_events_response(
+    revision: u64,
+    server_instance_id: String,
+) -> FallbackStateEventPayload {
+    let mut state = empty_state_events_response(server_instance_id);
     state.revision = revision;
     FallbackStateEventPayload {
         sse_fallback: true,
@@ -124,21 +124,21 @@ fn fallback_state_events_response(revision: u64) -> FallbackStateEventPayload {
     }
 }
 
-fn fallback_state_events_payload(revision: u64) -> Result<String, ApiError> {
-    serde_json::to_string(&fallback_state_events_response(revision)).map_err(|err| {
+fn fallback_state_events_payload(
+    revision: u64,
+    server_instance_id: String,
+) -> Result<String, ApiError> {
+    serde_json::to_string(&fallback_state_events_response(revision, server_instance_id)).map_err(|err| {
         ApiError::internal(format!(
             "failed to serialize fallback SSE state snapshot: {err}"
         ))
     })
 }
 
-static EMPTY_STATE_EVENTS_PAYLOAD: LazyLock<String> = LazyLock::new(|| {
-    fallback_state_events_payload(0).expect("empty SSE state payload should serialize")
-});
-
 /// Serializes a metadata-first state snapshot for SSE on the blocking pool
 /// because summary_snapshot() acquires the synchronous app-state mutex.
 async fn state_snapshot_payload_for_sse(state: AppState) -> String {
+    let fallback_server_instance_id = state.server_instance_id.clone();
     run_blocking_api(move || {
         let snapshot = state.summary_snapshot();
         match serde_json::to_string(&snapshot) {
@@ -149,7 +149,10 @@ async fn state_snapshot_payload_for_sse(state: AppState) -> String {
                     snapshot.revision,
                     err
                 );
-                fallback_state_events_payload(snapshot.revision)
+                fallback_state_events_payload(
+                    snapshot.revision,
+                    snapshot.server_instance_id.clone(),
+                )
             }
         }
     })
@@ -159,7 +162,8 @@ async fn state_snapshot_payload_for_sse(state: AppState) -> String {
             "state events warning> failed to build SSE fallback state snapshot: {}",
             err.message
         );
-        EMPTY_STATE_EVENTS_PAYLOAD.clone()
+        fallback_state_events_payload(0, fallback_server_instance_id)
+            .expect("fallback SSE state payload should serialize")
     })
 }
 

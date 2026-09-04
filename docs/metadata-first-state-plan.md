@@ -61,27 +61,25 @@ not depend on remote `/api/state` for transcript repair after this refactor; it
 must hydrate the targeted remote session and then localize the returned session
 id/project/session references before writing the local proxy record.
 
-## Implementation Status - 2026-04-24
+## Implementation Status - 2026-09-03
 
-The current tree has landed the first metadata-first transport slice:
+The current tree has completed the explicit metadata-first wire boundary:
 
-- `/api/state` and SSE `state` snapshots now emit adapter-compatible session
-  summaries (`messages: []`, `messagesLoaded: false`, `messageCount` from the
-  real transcript) instead of full transcripts.
-- `GET /api/sessions/{id}` remains the full transcript hydration route and
-  returns `messagesLoaded: true`.
-- Frontend snapshot reconciliation preserves already-hydrated messages when a
-  summary snapshot arrives.
-- Deltas for `messagesLoaded: false` sessions update metadata and do not force
-  `/api/state` resync loops.
-- Remote snapshot sync preserves an existing local proxy transcript when the
-  incoming remote session is summary-only.
+- `/api/state`, SSE `state`, `SessionCreated`, and
+  `OrchestratorsUpdated.sessions` use the dedicated `StateSessionSummary`
+  shape. The type has required `messageCount` and cannot carry `messages`,
+  prompt history, hydration flags, or queued-prompt bodies.
+- `GET /api/sessions/{id}` remains the bounded transcript hydration route.
+- Frontend summary reconciliation preserves already-hydrated local messages;
+  new summary-only sessions begin unhydrated and request targeted detail.
+- Remote snapshot sync accepts only the current summary contract and preserves
+  an existing local proxy transcript until targeted hydration replaces it.
+- Temporary full-`Session` summary envelopes and older-remote adapters are
+  removed from production code.
 
-Still open from this plan: replace the temporary `Session`-envelope summary
-with a dedicated `StateSessionSummary` type, convert
-`OrchestratorsUpdated.sessions` away from transcript-bearing sessions, finish
-the hydration retry/error state machine, add targeted remote transcript
-hydration, and complete the reader inventory / transcript eviction work.
+Remaining work in this longer plan is limited to later retention/performance
+policy such as transcript eviction and baseline measurement; it does not reopen
+the wire compatibility shapes removed above.
 
 ## Wire Model
 
@@ -112,13 +110,8 @@ struct StateSessionSummary {
     codex_thread_state: Option<CodexThreadState>,
     status: SessionStatus,
     preview: String,
-    pending_prompts: Vec<PendingPrompt>,
+    queue_paused: bool,
     session_mutation_stamp: Option<u64>,
-    // `messages_loaded` is present on the wire only during the Phase 2 → Phase 3
-    // transitional adapter window. See Contract Precisions → Field semantics:
-    // the field is always `false` in summaries and is removed from the wire
-    // type at Phase 5.
-    messages_loaded: bool,
     // `u32` on the wire, not `usize`. See Contract Precisions → Field semantics
     // for the rationale (`usize` has no portable wire width).
     message_count: u32,
@@ -140,8 +133,18 @@ struct StateResponse {
 Frontend target:
 
 ```ts
-export type StateSessionSummary = Omit<Session, "messages"> & {
-  messagesLoaded: false;
+export type StateSessionSummary = Omit<
+  Session,
+  | "messages"
+  | "promptHistory"
+  | "promptHistoryRedacted"
+  | "messagesLoaded"
+  | "messageStartIndex"
+  | "hasOlderHistory"
+  | "hasNewerHistory"
+  | "pendingPrompts"
+  | "messageCount"
+> & {
   messageCount: number;
 };
 
@@ -158,12 +161,10 @@ export type StateResponse = {
 };
 ```
 
-During migration, a temporary frontend-only adapter may convert
-`StateSessionSummary` into the legacy `Session` shape with `messages: []` and
-`messagesLoaded: false` at the UI boundary. The backend should not ship a new
-long-lived "summary but typed as full Session" contract. Any compatibility
-adapter must be documented as temporary and removed once pane, tab, composer,
-and orchestrator surfaces consume summaries directly.
+The frontend reconciles `StateSessionSummary` into its transcript-bearing local
+session store through named summary-specific functions. This is local state
+materialization, not a wire compatibility adapter: broad payloads remain
+statically unable to contain transcript or queue-body fields.
 
 ## Contract Precisions
 

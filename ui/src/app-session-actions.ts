@@ -18,6 +18,7 @@ import {
   createProject,
   createSession,
   fetchAgentCommands,
+  fetchSessionTail,
   fetchState,
   killSession,
   pickProjectRoot,
@@ -94,6 +95,7 @@ import type {
   GeminiApprovalMode,
   JsonValue,
   McpElicitationAction,
+  PendingPrompt,
   Project,
   SandboxMode,
   Session,
@@ -138,6 +140,60 @@ type SuccessfulAdoptActionStateOutcome = Extract<
   AdoptActionStateOutcome,
   "adopted" | "stale-success"
 >;
+
+function samePendingPromptAttachments(
+  left: PendingPrompt["attachments"],
+  right: PendingPrompt["attachments"],
+) {
+  const leftAttachments = left ?? [];
+  const rightAttachments = right ?? [];
+  return (
+    leftAttachments.length === rightAttachments.length &&
+    leftAttachments.every((attachment, index) => {
+      const candidate = rightAttachments[index];
+      return (
+        candidate?.fileName === attachment.fileName &&
+        candidate.mediaType === attachment.mediaType &&
+        candidate.byteSize === attachment.byteSize
+      );
+    })
+  );
+}
+
+function samePendingPromptContent(left: PendingPrompt, right: PendingPrompt) {
+  return (
+    left.text === right.text &&
+    (left.expandedText ?? null) === (right.expandedText ?? null) &&
+    samePendingPromptAttachments(left.attachments, right.attachments)
+  );
+}
+
+function resolveAuthoritativePendingPromptId(
+  optimisticPrompt: PendingPrompt,
+  previousPendingPrompts: PendingPrompt[],
+  authoritativePendingPrompts: PendingPrompt[],
+) {
+  const authoritativeIdsAlreadyVisible = new Set(
+    previousPendingPrompts
+      .filter((prompt) => prompt.localOnly !== true)
+      .map((prompt) => prompt.id),
+  );
+  const optimisticMatchIndex = previousPendingPrompts
+    .filter(
+      (prompt) =>
+        prompt.localOnly === true &&
+        samePendingPromptContent(prompt, optimisticPrompt),
+    )
+    .findIndex((prompt) => prompt.id === optimisticPrompt.id);
+  const matchingAuthoritativePrompts = authoritativePendingPrompts.filter(
+    (prompt) =>
+      !authoritativeIdsAlreadyVisible.has(prompt.id) &&
+      samePendingPromptContent(prompt, optimisticPrompt),
+  );
+  return matchingAuthoritativePrompts[
+    optimisticMatchIndex >= 0 ? optimisticMatchIndex : 0
+  ]?.id;
+}
 
 export function useAppSessionActions(
   params: UseAppSessionActionsParams,
@@ -307,14 +363,10 @@ export function useAppSessionActions(
     return outcome === "adopted" || outcome === "stale-success";
   }
 
-  function sessionAfterActionStateOutcome(
-    sessionId: string,
-    state: StateResponse,
-    outcome: SuccessfulAdoptActionStateOutcome,
-  ) {
-    const sessions =
-      outcome === "adopted" ? state.sessions : sessionsRef.current;
-    return sessions.find((entry) => entry.id === sessionId) ?? null;
+  function sessionAfterActionStateOutcome(sessionId: string) {
+    return (
+      sessionsRef.current.find((entry) => entry.id === sessionId) ?? null
+    );
   }
 
   function adoptSessionActionState(
@@ -1106,6 +1158,35 @@ export function useAppSessionActions(
   }
 
   async function handleCancelQueuedPrompt(sessionId: string, promptId: string) {
+    const previousSession = sessionsRef.current.find(
+      (session) => session.id === sessionId,
+    );
+    const previousPendingPrompts = previousSession?.pendingPrompts ?? [];
+    const requestedPrompt = previousPendingPrompts.find(
+      (prompt) => prompt.id === promptId,
+    );
+    let authoritativePromptId = promptId;
+
+    if (requestedPrompt?.localOnly === true) {
+      try {
+        const response = await fetchSessionTail(sessionId);
+        if (!isMountedRef.current) {
+          return;
+        }
+        authoritativePromptId =
+          resolveAuthoritativePendingPromptId(
+            requestedPrompt,
+            previousPendingPrompts,
+            response.session.pendingPrompts ?? [],
+          ) ?? "";
+      } catch (error) {
+        if (isMountedRef.current) {
+          reportRequestError(error);
+        }
+        return;
+      }
+    }
+
     const previousSessions = sessionsRef.current;
     const next = removeQueuedPromptFromSessions(
       previousSessions,
@@ -1124,8 +1205,19 @@ export function useAppSessionActions(
       }
       setSessions(next);
     }
+    // A local optimistic entry can outlive the server queue entry when the
+    // prompt started running before targeted hydration completed. Removing
+    // that stale local card is sufficient; there is no queued server id left
+    // to cancel.
+    if (!authoritativePromptId) {
+      setRequestError(null);
+      return;
+    }
     try {
-      const state = await cancelQueuedPrompt(sessionId, promptId);
+      const state = await cancelQueuedPrompt(
+        sessionId,
+        authoritativePromptId,
+      );
       if (!isMountedRef.current) {
         return;
       }
@@ -1297,11 +1389,7 @@ export function useAppSessionActions(
       if (!isSuccessfulAdoptActionStateOutcome(adoptionOutcome)) {
         return;
       }
-      const updatedSession = sessionAfterActionStateOutcome(
-        sessionId,
-        state,
-        adoptionOutcome,
-      );
+      const updatedSession = sessionAfterActionStateOutcome(sessionId);
       const nextNotice =
         session.agent === "Codex" && field === "model" && updatedSession
           ? describeCodexModelAdjustmentNotice(session, updatedSession)
@@ -1385,11 +1473,7 @@ export function useAppSessionActions(
         return "skipped";
       }
       if (previousSession?.agent === "Codex") {
-        const refreshedSession = sessionAfterActionStateOutcome(
-          sessionId,
-          state,
-          adoptionOutcome,
-        );
+        const refreshedSession = sessionAfterActionStateOutcome(sessionId);
         const nextNotice = refreshedSession
           ? describeCodexModelAdjustmentNotice(
               previousSession,

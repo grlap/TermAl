@@ -70,6 +70,10 @@ async fn send_message_route_accepts_and_queues_prompt_for_busy_session() {
         .find(|session| session.id == session_id)
         .expect("queued session should be present");
     assert_eq!(session.status, SessionStatus::Active);
+    let session = state
+        .get_session(&session_id)
+        .expect("queued session detail should hydrate")
+        .session;
     assert_eq!(session.pending_prompts.len(), 1);
     assert_eq!(session.pending_prompts[0].text, "Queued route prompt");
     assert_eq!(
@@ -145,7 +149,8 @@ async fn submit_approval_route_updates_claude_session_and_delivers_runtime_respo
         .find(|session| session.id == session_id)
         .expect("updated Claude session should be present");
     let expected_preview = approval_preview_text("Claude", ApprovalDecision::AcceptedForSession);
-    assert_interaction_response_session_hydrated(
+    assert_interaction_response_metadata_and_targeted_detail(
+        &state,
         session,
         SessionStatus::Active,
         &expected_preview,
@@ -247,8 +252,9 @@ fn attach_test_codex_runtime(
     input_rx
 }
 
-fn assert_interaction_response_session_hydrated(
-    session: &Session,
+fn assert_interaction_response_metadata_and_targeted_detail(
+    state: &AppState,
+    session: &StateSessionSummary,
     expected_status: SessionStatus,
     expected_preview: &str,
     expected_message_count: u32,
@@ -257,8 +263,16 @@ fn assert_interaction_response_session_hydrated(
 ) {
     assert_eq!(session.status, expected_status);
     assert_eq!(session.preview, expected_preview);
-    assert!(session.messages_loaded);
     assert_eq!(session.message_count, expected_message_count);
+    let response_session =
+        serde_json::to_value(session).expect("metadata-only interaction response should serialize");
+    assert!(response_session.get("messages").is_none());
+    assert!(response_session.get("pendingPrompts").is_none());
+    let session = state
+        .get_session(&session.id)
+        .expect("interaction response session detail should hydrate")
+        .session;
+    assert!(session.messages_loaded);
     assert_eq!(session.messages.len(), expected_message_count as usize);
     let message = &session.messages[0];
     assert_eq!(message.id(), expected_message_id);
@@ -392,7 +406,8 @@ async fn submit_codex_user_input_route_updates_message_and_publishes_message_upd
         .expect("updated Codex session should be present");
     let expected_preview =
         user_input_request_preview_text(session.agent.name(), InteractionRequestState::Submitted);
-    assert_interaction_response_session_hydrated(
+    assert_interaction_response_metadata_and_targeted_detail(
+        &state,
         session,
         SessionStatus::Active,
         &expected_preview,
@@ -721,6 +736,10 @@ async fn submit_claude_user_input_route_delivers_all_permission_answers() {
         .find(|session| session.id == session_id)
         .expect("updated Claude session should be present");
     assert_eq!(session.status, SessionStatus::Active);
+    let session = state
+        .get_session(&session_id)
+        .expect("updated Claude session detail should hydrate")
+        .session;
     assert!(matches!(
         session.messages.last(),
         Some(Message::UserInputRequest {
@@ -900,6 +919,10 @@ async fn submit_claude_user_input_route_answers_permission_transport_via_allow()
         .find(|session| session.id == session_id)
         .expect("updated Claude session should be present");
     assert_eq!(session.status, SessionStatus::Active);
+    let session = state
+        .get_session(&session_id)
+        .expect("updated Claude session detail should hydrate")
+        .session;
     assert!(matches!(
         session.messages.last(),
         Some(Message::UserInputRequest {
@@ -1048,6 +1071,10 @@ async fn submit_claude_user_input_route_decline_permission_transport_sends_deny(
         .find(|session| session.id == session_id)
         .expect("updated Claude session should be present");
     assert_eq!(session.status, SessionStatus::Active);
+    let session = state
+        .get_session(&session_id)
+        .expect("updated Claude session detail should hydrate")
+        .session;
     // The transcript must durably distinguish a user Skip from an
     // agent-side cancel: the declined card's detail records the choice.
     assert!(matches!(
@@ -1344,7 +1371,8 @@ async fn submit_codex_mcp_elicitation_route_updates_message_and_publishes_messag
         InteractionRequestState::Submitted,
         Some(McpElicitationAction::Decline),
     );
-    assert_interaction_response_session_hydrated(
+    assert_interaction_response_metadata_and_targeted_detail(
+        &state,
         session,
         SessionStatus::Active,
         &expected_preview,
@@ -1473,7 +1501,8 @@ async fn submit_codex_app_request_route_updates_message_and_publishes_message_up
         .expect("updated Codex session should be present");
     let expected_preview =
         codex_app_request_preview_text(session.agent.name(), InteractionRequestState::Submitted);
-    assert_interaction_response_session_hydrated(
+    assert_interaction_response_metadata_and_targeted_detail(
+        &state,
         session,
         SessionStatus::Active,
         &expected_preview,

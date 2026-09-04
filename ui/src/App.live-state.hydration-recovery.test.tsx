@@ -437,7 +437,7 @@ describe("App live state - delta-gap core", () => {
       const scrollIntoViewSpy = stubScrollIntoView();
 
       try {
-        await renderApp();
+        await renderApp({ serveStateSessionHydrationFixtures: false });
         await dispatchOpenedStateEvent(
           latestEventSource(),
           makeStateResponse({
@@ -613,7 +613,7 @@ describe("App live state - delta-gap core", () => {
       );
       const scrollIntoViewSpy = stubScrollIntoView();
       try {
-        await renderApp();
+        await renderApp({ serveStateSessionHydrationFixtures: false });
         const eventSource = latestEventSource();
         await dispatchOpenedStateEvent(
           eventSource,
@@ -868,7 +868,14 @@ describe("App live state - delta-gap core", () => {
           }
           if (requestUrl.pathname === "/api/sessions/session-1") {
             sessionHydrationFetchCount += 1;
-            return firstHydration.promise;
+            if (sessionHydrationFetchCount === 1) {
+              return firstHydration.promise;
+            }
+            return jsonResponse({
+              revision: 6,
+              serverInstanceId: "current-instance",
+              session: currentFullSession,
+            });
           }
           if (requestUrl.pathname === "/api/git/status") {
             return jsonResponse({
@@ -938,7 +945,7 @@ describe("App live state - delta-gap core", () => {
       );
       const scrollIntoViewSpy = stubScrollIntoView();
       try {
-        await renderApp();
+        await renderApp({ serveStateSessionHydrationFixtures: false });
         const eventSource = latestEventSource();
         await dispatchOpenedStateEvent(
           eventSource,
@@ -1200,7 +1207,7 @@ describe("App live state - delta-gap core", () => {
       );
       const scrollIntoViewSpy = stubScrollIntoView();
       try {
-        await renderApp();
+        await renderApp({ serveStateSessionHydrationFixtures: false });
         const eventSource = latestEventSource();
         await dispatchOpenedStateEvent(
           eventSource,
@@ -1445,7 +1452,7 @@ describe("App live state - delta-gap core", () => {
       );
       const scrollIntoViewSpy = stubScrollIntoView();
       try {
-        await renderApp();
+        await renderApp({ serveStateSessionHydrationFixtures: false });
         await dispatchOpenedStateEvent(latestEventSource(), state);
 
         await waitFor(() => {

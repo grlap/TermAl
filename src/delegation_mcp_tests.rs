@@ -25,7 +25,6 @@ pub(crate) struct TestMcpHttpRequest {
 fn serialized_delegation_child_state(
     child_session_id: &str,
     mode: DelegationMode,
-    review_result_required: bool,
 ) -> Value {
     let record = DelegationRecord {
         id: "delegation-reviewer-fixture".to_owned(),
@@ -48,9 +47,7 @@ fn serialized_delegation_child_state(
         review_result_recovery_probe_attempt: None,
         review_result_recovery_error: None,
         review_result_schema_version: None,
-        review_result_required,
-        review_result_submission_attempt: u32::from(review_result_required),
-        result_parser_version: 0,
+        review_result_submission_attempt: u32::from(mode == DelegationMode::Reviewer),
     };
     let delegation = serde_json::to_value(delegation_state_summary_from_record(&record))
         .expect("broad-state delegation capability should serialize");
@@ -763,11 +760,8 @@ fn delegation_mcp_list_sessions_returns_root_sessions_only() {
 
 #[test]
 fn delegation_mcp_hides_and_rejects_peer_tools_for_delegation_child() {
-    let state_snapshot = serialized_delegation_child_state(
-        "session-parent",
-        DelegationMode::Reviewer,
-        true,
-    );
+    let state_snapshot =
+        serialized_delegation_child_state("session-parent", DelegationMode::Reviewer);
     let (base_url, _requests, server) = spawn_test_mcp_http_server(1, move |request| {
         assert_eq!(request.method, "GET");
         assert_eq!(request.path, "/api/state");
@@ -874,8 +868,7 @@ fn delegation_mcp_hides_and_rejects_peer_tools_for_unlinked_durable_child() {
 fn delegation_mcp_hides_and_rejects_review_submission_for_non_reviewer_child() {
     for mode in [DelegationMode::Explorer, DelegationMode::Worker] {
         let child_session_id = format!("session-non-reviewer-{mode:?}").to_lowercase();
-        let state_snapshot =
-            serialized_delegation_child_state(&child_session_id, mode, false);
+        let state_snapshot = serialized_delegation_child_state(&child_session_id, mode);
         let (base_url, _requests, server) =
             spawn_test_mcp_http_server(1, move |request| {
                 assert_eq!(request.method, "GET");
@@ -1797,7 +1790,7 @@ fn delegation_mcp_spawn_session_posts_parent_scoped_request() {
             "agent": "Codex",
             "model": "gpt-5.4",
             "mode": "reviewer",
-            "writePolicy": "readOnly"
+            "writePolicy": { "kind": "readOnly" }
         }))
         .expect("spawn should post delegation request");
 
@@ -1805,6 +1798,52 @@ fn delegation_mcp_spawn_session_posts_parent_scoped_request() {
     assert_eq!(response["childSessionId"], "session-child");
     server.join().expect("test server should join");
     assert_eq!(requests.lock().expect("request log mutex poisoned").len(), 1);
+}
+
+#[test]
+fn delegation_mcp_spawn_session_rejects_legacy_string_write_policy() {
+    let bridge = TermalDelegationMcpBridge::new(
+        "session-parent".to_owned(),
+        "http://127.0.0.1:1".to_owned(),
+    )
+    .expect("bridge should initialize");
+
+    let error = bridge
+        .tool_spawn_session(json!({
+            "prompt": "Review this patch",
+            "writePolicy": "readOnly"
+        }))
+        .expect_err("legacy string writePolicy must fail before transport");
+    assert!(
+        error
+            .to_string()
+            .contains("writePolicy must use the canonical tagged object shape"),
+        "unexpected error: {error:#}"
+    );
+}
+
+#[test]
+fn delegation_mcp_spawn_session_rejects_worktree_policy_without_owned_paths() {
+    let bridge = TermalDelegationMcpBridge::new(
+        "session-parent".to_owned(),
+        "http://127.0.0.1:1".to_owned(),
+    )
+    .expect("bridge should initialize");
+
+    for kind in ["sharedWorktree", "isolatedWorktree"] {
+        let error = bridge
+            .tool_spawn_session(json!({
+                "prompt": "Review this patch",
+                "writePolicy": { "kind": kind }
+            }))
+            .expect_err("worktree writePolicy without ownedPaths must fail before transport");
+        let rendered = format!("{error:#}");
+        assert!(
+            rendered.contains("writePolicy must use the canonical tagged object shape")
+                && rendered.contains("ownedPaths"),
+            "unexpected {kind} error: {error:#}"
+        );
+    }
 }
 
 #[test]
@@ -1850,6 +1889,27 @@ fn delegation_mcp_spawn_schema_documents_mode_and_agent_boundaries() {
             && mode_description.contains("ACP agents should pass explorer"),
         "spawn input schema must teach callers the same constraints as the tool description"
     );
+    let policy_variants = spawn
+        .pointer("/inputSchema/properties/writePolicy/oneOf")
+        .and_then(Value::as_array)
+        .expect("writePolicy should advertise exact tagged variants");
+    assert_eq!(policy_variants.len(), 3);
+    assert_eq!(
+        policy_variants[0].pointer("/properties/kind/const"),
+        Some(&json!("readOnly"))
+    );
+    assert_eq!(policy_variants[0]["required"], json!(["kind"]));
+    for (variant, kind) in policy_variants[1..]
+        .iter()
+        .zip(["sharedWorktree", "isolatedWorktree"])
+    {
+        assert_eq!(
+            variant.pointer("/properties/kind/const"),
+            Some(&json!(kind))
+        );
+        assert_eq!(variant["required"], json!(["kind", "ownedPaths"]));
+        assert_eq!(variant["properties"]["ownedPaths"]["minItems"], 1);
+    }
 }
 
 #[test]
@@ -2325,7 +2385,7 @@ fn delegation_mcp_spawn_session_explicit_options_override_resolved_defaults() {
             "prompt": "/review-code",
             "title": "Explicit title",
             "mode": "reviewer",
-            "writePolicy": "readOnly"
+            "writePolicy": { "kind": "readOnly" }
         }))
         .expect("explicit spawn options should override resolved defaults");
 

@@ -201,28 +201,16 @@ fn delegation_explicit_model_is_preserved_verbatim() {
 }
 
 #[test]
-fn delegation_write_policy_accepts_legacy_snake_case_discriminators() {
+fn delegation_write_policy_accepts_only_the_canonical_tagged_shape() {
     let read_only: DelegationWritePolicy =
-        serde_json::from_value(json!({ "kind": "read_only" })).expect("read_only alias");
+        serde_json::from_value(json!({ "kind": "readOnly" })).expect("readOnly policy");
     assert_eq!(read_only, DelegationWritePolicy::ReadOnly);
 
-    let read_only_string: DelegationWritePolicy =
-        serde_json::from_value(json!("readOnly")).expect("readOnly string alias");
-    assert_eq!(read_only_string, DelegationWritePolicy::ReadOnly);
-
-    let read_only_wrapper: DelegationWritePolicy =
-        serde_json::from_value(json!({ "readOnly": true })).expect("readOnly wrapper alias");
-    assert_eq!(read_only_wrapper, DelegationWritePolicy::ReadOnly);
-
-    let read_only_empty: DelegationWritePolicy =
-        serde_json::from_value(json!({})).expect("empty object should default read-only");
-    assert_eq!(read_only_empty, DelegationWritePolicy::ReadOnly);
-
     let shared: DelegationWritePolicy = serde_json::from_value(json!({
-        "kind": "shared_worktree",
+        "kind": "sharedWorktree",
         "ownedPaths": ["src"]
     }))
-    .expect("shared_worktree alias");
+    .expect("sharedWorktree policy");
     assert_eq!(
         shared,
         DelegationWritePolicy::SharedWorktree {
@@ -231,11 +219,11 @@ fn delegation_write_policy_accepts_legacy_snake_case_discriminators() {
     );
 
     let isolated: DelegationWritePolicy = serde_json::from_value(json!({
-        "kind": "isolated_worktree",
+        "kind": "isolatedWorktree",
         "ownedPaths": ["src"],
         "worktreePath": "C:/tmp/delegation-worktree"
     }))
-    .expect("isolated_worktree alias");
+    .expect("isolatedWorktree policy");
     assert_eq!(
         isolated,
         DelegationWritePolicy::IsolatedWorktree {
@@ -254,21 +242,6 @@ fn delegation_write_policy_accepts_legacy_snake_case_discriminators() {
         DelegationWritePolicy::IsolatedWorktree {
             owned_paths: Vec::new(),
             worktree_path: None,
-        }
-    );
-
-    let isolated_wrapper: DelegationWritePolicy = serde_json::from_value(json!({
-        "isolatedWorktree": {
-            "ownedPaths": ["src"],
-            "worktreePath": "C:/tmp/delegation-worktree"
-        }
-    }))
-    .expect("isolatedWorktree wrapper alias");
-    assert_eq!(
-        isolated_wrapper,
-        DelegationWritePolicy::IsolatedWorktree {
-            owned_paths: vec!["src".to_owned()],
-            worktree_path: Some("C:/tmp/delegation-worktree".to_owned()),
         }
     );
 }
@@ -312,14 +285,28 @@ fn delegation_write_policy_rejects_invalid_shapes() {
 
     assert_rejected(
         json!({ "readOnly": true, "isolatedWorktree": {} }),
-        "writePolicy object must include kind",
+        "missing field `kind`",
     );
     assert_rejected(
         json!({ "kind": "dangerousWorktree" }),
-        "unsupported writePolicy kind",
+        "unknown variant `dangerousWorktree`",
     );
-    assert_rejected(json!({ "kind": true }), "writePolicy.kind must be a string");
-    assert_rejected(json!(true), "writePolicy must be a string or object");
+    assert_rejected(json!({ "kind": true }), "expected variant identifier");
+    assert_rejected(json!("readOnly"), "expected internally tagged enum");
+    assert_rejected(json!({}), "missing field `kind`");
+    assert_rejected(json!({ "readOnly": true }), "missing field `kind`");
+    assert_rejected(
+        json!({ "kind": "read_only" }),
+        "unknown variant `read_only`",
+    );
+    assert_rejected(
+        json!({ "kind": "readOnly", "ownedPaths": [] }),
+        "unknown field `ownedPaths`",
+    );
+    assert_rejected(
+        json!({ "kind": "isolatedWorktree", "owned_paths": [] }),
+        "unknown field `owned_paths`",
+    );
 }
 
 #[test]

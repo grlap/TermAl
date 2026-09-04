@@ -781,7 +781,10 @@ describe("App live state — reconnect", () => {
 
       expect(stateFetchCallCount()).toBe(2);
 
-      expect(screen.getAllByText("Recovered current.")).toHaveLength(2);
+      // Broad recovery state is transcript-free, so this value appears in the
+      // sidebar preview only; the assertion still proves the older queued
+      // snapshot did not win.
+      expect(screen.getAllByText("Recovered current.")).toHaveLength(1);
       expect(screen.queryByText("Older snapshot.")).not.toBeInTheDocument();
     } finally {
       vi.useRealTimers();
@@ -1122,7 +1125,7 @@ describe("App live state — reconnect", () => {
       expect(stateRequestCount).toBe(2);
       expect(
         screen.getAllByText("Recovered after queued reconnect fallback."),
-      ).toHaveLength(2);
+      ).toHaveLength(1);
       expect(
         screen.getAllByText("Recovered queued reconnect session"),
       ).toHaveLength(2);
@@ -2211,6 +2214,11 @@ describe("App live state — reconnect", () => {
     );
     const fetchSessionSpy = vi
       .spyOn(api, "fetchSessionTail")
+      .mockResolvedValueOnce({
+        revision: 5,
+        serverInstanceId: "current-instance",
+        session: initialSession,
+      })
       .mockResolvedValue({
         revision: 6,
         serverInstanceId: "replacement-instance",
@@ -3244,7 +3252,7 @@ describe("App live state — reconnect", () => {
       expect(stateFetchCallCount()).toBe(1);
       expect(
         screen.getAllByText("Here after stale reconnect state."),
-      ).toHaveLength(2);
+      ).toHaveLength(1);
       expect(
         screen.queryByText("Working on the current turn..."),
       ).not.toBeInTheDocument();

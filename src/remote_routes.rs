@@ -598,7 +598,9 @@ impl AppState {
         }
     }
 
-    fn remote_delta_session_payload_fingerprint(session: &Session) -> Option<String> {
+    fn remote_delta_session_payload_fingerprint(
+        session: &StateSessionSummary,
+    ) -> Option<String> {
         let mut normalized = session.clone();
         // `localize_remote_session` discards inbound wire ownership, so replay
         // identity must ignore it too.

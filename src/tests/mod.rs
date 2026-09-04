@@ -1057,12 +1057,62 @@ fn insert_test_remote_connection(
         );
 }
 
+/// Test fixture that keeps full sessions available to targeted-response tests
+/// while serializing/converting through the canonical transcript-free broad
+/// state contract.
+#[derive(Clone)]
+struct TestRemoteState {
+    state: StateResponse,
+    sessions: Vec<Session>,
+}
+
+impl TestRemoteState {
+    fn session_summaries(&self) -> Vec<StateSessionSummary> {
+        self.sessions
+            .iter()
+            .map(test_state_session_summary_from_session)
+            .collect()
+    }
+
+    fn into_state_response(mut self) -> StateResponse {
+        self.state.sessions = self.session_summaries();
+        self.state
+    }
+
+    fn as_state_response(&self) -> StateResponse {
+        self.clone().into_state_response()
+    }
+}
+
+impl std::ops::Deref for TestRemoteState {
+    type Target = StateResponse;
+
+    fn deref(&self) -> &Self::Target {
+        &self.state
+    }
+}
+
+impl std::ops::DerefMut for TestRemoteState {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.state
+    }
+}
+
+impl Serialize for TestRemoteState {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.as_state_response().serialize(serializer)
+    }
+}
+
 fn sample_remote_orchestrator_state(
     remote_project_id: &str,
     root_path: &str,
     revision: u64,
     status: OrchestratorInstanceStatus,
-) -> StateResponse {
+) -> TestRemoteState {
     let draft = sample_orchestrator_template_draft();
     let template = OrchestratorTemplate {
         id: "remote-template-1".to_owned(),
@@ -1174,48 +1224,92 @@ fn sample_remote_orchestrator_state(
             created_at: "2026-04-03 10:05:00".to_owned(),
         }]
     };
-    StateResponse {
-        revision,
-        // Tests simulate a remote snapshot; a stable stub id is fine
-        // since remote-state sync doesn't consume the field today.
-        server_instance_id: "remote-test-instance".to_owned(),
-        codex: CodexState::default(),
-        agent_readiness: Vec::new(),
-        preferences: AppPreferences::default(),
-        projects: Vec::new(),
-        workspaces: Vec::new(),
-        orchestrators: vec![OrchestratorInstance {
-            id: "remote-orchestrator-1".to_owned(),
-            remote_id: None,
-            remote_orchestrator_id: None,
-            template_id: template.id.clone(),
-            project_id: remote_project_id.to_owned(),
-            template_snapshot: template,
-            status,
-            session_instances: draft
-                .sessions
-                .iter()
-                .map(|template_session| OrchestratorSessionInstance {
-                    template_session_id: template_session.id.clone(),
-                    session_id: remote_session_ids_by_template_session_id[&template_session.id]
-                        .clone(),
-                    last_completion_revision: None,
-                    last_delivered_completion_revision: None,
-                })
-                .collect(),
-            pending_transitions,
-            created_at: "2026-04-03 10:00:00".to_owned(),
-            error_message: None,
-            completed_at: (status == OrchestratorInstanceStatus::Stopped)
-                .then_some("2026-04-03 10:15:00".to_owned()),
-            stop_in_progress: false,
-            active_session_ids_during_stop: None,
-            stopped_session_ids_during_stop: Vec::new(),
-        }],
+    TestRemoteState {
         sessions,
-        delegations: Vec::new(),
-        delegation_waits: Vec::new(),
-        pending_engram_mcp_revocation_session_ids: Vec::new(),
+        state: StateResponse {
+            revision,
+            // Tests simulate a remote snapshot; a stable stub id is fine
+            // since remote-state sync doesn't consume the field today.
+            server_instance_id: "remote-test-instance".to_owned(),
+            codex: CodexState::default(),
+            agent_readiness: Vec::new(),
+            preferences: AppPreferences::default(),
+            projects: Vec::new(),
+            workspaces: Vec::new(),
+            orchestrators: vec![OrchestratorInstance {
+                id: "remote-orchestrator-1".to_owned(),
+                remote_id: None,
+                remote_orchestrator_id: None,
+                template_id: template.id.clone(),
+                project_id: remote_project_id.to_owned(),
+                template_snapshot: template,
+                status,
+                session_instances: draft
+                    .sessions
+                    .iter()
+                    .map(|template_session| OrchestratorSessionInstance {
+                        template_session_id: template_session.id.clone(),
+                        session_id: remote_session_ids_by_template_session_id[&template_session.id]
+                            .clone(),
+                        last_completion_revision: None,
+                        last_delivered_completion_revision: None,
+                    })
+                    .collect(),
+                pending_transitions,
+                created_at: "2026-04-03 10:00:00".to_owned(),
+                error_message: None,
+                completed_at: (status == OrchestratorInstanceStatus::Stopped)
+                    .then_some("2026-04-03 10:15:00".to_owned()),
+                stop_in_progress: false,
+                active_session_ids_during_stop: None,
+                stopped_session_ids_during_stop: Vec::new(),
+            }],
+            sessions: Vec::new(),
+            delegations: Vec::new(),
+            delegation_waits: Vec::new(),
+            pending_engram_mcp_revocation_session_ids: Vec::new(),
+        },
+    }
+}
+
+fn test_state_session_summary_from_session(session: &Session) -> StateSessionSummary {
+    StateSessionSummary {
+        id: session.id.clone(),
+        name: session.name.clone(),
+        emoji: session.emoji.clone(),
+        agent: session.agent,
+        workdir: session.workdir.clone(),
+        project_id: session.project_id.clone(),
+        remote_id: session.remote_id.clone(),
+        model: session.model.clone(),
+        model_options: session.model_options.clone(),
+        approval_policy: session.approval_policy,
+        reasoning_effort: session.reasoning_effort,
+        codex_fast_mode: session.codex_fast_mode,
+        sandbox_mode: session.sandbox_mode,
+        cursor_mode: session.cursor_mode,
+        claude_effort: session.claude_effort,
+        claude_approval_mode: session.claude_approval_mode,
+        gemini_approval_mode: session.gemini_approval_mode,
+        opencode_model: session.opencode_model.clone(),
+        opencode_effort: session.opencode_effort.clone(),
+        opencode_current_effort: session.opencode_current_effort.clone(),
+        opencode_effort_options: session.opencode_effort_options.clone(),
+        opencode_mode: session.opencode_mode.clone(),
+        opencode_current_mode: session.opencode_current_mode.clone(),
+        opencode_mode_options: session.opencode_mode_options.clone(),
+        external_session_id: session.external_session_id.clone(),
+        agent_commands_revision: session.agent_commands_revision,
+        codex_thread_state: session.codex_thread_state,
+        live_activity: session.live_activity.clone(),
+        engram_boot_recovery_pending: session.engram_boot_recovery_pending,
+        status: session.status,
+        preview: session.preview.clone(),
+        message_count: session.message_count,
+        markers: session.markers.clone(),
+        queue_paused: session.queue_paused,
+        session_mutation_stamp: session.session_mutation_stamp,
+        parent_delegation_id: session.parent_delegation_id.clone(),
     }
 }
 

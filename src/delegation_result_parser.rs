@@ -1,5 +1,6 @@
-// Owns semantic parsing and degraded-result synthesis for delegated reviewer
-// result packets.
+// Owns semantic parsing and degraded-result synthesis for ordinary delegated
+// child result packets. Reviewer results come only from the validated mailbox
+// submission contract and never use this prose parser as terminal truth.
 // Does not own delegation lifecycle, persistence, repair admission, or parent
 // card updates.
 // Split from src/delegations.rs so packet-format tolerance can evolve without

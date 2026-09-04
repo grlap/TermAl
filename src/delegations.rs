@@ -22,10 +22,10 @@ const MAX_DELEGATION_MODEL_CHARS: usize = 200;
 const MAX_DELEGATION_CWD_CHARS: usize = 4096;
 // Public summaries ride in `/api/state`; full summaries stay behind result reads.
 const MAX_DELEGATION_PUBLIC_SUMMARY_CHARS: usize = 1000;
-// Synthesized no-packet results can contain a full review transcript; keep the
+// Synthesized no-packet results can contain a full child transcript; keep the
 // stored result summary bounded before persisting and rebroadcasting it.
 const MAX_DELEGATION_RESULT_SUMMARY_CHARS: usize = 8000;
-// Keep parsed reviewer output bounded alongside the summary cap.
+// Keep parsed ordinary result packets bounded alongside the summary cap.
 const MAX_DELEGATION_RESULT_FINDINGS: usize = 100;
 // Full child output is intentionally separate from the compact result packet.
 // Keep pages small enough to survive MCP/tool-output limits while allowing a
@@ -35,10 +35,6 @@ const MIN_DELEGATION_RESULT_OUTPUT_PAGE_BYTES: usize = 256;
 const MAX_DELEGATION_RESULT_OUTPUT_PAGE_BYTES: usize = 8 * 1024;
 // Result packets are expected near the end of long assistant output.
 const DELEGATION_RESULT_PACKET_SEARCH_BYTES: usize = 32 * 1024;
-// Persisted terminal results are reparsed once when this version increases.
-// This lets parser upgrades repair old packets without rescanning clean child
-// transcripts on every result/status poll.
-const DELEGATION_RESULT_PARSER_VERSION: u32 = 5;
 // Phase 1 starts children immediately but still enforces simple fan-out limits.
 const MAX_RUNNING_DELEGATIONS_PER_PARENT: usize = 4;
 // Keep nesting shallow until delegation ownership/scheduling is explicit.
@@ -616,7 +612,6 @@ impl AppState {
         let child_session = Self::wire_session_from_record(&inner.sessions[child_index]);
         let child_delta_session =
             Self::wire_session_summary_from_record(&inner.sessions[child_index]);
-        let review_result_required = mode == DelegationMode::Reviewer;
         let record = DelegationRecord {
             id: delegation_id.clone(),
             parent_session_id,
@@ -638,13 +633,11 @@ impl AppState {
             review_result_recovery_probe_attempt: None,
             review_result_recovery_error: None,
             review_result_schema_version: None,
-            review_result_required,
-            review_result_submission_attempt: if review_result_required {
+            review_result_submission_attempt: if mode == DelegationMode::Reviewer {
                 1
             } else {
                 0
             },
-            result_parser_version: 0,
         };
         let delegation_index = inner.delegations.len();
         inner.delegations.push(record.clone());
@@ -938,25 +931,17 @@ impl AppState {
         };
         self.recover_durable_delegation_review_submission(&child_session_id)?;
 
-        // Refresh while the result is unavailable or its parser version is
-        // stale. After terminalization and any one-time parser repair, every
-        // continuation page reads the snapshot directly instead of repeating
-        // the full child lifecycle scan. This remains independent of the
-        // requested offset so callers may begin at any valid UTF-8 boundary.
+        // Refresh while the result is unavailable. Terminal results are
+        // immutable: reviewer truth comes from the validated mailbox payload,
+        // while non-reviewer results are captured when their turn settles.
+        // This remains independent of the requested offset so callers may
+        // begin at any valid UTF-8 boundary.
         let needs_result_refresh = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let index =
                 find_parent_delegation_index_locked(&inner, parent_session_id, delegation_id)?;
             let delegation = &inner.delegations[index];
             !delegation_is_terminal(delegation.status) || delegation.result.is_none()
-                || (delegation.status == DelegationStatus::Completed
-                    && delegation
-                        .result
-                        .as_ref()
-                        .is_some_and(|result| result.status == DelegationStatus::Completed)
-                    && delegation.review_result_schema_version.is_none()
-                    && !delegation.review_result_required
-                    && delegation.result_parser_version < DELEGATION_RESULT_PARSER_VERSION)
         };
         if needs_result_refresh {
             self.get_delegation_result(parent_session_id, delegation_id)?;
@@ -2033,7 +2018,7 @@ Final answer requirements:\n\
         write_policy,
         record.prompt,
     );
-    if record.review_result_required {
+    if record.mode == DelegationMode::Reviewer {
         prompt.push_str("\n\n");
         prompt.push_str(DELEGATION_REVIEW_RESULT_PROTOCOL_INSTRUCTIONS.trim());
     }
@@ -2057,7 +2042,6 @@ impl AppState {
                 delegation.child_session_id == child_session_id
                     && delegation.mode == DelegationMode::Reviewer
                     && delegation.status == DelegationStatus::Running
-                    && delegation.review_result_required
                     && inner
                         .find_session_index(child_session_id)
                         .and_then(|index| inner.sessions.get(index))
@@ -2615,7 +2599,7 @@ fn refresh_delegation_from_child_locked(
 ) -> Option<DelegationLifecycleDelta> {
     let delegation = inner.delegations.get(delegation_index)?.clone();
     if delegation_is_terminal(delegation.status) {
-        return repair_terminal_delegation_result_locked(inner, delegation_index, &delegation);
+        return None;
     }
 
     let child_outcome = delegation_child_outcome(inner, &delegation.child_session_id);
@@ -2698,7 +2682,7 @@ fn refresh_delegation_from_child_locked(
             notes,
         } => {
             let completed_at = stamp_now();
-            if delegation.review_result_required {
+            if delegation.mode == DelegationMode::Reviewer {
                 let unavailable_summary =
                     "Reviewer completed without the required structured result. Inspect the full child output; TermAl did not classify this review as clean.";
                 let mut unavailable_notes = vec![
@@ -2732,7 +2716,6 @@ fn refresh_delegation_from_child_locked(
                     record.result = Some(result.clone());
                     record.submitted_review_result = None;
                     record.review_result_schema_version = None;
-                    record.result_parser_version = DELEGATION_RESULT_PARSER_VERSION;
                 }
                 inner.sync_running_read_only_delegation_index(delegation_index);
                 inner.mark_delegation_mutated(delegation_index);
@@ -2776,7 +2759,6 @@ fn refresh_delegation_from_child_locked(
                 record.review_result_recovery_probe_attempt = None;
                 record.review_result_recovery_error = None;
                 record.review_result_schema_version = None;
-                record.result_parser_version = DELEGATION_RESULT_PARSER_VERSION;
             }
             inner.sync_running_read_only_delegation_index(delegation_index);
             inner.mark_delegation_mutated(delegation_index);
@@ -2815,73 +2797,6 @@ fn refresh_delegation_from_child_locked(
     }
 }
 
-/// Reparse a completed child's retained transcript once after a parser upgrade.
-/// The version stamp is persisted even when the current parser produces the
-/// same result, so clean reviews never become an unbounded poll-time scan.
-fn repair_terminal_delegation_result_locked(
-    inner: &mut StateInner,
-    delegation_index: usize,
-    delegation: &DelegationRecord,
-) -> Option<DelegationLifecycleDelta> {
-    let existing = delegation.result.as_ref()?;
-    if delegation.status != DelegationStatus::Completed
-        || existing.status != DelegationStatus::Completed
-        || delegation.review_result_schema_version.is_some()
-        || delegation.review_result_required
-        || delegation.result_parser_version >= DELEGATION_RESULT_PARSER_VERSION
-    {
-        return None;
-    }
-    let reparsed = match delegation_child_outcome(inner, &delegation.child_session_id) {
-        DelegationChildOutcome::Completed {
-            summary,
-            findings,
-            changed_files,
-            commands_run,
-            notes,
-        } => Some(DelegationResult {
-            delegation_id: delegation.id.clone(),
-            child_session_id: delegation.child_session_id.clone(),
-            status: DelegationStatus::Completed,
-            summary,
-            findings,
-            changed_files,
-            commands_run,
-            notes,
-        }),
-        _ => None,
-    };
-    let result_changed = reparsed
-        .as_ref()
-        .is_some_and(|reparsed| reparsed != existing);
-    {
-        let record = inner.delegations.get_mut(delegation_index)?;
-        record.result_parser_version = DELEGATION_RESULT_PARSER_VERSION;
-        if let Some(reparsed) = reparsed.filter(|_| result_changed) {
-            record.result = Some(reparsed);
-        }
-    }
-    inner.mark_delegation_mutated(delegation_index);
-    let parent_card_delta = if result_changed {
-        let repaired = inner.delegations.get(delegation_index)?.result.as_ref()?;
-        let public_summary = compact_delegation_public_summary(&repaired.summary);
-        update_parent_delegation_card_locked(
-            inner,
-            delegation,
-            ParallelAgentStatus::Completed,
-            public_summary,
-        )
-    } else {
-        None
-    };
-    Some(DelegationLifecycleDelta::Updated {
-        delegation_id: delegation.id.clone(),
-        status: DelegationStatus::Completed,
-        updated_at: stamp_now(),
-        parent_card_delta,
-    })
-}
-
 /// Re-arms a terminal delegation back to Running for a follow-up turn.
 ///
 /// `refresh_delegation_from_child_locked` deliberately skips terminal delegations, so a
@@ -2906,13 +2821,12 @@ fn rearm_terminal_delegation_for_followup_locked(
         record.review_result_recovery_probe_attempt = None;
         record.review_result_recovery_error = None;
         record.review_result_schema_version = None;
-        if record.review_result_required {
+        if record.mode == DelegationMode::Reviewer {
             record.review_result_submission_attempt = record
                 .review_result_submission_attempt
                 .saturating_add(1)
                 .max(1);
         }
-        record.result_parser_version = 0;
         record.started_at = Some(updated_at.clone());
     }
     inner.sync_running_read_only_delegation_index(delegation_index);
@@ -4328,8 +4242,7 @@ fn delegation_summary_from_record(record: &DelegationRecord) -> DelegationSummar
         created_at: record.created_at.clone(),
         started_at: record.started_at.clone(),
         completed_at: record.completed_at.clone(),
-        result_parser_version: record.result_parser_version,
-        review_result_required: record.review_result_required,
+        review_result_required: record.mode == DelegationMode::Reviewer,
         post_submission_transport_error: record.post_submission_transport_error.clone(),
         review_result_recovery_error: record.review_result_recovery_error.clone(),
         result: record.result.as_ref().map(delegation_result_summary),
@@ -4341,7 +4254,7 @@ fn delegation_state_summary_from_record(record: &DelegationRecord) -> Delegation
         id: record.id.clone(),
         child_session_id: record.child_session_id.clone(),
         mode: record.mode,
-        review_result_required: record.review_result_required,
+        review_result_required: record.mode == DelegationMode::Reviewer,
     }
 }
 

@@ -117,6 +117,7 @@ import {
   applyDelegationParentIdsFromSummaries,
   reconcileSessions,
   reconcileSingleSession,
+  reconcileStateSessionSummaries,
 } from "./session-reconcile";
 import {
   openSessionInWorkspaceState,
@@ -131,6 +132,7 @@ import type {
   Project,
   RemoteConfig,
   Session,
+  StateSessionSummary,
   WorkspaceFilesChangedEvent,
 } from "./types";
 
@@ -305,6 +307,7 @@ export function useAppLiveState(
     lastSeenServerInstanceIdRef.current,
   );
   const hydrationRestartResyncPendingRef = useRef(false);
+  const hydrationAfterStateResyncSessionIdsRef = useRef(new Set<string>());
   const hydrationRetryTimersRef = useRef<Map<string, number>>(new Map());
   const hydrationRetryAttemptsRef = useRef<Map<string, number>>(new Map());
   const hydrationCappedRetryAttemptsRef = useRef<Map<string, number>>(
@@ -568,14 +571,18 @@ export function useAppLiveState(
   }
 
   function adoptSessions(
-    nextSessions: Session[],
+    nextSessions: StateSessionSummary[],
     options?: AdoptSessionsOptions,
   ) {
     const previousSessions = sessionsRef.current;
-    const mergedSessions = reconcileSessions(previousSessions, nextSessions, {
-      disableMutationStampFastPath: options?.disableMutationStampFastPath,
-      forceMessagesUnloaded: options?.forceMessagesUnloaded,
-    });
+    const mergedSessions = reconcileStateSessionSummaries(
+      previousSessions,
+      nextSessions,
+      {
+        disableMutationStampFastPath: options?.disableMutationStampFastPath,
+        forceMessagesUnloaded: options?.forceMessagesUnloaded,
+      },
+    );
     const pendingOpenSessionId =
       options?.openSessionId ?? pendingRecoveryOpenSessionIdRef.current;
     const pendingPaneId =
@@ -1163,6 +1170,7 @@ export function useAppLiveState(
               completeSessionHydration(sessionId);
               return;
             case "restartResync":
+              hydrationAfterStateResyncSessionIdsRef.current.add(sessionId);
               hydrationRestartResyncPendingRef.current = true;
               requestActionRecoveryResyncRef.current();
               return;
@@ -1561,8 +1569,14 @@ export function useAppLiveState(
     );
     // Local state adoptions can resume or create active sessions before any SSE arrives.
     syncAdoptedLiveSessionResumeWatchdogBaselinesRef.current(
-      nextState.sessions,
+      sessionsRef.current,
     );
+    for (const sessionId of hydrationAfterStateResyncSessionIdsRef.current) {
+      hydrationAfterStateResyncSessionIdsRef.current.delete(sessionId);
+      if (sessionStillNeedsHydration(sessionId)) {
+        startSessionHydration(sessionId, { queueAfterCurrent: true });
+      }
+    }
     if (requestedOpenSessionId) {
       const openedSession = nextState.sessions.find(
         (session) => session.id === requestedOpenSessionId,

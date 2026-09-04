@@ -824,7 +824,7 @@ describe("App live state - visibility and wake recovery", () => {
       await settleAsyncUi();
       expect(watchdogTriggered).toBe(true);
       expect(stateFetchCallCount()).toBe(1);
-      expect(screen.getAllByText("Here after wake.")).toHaveLength(2);
+      expect(screen.getAllByText("Here after wake.")).toHaveLength(1);
       expect(
         screen.queryByText("Working on the current turn..."),
       ).not.toBeInTheDocument();
@@ -1144,6 +1144,29 @@ describe("App live state - visibility and wake recovery", () => {
       ).toBeInTheDocument();
 
       await clickAndSettle(screen.getByRole("button", { name: "Approve" }));
+      act(() => {
+        eventSource.dispatchNamedEvent("delta", {
+          type: "messageUpdated",
+          revision: 2,
+          sessionId: "session-1",
+          messageId: "message-approval-1",
+          messageIndex: 1,
+          messageCount: 2,
+          message: {
+            id: "message-approval-1",
+            type: "approval",
+            timestamp: "10:01",
+            author: "assistant",
+            title: "Codex needs approval",
+            command: "npm test",
+            detail: "Need permission to run the test suite.",
+            decision: "accepted",
+          },
+          preview: "Approval granted. Codex is continuing...",
+          status: "active",
+        });
+      });
+      await settleAsyncUi();
       expect(screen.getByText("Codex needs approval")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
       expect(
@@ -1281,7 +1304,7 @@ describe("App live state - visibility and wake recovery", () => {
           makeSession("session-2", {
             name: "Noisy Session",
             status: "active",
-            preview: "Busy output 1",
+            preview: "noisy prompt",
             messages: [
               {
                 id: "message-user-noisy-1",
@@ -1289,13 +1312,6 @@ describe("App live state - visibility and wake recovery", () => {
                 timestamp: "10:00",
                 author: "you",
                 text: "noisy prompt",
-              },
-              {
-                id: "message-assistant-noisy-1",
-                type: "text",
-                timestamp: "10:01",
-                author: "assistant",
-                text: "Busy output 1",
               },
             ],
           }),
@@ -1308,13 +1324,12 @@ describe("App live state - visibility and wake recovery", () => {
         throw new Error("Session list not found");
       }
 
-      const quietSessionRowLabel =
-        within(sessionList).getByText("Quiet Session");
-      const quietSessionRowButton = quietSessionRowLabel.closest("button");
+      const quietSessionRowButton = within(sessionList)
+        .getByText("Quiet Session")
+        .closest("button");
       if (!quietSessionRowButton) {
         throw new Error("Quiet session row button not found");
       }
-
       await clickAndSettle(quietSessionRowButton);
       expect(
         screen.getByText("Working on the current turn..."),
@@ -1329,14 +1344,21 @@ describe("App live state - visibility and wake recovery", () => {
       );
       act(() => {
         eventSource.dispatchNamedEvent("delta", {
-          type: "textReplace",
+          type: "messageCreated",
           revision: 2,
           sessionId: "session-2",
           messageId: "message-assistant-noisy-1",
           messageIndex: 1,
           messageCount: 2,
-          text: "Still streaming from session 2.",
+          message: {
+            id: "message-assistant-noisy-1",
+            type: "text",
+            timestamp: "10:01",
+            author: "assistant",
+            text: "Still streaming from session 2.",
+          },
           preview: "Still streaming from session 2.",
+          status: "active",
         });
         eventSource.dispatchNamedEvent("delta", {
           type: "orchestratorsUpdated",

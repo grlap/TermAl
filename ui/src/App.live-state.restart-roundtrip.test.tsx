@@ -64,6 +64,7 @@ import {
   jsonResponse,
   latestEventSource,
   makeSession,
+  makeStateSessionSummary,
   makeStateResponse,
   makeWorkspaceLayoutResponse,
   renderApp,
@@ -72,6 +73,7 @@ import {
   stubScrollIntoView,
   withVerifiedNoReactActWarnings,
 } from "./app-test-harness";
+import { getSessionRecordSnapshotForTesting } from "./session-store";
 
 vi.mock("./MonacoDiffEditor", () => ({
   MonacoDiffEditor: forwardRef(function MonacoDiffEditorMock(
@@ -322,15 +324,10 @@ describe("App live state — restart roundtrip (canonical)", () => {
           // response and visibly rolls the assistant message body off
           // the screen.
           //
-          // Returned with `messagesLoaded: true` and only the
-          // pre-assistant user message so the rollback is visible in the
-          // assertions. (Production `/api/state` responses are always
-          // metadata-first — `reconcileSummarySession` preserves
-          // `previous.messages` on rollback so an honest metadata-first
-          // payload would not surface the regression. The gate logic is
-          // the same regardless of payload shape; this hydrated-shape
-          // fixture is the cleanest way to assert the rollback was
-          // rejected at the gate, not silently absorbed.)
+          // The stale response uses the production metadata-first shape.
+          // Its status and preview deliberately disagree with the accepted
+          // revision-7 state so an erroneous rollback remains observable
+          // without smuggling transcript content through `/api/state`.
           return jsonResponse(
             makeStateResponse({
               revision: 5,
@@ -339,29 +336,32 @@ describe("App live state — restart roundtrip (canonical)", () => {
               orchestrators: [],
               workspaces: [],
               sessions: [
-                makeSession("session-1", {
-                  name: "Codex Session",
-                  status: "active",
-                  preview: "Hi",
-                  messagesLoaded: true,
-                  messageCount: 1,
-                  sessionMutationStamp: undefined,
-                  messages: [
-                    {
-                      id: "message-user-1",
-                      type: "text",
-                      timestamp: "10:00",
-                      author: "you",
-                      text: "Hi",
-                    },
-                  ],
-                }),
+                makeStateSessionSummary(
+                  makeSession("session-1", {
+                    name: "Codex Session",
+                    status: "active",
+                    preview: "stale pre-restart preview",
+                    messageCount: 1,
+                    sessionMutationStamp: undefined,
+                    messages: [],
+                  }),
+                ),
               ],
             }),
           );
         }
         if (requestUrl.pathname === "/api/sessions/session-1") {
           sessionRequestCount += 1;
+          if (sessionRequestCount === 1) {
+            // Broad state is metadata-only in production. The first targeted
+            // fetch hydrates the current-instance transcript the user was
+            // viewing before the simulated restart.
+            return jsonResponse({
+              revision: 5,
+              serverInstanceId: "current-instance",
+              session: initialSession,
+            });
+          }
           // The visible-session hydration effect fires `/api/sessions/{id}`
           // after `forceMessagesUnloaded` flipped `messagesLoaded: false`.
           // This short transcript fits in the bounded tail response, which
@@ -399,7 +399,7 @@ describe("App live state — restart roundtrip (canonical)", () => {
       const scrollIntoViewSpy = stubScrollIntoView();
 
       try {
-        await renderApp();
+        await renderApp({ serveStateSessionHydrationFixtures: false });
         const eventSource = latestEventSource();
 
         // Step 1: Establish the "before restart" view — current-instance
@@ -487,7 +487,7 @@ describe("App live state — restart roundtrip (canonical)", () => {
         // test still asserts the hydration fetch fires here as the
         // composed visible-message contract.
         await waitFor(() => {
-          expect(sessionRequestCount).toBeGreaterThanOrEqual(1);
+          expect(sessionRequestCount).toBeGreaterThanOrEqual(2);
         });
 
         // Step 4: Live deltas extend the assistant message text. With
@@ -585,6 +585,10 @@ describe("App live state — restart roundtrip (canonical)", () => {
           ".message-card.bubble-you",
         );
         expect(userBubble?.textContent).toContain("Hi");
+        expect(getSessionRecordSnapshotForTesting("session-1")).toMatchObject({
+          status: "idle",
+          preview: "Hello, I'll help you with that.",
+        });
         // The fallback marker triggered an /api/state probe; verify
         // the request count incremented FROM the value we captured
         // before dispatching the marker, not just the cumulative count

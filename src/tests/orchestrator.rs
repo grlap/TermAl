@@ -434,7 +434,6 @@ async fn orchestrator_lifecycle_routes_update_state_and_stop_active_sessions() {
         .find(|session| session.id == planner_session_id)
         .expect("planner session should still be present");
     assert_eq!(planner_session.status, SessionStatus::Idle);
-    assert!(planner_session.pending_prompts.is_empty());
 
     let inner = state.inner.lock().expect("state mutex poisoned");
     let planner_record = inner
@@ -457,9 +456,6 @@ async fn orchestrator_lifecycle_routes_update_state_and_stop_active_sessions() {
             ))
     );
     drop(inner);
-    assert!(!planner_session.messages_loaded);
-    assert!(planner_session.messages.is_empty());
-
     let _ = fs::remove_dir_all(project_root);
     let _ = fs::remove_file(state.persistence_path.as_path());
 }

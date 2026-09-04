@@ -70,6 +70,7 @@ import type { AgentReadiness, OrchestratorInstance, Session } from "./types";
 import * as workspaceStorage from "./workspace-storage";
 import { WORKSPACE_LAYOUT_STORAGE_KEY } from "./workspace-storage";
 import type { WorkspaceState, WorkspaceTab } from "./workspace";
+import { getSessionRecordSnapshotForTesting } from "./session-store";
 import type { AppTestStateResponse } from "./app-test-harness";
 import {
   EventSourceMock,
@@ -89,6 +90,7 @@ import {
   makeOrchestrator,
   makeReadiness,
   makeSession,
+  makeStateSessionSummary,
   makeStateResponse,
   makeWorkspaceLayoutResponse,
   mockScrollToAndApplyTop,
@@ -342,6 +344,50 @@ describe("App live state - delta-gap core", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-02T09:00:00.000Z"));
     let stateRequestCount = 0;
+    const initialSession = makeSession("session-1", {
+      name: "Codex Session",
+      status: "active",
+      preview: "Partial output.",
+      sessionMutationStamp: 1,
+      messages: [
+        {
+          id: "message-user-1",
+          type: "text",
+          timestamp: "10:00",
+          author: "you",
+          text: "test",
+        },
+        {
+          id: "message-assistant-1",
+          type: "text",
+          timestamp: "10:01",
+          author: "assistant",
+          text: "Partial output.",
+        },
+      ],
+    });
+    const recoveredSession = makeSession("session-1", {
+      name: "Codex Session",
+      status: "idle",
+      preview: "Here after ignored deltas.",
+      sessionMutationStamp: 2,
+      messages: [
+        {
+          id: "message-user-1",
+          type: "text",
+          timestamp: "10:00",
+          author: "you",
+          text: "test",
+        },
+        {
+          id: "message-assistant-1",
+          type: "text",
+          timestamp: "10:01",
+          author: "assistant",
+          text: "Here after ignored deltas.",
+        },
+      ],
+    });
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "/api/state") {
@@ -349,32 +395,9 @@ describe("App live state - delta-gap core", () => {
         return jsonResponse({
           revision: 2,
           projects: [],
-          sessions: [
-            makeSession("session-1", {
-              name: "Codex Session",
-              status: "idle",
-              preview: "Here after ignored deltas.",
-              messages: [
-                {
-                  id: "message-user-1",
-                  type: "text",
-                  timestamp: "10:00",
-                  author: "you",
-                  text: "test",
-                },
-                {
-                  id: "message-assistant-1",
-                  type: "text",
-                  timestamp: "10:01",
-                  author: "assistant",
-                  text: "Here after ignored deltas.",
-                },
-              ],
-            }),
-          ],
+          sessions: [recoveredSession],
         });
       }
-
       throw new Error(`Unexpected fetch: ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -397,29 +420,7 @@ describe("App live state - delta-gap core", () => {
         eventSource.dispatchNamedEvent("state", {
           revision: 1,
           projects: [],
-          sessions: [
-            makeSession("session-1", {
-              name: "Codex Session",
-              status: "active",
-              preview: "Partial output.",
-              messages: [
-                {
-                  id: "message-user-1",
-                  type: "text",
-                  timestamp: "10:00",
-                  author: "you",
-                  text: "test",
-                },
-                {
-                  id: "message-assistant-1",
-                  type: "text",
-                  timestamp: "10:01",
-                  author: "assistant",
-                  text: "Partial output.",
-                },
-              ],
-            }),
-          ],
+          sessions: [initialSession],
         });
       });
       await settleAsyncUi();
@@ -473,6 +474,14 @@ describe("App live state - delta-gap core", () => {
       expect(watchdogTriggered).toBe(true);
       expect(stateFetchCallCount()).toBe(1);
       expect(screen.getAllByText("Here after ignored deltas.")).toHaveLength(2);
+      expect(getSessionRecordSnapshotForTesting("session-1")?.messages).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: "message-assistant-1",
+            text: "Here after ignored deltas.",
+          }),
+        ]),
+      );
       expect(
         screen.queryByText("Working on the current turn..."),
       ).not.toBeInTheDocument();
@@ -494,6 +503,52 @@ describe("App live state - delta-gap core", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-02T09:00:00.000Z"));
     let stateRequestCount = 0;
+    const duplicateMessage = {
+      id: "message-assistant-1",
+      type: "text",
+      timestamp: "10:01",
+      author: "assistant",
+      text: "Partial output.",
+    } as const;
+    const initialSession = makeSession("session-1", {
+      name: "Codex Session",
+      status: "active",
+      preview: "Partial output.",
+      messageCount: 2,
+      sessionMutationStamp: 41,
+      messages: [
+        {
+          id: "message-user-1",
+          type: "text",
+          timestamp: "10:00",
+          author: "you",
+          text: "test",
+        },
+        duplicateMessage,
+      ],
+    });
+    const recoveredSession = makeSession("session-1", {
+      name: "Codex Session",
+      status: "idle",
+      preview: "Here after duplicate messageCreated deltas.",
+      sessionMutationStamp: 42,
+      messages: [
+        {
+          id: "message-user-1",
+          type: "text",
+          timestamp: "10:00",
+          author: "you",
+          text: "test",
+        },
+        {
+          id: "message-assistant-1",
+          type: "text",
+          timestamp: "10:01",
+          author: "assistant",
+          text: "Here after duplicate messageCreated deltas.",
+        },
+      ],
+    });
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "/api/state") {
@@ -501,32 +556,9 @@ describe("App live state - delta-gap core", () => {
         return jsonResponse({
           revision: 2,
           projects: [],
-          sessions: [
-            makeSession("session-1", {
-              name: "Codex Session",
-              status: "idle",
-              preview: "Here after duplicate messageCreated deltas.",
-              messages: [
-                {
-                  id: "message-user-1",
-                  type: "text",
-                  timestamp: "10:00",
-                  author: "you",
-                  text: "test",
-                },
-                {
-                  id: "message-assistant-1",
-                  type: "text",
-                  timestamp: "10:01",
-                  author: "assistant",
-                  text: "Here after duplicate messageCreated deltas.",
-                },
-              ],
-            }),
-          ],
+          sessions: [recoveredSession],
         });
       }
-
       throw new Error(`Unexpected fetch: ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -544,37 +576,12 @@ describe("App live state - delta-gap core", () => {
     try {
       await renderApp();
       const eventSource = latestEventSource();
-      const duplicateMessage = {
-        id: "message-assistant-1",
-        type: "text",
-        timestamp: "10:01",
-        author: "assistant",
-        text: "Partial output.",
-      } as const;
       act(() => {
         eventSource.dispatchOpen();
         eventSource.dispatchNamedEvent("state", {
           revision: 1,
           projects: [],
-          sessions: [
-            makeSession("session-1", {
-              name: "Codex Session",
-              status: "active",
-              preview: "Partial output.",
-              messageCount: 2,
-              sessionMutationStamp: 41,
-              messages: [
-                {
-                  id: "message-user-1",
-                  type: "text",
-                  timestamp: "10:00",
-                  author: "you",
-                  text: "test",
-                },
-                duplicateMessage,
-              ],
-            }),
-          ],
+          sessions: [initialSession],
         });
       });
       await settleAsyncUi();
@@ -620,6 +627,14 @@ describe("App live state - delta-gap core", () => {
       expect(
         screen.getAllByText("Here after duplicate messageCreated deltas."),
       ).toHaveLength(2);
+      expect(getSessionRecordSnapshotForTesting("session-1")?.messages).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: "message-assistant-1",
+            text: "Here after duplicate messageCreated deltas.",
+          }),
+        ]),
+      );
       expect(
         screen.queryByText("Working on the current turn..."),
       ).not.toBeInTheDocument();
@@ -808,6 +823,28 @@ describe("App live state - delta-gap core", () => {
           },
         ],
       });
+      const recoveredSession = makeSession("session-1", {
+        name: "Codex Session",
+        status: "idle",
+        preview: "Recovered after appliedNoOp replays.",
+        sessionMutationStamp: 42,
+        messages: [
+          {
+            id: "message-user-1",
+            type: "text",
+            timestamp: "10:00",
+            author: "you",
+            text: "test",
+          },
+          {
+            id: "message-assistant-1",
+            type: "text",
+            timestamp: "10:03",
+            author: "assistant",
+            text: "Recovered after appliedNoOp replays.",
+          },
+        ],
+      });
       let stateRequestCount = 0;
       const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
@@ -816,29 +853,7 @@ describe("App live state - delta-gap core", () => {
           return jsonResponse({
             revision: 2,
             projects: [],
-            sessions: [
-              makeSession("session-1", {
-                name: "Codex Session",
-                status: "idle",
-                preview: "Recovered after appliedNoOp replays.",
-                messages: [
-                  {
-                    id: "message-user-1",
-                    type: "text",
-                    timestamp: "10:00",
-                    author: "you",
-                    text: "test",
-                  },
-                  {
-                    id: "message-assistant-1",
-                    type: "text",
-                    timestamp: "10:03",
-                    author: "assistant",
-                    text: "Recovered after appliedNoOp replays.",
-                  },
-                ],
-              }),
-            ],
+            sessions: [recoveredSession],
           });
         }
 
@@ -899,6 +914,14 @@ describe("App live state - delta-gap core", () => {
         expect(
           screen.getAllByText("Recovered after appliedNoOp replays."),
         ).toHaveLength(2);
+        expect(getSessionRecordSnapshotForTesting("session-1")?.messages).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              id: "message-assistant-1",
+              text: "Recovered after appliedNoOp replays.",
+            }),
+          ]),
+        );
         expect(
           screen.queryByText("Working on the current turn..."),
         ).not.toBeInTheDocument();
@@ -921,6 +944,50 @@ describe("App live state - delta-gap core", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-02T09:00:00.000Z"));
     let stateRequestCount = 0;
+    const initialSession = makeSession("session-1", {
+      name: "Codex Session",
+      status: "active",
+      preview: "Partial output.",
+      sessionMutationStamp: 1,
+      messages: [
+        {
+          id: "message-user-1",
+          type: "text",
+          timestamp: "10:00",
+          author: "you",
+          text: "test",
+        },
+        {
+          id: "message-assistant-1",
+          type: "text",
+          timestamp: "10:01",
+          author: "assistant",
+          text: "Partial output.",
+        },
+      ],
+    });
+    const recoveredSession = makeSession("session-1", {
+      name: "Codex Session",
+      status: "idle",
+      preview: "Here after orchestrators.",
+      sessionMutationStamp: 2,
+      messages: [
+        {
+          id: "message-user-1",
+          type: "text",
+          timestamp: "10:00",
+          author: "you",
+          text: "test",
+        },
+        {
+          id: "message-assistant-1",
+          type: "text",
+          timestamp: "10:01",
+          author: "assistant",
+          text: "Here after orchestrators.",
+        },
+      ],
+    });
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "/api/state") {
@@ -928,29 +995,7 @@ describe("App live state - delta-gap core", () => {
         return jsonResponse({
           revision: 2,
           projects: [],
-          sessions: [
-            makeSession("session-1", {
-              name: "Codex Session",
-              status: "idle",
-              preview: "Here after orchestrators.",
-              messages: [
-                {
-                  id: "message-user-1",
-                  type: "text",
-                  timestamp: "10:00",
-                  author: "you",
-                  text: "test",
-                },
-                {
-                  id: "message-assistant-1",
-                  type: "text",
-                  timestamp: "10:01",
-                  author: "assistant",
-                  text: "Here after orchestrators.",
-                },
-              ],
-            }),
-          ],
+          sessions: [recoveredSession],
         });
       }
 
@@ -976,29 +1021,7 @@ describe("App live state - delta-gap core", () => {
         eventSource.dispatchNamedEvent("state", {
           revision: 1,
           projects: [],
-          sessions: [
-            makeSession("session-1", {
-              name: "Codex Session",
-              status: "active",
-              preview: "Partial output.",
-              messages: [
-                {
-                  id: "message-user-1",
-                  type: "text",
-                  timestamp: "10:00",
-                  author: "you",
-                  text: "test",
-                },
-                {
-                  id: "message-assistant-1",
-                  type: "text",
-                  timestamp: "10:01",
-                  author: "assistant",
-                  text: "Partial output.",
-                },
-              ],
-            }),
-          ],
+          sessions: [initialSession],
         });
       });
       await settleAsyncUi();
@@ -1051,6 +1074,14 @@ describe("App live state - delta-gap core", () => {
       expect(watchdogTriggered).toBe(true);
       expect(stateFetchCallCount()).toBe(1);
       expect(screen.getAllByText("Here after orchestrators.")).toHaveLength(2);
+      expect(getSessionRecordSnapshotForTesting("session-1")?.messages).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: "message-assistant-1",
+            text: "Here after orchestrators.",
+          }),
+        ]),
+      );
       expect(
         screen.queryByText("Working on the current turn..."),
       ).not.toBeInTheDocument();
@@ -1169,9 +1200,7 @@ describe("App live state - delta-gap core", () => {
     try {
       await renderApp();
       const eventSource = latestEventSource();
-      act(() => {
-        eventSource.dispatchOpen();
-        eventSource.dispatchNamedEvent("state", {
+      await dispatchOpenedStateEvent(eventSource, {
           revision: 1,
           projects: [],
           sessions: [
@@ -1191,8 +1220,6 @@ describe("App live state - delta-gap core", () => {
             }),
           ],
         });
-      });
-      await settleAsyncUi();
       fetchMock.mockClear();
       stateRequestCount = 0;
 
@@ -1222,33 +1249,38 @@ describe("App live state - delta-gap core", () => {
             }),
           ],
           sessions: [
-            makeSession("session-2", {
-              name: "Reviewer",
-              status: "active",
-              preview: "Draft review ready.",
-              messages: [
-                {
-                  id: "message-user-reviewer-1",
-                  type: "text",
-                  timestamp: "10:01",
-                  author: "you",
-                  text: "review the changes",
-                },
-                {
-                  id: "message-assistant-reviewer-1",
-                  type: "text",
-                  timestamp: "10:02",
-                  author: "assistant",
-                  text: "Draft review ready.",
-                },
-              ],
-            }),
+            makeStateSessionSummary(
+              makeSession("session-2", {
+                name: "Reviewer",
+                status: "active",
+                preview: "Draft review ready.",
+                messages: [
+                  {
+                    id: "message-user-reviewer-1",
+                    type: "text",
+                    timestamp: "10:01",
+                    author: "you",
+                    text: "review the changes",
+                  },
+                  {
+                    id: "message-assistant-reviewer-1",
+                    type: "text",
+                    timestamp: "10:02",
+                    author: "assistant",
+                    text: "Draft review ready.",
+                  },
+                ],
+              }),
+            ),
           ],
         });
       });
       await settleAsyncUi();
 
       expect(stateFetchCallCount()).toBe(0);
+      expect(getSessionRecordSnapshotForTesting("session-2")).toMatchObject({
+        status: "active",
+      });
 
       await advanceTimers(LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS + 1000);
       await settleAsyncUi();
@@ -1343,56 +1375,86 @@ describe("App live state - delta-gap core", () => {
     try {
       await renderApp();
       const eventSource = latestEventSource();
+      await dispatchOpenedStateEvent(eventSource, {
+        revision: 1,
+        projects: [],
+        sessions: [
+          makeSession("session-1", {
+            name: "Quiet Session",
+            status: "active",
+            preview: "Quiet partial.",
+            messageCount: 0,
+            messages: [],
+          }),
+          makeSession("session-2", {
+            name: "Noisy Session",
+            status: "active",
+            preview: "Busy output 1",
+            messageCount: 0,
+            messages: [],
+          }),
+        ],
+      });
       act(() => {
-        eventSource.dispatchOpen();
-        eventSource.dispatchNamedEvent("state", {
-          revision: 1,
-          projects: [],
-          sessions: [
-            makeSession("session-1", {
-              name: "Quiet Session",
-              status: "active",
-              preview: "Quiet partial.",
-              messages: [
-                {
-                  id: "message-user-quiet-1",
-                  type: "text",
-                  timestamp: "10:00",
-                  author: "you",
-                  text: "quiet prompt",
-                },
-                {
-                  id: "message-assistant-quiet-1",
-                  type: "text",
-                  timestamp: "10:01",
-                  author: "assistant",
-                  text: "Quiet partial.",
-                },
-              ],
-            }),
-            makeSession("session-2", {
-              name: "Noisy Session",
-              status: "active",
-              preview: "Busy output 1",
-              messages: [
-                {
-                  id: "message-user-noisy-1",
-                  type: "text",
-                  timestamp: "10:00",
-                  author: "you",
-                  text: "noisy prompt",
-                },
-                {
-                  id: "message-assistant-noisy-1",
-                  type: "text",
-                  timestamp: "10:01",
-                  author: "assistant",
-                  text: "Busy output 1",
-                },
-              ],
-            }),
+        for (const [revision, sessionId, message] of [
+          [
+            2,
+            "session-1",
+            {
+              id: "message-user-quiet-1",
+              type: "text",
+              timestamp: "10:00",
+              author: "you",
+              text: "quiet prompt",
+            },
           ],
-        });
+          [
+            3,
+            "session-1",
+            {
+              id: "message-assistant-quiet-1",
+              type: "text",
+              timestamp: "10:01",
+              author: "assistant",
+              text: "Quiet partial.",
+            },
+          ],
+          [
+            4,
+            "session-2",
+            {
+              id: "message-user-noisy-1",
+              type: "text",
+              timestamp: "10:00",
+              author: "you",
+              text: "noisy prompt",
+            },
+          ],
+          [
+            5,
+            "session-2",
+            {
+              id: "message-assistant-noisy-1",
+              type: "text",
+              timestamp: "10:01",
+              author: "assistant",
+              text: "Busy output 1",
+            },
+          ],
+        ] as const) {
+          const messageIndex = message.author === "you" ? 0 : 1;
+          eventSource.dispatchNamedEvent("delta", {
+            type: "messageCreated",
+            revision,
+            sessionId,
+            messageId: message.id,
+            messageIndex,
+            messageCount: messageIndex + 1,
+            message,
+            preview: message.text,
+            status: "active",
+          });
+        }
       });
       await settleAsyncUi();
 
@@ -1402,21 +1464,30 @@ describe("App live state - delta-gap core", () => {
         throw new Error("Session list not found");
       }
 
-      const quietSessionRowLabel =
-        within(sessionList).getByText("Quiet Session");
-      const quietSessionRowButton = quietSessionRowLabel.closest("button");
+      const quietSessionRowButton = within(sessionList)
+        .getByText("Quiet Session")
+        .closest("button");
       if (!quietSessionRowButton) {
         throw new Error("Quiet session row button not found");
       }
-
       await clickAndSettle(quietSessionRowButton);
-      expect(
-        screen.getByText("Working on the current turn..."),
-      ).toBeInTheDocument();
+      expect(getSessionRecordSnapshotForTesting("session-1")).toMatchObject({
+        status: "active",
+      });
+      expect(getSessionRecordSnapshotForTesting("session-1")).toMatchObject({
+        messages: expect.arrayContaining([
+          expect.objectContaining({ id: "message-assistant-quiet-1" }),
+        ]),
+      });
+      expect(getSessionRecordSnapshotForTesting("session-2")).toMatchObject({
+        messages: expect.arrayContaining([
+          expect.objectContaining({ id: "message-assistant-noisy-1" }),
+        ]),
+      });
       fetchMock.mockClear();
       stateRequestCount = 0;
 
-      let noisyRevision = 1;
+      let noisyRevision = 5;
       let watchdogTriggered = false;
       for (
         let elapsed = 0;
@@ -1447,7 +1518,10 @@ describe("App live state - delta-gap core", () => {
 
       expect(watchdogTriggered).toBe(true);
       expect(stateFetchCallCount()).toBe(1);
-      expect(screen.getAllByText("Recovered quiet session.")).toHaveLength(2);
+      expect(screen.getAllByText("Recovered quiet session.")).toHaveLength(1);
+      expect(getSessionRecordSnapshotForTesting("session-1")).toMatchObject({
+        status: "idle",
+      });
       expect(
         screen.queryByText("Working on the current turn..."),
       ).not.toBeInTheDocument();
@@ -1613,11 +1687,50 @@ describe("App live state - delta-gap core", () => {
       fetchMock.mockClear();
       stateRequestCount = 0;
 
+      act(() => {
+        eventSource.dispatchNamedEvent("delta", {
+          type: "messageCreated",
+          revision: 2,
+          sessionId: "session-1",
+          messageId: "message-assistant-quiet-1",
+          messageIndex: 1,
+          messageCount: 2,
+          message: {
+            id: "message-assistant-quiet-1",
+            type: "text",
+            timestamp: "10:01",
+            author: "assistant",
+            text: "Quiet partial.",
+          },
+          preview: "Quiet partial.",
+          status: "active",
+        });
+        eventSource.dispatchNamedEvent("delta", {
+          type: "messageCreated",
+          revision: 3,
+          sessionId: "session-2",
+          messageId: "message-assistant-noisy-1",
+          messageIndex: 1,
+          messageCount: 2,
+          message: {
+            id: "message-assistant-noisy-1",
+            type: "text",
+            timestamp: "10:01",
+            author: "assistant",
+            text: "Busy output 1",
+          },
+          preview: "Busy output 1",
+          status: "active",
+        });
+      });
+      await settleAsyncUi();
+      expect(stateFetchCallCount()).toBe(0);
+
       await advanceTimers(1000);
       act(() => {
         eventSource.dispatchNamedEvent("delta", {
           type: "textReplace",
-          revision: 2,
+          revision: 4,
           sessionId: "session-1",
           messageId: "message-assistant-quiet-1",
           messageIndex: 1,
@@ -1627,8 +1740,17 @@ describe("App live state - delta-gap core", () => {
         });
       });
       await settleAsyncUi();
+      expect(stateFetchCallCount()).toBe(0);
+      expect(getSessionRecordSnapshotForTesting("session-1")?.messages).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: "message-assistant-quiet-1",
+            text: "Quiet partial refreshed.",
+          }),
+        ]),
+      );
 
-      let noisyRevision = 2;
+      let noisyRevision = 4;
       for (
         let elapsed = 0;
         elapsed < LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS - 1000;
@@ -1679,7 +1801,7 @@ describe("App live state - delta-gap core", () => {
 
       expect(watchdogTriggered).toBe(true);
       expect(stateFetchCallCount()).toBe(1);
-      expect(screen.getAllByText("Recovered quiet session.")).toHaveLength(2);
+      expect(screen.getAllByText("Recovered quiet session.")).toHaveLength(1);
       expect(
         screen.queryByText("Working on the current turn..."),
       ).not.toBeInTheDocument();

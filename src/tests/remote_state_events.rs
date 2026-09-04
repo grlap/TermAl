@@ -4,8 +4,8 @@
 //! focused module.
 
 use super::remote::{
-    make_remote_session_summary_only, remote_text_message, spawn_remote_session_response_server,
-    spawn_remote_state_response_server,
+    make_remote_session_summary_only, materialize_remote_proxy_session_transcript_for_test,
+    remote_text_message, spawn_remote_session_response_server, spawn_remote_state_response_server,
 };
 use super::remote_delta_replay::local_replay_test_remote;
 use super::*;
@@ -26,6 +26,39 @@ fn current_remote_wire_requires_instance_id_and_text_delta_offset() {
         health_error
             .to_string()
             .contains("missing field `serverInstanceId`")
+    );
+    let empty_health_error = match serde_json::from_value::<HealthResponse>(json!({
+        "ok": true,
+        "serverInstanceId": ""
+    })) {
+        Ok(_) => panic!("current health responses must carry a non-empty serverInstanceId"),
+        Err(error) => error,
+    };
+    assert!(
+        empty_health_error
+            .to_string()
+            .contains("serverInstanceId must be a non-empty string")
+    );
+
+    let mut empty_state = serde_json::to_value(
+        sample_remote_orchestrator_state(
+            "remote-project-1",
+            "/remote/repo",
+            1,
+            OrchestratorInstanceStatus::Running,
+        )
+        .as_state_response(),
+    )
+    .expect("remote state should encode");
+    empty_state["serverInstanceId"] = json!("");
+    let empty_state_error = match serde_json::from_value::<StateResponse>(empty_state) {
+        Ok(_) => panic!("current state responses must carry a non-empty serverInstanceId"),
+        Err(error) => error,
+    };
+    assert!(
+        empty_state_error
+            .to_string()
+            .contains("serverInstanceId must be a non-empty string")
     );
 
     let delta_error = match serde_json::from_value::<DeltaEvent>(json!({
@@ -91,10 +124,11 @@ fn remote_text_delta_gap_triggers_bounded_authoritative_tail_repair() {
             DeltaEvent::SessionCreated {
                 revision: 2,
                 session_id: initial_session.id.clone(),
-                session: initial_session,
+                session: test_state_session_summary_from_session(&initial_session),
             },
         )
         .expect("initial remote session delta should apply");
+    materialize_remote_proxy_session_transcript_for_test(&state, &remote, &initial_session);
 
     let mut repaired_state = sample_remote_orchestrator_state(
         "remote-project-1",
@@ -207,10 +241,11 @@ fn remote_tail_repair_failure_falls_back_to_full_state_resync() {
             DeltaEvent::SessionCreated {
                 revision: 2,
                 session_id: initial_session.id.clone(),
-                session: initial_session,
+                session: test_state_session_summary_from_session(&initial_session),
             },
         )
         .expect("initial remote session should apply");
+    materialize_remote_proxy_session_transcript_for_test(&state, &remote, &initial_session);
 
     let mut repaired_state = sample_remote_orchestrator_state(
         "remote-project-1",
@@ -356,7 +391,7 @@ fn remote_state_event_dedupes_marked_sse_fallback_resyncs_by_revision() {
         (remote_record.session.id, local_record.session.id)
     };
 
-    let mut first_full_state_response = state.full_snapshot();
+    let mut first_full_state_response = state.snapshot();
     let mut first_remote_session = first_full_state_response
         .sessions
         .iter()
@@ -369,7 +404,7 @@ fn remote_state_event_dedupes_marked_sse_fallback_resyncs_by_revision() {
     let first_full_state_response =
         serde_json::to_string(&first_full_state_response).expect("state response should encode");
 
-    let mut second_full_state_response = state.full_snapshot();
+    let mut second_full_state_response = state.snapshot();
     let mut second_remote_session = second_full_state_response
         .sessions
         .iter()
@@ -461,9 +496,11 @@ fn remote_state_event_dedupes_marked_sse_fallback_resyncs_by_revision() {
             }),
         );
 
-    let mut first_fallback_payload: Value =
-        serde_json::from_str(EMPTY_STATE_EVENTS_PAYLOAD.as_str())
-            .expect("fallback payload should parse");
+    let mut first_fallback_payload: Value = serde_json::from_str(
+        &fallback_state_events_payload(0, "remote-instance".to_owned())
+            .expect("fallback payload should encode"),
+    )
+    .expect("fallback payload should parse");
     first_fallback_payload["revision"] = json!(4);
     let first_data_lines = serde_json::to_string_pretty(&first_fallback_payload)
         .expect("first fallback payload should encode")
@@ -861,7 +898,7 @@ fn remote_state_event_applies_non_fallback_empty_snapshot_payload() {
         (removed.session.id, local.session.id)
     };
 
-    let mut remote_state = empty_state_events_response();
+    let mut remote_state = empty_state_events_response("remote-instance".to_owned());
     remote_state.revision = 1;
     let data_lines =
         vec![serde_json::to_string(&remote_state).expect("state payload should encode")];
@@ -1038,7 +1075,7 @@ fn retired_bridge_cannot_apply_buffered_frames_or_clear_current_continuity() {
     let stale_delta = DeltaEvent::SessionCreated {
         revision: 11,
         session_id: stale_delta_session.id.clone(),
-        session: stale_delta_session,
+        session: test_state_session_summary_from_session(&stale_delta_session),
     };
     let stale_delta_frame = format!(
         "event: delta\ndata: {}\n\n",
@@ -1166,7 +1203,7 @@ fn bridge_continuity_cleanup_invalidates_pre_cleanup_request_leases() {
     state
         .apply_remote_state_snapshot_for_request(
             &newer_lease,
-            newer_state,
+            newer_state.into_state_response(),
             RemoteSnapshotApplyMode::GateBySnapshotRevision,
         )
         .expect("newer same-connection response should localize before cleanup");
@@ -1190,7 +1227,7 @@ fn bridge_continuity_cleanup_invalidates_pre_cleanup_request_leases() {
     let error = state
         .apply_remote_state_snapshot_for_request(
             &stale_lease,
-            stale_state,
+            stale_state.into_state_response(),
             RemoteSnapshotApplyMode::GateBySnapshotRevision,
         )
         .expect_err("pre-cleanup request lease must not cross continuity cleanup");
@@ -1252,10 +1289,11 @@ fn remote_lagged_marker_force_applies_next_same_revision_state_snapshot() {
             DeltaEvent::SessionCreated {
                 revision: 2,
                 session_id: initial_session.id.clone(),
-                session: initial_session,
+                session: test_state_session_summary_from_session(&initial_session),
             },
         )
         .expect("initial remote session delta should apply");
+    materialize_remote_proxy_session_transcript_for_test(&state, &remote, &initial_session);
 
     let mut repaired_state = sample_remote_orchestrator_state(
         "remote-project-1",
@@ -1592,10 +1630,11 @@ fn remote_lagged_marker_does_not_force_apply_after_intervening_delta_progress() 
             DeltaEvent::SessionCreated {
                 revision: 2,
                 session_id: initial_session.id.clone(),
-                session: initial_session,
+                session: test_state_session_summary_from_session(&initial_session),
             },
         )
         .expect("initial remote session delta should apply");
+    materialize_remote_proxy_session_transcript_for_test(&state, &remote, &initial_session);
 
     dispatch_remote_event_with_recovery(
         &state,
@@ -1723,7 +1762,8 @@ fn remote_lagged_marker_force_applies_same_revision_fallback_resync_snapshot() {
         vec![remote_text_message("message-1", "Fallback repaired body")];
     repaired_state.sessions[0].messages_loaded = true;
     repaired_state.sessions[0].message_count = 1;
-    let (port, requests, server) = spawn_remote_state_response_server(repaired_state);
+    let (port, requests, server) =
+        spawn_remote_state_response_server(repaired_state.into_state_response());
     insert_test_remote_connection(
         &state,
         &remote,
@@ -1731,7 +1771,7 @@ fn remote_lagged_marker_force_applies_same_revision_fallback_resync_snapshot() {
         TestRemoteBridgeOwnership::RequestOnly,
     );
 
-    let mut fallback_marker = empty_state_events_response();
+    let mut fallback_marker = empty_state_events_response("remote-instance".to_owned());
     fallback_marker.revision = 2;
     let mut fallback_value =
         serde_json::to_value(&fallback_marker).expect("fallback marker should encode");
@@ -1888,7 +1928,7 @@ fn remote_delta_hydration_in_flight_skips_narrow_unloaded_delta_apply() {
             DeltaEvent::SessionCreated {
                 revision: 2,
                 session_id: remote_session.id.clone(),
-                session: remote_session.clone(),
+                session: test_state_session_summary_from_session(&remote_session),
             },
         )
         .expect("remote summary session create delta should apply");
@@ -1986,7 +2026,7 @@ fn remote_delta_hydration_burst_uses_one_fetch_and_skips_duplicate_delta() {
             DeltaEvent::SessionCreated {
                 revision: 2,
                 session_id: summary_session.id.clone(),
-                session: summary_session.clone(),
+                session: test_state_session_summary_from_session(&summary_session),
             },
         )
         .expect("remote summary session create delta should apply");

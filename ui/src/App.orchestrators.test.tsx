@@ -90,6 +90,7 @@ import {
   makeOrchestrator,
   makeReadiness,
   makeSession,
+  makeStateSessionSummary,
   makeStateResponse,
   makeWorkspaceLayoutResponse,
   mockScrollToAndApplyTop,
@@ -630,6 +631,40 @@ describe("App orchestrators", () => {
         inputMode: "queue" as const,
         position: { x: 520, y: 420 },
       };
+      const reviewerSession = makeSession("session-2", {
+        name: "Reviewer",
+        agent: "Claude",
+        model: "claude-sonnet-4-5",
+        projectId: "project-local",
+        workdir: "/repo",
+        preview: "Draft review ready.",
+        messageCount: 2,
+        sessionMutationStamp: 2,
+        messagesLoaded: true,
+        messages: [
+          {
+            id: "message-user-reviewer-1",
+            type: "text",
+            timestamp: "10:00",
+            author: "you",
+            text: "review the implementation",
+          },
+          {
+            id: "message-assistant-reviewer-1",
+            type: "text",
+            timestamp: "10:01",
+            author: "assistant",
+            text: "Draft review ready.",
+          },
+        ],
+      });
+      const fetchSessionTailSpy = vi
+        .spyOn(api, "fetchSessionTail")
+        .mockResolvedValue({
+          revision: 2,
+          serverInstanceId: "test-instance",
+          session: reviewerSession,
+        });
 
       try {
         await renderApp();
@@ -688,32 +723,7 @@ describe("App orchestrators", () => {
                 ],
               }),
             ],
-            sessions: [
-              makeSession("session-2", {
-                name: "Reviewer",
-                agent: "Claude",
-                model: "claude-sonnet-4-5",
-                projectId: "project-local",
-                workdir: "/repo",
-                preview: "Draft review ready.",
-                messages: [
-                  {
-                    id: "message-user-reviewer-1",
-                    type: "text",
-                    timestamp: "10:00",
-                    author: "you",
-                    text: "review the implementation",
-                  },
-                  {
-                    id: "message-assistant-reviewer-1",
-                    type: "text",
-                    timestamp: "10:01",
-                    author: "assistant",
-                    text: "Draft review ready.",
-                  },
-                ],
-              }),
-            ],
+            sessions: [makeStateSessionSummary(reviewerSession)],
           });
         });
         await settleAsyncUi();
@@ -747,6 +757,7 @@ describe("App orchestrators", () => {
       } finally {
         scrollIntoViewSpy.mockRestore();
         fetchStateSpy.mockRestore();
+        fetchSessionTailSpy.mockRestore();
         fetchWorkspaceLayoutSpy.mockRestore();
         saveWorkspaceLayoutSpy.mockRestore();
         restoreGlobal("EventSource", originalEventSource);

@@ -7,7 +7,10 @@ import type {
   SessionLiveActivity,
   TextMessage,
 } from "./types";
-import { reconcileSessions } from "./session-reconcile";
+import {
+  reconcileSingleStateSessionSummary,
+  reconcileStateSessionSummaries,
+} from "./session-reconcile";
 import { removePendingPromptForCreatedMessage } from "./app-utils";
 
 export const LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS = 15000;
@@ -82,9 +85,14 @@ export function sessionHasPotentiallyStaleTransport(
   lastLiveTransportActivityAt: number | undefined,
   now: number,
 ) {
+  const hasUnhydratedTranscriptActivity =
+    session.messagesLoaded === false &&
+    session.messages.length === 0 &&
+    (session.messageCount ?? 0) > 0;
   return (
     (session.status === "active" || session.status === "stopping") &&
-    hasInTurnActivitySinceTurnBoundary(session) &&
+    (hasInTurnActivitySinceTurnBoundary(session) ||
+      hasUnhydratedTranscriptActivity) &&
     lastLiveTransportActivityAt !== undefined &&
     now - lastLiveTransportActivityAt >=
       LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS
@@ -629,7 +637,10 @@ export function applyDeltaToSessions(
       if (sessionIndex === -1) {
         return {
           kind: "applied",
-          sessions: [...sessions, delta.session],
+          sessions: [
+            ...sessions,
+            reconcileStateSessionSummaries([], [delta.session])[0],
+          ],
         };
       }
 
@@ -638,9 +649,13 @@ export function applyDeltaToSessions(
         sessions: replaceSession(
           sessions,
           sessionIndex,
-          reconcileSessions([sessions[sessionIndex]], [delta.session], {
+          reconcileSingleStateSessionSummary(
+            sessions[sessionIndex],
+            delta.session,
+            {
             disableMutationStampFastPath: true,
-          })[0],
+            },
+          ),
         ),
       };
     }

@@ -1691,7 +1691,7 @@ fn equal_remote_snapshot_retries_dirty_delta_persistence_after_failed_recovery()
         )
         .expect_err("marker deletion should surface the forced persistence failure");
     state
-        .apply_remote_state_snapshot(&remote.id, recovery_snapshot())
+        .apply_remote_state_snapshot(&remote.id, recovery_snapshot().into_state_response())
         .expect_err("the first recovery snapshot should surface the same persistence failure");
 
     let inner = state.inner.lock().expect("state mutex poisoned");
@@ -1707,7 +1707,7 @@ fn equal_remote_snapshot_retries_dirty_delta_persistence_after_failed_recovery()
         .expect("failing persistence directory should be removable");
     state.persistence_path = Arc::new(original_persistence_path.clone());
     state
-        .apply_remote_state_snapshot(&remote.id, recovery_snapshot())
+        .apply_remote_state_snapshot(&remote.id, recovery_snapshot().into_state_response())
         .expect("an equal-revision recovery should retry the dirty full-state persistence");
 
     let inner = state.inner.lock().expect("state mutex poisoned");

@@ -48,6 +48,7 @@ import {
   resolveUnknownSessionModelSendAttempt,
 } from "./session-model-utils";
 import { setAppTestHooksForTests } from "./app-test-hooks";
+import { getSessionRecordSnapshotForTesting } from "./session-store";
 import { resolveStandaloneControlPanelDockWidthRatio } from "./control-panel-layout";
 import {
   buildControlSurfaceSessionListEntries,
@@ -882,6 +883,7 @@ describe("App live state - delta-gap core", () => {
         preview: "Stable answer",
         messagesLoaded: true,
         messageCount: 2,
+        sessionMutationStamp: 1,
         messages: [
           {
             id: "message-user-1",
@@ -949,7 +951,7 @@ describe("App live state - delta-gap core", () => {
       );
       const scrollIntoViewSpy = stubScrollIntoView();
       try {
-        await renderApp();
+        await renderApp({ serveStateSessionHydrationFixtures: false });
         const eventSource = latestEventSource();
         await dispatchOpenedStateEvent(
           eventSource,
@@ -962,7 +964,15 @@ describe("App live state - delta-gap core", () => {
           }),
         );
         await openSessionByName("Codex Session");
-        expect(screen.getAllByText("Stable answer").length).toBeGreaterThan(0);
+        await waitFor(() => {
+          expect(sessionFetchCount).toBeGreaterThan(0);
+          expect(screen.getAllByText("Stable answer").length).toBeGreaterThan(0);
+          expect(getSessionRecordSnapshotForTesting("session-1")).toMatchObject({
+            messagesLoaded: true,
+            messages: initialSession.messages,
+          });
+        });
+        await settleAsyncUi();
 
         stateRequestCount = 0;
         sessionFetchCount = 0;
@@ -1071,6 +1081,7 @@ describe("App live state - delta-gap core", () => {
         },
       ],
     });
+    let sessionFetchCount = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const requestUrl = new URL(String(input), "http://localhost");
       if (requestUrl.pathname === "/api/state") {
@@ -1099,10 +1110,11 @@ describe("App live state - delta-gap core", () => {
         );
       }
       if (requestUrl.pathname === "/api/sessions/session-1") {
+        sessionFetchCount += 1;
         return jsonResponse({
-          revision: 5,
+          revision: sessionFetchCount === 1 ? 1 : 5,
           serverInstanceId: "test-instance",
-          session: recoveredSession,
+          session: sessionFetchCount === 1 ? initialSession : recoveredSession,
         });
       }
       if (requestUrl.pathname === "/api/git/status") {
@@ -1131,7 +1143,7 @@ describe("App live state - delta-gap core", () => {
     );
     const scrollIntoViewSpy = stubScrollIntoView();
     try {
-      await renderApp();
+      await renderApp({ serveStateSessionHydrationFixtures: false });
       const eventSource = latestEventSource();
       await dispatchOpenedStateEvent(
         eventSource,
@@ -1154,7 +1166,10 @@ describe("App live state - delta-gap core", () => {
         throw new Error("Session row button not found");
       }
       await clickAndSettle(sessionRowButton);
-      expect(screen.getAllByText("First message").length).toBeGreaterThan(0);
+      await waitFor(() => {
+        expect(sessionFetchCount).toBe(1);
+        expect(screen.getAllByText("First message").length).toBeGreaterThan(1);
+      });
       fetchMock.mockClear();
 
       // Dispatch a textDelta whose target message is unknown to the local
@@ -1458,7 +1473,7 @@ describe("App live state - delta-gap core", () => {
     );
     const scrollIntoViewSpy = stubScrollIntoView();
     try {
-      await renderApp();
+      await renderApp({ serveStateSessionHydrationFixtures: false });
       const eventSource = latestEventSource();
       await dispatchOpenedStateEvent(
         eventSource,

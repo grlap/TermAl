@@ -35,6 +35,7 @@ import type {
   RemoteConfig,
   SandboxMode,
   Session,
+  StateSessionSummary,
 } from "./types";
 import {
   createBackendUnavailableError,
@@ -67,9 +68,10 @@ export type StateResponse = {
    * the server. Stable for the lifetime of the server process; changes
    * on every restart. Carried on every snapshot so the client can
    * distinguish "revision decreased because the server just restarted"
-   * from "revision decreased because this response is stale". Empty
-   * string is reserved for the fallback SSE payload and means "unknown" — treat
-   * as NOT a restart signal. See `shouldAdoptSnapshotRevision`.
+   * from "revision decreased because this response is stale". Current
+   * snapshot endpoints require a non-empty value; empty or absent ids are
+   * malformed-input cases handled defensively by the adoption helpers.
+   * See `shouldAdoptSnapshotRevision`.
    */
   serverInstanceId: string;
   codex: CodexState;
@@ -78,7 +80,7 @@ export type StateResponse = {
   projects: Project[];
   orchestrators: OrchestratorInstance[];
   workspaces: WorkspaceLayoutSummary[];
-  sessions: Session[];
+  sessions: StateSessionSummary[];
   delegations?: DelegationStateSummary[];
   delegationWaits?: DelegationWaitRecord[];
   /** Sessions whose current Stop owner will finish an Engram MCP revocation. */

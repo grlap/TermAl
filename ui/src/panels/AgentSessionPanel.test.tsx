@@ -1111,7 +1111,7 @@ describe("AgentSessionPanel conversation caching", () => {
     ).toHaveTextContent("No findings.");
   });
 
-  it("does not expose cancel for local-only optimistic pending prompts", () => {
+  it("allows canceling a local-only optimistic pending prompt", () => {
     const onCancelQueuedPrompt = vi.fn();
     renderSessionPanelWithDefaults({
       activeSession: makeSession("session-a", {
@@ -1130,9 +1130,13 @@ describe("AgentSessionPanel conversation caching", () => {
     });
 
     expect(screen.getByText("Optimistic follow-up")).toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "Cancel queued prompt" }),
-    ).not.toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Cancel queued prompt" }),
+    );
+    expect(onCancelQueuedPrompt).toHaveBeenCalledWith(
+      "session-a",
+      "optimistic-send-session-a-abc-1",
+    );
   });
 
   it("does not attach a native tooltip to queued prompt cancel buttons", () => {

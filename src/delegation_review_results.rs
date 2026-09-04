@@ -120,7 +120,7 @@ impl AppState {
         if delegation.id != delegation_id
             || delegation.parent_session_id != parent_session_id
             || delegation.review_result_submission_attempt != submission_attempt
-            || !delegation.review_result_required
+            || delegation.mode != DelegationMode::Reviewer
             || delegation.review_result_schema_version.is_some()
             || delegation.submitted_review_result.is_some()
             || !matches!(
@@ -182,7 +182,7 @@ impl AppState {
                 return Ok(());
             };
             let delegation = &inner.delegations[delegation_index];
-            if !delegation.review_result_required
+            if delegation.mode != DelegationMode::Reviewer
                 || delegation.review_result_schema_version.is_some()
                 || delegation.submitted_review_result.is_some()
                 || !matches!(
@@ -320,7 +320,7 @@ impl AppState {
                 .delegations
                 .iter()
                 .filter(|delegation| {
-                    delegation.review_result_required
+                    delegation.mode == DelegationMode::Reviewer
                         && delegation.review_result_schema_version.is_none()
                         && delegation.submitted_review_result.is_none()
                 })
@@ -362,7 +362,6 @@ impl AppState {
         let delegation = &inner.delegations[delegation_index];
         if delegation.child_session_id != child_session_id
             || delegation.mode != DelegationMode::Reviewer
-            || !delegation.review_result_required
         {
             return Err(ApiError::bad_request(
                 "structured review results are accepted only from current reviewer children",
@@ -475,7 +474,7 @@ impl AppState {
             let delegation = &inner.delegations[delegation_index];
             if delegation.id != submission.delegation_id
                 || delegation.parent_session_id != submission.parent_session_id
-                || !delegation.review_result_required
+                || delegation.mode != DelegationMode::Reviewer
             {
                 return Err(ApiError::conflict(
                     "delegation link changed during result submission",
@@ -736,7 +735,6 @@ fn terminalize_submitted_review_result_locked(
         record.review_result_recovery_probe_attempt = None;
         record.review_result_recovery_error = None;
         record.review_result_schema_version = Some(DELEGATION_REVIEW_RESULT_SCHEMA_VERSION);
-        record.result_parser_version = DELEGATION_RESULT_PARSER_VERSION;
     }
     inner.sync_running_read_only_delegation_index(delegation_index);
     inner.mark_delegation_mutated(delegation_index);

@@ -1,9 +1,23 @@
-import { act, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { StateResponse } from "./api";
 import App from "./App";
-import { clickAndSettle } from "./app-test-harness";
+import {
+  clickAndSettle,
+  flushUiWork,
+  makeStateSessionSummary,
+} from "./app-test-harness";
+import {
+  getSessionRecordSnapshotForTesting,
+  resetSessionStoreForTesting,
+} from "./session-store";
 import type { Session } from "./types";
 
 class EventSourceMock {
@@ -39,6 +53,15 @@ class EventSourceMock {
       data: JSON.stringify(state),
     });
     for (const listener of this.listeners.state ?? []) {
+      listener(event);
+    }
+  }
+
+  dispatchDelta(delta: unknown) {
+    const event = new MessageEvent<string>("delta", {
+      data: JSON.stringify(delta),
+    });
+    for (const listener of this.listeners.delta ?? []) {
       listener(event);
     }
   }
@@ -159,7 +182,7 @@ function makeState(session: Session, revision: number): StateResponse {
     projects: [],
     orchestrators: [],
     workspaces: [],
-    sessions: [session],
+    sessions: [makeStateSessionSummary(session)],
   } as StateResponse;
 }
 
@@ -167,23 +190,39 @@ describe("SessionPaneView retry display state", () => {
   const originalScrollTo = HTMLElement.prototype.scrollTo;
 
   beforeEach(() => {
+    resetSessionStoreForTesting();
     HTMLElement.prototype.scrollTo =
       vi.fn() as unknown as typeof HTMLElement.prototype.scrollTo;
     EventSourceMock.instances = [];
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await act(async () => {
+      cleanup();
+      await flushUiWork();
+    });
     vi.unstubAllGlobals();
+    resetSessionStoreForTesting();
     HTMLElement.prototype.scrollTo = originalScrollTo;
   });
 
   it("passes retry display states through the session renderer as lifecycle changes", async () => {
-    const activeState = makeState(makeRetrySession("active"), 1);
+    const activeSession = makeRetrySession("active");
+    const activeState = makeState(activeSession, 1);
+    let hydratedSession = activeSession;
+    let hydrationRevision = 1;
     const fetchMock = vi.fn(
       async (input: RequestInfo | URL, init?: RequestInit) => {
         const target = String(input);
         if (target === "/api/state") {
           return jsonResponse(activeState);
+        }
+        if (target.startsWith("/api/sessions/session-1")) {
+          return jsonResponse({
+            revision: hydrationRevision,
+            serverInstanceId: "test-instance",
+            session: hydratedSession,
+          });
         }
         if (target.startsWith("/api/workspaces/")) {
           if (init?.method === "PUT") {
@@ -215,9 +254,10 @@ describe("SessionPaneView retry display state", () => {
     render(<App />);
     const eventSource = latestEventSource();
 
-    act(() => {
+    await act(async () => {
       eventSource.dispatchOpen();
       eventSource.dispatchState(activeState);
+      await flushUiWork();
     });
 
     await clickAndSettle(await screen.findByRole("button", { name: "Sessions" }));
@@ -236,41 +276,105 @@ describe("SessionPaneView retry display state", () => {
       }),
     ).toBeInTheDocument();
 
+    const resolvedSession = makeResolvedRetrySession();
+    const recoveredMessage =
+      resolvedSession.messages[resolvedSession.messages.length - 1];
+    if (!recoveredMessage) {
+      throw new Error("retry fixture missing recovered response");
+    }
     act(() => {
-      eventSource.dispatchState(makeState(makeRetrySessionWithNewPrompt(), 2));
-    });
-
-    expect(
-      await screen.findByRole("heading", { name: "Connection retry ended" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByRole("heading", {
-        name: "Reconnecting to continue this turn",
-      }),
-    ).not.toBeInTheDocument();
-
-    act(() => {
-      eventSource.dispatchState(makeState(makeRetrySession("idle"), 3));
-    });
-
-    expect(
-      await screen.findByRole("heading", { name: "Connection retry ended" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByRole("heading", {
-        name: "Reconnecting to continue this turn",
-      }),
-    ).not.toBeInTheDocument();
-
-    act(() => {
-      eventSource.dispatchState(makeState(makeResolvedRetrySession(), 4));
+      eventSource.dispatchDelta({
+        type: "messageCreated",
+        revision: 2,
+        sessionId: "session-1",
+        messageId: recoveredMessage.id,
+        messageIndex: 2,
+        messageCount: 3,
+        message: recoveredMessage,
+        preview: resolvedSession.preview,
+        status: "idle",
+        sessionMutationStamp: 2,
+      });
     });
 
     expect(
       await screen.findByRole("heading", { name: "Connection recovered" }),
     ).toBeInTheDocument();
     expect(
-      screen.queryByRole("heading", { name: "Connection retry ended" }),
+      screen.queryByRole("heading", {
+        name: "Reconnecting to continue this turn",
+      }),
     ).not.toBeInTheDocument();
+
+    const thirdRetry = {
+      ...activeSession.messages[1],
+      id: "retry-3",
+      timestamp: "10:03",
+      text: "Connection dropped before the response finished. Retrying automatically (attempt 3 of 5).",
+    };
+    act(() => {
+      eventSource.dispatchDelta({
+        type: "messageCreated",
+        revision: 3,
+        sessionId: "session-1",
+        messageId: thirdRetry.id,
+        messageIndex: 3,
+        messageCount: 4,
+        message: thirdRetry,
+        preview: thirdRetry.text,
+        status: "active",
+        sessionMutationStamp: 3,
+      });
+    });
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "Reconnecting to continue this turn",
+      }),
+    ).toBeInTheDocument();
+
+    const sessionWithNewPrompt = makeRetrySessionWithNewPrompt();
+    const newPrompt =
+      sessionWithNewPrompt.messages[sessionWithNewPrompt.messages.length - 1];
+    if (!newPrompt) {
+      throw new Error("retry fixture missing superseding prompt");
+    }
+    hydratedSession = {
+      ...sessionWithNewPrompt,
+      messageCount: 5,
+      sessionMutationStamp: 4,
+      messages: [
+        ...activeSession.messages,
+        recoveredMessage,
+        thirdRetry,
+        newPrompt,
+      ],
+    };
+    hydrationRevision = 4;
+    await act(async () => {
+      eventSource.dispatchState(makeState(hydratedSession, hydrationRevision));
+      await flushUiWork();
+    });
+
+    await waitFor(() => {
+      expect(getSessionRecordSnapshotForTesting("session-1")).toMatchObject({
+        messageCount: 5,
+        messages: expect.arrayContaining([
+          expect.objectContaining({ id: "prompt-after-retry" }),
+        ]),
+      });
+    });
+
+    expect(
+      await screen.findByRole("heading", { name: "Connection retry ended" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", {
+        name: "Reconnecting to continue this turn",
+      }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Connection recovered" }),
+    ).toBeInTheDocument();
   });
 });

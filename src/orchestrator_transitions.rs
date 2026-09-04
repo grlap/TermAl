@@ -305,7 +305,7 @@ fn update_orchestrator_delivery_cursor(
 fn referenced_sessions_for_orchestrators(
     inner: &StateInner,
     orchestrators: &[OrchestratorInstance],
-) -> Vec<Session> {
+) -> Vec<StateSessionSummary> {
     let referenced_session_ids = orchestrators
         .iter()
         .flat_map(|instance| {

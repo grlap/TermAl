@@ -1310,11 +1310,7 @@ const SessionConversationPage = memo(
             prompt={prompt}
             sessionId={session.id}
             onOpenMailbox={onOpenMailbox}
-            onCancel={
-              prompt.localOnly
-                ? undefined
-                : () => onCancelQueuedPrompt(session.id, prompt.id)
-            }
+            onCancel={() => onCancelQueuedPrompt(session.id, prompt.id)}
             searchQuery={
               conversationSearchActiveItemKey === `pendingPrompt:${prompt.id}`
                 ? conversationSearchQuery

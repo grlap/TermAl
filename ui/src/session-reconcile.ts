@@ -13,6 +13,7 @@ import type {
   ParallelAgentsMessage,
   PendingPrompt,
   Session,
+  StateSessionSummary,
   SubagentResultMessage,
   TextMessage,
   ThinkingMessage,
@@ -47,10 +48,12 @@ type ReconcileSessionsOptions = {
   forceMessagesUnloaded?: boolean;
 };
 
-export function applyDelegationParentIdsFromSummaries(
-  sessions: Session[],
+export function applyDelegationParentIdsFromSummaries<
+  T extends Pick<Session, "id" | "parentDelegationId">,
+>(
+  sessions: T[],
   delegations: readonly Pick<DelegationSummary, "id" | "childSessionId">[],
-): Session[] {
+): T[] {
   if (!delegations.length) {
     return sessions;
   }
@@ -124,6 +127,87 @@ export function reconcileSessions(
   });
 
   return changed ? merged : previous;
+}
+
+/** Reconciles canonical transcript-free wire summaries into the local
+ * transcript-bearing session store. Omitted private fields are retained only
+ * from local state; new sessions start explicitly unhydrated. */
+export function reconcileStateSessionSummaries(
+  previous: Session[],
+  next: StateSessionSummary[],
+  options?: ReconcileSessionsOptions,
+): Session[] {
+  let previousById: Map<string, Session> | null = null;
+  let changed = previous.length !== next.length;
+
+  const merged = next.map((nextSession, index) => {
+    const previousSession =
+      previous[index]?.id === nextSession.id
+        ? previous[index]
+        : (previousById ??= new Map(
+            previous.map((session) => [session.id, session]),
+          )).get(nextSession.id);
+    if (!previousSession) {
+      changed = true;
+      return materializeNewStateSessionSummary(nextSession);
+    }
+
+    const mergedSession = reconcileSingleStateSessionSummary(
+      previousSession,
+      nextSession,
+      options,
+    );
+    if (
+      mergedSession !== previousSession ||
+      previous[index]?.id !== nextSession.id
+    ) {
+      changed = true;
+    }
+    return mergedSession;
+  });
+
+  return changed ? merged : previous;
+}
+
+function materializeNewStateSessionSummary(
+  summary: StateSessionSummary,
+): Session {
+  const messageCount = summary.messageCount;
+  return {
+    ...summary,
+    messages: [],
+    promptHistory: [],
+    promptHistoryRedacted: true,
+    messagesLoaded: messageCount === 0,
+    messageStartIndex: messageCount,
+    hasOlderHistory: messageCount > 0,
+    hasNewerHistory: false,
+  };
+}
+
+export function reconcileSingleStateSessionSummary(
+  previous: Session,
+  summary: StateSessionSummary,
+  options?: ReconcileSessionsOptions,
+): Session {
+  const messageCount = summary.messageCount;
+  const projected: Session = preserveExistingPromptHistory(
+    previous,
+    preserveExistingParentDelegationId(previous, {
+      ...summary,
+      messages: [],
+      // Broad summaries omit prompt history entirely. Preserve the local
+      // targeted-hydration value instead of manufacturing a redacted empty
+      // value that needlessly changes object identity on every state poll.
+      promptHistory: previous.promptHistory,
+      promptHistoryRedacted: previous.promptHistoryRedacted,
+      messagesLoaded: false,
+      messageStartIndex: messageCount,
+      hasOlderHistory: messageCount > 0,
+      hasNewerHistory: false,
+    }),
+  );
+  return reconcileSummarySession(previous, projected, options);
 }
 
 /**

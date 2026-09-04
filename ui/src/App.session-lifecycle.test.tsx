@@ -467,8 +467,16 @@ describe("App session lifecycle", () => {
         await advanceTimers(ACTIVE_PROMPT_POLL_INTERVAL_MS);
         await settleAsyncUi();
 
-        expect(fetchMock).toHaveBeenCalledTimes(1);
-        expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/state");
+        expect(
+          fetchMock.mock.calls.filter(([input]) => {
+            const requestUrl = new URL(String(input), "http://localhost");
+            return requestUrl.pathname === "/api/state";
+          }),
+        ).toHaveLength(1);
+        // The harness owns the targeted hydration route registered from the
+        // projected state fixture, so the underlying broad-state mock does
+        // not see that request. Rendering the recovered transcript below is
+        // the observable proof that targeted hydration completed.
         expect(
           screen.getAllByText("Recovered assistant response").length,
         ).toBeGreaterThan(0);
@@ -1105,7 +1113,14 @@ describe("App session lifecycle", () => {
         await advanceTimers(ACTIVE_PROMPT_POLL_INTERVAL_MS);
         await settleAsyncUi();
 
-        expect(fetchMock).not.toHaveBeenCalled();
+        expect(
+          fetchMock.mock.calls.filter(([input]) => {
+            const requestUrl = new URL(String(input), "http://localhost");
+            return requestUrl.pathname === "/api/state";
+          }),
+        ).toHaveLength(0);
+        // The fixture adapter serves targeted hydration directly. The
+        // recovered transcript assertion below pins that it completed.
         expect(
           screen.getAllByText("Recovered via live event").length,
         ).toBeGreaterThan(0);
@@ -1268,8 +1283,14 @@ describe("App session lifecycle", () => {
         await advanceTimers(ACTIVE_PROMPT_POLL_INTERVAL_MS);
         await settleAsyncUi();
 
-        expect(fetchMock).toHaveBeenCalledTimes(1);
-        expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/state");
+        expect(
+          fetchMock.mock.calls.filter(([input]) => {
+            const requestUrl = new URL(String(input), "http://localhost");
+            return requestUrl.pathname === "/api/state";
+          }),
+        ).toHaveLength(1);
+        // The fixture adapter serves targeted hydration directly. The
+        // recovered transcript assertion below pins that it completed.
         expect(
           screen.getAllByText("Recovered after adopted response").length,
         ).toBeGreaterThan(0);
@@ -1684,7 +1705,8 @@ describe("App session lifecycle", () => {
                   sandboxMode: "workspace-write",
                   status: "idle",
                   preview: "Ready for a prompt.",
-                  messages: [],
+                  messageCount: 0,
+                  queuePaused: false,
                 },
               ],
             }),
@@ -1917,6 +1939,19 @@ describe("App session lifecycle", () => {
       try {
         await renderApp();
 
+        // Establish a healthy live stream before creation so the test isolates
+        // the post-create wake-gap watchdog from the reconnect fallback timer.
+        await dispatchOpenedStateEvent(
+          latestEventSource(),
+          makeStateResponse({
+            revision: 1,
+            projects: [],
+            orchestrators: [],
+            workspaces: [],
+            sessions: [],
+          }),
+        );
+
         await openCreateSessionDialog();
         await settleAsyncUi();
         await submitButtonAndSettle(
@@ -1994,8 +2029,8 @@ describe("App session lifecycle", () => {
         // No SSE state arrives here: the active session exists only because the
         // create-session REST flow adopted it locally.
         expect(
-          screen.getByText("Working on the current turn..."),
-        ).toBeInTheDocument();
+          document.querySelector(".activity-card-live")?.textContent,
+        ).toContain("Working on the current turn...");
         fetchStateSpy.mockClear();
 
         // Keep one real watchdog interval and own every update it can trigger
@@ -2010,9 +2045,7 @@ describe("App session lifecycle", () => {
 
         await waitFor(() => {
           expect(fetchStateSpy).toHaveBeenCalledTimes(1);
-          expect(
-            screen.queryByText("Working on the current turn..."),
-          ).not.toBeInTheDocument();
+          expect(document.querySelector(".activity-card-live")).toBeNull();
         });
       } finally {
         window.history.replaceState(window.history.state, "", originalUrl);
@@ -2138,7 +2171,8 @@ describe("App session lifecycle", () => {
                   sandboxMode: "workspace-write",
                   status: "idle",
                   preview: "Ready for a prompt.",
-                  messages: [],
+                  messageCount: 0,
+                  queuePaused: false,
                 },
               ],
             }),
@@ -2263,7 +2297,8 @@ describe("App session lifecycle", () => {
                 sandboxMode: "workspace-write",
                 status: "idle",
                 preview: "Ready for a prompt.",
-                messages: [],
+                messageCount: 0,
+                queuePaused: false,
               },
             ],
           }),
@@ -2455,7 +2490,8 @@ describe("App session lifecycle", () => {
                   claudeEffort: "max",
                   status: "idle",
                   preview: "Ready for a prompt.",
-                  messages: [],
+                  messageCount: 0,
+                  queuePaused: false,
                 },
               ],
             }),

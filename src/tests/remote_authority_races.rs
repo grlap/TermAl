@@ -171,7 +171,7 @@ fn seed_unloaded_remote_proxy_for_authority_test(
             DeltaEvent::SessionCreated {
                 revision: 1,
                 session_id: summary_session.id.clone(),
-                session: summary_session,
+                session: test_state_session_summary_from_session(&summary_session),
             },
         )
         .expect("remote summary session should localize");

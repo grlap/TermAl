@@ -162,7 +162,7 @@ function makeDelegationSummary(
     startedAt: null,
     completedAt: null,
     result: null,
-    resultParserVersion: 0,
+    reviewResultRequired: overrides.reviewResultRequired ?? false,
     ...overrides,
   };
 }

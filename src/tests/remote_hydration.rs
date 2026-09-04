@@ -4,9 +4,10 @@
 //! incremental transcript repair coverage in focused test modules.
 
 use super::remote::{
-    make_remote_session_summary_only, remote_text_message,
-    seed_remote_proxy_session_via_state_inner_upsert, spawn_remote_session_history_response_server,
-    spawn_remote_session_overview_response_server, spawn_remote_session_response_server,
+    make_remote_session_summary_only, materialize_remote_proxy_session_transcript_for_test,
+    remote_text_message, seed_remote_proxy_session_via_state_inner_upsert,
+    spawn_remote_session_history_response_server, spawn_remote_session_overview_response_server,
+    spawn_remote_session_response_server,
 };
 use super::remote_delta_replay::local_replay_test_remote;
 use super::*;
@@ -51,7 +52,7 @@ fn exact_bounded_tail_replay_retries_dirty_persistence() {
     remote_session.messages_loaded = true;
     let remote_session = remote_session.clone();
     state
-        .apply_remote_state_snapshot(&remote.id, initial_state)
+        .apply_remote_state_snapshot(&remote.id, initial_state.into_state_response())
         .expect("initial remote state should apply");
     let local_session_id = {
         let inner = state.inner.lock().expect("state mutex poisoned");
@@ -285,7 +286,7 @@ fn remote_session_created_delta_republishes_metadata_only_session_summary() {
             DeltaEvent::SessionCreated {
                 revision: 2,
                 session_id: remote_session.id.clone(),
-                session: remote_session,
+                session: test_state_session_summary_from_session(&remote_session),
             },
         )
         .expect("remote session create delta should apply");
@@ -296,9 +297,10 @@ fn remote_session_created_delta_republishes_metadata_only_session_summary() {
             .find_remote_session_index(&remote.id, "remote-session-1")
             .expect("remote session should be mirrored locally");
         let record = &inner.sessions[index];
-        assert!(record.session.messages_loaded);
-        assert_eq!(record.session.messages.len(), 1);
-        (record.session.id.clone(), record.session.messages.len())
+        assert!(!record.session.messages_loaded);
+        assert!(record.session.messages.is_empty());
+        assert_eq!(record.session.message_count, 1);
+        (record.session.id.clone(), record.session.message_count)
     };
 
     let payload = delta_receiver
@@ -314,9 +316,7 @@ fn remote_session_created_delta_republishes_metadata_only_session_summary() {
             assert_eq!(revision, state.full_snapshot().revision);
             assert_eq!(session_id, local_session_id);
             assert_eq!(session.id, local_session_id);
-            assert!(!session.messages_loaded);
-            assert!(session.messages.is_empty());
-            assert_eq!(session.message_count, stored_message_count as u32);
+            assert_eq!(session.message_count, stored_message_count);
         }
         _ => panic!("expected sessionCreated delta"),
     }
@@ -365,7 +365,7 @@ fn remote_session_created_duplicate_redelivery_does_not_publish_non_advancing_de
     let session_created = || DeltaEvent::SessionCreated {
         revision: 2,
         session_id: remote_session.id.clone(),
-        session: remote_session.clone(),
+        session: test_state_session_summary_from_session(&remote_session),
     };
 
     state
@@ -429,7 +429,7 @@ fn remote_session_created_summary_preserves_unloaded_message_count() {
             DeltaEvent::SessionCreated {
                 revision: 2,
                 session_id: remote_session.id.clone(),
-                session: remote_session,
+                session: test_state_session_summary_from_session(&remote_session),
             },
         )
         .expect("remote summary session create delta should apply");
@@ -458,8 +458,6 @@ fn remote_session_created_summary_preserves_unloaded_message_count() {
         } => {
             assert_eq!(session_id, local_session_id);
             assert_eq!(session.id, local_session_id);
-            assert!(!session.messages_loaded);
-            assert!(session.messages.is_empty());
             assert_eq!(session.message_count, 2);
         }
         _ => panic!("expected sessionCreated delta"),
@@ -511,10 +509,11 @@ fn remote_summary_count_decrease_discards_stale_cached_suffix() {
             DeltaEvent::SessionCreated {
                 revision: 2,
                 session_id: full_remote_session.id.clone(),
-                session: full_remote_session.clone(),
+                session: test_state_session_summary_from_session(&full_remote_session),
             },
         )
         .expect("remote full session create delta should apply");
+    materialize_remote_proxy_session_transcript_for_test(&state, &remote, &full_remote_session);
 
     let mut summary_session = full_remote_session;
     make_remote_session_summary_only(&mut summary_session, 1);
@@ -525,7 +524,7 @@ fn remote_summary_count_decrease_discards_stale_cached_suffix() {
             DeltaEvent::SessionCreated {
                 revision: 3,
                 session_id: summary_session.id.clone(),
-                session: summary_session,
+                session: test_state_session_summary_from_session(&summary_session),
             },
         )
         .expect("remote summary count decrease should apply");
@@ -547,8 +546,6 @@ fn remote_summary_count_decrease_discards_stale_cached_suffix() {
     let delta: DeltaEvent = serde_json::from_str(&payload).expect("delta should decode");
     match delta {
         DeltaEvent::SessionCreated { session, .. } => {
-            assert!(!session.messages_loaded);
-            assert!(session.messages.is_empty());
             assert_eq!(session.message_count, 1);
         }
         _ => panic!("expected sessionCreated delta"),
@@ -601,10 +598,11 @@ fn remote_summary_same_count_with_new_stamp_discards_stale_cached_suffix() {
             DeltaEvent::SessionCreated {
                 revision: 2,
                 session_id: full_remote_session.id.clone(),
-                session: full_remote_session.clone(),
+                session: test_state_session_summary_from_session(&full_remote_session),
             },
         )
         .expect("remote full session create delta should apply");
+    materialize_remote_proxy_session_transcript_for_test(&state, &remote, &full_remote_session);
 
     let mut summary_session = full_remote_session;
     make_remote_session_summary_only(&mut summary_session, 1);
@@ -616,7 +614,7 @@ fn remote_summary_same_count_with_new_stamp_discards_stale_cached_suffix() {
             DeltaEvent::SessionCreated {
                 revision: 3,
                 session_id: summary_session.id.clone(),
-                session: summary_session,
+                session: test_state_session_summary_from_session(&summary_session),
             },
         )
         .expect("remote same-count summary with new stamp should apply");
@@ -685,10 +683,11 @@ fn remote_summary_same_count_with_same_stamp_preserves_cached_transcript() {
             DeltaEvent::SessionCreated {
                 revision: 2,
                 session_id: full_remote_session.id.clone(),
-                session: full_remote_session.clone(),
+                session: test_state_session_summary_from_session(&full_remote_session),
             },
         )
         .expect("remote full session create delta should apply");
+    materialize_remote_proxy_session_transcript_for_test(&state, &remote, &full_remote_session);
 
     let mut summary_session = full_remote_session;
     make_remote_session_summary_only(&mut summary_session, 1);
@@ -699,7 +698,7 @@ fn remote_summary_same_count_with_same_stamp_preserves_cached_transcript() {
             DeltaEvent::SessionCreated {
                 revision: 3,
                 session_id: summary_session.id.clone(),
-                session: summary_session,
+                session: test_state_session_summary_from_session(&summary_session),
             },
         )
         .expect("remote same-count summary with same stamp should apply");
@@ -764,10 +763,11 @@ fn remote_summary_without_stamp_preserves_cached_transcript_and_stamp() {
             DeltaEvent::SessionCreated {
                 revision: 2,
                 session_id: full_remote_session.id.clone(),
-                session: full_remote_session.clone(),
+                session: test_state_session_summary_from_session(&full_remote_session),
             },
         )
         .expect("remote full session create delta should apply");
+    materialize_remote_proxy_session_transcript_for_test(&state, &remote, &full_remote_session);
 
     let mut summary_session = full_remote_session;
     make_remote_session_summary_only(&mut summary_session, 1);
@@ -779,7 +779,7 @@ fn remote_summary_without_stamp_preserves_cached_transcript_and_stamp() {
             DeltaEvent::SessionCreated {
                 revision: 3,
                 session_id: summary_session.id.clone(),
-                session: summary_session,
+                session: test_state_session_summary_from_session(&summary_session),
             },
         )
         .expect("remote unstamped summary should apply");
@@ -846,10 +846,11 @@ fn remote_summary_without_any_stamps_preserves_cached_transcript() {
             DeltaEvent::SessionCreated {
                 revision: 2,
                 session_id: full_remote_session.id.clone(),
-                session: full_remote_session.clone(),
+                session: test_state_session_summary_from_session(&full_remote_session),
             },
         )
         .expect("remote unstamped full session create delta should apply");
+    materialize_remote_proxy_session_transcript_for_test(&state, &remote, &full_remote_session);
 
     let mut summary_session = full_remote_session;
     make_remote_session_summary_only(&mut summary_session, 1);
@@ -861,7 +862,7 @@ fn remote_summary_without_any_stamps_preserves_cached_transcript() {
             DeltaEvent::SessionCreated {
                 revision: 3,
                 session_id: summary_session.id.clone(),
-                session: summary_session,
+                session: test_state_session_summary_from_session(&summary_session),
             },
         )
         .expect("remote unstamped same-count summary should apply");
@@ -929,7 +930,7 @@ fn get_session_hydrates_unloaded_remote_proxy_from_remote_owner() {
             DeltaEvent::SessionCreated {
                 revision: 2,
                 session_id: summary_session.id.clone(),
-                session: summary_session,
+                session: test_state_session_summary_from_session(&summary_session),
             },
         )
         .expect("remote summary session create delta should apply");
@@ -1041,7 +1042,7 @@ fn bounded_history_hydrates_unloaded_remote_proxy_before_slicing() {
             DeltaEvent::SessionCreated {
                 revision: 2,
                 session_id: summary_session.id.clone(),
-                session: summary_session,
+                session: test_state_session_summary_from_session(&summary_session),
             },
         )
         .expect("remote summary session create delta should apply");
@@ -1153,7 +1154,7 @@ fn conversation_overview_forwards_one_bounded_remote_request() {
             DeltaEvent::SessionCreated {
                 revision: 2,
                 session_id: summary_session.id.clone(),
-                session: summary_session,
+                session: test_state_session_summary_from_session(&summary_session),
             },
         )
         .expect("remote summary session create delta should apply");
@@ -1259,7 +1260,7 @@ fn stale_remote_tail_response_cannot_overwrite_newer_synchronized_metadata() {
             DeltaEvent::SessionCreated {
                 revision: 2,
                 session_id: initial_summary.id.clone(),
-                session: initial_summary,
+                session: test_state_session_summary_from_session(&initial_summary),
             },
         )
         .expect("remote summary should apply");
@@ -1347,7 +1348,7 @@ fn stale_remote_history_page_is_not_relabelled_with_current_proxy_metadata() {
             DeltaEvent::SessionCreated {
                 revision: 4,
                 session_id: summary.id.clone(),
-                session: summary,
+                session: test_state_session_summary_from_session(&summary),
             },
         )
         .expect("current remote summary should apply");
@@ -1438,7 +1439,7 @@ fn get_session_adopts_bounded_summary_when_remote_owner_has_no_tail_bytes() {
             DeltaEvent::SessionCreated {
                 revision: 2,
                 session_id: local_summary.id.clone(),
-                session: local_summary,
+                session: test_state_session_summary_from_session(&local_summary),
             },
         )
         .expect("remote summary session create delta should apply");
@@ -1557,7 +1558,7 @@ fn get_session_hydration_skips_side_fetch_when_remote_revision_is_already_seen()
             DeltaEvent::SessionCreated {
                 revision: 2,
                 session_id: summary_session.id.clone(),
-                session: summary_session,
+                session: test_state_session_summary_from_session(&summary_session),
             },
         )
         .expect("remote summary session create delta should apply");
@@ -1660,7 +1661,7 @@ fn get_session_hydration_suppresses_same_revision_delta_for_hydrated_session_onl
             DeltaEvent::SessionCreated {
                 revision: 2,
                 session_id: summary_session.id.clone(),
-                session: summary_session,
+                session: test_state_session_summary_from_session(&summary_session),
             },
         )
         .expect("remote summary session create delta should apply");
@@ -1682,10 +1683,11 @@ fn get_session_hydration_suppresses_same_revision_delta_for_hydrated_session_onl
             DeltaEvent::SessionCreated {
                 revision: 2,
                 session_id: sibling_session.id.clone(),
-                session: sibling_session,
+                session: test_state_session_summary_from_session(&sibling_session),
             },
         )
         .expect("sibling remote session create delta should apply");
+    materialize_remote_proxy_session_transcript_for_test(&state, &remote, &sibling_session);
 
     let local_session_id = {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
@@ -1835,7 +1837,7 @@ fn get_session_propagates_remote_protocol_error_instead_of_cached_summary() {
             DeltaEvent::SessionCreated {
                 revision: 2,
                 session_id: local_summary.id.clone(),
-                session: local_summary,
+                session: test_state_session_summary_from_session(&local_summary),
             },
         )
         .expect("remote summary session create delta should apply");
@@ -1924,7 +1926,7 @@ fn get_session_surfaces_remote_tail_transport_failure_without_summary_fallback()
             DeltaEvent::SessionCreated {
                 revision: 2,
                 session_id: local_summary.id.clone(),
-                session: local_summary,
+                session: test_state_session_summary_from_session(&local_summary),
             },
         )
         .expect("remote summary session create delta should apply");
@@ -2054,7 +2056,7 @@ fn get_session_tail_does_not_fetch_a_broad_remote_state_snapshot() {
             DeltaEvent::SessionCreated {
                 revision: 2,
                 session_id: summary_session.id.clone(),
-                session: summary_session,
+                session: test_state_session_summary_from_session(&summary_session),
             },
         )
         .expect("remote summary session create delta should apply");
@@ -2169,7 +2171,7 @@ fn remote_message_delta_hydrates_unloaded_proxy_before_gap_check() {
             DeltaEvent::SessionCreated {
                 revision: 2,
                 session_id: summary_session.id.clone(),
-                session: summary_session,
+                session: test_state_session_summary_from_session(&summary_session),
             },
         )
         .expect("remote summary session create delta should apply");
@@ -2276,7 +2278,7 @@ fn remote_text_delta_targeted_hydration_accepts_newer_global_revision_with_match
             DeltaEvent::SessionCreated {
                 revision: 2,
                 session_id: summary_session.id.clone(),
-                session: summary_session,
+                session: test_state_session_summary_from_session(&summary_session),
             },
         )
         .expect("remote summary session create delta should apply");
@@ -2298,10 +2300,11 @@ fn remote_text_delta_targeted_hydration_accepts_newer_global_revision_with_match
             DeltaEvent::SessionCreated {
                 revision: 2,
                 session_id: sibling_session.id.clone(),
-                session: sibling_session,
+                session: test_state_session_summary_from_session(&sibling_session),
             },
         )
         .expect("sibling remote session create delta should apply");
+    materialize_remote_proxy_session_transcript_for_test(&state, &remote, &sibling_session);
 
     let (port, _requests, server) = spawn_remote_session_response_server(SessionResponse {
         // The remote revision is global, so a busy upstream can already be
@@ -2613,6 +2616,7 @@ fn remote_delegation_delta_advances_revision_without_local_record() {
         parent_session_id: "remote-parent-session".to_owned(),
         child_session_id: "remote-child-session".to_owned(),
         mode: DelegationMode::Reviewer,
+        review_result_required: true,
         status: DelegationStatus::Running,
         title: "Remote delegation".to_owned(),
         agent: Agent::Codex,
@@ -2621,8 +2625,6 @@ fn remote_delegation_delta_advances_revision_without_local_record() {
         created_at: "2026-04-05 10:00:00".to_owned(),
         started_at: Some("2026-04-05 10:00:01".to_owned()),
         completed_at: None,
-        result_parser_version: 0,
-        review_result_required: false,
         post_submission_transport_error: None,
         review_result_recovery_error: None,
         result: None,
@@ -2786,10 +2788,11 @@ fn metadata_remote_state_snapshot_allows_same_revision_transcript_delta() {
             DeltaEvent::SessionCreated {
                 revision: 2,
                 session_id: seed_remote_session.id.clone(),
-                session: seed_remote_session.clone(),
+                session: test_state_session_summary_from_session(&seed_remote_session),
             },
         )
         .expect("bounded remote session seed should apply");
+    materialize_remote_proxy_session_transcript_for_test(&state, &remote, seed_remote_session);
 
     let mut metadata_remote_state = sample_remote_orchestrator_state(
         "remote-project-1",
@@ -2810,7 +2813,7 @@ fn metadata_remote_state_snapshot_allows_same_revision_transcript_delta() {
     metadata_remote_session.session_mutation_stamp = Some(10);
 
     state
-        .apply_remote_state_snapshot(&remote.id, metadata_remote_state)
+        .apply_remote_state_snapshot(&remote.id, metadata_remote_state.into_state_response())
         .expect("metadata remote state snapshot should apply");
 
     let mut delta_receiver = state.subscribe_delta_events();
@@ -2907,7 +2910,7 @@ fn targeted_remote_hydration_rejects_message_count_length_mismatch() {
             DeltaEvent::SessionCreated {
                 revision: 2,
                 session_id: summary_session.id.clone(),
-                session: summary_session,
+                session: test_state_session_summary_from_session(&summary_session),
             },
         )
         .expect("remote summary session create delta should apply");
@@ -3001,7 +3004,7 @@ fn remote_delta_falls_through_when_targeted_hydration_returns_summary() {
             DeltaEvent::SessionCreated {
                 revision: 2,
                 session_id: summary_session.id.clone(),
-                session: summary_session.clone(),
+                session: test_state_session_summary_from_session(&summary_session),
             },
         )
         .expect("remote summary session create delta should apply");
@@ -3111,7 +3114,7 @@ fn remote_delta_repair_rejects_newer_targeted_session_revision() {
             DeltaEvent::SessionCreated {
                 revision: 2,
                 session_id: summary_session.id.clone(),
-                session: summary_session,
+                session: test_state_session_summary_from_session(&summary_session),
             },
         )
         .expect("remote summary session create delta should apply");
@@ -3212,7 +3215,7 @@ fn stale_remote_delta_skips_before_targeted_hydration_fetch() {
             DeltaEvent::SessionCreated {
                 revision: 5,
                 session_id: summary_session.id.clone(),
-                session: summary_session,
+                session: test_state_session_summary_from_session(&summary_session),
             },
         )
         .expect("remote summary session create delta should apply");
@@ -3318,7 +3321,7 @@ fn remote_summary_state_snapshot_preserves_existing_proxy_transcript() {
         )
         .expect("remote message create delta should apply");
 
-    let mut remote_state = state.full_snapshot();
+    let mut remote_state = state.summary_snapshot();
     remote_state.revision = 3;
     let mut remote_session = remote_state
         .sessions
@@ -3328,8 +3331,6 @@ fn remote_summary_state_snapshot_preserves_existing_proxy_transcript() {
         .expect("local proxy should be present in snapshot");
     remote_session.id = "remote-session-1".to_owned();
     remote_session.preview = "Summary-only remote update.".to_owned();
-    remote_session.messages.clear();
-    remote_session.messages_loaded = false;
     remote_session.session_mutation_stamp = Some(42);
     remote_state.sessions = vec![remote_session];
 

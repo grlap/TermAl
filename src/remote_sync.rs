@@ -5,9 +5,11 @@
 //
 // Covers: snapshot sync (`sync_remote_state_inner`,
 // `apply_remote_state_if_newer_locked`), per-session proxy record upsert
-// (`apply_remote_session_to_record`, `upsert_remote_proxy_session_record`,
-// `ensure_remote_proxy_session_record`), remote→local ID localization
-// (`localize_remote_session`, `remote_project_id_map`,
+// (`apply_remote_session_summary_to_record`,
+// `upsert_remote_proxy_session_summary_record` for broad metadata snapshots;
+// the full-session variants remain on targeted hydration paths), remote→local
+// ID localization (`localize_remote_session_summary`, `localize_remote_session`,
+// `remote_project_id_map`,
 // `local_project_id_for_remote_project`, `local_session_id_for_remote_session`),
 // orchestrator mirroring (`localize_remote_orchestrator_instance`,
 // `ensure_remote_orchestrator_instance`, `sync_remote_orchestrators_inner`),
@@ -133,7 +135,7 @@ impl RemoteSyncRollback {
 ///   drop local proxies not in the snapshot and tombstone them via
 ///   `record_removed_session`; updates every remaining remote
 ///   session via `session_mut_by_index` +
-///   `apply_remote_session_to_record`; then syncs every remote
+///   `apply_remote_session_summary_to_record`; then syncs every remote
 ///   orchestrator instance via `sync_remote_orchestrators_inner`,
 ///   each id translated from remote to local proxy ids. A failure
 ///   inside orchestrator sync triggers `rollback.restore(inner)`
@@ -181,7 +183,7 @@ impl RemoteSyncRollback {
 ///   PreCapture --> BuildMap[build remote→local project id map<br/>read-only scan of inner.projects]
 ///   BuildMap --> BroadRetain{broad-sync?}
 ///   BroadRetain -- yes --> Retain[retain_sessions: drop local proxies<br/>not in snapshot, queue tombstones]
-///   BroadRetain -- no --> SessionUpdates[two-phase session updates:<br/>collect indexes, then<br/>session_mut_by_index + apply_remote_session_to_record]
+///   BroadRetain -- no --> SessionUpdates[two-phase session updates:<br/>collect indexes, then<br/>session_mut_by_index + apply_remote_session_summary_to_record]
 ///   Retain --> SessionUpdates
 ///   SessionUpdates --> FocusedCapture{focused path?}
 ///   FocusedCapture -- yes --> PostCapture[RemoteSyncRollback::capture<br/>AFTER session updates]
@@ -207,7 +209,7 @@ fn sync_remote_state_inner(
 ) {
     // Mutation contract — this function mutates only these fields of
     // `StateInner`: `sessions` (via retain_sessions /
-    // upsert_remote_proxy_session_record / session_mut_by_index),
+    // upsert_remote_proxy_session_summary_record / session_mut_by_index),
     // `orchestrator_instances` (via localize_remote_orchestrator_instance),
     // `next_session_number` (via push_session), `removed_session_ids` (via
     // retain_sessions → record_removed_session), and `last_mutation_stamp`
@@ -258,21 +260,11 @@ fn sync_remote_state_inner(
         });
     }
 
-    // Broad `/api/state` and SSE `state` payloads are metadata only. Even if a
-    // malformed or older peer includes transcript bytes, this boundary drops
-    // them; transcript materialization is exclusively owned by bounded
-    // session-tail and history routes.
-    let remote_session_summaries = remote_state
+    // Broad `/api/state` and SSE `state` payloads are metadata only by type;
+    // transcript materialization is exclusively owned by bounded session-tail
+    // and history routes.
+    let remote_sessions_by_id = remote_state
         .sessions
-        .iter()
-        .cloned()
-        .map(|mut session| {
-            session.messages.clear();
-            session.messages_loaded = session.message_count == 0;
-            session
-        })
-        .collect::<Vec<_>>();
-    let remote_sessions_by_id = remote_session_summaries
         .iter()
         .map(|session| (session.id.as_str(), session))
         .collect::<HashMap<_, _>>();
@@ -322,7 +314,7 @@ fn sync_remote_state_inner(
         let Some(record) = inner.session_mut_by_index(idx) else {
             continue;
         };
-        apply_remote_session_to_record(
+        apply_remote_session_summary_to_record(
             record,
             remote_id,
             local_project_id.map(LocalProjectId::into_inner),
@@ -464,6 +456,59 @@ fn apply_remote_session_to_record(
             .unwrap_or(usize::MAX)
             .saturating_sub(record.session.messages.len());
     }
+    finish_remote_session_record_refresh(record);
+}
+
+/// Applies a transcript-free remote session summary to a local proxy record
+/// while retaining any targeted transcript, prompt-history, and queued-prompt
+/// data already materialized for that proxy.
+fn apply_remote_session_summary_to_record(
+    record: &mut SessionRecord,
+    remote_id: &str,
+    local_project_id: Option<String>,
+    remote_session: &StateSessionSummary,
+) {
+    let local_session_id = record.session.id.clone();
+    let previous_messages = record.session.messages.clone();
+    let previous_message_start_index = record.message_start_index;
+    let previous_messages_loaded = record.session.messages_loaded;
+    let previous_prompt_history = record.session.prompt_history.clone();
+    let previous_pending_prompts = record.session.pending_prompts.clone();
+    let previous_remote_mutation_stamp = record.session.session_mutation_stamp;
+    record.session = localize_remote_session_summary(
+        remote_id,
+        &local_session_id,
+        local_project_id,
+        remote_session,
+    );
+    record.engram_boot_recovery_pending = remote_session.engram_boot_recovery_pending;
+    if remote_session.session_mutation_stamp.is_none() {
+        record.session.session_mutation_stamp = previous_remote_mutation_stamp;
+    }
+    record.session.prompt_history = previous_prompt_history;
+    record.session.pending_prompts = previous_pending_prompts;
+
+    let count_matches = record.session.message_count
+        == u32::try_from(previous_message_start_index.saturating_add(previous_messages.len()))
+            .unwrap_or(u32::MAX);
+    let remote_mutation_stamp_matches = remote_mutation_stamp_allows_cached_transcript(
+        previous_remote_mutation_stamp,
+        remote_session.session_mutation_stamp,
+    );
+    if count_matches && remote_mutation_stamp_matches {
+        record.message_start_index = previous_message_start_index;
+        record.session.messages = previous_messages;
+        record.session.messages_loaded = previous_messages_loaded;
+    } else {
+        record.message_start_index =
+            usize::try_from(record.session.message_count).unwrap_or(usize::MAX);
+        record.session.messages.clear();
+        record.session.messages_loaded = record.session.message_count == 0;
+    }
+    finish_remote_session_record_refresh(record);
+}
+
+fn finish_remote_session_record_refresh(record: &mut SessionRecord) {
     record.external_session_id = record.session.external_session_id.clone();
     sync_codex_thread_state(record);
     record.codex_approval_policy = record
@@ -528,6 +573,23 @@ fn upsert_remote_proxy_session_record(
         local_project_id,
         remote_session,
     );
+    push_remote_proxy_session_record(
+        inner,
+        remote_id,
+        &remote_session.id,
+        remote_session.engram_boot_recovery_pending,
+        session,
+    );
+    local_session_id
+}
+
+fn push_remote_proxy_session_record(
+    inner: &mut StateInner,
+    remote_id: &str,
+    remote_session_id: &str,
+    engram_boot_recovery_pending: bool,
+    session: Session,
+) {
     let mut record = SessionRecord {
         active_codex_approval_policy: None,
         active_codex_reasoning_effort: None,
@@ -567,7 +629,7 @@ fn upsert_remote_proxy_session_record(
         },
         message_positions: build_message_positions(&session.messages),
         remote_id: Some(remote_id.to_owned()),
-        remote_session_id: Some(remote_session.id.clone()),
+        remote_session_id: Some(remote_session_id.to_owned()),
         runtime: SessionRuntime::None,
         engram_mcp_installed: None,
         runtime_reset_required: false,
@@ -579,7 +641,7 @@ fn upsert_remote_proxy_session_record(
         engram_mcp_revocation_pending: false,
         deferred_stop_callbacks: Vec::new(),
         engram: EngramSessionState::default(),
-        engram_boot_recovery_pending: remote_session.engram_boot_recovery_pending,
+        engram_boot_recovery_pending,
         engram_boot_recovery_dispatch_pending: false,
         engram_boot_recovery_retry_in_progress: false,
         hidden: false,
@@ -591,7 +653,6 @@ fn upsert_remote_proxy_session_record(
     };
     sync_codex_thread_state(&mut record);
     inner.push_session(record);
-    local_session_id
 }
 
 /// Ensures a remote proxy session record exists locally, optionally refreshing
@@ -621,6 +682,79 @@ fn ensure_remote_proxy_session_record(
 
     (
         upsert_remote_proxy_session_record(inner, remote_id, remote_session, local_project_id),
+        true,
+    )
+}
+
+/// Upserts a remote proxy from the canonical transcript-free state/delta
+/// summary without routing that wire payload through the full-session type.
+fn upsert_remote_proxy_session_summary_record(
+    inner: &mut StateInner,
+    remote_id: &str,
+    remote_session: &StateSessionSummary,
+    local_project_id: Option<String>,
+) -> String {
+    if let Some(index) = inner.find_remote_session_index(remote_id, &remote_session.id) {
+        apply_remote_session_summary_to_record(
+            inner
+                .session_mut_by_index(index)
+                .expect("session index should be valid"),
+            remote_id,
+            local_project_id,
+            remote_session,
+        );
+        return inner.sessions[index].session.id.clone();
+    }
+
+    let number = inner.next_session_number;
+    inner.next_session_number += 1;
+    let local_session_id = format!("session-{number}");
+    let session = localize_remote_session_summary(
+        remote_id,
+        &local_session_id,
+        local_project_id,
+        remote_session,
+    );
+    push_remote_proxy_session_record(
+        inner,
+        remote_id,
+        &remote_session.id,
+        remote_session.engram_boot_recovery_pending,
+        session,
+    );
+    local_session_id
+}
+
+fn ensure_remote_proxy_session_summary_record(
+    inner: &mut StateInner,
+    remote_id: &str,
+    remote_session: &StateSessionSummary,
+    local_project_id: Option<String>,
+    update_existing: bool,
+) -> (String, bool) {
+    if let Some(index) = inner.find_remote_session_index(remote_id, &remote_session.id) {
+        let local_session_id = inner.sessions[index].session.id.clone();
+        if update_existing {
+            apply_remote_session_summary_to_record(
+                inner
+                    .session_mut_by_index(index)
+                    .expect("session index should be valid"),
+                remote_id,
+                local_project_id,
+                remote_session,
+            );
+            return (local_session_id, true);
+        }
+        return (local_session_id, false);
+    }
+
+    (
+        upsert_remote_proxy_session_summary_record(
+            inner,
+            remote_id,
+            remote_session,
+            local_project_id,
+        ),
         true,
     )
 }
@@ -669,6 +803,73 @@ fn localize_remote_session(
     // phase, so a remote child link would be dangling in the local proxy state.
     session.parent_delegation_id = None;
     session
+}
+
+fn localize_remote_session_summary(
+    remote_id: &str,
+    local_session_id: &str,
+    local_project_id: Option<String>,
+    remote_session: &StateSessionSummary,
+) -> Session {
+    Session {
+        id: local_session_id.to_owned(),
+        name: remote_session.name.clone(),
+        emoji: remote_session.emoji.clone(),
+        agent: remote_session.agent,
+        workdir: remote_session.workdir.clone(),
+        project_id: local_project_id,
+        remote_id: None,
+        model: remote_session.model.clone(),
+        model_options: remote_session.model_options.clone(),
+        approval_policy: remote_session.approval_policy,
+        reasoning_effort: remote_session.reasoning_effort,
+        codex_fast_mode: remote_session.codex_fast_mode,
+        sandbox_mode: remote_session.sandbox_mode,
+        cursor_mode: remote_session.cursor_mode,
+        claude_effort: remote_session.claude_effort,
+        claude_approval_mode: remote_session.claude_approval_mode,
+        gemini_approval_mode: remote_session.gemini_approval_mode,
+        opencode_model: remote_session.opencode_model.clone(),
+        opencode_effort: remote_session.opencode_effort.clone(),
+        opencode_current_effort: remote_session.opencode_current_effort.clone(),
+        opencode_effort_options: remote_session.opencode_effort_options.clone(),
+        opencode_mode: remote_session.opencode_mode.clone(),
+        opencode_current_mode: remote_session.opencode_current_mode.clone(),
+        opencode_mode_options: remote_session.opencode_mode_options.clone(),
+        external_session_id: remote_session.external_session_id.clone(),
+        agent_commands_revision: remote_session.agent_commands_revision,
+        codex_thread_state: remote_session.codex_thread_state,
+        live_activity: remote_session.live_activity.clone(),
+        engram_boot_recovery_pending: remote_session.engram_boot_recovery_pending,
+        status: remote_session.status,
+        preview: remote_session.preview.clone(),
+        messages: Vec::new(),
+        prompt_history: Vec::new(),
+        prompt_history_redacted: false,
+        messages_loaded: remote_session.message_count == 0,
+        message_count: remote_session.message_count,
+        markers: remote_session
+            .markers
+            .iter()
+            .filter_map(|marker| {
+                match localize_remote_conversation_marker(marker.clone(), local_session_id) {
+                    Ok(marker) => Some(marker),
+                    Err(err) => {
+                        eprintln!(
+                            "backend warning> skipping remote conversation marker `{}` from remote `{}` session `{}`: {}",
+                            marker.id, remote_id, remote_session.id, err.message
+                        );
+                        None
+                    }
+                }
+            })
+            .collect(),
+        pending_prompts: Vec::new(),
+        queue_paused: remote_session.queue_paused,
+        session_mutation_stamp: remote_session.session_mutation_stamp,
+        // Delegation records are intentionally not mirrored across remotes.
+        parent_delegation_id: None,
+    }
 }
 
 /// Localizes a remote marker and applies the same hex-only color
@@ -740,7 +941,7 @@ fn local_session_id_for_remote_session(
     inner: &mut StateInner,
     remote_id: &str,
     remote_session_id: &RemoteSessionId,
-    remote_sessions_by_id: Option<&HashMap<&str, &Session>>,
+    remote_sessions_by_id: Option<&HashMap<&str, &StateSessionSummary>>,
     local_project_ids_by_remote_project_id: &HashMap<RemoteProjectId, LocalProjectId>,
     fallback_local_project_id: Option<&str>,
 ) -> Option<LocalSessionId> {
@@ -756,7 +957,7 @@ fn local_session_id_for_remote_session(
         remote_session.project_id.as_deref(),
     )
     .or_else(|| fallback_local_project_id.map(LocalProjectId::from));
-    Some(LocalSessionId::from(upsert_remote_proxy_session_record(
+    Some(LocalSessionId::from(upsert_remote_proxy_session_summary_record(
         inner,
         remote_id,
         remote_session,
@@ -775,7 +976,7 @@ fn localize_remote_orchestrator_instance(
     remote_id: &str,
     remote_orchestrator: &OrchestratorInstance,
     local_project_ids_by_remote_project_id: &HashMap<RemoteProjectId, LocalProjectId>,
-    remote_sessions_by_id: Option<&HashMap<&str, &Session>>,
+    remote_sessions_by_id: Option<&HashMap<&str, &StateSessionSummary>>,
 ) -> Result<OrchestratorInstance, anyhow::Error> {
     // `delete_project` (`src/state.rs`) clears `OrchestratorInstance.project_id`
     // to `""` for any orchestrator bound to the deleted project rather than
@@ -944,7 +1145,7 @@ fn ensure_remote_orchestrator_instance(
     inner: &mut StateInner,
     remote_id: &str,
     remote_orchestrator: &OrchestratorInstance,
-    remote_sessions_by_id: Option<&HashMap<&str, &Session>>,
+    remote_sessions_by_id: Option<&HashMap<&str, &StateSessionSummary>>,
     update_existing: bool,
 ) -> Result<(OrchestratorInstance, bool), anyhow::Error> {
     if let Some(index) = inner.find_remote_orchestrator_index(remote_id, &remote_orchestrator.id) {
@@ -987,7 +1188,7 @@ fn sync_remote_orchestrators_inner(
     remote_id: &str,
     remote_orchestrators: &[OrchestratorInstance],
     local_project_ids_by_remote_project_id: &HashMap<RemoteProjectId, LocalProjectId>,
-    remote_sessions_by_id: Option<&HashMap<&str, &Session>>,
+    remote_sessions_by_id: Option<&HashMap<&str, &StateSessionSummary>>,
 ) -> Result<(), anyhow::Error> {
     let mut localized_by_remote_orchestrator_id = HashMap::new();
     let mut localized_remote_orchestrator_ids = Vec::with_capacity(remote_orchestrators.len());

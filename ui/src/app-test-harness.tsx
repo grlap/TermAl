@@ -21,7 +21,7 @@
 // see docs/app-split-plan.md).
 
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
-import { vi } from "vitest";
+import { afterEach, vi } from "vitest";
 
 import * as api from "./api";
 import App from "./App";
@@ -34,7 +34,12 @@ import {
   DEFAULT_CODEX_REASONING_EFFORT,
   DEFAULT_CODEX_SANDBOX_MODE,
 } from "./session-model-utils";
-import type { AgentReadiness, OrchestratorInstance, Session } from "./types";
+import type {
+  AgentReadiness,
+  OrchestratorInstance,
+  Session,
+  StateSessionSummary,
+} from "./types";
 import type { WorkspaceState } from "./workspace";
 
 export class EventSourceMock {
@@ -90,7 +95,12 @@ export class EventSourceMock {
   }
 
   dispatchNamedEvent(type: string, data: unknown) {
-    const payload = typeof data === "string" ? data : JSON.stringify(data);
+    const wireData =
+      type === "state" && typeof data !== "string"
+        ? projectStateFixtureForWire(data)
+        : data;
+    const payload =
+      typeof wireData === "string" ? wireData : JSON.stringify(wireData);
     const event = { data: payload } as MessageEvent<string>;
     this.listeners.get(type)?.forEach((listener) => {
       listener(event);
@@ -256,6 +266,178 @@ export function makeStateResponse(overrides: AppTestStateResponseOverrides): App
   };
 }
 
+/** Mirrors the transcript-free session projection returned by broad state
+ * routes. Tests that need transcript content must serve the original Session
+ * through the targeted `/api/sessions/{id}` hydration route. */
+export function makeStateSessionSummary(
+  session: Session,
+): StateSessionSummary {
+  const {
+    messages: _messages,
+    promptHistory: _promptHistory,
+    promptHistoryRedacted: _promptHistoryRedacted,
+    messagesLoaded: _messagesLoaded,
+    messageStartIndex: _messageStartIndex,
+    hasOlderHistory: _hasOlderHistory,
+    hasNewerHistory: _hasNewerHistory,
+    pendingPrompts: _pendingPrompts,
+    ...summary
+  } = session;
+  return {
+    ...summary,
+    messageCount: session.messageCount ?? session.messages.length,
+    queuePaused: session.queuePaused ?? false,
+  };
+}
+
+type StateSessionHydrationFixture = {
+  revision: number;
+  serverInstanceId: string;
+  session: Session;
+};
+
+const stateSessionHydrationFixtures = new Map<
+  string,
+  StateSessionHydrationFixture
+>();
+let activeStateTransportFetchAdapter: {
+  adapter: typeof fetch;
+  sourceFetch: typeof fetch;
+} | null = null;
+
+function materializeHydratedSessionFixture(
+  session: Session,
+  fallbackMutationStamp?: number | null,
+): Session {
+  const messageCount = session.messageCount ?? session.messages.length;
+  const hasOlderHistory =
+    session.hasOlderHistory ?? session.messages.length < messageCount;
+  const hasNewerHistory = session.hasNewerHistory ?? false;
+  return {
+    ...session,
+    messageCount,
+    sessionMutationStamp:
+      session.sessionMutationStamp ?? fallbackMutationStamp,
+    messagesLoaded:
+      session.messagesLoaded ?? (!hasOlderHistory && !hasNewerHistory),
+    messageStartIndex:
+      session.messageStartIndex ?? Math.max(0, messageCount - session.messages.length),
+    hasOlderHistory,
+    hasNewerHistory,
+  };
+}
+
+export function makeSessionHydrationResponse(
+  session: Session,
+  revision: number,
+  serverInstanceId = "test-instance",
+) {
+  return {
+    revision,
+    serverInstanceId,
+    session: materializeHydratedSessionFixture(session),
+  };
+}
+
+function projectStateFixtureForWire(state: unknown) {
+  if (typeof state !== "object" || state === null) {
+    return state;
+  }
+  const candidate = state as {
+    revision?: unknown;
+    serverInstanceId?: unknown;
+    sessions?: unknown;
+  };
+  if (!Array.isArray(candidate.sessions)) {
+    return state;
+  }
+
+  const revision =
+    typeof candidate.revision === "number" ? candidate.revision : 0;
+  const serverInstanceId =
+    typeof candidate.serverInstanceId === "string"
+      ? candidate.serverInstanceId
+      : "test-instance";
+  const sessions = candidate.sessions.map((entry) => {
+    if (
+      typeof entry !== "object" ||
+      entry === null ||
+      !Array.isArray((entry as Partial<Session>).messages)
+    ) {
+      return entry;
+    }
+    const session = materializeHydratedSessionFixture(entry as Session);
+    stateSessionHydrationFixtures.set(session.id, {
+      revision,
+      serverInstanceId,
+      session,
+    });
+    return makeStateSessionSummary(session);
+  });
+  return { ...state, sessions };
+}
+
+function installStateTransportFixtureAdapter(
+  serveStateSessionHydrationFixtures: boolean,
+) {
+  const sourceFetch = globalThis.fetch;
+  if (!sourceFetch || activeStateTransportFetchAdapter?.adapter === sourceFetch) {
+    return;
+  }
+  activeStateTransportFetchAdapter = null;
+  const adapter: typeof fetch = async (input, init) => {
+    const requestUrl = new URL(String(input), "http://localhost");
+    const method = (
+      init?.method ?? (input instanceof Request ? input.method : "GET")
+    ).toUpperCase();
+    const sessionMatch = requestUrl.pathname.match(
+      /^\/api\/sessions\/([^/]+)$/,
+    );
+    if (serveStateSessionHydrationFixtures && method === "GET" && sessionMatch) {
+      const sessionId = decodeURIComponent(sessionMatch[1] ?? "");
+      const fixture = stateSessionHydrationFixtures.get(sessionId);
+      if (fixture) {
+        // This route is owned explicitly by the state fixture registered when
+        // the harness projected the corresponding broad-state payload. Serve
+        // it directly instead of invoking a mock, catching its unexpected-
+        // request guard, and guessing whether the failure meant "no route".
+        return jsonResponse(fixture);
+      }
+    }
+
+    const response = await sourceFetch(input, init);
+    if (method !== "GET" || requestUrl.pathname !== "/api/state") {
+      return response;
+    }
+    try {
+      const state = await response.clone().json();
+      const projected = projectStateFixtureForWire(state);
+      const headers = new Headers(response.headers);
+      headers.delete("Content-Length");
+      return new Response(JSON.stringify(projected), {
+        headers,
+        status: response.status,
+        statusText: response.statusText,
+      });
+    } catch {
+      return response;
+    }
+  };
+  activeStateTransportFetchAdapter = { adapter, sourceFetch };
+  globalThis.fetch = adapter;
+}
+
+function restoreStateTransportFixtureAdapter() {
+  const active = activeStateTransportFetchAdapter;
+  activeStateTransportFetchAdapter = null;
+  stateSessionHydrationFixtures.clear();
+  if (active && globalThis.fetch === active.adapter) {
+    globalThis.fetch = active.sourceFetch;
+  }
+}
+
+afterEach(restoreStateTransportFixtureAdapter);
+
 export async function flushUiWork() {
   for (let iteration = 0; iteration < 3; iteration += 1) {
     await Promise.resolve();
@@ -285,9 +467,17 @@ export async function advanceTimers(durationMs: number) {
 
 export async function renderApp({
   waitForWorkspaceLayout = true,
+  preserveStateSessionHydrationFixtures = false,
+  serveStateSessionHydrationFixtures = true,
 }: {
   waitForWorkspaceLayout?: boolean;
+  preserveStateSessionHydrationFixtures?: boolean;
+  serveStateSessionHydrationFixtures?: boolean;
 } = {}) {
+  if (!preserveStateSessionHydrationFixtures) {
+    stateSessionHydrationFixtures.clear();
+  }
+  installStateTransportFixtureAdapter(serveStateSessionHydrationFixtures);
   if (!waitForWorkspaceLayout) {
     await act(async () => {
       render(<App />);
@@ -530,7 +720,7 @@ export type FallbackStateTestContext = {
 
 export async function dispatchStateEvent(eventSource: EventSourceMock, state: unknown) {
   await act(async () => {
-    eventSource.dispatchNamedEvent("state", state);
+    eventSource.dispatchNamedEvent("state", projectStateFixtureForWire(state));
     await flushUiWork();
   });
 }
@@ -541,7 +731,7 @@ export async function dispatchOpenedStateEvent(
 ) {
   await act(async () => {
     eventSource.dispatchOpen();
-    eventSource.dispatchNamedEvent("state", state);
+    eventSource.dispatchNamedEvent("state", projectStateFixtureForWire(state));
     await flushUiWork();
   });
 }
@@ -665,6 +855,18 @@ export async function renderAppWithProjectAndSession(
   const originalFetch = globalThis.fetch;
   const originalEventSource = globalThis.EventSource;
   const originalResizeObserver = globalThis.ResizeObserver;
+  const session = makeSession("session-1", {
+    name: "Session 1",
+    projectId: "project-termal",
+    workdir: "/projects/termal",
+  });
+  const hydratedSession = materializeHydratedSessionFixture(session, 1);
+  stateSessionHydrationFixtures.clear();
+  stateSessionHydrationFixtures.set(hydratedSession.id, {
+    revision: 1,
+    serverInstanceId: "test-instance",
+    session: hydratedSession,
+  });
   const fetchMock = vi.fn(
     async (input: RequestInfo | URL, init?: RequestInit) => {
       const requestUrl = new URL(String(input), "http://localhost");
@@ -678,13 +880,22 @@ export async function renderAppWithProjectAndSession(
               rootPath: "/projects/termal",
             },
           ],
-          sessions: [
-            makeSession("session-1", {
-              name: "Session 1",
-              projectId: "project-termal",
-              workdir: "/projects/termal",
-            }),
-          ],
+          sessions: [makeStateSessionSummary(hydratedSession)],
+        });
+      }
+
+      if (/^\/api\/sessions\/[^/]+$/.test(requestUrl.pathname)) {
+        const sessionId = decodeURIComponent(
+          requestUrl.pathname.slice("/api/sessions/".length),
+        );
+        const fixture = stateSessionHydrationFixtures.get(sessionId);
+        if (!fixture) {
+          throw new Error(`Missing hydration fixture for ${sessionId}`);
+        }
+        return jsonResponse({
+          revision: fixture.revision,
+          serverInstanceId: fixture.serverInstanceId,
+          session: fixture.session,
         });
       }
 
@@ -750,6 +961,7 @@ export async function renderAppWithProjectAndSession(
     .mockImplementation(() => {});
 
   function restoreSetup() {
+    stateSessionHydrationFixtures.clear();
     window.localStorage.clear();
     EventSourceMock.instances.splice(priorEventSourceCount);
     scrollIntoViewSpy.mockRestore();
@@ -759,7 +971,10 @@ export async function renderAppWithProjectAndSession(
   }
 
   try {
-    await renderApp();
+    await renderApp({
+      preserveStateSessionHydrationFixtures: true,
+      serveStateSessionHydrationFixtures: false,
+    });
     const eventSource = EventSourceMock.instances[priorEventSourceCount];
     if (!eventSource) {
       throw new Error("Event source not created");
@@ -791,7 +1006,15 @@ export async function renderAppWithProjectAndSession(
     throw error;
   }
 }
-export function makeSession(id: string, overrides?: Partial<Session>): Session {
+export type AppTestSession = Session & {
+  messageCount: number;
+  queuePaused: boolean;
+};
+
+export function makeSession(
+  id: string,
+  overrides?: Partial<Session>,
+): AppTestSession {
   return {
     id,
     name: id,
@@ -806,7 +1029,7 @@ export function makeSession(id: string, overrides?: Partial<Session>): Session {
     preview: "",
     messages: [],
     ...overrides,
-  };
+  } as AppTestSession;
 }
 
 export function makeOrchestrator(

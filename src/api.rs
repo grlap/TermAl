@@ -265,7 +265,7 @@ fn dispatch_turn_and_snapshot(
         DispatchTurnResult::Queued => {}
     }
     Ok(SendMessageRouteResponse {
-        state: state.summary_snapshot_with_session_detail(session_id),
+        state: state.summary_snapshot(),
         message_disposition,
     })
 }

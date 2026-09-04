@@ -59,7 +59,7 @@ fn create_orchestrator_instance_proxies_remote_projects_and_localizes_response()
     let remote_orchestrator = remote_state.orchestrators[0].clone();
     let remote_response = serde_json::to_string(&CreateOrchestratorInstanceResponse {
         orchestrator: remote_orchestrator,
-        state: remote_state,
+        state: remote_state.into_state_response(),
     })
     .expect("remote orchestrator response should encode");
 
@@ -290,7 +290,7 @@ fn create_remote_orchestrator_proxy_localizes_launch_and_notes_revision() {
     };
     let remote_response = serde_json::to_string(&CreateOrchestratorInstanceResponse {
         orchestrator: remote_state.orchestrators[0].clone(),
-        state: remote_state,
+        state: remote_state.into_state_response(),
     })
     .expect("remote orchestrator response should encode");
 
@@ -459,7 +459,7 @@ fn create_remote_orchestrator_proxy_rolls_back_on_localization_failure() {
         .retain(|session| session.id != "remote-session-1");
     let remote_response = serde_json::to_string(&CreateOrchestratorInstanceResponse {
         orchestrator: remote_state.orchestrators[0].clone(),
-        state: remote_state,
+        state: remote_state.into_state_response(),
     })
     .expect("remote orchestrator response should encode");
 
@@ -615,7 +615,7 @@ fn create_orchestrator_instance_materializes_stale_remote_launch_response() {
     };
     let remote_response = serde_json::to_string(&CreateOrchestratorInstanceResponse {
         orchestrator: remote_state.orchestrators[0].clone(),
-        state: remote_state,
+        state: remote_state.into_state_response(),
     })
     .expect("remote orchestrator response should encode");
 
@@ -784,7 +784,8 @@ fn remote_snapshot_sync_skips_orchestrators_without_a_local_project_mapping() {
                 "/remote/repo",
                 1,
                 OrchestratorInstanceStatus::Running,
-            ),
+            )
+            .into_state_response(),
         )
         .expect("snapshot should still apply even when orchestration localization fails");
 
@@ -833,7 +834,8 @@ fn remote_orchestrator_lifecycle_actions_proxy_to_remote_backend_and_resync_loca
                 "/remote/repo",
                 1,
                 OrchestratorInstanceStatus::Running,
-            ),
+            )
+            .into_state_response(),
         )
         .expect("initial remote snapshot should apply");
     let local_orchestrator_id = state
@@ -1044,7 +1046,7 @@ fn remote_snapshot_sync_preserves_existing_orchestrators_when_localization_fails
     second_orchestrator.status = OrchestratorInstanceStatus::Paused;
     initial_state.orchestrators.push(second_orchestrator);
     state
-        .apply_remote_state_snapshot(&remote.id, initial_state)
+        .apply_remote_state_snapshot(&remote.id, initial_state.into_state_response())
         .expect("initial remote snapshot should apply");
 
     let initial_remote_orchestrator_ids = state
@@ -1077,7 +1079,7 @@ fn remote_snapshot_sync_preserves_existing_orchestrators_when_localization_fails
     invalid_state.orchestrators.push(invalid_orchestrator);
 
     state
-        .apply_remote_state_snapshot(&remote.id, invalid_state)
+        .apply_remote_state_snapshot(&remote.id, invalid_state.into_state_response())
         .expect("remote snapshot should still apply when orchestrator localization fails");
 
     let remote_orchestrator_ids = state
@@ -1135,7 +1137,7 @@ fn remote_snapshot_sync_preserves_sessions_referenced_by_existing_orchestrators_
         OrchestratorInstanceStatus::Running,
     );
     state
-        .apply_remote_state_snapshot(&remote.id, initial_state)
+        .apply_remote_state_snapshot(&remote.id, initial_state.into_state_response())
         .expect("initial remote snapshot should apply");
 
     let (preserved_local_session_id, preserved_preview) = {
@@ -1160,7 +1162,7 @@ fn remote_snapshot_sync_preserves_sessions_referenced_by_existing_orchestrators_
         .retain(|session| session.id != "remote-session-1");
 
     state
-        .apply_remote_state_snapshot(&remote.id, invalid_state)
+        .apply_remote_state_snapshot(&remote.id, invalid_state.into_state_response())
         .expect("remote snapshot should still apply when orchestrator localization fails");
 
     let snapshot = state.full_snapshot();
@@ -1274,7 +1276,11 @@ fn focused_remote_state_sync_rolls_back_proxy_sessions_when_orchestrator_localiz
         .connection(&target.remote)
         .expect("focused sync lease should resolve");
     state
-        .sync_remote_state_for_target(&target, invalid_state, &response_lease)
+        .sync_remote_state_for_target(
+            &target,
+            invalid_state.into_state_response(),
+            &response_lease,
+        )
         .expect("focused remote sync should preserve the target session update");
 
     let snapshot = state.full_snapshot();
@@ -1404,7 +1410,7 @@ fn focused_remote_state_sync_skips_stale_revision() {
         .connection(&target.remote)
         .expect("stale sync lease should resolve");
     state
-        .sync_remote_state_for_target(&target, stale_state, &response_lease)
+        .sync_remote_state_for_target(&target, stale_state.into_state_response(), &response_lease)
         .expect("stale focused sync should be ignored");
 
     let snapshot = state.full_snapshot();
@@ -1454,7 +1460,7 @@ fn equal_remote_orchestrator_action_snapshot_retries_dirty_persistence() {
     let response_body =
         serde_json::to_string(&remote_state).expect("equal orchestrator state should encode");
     state
-        .apply_remote_state_snapshot(&remote.id, remote_state)
+        .apply_remote_state_snapshot(&remote.id, remote_state.into_state_response())
         .expect("initial orchestrator state should apply");
     let (local_orchestrator_id, local_session_id) = {
         let inner = state.inner.lock().expect("state mutex poisoned");
@@ -1695,7 +1701,7 @@ fn focused_remote_state_sync_stale_revision_retries_dirty_persistence() {
         .expect("stale focused session should exist")
         .preview = "Stale preview must stay ignored.".to_owned();
     state
-        .sync_remote_state_for_target(&target, stale_state, &response_lease)
+        .sync_remote_state_for_target(&target, stale_state.into_state_response(), &response_lease)
         .expect("a stale response should still discharge persistence debt");
 
     let inner = state.inner.lock().expect("state mutex poisoned");
@@ -1773,7 +1779,7 @@ fn remote_snapshot_sync_removes_missing_proxy_sessions() {
         (kept.session.id, removed.session.id, local.session.id)
     };
 
-    let mut remote_state = state.full_snapshot();
+    let mut remote_state = state.summary_snapshot();
     let mut remote_session = remote_state
         .sessions
         .iter()

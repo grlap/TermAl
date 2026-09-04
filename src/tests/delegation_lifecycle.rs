@@ -1,5 +1,5 @@
 use super::delegation_support::{
-    finish_delegation_child_with_assistant_text, mark_delegation_as_legacy_unstructured_review,
+    finish_delegation_child_with_assistant_text, mark_delegation_as_unstructured_explorer,
     test_app_state_with_delegation_codex_runtime,
     test_app_state_with_drained_delegation_codex_runtime,
 };
@@ -264,7 +264,7 @@ fn stale_busy_delegation_child_without_runtime_keeps_completed_result_packet() {
             },
         )
         .expect("delegation should be created");
-    mark_delegation_as_legacy_unstructured_review(&state, &created.delegation.id);
+    mark_delegation_as_unstructured_explorer(&state, &created.delegation.id);
     state
         .create_delegation_wait(
             &parent_session_id,

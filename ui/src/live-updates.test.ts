@@ -14,7 +14,10 @@ import type {
   UserInputRequestMessage,
 } from "./types";
 
-function makeSession(id: string, overrides?: Partial<Session>): Session {
+type TestSession = Session & { messageCount: number; queuePaused: boolean };
+
+function makeSession(id: string, overrides?: Partial<Session>): TestSession {
+  const messages = overrides?.messages ?? [];
   return {
     id,
     name: id,
@@ -24,8 +27,10 @@ function makeSession(id: string, overrides?: Partial<Session>): Session {
     model: "test-model",
     status: "idle",
     preview: "",
-    messages: [],
+    messages,
     ...overrides,
+    messageCount: overrides?.messageCount ?? messages.length,
+    queuePaused: overrides?.queuePaused ?? false,
   };
 }
 
@@ -514,6 +519,23 @@ describe("session transport helpers", () => {
           declinable: false,
         },
       ],
+    });
+
+    expect(
+      sessionHasPotentiallyStaleTransport(
+        session,
+        0,
+        LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS,
+      ),
+    ).toBe(true);
+  });
+
+  it("treats an active transcript-free summary with known messages as in-turn activity", () => {
+    const session = makeSession("session-1", {
+      status: "active",
+      messages: [],
+      messagesLoaded: false,
+      messageCount: 2,
     });
 
     expect(

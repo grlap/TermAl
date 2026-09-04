@@ -32,9 +32,7 @@ fn make_persist_delta_test_delegation(
         review_result_recovery_probe_attempt: None,
         review_result_recovery_error: None,
         review_result_schema_version: None,
-        review_result_required: false,
         review_result_submission_attempt: 0,
-        result_parser_version: 0,
     }
 }
 

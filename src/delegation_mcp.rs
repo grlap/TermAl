@@ -818,13 +818,13 @@ impl TermalDelegationMcpBridge {
                 .map(Value::String)
                 .unwrap_or_else(|| Value::String("reviewer".to_owned())),
         );
+        let write_policy = arguments
+            .get("writePolicy")
+            .cloned()
+            .or(resolved_prompt.write_policy);
         body.insert(
             "writePolicy".to_owned(),
-            arguments
-                .get("writePolicy")
-                .map(|value| normalize_mcp_write_policy(Some(value)))
-                .or(resolved_prompt.write_policy)
-                .unwrap_or_else(|| normalize_mcp_write_policy(None)),
+            canonical_mcp_write_policy(write_policy)?,
         );
         self.post_json(
             &format!("/api/sessions/{}/delegations", self.serving_session_id),
@@ -2022,7 +2022,51 @@ fn tool_requires_delegation_child(name: &str) -> bool {
     name == TERMAL_SUBMIT_REVIEW_RESULT_TOOL_NAME
 }
 
+fn delegation_write_policy_input_schema() -> Value {
+    json!({
+        "description": "OpenCode rejects readOnly. Use isolatedWorktree for OpenCode delegation sessions.",
+        "oneOf": [
+            {
+                "type": "object",
+                "required": ["kind"],
+                "additionalProperties": false,
+                "properties": {
+                    "kind": { "const": "readOnly" }
+                }
+            },
+            {
+                "type": "object",
+                "required": ["kind", "ownedPaths"],
+                "additionalProperties": false,
+                "properties": {
+                    "kind": { "const": "sharedWorktree" },
+                    "ownedPaths": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": { "type": "string" }
+                    }
+                }
+            },
+            {
+                "type": "object",
+                "required": ["kind", "ownedPaths"],
+                "additionalProperties": false,
+                "properties": {
+                    "kind": { "const": "isolatedWorktree" },
+                    "ownedPaths": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": { "type": "string" }
+                    },
+                    "worktreePath": { "type": ["string", "null"] }
+                }
+            }
+        ]
+    })
+}
+
 fn mcp_tools_list_result() -> Value {
+    let write_policy_input_schema = delegation_write_policy_input_schema();
     json!({
         "tools": [
             {
@@ -2052,13 +2096,7 @@ fn mcp_tools_list_result() -> Value {
                             "enum": ["reviewer", "explorer", "worker"],
                             "description": "Defaults to reviewer when omitted. Reviewer mode requires a Claude or Codex agent; ACP agents should pass explorer instead."
                         },
-                        "writePolicy": {
-                            "description": "OpenCode rejects readOnly. Use isolatedWorktree for OpenCode delegation sessions.",
-                            "oneOf": [
-                                { "type": "string", "enum": ["readOnly", "isolatedWorktree", "sharedWorktree"] },
-                                { "type": "object" }
-                            ]
-                        }
+                        "writePolicy": write_policy_input_schema
                     }
                 }
             },
@@ -2525,12 +2563,11 @@ fn optional_u64(value: Option<&Value>) -> Option<u64> {
     value.and_then(Value::as_u64)
 }
 
-fn normalize_mcp_write_policy(value: Option<&Value>) -> Value {
-    match value {
-        Some(Value::String(kind)) => json!({ "kind": kind }),
-        Some(value) => value.clone(),
-        None => json!({ "kind": "readOnly" }),
-    }
+fn canonical_mcp_write_policy(value: Option<Value>) -> Result<Value> {
+    let value = value.unwrap_or_else(|| json!({ "kind": "readOnly" }));
+    let policy: DelegationWritePolicy = serde_json::from_value(value)
+        .context("writePolicy must use the canonical tagged object shape")?;
+    serde_json::to_value(policy).context("failed to encode canonical writePolicy")
 }
 
 fn delegation_status_from_response(value: &Value) -> Option<&str> {
