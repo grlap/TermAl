@@ -3,8 +3,8 @@ SQLite-backed session state persistence.
 
 Owns the on-disk schema entry point (`ensure_sqlite_state_schema`), connection
 lifecycle (`open_sqlite_state_connection`, `SqlitePersistConnectionCache`),
-load path (`load_state`, `load_state_from_sqlite`), and the per-transaction
-write helpers used by the background persist thread
+load path (`load_state_for_boot`, `load_state_from_sqlite_with_connection`),
+and the per-transaction write helpers used by the background persist thread
 (`persist_state_parts_via_connection`, `persist_delta_via_cache`,
 `persist_created_session`, `persist_state_from_persisted`, `persist_state`).
 Overview-specific schema upgrades and backfill live in
@@ -1136,7 +1136,48 @@ fn first_normalized_state_authority_table_with_rows(
     Ok(None)
 }
 
-fn validate_no_legacy_embedded_state(connection: &rusqlite::Connection) -> Result<()> {
+#[cfg(test)]
+thread_local! {
+    static LEGACY_EMBEDDED_SESSION_SCAN_COUNT: std::cell::Cell<usize> =
+        const { std::cell::Cell::new(0) };
+    static PERSISTED_STATE_METADATA_DESERIALIZE_COUNT: std::cell::Cell<usize> =
+        const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+fn reset_legacy_embedded_session_scan_count() {
+    LEGACY_EMBEDDED_SESSION_SCAN_COUNT.with(|count| count.set(0));
+}
+
+#[cfg(test)]
+fn legacy_embedded_session_scan_count() -> usize {
+    LEGACY_EMBEDDED_SESSION_SCAN_COUNT.with(std::cell::Cell::get)
+}
+
+#[cfg(test)]
+fn reset_persisted_state_metadata_deserialize_count() {
+    PERSISTED_STATE_METADATA_DESERIALIZE_COUNT.with(|count| count.set(0));
+}
+
+#[cfg(test)]
+fn persisted_state_metadata_deserialize_count() -> usize {
+    PERSISTED_STATE_METADATA_DESERIALIZE_COUNT.with(std::cell::Cell::get)
+}
+
+fn reject_invalid_persisted_state_metadata_shape(error: serde_json::Error) -> anyhow::Error {
+    let mut detail = error.to_string();
+    let location = format!(" at line {} column {}", error.line(), error.column());
+    if detail.ends_with(&location) {
+        detail.truncate(detail.len() - location.len());
+    }
+    reject_unsupported_state_schema(format!(
+        "persisted state metadata does not match the current metadata shape: {detail}"
+    ))
+}
+
+fn validate_no_legacy_embedded_state(
+    connection: &rusqlite::Connection,
+) -> Result<Option<PersistedState>> {
     let metadata = connection
         .query_row(
             "SELECT value_json FROM app_state WHERE key = ?1",
@@ -1145,7 +1186,7 @@ fn validate_no_legacy_embedded_state(connection: &rusqlite::Connection) -> Resul
         )
         .optional()
         .context("failed to inspect state metadata authority")?;
-    if let Some(encoded) = metadata {
+    let persisted = if let Some(encoded) = metadata {
         let value: Value = serde_json::from_str(&encoded).map_err(|error| {
             reject_unsupported_state_schema(format!(
                 "persisted state metadata is not valid JSON: {error}"
@@ -1158,11 +1199,11 @@ fn validate_no_legacy_embedded_state(connection: &rusqlite::Connection) -> Resul
                 )));
             }
         }
-        let _: PersistedState = serde_json::from_value(value).map_err(|error| {
-            reject_unsupported_state_schema(format!(
-                "persisted state metadata does not match the current metadata shape: {error}"
-            ))
-        })?;
+        #[cfg(test)]
+        PERSISTED_STATE_METADATA_DESERIALIZE_COUNT.with(|count| count.set(count.get() + 1));
+        let persisted = serde_json::from_str::<PersistedState>(&encoded)
+            .map_err(reject_invalid_persisted_state_metadata_shape)?;
+        Some(persisted)
     } else if let Some(table_name) =
         first_normalized_state_authority_table_with_rows(connection)?
     {
@@ -1170,8 +1211,12 @@ fn validate_no_legacy_embedded_state(connection: &rusqlite::Connection) -> Resul
             "missing app_state `{SQLITE_METADATA_KEY}` metadata while normalized table \
              `{table_name}` contains rows"
         )));
-    }
+    } else {
+        None
+    };
 
+    #[cfg(test)]
+    LEGACY_EMBEDDED_SESSION_SCAN_COUNT.with(|count| count.set(count.get() + 1));
     let embedded_prompt_history_session = connection
         .query_row(
             "SELECT id
@@ -1193,7 +1238,7 @@ fn validate_no_legacy_embedded_state(connection: &rusqlite::Connection) -> Resul
             "session `{session_id}` still contains embedded `session.promptHistory`"
         )));
     }
-    Ok(())
+    Ok(persisted)
 }
 
 fn validate_current_sqlite_state_schema(connection: &rusqlite::Connection) -> Result<()> {
@@ -1234,7 +1279,7 @@ fn validate_current_sqlite_state_schema(connection: &rusqlite::Connection) -> Re
              `{prompt_history_storage_version}`, expected `{SQLITE_PROMPT_HISTORY_STORAGE_VERSION}`"
         )));
     }
-    validate_no_legacy_embedded_state(connection)
+    Ok(())
 }
 
 fn initialize_current_sqlite_state_schema(
@@ -1282,6 +1327,10 @@ fn initialize_current_sqlite_state_schema(
     Ok(true)
 }
 
+/// Performs the bounded schema setup required by write-only connections.
+///
+/// Deep metadata deserialization and the legacy session-JSON authority scan
+/// belong exclusively to [`ensure_sqlite_state_schema_for_load`].
 fn ensure_sqlite_state_schema(connection: &rusqlite::Connection) -> Result<()> {
     if sqlite_state_user_table_names(connection)?.is_empty()
         && initialize_current_sqlite_state_schema(connection)?
@@ -1293,12 +1342,40 @@ fn ensure_sqlite_state_schema(connection: &rusqlite::Connection) -> Result<()> {
     // Existing databases must pass every read-only compatibility check before
     // a persistent PRAGMA, CREATE/ALTER, backfill, or metadata write can run.
     validate_current_sqlite_state_schema(connection)?;
+    finish_existing_sqlite_state_schema_setup(connection)
+}
+
+fn finish_existing_sqlite_state_schema_setup(connection: &rusqlite::Connection) -> Result<()> {
     configure_sqlite_state_connection(connection)?;
     ensure_sqlite_message_overview_columns(connection)?;
     ensure_sqlite_response_board_schema(connection)?;
     backfill_missing_sqlite_session_overviews(connection)?;
     validate_sqlite_state_table_columns(connection, CURRENT_SQLITE_STATE_TABLE_COLUMNS, false)?;
     Ok(())
+}
+
+/// Prepares the SQLite state database for a startup load and returns the
+/// already-deserialized metadata row.
+///
+/// Startup alone pays for the fail-closed legacy-authority checks. Returning
+/// the value parsed from the raw metadata string keeps the guard and loader on
+/// one `serde_json::from_str` path instead of re-reading and re-parsing it.
+fn ensure_sqlite_state_schema_for_load(
+    connection: &rusqlite::Connection,
+) -> Result<Option<PersistedState>> {
+    if sqlite_state_user_table_names(connection)?.is_empty()
+        && initialize_current_sqlite_state_schema(connection)?
+    {
+        configure_sqlite_state_connection(connection)?;
+        return Ok(None);
+    }
+
+    // Existing databases must pass every read-only compatibility and startup
+    // authority check before a persistent PRAGMA or maintenance write can run.
+    validate_current_sqlite_state_schema(connection)?;
+    let persisted = validate_no_legacy_embedded_state(connection)?;
+    finish_existing_sqlite_state_schema_setup(connection)?;
+    Ok(persisted)
 }
 
 #[cfg(test)]
@@ -1339,9 +1416,33 @@ fn ensure_sqlite_state_schema_for_path(
     })
 }
 
+fn ensure_sqlite_state_schema_for_load_path(
+    connection: &rusqlite::Connection,
+    path: &FsPath,
+) -> Result<Option<PersistedState>> {
+    let write_lock = sqlite_state_write_lock(path);
+    let _write_guard = lock_sqlite_state_writer(&write_lock);
+    ensure_sqlite_state_schema_for_load(connection).with_context(|| {
+        format!(
+            "failed to validate or initialize state database `{}`",
+            path.display()
+        )
+    })
+}
+
 #[cfg(test)]
 mod sqlite_schema_tests {
     use super::*;
+
+    fn expect_startup_schema_error(
+        result: Result<Option<PersistedState>>,
+        message: &str,
+    ) -> anyhow::Error {
+        match result {
+            Ok(_) => panic!("{message}"),
+            Err(error) => error,
+        }
+    }
 
     #[test]
     fn sqlite_schema_guard_rejects_noncurrent_versions_before_creating_state_tables() {
@@ -1569,8 +1670,10 @@ mod sqlite_schema_tests {
                 .expect("embedded app-state fixture should insert");
             let changes_before_rejection = connection.total_changes();
 
-            let error = ensure_sqlite_state_schema(&connection)
-                .expect_err("embedded app-state records should be rejected");
+            let error = expect_startup_schema_error(
+                ensure_sqlite_state_schema_for_load(&connection),
+                "embedded app-state records should be rejected",
+            );
             let rendered = format!("{error:#}");
             assert!(rendered.contains(embedded_key), "{rendered}");
             assert_eq!(connection.total_changes(), changes_before_rejection);
@@ -1589,8 +1692,10 @@ mod sqlite_schema_tests {
             )
             .expect("malformed app-state fixture should insert");
 
-        let error = ensure_sqlite_state_schema(&connection)
-            .expect_err("malformed app-state metadata should be rejected");
+        let error = expect_startup_schema_error(
+            ensure_sqlite_state_schema_for_load(&connection),
+            "malformed app-state metadata should be rejected",
+        );
         let rendered = format!("{error:#}");
         assert!(rendered.contains("not valid JSON"), "{rendered}");
         assert!(rendered.contains("Move or delete `termal.sqlite`"), "{rendered}");
@@ -1628,8 +1733,10 @@ mod sqlite_schema_tests {
 
         let connection = open_sqlite_state_connection_unconfigured(&path)
             .expect("missing-metadata fixture should reopen");
-        let error = ensure_sqlite_state_schema_for_path(&connection, &path)
-            .expect_err("normalized rows without metadata must be rejected");
+        let error = expect_startup_schema_error(
+            ensure_sqlite_state_schema_for_load_path(&connection, &path),
+            "normalized rows without metadata must be rejected",
+        );
         let rendered = format!("{error:#}");
         assert!(rendered.contains("missing app_state `metadataState`"), "{rendered}");
         assert!(rendered.contains("sessions"), "{rendered}");
@@ -1668,10 +1775,23 @@ mod sqlite_schema_tests {
 
         let connection = open_sqlite_state_connection_unconfigured(&path)
             .expect("invalid-metadata fixture should reopen");
-        let error = ensure_sqlite_state_schema_for_path(&connection, &path)
-            .expect_err("structurally invalid metadata must be rejected");
+        let error = expect_startup_schema_error(
+            ensure_sqlite_state_schema_for_load_path(&connection, &path),
+            "structurally invalid metadata must be rejected",
+        );
         let rendered = format!("{error:#}");
-        assert!(rendered.contains("current metadata shape"), "{rendered}");
+        assert!(
+            rendered.contains(
+                "persisted state metadata does not match the current metadata shape: \
+                 invalid type: string \"wrong\", expected a sequence"
+            ),
+            "{rendered}"
+        );
+        assert!(
+            !rendered.contains(" at line "),
+            "raw-string deserialization must retain the previous location-free rejection: \
+             {rendered}"
+        );
         assert!(rendered.contains("Move or delete `termal.sqlite`"), "{rendered}");
         drop(connection);
         assert_eq!(
@@ -1702,8 +1822,9 @@ mod sqlite_schema_tests {
             )
             .expect("normalized message should seed");
 
-        ensure_sqlite_state_schema(&connection)
+        let persisted = ensure_sqlite_state_schema_for_load(&connection)
             .expect("current metadata and normalized rows should validate");
+        assert!(persisted.is_some(), "current metadata should be returned to the loader");
         for table_name in ["sessions", "messages"] {
             let count = connection
                 .query_row(
@@ -1714,6 +1835,86 @@ mod sqlite_schema_tests {
                 .expect("normalized row count should remain readable");
             assert_eq!(count, 1, "schema validation must preserve `{table_name}` rows");
         }
+    }
+
+    #[test]
+    fn sqlite_write_only_schema_setup_does_not_scan_session_json() {
+        let state_root = TestTempRoot::create("termal-state-write-only-schema-setup");
+        let path = state_root.path().join("termal.sqlite");
+        {
+            let connection = open_sqlite_state_connection_unconfigured(&path)
+                .expect("file-backed sqlite should open");
+            ensure_sqlite_state_schema_for_path(&connection, &path)
+                .expect("fresh current schema should initialize");
+            seed_current_state_metadata(&connection);
+            let transaction = connection
+                .unchecked_transaction()
+                .expect("large session fixture transaction should begin");
+            for index in 0..2_048 {
+                transaction
+                    .execute(
+                        "INSERT INTO sessions(id, value_json) VALUES(?1, ?2)",
+                        rusqlite::params![format!("session-{index:04}"), r#"{"session":{}}"#],
+                    )
+                    .expect("current session fixture should insert");
+            }
+            transaction
+                .execute(
+                    "INSERT INTO sessions(id, value_json) VALUES(?1, ?2)",
+                    rusqlite::params![
+                        "legacy-session",
+                        r#"{"session":{"promptHistory":["legacy prompt"]}}"#
+                    ],
+                )
+                .expect("legacy session fixture should insert");
+            transaction
+                .commit()
+                .expect("large session fixture should commit");
+        }
+
+        let write_connection = open_sqlite_state_connection_unconfigured(&path)
+            .expect("write-only connection should open");
+        reset_legacy_embedded_session_scan_count();
+        reset_persisted_state_metadata_deserialize_count();
+        ensure_sqlite_state_schema_for_path(&write_connection, &path)
+            .expect("write-only schema setup should not inspect session JSON");
+        assert_eq!(
+            legacy_embedded_session_scan_count(),
+            0,
+            "write-only setup must not execute the legacy session JSON scan"
+        );
+        assert_eq!(
+            persisted_state_metadata_deserialize_count(),
+            0,
+            "write-only setup must not deserialize persisted metadata"
+        );
+        drop(write_connection);
+
+        let load_connection = open_sqlite_state_connection_unconfigured(&path)
+            .expect("startup connection should open");
+        reset_legacy_embedded_session_scan_count();
+        reset_persisted_state_metadata_deserialize_count();
+        let error = expect_startup_schema_error(
+            ensure_sqlite_state_schema_for_load_path(&load_connection, &path),
+            "startup must still reject embedded prompt-history authority",
+        );
+        assert_eq!(
+            legacy_embedded_session_scan_count(),
+            1,
+            "startup must execute the legacy session JSON scan exactly once"
+        );
+        assert_eq!(
+            persisted_state_metadata_deserialize_count(),
+            1,
+            "startup must deserialize persisted metadata exactly once"
+        );
+        let rendered = format!("{error:#}");
+        assert!(
+            rendered.contains(
+                "session `legacy-session` still contains embedded `session.promptHistory`"
+            ),
+            "{rendered}"
+        );
     }
 
     #[test]
@@ -1733,8 +1934,10 @@ mod sqlite_schema_tests {
                 )
                 .expect("embedded prompt-history fixture should insert");
 
-            let error = ensure_sqlite_state_schema(&connection)
-                .expect_err("an embedded prompt-history array should be rejected");
+            let error = expect_startup_schema_error(
+                ensure_sqlite_state_schema_for_load(&connection),
+                "an embedded prompt-history array should be rejected",
+            );
             let rendered = format!("{error:#}");
             assert!(rendered.contains("session.promptHistory"), "{rendered}");
             assert!(rendered.contains(label), "{rendered}");
@@ -1756,7 +1959,7 @@ mod sqlite_schema_tests {
                 )
                 .expect("non-array prompt-history fixture should insert");
         }
-        ensure_sqlite_state_schema(&connection)
+        ensure_sqlite_state_schema_for_load(&connection)
             .expect("non-array prompt-history values are row corruption, not legacy authority");
         connection
             .execute(
@@ -1764,7 +1967,7 @@ mod sqlite_schema_tests {
                 [],
             )
             .expect("malformed quarantinable row should insert");
-        ensure_sqlite_state_schema(&connection)
+        ensure_sqlite_state_schema_for_load(&connection)
             .expect("malformed session JSON is not obsolete-schema evidence");
         connection
             .execute(
@@ -1772,7 +1975,7 @@ mod sqlite_schema_tests {
                 [],
             )
             .expect("current session fixture should insert");
-        ensure_sqlite_state_schema(&connection)
+        ensure_sqlite_state_schema_for_load(&connection)
             .expect("a session without the embedded prompt-history key should remain current");
     }
 
@@ -2162,7 +2365,7 @@ fn load_state_from_sqlite_with_connection(
     path: &FsPath,
 ) -> Result<(Option<StateInner>, rusqlite::Connection)> {
     let connection = open_sqlite_state_connection_unconfigured(path)?;
-    ensure_sqlite_state_schema_for_path(&connection, path)?;
+    let persisted = ensure_sqlite_state_schema_for_load_path(&connection, path)?;
     // `open_sqlite_state_connection_unconfigured` already hardens the fresh
     // handle, but
     // schema initialization can create or recreate SQLite sidecars, so the
@@ -2176,11 +2379,9 @@ fn load_state_from_sqlite_with_connection(
         load_session_records_from_sqlite_with_skipped(&connection, path)?;
     let (delegation_records, quarantined_delegation_ids) =
         load_delegation_records_from_sqlite(&connection, path)?;
-    let Some(encoded) = sqlite_app_state_value(&connection, SQLITE_METADATA_KEY, path)? else {
+    let Some(mut persisted) = persisted else {
         return Ok((None, connection));
     };
-    let mut persisted: PersistedState = serde_json::from_str(&encoded)
-        .with_context(|| format!("failed to parse persisted state from `{}`", path.display()))?;
     let project_ids = persisted
         .projects
         .iter()
@@ -2218,23 +2419,6 @@ fn load_state_from_sqlite_with_connection(
         format!("failed to validate state from `{}`", path.display())
     })?;
     Ok((Some(inner), connection))
-}
-
-fn sqlite_app_state_value(
-    connection: &rusqlite::Connection,
-    key: &str,
-    path: &FsPath,
-) -> Result<Option<String>> {
-    match connection.query_row(
-        "SELECT value_json FROM app_state WHERE key = ?1",
-        rusqlite::params![key],
-        |row| row.get::<_, String>(0),
-    ) {
-        Ok(encoded) => Ok(Some(encoded)),
-        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-        Err(err) => Err(err)
-            .with_context(|| format!("failed to read persisted state from `{}`", path.display())),
-    }
 }
 
 #[cfg(test)]
