@@ -1,3 +1,4 @@
+use super::telegram_support::install_telegram_settings_fixture;
 // Residual Telegram relay adapter tests split from this file into focused
 // siblings. This module owns command routing, Telegram/TermAl wire projections,
 // validation, error classification, log sanitization, prompt/message size
@@ -1014,14 +1015,11 @@ fn telegram_relay_iteration_caps_oversized_update_batches_and_persists_cursor() 
         termal.digest_project_ids.borrow().as_slice(),
         ["project-1".to_owned()]
     );
-    let persisted: TelegramBotFile = serde_json::from_slice(
+    let persisted: TelegramBotState = serde_json::from_slice(
         &fs::read(&config.state_path).expect("cursor state should persist per handled update"),
     )
     .expect("persisted Telegram state should decode");
-    assert_eq!(
-        persisted.state.next_update_id,
-        Some(expected_next_update_id)
-    );
+    assert_eq!(persisted.next_update_id, Some(expected_next_update_id));
 }
 
 #[test]
@@ -1630,7 +1628,6 @@ fn telegram_session_command_does_not_baseline_when_assistant_forwarding_disabled
     assert_eq!(state.selected_session_id.as_deref(), Some("session-2"));
     assert!(state.assistant_forwarding_cursors.is_empty());
     assert!(state.forward_next_assistant_message_session_ids.is_empty());
-    assert_eq!(state.forward_next_assistant_message_session_id, None);
     let sent_texts = telegram.sent_texts.borrow();
     assert_eq!(sent_texts.len(), 1);
     assert!(sent_texts[0].contains("Telegram session target set to Target Session"));
@@ -2216,23 +2213,10 @@ fn telegram_assistant_forwarding_cursor_state_uses_documented_wire_shape() {
 fn telegram_ui_relay_config() -> TelegramUiConfig {
     TelegramUiConfig {
         enabled: true,
-        bot_token: Some("123456:secret".to_owned()),
         subscribed_project_ids: vec!["project-1".to_owned()],
         default_project_id: None,
         ..TelegramUiConfig::default()
     }
-}
-
-fn telegram_ui_relay_file(config: TelegramUiConfig) -> TelegramBotFile {
-    TelegramBotFile {
-        config,
-        config_migrated_to_app_state: true,
-        state: TelegramBotState::default(),
-    }
-}
-
-fn telegram_ui_relay_token(file: &TelegramBotFile) -> Option<String> {
-    file.config.bot_token.clone()
 }
 
 fn read_telegram_settings_file_without_plaintext_token(
@@ -2251,7 +2235,8 @@ fn read_telegram_settings_file_without_plaintext_token(
     );
     let value: Value =
         serde_json::from_slice(&raw).expect("settings file should remain valid JSON");
-    assert!(value["config"].get("botToken").is_none());
+    assert!(value.get("botToken").is_none());
+    assert!(value.get("config").is_none());
     value
 }
 
@@ -2274,165 +2259,111 @@ fn telegram_keyring_storage_error(label: &'static str) -> keyring_core::Error {
 }
 
 #[test]
-fn telegram_ui_file_uses_single_subscribed_project_for_relay_config() {
-    let file = telegram_ui_relay_file(telegram_ui_relay_config());
-    let config = TelegramBotConfig::from_ui_file("/tmp", &file, telegram_ui_relay_token(&file))
-        .expect("single subscribed project should produce relay config");
-
+fn telegram_ui_settings_derive_current_relay_config() {
+    let runtime = TelegramBotState {
+        chat_id: Some(42),
+        ..Default::default()
+    };
+    let config = TelegramBotConfig::from_ui_settings(
+        "/tmp",
+        &telegram_ui_relay_config(),
+        &runtime,
+        Some("123456:secret".to_owned()),
+    )
+    .expect("single subscribed project should produce relay config");
     assert_eq!(config.project_id, "project-1");
     assert_eq!(config.subscribed_project_ids, vec!["project-1"]);
+    assert_eq!(config.chat_id, Some(42));
     assert!(!config.project_digests_enabled);
-}
 
-#[test]
-fn telegram_ui_file_falls_back_to_single_subscribed_project_for_blank_default() {
-    let with_blank_default = telegram_ui_relay_file(TelegramUiConfig {
-        default_project_id: Some("   ".to_owned()),
-        ..telegram_ui_relay_config()
-    });
-    let config = TelegramBotConfig::from_ui_file(
-        "/tmp",
-        &with_blank_default,
-        telegram_ui_relay_token(&with_blank_default),
-    )
-    .expect("blank default should fall back to single subscribed project");
-
-    assert_eq!(config.project_id, "project-1");
-}
-
-#[test]
-fn telegram_ui_file_requires_project_target_for_relay_config() {
-    let without_any_project = telegram_ui_relay_file(TelegramUiConfig {
-        subscribed_project_ids: Vec::new(),
-        default_project_id: None,
-        ..telegram_ui_relay_config()
-    });
-
-    assert_eq!(
-        TelegramBotConfig::from_ui_file(
-            "/tmp",
-            &without_any_project,
-            telegram_ui_relay_token(&without_any_project),
-        )
-        .expect_err("relay config without a project target should be unavailable"),
-        TelegramRelayConfigUnavailableReason::MissingProjectTarget
-    );
-}
-
-#[test]
-fn telegram_ui_file_requires_default_when_multiple_projects_for_relay_config() {
-    let with_multiple_projects = telegram_ui_relay_file(TelegramUiConfig {
-        subscribed_project_ids: vec!["project-1".to_owned(), "project-2".to_owned()],
-        default_project_id: None,
-        ..telegram_ui_relay_config()
-    });
-
-    assert_eq!(
-        TelegramBotConfig::from_ui_file(
-            "/tmp",
-            &with_multiple_projects,
-            telegram_ui_relay_token(&with_multiple_projects),
-        )
-        .expect_err("ambiguous relay project target should be unavailable"),
-        TelegramRelayConfigUnavailableReason::MissingProjectTarget
-    );
-}
-
-#[test]
-fn telegram_ui_file_uses_trimmed_default_project_for_relay_config() {
-    let with_default = TelegramBotFile {
-        config: TelegramUiConfig {
-            default_project_id: Some(" project-1 ".to_owned()),
-            subscribed_project_ids: vec![" project-2 ".to_owned(), "project-1".to_owned()],
+    for default_project_id in [None, Some("   ".to_owned()), Some(" project-1 ".to_owned())] {
+        let settings = TelegramUiConfig {
+            default_project_id,
             ..telegram_ui_relay_config()
-        },
-        config_migrated_to_app_state: true,
-        state: TelegramBotState {
-            chat_id: Some(42),
-            ..TelegramBotState::default()
-        },
+        };
+        let config = TelegramBotConfig::from_ui_settings(
+            "/tmp",
+            &settings,
+            &runtime,
+            Some("123456:secret".to_owned()),
+        )
+        .expect("explicit or unambiguous project should produce relay config");
+        assert_eq!(config.project_id, "project-1");
+    }
+    let settings = TelegramUiConfig {
+        default_project_id: Some(" project-1 ".to_owned()),
+        subscribed_project_ids: vec![" project-2 ".to_owned(), "project-1".to_owned()],
+        ..telegram_ui_relay_config()
     };
-    let config = TelegramBotConfig::from_ui_file(
+    let config = TelegramBotConfig::from_ui_settings(
         "/tmp",
-        &with_default,
-        telegram_ui_relay_token(&with_default),
+        &settings,
+        &runtime,
+        Some("123456:secret".to_owned()),
     )
-    .expect("default project should produce relay config");
-
+    .expect("multiple subscriptions with explicit default should work");
     assert_eq!(config.project_id, "project-1");
     assert_eq!(
         config.subscribed_project_ids,
         vec!["project-2", "project-1"]
     );
-    assert_eq!(config.chat_id, Some(42));
 }
 
 #[test]
-fn telegram_ui_file_omits_disabled_relay_config_even_with_token_and_project() {
-    let disabled = telegram_ui_relay_file(TelegramUiConfig {
-        enabled: false,
-        ..telegram_ui_relay_config()
-    });
-
-    assert_eq!(
-        TelegramBotConfig::from_ui_file("/tmp", &disabled, telegram_ui_relay_token(&disabled))
-            .expect_err("disabled relay config should be unavailable"),
-        TelegramRelayConfigUnavailableReason::Disabled
-    );
-}
-
-#[test]
-fn telegram_ui_file_requires_bot_token_for_relay_config() {
-    let missing_token = telegram_ui_relay_file(TelegramUiConfig {
-        bot_token: None,
-        ..telegram_ui_relay_config()
-    });
-
-    assert_eq!(
-        TelegramBotConfig::from_ui_file(
-            "/tmp",
-            &missing_token,
-            telegram_ui_relay_token(&missing_token),
-        )
-        .expect_err("relay config without a bot token should be unavailable"),
-        TelegramRelayConfigUnavailableReason::MissingBotToken
-    );
-}
-
-#[test]
-fn telegram_ui_file_rejects_empty_bot_token_for_relay_config() {
-    let empty_token = telegram_ui_relay_file(TelegramUiConfig {
-        bot_token: Some(String::new()),
-        ..telegram_ui_relay_config()
-    });
-
-    assert_eq!(
-        TelegramBotConfig::from_ui_file(
-            "/tmp",
-            &empty_token,
-            telegram_ui_relay_token(&empty_token)
-        )
-        .expect_err("relay config with an empty bot token should be unavailable"),
-        TelegramRelayConfigUnavailableReason::MissingBotToken
-    );
-}
-
-#[test]
-fn telegram_ui_file_rejects_whitespace_bot_token_for_relay_config() {
-    let whitespace_token = telegram_ui_relay_file(TelegramUiConfig {
-        bot_token: Some("   ".to_owned()),
-        ..telegram_ui_relay_config()
-    });
-
-    assert_eq!(
-        TelegramBotConfig::from_ui_file(
-            "/tmp",
-            &whitespace_token,
-            telegram_ui_relay_token(&whitespace_token),
-        )
-        .expect_err("relay config with a whitespace bot token should be unavailable"),
-        TelegramRelayConfigUnavailableReason::MissingBotToken
-    );
+fn telegram_ui_settings_require_enabled_token_and_unambiguous_project() {
+    let cases = [
+        (
+            TelegramUiConfig {
+                enabled: false,
+                ..telegram_ui_relay_config()
+            },
+            Some("123456:secret"),
+            TelegramRelayConfigUnavailableReason::Disabled,
+        ),
+        (
+            telegram_ui_relay_config(),
+            None,
+            TelegramRelayConfigUnavailableReason::MissingBotToken,
+        ),
+        (
+            telegram_ui_relay_config(),
+            Some(""),
+            TelegramRelayConfigUnavailableReason::MissingBotToken,
+        ),
+        (
+            telegram_ui_relay_config(),
+            Some("   "),
+            TelegramRelayConfigUnavailableReason::MissingBotToken,
+        ),
+        (
+            TelegramUiConfig {
+                subscribed_project_ids: vec![],
+                ..telegram_ui_relay_config()
+            },
+            Some("123456:secret"),
+            TelegramRelayConfigUnavailableReason::MissingProjectTarget,
+        ),
+        (
+            TelegramUiConfig {
+                subscribed_project_ids: vec!["project-1".to_owned(), "project-2".to_owned()],
+                ..telegram_ui_relay_config()
+            },
+            Some("123456:secret"),
+            TelegramRelayConfigUnavailableReason::MissingProjectTarget,
+        ),
+    ];
+    for (settings, token, expected) in cases {
+        assert_eq!(
+            TelegramBotConfig::from_ui_settings(
+                "/tmp",
+                &settings,
+                &TelegramBotState::default(),
+                token.map(str::to_owned),
+            )
+            .expect_err("unavailable relay must not start"),
+            expected
+        );
+    }
 }
 
 #[test]
@@ -2530,6 +2461,9 @@ fn telegram_bot_token_native_credential_store_round_trips() {
 fn telegram_config_update_stores_token_only_in_credential_store() {
     let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
     let state = test_app_state();
+    state
+        .persist_telegram_bot_file(&TelegramBotState::default())
+        .expect("runtime fixture should persist");
     let (project_id, _session_id) = create_telegram_settings_project_and_session(&state);
     let token = "123456:secret-at-rest";
 
@@ -2555,51 +2489,30 @@ fn telegram_config_update_stores_token_only_in_credential_store() {
     );
     let value =
         read_telegram_settings_file_without_plaintext_token(&state.telegram_bot_file_path(), token);
-    assert_eq!(value["config"]["enabled"], json!(true));
+    assert!(value.get("config").is_none());
+    let config_value = serde_json::to_value(state.telegram_config_from_state())
+        .expect("app config should serialize");
+    assert_eq!(config_value["enabled"], json!(true));
     assert_eq!(
-        value["config"]["subscribedProjectIds"],
+        config_value["subscribedProjectIds"],
         json!([project_id.clone()])
     );
-    assert_eq!(value["config"]["defaultProjectId"], json!(project_id));
-}
-
-#[test]
-fn telegram_status_migrates_legacy_plaintext_token_out_of_settings_file() {
-    let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
-    let state = test_app_state();
-    let path = state.telegram_bot_file_path();
-    let token = "123456:legacy-secret";
-    fs::create_dir_all(path.parent().expect("settings path should have a parent"))
-        .expect("settings dir should create");
-    fs::write(
-        &path,
-        serde_json::to_vec_pretty(&json!({
-            "config": {
-                "enabled": false,
-                "botToken": token
-            },
-            "chatId": 123
-        }))
-        .expect("fixture should encode"),
-    )
-    .expect("fixture should write");
-
-    let response = state
-        .telegram_status()
-        .expect("status should migrate legacy plaintext token");
-
-    assert!(response.configured);
-    assert_eq!(response.bot_token_masked.as_deref(), Some("****cret"));
+    assert_eq!(config_value["defaultProjectId"], json!(project_id));
+    let restarted = load_state(&state.persistence_path)
+        .expect("current app metadata should pass boot validation")
+        .expect("saved app state should exist");
     assert_eq!(
-        state
-            .saved_telegram_bot_token()
-            .expect("migrated token should read")
-            .as_deref(),
-        Some(token)
+        restarted.preferences.telegram,
+        state.telegram_config_from_state()
     );
-    let value = read_telegram_settings_file_without_plaintext_token(&path, token);
-    assert_eq!(value["configMigratedToAppState"], json!(true));
-    assert_eq!(value["chatId"], json!(123));
+    let metadata = serde_json::to_string(&PersistedState::metadata_from_inner(&restarted))
+        .expect("restarted metadata should serialize");
+    assert!(!metadata.contains(token));
+    assert!(!metadata.contains("botToken"));
+    let snapshot =
+        serde_json::to_string(&state.snapshot()).expect("state snapshot should serialize");
+    assert!(!snapshot.contains(token));
+    assert!(!snapshot.contains("botToken"));
 }
 
 #[test]
@@ -2653,6 +2566,9 @@ fn telegram_config_update_keyring_write_failure_does_not_persist_plaintext_token
 fn telegram_config_update_keyring_write_failure_preserves_existing_settings() {
     let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
     let state = test_app_state();
+    state
+        .persist_telegram_bot_file(&TelegramBotState::default())
+        .expect("runtime fixture should persist");
     let (project_id, session_id) = create_telegram_settings_project_and_session(&state);
     let path = state.telegram_bot_file_path();
     state
@@ -2746,6 +2662,9 @@ fn telegram_status_keyring_read_failure_surfaces_without_unconfigured_fallback()
     let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
     let state = test_app_state();
     state
+        .persist_telegram_bot_file(&TelegramBotState::default())
+        .expect("runtime fixture should persist");
+    state
         .save_telegram_bot_token("123456:read-failure-secret")
         .expect("token should save before injecting read failure");
     set_telegram_token_entry_error(
@@ -2766,7 +2685,7 @@ fn telegram_status_keyring_read_failure_surfaces_without_unconfigured_fallback()
         &state.telegram_bot_file_path(),
         "123456:read-failure-secret",
     );
-    assert_eq!(value["configMigratedToAppState"], json!(true));
+    assert!(value.get("configMigratedToAppState").is_none());
     // `keyring_core::mock::Cred::set_error` is one-shot; this proves the
     // failure path surfaced the read error without deleting the secret.
     assert_eq!(
@@ -3437,7 +3356,7 @@ fn telegram_settings_validation_autofills_session_project_subscription() {
     };
 
     state
-        .validate_and_normalize_telegram_config(&mut config)
+        .validate_and_normalize_telegram_config_with_token_status(&mut config, false)
         .expect("config should validate");
 
     assert_eq!(
@@ -3471,7 +3390,7 @@ fn telegram_settings_validation_rejects_delegated_default_session() {
     };
 
     let err = state
-        .validate_and_normalize_telegram_config(&mut config)
+        .validate_and_normalize_telegram_config_with_token_status(&mut config, false)
         .expect_err("delegated child session should not validate as a Telegram default");
 
     assert_eq!(err.status, StatusCode::BAD_REQUEST);
@@ -3531,7 +3450,7 @@ fn telegram_settings_validation_uses_single_subscribed_project_as_default() {
     };
 
     state
-        .validate_and_normalize_telegram_config(&mut config)
+        .validate_and_normalize_telegram_config_with_token_status(&mut config, false)
         .expect("config should validate");
 
     assert_eq!(
@@ -3546,12 +3465,11 @@ fn telegram_settings_validation_rejects_enabled_config_without_project_target() 
     let state = test_app_state();
     let mut config = TelegramUiConfig {
         enabled: true,
-        bot_token: Some("123456:secret".to_owned()),
         ..TelegramUiConfig::default()
     };
 
     let err = state
-        .validate_and_normalize_telegram_config(&mut config)
+        .validate_and_normalize_telegram_config_with_token_status(&mut config, true)
         .expect_err("enabled configured relay should require a project target");
 
     assert_eq!(err.status, StatusCode::BAD_REQUEST);
@@ -3590,7 +3508,7 @@ fn telegram_settings_validation_rejects_overlong_target_ids() {
 
     for (label, mut config) in cases {
         let err = state
-            .validate_and_normalize_telegram_config(&mut config)
+            .validate_and_normalize_telegram_config_with_token_status(&mut config, false)
             .expect_err("overlong target id should fail validation");
 
         assert_eq!(err.status, StatusCode::BAD_REQUEST);
@@ -3619,7 +3537,7 @@ fn telegram_settings_validation_rejects_too_many_subscribed_projects() {
     };
 
     let err = state
-        .validate_and_normalize_telegram_config(&mut config)
+        .validate_and_normalize_telegram_config_with_token_status(&mut config, false)
         .expect_err("oversized subscribed project list should fail validation");
 
     assert_eq!(err.status, StatusCode::BAD_REQUEST);
@@ -3726,11 +3644,15 @@ fn telegram_config_update_allows_enabled_without_token_or_project_target() {
     );
 
     let path = state.telegram_bot_file_path();
-    let value: Value = serde_json::from_slice(&fs::read(&path).expect("settings file should read"))
-        .expect("settings file should parse");
-    assert_eq!(value["config"]["enabled"], json!(true));
-    assert!(value["config"].get("botToken").is_none());
-    assert!(value["config"].get("subscribedProjectIds").is_none());
+    assert!(
+        !path.exists(),
+        "a preferences-only save must not create a runtime config mirror"
+    );
+    let config_value = serde_json::to_value(state.telegram_config_from_state())
+        .expect("app config should serialize");
+    assert_eq!(config_value["enabled"], json!(true));
+    assert!(config_value.get("botToken").is_none());
+    assert!(config_value.get("subscribedProjectIds").is_none());
 }
 
 #[test]
@@ -3740,18 +3662,18 @@ fn telegram_config_update_blank_token_clears_saved_token_before_project_target_c
     let path = state.telegram_bot_file_path();
     fs::create_dir_all(path.parent().expect("settings path should have a parent"))
         .expect("settings dir should create");
-    fs::write(
-        &path,
-        serde_json::to_vec_pretty(&json!({
-            "config": {
-                "enabled": false,
-                "botToken": "123456:secret"
-            },
+    install_telegram_settings_fixture(
+        &state,
+        serde_json::from_value(json!({
+                "enabled": false
+        }))
+        .expect("current config fixture should decode"),
+        Some("123456:secret"),
+        serde_json::from_value(json!({
             "chatId": 123
         }))
-        .expect("fixture should encode"),
-    )
-    .expect("fixture should write");
+        .expect("current runtime fixture should decode"),
+    );
 
     let response = state
         .update_telegram_config(UpdateTelegramConfigRequest {
@@ -3771,9 +3693,11 @@ fn telegram_config_update_blank_token_clears_saved_token_before_project_target_c
 
     let value: Value = serde_json::from_slice(&fs::read(&path).expect("settings file should read"))
         .expect("settings file should parse");
-    assert_eq!(value["config"]["enabled"], json!(true));
-    assert!(value["config"].get("botToken").is_none());
-    assert!(value["config"].get("subscribedProjectIds").is_none());
+    let config_value = serde_json::to_value(state.telegram_config_from_state())
+        .expect("app config should serialize");
+    assert_eq!(config_value["enabled"], json!(true));
+    assert!(config_value.get("botToken").is_none());
+    assert!(config_value.get("subscribedProjectIds").is_none());
     assert_eq!(value["chatId"], json!(123));
     assert_eq!(
         state
@@ -3790,18 +3714,18 @@ fn telegram_config_update_rejects_saved_token_without_project_target() {
     let path = state.telegram_bot_file_path();
     fs::create_dir_all(path.parent().expect("settings path should have a parent"))
         .expect("settings dir should create");
-    fs::write(
-        &path,
-        serde_json::to_vec_pretty(&json!({
-            "config": {
-                "enabled": false,
-                "botToken": "123456:secret"
-            },
+    install_telegram_settings_fixture(
+        &state,
+        serde_json::from_value(json!({
+                "enabled": false
+        }))
+        .expect("current config fixture should decode"),
+        Some("123456:secret"),
+        serde_json::from_value(json!({
             "chatId": 123
         }))
-        .expect("fixture should encode"),
-    )
-    .expect("fixture should write");
+        .expect("current runtime fixture should decode"),
+    );
 
     let err = state
         .update_telegram_config(UpdateTelegramConfigRequest {
@@ -3819,13 +3743,15 @@ fn telegram_config_update_rejects_saved_token_without_project_target() {
 
     let value: Value = serde_json::from_slice(&fs::read(&path).expect("settings file should read"))
         .expect("settings file should parse");
-    assert_eq!(value["config"]["enabled"], json!(false));
-    assert!(value["config"].get("botToken").is_none());
+    let config_value = serde_json::to_value(state.telegram_config_from_state())
+        .expect("app config should serialize");
+    assert_eq!(config_value["enabled"], json!(false));
+    assert!(config_value.get("botToken").is_none());
     assert_eq!(value["chatId"], json!(123));
     assert_eq!(
         state
             .saved_telegram_bot_token()
-            .expect("migrated token should read")
+            .expect("saved token should read")
             .as_deref(),
         Some("123456:secret")
     );
@@ -3853,7 +3779,7 @@ fn telegram_settings_validation_rejects_orphan_session_project() {
     };
 
     let err = state
-        .validate_and_normalize_telegram_config(&mut config)
+        .validate_and_normalize_telegram_config_with_token_status(&mut config, false)
         .expect_err("orphan session project should fail validation");
 
     assert!(
@@ -3875,7 +3801,7 @@ fn telegram_settings_validation_does_not_partially_mutate_on_late_errors() {
     };
 
     let err = state
-        .validate_and_normalize_telegram_config(&mut config)
+        .validate_and_normalize_telegram_config_with_token_status(&mut config, false)
         .expect_err("unknown default session should fail validation");
 
     assert!(err.message.contains("unknown default Telegram session"));
@@ -3916,7 +3842,10 @@ fn telegram_settings_validation_does_not_partially_mutate_on_other_error_paths()
         ..TelegramUiConfig::default()
     };
     let err = state
-        .validate_and_normalize_telegram_config(&mut unknown_default_project)
+        .validate_and_normalize_telegram_config_with_token_status(
+            &mut unknown_default_project,
+            false,
+        )
         .expect_err("unknown default project should fail validation");
     assert!(err.message.contains("unknown default Telegram project"));
     assert_eq!(
@@ -3931,7 +3860,7 @@ fn telegram_settings_validation_does_not_partially_mutate_on_other_error_paths()
         ..TelegramUiConfig::default()
     };
     let err = state
-        .validate_and_normalize_telegram_config(&mut no_project_session)
+        .validate_and_normalize_telegram_config_with_token_status(&mut no_project_session, false)
         .expect_err("session without project should fail validation");
     assert!(
         err.message
@@ -3949,7 +3878,10 @@ fn telegram_settings_validation_does_not_partially_mutate_on_other_error_paths()
         ..TelegramUiConfig::default()
     };
     let err = state
-        .validate_and_normalize_telegram_config(&mut mismatched_session_project)
+        .validate_and_normalize_telegram_config_with_token_status(
+            &mut mismatched_session_project,
+            false,
+        )
         .expect_err("mismatched default session project should fail validation");
     assert!(
         err.message

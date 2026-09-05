@@ -167,7 +167,6 @@ impl PersistedState {
     fn into_inner(self) -> Result<StateInner> {
         let mut preferences = self.preferences;
         preferences.remotes = validate_persisted_remote_configs(preferences.remotes)?;
-        preferences.telegram.bot_token = None;
         let mut inner = StateInner {
             codex: self.codex,
             engram_host_adapter: Arc::new(EngramHostAdapter::default()),

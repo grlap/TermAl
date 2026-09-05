@@ -289,9 +289,9 @@ All routes are under `/api`. The backend serves JSON, and the frontend proxies r
 | PATCH | `/api/projects/{id}/engram` | Enable/disable repository-declared Engram Base and independently opt into default-off premium `turnGatedControl`. No grant field is accepted. |
 | POST | `/api/projects/{id}/engram/verify` | Non-mutating doctor verification for the same no-grant project settings. Premium mode additionally requires `turn_gated` assurance. |
 | POST | `/api/projects/pick` | Pick a local project root |
-| GET | `/api/telegram/status` | Read Telegram relay configuration/status -> `TelegramStatusResponse` with configured/enabled/running state, lifecycle, linked chat, masked token, subscribed projects, and default targets. Current implementation is singleton; the target multi-bot spec changes this to an aggregate profile status while keeping compatibility for the default bot. |
-| POST | `/api/telegram/config` | Update the singleton Telegram relay token in the OS credential store, enabled flag, subscribed projects, and default project/session. Returns sanitized `TelegramStatusResponse`; validation failures use the standard `{ "error": ... }` envelope. Multi-bot work should supersede this with profile-scoped create/update/delete routes. |
-| POST | `/api/telegram/test` | Validate a supplied or saved Telegram bot token through `getMe` -> `TelegramTestResponse`. Local test throttling returns `429` with `Retry-After`; Telegram auth/validation failures return `422`, and upstream/network failures return `502`. Multi-bot work should add `/api/telegram/bots/{bot_id}/test`. |
+| GET | `/api/telegram/status` | Read Telegram relay configuration/status -> `TelegramStatusResponse` with configured/enabled/running state, lifecycle, linked chat, masked token, subscribed projects, and default targets. One current single-bot response shape; no default-bot compatibility projection. |
+| POST | `/api/telegram/config` | Update the Telegram relay token in the OS credential store, enabled flag, subscribed projects, and default project/session. Returns sanitized `TelegramStatusResponse`; validation failures use the standard `{ "error": ... }` envelope. |
+| POST | `/api/telegram/test` | Validate a supplied or saved Telegram bot token through `getMe` -> `TelegramTestResponse`. Local test throttling returns `429` with `Retry-After`; Telegram auth/validation failures return `422`, and upstream/network failures return `502`. |
 | POST | `/api/sessions` | Create session |
 | GET | `/api/sessions/{id}` | Fetch one bounded recent suffix -> `SessionResponse { revision, serverInstanceId, session }`. The default is 20 messages; `?tail=N` accepts `1..=64`. There is no unbounded transcript response or summary fallback. Remote-proxy sessions forward the same bounded tail request to the owner. |
 | GET | `/api/sessions/{id}/history` | Fetch one ascending transcript page by exclusive `before`/`after` cursor, true start, centered global `around` position, or latest tail -> `SessionHistoryResponse`. `limit` defaults to and is capped at 64. |
@@ -544,7 +544,7 @@ On broadcast channel lag, the backend falls back to sending a full state snapsho
 |-- termal.sqlite          # primary store: app_state + sessions + delegations tables (+ WAL/-shm sidecars)
 |-- coordination.sqlite    # mailbox + coordination-board tables, isolated writer/WAL
 |-- orchestrators.json     # reusable orchestrator templates
-`-- telegram-bot.json      # optional Telegram relay runtime metadata/state; UI config is mirrored from app_state
+`-- telegram-bot.json      # optional Telegram runtime-only state; config in app preferences, token in OS credential store
 ```
 
 Background persistence favors UI responsiveness over hard-kill durability. A

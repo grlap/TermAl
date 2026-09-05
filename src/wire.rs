@@ -1634,17 +1634,16 @@ struct RemoteActionResponse {
 
 /// UI-owned Telegram relay configuration committed through app preferences.
 ///
-/// `telegram-bot.json` still carries a mirrored `config` object for relay
-/// interop and legacy migration, but app state is the source of truth.
+/// App preferences are the sole configuration source. Runtime JSON contains
+/// only relay state; tokens are accepted by the dedicated settings request
+/// and stored only in the OS credential store.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct TelegramUiConfig {
     #[serde(default)]
     enabled: bool,
     #[serde(default)]
     forward_assistant_replies: bool,
-    #[serde(default, skip_serializing)]
-    bot_token: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     subscribed_project_ids: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1659,8 +1658,7 @@ fn telegram_ui_config_is_default(config: &TelegramUiConfig) -> bool {
 
 /// UI-visible Telegram relay lifecycle.
 ///
-/// Currently always `InProcess`; retained as a discriminator for the planned
-/// multi-bot status surface in `docs/features/telegram-ui-integration.md`.
+/// The current relay always runs in the backend process.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 enum TelegramLifecycle {

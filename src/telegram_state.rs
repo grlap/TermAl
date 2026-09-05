@@ -1,7 +1,7 @@
 /*
 Telegram relay persisted state and log redaction helpers.
 
-Owns telegram-bot.json state shape, merge persistence, corrupt-file backup,
+Owns the current telegram-bot.json runtime-only shape, persistence, corrupt-file backup,
 and token redaction used by runtime/client error paths.
 */
 
@@ -21,51 +21,14 @@ struct TelegramBotState {
     last_digest_message_id: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     next_update_id: Option<i64>,
-    /// Most recently forwarded assistant `Text` message id. Used by
-    /// `forward_new_assistant_message_if_any` to dedupe full-content
-    /// forwards: the digest poll runs every iteration, but the latest
-    /// assistant message only needs to be delivered to Telegram once.
-    /// Older state files that predate this field deserialize as
-    /// `None`, which is correctly interpreted as "nothing forwarded
-    /// yet" — the next sync will (re-)forward whatever the latest
-    /// assistant message is at that moment.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    last_forwarded_assistant_message_id: Option<String>,
-    /// Character count of the last forwarded assistant `Text`
-    /// message. Paired with `last_forwarded_assistant_message_id`
-    /// to detect the case where a forward landed mid-stream (the
-    /// id stays stable while the text grows): on the next sync the
-    /// same id is observed with a strictly-greater char count, and
-    /// the relay re-forwards the now-settled text. Without this,
-    /// the per-id dedupe would silently swallow the rest of any
-    /// reply that started forwarding before the turn settled.
-    /// Older state files that predate this field deserialize as
-    /// `None` and the relay treats them as "unknown length", which
-    /// triggers a one-time re-forward when the latest message is
-    /// next observed (acceptable cost for self-healing).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    last_forwarded_assistant_message_text_chars: Option<usize>,
-    /// Session-keyed forwarding cursors. This is the authoritative cursor set.
-    /// The two legacy fields above are read as a compatibility fallback for
-    /// older state files, but new cursor writes stay session-scoped. On disk
-    /// this is `assistantForwardingCursors: { "<session-id>": { messageId,
-    /// textChars, resendIfGrown?, sentChunks?, failedChunkSendAttempts?,
-    /// footerPending?, baselineWhileActive? } }`.
+    /// Authoritative session-keyed delivery cursors, including chunk retry and
+    /// pending-footer state. A cursor never applies to another session.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     assistant_forwarding_cursors: HashMap<String, TelegramAssistantForwardingCursor>,
-    /// Session ids whose next settled assistant reply should be forwarded even
-    /// when no prior assistant text exists for that session. This ordered list
-    /// is authoritative; the legacy singleton below mirrors the latest touched
-    /// id for older state readers. On disk this is
-    /// `forwardNextAssistantMessageSessionIds: ["<session-id>", ...]`, in the
-    /// same order Telegram prompts armed their sessions.
+    /// Ordered session ids armed by Telegram prompts, including sessions with
+    /// no previous assistant message to use as a baseline.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     forward_next_assistant_message_session_ids: Vec<String>,
-    /// Session id whose next settled assistant text should be forwarded even
-    /// when there was no previous assistant message to baseline against. Set
-    /// immediately before accepting a Telegram-originated prompt.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    forward_next_assistant_message_session_id: Option<String>,
     #[serde(skip)]
     chat_work_rate_limit: HashMap<i64, VecDeque<std::time::Instant>>,
 }
@@ -98,8 +61,7 @@ struct TelegramAssistantForwardingCursor {
     #[serde(default, skip_serializing_if = "is_false")]
     footer_pending: bool,
     /// Holds the boundary for a Telegram prompt queued behind an already
-    /// running or approval-paused local turn. Older binaries ignore this field;
-    /// after a downgrade, one settled old-turn reply can be misattributed.
+    /// running or approval-paused local turn.
     #[serde(default, skip_serializing_if = "is_false")]
     baseline_while_active: bool,
 }
@@ -169,25 +131,23 @@ fn persist_telegram_bot_state(path: &FsPath, state: &TelegramBotState) -> Result
             .with_context(|| format!("failed to create `{}`", parent.display()))?;
     }
 
-    let mut file = match fs::read(path) {
-        Ok(raw) => match serde_json::from_slice::<TelegramBotFile>(&raw) {
-            Ok(file) => file,
-            Err(err) => {
-                bail!(
-                    "failed to parse existing Telegram bot file `{}` before merging relay state: {err}",
-                    path.display()
-                );
-            }
-        },
-        Err(err) if err.kind() == io::ErrorKind::NotFound => TelegramBotFile::default(),
+    // Unknown keys are deliberately ignored, not imported or mirrored. Every
+    // save emits only runtime state. Still reject malformed current fields
+    // rather than replacing an unreadable file with a fresh relay snapshot.
+    match fs::read(path) {
+        Ok(raw) => {
+            serde_json::from_slice::<TelegramBotState>(&raw).with_context(|| {
+                format!("failed to parse existing Telegram bot file `{}` before saving relay state", path.display())
+            })?;
+        }
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {}
         Err(err) => {
             return Err(err).with_context(|| format!("failed to read `{}`", path.display()));
         }
-    };
-    file.state = state.clone();
+    }
 
     let encoded =
-        serde_json::to_vec_pretty(&file).context("failed to serialize telegram bot state")?;
+        serde_json::to_vec_pretty(state).context("failed to serialize telegram bot state")?;
     write_telegram_bot_file(path, &encoded)
         .with_context(|| format!("failed to write `{}`", path.display()))
 }

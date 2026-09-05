@@ -432,3 +432,22 @@ pub(super) fn create_telegram_settings_project_and_session(state: &AppState) -> 
         .expect("session should create");
     (project.project_id, session.session_id)
 }
+
+pub(super) fn install_telegram_settings_fixture(
+    state: &AppState,
+    config: TelegramUiConfig,
+    token: Option<&str>,
+    runtime: TelegramBotState,
+) {
+    state
+        .commit_telegram_config_if_changed(config)
+        .expect("app config fixture should persist");
+    if let Some(token) = token {
+        state
+            .save_telegram_bot_token(token)
+            .expect("mock credential should save");
+    }
+    state
+        .persist_telegram_bot_file(&runtime)
+        .expect("current runtime fixture should persist");
+}

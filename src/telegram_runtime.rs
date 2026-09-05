@@ -198,12 +198,13 @@ struct TelegramBotConfig {
 }
 
 impl TelegramBotConfig {
-    fn from_ui_file(
+    fn from_ui_settings(
         default_workdir: &str,
-        file: &TelegramBotFile,
+        config: &TelegramUiConfig,
+        state: &TelegramBotState,
         bot_token: Option<String>,
     ) -> Result<Self, TelegramRelayConfigUnavailableReason> {
-        if !file.config.enabled {
+        if !config.enabled {
             return Err(TelegramRelayConfigUnavailableReason::Disabled);
         }
         let bot_token = match bot_token
@@ -216,13 +217,13 @@ impl TelegramBotConfig {
         };
         #[cfg(test)]
         let _ = &bot_token;
-        let project_id = telegram_effective_default_project_id(&file.config)
+        let project_id = telegram_effective_default_project_id(config)
             .ok_or(TelegramRelayConfigUnavailableReason::MissingProjectTarget)?;
         if project_id.is_empty() {
             return Err(TelegramRelayConfigUnavailableReason::MissingProjectTarget);
         }
         let subscribed_project_ids =
-            telegram_effective_subscribed_project_ids(&file.config, &project_id);
+            telegram_effective_subscribed_project_ids(config, &project_id);
         let state_path = resolve_termal_data_dir(default_workdir).join("telegram-bot.json");
 
         Ok(Self {
@@ -231,8 +232,8 @@ impl TelegramBotConfig {
             bot_username: None,
             #[cfg(not(test))]
             bot_token,
-            chat_id: file.state.chat_id,
-            forward_assistant_replies: file.config.forward_assistant_replies,
+            chat_id: state.chat_id,
+            forward_assistant_replies: config.forward_assistant_replies,
             project_digests_enabled: false,
             #[cfg(not(test))]
             poll_timeout_secs: TELEGRAM_DEFAULT_POLL_TIMEOUT_SECS,

@@ -114,7 +114,7 @@ fn sync_telegram_assistant_replies(
 /// session; explicit selections are honored even when that session is currently
 /// in Error. Stale selections are cleared, including any armed assistant
 /// forwarding state, and reported through the dirty flag. If no selected
-/// session remains, an optional legacy fallback is used when promptable;
+/// session remains, an optional caller-provided fallback is used when promptable;
 /// otherwise the latest promptable project-root session is selected. The
 /// production relay passes no digest fallback.
 fn resolve_telegram_project_prompt_session(
@@ -246,46 +246,14 @@ fn telegram_assistant_text_hash(text: &str) -> String {
 fn resolve_assistant_forwarding_cursor(
     state: &TelegramBotState,
     session_id: &str,
-    messages: &[TelegramSessionFetchMessage],
 ) -> TelegramAssistantForwardingCursor {
-    if let Some(cursor) = state.assistant_forwarding_cursors.get(session_id) {
-        return cursor.clone();
-    }
-
-    if let Some(legacy_id) = state.last_forwarded_assistant_message_id.as_deref() {
-        if messages.iter().any(|message| {
-            matches!(
-                message,
-                TelegramSessionFetchMessage::Text { id, author, .. }
-                    if id == legacy_id && author == "assistant"
-            )
-        }) {
-            return TelegramAssistantForwardingCursor {
-                message_id: state.last_forwarded_assistant_message_id.clone(),
-                text_chars: state.last_forwarded_assistant_message_text_chars,
-                text_hash: None,
-                text_start_chars: None,
-                resend_if_grown: state.last_forwarded_assistant_message_text_chars.is_none(),
-                sent_chunks: None,
-                failed_chunk_send_attempts: None,
-                footer_pending: false,
-                baseline_while_active: false,
-            };
-        }
-    }
-
-    TelegramAssistantForwardingCursor::default()
+    state.assistant_forwarding_cursors.get(session_id).cloned().unwrap_or_default()
 }
 
 fn forward_next_assistant_message_session_ids(state: &TelegramBotState) -> Vec<String> {
     let mut seen = BTreeSet::new();
     let mut session_ids = Vec::new();
     for session_id in &state.forward_next_assistant_message_session_ids {
-        if seen.insert(session_id.clone()) {
-            session_ids.push(session_id.clone());
-        }
-    }
-    if let Some(session_id) = state.forward_next_assistant_message_session_id.as_ref() {
         if seen.insert(session_id.clone()) {
             session_ids.push(session_id.clone());
         }
@@ -308,7 +276,6 @@ fn is_forward_next_assistant_message_session(state: &TelegramBotState, session_i
         .forward_next_assistant_message_session_ids
         .iter()
         .any(|armed_session_id| armed_session_id == session_id)
-        || state.forward_next_assistant_message_session_id.as_deref() == Some(session_id)
 }
 
 fn remember_assistant_forwarding_cursor(
@@ -354,20 +321,13 @@ fn clear_forward_next_assistant_message_session_id(
     state: &mut TelegramBotState,
     session_id: &str,
 ) -> bool {
-    let mut changed = state
+    let changed = state
         .forward_next_assistant_message_session_ids
         .iter()
         .any(|armed_session_id| armed_session_id == session_id);
     state
         .forward_next_assistant_message_session_ids
         .retain(|armed_session_id| armed_session_id != session_id);
-    if state.forward_next_assistant_message_session_id.as_deref() == Some(session_id) {
-        state.forward_next_assistant_message_session_id = state
-            .forward_next_assistant_message_session_ids
-            .first()
-            .cloned();
-        changed = true;
-    }
     changed
 }
 
@@ -375,7 +335,7 @@ fn arm_forward_next_assistant_message_session_id(
     state: &mut TelegramBotState,
     session_id: &str,
 ) -> bool {
-    let inserted = if state
+    if state
         .forward_next_assistant_message_session_ids
         .iter()
         .any(|armed_session_id| armed_session_id == session_id)
@@ -386,11 +346,7 @@ fn arm_forward_next_assistant_message_session_id(
             .forward_next_assistant_message_session_ids
             .push(session_id.to_owned());
         true
-    };
-    let changed =
-        inserted || state.forward_next_assistant_message_session_id.as_deref() != Some(session_id);
-    state.forward_next_assistant_message_session_id = Some(session_id.to_owned());
-    changed
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -737,7 +693,7 @@ fn complete_assistant_forwarding_cursor(
 }
 
 /// Forwards every assistant `Text` message that has appeared since
-/// the last `state.last_forwarded_assistant_message_id` (in
+/// the session's last forwarded assistant message id (in
 /// chronological order, chunked to Telegram's per-message length
 /// limit). Returns `true` when state changed.
 ///
@@ -797,7 +753,7 @@ fn forward_new_assistant_message_outcome(
 
     let forward_without_existing_baseline =
         is_forward_next_assistant_message_session(state, session_id);
-    let cursor = resolve_assistant_forwarding_cursor(state, session_id, messages);
+    let cursor = resolve_assistant_forwarding_cursor(state, session_id);
 
     // Assistant forwarding has two active-session modes:
     //

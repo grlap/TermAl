@@ -6,48 +6,190 @@
 // It deliberately does not own assistant forwarding, digest delivery, relay
 // lifecycle restart behavior, or generic route/rate-limit coverage.
 
-use super::telegram_support::create_telegram_settings_project_and_session;
+use super::telegram_support::{
+    create_telegram_settings_project_and_session, install_telegram_settings_fixture,
+};
 use super::*;
 
 #[test]
-fn telegram_state_persist_preserves_settings_config_without_plaintext_token() {
-    let path = std::env::temp_dir().join(format!("termal-telegram-state-{}.json", Uuid::new_v4()));
-    fs::write(
-        &path,
-        serde_json::to_vec_pretty(&json!({
-            "config": {
-                "enabled": true,
-                "botToken": "123456:secret",
-                "subscribedProjectIds": ["project-1"],
-                "defaultProjectId": "project-1",
-                "defaultSessionId": "session-1"
-            },
-            "chatId": 123
-        }))
-        .expect("fixture should encode"),
-    )
-    .expect("fixture should write");
+fn telegram_runtime_file_ignores_unknown_fields_without_importing_config_or_secrets() {
+    let state = test_app_state();
+    let path = state.telegram_bot_file_path();
+    let token = "123456:ignored-file-secret";
+    let current = json!({
+        "chatId": 123,
+        "selectedProjectId": "project-live",
+        "selectedSessionId": "session-live",
+        "lastDigestHash": "digest-live",
+        "lastDigestMessageId": 47,
+        "nextUpdateId": 991,
+        "assistantForwardingCursors": {
+            "session-live": { "messageId": "reply", "textChars": 42, "textHash": "hash", "resendIfGrown": true }
+        },
+        "forwardNextAssistantMessageSessionIds": ["session-live"]
+    });
+    let mut input = current.clone();
+    input["config"] = json!({
+        "enabled": true, "forwardAssistantReplies": true,
+        "subscribedProjectIds": ["project-live"], "defaultProjectId": "project-live",
+        "botToken": token
+    });
+    input["configMigratedToAppState"] = json!(true);
+    input["lastForwardedAssistantMessageId"] = json!("unscoped-reply");
+    input["lastForwardedAssistantMessageTextChars"] = json!(100);
+    input["forwardNextAssistantMessageSessionId"] = json!("unscoped-session");
+    input["futureRuntimeKey"] = json!({"ignored": true});
+    let raw = serde_json::to_vec_pretty(&input).expect("input should encode");
+    fs::create_dir_all(path.parent().unwrap()).expect("runtime directory should create");
+    fs::write(&path, &raw).expect("runtime fixture should write");
 
-    let state = TelegramBotState {
-        chat_id: Some(456),
-        next_update_id: Some(99),
-        ..TelegramBotState::default()
-    };
-    persist_telegram_bot_state(&path, &state).expect("state should persist");
-
-    let value: Value = serde_json::from_slice(&fs::read(&path).expect("state file should read"))
-        .expect("state file should parse");
-    assert!(value["config"].get("botToken").is_none());
+    let loaded = state
+        .load_telegram_bot_file()
+        .expect("settings should read current fields");
+    let relay_loaded = load_telegram_bot_state(&path).expect("relay should read current fields");
+    assert_eq!(serde_json::to_value(&loaded).unwrap(), current);
+    assert_eq!(serde_json::to_value(&relay_loaded).unwrap(), current);
     assert_eq!(
-        value["config"]["subscribedProjectIds"],
-        json!(["project-1"])
+        fs::read(&path).unwrap(),
+        raw,
+        "reads must not rewrite the runtime file"
     );
-    assert_eq!(value["config"]["defaultProjectId"], json!("project-1"));
-    assert_eq!(value["config"]["defaultSessionId"], json!("session-1"));
-    assert_eq!(value["chatId"], json!(456));
-    assert_eq!(value["nextUpdateId"], json!(99));
+    let status = state
+        .telegram_status()
+        .expect("unknown fields must not block status");
+    assert!(!status.configured);
+    assert!(!status.enabled);
+    assert_eq!(status.linked_chat_id, Some(123));
+    assert_eq!(
+        state.telegram_config_from_state(),
+        TelegramUiConfig::default()
+    );
+    assert_eq!(state.saved_telegram_bot_token().unwrap(), None);
+    assert_eq!(
+        fs::read(&path).unwrap(),
+        raw,
+        "status must not migrate unknown data"
+    );
 
-    fs::remove_file(&path).ok();
+    persist_telegram_bot_state(&path, &loaded)
+        .expect("next relay save should emit only current state");
+    let saved = fs::read(&path).unwrap();
+    assert_eq!(serde_json::from_slice::<Value>(&saved).unwrap(), current);
+    assert!(!String::from_utf8(saved).unwrap().contains(token));
+    assert_eq!(state.saved_telegram_bot_token().unwrap(), None);
+}
+
+#[test]
+fn telegram_runtime_current_shape_round_trips_through_both_writers() {
+    let state = test_app_state();
+    let path = state.telegram_bot_file_path();
+    let runtime = TelegramBotState {
+        chat_id: Some(123),
+        next_update_id: Some(991),
+        selected_project_id: Some("project-1".to_owned()),
+        selected_session_id: Some("session-1".to_owned()),
+        last_digest_hash: Some("digest".to_owned()),
+        last_digest_message_id: Some(17),
+        assistant_forwarding_cursors: HashMap::from([(
+            "session-1".to_owned(),
+            TelegramAssistantForwardingCursor {
+                message_id: Some("message-1".to_owned()),
+                text_chars: Some(27),
+                text_hash: Some("hash".to_owned()),
+                text_start_chars: Some(5),
+                resend_if_grown: true,
+                sent_chunks: Some(2),
+                failed_chunk_send_attempts: Some(1),
+                footer_pending: true,
+                baseline_while_active: true,
+            },
+        )]),
+        forward_next_assistant_message_session_ids: vec![
+            "session-1".to_owned(),
+            "session-2".to_owned(),
+        ],
+        ..Default::default()
+    };
+    state
+        .persist_telegram_bot_file(&runtime)
+        .expect("settings runtime writer should save");
+    let before = fs::read(&path).unwrap();
+    let loaded = load_telegram_bot_state(&path).expect("relay should load current state");
+    assert_eq!(
+        serde_json::to_value(&loaded).unwrap(),
+        serde_json::to_value(&runtime).unwrap()
+    );
+    persist_telegram_bot_state(&path, &loaded).expect("relay writer should save");
+    assert_eq!(
+        fs::read(&path).unwrap(),
+        before,
+        "current single-session map round trip is byte-identical"
+    );
+    assert_eq!(
+        serde_json::to_value(state.load_telegram_bot_file().unwrap()).unwrap(),
+        serde_json::to_value(runtime).unwrap()
+    );
+}
+
+#[test]
+fn telegram_unknown_file_config_never_overrides_default_app_preferences() {
+    for operation in ["status", "update", "delete-project", "delete-session"] {
+        let state = test_app_state();
+        let (project_id, session_id) = create_telegram_settings_project_and_session(&state);
+        let path = state.telegram_bot_file_path();
+        let raw = serde_json::to_vec(&json!({
+            "configMigratedToAppState": true,
+            "config": { "enabled": true, "forwardAssistantReplies": true,
+                "subscribedProjectIds": [project_id], "defaultProjectId": project_id,
+                "defaultSessionId": session_id, "botToken": "123456:ignored" },
+            "chatId": 123, "nextUpdateId": 991
+        }))
+        .unwrap();
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, &raw).unwrap();
+        match operation {
+            "status" => {
+                state.telegram_status().unwrap();
+            }
+            "update" => {
+                state
+                    .update_telegram_config(serde_json::from_value(json!({})).unwrap())
+                    .unwrap();
+            }
+            "delete-project" => {
+                state.delete_project(&project_id).unwrap();
+            }
+            "delete-session" => {
+                state.kill_session(&session_id).unwrap();
+            }
+            _ => unreachable!(),
+        }
+        assert_eq!(
+            state.telegram_config_from_state(),
+            TelegramUiConfig::default(),
+            "{operation}"
+        );
+        assert_eq!(
+            state.saved_telegram_bot_token().unwrap(),
+            None,
+            "{operation}"
+        );
+        assert_eq!(
+            fs::read(&path).unwrap(),
+            raw,
+            "{operation} must not write a config mirror"
+        );
+    }
+}
+
+#[test]
+fn telegram_app_preferences_reject_plaintext_token_fields() {
+    assert!(
+        serde_json::from_value::<TelegramUiConfig>(
+            json!({"enabled": false, "botToken": "123456:secret"})
+        )
+        .is_err()
+    );
 }
 
 #[test]
@@ -75,21 +217,21 @@ fn telegram_status_persists_sanitized_stale_project_and_session_references() {
     let path = state.telegram_bot_file_path();
     fs::create_dir_all(path.parent().expect("settings path should have a parent"))
         .expect("settings dir should create");
-    fs::write(
-        &path,
-        serde_json::to_vec_pretty(&json!({
-            "config": {
+    install_telegram_settings_fixture(
+        &state,
+        serde_json::from_value(json!({
                 "enabled": false,
-                "botToken": "123456:secret",
                 "subscribedProjectIds": [project_id.clone(), "missing-project"],
                 "defaultProjectId": project_id.clone(),
                 "defaultSessionId": "missing-session"
-            },
+        }))
+        .expect("current config fixture should decode"),
+        Some("123456:secret"),
+        serde_json::from_value(json!({
             "chatId": 123
         }))
-        .expect("fixture should encode"),
-    )
-    .expect("fixture should write");
+        .expect("current runtime fixture should decode"),
+    );
     let initial_revision = state.snapshot().revision;
 
     let response = state
@@ -119,121 +261,15 @@ fn telegram_status_persists_sanitized_stale_project_and_session_references() {
 
     let value: Value = serde_json::from_slice(&fs::read(&path).expect("settings file should read"))
         .expect("settings file should parse");
+    let config_value = serde_json::to_value(state.telegram_config_from_state())
+        .expect("app config should serialize");
     assert_eq!(
-        value["config"]["subscribedProjectIds"],
+        config_value["subscribedProjectIds"],
         json!([project_id.clone()])
     );
-    assert_eq!(value["config"]["defaultProjectId"], json!(project_id));
-    assert!(value["config"].get("defaultSessionId").is_none());
-    assert!(value["config"].get("botToken").is_none());
-    assert_eq!(value["chatId"], json!(123));
-}
-
-#[test]
-fn telegram_status_does_not_reimport_migrated_file_config_after_default_reset() {
-    let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
-    let state = test_app_state();
-    let path = state.telegram_bot_file_path();
-    fs::create_dir_all(path.parent().expect("settings path should have a parent"))
-        .expect("settings dir should create");
-    fs::write(
-        &path,
-        serde_json::to_vec_pretty(&json!({
-            "configMigratedToAppState": true,
-            "config": {
-                "enabled": true,
-                "forwardAssistantReplies": true,
-                "subscribedProjectIds": ["stale-project"],
-                "defaultProjectId": "stale-project",
-                "defaultSessionId": "stale-session"
-            },
-            "chatId": 123
-        }))
-        .expect("fixture should encode"),
-    )
-    .expect("fixture should write");
-
-    let response = state
-        .telegram_status()
-        .expect("status read should ignore migrated stale file config");
-
-    assert!(!response.enabled);
-    assert!(!response.forward_assistant_replies);
-    assert!(response.subscribed_project_ids.is_empty());
-    assert_eq!(response.default_project_id, None);
-    assert_eq!(response.default_session_id, None);
-    assert_eq!(response.linked_chat_id, Some(123));
-    assert_eq!(
-        state.snapshot().preferences.telegram,
-        TelegramUiConfig::default()
-    );
-
-    let value: Value = serde_json::from_slice(&fs::read(&path).expect("settings file should read"))
-        .expect("settings file should parse");
-    assert_eq!(value["configMigratedToAppState"], json!(true));
-    assert_eq!(value["config"]["enabled"], json!(false));
-    assert_eq!(value["config"]["forwardAssistantReplies"], json!(false));
-    assert!(value["config"].get("subscribedProjectIds").is_none());
-    assert!(value["config"].get("defaultProjectId").is_none());
-    assert!(value["config"].get("defaultSessionId").is_none());
-    assert_eq!(value["chatId"], json!(123));
-}
-
-#[test]
-fn telegram_config_update_does_not_reimport_migrated_file_config_after_default_reset() {
-    let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
-    let state = test_app_state();
-    let (project_id, session_id) = create_telegram_settings_project_and_session(&state);
-    let path = state.telegram_bot_file_path();
-    fs::create_dir_all(path.parent().expect("settings path should have a parent"))
-        .expect("settings dir should create");
-    fs::write(
-        &path,
-        serde_json::to_vec_pretty(&json!({
-            "configMigratedToAppState": true,
-            "config": {
-                "enabled": true,
-                "forwardAssistantReplies": true,
-                "subscribedProjectIds": [project_id.clone()],
-                "defaultProjectId": project_id,
-                "defaultSessionId": session_id
-            },
-            "chatId": 123
-        }))
-        .expect("fixture should encode"),
-    )
-    .expect("fixture should write");
-
-    let response = state
-        .update_telegram_config(UpdateTelegramConfigRequest {
-            enabled: None,
-            forward_assistant_replies: None,
-            bot_token: None,
-            subscribed_project_ids: None,
-            default_project_id: None,
-            default_session_id: None,
-        })
-        .expect("update should ignore migrated stale file config");
-
-    assert!(!response.enabled);
-    assert!(!response.forward_assistant_replies);
-    assert!(response.subscribed_project_ids.is_empty());
-    assert_eq!(response.default_project_id, None);
-    assert_eq!(response.default_session_id, None);
-    assert_eq!(response.linked_chat_id, Some(123));
-    assert_eq!(
-        state.snapshot().preferences.telegram,
-        TelegramUiConfig::default()
-    );
-
-    let value: Value = serde_json::from_slice(&fs::read(&path).expect("settings file should read"))
-        .expect("settings file should parse");
-    assert_eq!(value["configMigratedToAppState"], json!(true));
-    assert_eq!(value["config"]["enabled"], json!(false));
-    assert_eq!(value["config"]["forwardAssistantReplies"], json!(false));
-    assert!(value["config"].get("subscribedProjectIds").is_none());
-    assert!(value["config"].get("defaultProjectId").is_none());
-    assert!(value["config"].get("defaultSessionId").is_none());
+    assert_eq!(config_value["defaultProjectId"], json!(project_id));
+    assert!(config_value.get("defaultSessionId").is_none());
+    assert!(config_value.get("botToken").is_none());
     assert_eq!(value["chatId"], json!(123));
 }
 
@@ -246,8 +282,7 @@ fn telegram_settings_load_defaults_only_for_missing_file() {
     let missing = state
         .load_telegram_bot_file()
         .expect("missing settings file should default");
-    assert_eq!(missing.config.bot_token, None);
-    assert_eq!(missing.state.chat_id, None);
+    assert_eq!(missing.chat_id, None);
 
     fs::create_dir_all(path.parent().expect("settings path should have a parent"))
         .expect("settings dir should create");
@@ -269,21 +304,21 @@ fn telegram_config_update_sanitizes_stale_persisted_references_before_validation
     let path = state.telegram_bot_file_path();
     fs::create_dir_all(path.parent().expect("settings path should have a parent"))
         .expect("settings dir should create");
-    fs::write(
-        &path,
-        serde_json::to_vec_pretty(&json!({
-            "config": {
+    install_telegram_settings_fixture(
+        &state,
+        serde_json::from_value(json!({
                 "enabled": false,
-                "botToken": "123456:secret",
                 "subscribedProjectIds": ["missing-project"],
                 "defaultProjectId": "missing-project",
                 "defaultSessionId": "missing-session"
-            },
+        }))
+        .expect("current config fixture should decode"),
+        Some("123456:secret"),
+        serde_json::from_value(json!({
             "chatId": 123
         }))
-        .expect("fixture should encode"),
-    )
-    .expect("fixture should write");
+        .expect("current runtime fixture should decode"),
+    );
 
     let request: UpdateTelegramConfigRequest = serde_json::from_value(json!({
         "enabled": true,
@@ -305,15 +340,18 @@ fn telegram_config_update_sanitizes_stale_persisted_references_before_validation
 
     let value: Value = serde_json::from_slice(&fs::read(&path).expect("settings file should read"))
         .expect("settings file should parse");
-    assert_eq!(value["config"]["enabled"], json!(true));
-    assert_eq!(value["configMigratedToAppState"], json!(true));
-    assert!(value["config"].get("botToken").is_none());
+    let config_value = serde_json::to_value(state.telegram_config_from_state())
+        .expect("app config should serialize");
+    assert_eq!(config_value["enabled"], json!(true));
+    assert!(value.get("configMigratedToAppState").is_none());
+    assert!(value.get("config").is_none());
+    assert!(config_value.get("botToken").is_none());
     assert_eq!(
-        value["config"]["subscribedProjectIds"],
+        config_value["subscribedProjectIds"],
         json!([project_id.clone()])
     );
-    assert_eq!(value["config"]["defaultProjectId"], json!(project_id));
-    assert!(value["config"].get("defaultSessionId").is_none());
+    assert_eq!(config_value["defaultProjectId"], json!(project_id));
+    assert!(config_value.get("defaultSessionId").is_none());
     assert_eq!(value["chatId"], json!(123));
 }
 
@@ -321,6 +359,9 @@ fn telegram_config_update_sanitizes_stale_persisted_references_before_validation
 fn telegram_config_update_resanitizes_project_deleted_after_validation_before_persist() {
     let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
     let state = test_app_state();
+    state
+        .persist_telegram_bot_file(&TelegramBotState::default())
+        .expect("runtime fixture should persist");
     let (project_id, session_id) = create_telegram_settings_project_and_session(&state);
     let path = state.telegram_bot_file_path();
     let request_project_id = project_id.clone();
@@ -369,11 +410,14 @@ fn telegram_config_update_resanitizes_project_deleted_after_validation_before_pe
 
     let value: Value = serde_json::from_slice(&fs::read(&path).expect("settings file should read"))
         .expect("settings file should parse");
-    assert_eq!(value["configMigratedToAppState"], json!(true));
-    assert_eq!(value["config"]["enabled"], json!(false));
-    assert!(value["config"].get("subscribedProjectIds").is_none());
-    assert!(value["config"].get("defaultProjectId").is_none());
-    assert!(value["config"].get("defaultSessionId").is_none());
+    let config_value = serde_json::to_value(state.telegram_config_from_state())
+        .expect("app config should serialize");
+    assert!(value.get("configMigratedToAppState").is_none());
+    assert!(value.get("config").is_none());
+    assert_eq!(config_value["enabled"], json!(false));
+    assert!(config_value.get("subscribedProjectIds").is_none());
+    assert!(config_value.get("defaultProjectId").is_none());
+    assert!(config_value.get("defaultSessionId").is_none());
     // The test runtime records stop requests even if no relay was running; the
     // important invariant is that no start survives after target removal.
     assert_eq!(
@@ -386,6 +430,9 @@ fn telegram_config_update_resanitizes_project_deleted_after_validation_before_pe
 fn telegram_config_update_resanitizes_session_deleted_after_validation_before_persist() {
     let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
     let state = test_app_state();
+    state
+        .persist_telegram_bot_file(&TelegramBotState::default())
+        .expect("runtime fixture should persist");
     let (project_id, session_id) = create_telegram_settings_project_and_session(&state);
     let path = state.telegram_bot_file_path();
     let request_project_id = project_id.clone();
@@ -424,16 +471,16 @@ fn telegram_config_update_resanitizes_session_deleted_after_validation_before_pe
 
     let value: Value = serde_json::from_slice(&fs::read(&path).expect("settings file should read"))
         .expect("settings file should parse");
-    assert_eq!(value["configMigratedToAppState"], json!(true));
+    let config_value = serde_json::to_value(state.telegram_config_from_state())
+        .expect("app config should serialize");
+    assert!(value.get("configMigratedToAppState").is_none());
+    assert!(value.get("config").is_none());
     assert_eq!(
-        value["config"]["subscribedProjectIds"],
+        config_value["subscribedProjectIds"],
         json!([project_id.clone()])
     );
-    assert_eq!(
-        value["config"]["defaultProjectId"],
-        json!(project_id.clone())
-    );
-    assert!(value["config"].get("defaultSessionId").is_none());
+    assert_eq!(config_value["defaultProjectId"], json!(project_id.clone()));
+    assert!(config_value.get("defaultSessionId").is_none());
     assert_eq!(
         state.take_telegram_relay_runtime_actions_for_tests(),
         vec![TelegramRelayRuntimeActionForTest::Start {
@@ -451,21 +498,21 @@ fn delete_project_prunes_telegram_config_and_disables_relay_without_project_targ
     let path = state.telegram_bot_file_path();
     fs::create_dir_all(path.parent().expect("state path should have a parent"))
         .expect("settings dir should create");
-    fs::write(
-        &path,
-        serde_json::to_vec_pretty(&json!({
-            "config": {
+    install_telegram_settings_fixture(
+        &state,
+        serde_json::from_value(json!({
                 "enabled": true,
-                "botToken": "123456:secret",
                 "subscribedProjectIds": [project_id.clone()],
                 "defaultProjectId": project_id.clone(),
                 "defaultSessionId": session_id
-            },
+        }))
+        .expect("current config fixture should decode"),
+        Some("123456:secret"),
+        serde_json::from_value(json!({
             "chatId": 123
         }))
-        .expect("fixture should encode"),
-    )
-    .expect("fixture should write");
+        .expect("current runtime fixture should decode"),
+    );
 
     state.reset_telegram_relay_runtime_actions_for_tests();
     let response = state
@@ -484,73 +531,22 @@ fn delete_project_prunes_telegram_config_and_disables_relay_without_project_targ
 
     let value: Value = serde_json::from_slice(&fs::read(&path).expect("settings file should read"))
         .expect("settings file should parse");
-    assert_eq!(value["config"]["enabled"], json!(false));
-    assert_eq!(value["configMigratedToAppState"], json!(true));
-    assert!(value["config"].get("botToken").is_none());
+    let config_value = serde_json::to_value(state.telegram_config_from_state())
+        .expect("app config should serialize");
+    assert_eq!(config_value["enabled"], json!(false));
+    assert!(value.get("configMigratedToAppState").is_none());
+    assert!(value.get("config").is_none());
+    assert!(config_value.get("botToken").is_none());
     assert!(
-        value["config"].get("subscribedProjectIds").is_none()
-            || value["config"]["subscribedProjectIds"] == json!([])
+        config_value.get("subscribedProjectIds").is_none()
+            || config_value["subscribedProjectIds"] == json!([])
     );
-    assert!(value["config"].get("defaultProjectId").is_none());
-    assert!(value["config"].get("defaultSessionId").is_none());
+    assert!(config_value.get("defaultProjectId").is_none());
+    assert!(config_value.get("defaultSessionId").is_none());
     assert_eq!(value["chatId"], json!(123));
     assert_eq!(
         state.take_telegram_relay_runtime_actions_for_tests(),
         vec![TelegramRelayRuntimeActionForTest::Stop]
-    );
-}
-
-#[test]
-fn delete_project_does_not_reimport_migrated_file_config_after_default_reset() {
-    let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
-    let state = test_app_state();
-    let (deleted_project_id, _deleted_session_id) =
-        create_telegram_settings_project_and_session(&state);
-    let (stale_project_id, stale_session_id) = create_telegram_settings_project_and_session(&state);
-    let path = state.telegram_bot_file_path();
-    fs::create_dir_all(path.parent().expect("settings path should have a parent"))
-        .expect("settings dir should create");
-    fs::write(
-        &path,
-        serde_json::to_vec_pretty(&json!({
-            "configMigratedToAppState": true,
-            "config": {
-                "enabled": true,
-                "forwardAssistantReplies": true,
-                "subscribedProjectIds": [stale_project_id.clone()],
-                "defaultProjectId": stale_project_id.clone(),
-                "defaultSessionId": stale_session_id.clone()
-            },
-            "chatId": 123
-        }))
-        .expect("fixture should encode"),
-    )
-    .expect("fixture should write");
-
-    state.reset_telegram_relay_runtime_actions_for_tests();
-    let response = state
-        .delete_project(&deleted_project_id)
-        .expect("project should delete without importing migrated mirror");
-
-    assert_eq!(response.preferences.telegram, TelegramUiConfig::default());
-    assert_eq!(
-        state.snapshot().preferences.telegram,
-        TelegramUiConfig::default()
-    );
-
-    let value: Value = serde_json::from_slice(&fs::read(&path).expect("settings file should read"))
-        .expect("settings file should parse");
-    assert_eq!(value["configMigratedToAppState"], json!(true));
-    assert_eq!(value["config"]["enabled"], json!(false));
-    assert_eq!(value["config"]["forwardAssistantReplies"], json!(false));
-    assert!(value["config"].get("subscribedProjectIds").is_none());
-    assert!(value["config"].get("defaultProjectId").is_none());
-    assert!(value["config"].get("defaultSessionId").is_none());
-    assert_eq!(value["chatId"], json!(123));
-    assert!(
-        state
-            .take_telegram_relay_runtime_actions_for_tests()
-            .is_empty()
     );
 }
 
@@ -584,21 +580,21 @@ fn delete_project_prunes_telegram_config_and_keeps_relay_enabled_with_remaining_
     let path = state.telegram_bot_file_path();
     fs::create_dir_all(path.parent().expect("state path should have a parent"))
         .expect("settings dir should create");
-    fs::write(
-        &path,
-        serde_json::to_vec_pretty(&json!({
-            "config": {
+    install_telegram_settings_fixture(
+        &state,
+        serde_json::from_value(json!({
                 "enabled": true,
-                "botToken": "123456:secret",
                 "subscribedProjectIds": [deleted_project_id.clone(), remaining_project_id.clone()],
                 "defaultProjectId": remaining_project_id.clone(),
                 "defaultSessionId": remaining_session_id
-            },
+        }))
+        .expect("current config fixture should decode"),
+        Some("123456:secret"),
+        serde_json::from_value(json!({
             "chatId": 123
         }))
-        .expect("fixture should encode"),
-    )
-    .expect("fixture should write");
+        .expect("current runtime fixture should decode"),
+    );
 
     state.reset_telegram_relay_runtime_actions_for_tests();
     let response = state
@@ -620,19 +616,22 @@ fn delete_project_prunes_telegram_config_and_keeps_relay_enabled_with_remaining_
 
     let value: Value = serde_json::from_slice(&fs::read(&path).expect("settings file should read"))
         .expect("settings file should parse");
-    assert_eq!(value["configMigratedToAppState"], json!(true));
-    assert_eq!(value["config"]["enabled"], json!(true));
-    assert!(value["config"].get("botToken").is_none());
+    let config_value = serde_json::to_value(state.telegram_config_from_state())
+        .expect("app config should serialize");
+    assert!(value.get("configMigratedToAppState").is_none());
+    assert!(value.get("config").is_none());
+    assert_eq!(config_value["enabled"], json!(true));
+    assert!(config_value.get("botToken").is_none());
     assert_eq!(
-        value["config"]["subscribedProjectIds"],
+        config_value["subscribedProjectIds"],
         json!([remaining_project_id.clone()])
     );
     assert_eq!(
-        value["config"]["defaultProjectId"],
+        config_value["defaultProjectId"],
         json!(remaining_project_id.clone())
     );
     assert_eq!(
-        value["config"]["defaultSessionId"],
+        config_value["defaultSessionId"],
         json!(remaining_session_id)
     );
     assert_eq!(value["chatId"], json!(123));
@@ -713,7 +712,7 @@ fn delete_project_restarts_running_telegram_relay_with_remaining_effective_proje
 }
 
 #[test]
-fn delete_project_migrates_unrelated_telegram_token_without_restarting_relay() {
+fn delete_project_preserves_unrelated_telegram_settings_without_restarting_relay() {
     let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
     let state = test_app_state();
     let (deleted_project_id, _deleted_session_id) =
@@ -723,19 +722,22 @@ fn delete_project_migrates_unrelated_telegram_token_without_restarting_relay() {
     let path = state.telegram_bot_file_path();
     fs::create_dir_all(path.parent().expect("state path should have a parent"))
         .expect("settings dir should create");
-    let fixture = serde_json::to_string(&json!({
-        "chatId": 123,
-        "config": {
-            "botToken": "123456:secret",
-            "defaultProjectId": remaining_project_id.clone(),
-            "defaultSessionId": remaining_session_id,
-            "enabled": true,
-            "subscribedProjectIds": [remaining_project_id]
-        }
-    }))
-    .expect("fixture should encode");
-    fs::write(&path, fixture.as_bytes()).expect("fixture should write");
-
+    install_telegram_settings_fixture(
+        &state,
+        TelegramUiConfig {
+            enabled: true,
+            subscribed_project_ids: vec![remaining_project_id.clone()],
+            default_project_id: Some(remaining_project_id.clone()),
+            default_session_id: Some(remaining_session_id.clone()),
+            ..Default::default()
+        },
+        Some("123456:secret"),
+        TelegramBotState {
+            chat_id: Some(123),
+            ..Default::default()
+        },
+    );
+    let fixture = fs::read(&path).expect("runtime should read");
     state.reset_telegram_relay_runtime_actions_for_tests();
     state
         .delete_project(&deleted_project_id)
@@ -743,16 +745,19 @@ fn delete_project_migrates_unrelated_telegram_token_without_restarting_relay() {
 
     let value: Value = serde_json::from_slice(&fs::read(&path).expect("settings file should read"))
         .expect("settings file should parse");
-    assert_eq!(value["configMigratedToAppState"], json!(true));
+    let config_value = serde_json::to_value(state.telegram_config_from_state())
+        .expect("app config should serialize");
+    assert!(value.get("configMigratedToAppState").is_none());
+    assert!(value.get("config").is_none());
     assert_eq!(value["chatId"], json!(123));
-    assert!(value["config"].get("botToken").is_none());
-    assert_eq!(value["config"]["enabled"], json!(true));
+    assert!(config_value.get("botToken").is_none());
+    assert_eq!(config_value["enabled"], json!(true));
     assert_eq!(
-        value["config"]["defaultProjectId"],
+        config_value["defaultProjectId"],
         json!(remaining_project_id)
     );
     assert_eq!(
-        value["config"]["defaultSessionId"],
+        config_value["defaultSessionId"],
         json!(remaining_session_id)
     );
     assert!(
@@ -760,10 +765,7 @@ fn delete_project_migrates_unrelated_telegram_token_without_restarting_relay() {
             .take_telegram_relay_runtime_actions_for_tests()
             .is_empty()
     );
-    assert_ne!(
-        fs::read(&path).expect("settings file should read"),
-        fixture.as_bytes()
-    );
+    assert_eq!(fs::read(&path).expect("settings file should read"), fixture);
 }
 
 #[test]
@@ -774,21 +776,21 @@ fn kill_session_prunes_telegram_state_and_config_references() {
     let path = state.telegram_bot_file_path();
     fs::create_dir_all(path.parent().expect("state path should have a parent"))
         .expect("settings dir should create");
-    fs::write(
-        &path,
-        serde_json::to_vec_pretty(&json!({
-            "config": {
+    install_telegram_settings_fixture(
+        &state,
+        serde_json::from_value(json!({
                 "enabled": true,
-                "botToken": "123456:secret",
                 "subscribedProjectIds": [project_id.clone()],
                 "defaultProjectId": project_id,
                 "defaultSessionId": session_id.clone()
-            },
+        }))
+        .expect("current config fixture should decode"),
+        Some("123456:secret"),
+        serde_json::from_value(json!({
             "selectedSessionId": session_id.clone(),
             "lastDigestHash": "old-digest",
             "lastDigestMessageId": 44,
             "forwardNextAssistantMessageSessionIds": [session_id.clone(), "other-session"],
-            "forwardNextAssistantMessageSessionId": session_id.clone(),
             "assistantForwardingCursors": {
                 (session_id.clone()): {
                     "messageId": "message-1",
@@ -801,9 +803,8 @@ fn kill_session_prunes_telegram_state_and_config_references() {
             },
             "chatId": 123
         }))
-        .expect("fixture should encode"),
-    )
-    .expect("fixture should write");
+        .expect("current runtime fixture should decode"),
+    );
 
     let response = state
         .kill_session(&session_id)
@@ -812,9 +813,12 @@ fn kill_session_prunes_telegram_state_and_config_references() {
 
     let value: Value = serde_json::from_slice(&fs::read(&path).expect("settings file should read"))
         .expect("settings file should parse");
-    assert_eq!(value["configMigratedToAppState"], json!(true));
-    assert!(value["config"].get("botToken").is_none());
-    assert!(value["config"].get("defaultSessionId").is_none());
+    let config_value = serde_json::to_value(state.telegram_config_from_state())
+        .expect("app config should serialize");
+    assert!(value.get("configMigratedToAppState").is_none());
+    assert!(value.get("config").is_none());
+    assert!(config_value.get("botToken").is_none());
+    assert!(config_value.get("defaultSessionId").is_none());
     assert!(value.get("selectedSessionId").is_none());
     assert!(value.get("lastDigestHash").is_none());
     assert!(value.get("lastDigestMessageId").is_none());
@@ -822,10 +826,7 @@ fn kill_session_prunes_telegram_state_and_config_references() {
         value["forwardNextAssistantMessageSessionIds"],
         json!(["other-session"])
     );
-    assert_eq!(
-        value["forwardNextAssistantMessageSessionId"],
-        json!("other-session")
-    );
+    assert!(value.get("forwardNextAssistantMessageSessionId").is_none());
     assert!(
         value["assistantForwardingCursors"]
             .get(&session_id)
@@ -835,60 +836,5 @@ fn kill_session_prunes_telegram_state_and_config_references() {
         value["assistantForwardingCursors"]["other-session"]["messageId"],
         json!("message-2")
     );
-    assert_eq!(value["chatId"], json!(123));
-}
-
-#[test]
-fn kill_session_does_not_reimport_migrated_file_config_after_default_reset() {
-    let _env_lock = TEST_HOME_ENV_MUTEX.lock().expect("test env mutex poisoned");
-    let state = test_app_state();
-    let (project_id, session_id) = create_telegram_settings_project_and_session(&state);
-    let path = state.telegram_bot_file_path();
-    fs::create_dir_all(path.parent().expect("settings path should have a parent"))
-        .expect("settings dir should create");
-    fs::write(
-        &path,
-        serde_json::to_vec_pretty(&json!({
-            "configMigratedToAppState": true,
-            "config": {
-                "enabled": true,
-                "forwardAssistantReplies": true,
-                "subscribedProjectIds": [project_id.clone()],
-                "defaultProjectId": project_id,
-                "defaultSessionId": session_id.clone()
-            },
-            "selectedSessionId": session_id.clone(),
-            "assistantForwardingCursors": {
-                (session_id.clone()): {
-                    "messageId": "message-1",
-                    "textChars": 10
-                }
-            },
-            "chatId": 123
-        }))
-        .expect("fixture should encode"),
-    )
-    .expect("fixture should write");
-
-    let response = state
-        .kill_session(&session_id)
-        .expect("session should kill without importing migrated mirror");
-
-    assert_eq!(response.preferences.telegram, TelegramUiConfig::default());
-    assert_eq!(
-        state.snapshot().preferences.telegram,
-        TelegramUiConfig::default()
-    );
-
-    let value: Value = serde_json::from_slice(&fs::read(&path).expect("settings file should read"))
-        .expect("settings file should parse");
-    assert_eq!(value["configMigratedToAppState"], json!(true));
-    assert_eq!(value["config"]["enabled"], json!(false));
-    assert_eq!(value["config"]["forwardAssistantReplies"], json!(false));
-    assert!(value["config"].get("subscribedProjectIds").is_none());
-    assert!(value["config"].get("defaultProjectId").is_none());
-    assert!(value["config"].get("defaultSessionId").is_none());
-    assert!(value.get("selectedSessionId").is_none());
-    assert!(value.get("assistantForwardingCursors").is_none());
     assert_eq!(value["chatId"], json!(123));
 }
