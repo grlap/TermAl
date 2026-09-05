@@ -475,7 +475,10 @@ async fn peer_message_route_reports_idle_and_queued_dispositions() {
     assert_eq!(status, StatusCode::ACCEPTED);
     assert_eq!(response["messageDisposition"], "deliveredToIdleSession");
     assert!(matches!(
-        input_rx.recv_timeout(Duration::from_secs(1)),
+        recv_within_guard(
+            &input_rx,
+            "peer message route reports idle and queued dispositions: runtime command 1"
+        ),
         Ok(ClaudeRuntimeCommand::Prompt(_))
     ));
 

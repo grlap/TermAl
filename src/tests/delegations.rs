@@ -6,11 +6,11 @@ use super::delegation_support::{
 };
 use super::*;
 
-fn attach_sleeping_claude_runtime_to_delegation_child(
+fn attach_parked_claude_runtime_to_delegation_child(
     state: &AppState,
     child_session_id: &str,
-) -> Arc<SharedChild> {
-    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+) -> phase_sync::ParkedProcess {
+    let owner = phase_sync::ParkedProcess::spawn();
     let (input_tx, _input_rx) = mpsc::channel();
     let mut inner = state.inner.lock().expect("state mutex poisoned");
     let child_index = inner
@@ -22,11 +22,11 @@ fn attach_sleeping_claude_runtime_to_delegation_child(
     child.runtime = SessionRuntime::Claude(ClaudeRuntimeHandle {
         runtime_id: format!("test-delegation-child-runtime-{child_session_id}"),
         input_tx,
-        process: process.clone(),
+        process: owner.process.clone(),
     });
     child.session.status = SessionStatus::Active;
     state.commit_locked(&mut inner).unwrap();
-    process
+    owner
 }
 
 #[test]
@@ -788,7 +788,10 @@ fn delegated_interaction_submission_returns_post_refresh_state_and_restores_runn
             },
         )
         .expect("delegation should be created");
-    match input_rx.recv_timeout(Duration::from_secs(1)) {
+    match recv_within_guard(
+        &input_rx,
+        "delegated interaction submission returns post refresh state and restores running detail: runtime command 1",
+    ) {
         Ok(CodexRuntimeCommand::Prompt { .. }) => {}
         Ok(_) => panic!("expected initial delegation prompt"),
         Err(err) => panic!("initial delegation prompt should dispatch: {err}"),
@@ -831,7 +834,7 @@ fn delegated_interaction_submission_returns_post_refresh_state_and_restores_runn
         )
         .expect("MCP elicitation response should submit");
 
-    match input_rx.recv_timeout(Duration::from_millis(50)) {
+    match recv_within_guard(&input_rx, "Codex MCP elicitation response published") {
         Ok(CodexRuntimeCommand::JsonRpcResponse { response }) => {
             assert_eq!(response.request_id, json!("delegation-mcp-request"));
         }
@@ -1984,9 +1987,11 @@ fn delegation_creation_dispatches_child_prompt_through_runtime_channel() {
         )
         .expect("delegation should be created");
 
-    match input_rx
-        .recv_timeout(Duration::from_secs(1))
-        .expect("delegation child prompt should be delivered to runtime")
+    match recv_within_guard(
+        &input_rx,
+        "delegation child prompt should be delivered to runtime",
+    )
+    .expect("delegation child prompt should be delivered to runtime")
     {
         CodexRuntimeCommand::Prompt {
             session_id,
@@ -2078,9 +2083,11 @@ fn isolated_worktree_delegation_materializes_dirty_state_and_uses_workspace_writ
         )
         .expect("isolated worktree delegation should be created");
 
-    match input_rx
-        .recv_timeout(Duration::from_secs(1))
-        .expect("delegation child prompt should be delivered to runtime")
+    match recv_within_guard(
+        &input_rx,
+        "delegation child prompt should be delivered to runtime",
+    )
+    .expect("delegation child prompt should be delivered to runtime")
     {
         CodexRuntimeCommand::Prompt {
             session_id,
@@ -2178,9 +2185,11 @@ async fn isolated_worktree_delegation_route_generates_termal_owned_path_when_omi
     .await;
 
     assert_eq!(status, StatusCode::CREATED);
-    let _ = input_rx
-        .recv_timeout(Duration::from_secs(1))
-        .expect("delegation child prompt should be delivered to runtime");
+    let _ = recv_within_guard(
+        &input_rx,
+        "delegation child prompt should be delivered to runtime",
+    )
+    .expect("delegation child prompt should be delivered to runtime");
 
     let DelegationWritePolicy::IsolatedWorktree { worktree_path, .. } =
         &created.delegation.write_policy
@@ -2328,9 +2337,11 @@ fn isolated_worktree_max_fanout_rejection_does_not_leave_worktree() {
                 },
             )
             .expect("read-only delegation should be admitted");
-        match input_rx
-            .recv_timeout(Duration::from_secs(1))
-            .expect("delegation child prompt should be delivered to runtime")
+        match recv_within_guard(
+            &input_rx,
+            "delegation child prompt should be delivered to runtime",
+        )
+        .expect("delegation child prompt should be delivered to runtime")
         {
             CodexRuntimeCommand::Prompt { session_id, .. } => {
                 assert_eq!(session_id, created.delegation.child_session_id);
@@ -3374,8 +3385,7 @@ fn production_completion_clears_queued_child_prompt_before_dispatch() {
         )
         .expect("delegation should be created");
     mark_delegation_as_unstructured_explorer(&state, &created.delegation.id);
-    input_rx
-        .recv_timeout(Duration::from_secs(1))
+    recv_within_guard(&input_rx, "initial delegation prompt should dispatch")
         .expect("initial delegation prompt should dispatch");
 
     queue_delegation_child_prompt(
@@ -3435,8 +3445,7 @@ fn production_failure_clears_queued_child_prompt_before_dispatch() {
             },
         )
         .expect("delegation should be created");
-    input_rx
-        .recv_timeout(Duration::from_secs(1))
+    recv_within_guard(&input_rx, "initial delegation prompt should dispatch")
         .expect("initial delegation prompt should dispatch");
 
     queue_delegation_child_prompt(
@@ -5128,7 +5137,7 @@ fn completed_delegation_refresh_detaches_and_kills_child_runtime() {
             },
         )
         .expect("delegation should be created");
-    let process = attach_sleeping_claude_runtime_to_delegation_child(
+    let process_owner = attach_parked_claude_runtime_to_delegation_child(
         &state,
         &created.delegation.child_session_id,
     );
@@ -5164,15 +5173,9 @@ fn completed_delegation_refresh_detaches_and_kills_child_runtime() {
         "detach must not recycle the process-local turn generation"
     );
     drop(inner);
-    assert!(
-        wait_for_shared_child_exit_timeout(
-            &process,
-            Duration::from_secs(1),
-            "delegation child runtime"
-        )
-        .expect("runtime wait should succeed")
-        .is_some(),
-        "terminal delegation refresh should reap the child runtime process"
+    phase_sync::process_exit(
+        &process_owner.process,
+        "terminal delegation refresh reaped child runtime",
     );
 
     let _ = fs::remove_file(state.persistence_path.as_path());
@@ -5277,8 +5280,7 @@ async fn delegation_cancel_running_runtime_route_interrupts_child() {
             },
         )
         .expect("delegation should be created");
-    input_rx
-        .recv_timeout(Duration::from_secs(1))
+    recv_within_guard(&input_rx, "initial delegation prompt should dispatch")
         .expect("initial delegation prompt should dispatch");
 
     let runtime = shared_codex_runtime_for_state(&state);
@@ -5304,9 +5306,11 @@ async fn delegation_cancel_running_runtime_route_interrupts_child() {
         );
 
     let command_thread = std::thread::spawn(move || {
-        let command = input_rx
-            .recv_timeout(Duration::from_secs(1))
-            .expect("delegation cancel should interrupt the running child");
+        let command = recv_within_guard(
+            &input_rx,
+            "delegation cancel should interrupt the running child",
+        )
+        .expect("delegation cancel should interrupt the running child");
         match command {
             CodexRuntimeCommand::InterruptTurn {
                 thread_id,
@@ -5389,8 +5393,7 @@ fn delegation_cancel_conflicted_stop_interrupts_before_detaching_child() {
             },
         )
         .expect("delegation should be created");
-    input_rx
-        .recv_timeout(Duration::from_secs(1))
+    recv_within_guard(&input_rx, "initial delegation prompt should dispatch")
         .expect("initial delegation prompt should dispatch");
 
     let runtime = shared_codex_runtime_for_state(&state);
@@ -5427,9 +5430,11 @@ fn delegation_cancel_conflicted_stop_interrupts_before_detaching_child() {
     }
 
     let command_thread = std::thread::spawn(move || {
-        let command = input_rx
-            .recv_timeout(Duration::from_secs(1))
-            .expect("conflicted delegation cancel should still interrupt the child");
+        let command = recv_within_guard(
+            &input_rx,
+            "conflicted delegation cancel should still interrupt the child",
+        )
+        .expect("conflicted delegation cancel should still interrupt the child");
         match command {
             CodexRuntimeCommand::InterruptTurn {
                 thread_id,
@@ -5991,8 +5996,7 @@ fn removing_delegation_parent_deletes_child_runtime_and_session() {
             },
         )
         .expect("delegation should be created");
-    input_rx
-        .recv_timeout(Duration::from_secs(1))
+    recv_within_guard(&input_rx, "initial delegation prompt should dispatch")
         .expect("initial delegation prompt should dispatch");
 
     let runtime = shared_codex_runtime_for_state(&state);
@@ -6078,9 +6082,11 @@ fn removing_delegation_parent_deletes_child_runtime_and_session() {
     while delta_events.try_recv().is_ok() {}
 
     let command_thread = std::thread::spawn(move || {
-        let command = input_rx
-            .recv_timeout(Duration::from_secs(1))
-            .expect("parent removal should interrupt the running child");
+        let command = recv_within_guard(
+            &input_rx,
+            "parent removal should interrupt the running child",
+        )
+        .expect("parent removal should interrupt the running child");
         match command {
             CodexRuntimeCommand::InterruptTurn {
                 thread_id,

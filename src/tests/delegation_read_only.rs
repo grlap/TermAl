@@ -1045,9 +1045,11 @@ fn read_only_cursor_delegation_uses_plan_mode() {
     assert_eq!(created.delegation.status, DelegationStatus::Running);
     assert_eq!(created.child_session.status, SessionStatus::Active);
     assert_eq!(created.child_session.cursor_mode, Some(CursorMode::Plan));
-    match acp_input_rx
-        .recv_timeout(Duration::from_millis(100))
-        .expect("Cursor delegation should dispatch through the fake ACP runtime")
+    match recv_within_guard(
+        &acp_input_rx,
+        "Cursor delegation should dispatch through the fake ACP runtime",
+    )
+    .expect("Cursor delegation should dispatch through the fake ACP runtime")
     {
         AcpRuntimeCommand::Prompt(command) => {
             assert_eq!(command.cwd, created.delegation.cwd);

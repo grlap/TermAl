@@ -773,16 +773,14 @@ fn removing_remote_stops_event_bridge_worker_and_resets_started_guard() {
 
     state.remote_registry.reconcile(&[RemoteConfig::local()]);
 
-    let deadline = std::time::Instant::now() + Duration::from_secs(1);
+    let deadline = phase_sync::PollGuard::new();
     loop {
         if !connection.event_bridge_started.load(Ordering::SeqCst) {
             break;
         }
-        assert!(
-            std::time::Instant::now() < deadline,
+        deadline.wait(format_args!(
             "event bridge worker should stop after the remote is removed"
-        );
-        std::thread::sleep(Duration::from_millis(10));
+        ));
     }
 
     assert!(
@@ -808,16 +806,14 @@ fn removing_remote_stops_event_bridge_worker_and_resets_started_guard() {
 
     replacement.stop_event_bridge();
 
-    let deadline = std::time::Instant::now() + Duration::from_secs(1);
+    let deadline = phase_sync::PollGuard::new();
     loop {
         if !replacement.event_bridge_started.load(Ordering::SeqCst) {
             break;
         }
-        assert!(
-            std::time::Instant::now() < deadline,
+        deadline.wait(format_args!(
             "event bridge started guard should reset after shutdown"
-        );
-        std::thread::sleep(Duration::from_millis(10));
+        ));
     }
 }
 
@@ -871,30 +867,26 @@ fn remote_event_bridge_retry_clears_fallback_resync_tracking() {
         .remote_registry
         .start_event_bridge_by_id(state.clone(), &remote.id);
 
-    let deadline = std::time::Instant::now() + Duration::from_secs(1);
+    let deadline = phase_sync::PollGuard::new();
     loop {
         if !state.should_skip_remote_sse_fallback_resync(&remote.id, 4) {
             break;
         }
-        assert!(
-            std::time::Instant::now() < deadline,
+        deadline.wait(format_args!(
             "event bridge retry should clear stale fallback tracking"
-        );
-        std::thread::sleep(Duration::from_millis(10));
+        ));
     }
 
     connection.stop_event_bridge();
 
-    let shutdown_deadline = std::time::Instant::now() + Duration::from_secs(1);
+    let shutdown_deadline = phase_sync::PollGuard::new();
     loop {
         if !connection.event_bridge_started.load(Ordering::SeqCst) {
             break;
         }
-        assert!(
-            std::time::Instant::now() < shutdown_deadline,
+        shutdown_deadline.wait(format_args!(
             "event bridge worker should stop after shutdown"
-        );
-        std::thread::sleep(Duration::from_millis(10));
+        ));
     }
 
     let _ = fs::remove_file(state.persistence_path.as_path());
@@ -953,7 +945,7 @@ fn remote_event_bridge_retry_clears_applied_revision_tracking() {
         .remote_registry
         .start_event_bridge_by_id(state.clone(), &remote.id);
 
-    let deadline = std::time::Instant::now() + Duration::from_secs(1);
+    let deadline = phase_sync::PollGuard::new();
     loop {
         let still_skipping = {
             let inner = state.inner.lock().expect("state mutex poisoned");
@@ -962,25 +954,21 @@ fn remote_event_bridge_retry_clears_applied_revision_tracking() {
         if !still_skipping {
             break;
         }
-        assert!(
-            std::time::Instant::now() < deadline,
+        deadline.wait(format_args!(
             "event bridge retry should clear stale applied revision tracking"
-        );
-        std::thread::sleep(Duration::from_millis(10));
+        ));
     }
 
     connection.stop_event_bridge();
 
-    let shutdown_deadline = std::time::Instant::now() + Duration::from_secs(1);
+    let shutdown_deadline = phase_sync::PollGuard::new();
     loop {
         if !connection.event_bridge_started.load(Ordering::SeqCst) {
             break;
         }
-        assert!(
-            std::time::Instant::now() < shutdown_deadline,
+        shutdown_deadline.wait(format_args!(
             "event bridge worker should stop after shutdown"
-        );
-        std::thread::sleep(Duration::from_millis(10));
+        ));
     }
 
     let _ = fs::remove_file(state.persistence_path.as_path());

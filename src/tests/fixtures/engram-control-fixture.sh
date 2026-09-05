@@ -53,8 +53,8 @@ case " $original_args " in
     [ "$ENGRAM_ACTOR_CONTEXT" = "$actor_context" ] || exit 9
     [ "$ENGRAM_SESSION_ID" = "$session_id" ] || exit 9
     mode=$(tr -d '\r\n' < "$project_file")
-    if [ "$mode" = "fixture-work-next-slow" ]; then
-      sleep 1
+    if [ "$mode" = "fixture-work-next-gated" ] && [ ! -e "$engram_home/work-context-released" ]; then
+      sh "$engram_home/work-context-gate.sh" >/dev/null
     fi
     printf 'Engram work context for %s as %s\n' "$ENGRAM_SESSION_ID" "$ENGRAM_ACTOR_ID"
     exit 0
@@ -63,8 +63,11 @@ esac
 
 case " $original_args " in
   *" authority revoke "*)
+    printf '%s entered\n' "$$" >> "$engram_home/authority-revoke-phases"
     printf '%s\n' "$original_args" > "$engram_home/engram-authority-revoke-args.txt"
+    printf '%s argv-written\n' "$$" >> "$engram_home/authority-revoke-phases"
     mode=$(tr -d '\r\n' < "$project_file")
+    printf '%s mode-read\n' "$$" >> "$engram_home/authority-revoke-phases"
     if [ "$mode" = "fixture-authority-revoke-fail" ]; then
       printf '%s\n' 'scripted authority revoke failure' >&2
       exit 9
@@ -78,6 +81,7 @@ case " $original_args " in
       fi
     fi
     printf '%s\n' 'fixture-revocation-hash'
+    printf '%s exiting\n' "$$" >> "$engram_home/authority-revoke-phases"
     exit 0
     ;;
 esac
@@ -207,6 +211,20 @@ $seen_checkpoint_rows
 EOF
 }
 
+# Readiness is a pipe publication, not a delay for the child to start.
+initial_mode=$(tr -d '\r\n' < "$project_file")
+case "$initial_mode" in
+  fixture-tree-*)
+    ready_pipe="$engram_home/descendant-ready.pipe"
+    mkfifo "$ready_pipe"
+    sh "$engram_home/engram-descendant.sh" > "$ready_pipe" &
+    exec 3< "$ready_pipe"
+    while IFS= read -r ready_line <&3; do
+      case "$ready_line" in *termal-descendant-ready*) break ;; esac
+    done
+    case "$ready_line" in *termal-descendant-ready*) ;; *) exit 3 ;; esac
+    ;;
+esac
 printf '%s\n' 'termal-engram-control-fixture-ready'
 
 while IFS= read -r line; do
@@ -216,29 +234,18 @@ while IFS= read -r line; do
       exit 0
       ;;
     fixture-hang)
-      sleep 30
+      # No response and no timer: the host must kill this blocked reader.
+      IFS= read -r unused
+      exit 0
       ;;
     fixture-tree-hang)
-      sh "$engram_home/engram-descendant.sh" &
-      while [ ! -e "$engram_home/engram-descendant-spawned" ]; do sleep 0.01; done
-      sleep 30
+      IFS= read -r unused
+      exit 0
       ;;
     fixture-tree-eof)
-      sh "$engram_home/engram-descendant.sh" >/dev/null &
-      while [ ! -e "$engram_home/engram-descendant-spawned" ]; do sleep 0.01; done
-      release_attempts=0
-      while [ ! -e "$engram_home/engram-eof-release" ]; do
-        release_attempts=$((release_attempts + 1))
-        if [ "$release_attempts" -ge 1000 ]; then
-          exit 4
-        fi
-        sleep 0.01
-      done
       exit 0
       ;;
     fixture-tree-reply)
-      sh "$engram_home/engram-descendant.sh" &
-      while [ ! -e "$engram_home/engram-descendant-spawned" ]; do sleep 0.01; done
       printf '%s\n' '{"status":"ok","result":{"routing_token":"fixture-token","status":{"phase":"ready"}}}'
       ;;
     fixture-malformed)

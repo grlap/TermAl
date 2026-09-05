@@ -291,7 +291,7 @@ fn live_busy_mailbox_wake_is_visible_and_drains_at_turn_completion() {
         .finish_turn_ok_if_runtime_matches(&target_id, &runtime_token)
         .expect("finishing the active turn should drain the queued mailbox wake");
     assert!(matches!(
-        input_rx.recv_timeout(Duration::from_secs(1)),
+        recv_within_guard(&input_rx, "live busy mailbox wake is visible and drains at turn completion: runtime command 1"),
         Ok(ClaudeRuntimeCommand::Prompt(command)) if command.text.contains(&receipt.mailbox_id)
     ));
 
@@ -596,7 +596,7 @@ fn mailbox_send_runtime_channel_failure_keeps_notification_recoverable() {
     };
     deliver_turn_dispatch(&state, retry).expect("the replacement runtime should accept the wake");
     assert!(matches!(
-        input_rx.recv_timeout(Duration::from_secs(1)),
+        recv_within_guard(&input_rx, "mailbox send runtime channel failure keeps notification recoverable: runtime command 1"),
         Ok(ClaudeRuntimeCommand::Prompt(command)) if command.text.contains(&receipt.mailbox_id)
     ));
     assert_eq!(
@@ -746,7 +746,10 @@ fn failed_mailbox_turn_is_requeued_once_and_pauses_automatic_dispatch() {
         .expect("first mailbox wake should dispatch");
     deliver_turn_dispatch(&state, first_dispatch).expect("first wake should reach the runtime");
     assert!(matches!(
-        input_rx.recv_timeout(Duration::from_secs(1)),
+        recv_within_guard(
+            &input_rx,
+            "failed mailbox turn is requeued once and pauses automatic dispatch: runtime command 1"
+        ),
         Ok(ClaudeRuntimeCommand::Prompt(_))
     ));
     assert_eq!(
@@ -1113,7 +1116,10 @@ fn engram_runtime_revocation_restores_the_active_mailbox_wake() {
         .expect("mailbox wake should dispatch");
     deliver_turn_dispatch(&state, dispatch).expect("runtime should accept the mailbox wake");
     assert!(matches!(
-        input_rx.recv_timeout(Duration::from_secs(1)),
+        recv_within_guard(
+            &input_rx,
+            "engram runtime revocation restores the active mailbox wake: runtime command 1"
+        ),
         Ok(ClaudeRuntimeCommand::Prompt(_))
     ));
 
@@ -1183,7 +1189,10 @@ fn errored_mailbox_turn_is_restored_without_immediate_redispatch() {
         .expect("mailbox wake should dispatch");
     deliver_turn_dispatch(&state, dispatch).expect("runtime should accept the mailbox wake");
     assert!(matches!(
-        input_rx.recv_timeout(Duration::from_secs(1)),
+        recv_within_guard(
+            &input_rx,
+            "errored mailbox turn is restored without immediate redispatch: runtime command 1"
+        ),
         Ok(ClaudeRuntimeCommand::Prompt(_))
     ));
 
@@ -1237,7 +1246,10 @@ fn runtime_exit_restores_the_mailbox_wake_and_pauses_automatic_dispatch() {
         .expect("mailbox wake should dispatch");
     deliver_turn_dispatch(&state, dispatch).expect("runtime should accept the mailbox wake");
     assert!(matches!(
-        input_rx.recv_timeout(Duration::from_secs(1)),
+        recv_within_guard(
+            &input_rx,
+            "runtime exit restores the mailbox wake and pauses automatic dispatch: runtime command 1"
+        ),
         Ok(ClaudeRuntimeCommand::Prompt(_))
     ));
 
@@ -1396,7 +1408,10 @@ fn fresh_inbound_wake_coalesces_and_dispatches_recovered_mailbox_prompt_once() {
         "the receipt must describe the mailbox wake that actually started"
     );
     assert!(matches!(
-        input_rx.recv_timeout(Duration::from_secs(1)),
+        recv_within_guard(
+            &input_rx,
+            "fresh inbound wake coalesces and dispatches recovered mailbox prompt once: runtime command 1"
+        ),
         Ok(ClaudeRuntimeCommand::Prompt(_))
     ));
     assert!(
@@ -1548,7 +1563,10 @@ fn queue_drain_skips_a_stale_wake_left_after_the_cursor_advanced() {
     assert_eq!(prompt, "ordinary queued prompt");
     deliver_turn_dispatch(&state, dispatch).expect("runtime should accept the ordinary prompt");
     assert!(matches!(
-        input_rx.recv_timeout(Duration::from_secs(1)),
+        recv_within_guard(
+            &input_rx,
+            "queue drain skips a stale wake left after the cursor advanced: runtime command 1"
+        ),
         Ok(ClaudeRuntimeCommand::Prompt(_))
     ));
 
@@ -1629,7 +1647,10 @@ fn delivered_unacknowledged_notification_does_not_loop_or_starve_user_prompt() {
     );
     deliver_turn_dispatch(&state, first).expect("runtime should accept the mailbox wake");
     assert!(matches!(
-        input_rx.recv_timeout(Duration::from_secs(1)),
+        recv_within_guard(
+            &input_rx,
+            "delivered unacknowledged notification does not loop or starve user prompt: runtime command 1"
+        ),
         Ok(ClaudeRuntimeCommand::Prompt(_))
     ));
     assert_eq!(
@@ -1910,7 +1931,10 @@ fn boot_recovers_a_delivered_notification_after_its_turn_dies_exactly_once() {
     deliver_turn_dispatch(&restarted, recovered)
         .expect("runtime should accept the boot recovery wake");
     assert!(matches!(
-        input_rx.recv_timeout(Duration::from_secs(1)),
+        recv_within_guard(
+            &input_rx,
+            "boot recovers a delivered notification after its turn dies exactly once: runtime command 1"
+        ),
         Ok(AcpRuntimeCommand::Prompt(_))
     ));
 
@@ -2070,7 +2094,7 @@ fn rejected_boot_recovery_wake_is_immediately_requeued() {
     };
     deliver_turn_dispatch(&state, retry).expect("the replacement runtime should accept the wake");
     assert!(matches!(
-        input_rx.recv_timeout(Duration::from_secs(1)),
+        recv_within_guard(&input_rx, "rejected boot recovery wake is immediately requeued: runtime command 1"),
         Ok(AcpRuntimeCommand::Prompt(command)) if command.prompt.contains(&committed.mailbox_id)
     ));
     assert_eq!(
@@ -2134,7 +2158,7 @@ fn boot_dispatches_committed_workflow_queue_heads() {
         .expect("post-listen boot recovery should run");
 
     assert!(matches!(
-        input_rx.recv_timeout(Duration::from_secs(1)),
+        recv_within_guard(&input_rx, "boot dispatches committed workflow queue heads: runtime command 1"),
         Ok(AcpRuntimeCommand::Prompt(command))
             if command.prompt == "resume committed delegation or orchestrator workflow"
     ));
@@ -2272,7 +2296,10 @@ fn boot_workflow_activation_drains_a_recovered_mailbox_wake_first() {
         .run_post_listen_boot()
         .expect("post-listen boot recovery should run");
 
-    let runtime_prompt = match input_rx.recv_timeout(Duration::from_secs(1)) {
+    let runtime_prompt = match recv_within_guard(
+        &input_rx,
+        "boot workflow activation drains a recovered mailbox wake first: runtime command 1",
+    ) {
         Ok(AcpRuntimeCommand::Prompt(command)) => command.prompt,
         Ok(_) => panic!("expected recovered mailbox wake prompt dispatch"),
         Err(err) => panic!("expected recovered mailbox wake dispatch: {err}"),
@@ -2359,7 +2386,7 @@ fn boot_workflow_activation_retries_a_rejected_recovered_wake_once() {
         .expect("post-listen boot recovery should run");
 
     assert!(matches!(
-        accepted_rx.recv_timeout(Duration::from_secs(1)),
+        recv_within_guard(&accepted_rx, "boot workflow activation retries a rejected recovered wake once: request accepted 1"),
         Ok(AcpRuntimeCommand::Prompt(command)) if command.prompt.contains(&committed.mailbox_id)
     ));
     assert_eq!(
@@ -2455,7 +2482,7 @@ fn boot_requeues_a_rejected_workflow_head_for_a_later_recovery_pass() {
     state.dispatch_orphaned_workflow_prompts();
 
     assert!(matches!(
-        accepted_rx.recv_timeout(Duration::from_secs(1)),
+        recv_within_guard(&accepted_rx, "boot requeues a rejected workflow head for a later recovery pass: request accepted 1"),
         Ok(AcpRuntimeCommand::Prompt(command))
             if command.prompt.contains("retry this committed workflow on the next recovery pass")
     ));

@@ -12,6 +12,7 @@ refactors still exercise the same cross-file behavior the app depends on.
 use super::*;
 use axum::body::{Body, to_bytes};
 use axum::http::Request;
+use phase_sync::receive_result as recv_within_guard;
 use std::io::Read as _;
 use tower::util::ServiceExt;
 
@@ -40,6 +41,7 @@ mod delegation_support;
 mod delegation_validation;
 mod delegation_wait;
 mod delegations;
+mod engram_authority_fixture;
 mod engram_host_adapter;
 mod file_changes;
 mod git;
@@ -49,6 +51,7 @@ mod json_rpc;
 mod mailboxes;
 mod opencode_config;
 mod orchestrator;
+mod phase_sync;
 pub use orchestrator::{
     sample_deadlocked_orchestrator_template_draft, sample_orchestrator_template_draft,
 };
@@ -551,7 +554,7 @@ fn clear_shared_codex_turn_session_state_resets_turn_local_fields_and_preserves_
     assert!(session_state.turn_started_watchdog_cancel_tx.is_none());
     assert!(!session_state.turn_started_before_response);
     assert!(matches!(
-        watchdog_cancel_rx.recv_timeout(Duration::from_secs(1)),
+        recv_within_guard(&watchdog_cancel_rx, "watchdog_cancel_rx publication"),
         Ok(())
     ));
     assert_eq!(session_state.thread_id.as_deref(), Some("thread-1"));
@@ -582,15 +585,11 @@ fn clear_shared_codex_turn_session_state_resets_turn_local_fields_and_preserves_
     assert_eq!(session_state.recorder.streaming_text_message_id, None);
 }
 
-fn accept_test_connection_with_timeout(
-    listener: &std::net::TcpListener,
-    label: &str,
-    timeout: std::time::Duration,
-) -> std::net::TcpStream {
+fn accept_test_connection(listener: &std::net::TcpListener, label: &str) -> std::net::TcpStream {
     listener
         .set_nonblocking(true)
         .expect("test listener should support nonblocking mode");
-    let deadline = std::time::Instant::now() + timeout;
+    let publication = phase_sync::PollGuard::new();
     loop {
         match listener.accept() {
             Ok((stream, _)) => {
@@ -600,23 +599,11 @@ fn accept_test_connection_with_timeout(
                 return stream;
             }
             Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
-                assert!(
-                    std::time::Instant::now() < deadline,
-                    "{label} timed out waiting for a connection"
-                );
-                std::thread::sleep(std::time::Duration::from_millis(10));
+                publication.wait(format_args!("{label}: test connection accepted"));
             }
             Err(err) => panic!("{label} failed to accept a connection: {err}"),
         }
     }
-}
-
-fn accept_test_connection(listener: &std::net::TcpListener, label: &str) -> std::net::TcpStream {
-    // Full-suite runs intentionally execute several HTTP-heavy remote tests in
-    // parallel. Two seconds was short enough for a valid listener to time out
-    // before a scheduled test thread reached its first request, after which the
-    // client observed a misleading connection-refused hydration failure.
-    accept_test_connection_with_timeout(listener, label, std::time::Duration::from_secs(10))
 }
 
 fn join_test_server(server: std::thread::JoinHandle<()>) {
@@ -1367,25 +1354,6 @@ fn test_exit_success_child() -> Child {
     }
 }
 
-fn test_sleep_child() -> Child {
-    if cfg!(windows) {
-        Command::new("cmd")
-            // Keep the fixture alive well beyond a loaded parallel test run.
-            // Five seconds was short enough for the child to exit naturally
-            // before a forced-kill assertion reached shutdown, making those
-            // tests order- and scheduler-dependent.
-            .args(["/C", "ping -n 31 127.0.0.1 >NUL"])
-            .spawn()
-            .unwrap()
-    } else {
-        Command::new("sh")
-            .arg("-c")
-            .arg("sleep 30")
-            .spawn()
-            .unwrap()
-    }
-}
-
 static TEST_KILL_CHILD_PROCESS_FAILURE_MUTEX: std::sync::LazyLock<std::sync::Mutex<()>> =
     std::sync::LazyLock::new(|| std::sync::Mutex::new(()));
 
@@ -1522,12 +1490,11 @@ fn shared_codex_watched_writer_clears_activity_after_successful_write() {
 
 fn take_pending_acp_request(
     pending_requests: &AcpPendingRequestMap,
-    timeout: Duration,
 ) -> (
     String,
     std::sync::mpsc::Sender<std::result::Result<Value, AcpResponseError>>,
 ) {
-    let deadline = std::time::Instant::now() + timeout;
+    let publication = phase_sync::PollGuard::new();
     loop {
         if let Some(request) = {
             let mut locked = pending_requests
@@ -1542,11 +1509,7 @@ fn take_pending_acp_request(
         } {
             return request;
         }
-        assert!(
-            std::time::Instant::now() < deadline,
-            "ACP request should arrive before timeout"
-        );
-        std::thread::sleep(Duration::from_millis(10));
+        publication.wait("ACP pending request publication");
     }
 }
 
@@ -1601,12 +1564,11 @@ fn expected_codex_shell_environment_set(
 
 fn take_pending_codex_request(
     pending_requests: &CodexPendingRequestMap,
-    timeout: Duration,
 ) -> (
     String,
     std::sync::mpsc::Sender<std::result::Result<Value, CodexResponseError>>,
 ) {
-    let deadline = std::time::Instant::now() + timeout;
+    let publication = phase_sync::PollGuard::new();
     loop {
         if let Some(request) = {
             let mut locked = pending_requests
@@ -1621,11 +1583,7 @@ fn take_pending_codex_request(
         } {
             return request;
         }
-        assert!(
-            std::time::Instant::now() < deadline,
-            "Codex request should arrive before timeout"
-        );
-        std::thread::sleep(Duration::from_millis(10));
+        publication.wait("Codex pending request publication");
     }
 }
 fn cursor_permission_request(request_id: &str) -> Value {
@@ -1654,6 +1612,17 @@ fn test_shared_codex_runtime(
 ) {
     let child = test_exit_success_child();
     let process = Arc::new(SharedChild::new(child).unwrap());
+    test_shared_codex_runtime_with_process(runtime_id, process)
+}
+
+fn test_shared_codex_runtime_with_process(
+    runtime_id: &str,
+    process: Arc<SharedChild>,
+) -> (
+    SharedCodexRuntime,
+    mpsc::Receiver<CodexRuntimeCommand>,
+    Arc<SharedChild>,
+) {
     let (input_tx, input_rx) = mpsc::channel();
     let runtime = SharedCodexRuntime {
         runtime_id: runtime_id.to_owned(),
@@ -1805,8 +1774,8 @@ fn wait_for_terminal_command_status_with_timeout_returns_cached_status() {
 // Tests that wait for shared child exit timeout returns none for running process.
 #[test]
 fn wait_for_shared_child_exit_timeout_returns_none_for_running_process() {
-    let child = test_sleep_child();
-    let process = Arc::new(SharedChild::new(child).unwrap());
+    let process_owner = phase_sync::ParkedProcess::spawn();
+    let process = process_owner.process.clone();
 
     let status =
         wait_for_shared_child_exit_timeout(&process, Duration::from_millis(10), "test child")
@@ -1837,8 +1806,8 @@ fn wait_for_terminal_command_status_returns_status_without_cancellation_delay() 
 
 #[test]
 fn wait_for_terminal_command_status_observes_mid_wait_cancellation() {
-    let child = test_sleep_child();
-    let process = Arc::new(SharedChild::new(child).unwrap());
+    let process_owner = phase_sync::ParkedProcess::spawn();
+    let process = process_owner.process.clone();
     let cancellation = Arc::new(AtomicBool::new(false));
     let waiter_process = process.clone();
     let waiter_cancellation = cancellation.clone();
@@ -1851,11 +1820,12 @@ fn wait_for_terminal_command_status_observes_mid_wait_cancellation() {
         let _ = done_tx.send(result);
     });
 
+    // Pacing encourages the mid-wait path; a late waiter must still observe
+    // cancellation immediately, so this delay is not a completion deadline.
     std::thread::sleep(Duration::from_millis(20));
     cancellation.store(true, Ordering::SeqCst);
 
-    let (status, cancelled) = done_rx
-        .recv_timeout(Duration::from_secs(1))
+    let (status, cancelled) = recv_within_guard(&done_rx, "waiter should observe cancellation")
         .expect("waiter should observe cancellation")
         .expect("waiter should not error");
     assert!(status.is_none());
@@ -1918,8 +1888,8 @@ async fn spawn_terminal_stream_worker_reports_panics_as_error_events() {
 // Tests that shutdown REPL Codex process forces running process after timeout.
 #[test]
 fn shutdown_repl_codex_process_forces_running_process_after_timeout() {
-    let child = test_sleep_child();
-    let process = Arc::new(SharedChild::new(child).unwrap());
+    let process_owner = phase_sync::ParkedProcess::spawn();
+    let process = process_owner.process.clone();
 
     let (status, forced_shutdown) = shutdown_repl_codex_process(&process).unwrap();
 
@@ -1994,8 +1964,7 @@ fn gemini_invalid_session_load_falls_back_to_session_new() {
         )
     });
 
-    let (_load_request_id, load_sender) =
-        take_pending_acp_request(&pending_requests, Duration::from_secs(1));
+    let (_load_request_id, load_sender) = take_pending_acp_request(&pending_requests);
     load_sender
         .send(Err(AcpResponseError::JsonRpc(AcpJsonRpcError {
             code: Some(-32602),
@@ -2006,8 +1975,7 @@ fn gemini_invalid_session_load_falls_back_to_session_new() {
         })))
         .expect("session/load response should send");
 
-    let (_new_request_id, new_sender) =
-        take_pending_acp_request(&pending_requests, Duration::from_secs(1));
+    let (_new_request_id, new_sender) = take_pending_acp_request(&pending_requests);
     new_sender
         .send(Ok(json!({
             "sessionId": "gemini-session-new",

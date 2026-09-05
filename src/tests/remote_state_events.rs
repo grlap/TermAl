@@ -2115,9 +2115,11 @@ fn remote_delta_hydration_burst_uses_one_fetch_and_skips_duplicate_delta() {
         )
     });
 
-    session_request_rx
-        .recv_timeout(std::time::Duration::from_secs(1))
-        .expect("first delta should start targeted hydration");
+    recv_within_guard(
+        &session_request_rx,
+        "first delta should start targeted hydration",
+    )
+    .expect("first delta should start targeted hydration");
 
     let second_state = state.clone();
     let second_remote_id = remote.id.clone();

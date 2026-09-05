@@ -91,9 +91,11 @@ fn acp_permission_does_not_infer_control_plane_identity_from_a_tool_name() {
         AcpAgent::Cursor,
     )
     .expect("ACP permission should be handled by the ordinary plan policy");
-    let response = input_rx
-        .recv_timeout(Duration::from_secs(1))
-        .expect("plan mode should reject an ACP permission without authenticated identity");
+    let response = recv_within_guard(
+        &input_rx,
+        "plan mode should reject an ACP permission without authenticated identity",
+    )
+    .expect("plan mode should reject an ACP permission without authenticated identity");
     assert!(matches!(
         response,
         AcpRuntimeCommand::JsonRpcMessage(message)
@@ -175,8 +177,7 @@ fn acp_reviewer_does_not_auto_approve_an_unscoped_colliding_tool_name() {
         AcpAgent::Cursor,
     )
     .expect("colliding permission should be handled by the ordinary policy");
-    let response = input_rx
-        .recv_timeout(Duration::from_secs(1))
+    let response = recv_within_guard(&input_rx, "plan mode should reject the untrusted collision")
         .expect("plan mode should reject the untrusted collision");
     assert!(matches!(
         response,
@@ -270,8 +271,7 @@ fn cursor_agent_mode_auto_approves_acp_permission_requests() {
     )
     .unwrap();
 
-    match input_rx
-        .recv_timeout(Duration::from_millis(100))
+    match recv_within_guard(&input_rx, "Cursor agent mode should auto-respond")
         .expect("Cursor agent mode should auto-respond")
     {
         AcpRuntimeCommand::JsonRpcMessage(message) => {
@@ -573,8 +573,7 @@ fn acp_structured_permission_requests_queue_and_resolve_in_arrival_order() {
             ApprovalDecision::Accepted,
         )
         .unwrap();
-    match input_rx
-        .recv_timeout(Duration::from_millis(100))
+    match recv_within_guard(&input_rx, "first approval response should be delivered")
         .expect("first approval response should be delivered")
     {
         AcpRuntimeCommand::JsonRpcMessage(message) => {
@@ -609,8 +608,7 @@ fn acp_structured_permission_requests_queue_and_resolve_in_arrival_order() {
             ApprovalDecision::Rejected,
         )
         .unwrap();
-    match input_rx
-        .recv_timeout(Duration::from_millis(100))
+    match recv_within_guard(&input_rx, "second approval response should be delivered")
         .expect("second approval response should be delivered")
     {
         AcpRuntimeCommand::JsonRpcMessage(message) => {
@@ -732,9 +730,11 @@ fn cursor_permissions_remain_resolvable_out_of_arrival_order() {
             ApprovalDecision::Accepted,
         )
         .expect("Cursor permissions should remain independently resolvable");
-    match input_rx
-        .recv_timeout(Duration::from_millis(100))
-        .expect("second Cursor response should be delivered first")
+    match recv_within_guard(
+        &input_rx,
+        "second Cursor response should be delivered first",
+    )
+    .expect("second Cursor response should be delivered first")
     {
         AcpRuntimeCommand::JsonRpcMessage(message) => {
             assert_eq!(message.get("id"), Some(&json!("cursor-permission-2")));
@@ -797,8 +797,7 @@ fn cursor_plan_mode_rejects_acp_permission_requests() {
     )
     .unwrap();
 
-    match input_rx
-        .recv_timeout(Duration::from_millis(100))
+    match recv_within_guard(&input_rx, "Cursor plan mode should auto-reject")
         .expect("Cursor plan mode should auto-reject")
     {
         AcpRuntimeCommand::JsonRpcMessage(message) => {
@@ -1079,9 +1078,11 @@ fn updates_live_cursor_mode_on_active_acp_sessions() {
         .expect("updated Cursor session should be present");
     assert_eq!(session.cursor_mode, Some(CursorMode::Ask));
 
-    match input_rx
-        .recv_timeout(Duration::from_millis(100))
-        .expect("Cursor mode change should be forwarded to the live ACP session")
+    match recv_within_guard(
+        &input_rx,
+        "Cursor mode change should be forwarded to the live ACP session",
+    )
+    .expect("Cursor mode change should be forwarded to the live ACP session")
     {
         AcpRuntimeCommand::JsonRpcMessage(message) => {
             assert_eq!(

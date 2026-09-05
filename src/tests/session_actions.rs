@@ -164,14 +164,20 @@ async fn submit_approval_route_updates_claude_session_and_delivers_runtime_respo
             _ => panic!("expected accepted-for-session approval message"),
         },
     );
-    match input_rx.recv_timeout(Duration::from_millis(50)) {
+    match recv_within_guard(
+        &input_rx,
+        "submit approval route updates claude session and delivers runtime response: runtime command 1",
+    ) {
         Ok(ClaudeRuntimeCommand::SetPermissionMode(mode)) => {
             assert_eq!(mode, "acceptEdits");
         }
         Ok(_) => panic!("expected Claude permission-mode update"),
         Err(err) => panic!("Claude permission-mode update should arrive: {err}"),
     }
-    match input_rx.recv_timeout(Duration::from_millis(50)) {
+    match recv_within_guard(
+        &input_rx,
+        "submit approval route updates claude session and delivers runtime response: runtime command 2",
+    ) {
         Ok(ClaudeRuntimeCommand::PermissionResponse(ClaudePermissionDecision::Allow {
             request_id,
             updated_input,
@@ -432,7 +438,10 @@ async fn submit_codex_user_input_route_updates_message_and_publishes_message_upd
         },
     );
 
-    match input_rx.recv_timeout(Duration::from_millis(50)) {
+    match recv_within_guard(
+        &input_rx,
+        "submit codex user input route updates message and publishes message updated delta: runtime command 1",
+    ) {
         Ok(CodexRuntimeCommand::JsonRpcResponse { response }) => {
             assert_eq!(response.request_id, json!("user-input-request"));
             assert_eq!(
@@ -755,7 +764,10 @@ async fn submit_claude_user_input_route_delivers_all_permission_answers() {
         ])
     ));
 
-    match input_rx.recv_timeout(Duration::from_millis(50)) {
+    match recv_within_guard(
+        &input_rx,
+        "submit claude user input route delivers all permission answers: runtime command 1",
+    ) {
         Ok(ClaudeRuntimeCommand::PermissionResponse(ClaudePermissionDecision::Allow {
             request_id,
             updated_input,
@@ -938,7 +950,10 @@ async fn submit_claude_user_input_route_answers_permission_transport_via_allow()
         ])
     ));
 
-    match input_rx.recv_timeout(Duration::from_millis(50)) {
+    match recv_within_guard(
+        &input_rx,
+        "submit claude user input route answers permission transport via allow: runtime command 1",
+    ) {
         Ok(ClaudeRuntimeCommand::PermissionResponse(ClaudePermissionDecision::Allow {
             request_id,
             updated_input,
@@ -1087,7 +1102,10 @@ async fn submit_claude_user_input_route_decline_permission_transport_sends_deny(
         }) if detail == "The user skipped these questions; Claude was asked to decide on its own."
     ));
 
-    match input_rx.recv_timeout(Duration::from_millis(50)) {
+    match recv_within_guard(
+        &input_rx,
+        "submit claude user input route decline permission transport sends deny: runtime command 1",
+    ) {
         Ok(ClaudeRuntimeCommand::PermissionResponse(ClaudePermissionDecision::Deny {
             request_id,
             message,
@@ -1247,7 +1265,10 @@ fn concurrent_claude_user_input_submissions_deliver_exactly_one_runtime_response
     assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
     assert_eq!(results.iter().filter(|result| result.is_err()).count(), 1);
     assert!(matches!(
-        input_rx.recv_timeout(Duration::from_millis(50)),
+        recv_within_guard(
+            &input_rx,
+            "concurrent claude user input submissions deliver exactly one runtime response: runtime command 1"
+        ),
         Ok(ClaudeRuntimeCommand::PermissionResponse(
             ClaudePermissionDecision::Allow { .. }
         ))
@@ -1396,7 +1417,10 @@ async fn submit_codex_mcp_elicitation_route_updates_message_and_publishes_messag
         },
     );
 
-    match input_rx.recv_timeout(Duration::from_millis(50)) {
+    match recv_within_guard(
+        &input_rx,
+        "submit codex mcp elicitation route updates message and publishes message updated delta: runtime command 1",
+    ) {
         Ok(CodexRuntimeCommand::JsonRpcResponse { response }) => {
             assert_eq!(response.request_id, json!("mcp-request"));
             assert_eq!(
@@ -1521,7 +1545,10 @@ async fn submit_codex_app_request_route_updates_message_and_publishes_message_up
         },
     );
 
-    match input_rx.recv_timeout(Duration::from_millis(50)) {
+    match recv_within_guard(
+        &input_rx,
+        "submit codex app request route updates message and publishes message updated delta: runtime command 1",
+    ) {
         Ok(CodexRuntimeCommand::JsonRpcResponse { response }) => {
             assert_eq!(response.request_id, json!("app-request"));
             assert_eq!(

@@ -527,8 +527,7 @@ fn already_terminal_delegation_wait_reports_dispatch_for_idle_parent() {
             },
         )
         .expect("delegation should be created");
-    input_rx
-        .recv_timeout(Duration::from_secs(1))
+    recv_within_guard(&input_rx, "initial delegation prompt should dispatch")
         .expect("initial delegation prompt should dispatch");
 
     finish_delegation_child_with_assistant_text(
@@ -555,9 +554,11 @@ fn already_terminal_delegation_wait_reports_dispatch_for_idle_parent() {
     assert!(wait.resume_dispatch_requested);
     assert_delegation_wait_response_serializes_queue_flags(&wait, true, true);
 
-    match input_rx
-        .recv_timeout(Duration::from_secs(1))
-        .expect("parent resume prompt should dispatch immediately")
+    match recv_within_guard(
+        &input_rx,
+        "parent resume prompt should dispatch immediately",
+    )
+    .expect("parent resume prompt should dispatch immediately")
     {
         CodexRuntimeCommand::Prompt {
             session_id,

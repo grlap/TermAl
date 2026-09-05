@@ -352,7 +352,8 @@ fn apply_agent_process_env_sets_termal_identity_and_clears_ineligible_engram_ide
 
 #[test]
 fn claude_control_failure_terminates_the_child_and_preserves_the_waiter_reason() {
-    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let process_owner = phase_sync::ParkedProcess::spawn();
+    let process = process_owner.process.clone();
     let error_override = Arc::new(Mutex::new(None));
     let detail = "failed to handle Claude control request: unattended question loop";
 
@@ -532,7 +533,8 @@ fn lightweight_test_state_rejects_direct_acp_runtime_spawning() {
 fn killing_session_persists_removal_even_when_shared_codex_interrupt_fails() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Codex);
-    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let process_owner = phase_sync::ParkedProcess::spawn();
+    let process = process_owner.process.clone();
     let (input_tx, input_rx) = mpsc::channel();
     let shared_runtime = SharedCodexRuntime {
         runtime_id: "runtime-1".to_owned(),
@@ -633,7 +635,8 @@ fn killing_session_persists_removal_even_when_shared_codex_interrupt_fails() {
 async fn kill_session_route_returns_ok_when_shared_codex_interrupt_fails() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Codex);
-    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let process_owner = phase_sync::ParkedProcess::spawn();
+    let process = process_owner.process.clone();
     let (input_tx, input_rx) = mpsc::channel();
     let shared_runtime = SharedCodexRuntime {
         runtime_id: "runtime-route".to_owned(),
@@ -713,15 +716,51 @@ async fn kill_session_route_returns_ok_when_shared_codex_interrupt_fails() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
+#[test]
+fn stop_fence_observer_drop_releases_a_claimed_worker() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let gate = install_test_stop_fence_gate(&state, &session_id);
+    let (done_tx, done_rx) = mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        wait_at_test_stop_fence_gate(&state, &session_id);
+        done_tx
+            .send(())
+            .expect("completion observer should remain alive");
+    });
+    gate.wait_until_claimed();
+    assert!(
+        done_rx.try_recv().is_err(),
+        "worker must remain gated until observer release"
+    );
+    drop(gate);
+    super::phase_sync::receive(&done_rx, "dropped Stop observer releases claimed worker");
+    worker
+        .join()
+        .expect("canceled fixture worker should not panic");
+}
+
+#[test]
+fn stop_fence_observer_drop_removes_an_unclaimed_registration() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let gate = install_test_stop_fence_gate(&state, &session_id);
+    let key = gate.key.clone();
+    drop(gate);
+    assert!(!TEST_STOP_FENCE_GATES.lock().unwrap().contains_key(&key));
+    wait_at_test_stop_fence_gate(&state, &session_id);
+}
+
 // Pins the public Stop contract: the route persists an explicit Stopping
-// state and returns well below the runtime's shutdown bound, a repeated Stop
+// state and returns before the runtime's shutdown gate opens, a repeated Stop
 // is idempotent, and the claimed worker finishes the old synchronous cleanup
 // after the response is already in the caller's hands.
 #[tokio::test]
 async fn stop_session_route_returns_stopping_immediately_and_finishes_in_background() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Claude);
-    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let process_owner = phase_sync::ParkedProcess::spawn();
+    let process = process_owner.process.clone();
     let (input_tx, _input_rx) = mpsc::channel();
     {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
@@ -741,24 +780,23 @@ async fn stop_session_route_returns_stopping_immediately_and_finishes_in_backgro
     }
 
     let gate = install_test_stop_fence_gate(&state, &session_id);
+    let mut events = state.subscribe_events();
     let app = app_router(state.clone());
-    let started_at = std::time::Instant::now();
-    let (status, response): (StatusCode, StateResponse) = request_json(
-        &app,
-        Request::builder()
-            .method("POST")
-            .uri(format!("/api/sessions/{session_id}/stop"))
-            .body(Body::empty())
-            .unwrap(),
+    let (status, response): (StatusCode, StateResponse) = tokio::time::timeout(
+        super::phase_sync::DEADLOCK_GUARD,
+        request_json(
+            &app,
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/sessions/{session_id}/stop"))
+                .body(Body::empty())
+                .unwrap(),
+        ),
     )
-    .await;
-    let route_elapsed = started_at.elapsed();
+    .await
+    .expect("Stop response must precede release of the finalizer gate");
 
     assert_eq!(status, StatusCode::OK);
-    assert!(
-        route_elapsed < Duration::from_millis(100),
-        "Stop route took {route_elapsed:?} before returning"
-    );
     let stopping = response
         .sessions
         .iter()
@@ -766,20 +804,25 @@ async fn stop_session_route_returns_stopping_immediately_and_finishes_in_backgro
         .expect("stopping session should remain visible");
     assert_eq!(stopping.status, SessionStatus::Stopping);
     assert_eq!(stopping.preview, SESSION_STOPPING_MESSAGE);
-    gate.wait_until_claimed();
+    super::phase_sync::receive(
+        &gate.claimed_rx,
+        "Stop finalizer claimed, release still withheld",
+    );
 
-    let second_started_at = std::time::Instant::now();
-    let (second_status, second_response): (StatusCode, StateResponse) = request_json(
-        &app,
-        Request::builder()
-            .method("POST")
-            .uri(format!("/api/sessions/{session_id}/stop"))
-            .body(Body::empty())
-            .unwrap(),
+    let (second_status, second_response): (StatusCode, StateResponse) = tokio::time::timeout(
+        super::phase_sync::DEADLOCK_GUARD,
+        request_json(
+            &app,
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/sessions/{session_id}/stop"))
+                .body(Body::empty())
+                .unwrap(),
+        ),
     )
-    .await;
+    .await
+    .expect("repeated Stop must return while the same finalizer remains gated");
     assert_eq!(second_status, StatusCode::OK);
-    assert!(second_started_at.elapsed() < Duration::from_millis(100));
     assert_eq!(
         second_response
             .sessions
@@ -791,25 +834,27 @@ async fn stop_session_route_returns_stopping_immediately_and_finishes_in_backgro
     );
 
     gate.release();
-    let deadline = std::time::Instant::now() + Duration::from_secs(2);
-    loop {
-        let status = state
-            .snapshot()
-            .sessions
-            .iter()
-            .find(|session| session.id == session_id)
-            .expect("session should survive Stop")
-            .status;
-        if status != SessionStatus::Stopping {
-            assert_eq!(status, SessionStatus::Idle);
-            break;
+    tokio::time::timeout(super::phase_sync::DEADLOCK_GUARD, async {
+        loop {
+            let status = state
+                .snapshot()
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+                .expect("session should survive Stop")
+                .status;
+            if status != SessionStatus::Stopping {
+                assert_eq!(status, SessionStatus::Idle);
+                break;
+            }
+            events
+                .recv()
+                .await
+                .expect("Stop completion event stream should remain connected");
         }
-        assert!(
-            std::time::Instant::now() < deadline,
-            "background Stop did not finish"
-        );
-        std::thread::sleep(Duration::from_millis(5));
-    }
+    })
+    .await
+    .expect("released Stop finalizer did not publish terminal state");
     let inner = state.inner.lock().expect("state mutex poisoned");
     let record = inner
         .find_session_index(&session_id)
@@ -827,11 +872,12 @@ async fn stop_session_route_returns_stopping_immediately_and_finishes_in_backgro
 // A background interrupt failure cannot be returned through the already
 // completed HTTP response. It must therefore settle the persisted Stopping
 // state to Error and leave an actionable transcript notice.
-#[test]
-fn asynchronous_stop_surfaces_runtime_interrupt_failure_on_the_session() {
+#[tokio::test]
+async fn asynchronous_stop_surfaces_runtime_interrupt_failure_on_the_session() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Claude);
-    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let process_owner = phase_sync::ParkedProcess::spawn();
+    let process = process_owner.process.clone();
     let (input_tx, _input_rx) = mpsc::channel();
     {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
@@ -850,6 +896,7 @@ fn asynchronous_stop_surfaces_runtime_interrupt_failure_on_the_session() {
     }
 
     let failure_guard = force_test_kill_child_process_failure(&process, "Claude");
+    let mut events = state.subscribe_events();
     let response = state
         .request_stop_session(&session_id)
         .expect("Stop should return its Stopping snapshot");
@@ -863,25 +910,27 @@ fn asynchronous_stop_surfaces_runtime_interrupt_failure_on_the_session() {
         SessionStatus::Stopping
     );
 
-    let deadline = std::time::Instant::now() + Duration::from_secs(2);
-    loop {
-        let status = state
-            .snapshot()
-            .sessions
-            .iter()
-            .find(|session| session.id == session_id)
-            .expect("session should remain")
-            .status;
-        if status != SessionStatus::Stopping {
-            assert_eq!(status, SessionStatus::Error);
-            break;
+    tokio::time::timeout(phase_sync::DEADLOCK_GUARD, async {
+        loop {
+            let status = state
+                .snapshot()
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+                .expect("session should remain")
+                .status;
+            if status != SessionStatus::Stopping {
+                assert_eq!(status, SessionStatus::Error);
+                break;
+            }
+            events
+                .recv()
+                .await
+                .expect("Stop failure publication should remain connected");
         }
-        assert!(
-            std::time::Instant::now() < deadline,
-            "background interrupt failure was not surfaced"
-        );
-        std::thread::sleep(Duration::from_millis(5));
-    }
+    })
+    .await
+    .expect("Stop did not publish its background interrupt failure");
 
     let inner = state.inner.lock().expect("state mutex poisoned");
     let record = inner
@@ -936,7 +985,8 @@ fn killing_shared_codex_session_does_not_reset_other_shared_sessions_when_interr
         })
         .unwrap();
     let second_session_id = created.session_id;
-    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let process_owner = phase_sync::ParkedProcess::spawn();
+    let process = process_owner.process.clone();
     let (input_tx, input_rx) = mpsc::channel();
     let shared_runtime = SharedCodexRuntime {
         runtime_id: "runtime-shared".to_owned(),

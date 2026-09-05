@@ -753,8 +753,7 @@ fn bridge_claim_sets_started_before_publication_can_observe_the_connection() {
             publish_tx
                 .send(())
                 .expect("publisher should be released while claim locks are held");
-            attempted_rx
-                .recv_timeout(Duration::from_secs(5))
+            recv_within_guard(&attempted_rx, "publisher should attempt publication")
                 .expect("publisher should attempt publication");
             assert!(
                 state.remote_registry.configs.try_lock().is_err(),
@@ -768,9 +767,11 @@ fn bridge_claim_sets_started_before_publication_can_observe_the_connection() {
         .expect("bridge claim should resolve")
         .expect("bridge should be newly claimed");
 
-    let publication = publication_rx
-        .recv_timeout(Duration::from_secs(5))
-        .expect("publication should complete after claim releases its locks");
+    let publication = recv_within_guard(
+        &publication_rx,
+        "publication should complete after claim releases its locks",
+    )
+    .expect("publication should complete after claim releases its locks");
     assert_eq!(publication.bridges_to_restart, vec![original.id.clone()]);
     assert!(claimed.retired.load(Ordering::SeqCst));
     state.remote_registry.finish_config_publication(publication);

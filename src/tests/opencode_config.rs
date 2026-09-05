@@ -4,6 +4,49 @@
 
 use super::*;
 
+/// Observe complete JSON-RPC frames, not the pending-map insertion that happens
+/// before serialization. Replies are released explicitly by the test.
+struct ObservedAcpWriter {
+    output: SharedBufferWriter,
+    frames: mpsc::Sender<Value>,
+    next_frame: Vec<u8>,
+}
+
+impl Write for ObservedAcpWriter {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.output.write_all(bytes)?;
+        self.next_frame.extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        let frame = serde_json::from_slice(&self.next_frame)?;
+        self.frames.send(frame).map_err(std::io::Error::other)?;
+        self.next_frame.clear();
+        Ok(())
+    }
+}
+
+fn receive_acp_frame(
+    frames: &mpsc::Receiver<Value>,
+    pending: &AcpPendingRequestMap,
+    method: &str,
+    config_id: Option<&str>,
+) -> mpsc::Sender<std::result::Result<Value, AcpResponseError>> {
+    let frame =
+        super::phase_sync::receive(frames, &format!("{method}/{config_id:?} frame flushed"));
+    assert_eq!(frame["method"], method);
+    if let Some(config_id) = config_id {
+        assert_eq!(frame["params"]["configId"], config_id);
+    }
+    let id = frame["id"].as_str().expect("request frame must have an id");
+    pending
+        .lock()
+        .expect("pending requests mutex poisoned")
+        .remove(id)
+        .expect("flushed frame must already own its response sender")
+}
+
 #[test]
 fn opencode_model_options_filter_values_outside_ingress_bounds() {
     let oversized = "x".repeat(MAX_OPENCODE_MODEL_CHARS + 1);
@@ -90,7 +133,12 @@ fn opencode_session_new_reapplies_explicit_model_effort_then_mode_before_ready()
     let pending_requests = Arc::new(Mutex::new(HashMap::new()));
     let runtime_state = Arc::new(Mutex::new(AcpRuntimeState::default()));
     let writer = SharedBufferWriter::default();
-    let thread_writer = writer.clone();
+    let (frame_tx, frame_rx) = mpsc::channel();
+    let thread_writer = ObservedAcpWriter {
+        output: writer.clone(),
+        frames: frame_tx,
+        next_frame: Vec::new(),
+    };
     let thread_pending_requests = pending_requests.clone();
     let thread_state = state.clone();
     let thread_runtime_state = runtime_state.clone();
@@ -116,8 +164,7 @@ fn opencode_session_new_reapplies_explicit_model_effort_then_mode_before_ready()
         )
     });
 
-    let (_new_request_id, new_sender) =
-        take_pending_acp_request(&pending_requests, Duration::from_secs(1));
+    let new_sender = receive_acp_frame(&frame_rx, &pending_requests, "session/new", None);
     new_sender
         .send(Ok(json!({
             "sessionId": "opencode-session-1",
@@ -151,8 +198,12 @@ fn opencode_session_new_reapplies_explicit_model_effort_then_mode_before_ready()
         })))
         .expect("session/new response should send");
 
-    let (_model_request_id, model_sender) =
-        take_pending_acp_request(&pending_requests, Duration::from_secs(1));
+    let model_sender = receive_acp_frame(
+        &frame_rx,
+        &pending_requests,
+        "session/set_config_option",
+        Some("model"),
+    );
     let session_while_config_pending = state
         .snapshot()
         .sessions
@@ -189,8 +240,12 @@ fn opencode_session_new_reapplies_explicit_model_effort_then_mode_before_ready()
         .send(Ok(json!({})))
         .expect("model config response should send");
 
-    let (_effort_request_id, effort_sender) =
-        take_pending_acp_request(&pending_requests, Duration::from_secs(1));
+    let effort_sender = receive_acp_frame(
+        &frame_rx,
+        &pending_requests,
+        "session/set_config_option",
+        Some("effort"),
+    );
     let after_effort = writer.contents();
     let model_position = after_effort
         .find("\"params\":{\"configId\":\"model\"")
@@ -210,8 +265,12 @@ fn opencode_session_new_reapplies_explicit_model_effort_then_mode_before_ready()
         .send(Ok(json!({})))
         .expect("effort config response should send");
 
-    let (_mode_request_id, mode_sender) =
-        take_pending_acp_request(&pending_requests, Duration::from_secs(1));
+    let mode_sender = receive_acp_frame(
+        &frame_rx,
+        &pending_requests,
+        "session/set_config_option",
+        Some("mode"),
+    );
     let after_mode = writer.contents();
     let mode_position = after_mode
         .find("\"params\":{\"configId\":\"mode\"")
@@ -314,8 +373,7 @@ fn opencode_resume_survives_explicit_config_rejection() {
         )
     });
 
-    let (_resume_request_id, resume_sender) =
-        take_pending_acp_request(&pending_requests, Duration::from_secs(1));
+    let (_resume_request_id, resume_sender) = take_pending_acp_request(&pending_requests);
     resume_sender
         .send(Ok(json!({
             "configOptions": [
@@ -337,8 +395,7 @@ fn opencode_resume_survives_explicit_config_rejection() {
             ]
         })))
         .expect("session/resume response should send");
-    let (_config_request_id, config_sender) =
-        take_pending_acp_request(&pending_requests, Duration::from_secs(1));
+    let (_config_request_id, config_sender) = take_pending_acp_request(&pending_requests);
     config_sender
         .send(Err(AcpResponseError::JsonRpc(AcpJsonRpcError {
             code: Some(-32602),
@@ -428,8 +485,7 @@ fn opencode_missing_explicit_config_resets_to_auto_with_visible_notice() {
         )
     });
 
-    let (_new_request_id, new_sender) =
-        take_pending_acp_request(&pending_requests, Duration::from_secs(1));
+    let (_new_request_id, new_sender) = take_pending_acp_request(&pending_requests);
     new_sender
         .send(Ok(json!({
             "sessionId": "opencode-session-stale",
@@ -570,8 +626,7 @@ fn opencode_generic_resume_error_preserves_continuity_without_fallback() {
             .pointer("/unknownSessionLoad/error")
             .expect("captured fixture should include an error"),
     );
-    let (_resume_request_id, resume_sender) =
-        take_pending_acp_request(&pending_requests, Duration::from_secs(1));
+    let (_resume_request_id, resume_sender) = take_pending_acp_request(&pending_requests);
     resume_sender
         .send(Err(AcpResponseError::JsonRpc(error)))
         .expect("session/resume error should send");
@@ -683,8 +738,7 @@ fn opencode_structured_missing_session_error_preserves_continuity_after_failure(
         )
     });
 
-    let (_resume_request_id, resume_sender) =
-        take_pending_acp_request(&pending_requests, Duration::from_secs(1));
+    let (_resume_request_id, resume_sender) = take_pending_acp_request(&pending_requests);
     resume_sender
         .send(Err(AcpResponseError::JsonRpc(AcpJsonRpcError {
             code: Some(-32001),
@@ -875,8 +929,7 @@ fn opencode_config_update_queues_explicit_selection_reconciliation() {
     )
     .expect("OpenCode config update should enqueue reconciliation");
 
-    match input_rx
-        .recv_timeout(Duration::from_millis(100))
+    match recv_within_guard(&input_rx, "writer reconciliation should be queued")
         .expect("writer reconciliation should be queued")
     {
         AcpRuntimeCommand::ReconcileOpenCodeConfig {
@@ -1271,8 +1324,7 @@ fn opencode_config_rejection_reverts_to_current_without_failing_reconcile() {
         )
     });
 
-    let (_request_id, response_tx) =
-        take_pending_acp_request(&pending_requests, Duration::from_secs(1));
+    let (_request_id, response_tx) = take_pending_acp_request(&pending_requests);
     response_tx
         .send(Err(AcpResponseError::JsonRpc(AcpJsonRpcError {
             code: Some(-32602),
@@ -1379,8 +1431,7 @@ fn opencode_duplicate_config_update_is_reconciled_once() {
             &thread_config,
         )
     });
-    let (_request_id, response_tx) =
-        take_pending_acp_request(&pending_requests, Duration::from_secs(1));
+    let (_request_id, response_tx) = take_pending_acp_request(&pending_requests);
     response_tx
         .send(Ok(json!({})))
         .expect("config acknowledgement should send");
@@ -1608,13 +1659,12 @@ fn opencode_live_config_commits_only_after_protocol_acknowledgement() {
         )
     });
 
-    started_rx
-        .recv_timeout(Duration::from_secs(1))
+    recv_within_guard(&started_rx, "serialized config writer should start")
         .expect("serialized config writer should start");
     proceed_tx
         .send(())
         .expect("API scheduling waiter should authorize execution");
-    let (_request_id, sender) = take_pending_acp_request(&pending_requests, Duration::from_secs(1));
+    let (_request_id, sender) = take_pending_acp_request(&pending_requests);
     let before_ack = state
         .snapshot()
         .sessions
@@ -1631,8 +1681,7 @@ fn opencode_live_config_commits_only_after_protocol_acknowledgement() {
         .expect("OpenCode config writer should finish")
         .expect("acknowledged update should remain runtime-safe");
     assert_eq!(
-        response_rx
-            .recv_timeout(Duration::from_secs(1))
+        recv_within_guard(&response_rx, "API response should arrive")
             .expect("API response should arrive"),
         Ok(())
     );
@@ -1736,14 +1785,12 @@ fn opencode_combined_model_and_effort_update_waits_for_model_specific_options() 
         )
     });
 
-    started_rx
-        .recv_timeout(Duration::from_secs(1))
+    recv_within_guard(&started_rx, "serialized config writer should start")
         .expect("serialized config writer should start");
     proceed_tx
         .send(())
         .expect("API scheduling waiter should authorize execution");
-    let (_model_request_id, model_response_tx) =
-        take_pending_acp_request(&pending_requests, Duration::from_secs(1));
+    let (_model_request_id, model_response_tx) = take_pending_acp_request(&pending_requests);
     model_response_tx
         .send(Ok(json!({})))
         .expect("model acknowledgement should send");
@@ -1773,8 +1820,7 @@ fn opencode_combined_model_and_effort_update_waits_for_model_specific_options() 
         }),
     );
 
-    let (_effort_request_id, effort_response_tx) =
-        take_pending_acp_request(&pending_requests, Duration::from_secs(1));
+    let (_effort_request_id, effort_response_tx) = take_pending_acp_request(&pending_requests);
     let written = writer.contents();
     let model_offset = written
         .find("\"configId\":\"model\"")
@@ -1793,8 +1839,7 @@ fn opencode_combined_model_and_effort_update_waits_for_model_specific_options() 
         .expect("OpenCode config writer should finish")
         .expect("refreshed combined config should succeed");
     assert_eq!(
-        response_rx
-            .recv_timeout(Duration::from_secs(1))
+        recv_within_guard(&response_rx, "API response should arrive")
             .expect("API response should arrive"),
         Ok(())
     );
@@ -1893,8 +1938,7 @@ fn opencode_dependent_rejection_after_model_change_resets_only_that_selection() 
         )
     });
 
-    let (_model_request_id, model_response_tx) =
-        take_pending_acp_request(&pending_requests, Duration::from_secs(1));
+    let (_model_request_id, model_response_tx) = take_pending_acp_request(&pending_requests);
     model_response_tx
         .send(Ok(json!({})))
         .expect("model acknowledgement should send");
@@ -1923,8 +1967,7 @@ fn opencode_dependent_rejection_after_model_change_resets_only_that_selection() 
         }),
     );
 
-    let (_effort_request_id, effort_response_tx) =
-        take_pending_acp_request(&pending_requests, Duration::from_secs(1));
+    let (_effort_request_id, effort_response_tx) = take_pending_acp_request(&pending_requests);
     let oversized_rejection = format!(
         "{}UNBOUNDED_REJECTION_TAIL",
         "x".repeat(MAX_OPENCODE_CONFIG_NOTICE_DETAIL_CHARS + 128)
@@ -2064,8 +2107,7 @@ fn opencode_model_change_resets_missing_carried_effort_to_auto() {
         )
     });
 
-    let (_model_request_id, model_response_tx) =
-        take_pending_acp_request(&pending_requests, Duration::from_secs(1));
+    let (_model_request_id, model_response_tx) = take_pending_acp_request(&pending_requests);
     model_response_tx
         .send(Ok(json!({})))
         .expect("model acknowledgement should send");
@@ -2213,8 +2255,7 @@ fn opencode_post_model_options_timeout_resets_dependents_without_failing_writer(
         )
     });
 
-    let (_model_request_id, model_response_tx) =
-        take_pending_acp_request(&pending_requests, Duration::from_secs(1));
+    let (_model_request_id, model_response_tx) = take_pending_acp_request(&pending_requests);
     model_response_tx
         .send(Ok(json!({})))
         .expect("model acknowledgement should send");
@@ -2340,8 +2381,7 @@ fn opencode_post_model_timeout_preserves_and_applies_reported_dependent() {
         )
     });
 
-    let (_model_request_id, model_response_tx) =
-        take_pending_acp_request(&pending_requests, Duration::from_secs(1));
+    let (_model_request_id, model_response_tx) = take_pending_acp_request(&pending_requests);
     model_response_tx
         .send(Ok(json!({})))
         .expect("model acknowledgement should send");
@@ -2370,8 +2410,7 @@ fn opencode_post_model_timeout_preserves_and_applies_reported_dependent() {
         }),
     );
 
-    let (_effort_request_id, effort_response_tx) =
-        take_pending_acp_request(&pending_requests, Duration::from_secs(1));
+    let (_effort_request_id, effort_response_tx) = take_pending_acp_request(&pending_requests);
     effort_response_tx
         .send(Ok(json!({})))
         .expect("reported effort acknowledgement should send");
@@ -2635,13 +2674,12 @@ fn opencode_live_config_rejection_preserves_authority_and_runtime() {
         )
     });
 
-    started_rx
-        .recv_timeout(Duration::from_secs(1))
+    recv_within_guard(&started_rx, "serialized config writer should start")
         .expect("serialized config writer should start");
     proceed_tx
         .send(())
         .expect("API scheduling waiter should authorize execution");
-    let (_request_id, sender) = take_pending_acp_request(&pending_requests, Duration::from_secs(1));
+    let (_request_id, sender) = take_pending_acp_request(&pending_requests);
     sender
         .send(Err(AcpResponseError::JsonRpc(AcpJsonRpcError {
             code: Some(-32602),
@@ -2654,8 +2692,7 @@ fn opencode_live_config_rejection_preserves_authority_and_runtime() {
         .expect("OpenCode config writer should finish")
         .expect("protocol rejection must not tear down the runtime");
     assert!(
-        response_rx
-            .recv_timeout(Duration::from_secs(1))
+        recv_within_guard(&response_rx, "API response should arrive")
             .expect("API response should arrive")
             .is_err()
     );
@@ -2792,11 +2829,12 @@ fn opencode_config_command_rejects_expired_execution_after_start_authorization()
     )
     .expect("an expired request should not tear down the runtime");
 
-    started_rx
-        .recv_timeout(Duration::from_secs(1))
-        .expect("serialized config writer should report its start");
-    let detail = response_rx
-        .recv_timeout(Duration::from_secs(1))
+    recv_within_guard(
+        &started_rx,
+        "serialized config writer should report its start",
+    )
+    .expect("serialized config writer should report its start");
+    let detail = recv_within_guard(&response_rx, "API response should arrive")
         .expect("API response should arrive")
         .expect_err("expired writer execution should be rejected");
     assert!(detail.contains("deadline expired"), "{detail}");
@@ -2875,9 +2913,11 @@ fn opencode_config_command_requires_post_start_authorization() {
         )
     });
 
-    started_rx
-        .recv_timeout(Duration::from_secs(1))
-        .expect("serialized config writer should report its start");
+    recv_within_guard(
+        &started_rx,
+        "serialized config writer should report its start",
+    )
+    .expect("serialized config writer should report its start");
     drop(proceed_tx);
     handle
         .join()

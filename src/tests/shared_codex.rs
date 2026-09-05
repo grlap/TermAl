@@ -169,9 +169,11 @@ fn prompt_during_codex_thread_setup_does_not_start_a_second_thread() {
     // The handoff is the half of this change that can fail silently: if the waiter
     // falls back to the command that opened the setup, the session answers the
     // OLDER prompt and nothing errors. Pin it end to end.
-    let delivered = input_rx
-        .recv_timeout(Duration::from_secs(5))
-        .expect("thread setup should hand the parked prompt back as StartTurnAfterSetup");
+    let delivered = recv_within_guard(
+        &input_rx,
+        "thread setup should hand the parked prompt back as StartTurnAfterSetup",
+    )
+    .expect("thread setup should hand the parked prompt back as StartTurnAfterSetup");
     match delivered {
         CodexRuntimeCommand::StartTurnAfterSetup {
             session_id: delivered_session_id,
@@ -1136,8 +1138,7 @@ fn shared_codex_turn_started_notification_does_not_restore_pending_state() {
         assert_eq!(session_state.pending_turn_start_request_id, None);
     }
 
-    let (_request_id, sender) =
-        take_pending_codex_request(&pending_requests, Duration::from_secs(1));
+    let (_request_id, sender) = take_pending_codex_request(&pending_requests);
     sender
         .send(Ok(json!({
             "turn": {
@@ -1211,8 +1212,7 @@ fn shared_codex_standard_turn_start_serializes_explicit_null_service_tier() {
         "TermAl AutoApprove must keep native Codex approval requests enabled per turn"
     );
 
-    let (_request_id, sender) =
-        take_pending_codex_request(&pending_requests, Duration::from_secs(1));
+    let (_request_id, sender) = take_pending_codex_request(&pending_requests);
     sender
         .send(Ok(json!({ "turn": { "id": "turn-standard" } })))
         .expect("turn/start response should send");
@@ -1794,8 +1794,7 @@ fn shared_codex_thread_setup_handoff_failure_rolls_back_registration() {
     )
     .unwrap();
 
-    let (_request_id, sender) =
-        take_pending_codex_request(&pending_requests, Duration::from_secs(1));
+    let (_request_id, sender) = take_pending_codex_request(&pending_requests);
     sender
         .send(Ok(json!({
             "thread": {
@@ -1804,7 +1803,7 @@ fn shared_codex_thread_setup_handoff_failure_rolls_back_registration() {
         })))
         .unwrap();
 
-    let deadline = std::time::Instant::now() + Duration::from_secs(1);
+    let deadline = phase_sync::PollGuard::new();
     loop {
         let (runtime_cleared, external_session_id, status, preview) = {
             let inner = state.inner.lock().expect("state mutex poisoned");
@@ -1848,11 +1847,9 @@ fn shared_codex_thread_setup_handoff_failure_rolls_back_registration() {
             break;
         }
 
-        assert!(
-            std::time::Instant::now() < deadline,
+        deadline.wait(format_args!(
             "failed StartTurnAfterSetup handoff should roll back provisional thread registration"
-        );
-        std::thread::sleep(Duration::from_millis(10));
+        ));
     }
 }
 
@@ -1924,8 +1921,7 @@ fn shared_codex_thread_setup_persist_failure_does_not_tear_down_runtime() {
     )
     .unwrap();
 
-    let (_request_id, sender) =
-        take_pending_codex_request(&pending_requests, Duration::from_secs(1));
+    let (_request_id, sender) = take_pending_codex_request(&pending_requests);
     sender
         .send(Ok(json!({
             "thread": {
@@ -1934,7 +1930,7 @@ fn shared_codex_thread_setup_persist_failure_does_not_tear_down_runtime() {
         })))
         .unwrap();
 
-    let deadline = std::time::Instant::now() + Duration::from_secs(1);
+    let deadline = phase_sync::PollGuard::new();
     loop {
         match input_rx.try_recv() {
             Ok(_) => panic!("failed thread registration should not queue StartTurnAfterSetup"),
@@ -1958,11 +1954,9 @@ fn shared_codex_thread_setup_persist_failure_does_not_tear_down_runtime() {
         if failed {
             break;
         }
-        assert!(
-            std::time::Instant::now() < deadline,
+        deadline.wait(format_args!(
             "failed thread registration should mark the session error"
-        );
-        std::thread::sleep(Duration::from_millis(10));
+        ));
     }
 
     {
@@ -2508,7 +2502,12 @@ fn shared_codex_undeliverable_server_request_returns_json_rpc_error() {
     )
     .unwrap();
 
-    match input_rx.recv_timeout(Duration::from_secs(1)).unwrap() {
+    match recv_within_guard(
+        &input_rx,
+        "shared codex undeliverable server request returns json rpc error: runtime command 1",
+    )
+    .unwrap()
+    {
         CodexRuntimeCommand::JsonRpcResponse { response } => {
             assert_eq!(
                 codex_json_rpc_response_message(&response),
@@ -2622,7 +2621,7 @@ fn shared_codex_server_request_with_unknown_thread_id_does_not_fallback_to_turn_
     )
     .unwrap();
 
-    match input_rx.recv_timeout(Duration::from_secs(1)).unwrap() {
+    match recv_within_guard(&input_rx, "shared codex server request with unknown thread id does not fallback to turn id: runtime command 1").unwrap() {
         CodexRuntimeCommand::JsonRpcResponse { response } => {
             assert_eq!(
                 codex_json_rpc_response_message(&response),
@@ -2707,7 +2706,12 @@ fn shared_codex_server_request_for_completed_turn_returns_json_rpc_error() {
     )
     .unwrap();
 
-    match input_rx.recv_timeout(Duration::from_secs(1)).unwrap() {
+    match recv_within_guard(
+        &input_rx,
+        "shared codex server request for completed turn returns json rpc error: runtime command 1",
+    )
+    .unwrap()
+    {
         CodexRuntimeCommand::JsonRpcResponse { response } => {
             assert_eq!(
                 codex_json_rpc_response_message(&response),
@@ -2754,7 +2758,12 @@ fn shared_codex_server_request_missing_thread_id_returns_json_rpc_error() {
     )
     .unwrap();
 
-    match input_rx.recv_timeout(Duration::from_secs(1)).unwrap() {
+    match recv_within_guard(
+        &input_rx,
+        "shared codex server request missing thread id returns json rpc error: runtime command 1",
+    )
+    .unwrap()
+    {
         CodexRuntimeCommand::JsonRpcResponse { response } => {
             assert_eq!(
                 codex_json_rpc_response_message(&response),
@@ -2831,7 +2840,11 @@ fn shared_codex_prompt_command_keeps_writer_loop_responsive_while_turn_start_is_
     let writer_thread = std::thread::spawn(move || {
         let mut stdin = thread_writer;
         let runtime_token = RuntimeToken::Codex(thread_runtime.runtime_id.clone());
-        while let Ok(command) = input_rx.recv_timeout(Duration::from_millis(250)) {
+        // This bound-thread fixture publishes a prompt and an approval reply.
+        // Return the receiver after those events, not scheduler idleness.
+        // The join handle retains it until the response continuation settles.
+        for _ in 0..2 {
+            let command = phase_sync::receive(&input_rx, "Codex prompt-loop command");
             match command {
                 CodexRuntimeCommand::Prompt {
                     session_id,
@@ -2896,6 +2909,7 @@ fn shared_codex_prompt_command_keeps_writer_loop_responsive_while_turn_start_is_
                 _ => panic!("unexpected shared Codex runtime command"),
             }
         }
+        input_rx
     });
 
     input_tx
@@ -2916,7 +2930,7 @@ fn shared_codex_prompt_command_keeps_writer_loop_responsive_while_turn_start_is_
         })
         .unwrap();
 
-    let deadline = std::time::Instant::now() + Duration::from_secs(1);
+    let deadline = phase_sync::PollGuard::new();
     loop {
         let written = writer.contents();
         let pending_count = pending_requests
@@ -2926,11 +2940,9 @@ fn shared_codex_prompt_command_keeps_writer_loop_responsive_while_turn_start_is_
         if written.contains("\"method\":\"turn/start\"") && pending_count == 1 {
             break;
         }
-        assert!(
-            std::time::Instant::now() < deadline,
+        deadline.wait(format_args!(
             "turn/start request should stay pending while the writer loop remains active"
-        );
-        std::thread::sleep(Duration::from_millis(10));
+        ));
     }
 
     input_tx
@@ -2944,21 +2956,18 @@ fn shared_codex_prompt_command_keeps_writer_loop_responsive_while_turn_start_is_
         })
         .unwrap();
 
-    let deadline = std::time::Instant::now() + Duration::from_secs(1);
+    let deadline = phase_sync::PollGuard::new();
     loop {
         let written = writer.contents();
         if written.contains("\"id\":\"approval-1\"") {
             break;
         }
-        assert!(
-            std::time::Instant::now() < deadline,
+        deadline.wait(format_args!(
             "writer loop should still write JSON-RPC responses while turn/start is pending"
-        );
-        std::thread::sleep(Duration::from_millis(10));
+        ));
     }
 
-    let (_request_id, sender) =
-        take_pending_codex_request(&pending_requests, Duration::from_secs(1));
+    let (_request_id, sender) = take_pending_codex_request(&pending_requests);
     sender
         .send(Ok(json!({
             "turn": {
@@ -2967,7 +2976,7 @@ fn shared_codex_prompt_command_keeps_writer_loop_responsive_while_turn_start_is_
         })))
         .unwrap();
 
-    let deadline = std::time::Instant::now() + Duration::from_secs(1);
+    let deadline = phase_sync::PollGuard::new();
     loop {
         let (turn_id, pending_turn_start) = {
             let sessions = runtime
@@ -2985,17 +2994,17 @@ fn shared_codex_prompt_command_keeps_writer_loop_responsive_while_turn_start_is_
         if turn_id.as_deref() == Some("turn-1") && pending_turn_start.is_some() {
             break;
         }
-        assert!(
-            std::time::Instant::now() < deadline,
-            "turn/start waiter should record the turn id and retain its watchdog marker until turn/started arrives"
-        );
-        std::thread::sleep(Duration::from_millis(10));
+        deadline.wait(format_args!("turn/start waiter should record the turn id and retain its watchdog marker until turn/started arrives"));
     }
 
-    drop(input_tx);
-    writer_thread
+    let input_rx = writer_thread
         .join()
         .expect("shared Codex writer thread should join cleanly");
+    assert!(
+        matches!(input_rx.try_recv(), Err(mpsc::TryRecvError::Empty)),
+        "Codex prompt-loop fixture received an extra command after prompt and approval reply"
+    );
+    drop(input_tx);
 }
 
 // Pins that a CodexResponseError::JsonRpc from turn/start is recorded as
@@ -3112,9 +3121,11 @@ fn shared_codex_turn_started_watchdog_terminalizes_its_current_request() {
         .insert("thread-watchdog".to_owned(), session_id.clone());
 
     let interrupt = std::thread::spawn(move || {
-        let command = input_rx
-            .recv_timeout(Duration::from_secs(30))
-            .expect("watchdog should interrupt the accepted turn before terminalizing it");
+        let command = recv_within_guard(
+            &input_rx,
+            "watchdog should interrupt the accepted turn before terminalizing it",
+        )
+        .expect("watchdog should interrupt the accepted turn before terminalizing it");
         match command {
             CodexRuntimeCommand::InterruptTurn {
                 response_tx,
@@ -3174,8 +3185,11 @@ fn shared_codex_turn_started_watchdog_missing_turn_id_retires_shared_runtime() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Codex);
     let sibling_id = test_session_id(&state, Agent::Codex);
-    let (runtime, input_rx, process) =
-        test_shared_codex_runtime("shared-codex-watchdog-missing-turn-id");
+    let process_owner = phase_sync::ParkedProcess::spawn();
+    let (runtime, input_rx, process) = test_shared_codex_runtime_with_process(
+        "shared-codex-watchdog-missing-turn-id",
+        process_owner.process.clone(),
+    );
     *state
         .shared_codex_runtime
         .lock()
@@ -3247,9 +3261,11 @@ fn shared_codex_turn_started_watchdog_missing_turn_id_retires_shared_runtime() {
         "turn-start-without-id",
         SHARED_CODEX_TURN_STARTED_EVENT_TIMEOUT,
     ));
-    match input_rx
-        .recv_timeout(Duration::from_secs(1))
-        .expect("runtime retirement should request graceful shutdown")
+    match recv_within_guard(
+        &input_rx,
+        "runtime retirement should request graceful shutdown",
+    )
+    .expect("runtime retirement should request graceful shutdown")
     {
         CodexRuntimeCommand::JsonRpcNotification { method } => {
             assert_eq!(method, "shutdown");
@@ -3286,15 +3302,7 @@ fn shared_codex_turn_started_watchdog_missing_turn_id_retires_shared_runtime() {
     assert_eq!(sibling.active_turn_generation, 7);
     assert!(matches!(sibling.runtime, SessionRuntime::None));
     drop(inner);
-    assert!(
-        wait_for_shared_child_exit_timeout(
-            &process,
-            Duration::from_secs(1),
-            "shared Codex runtime without a turn id",
-        )
-        .expect("shared Codex process status should be readable")
-        .is_some()
-    );
+    phase_sync::process_exit(&process, "shared Codex runtime without a turn id reaped");
 }
 
 #[test]
@@ -3394,12 +3402,13 @@ fn shared_codex_turn_started_watchdog_is_armed_by_the_real_turn_start_waiter() {
         },
     )
     .expect("turn/start should be written");
-    let (_request_id, response_tx) =
-        take_pending_codex_request(&pending_requests, Duration::from_secs(1));
+    let (_request_id, response_tx) = take_pending_codex_request(&pending_requests);
     let interrupt = std::thread::spawn(move || {
-        let command = input_rx
-            .recv_timeout(Duration::from_secs(30))
-            .expect("wired watchdog should interrupt the accepted turn");
+        let command = recv_within_guard(
+            &input_rx,
+            "wired watchdog should interrupt the accepted turn",
+        )
+        .expect("wired watchdog should interrupt the accepted turn");
         match command {
             CodexRuntimeCommand::InterruptTurn { response_tx, .. } => response_tx
                 .send(Ok(()))
@@ -3411,7 +3420,7 @@ fn shared_codex_turn_started_watchdog_is_armed_by_the_real_turn_start_waiter() {
         .send(Ok(json!({ "turn": { "id": "turn-wired-watchdog" } })))
         .expect("turn/start response should send");
 
-    let deadline = Instant::now() + Duration::from_secs(30);
+    let deadline = phase_sync::PollGuard::new();
     loop {
         let terminalized = {
             let inner = state.inner.lock().expect("state mutex poisoned");
@@ -3426,8 +3435,7 @@ fn shared_codex_turn_started_watchdog_is_armed_by_the_real_turn_start_waiter() {
         if terminalized {
             break;
         }
-        assert!(Instant::now() < deadline, "wired watchdog should expire");
-        std::thread::sleep(Duration::from_millis(5));
+        deadline.wait(format_args!("wired watchdog should expire"));
     }
     interrupt
         .join()
@@ -3504,12 +3512,11 @@ fn shared_codex_turn_started_event_cancels_the_real_waiter_watchdog() {
         },
     )
     .expect("turn/start should be written");
-    let (_request_id, response_tx) =
-        take_pending_codex_request(&pending_requests, Duration::from_secs(1));
+    let (_request_id, response_tx) = take_pending_codex_request(&pending_requests);
     response_tx
         .send(Ok(json!({ "turn": { "id": "turn-cancelled-watchdog" } })))
         .expect("turn/start response should send");
-    let deadline = Instant::now() + Duration::from_secs(1);
+    let deadline = phase_sync::PollGuard::new();
     loop {
         let armed = runtime
             .sessions
@@ -3520,11 +3527,7 @@ fn shared_codex_turn_started_event_cancels_the_real_waiter_watchdog() {
         if armed {
             break;
         }
-        assert!(
-            Instant::now() < deadline,
-            "watchdog should arm after response"
-        );
-        std::thread::sleep(Duration::from_millis(5));
+        deadline.wait(format_args!("watchdog should arm after response"));
     }
     handle_shared_codex_app_server_message(
         &json!({
@@ -3634,8 +3637,7 @@ fn idless_turn_started_before_response_reconciles_without_arming_watchdog() {
         },
     )
     .expect("turn/start should be written");
-    let (request_id, response_tx) =
-        take_pending_codex_request(&pending_requests, Duration::from_secs(1));
+    let (request_id, response_tx) = take_pending_codex_request(&pending_requests);
 
     handle_shared_codex_app_server_message(
         &json!({
@@ -3676,7 +3678,7 @@ fn idless_turn_started_before_response_reconciles_without_arming_watchdog() {
             "turn": { "id": "turn-idless-before-response" }
         })))
         .expect("turn/start response should send");
-    let deadline = Instant::now() + Duration::from_secs(1);
+    let deadline = phase_sync::PollGuard::new();
     loop {
         let reconciled = {
             let sessions = runtime
@@ -3694,11 +3696,9 @@ fn idless_turn_started_before_response_reconciles_without_arming_watchdog() {
         if reconciled {
             break;
         }
-        assert!(
-            Instant::now() < deadline,
+        deadline.wait(format_args!(
             "response waiter should reconcile the early notification"
-        );
-        std::thread::sleep(Duration::from_millis(5));
+        ));
     }
     assert!(matches!(
         input_rx.recv_timeout(Duration::from_millis(200)),
@@ -3787,8 +3787,7 @@ fn idless_turn_completed_before_response_finishes_the_armed_turn() {
         },
     )
     .expect("turn/start should be written");
-    let (_request_id, response_tx) =
-        take_pending_codex_request(&pending_requests, Duration::from_secs(1));
+    let (_request_id, response_tx) = take_pending_codex_request(&pending_requests);
 
     for message in [
         json!({
@@ -3919,9 +3918,11 @@ fn shared_codex_turn_started_watchdog_retires_runtime_when_interrupt_fails() {
         );
 
     let interrupt = std::thread::spawn(move || {
-        let command = input_rx
-            .recv_timeout(Duration::from_secs(1))
-            .expect("watchdog should attempt to interrupt the accepted turn");
+        let command = recv_within_guard(
+            &input_rx,
+            "watchdog should attempt to interrupt the accepted turn",
+        )
+        .expect("watchdog should attempt to interrupt the accepted turn");
         match command {
             CodexRuntimeCommand::InterruptTurn { response_tx, .. } => {
                 response_tx
@@ -5026,7 +5027,12 @@ fn shared_codex_app_server_request_waits_for_turn_started() {
     )
     .unwrap();
 
-    match input_rx.recv_timeout(Duration::from_secs(1)).unwrap() {
+    match recv_within_guard(
+        &input_rx,
+        "shared codex app server request waits for turn started: runtime command 1",
+    )
+    .unwrap()
+    {
         CodexRuntimeCommand::JsonRpcResponse { response } => {
             assert_eq!(
                 codex_json_rpc_response_message(&response),
@@ -5218,7 +5224,7 @@ fn codex_auto_approve_accepts_all_approval_kinds_without_pending_cards() {
             .expect("AutoApprove request should be classified")
         );
         assert!(matches!(
-            input_rx.recv_timeout(Duration::from_secs(1)).unwrap(),
+            recv_within_guard(&input_rx, "codex auto approve accepts all approval kinds without pending cards: runtime command 1").unwrap(),
             CodexRuntimeCommand::JsonRpcResponse {
                 response: CodexJsonRpcResponseCommand {
                     request_id,
@@ -5267,7 +5273,7 @@ fn codex_auto_approve_declines_all_approval_kinds_for_read_only_delegations() {
         };
         assert_ne!(expected_result, accepted_result);
         assert!(matches!(
-            input_rx.recv_timeout(Duration::from_secs(1)).unwrap(),
+            recv_within_guard(&input_rx, "codex auto approve declines all approval kinds for read only delegations: runtime command 1").unwrap(),
             CodexRuntimeCommand::JsonRpcResponse {
                 response: CodexJsonRpcResponseCommand {
                     request_id,

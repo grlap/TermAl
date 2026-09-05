@@ -105,11 +105,12 @@ fn session_mutation_stamp(state: &AppState, session_id: &str) -> u64 {
 // the affected session as error with the generic "agent communication timed
 // out" preview. guards against a future narrower fix that leaves the wedged
 // process alive while only failing one session.
-#[test]
-fn shared_codex_stdin_watchdog_times_out_stalled_writer_and_clears_runtime() {
+#[tokio::test]
+async fn shared_codex_stdin_watchdog_times_out_stalled_writer_and_clears_runtime() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Codex);
-    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let process_owner = phase_sync::ParkedProcess::spawn();
+    let process = process_owner.process.clone();
     let (input_tx, _input_rx) = mpsc::channel();
     let runtime = SharedCodexRuntime {
         runtime_id: "shared-codex-stdin-watchdog".to_owned(),
@@ -155,6 +156,7 @@ fn shared_codex_stdin_watchdog_times_out_stalled_writer_and_clears_runtime() {
             timed_out: false,
         })));
     let (_stop_tx, stop_rx) = mpsc::channel();
+    let mut events = state.subscribe_events();
     spawn_shared_codex_stdin_watchdog(
         &state,
         &runtime.runtime_id,
@@ -166,34 +168,36 @@ fn shared_codex_stdin_watchdog_times_out_stalled_writer_and_clears_runtime() {
     )
     .expect("shared Codex stdin watchdog should spawn");
 
-    let deadline = std::time::Instant::now() + Duration::from_secs(1);
-    loop {
-        let cleared = state
-            .shared_codex_runtime
-            .lock()
-            .expect("shared Codex runtime mutex poisoned")
-            .is_none();
-        // Runtime-exit handling deliberately clears the shared slot before
-        // cascading the failure onto its sessions. Wait for both observable
-        // effects so this test cannot snapshot that intentional intermediate
-        // state and misclassify the watchdog as incomplete.
-        let terminalized = {
-            let inner = state.inner.lock().expect("state mutex poisoned");
-            inner
-                .sessions
-                .iter()
-                .find(|record| record.session.id == session_id)
-                .is_some_and(|record| record.session.status == SessionStatus::Error)
-        };
-        if cleared && terminalized {
-            break;
+    tokio::time::timeout(super::phase_sync::DEADLOCK_GUARD, async {
+        loop {
+            let cleared = state
+                .shared_codex_runtime
+                .lock()
+                .expect("shared Codex runtime mutex poisoned")
+                .is_none();
+            // Runtime-exit handling deliberately clears the shared slot before
+            // cascading the failure onto its sessions. Wait for both observable
+            // effects so this test cannot snapshot that intentional intermediate
+            // state and misclassify the watchdog as incomplete.
+            let terminalized = {
+                let inner = state.inner.lock().expect("state mutex poisoned");
+                inner
+                    .sessions
+                    .iter()
+                    .find(|record| record.session.id == session_id)
+                    .is_some_and(|record| record.session.status == SessionStatus::Error)
+            };
+            if cleared && terminalized {
+                break;
+            }
+            events
+                .recv()
+                .await
+                .expect("watchdog state publication should remain connected");
         }
-        assert!(
-            std::time::Instant::now() < deadline,
-            "shared Codex stdin watchdog should tear down the stalled runtime"
-        );
-        std::thread::sleep(Duration::from_millis(5));
-    }
+    })
+    .await
+    .expect("watchdog did not publish both slot teardown and terminal session state");
 
     let snapshot = state.snapshot();
     let session = snapshot
@@ -548,7 +552,10 @@ fn resume_promotes_the_paused_queue_head_and_delivers_it() {
     );
     assert_eq!(session.status, SessionStatus::Active);
     assert!(matches!(
-        input_rx.recv_timeout(Duration::from_secs(1)),
+        recv_within_guard(
+            &input_rx,
+            "resume promotes the paused queue head and delivers it: runtime command 1"
+        ),
         Ok(ClaudeRuntimeCommand::Prompt(_))
     ));
 
@@ -685,7 +692,10 @@ fn resume_persist_failure_rolls_back_the_promotion_and_keeps_the_queue_paused() 
     assert!(!session.queue_paused);
     assert_eq!(session.status, SessionStatus::Active);
     assert!(matches!(
-        input_rx.recv_timeout(Duration::from_secs(1)),
+        recv_within_guard(
+            &input_rx,
+            "resume persist failure rolls back the promotion and keeps the queue paused: runtime command 1"
+        ),
         Ok(ClaudeRuntimeCommand::Prompt(_))
     ));
     {
@@ -870,7 +880,8 @@ fn ordinary_runtime_reset_does_not_preserve_the_revocation_quarantine_latch_on_e
 fn runtime_exit_publishes_message_updated_for_canceled_pending_interactions() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Claude);
-    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let process_owner = phase_sync::ParkedProcess::spawn();
+    let process = process_owner.process.clone();
     let (input_tx, _input_rx) = mpsc::channel();
     let runtime = ClaudeRuntimeHandle {
         runtime_id: "claude-runtime-exit-pending-update".to_owned(),
@@ -909,7 +920,8 @@ fn runtime_exit_publishes_message_updated_for_canceled_pending_interactions() {
 fn runtime_exit_publishes_message_created_for_terminal_failure_after_pending_cancel() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Claude);
-    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let process_owner = phase_sync::ParkedProcess::spawn();
+    let process = process_owner.process.clone();
     let (input_tx, _input_rx) = mpsc::channel();
     let runtime = ClaudeRuntimeHandle {
         runtime_id: "claude-runtime-exit-terminal-created".to_owned(),
@@ -984,7 +996,8 @@ fn runtime_exit_publishes_message_created_for_terminal_failure_after_pending_can
 fn runtime_exit_file_change_created_deltas_are_replayable_and_final_stamped() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Claude);
-    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let process_owner = phase_sync::ParkedProcess::spawn();
+    let process = process_owner.process.clone();
     let (input_tx, _input_rx) = mpsc::channel();
     let runtime = ClaudeRuntimeHandle {
         runtime_id: "claude-runtime-exit-file-change-created".to_owned(),
@@ -1114,7 +1127,8 @@ fn runtime_exit_file_change_created_deltas_are_replayable_and_final_stamped() {
 fn successful_stop_discards_deferred_callbacks() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Claude);
-    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let process_owner = phase_sync::ParkedProcess::spawn();
+    let process = process_owner.process.clone();
     let (input_tx, input_rx) = mpsc::channel();
     let runtime = ClaudeRuntimeHandle {
         runtime_id: "claude-stop-discard-deferred".to_owned(),
@@ -1167,7 +1181,8 @@ fn successful_stop_discards_deferred_callbacks() {
 fn stop_session_clears_active_turn_file_tracking_when_persist_fails() {
     let mut state = test_app_state();
     let session_id = test_session_id(&state, Agent::Claude);
-    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let process_owner = phase_sync::ParkedProcess::spawn();
+    let process = process_owner.process.clone();
     let (input_tx, _input_rx) = mpsc::channel();
     let runtime = ClaudeRuntimeHandle {
         runtime_id: "claude-stop-persist-active-turn-rollback".to_owned(),
@@ -1234,7 +1249,8 @@ fn stop_session_clears_active_turn_file_tracking_when_persist_fails() {
 fn stop_session_publishes_message_updated_for_canceled_pending_interactions() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Claude);
-    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let process_owner = phase_sync::ParkedProcess::spawn();
+    let process = process_owner.process.clone();
     let (input_tx, _input_rx) = mpsc::channel();
     let runtime = ClaudeRuntimeHandle {
         runtime_id: "claude-stop-pending-update".to_owned(),
@@ -1271,7 +1287,8 @@ fn stop_session_publishes_message_updated_for_canceled_pending_interactions() {
 fn stop_session_publishes_message_created_for_terminal_stop_after_pending_cancel() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Claude);
-    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let process_owner = phase_sync::ParkedProcess::spawn();
+    let process = process_owner.process.clone();
     let (input_tx, _input_rx) = mpsc::channel();
     let runtime = ClaudeRuntimeHandle {
         runtime_id: "claude-stop-terminal-created".to_owned(),
@@ -1344,7 +1361,8 @@ fn stop_session_publishes_message_created_for_terminal_stop_after_pending_cancel
 fn stop_session_file_change_created_deltas_are_replayable_and_final_stamped() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Claude);
-    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let process_owner = phase_sync::ParkedProcess::spawn();
+    let process = process_owner.process.clone();
     let (input_tx, _input_rx) = mpsc::channel();
     let runtime = ClaudeRuntimeHandle {
         runtime_id: "claude-stop-file-change-created".to_owned(),
@@ -1483,7 +1501,8 @@ fn stop_session_file_change_created_deltas_are_replayable_and_final_stamped() {
 fn failed_dedicated_stop_replays_deferred_turn_completion() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Claude);
-    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let process_owner = phase_sync::ParkedProcess::spawn();
+    let process = process_owner.process.clone();
     let (input_tx, _input_rx) = mpsc::channel();
     let runtime = ClaudeRuntimeHandle {
         runtime_id: "claude-stop-replay".to_owned(),
@@ -1549,7 +1568,8 @@ fn failed_dedicated_stop_replays_deferred_turn_completion() {
 fn failed_dedicated_stop_replays_deferred_runtime_exit() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Claude);
-    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let process_owner = phase_sync::ParkedProcess::spawn();
+    let process = process_owner.process.clone();
     let (input_tx, _input_rx) = mpsc::channel();
     let runtime = ClaudeRuntimeHandle {
         runtime_id: "claude-stop-exit-replay".to_owned(),
@@ -1614,7 +1634,8 @@ fn failed_dedicated_stop_replays_deferred_runtime_exit() {
 fn failed_dedicated_stop_replays_multiple_deferred_callbacks_in_order() {
     let expected_state = test_app_state();
     let expected_session_id = test_session_id(&expected_state, Agent::Claude);
-    let expected_process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let expected_process_owner = phase_sync::ParkedProcess::spawn();
+    let expected_process = expected_process_owner.process.clone();
     let (expected_input_tx, _expected_input_rx) = mpsc::channel();
     let expected_runtime = ClaudeRuntimeHandle {
         runtime_id: "claude-stop-replay-order-expected".to_owned(),
@@ -1680,7 +1701,8 @@ fn failed_dedicated_stop_replays_multiple_deferred_callbacks_in_order() {
 
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Claude);
-    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let process_owner = phase_sync::ParkedProcess::spawn();
+    let process = process_owner.process.clone();
     let (input_tx, _input_rx) = mpsc::channel();
     let runtime = ClaudeRuntimeHandle {
         runtime_id: "claude-stop-replay-order".to_owned(),
@@ -1756,7 +1778,8 @@ fn failed_dedicated_stop_replays_multiple_deferred_callbacks_in_order() {
 fn failed_dedicated_stop_replays_runtime_exit_last_even_when_it_arrives_first() {
     let expected_state = test_app_state();
     let expected_session_id = test_session_id(&expected_state, Agent::Claude);
-    let expected_process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let expected_process_owner = phase_sync::ParkedProcess::spawn();
+    let expected_process = expected_process_owner.process.clone();
     let (expected_input_tx, _expected_input_rx) = mpsc::channel();
     let expected_runtime = ClaudeRuntimeHandle {
         runtime_id: "claude-stop-replay-reversed-expected".to_owned(),
@@ -1822,7 +1845,8 @@ fn failed_dedicated_stop_replays_runtime_exit_last_even_when_it_arrives_first() 
 
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Claude);
-    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let process_owner = phase_sync::ParkedProcess::spawn();
+    let process = process_owner.process.clone();
     let (input_tx, _input_rx) = mpsc::channel();
     let runtime = ClaudeRuntimeHandle {
         runtime_id: "claude-stop-replay-reversed".to_owned(),

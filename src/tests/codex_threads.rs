@@ -117,8 +117,7 @@ fn shared_codex_model_list_pagination_stops_after_max_pages() {
     )
     .unwrap();
 
-    let (_request_id, sender) =
-        take_pending_codex_request(&pending_requests, Duration::from_secs(1));
+    let (_request_id, sender) = take_pending_codex_request(&pending_requests);
     sender
         .send(Ok(json!({
             "data": [],
@@ -126,8 +125,7 @@ fn shared_codex_model_list_pagination_stops_after_max_pages() {
         })))
         .unwrap();
 
-    let result = response_rx
-        .recv_timeout(Duration::from_secs(1))
+    let result = recv_within_guard(&response_rx, "model list response should arrive")
         .expect("model list response should arrive");
     assert_eq!(
         result,
@@ -166,8 +164,7 @@ fn shared_codex_model_list_pagination_queue_failure_returns_error() {
     )
     .unwrap();
 
-    let (_request_id, sender) =
-        take_pending_codex_request(&pending_requests, Duration::from_secs(1));
+    let (_request_id, sender) = take_pending_codex_request(&pending_requests);
     sender
         .send(Ok(json!({
             "data": [],
@@ -175,8 +172,7 @@ fn shared_codex_model_list_pagination_queue_failure_returns_error() {
         })))
         .unwrap();
 
-    let result = response_rx
-        .recv_timeout(Duration::from_secs(1))
+    let result = recv_within_guard(&response_rx, "model list response should arrive")
         .expect("model list response should arrive");
     assert_eq!(
         result,
@@ -243,8 +239,7 @@ fn fork_codex_thread_creates_a_new_local_session() {
         .expect("shared Codex runtime mutex poisoned") = Some(runtime);
 
     std::thread::spawn(move || {
-        let command = input_rx
-            .recv_timeout(Duration::from_secs(1))
+        let command = recv_within_guard(&input_rx, "Codex fork command should arrive")
             .expect("Codex fork command should arrive");
         match command {
             CodexRuntimeCommand::JsonRpcRequest {
@@ -466,8 +461,7 @@ fn fork_codex_thread_falls_back_to_note_when_history_is_unavailable() {
         .expect("shared Codex runtime mutex poisoned") = Some(runtime);
 
     std::thread::spawn(move || {
-        let command = input_rx
-            .recv_timeout(Duration::from_secs(1))
+        let command = recv_within_guard(&input_rx, "Codex fork command should arrive")
             .expect("Codex fork command should arrive");
         match command {
             CodexRuntimeCommand::JsonRpcRequest {
@@ -612,8 +606,7 @@ fn codex_archive_and_unarchive_actions_update_thread_state_and_block_dispatch() 
 
     std::thread::spawn(move || {
         for expected_method in ["thread/archive", "thread/unarchive"] {
-            let command = input_rx
-                .recv_timeout(Duration::from_secs(1))
+            let command = recv_within_guard(&input_rx, "Codex thread action should arrive")
                 .expect("Codex thread action should arrive");
             match command {
                 CodexRuntimeCommand::JsonRpcRequest {

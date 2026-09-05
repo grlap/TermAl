@@ -215,6 +215,7 @@ async fn assert_remote_terminal_stream_status_is_not_retried(stream_status: Stat
         let mut stream_response_sent = false;
         loop {
             let mut stream = if stream_response_sent {
+                let result_observation = phase_sync::PollGuard::new();
                 loop {
                     if client_observed_result_for_server.load(Ordering::SeqCst) {
                         return;
@@ -227,17 +228,14 @@ async fn assert_remote_terminal_stream_status_is_not_retried(stream_status: Stat
                             break stream;
                         }
                         Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
-                            std::thread::sleep(std::time::Duration::from_millis(10));
+                            result_observation
+                                .wait("client observed the stream error without retry");
                         }
                         Err(err) => panic!("remote terminal no-retry listener failed: {err}"),
                     }
                 }
             } else {
-                accept_test_connection_with_timeout(
-                    &listener,
-                    "remote terminal no-retry listener",
-                    std::time::Duration::from_secs(10),
-                )
+                accept_test_connection(&listener, "remote terminal no-retry listener")
             };
             let request = read_test_http_request(&mut stream);
             request_lines_for_server
@@ -380,11 +378,7 @@ async fn remote_terminal_stream_proxies_successful_sse_output() {
     };
     let server = std::thread::spawn(move || {
         loop {
-            let mut stream = accept_test_connection_with_timeout(
-                &listener,
-                "remote terminal SSE listener",
-                std::time::Duration::from_secs(10),
-            );
+            let mut stream = accept_test_connection(&listener, "remote terminal SSE listener");
             let request = read_test_http_request(&mut stream);
             request_lines_for_server
                 .lock()
@@ -1252,19 +1246,19 @@ async fn remote_terminal_frame_dispatch_rechecks_authority_during_backpressure()
         let _ = result_tx.send(result);
     });
 
-    let read_deadline = std::time::Instant::now() + Duration::from_secs(5);
+    let read_deadline = phase_sync::PollGuard::new();
     while !read_returned.load(Ordering::SeqCst) {
-        assert!(
-            std::time::Instant::now() < read_deadline,
+        read_deadline.wait(format_args!(
             "the forwarder should read the combined remote frame"
-        );
-        std::thread::yield_now();
+        ));
     }
     replace_remote_settings_for_terminal_authority_test(&state, replacement);
 
-    let error = match result_rx
-        .recv_timeout(Duration::from_secs(5))
-        .expect("route retirement should interrupt terminal backpressure")
+    let error = match recv_within_guard(
+        &result_rx,
+        "route retirement should interrupt terminal backpressure",
+    )
+    .expect("route retirement should interrupt terminal backpressure")
     {
         Ok(_) => panic!("retired buffered frames must not complete"),
         Err(error) => error,
@@ -1294,16 +1288,14 @@ async fn remote_terminal_frame_dispatch_rechecks_authority_during_backpressure()
 #[test]
 fn interruptible_remote_stream_reader_rejects_retirement_while_producer_is_idle() {
     struct BlockingSource {
-        read_called: Arc<AtomicBool>,
-        release: Arc<AtomicBool>,
+        read_called: mpsc::Sender<()>,
+        release: mpsc::Receiver<()>,
     }
 
     impl std::io::Read for BlockingSource {
         fn read(&mut self, _buf: &mut [u8]) -> io::Result<usize> {
-            self.read_called.store(true, Ordering::SeqCst);
-            while !self.release.load(Ordering::SeqCst) {
-                std::thread::yield_now();
-            }
+            let _ = self.read_called.send(());
+            let _ = self.release.recv();
             Ok(0)
         }
     }
@@ -1337,11 +1329,11 @@ fn interruptible_remote_stream_reader_rejects_retirement_while_producer_is_idle(
         state.remote_registry.configs.clone(),
         state.remote_registry.config_generation.clone(),
     );
-    let read_called = Arc::new(AtomicBool::new(false));
-    let release = Arc::new(AtomicBool::new(false));
+    let (read_tx, read_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
     let source = BlockingSource {
-        read_called: read_called.clone(),
-        release: release.clone(),
+        read_called: read_tx,
+        release: release_rx,
     };
     let cancellation = Arc::new(AtomicBool::new(false));
     let mut reader = InterruptibleRemoteStreamReader::spawn_with_authority(
@@ -1361,18 +1353,11 @@ fn interruptible_remote_stream_reader_rejects_retirement_while_producer_is_idle(
         let _ = result_tx.send(result);
     });
 
-    let read_deadline = std::time::Instant::now() + Duration::from_secs(5);
-    while !read_called.load(Ordering::SeqCst) {
-        assert!(
-            std::time::Instant::now() < read_deadline,
-            "the producer should enter its blocking body read"
-        );
-        std::thread::yield_now();
-    }
+    phase_sync::receive(&read_rx, "producer entered its blocking body read");
     replace_remote_settings_for_terminal_authority_test(&state, replacement);
 
-    let result = result_rx.recv_timeout(Duration::from_secs(5));
-    release.store(true, Ordering::SeqCst);
+    let result = phase_sync::receive_before_cleanup(&result_rx, "idle terminal route retirement");
+    drop(release_tx);
     cancellation.store(true, Ordering::SeqCst);
     let _ = forwarder.join();
     let error =
@@ -1412,6 +1397,8 @@ fn interruptible_remote_stream_reader_observes_cancellation_between_recv_timeout
     let (tx, _rx) = tokio::sync::mpsc::channel(TERMINAL_STREAM_EVENT_QUEUE_CAPACITY);
     let cancellation_for_thread = cancellation.clone();
     let cancel_thread = std::thread::spawn(move || {
+        // Pacing encourages a mid-wait cancellation, but the assertion also
+        // holds if scheduling delays the reader until after cancellation.
         std::thread::sleep(Duration::from_millis(25));
         cancellation_for_thread.store(true, Ordering::SeqCst);
     });
@@ -1438,7 +1425,7 @@ fn interruptible_remote_stream_reader_spawn_unblocks_on_cancellation() {
     // that never emits bytes must still let the adapter-level reader return
     // `terminal stream client disconnected` once the cancellation flag
     // flips. The mock `BlockingSource::read` mirrors a hung reqwest body
-    // read by parking inside `read()` until a release flag flips, so the
+    // read by parking inside `read()` until its owner releases it, so the
     // worker thread spawned by `InterruptibleRemoteStreamReader::spawn`
     // goes through `read_remote_stream_response` exactly as it would for a
     // real stalled remote. The pre-existing
@@ -1447,46 +1434,37 @@ fn interruptible_remote_stream_reader_spawn_unblocks_on_cancellation() {
     // this test a future edit could silently break the production spawn
     // path without failing any test.
     struct BlockingSource {
-        read_called: Arc<AtomicBool>,
-        release: Arc<AtomicBool>,
+        read_called: mpsc::Sender<()>,
+        release: mpsc::Receiver<()>,
     }
 
     impl std::io::Read for BlockingSource {
         fn read(&mut self, _buf: &mut [u8]) -> io::Result<usize> {
-            self.read_called.store(true, Ordering::SeqCst);
-            loop {
-                if self.release.load(Ordering::SeqCst) {
-                    return Ok(0);
-                }
-                std::thread::sleep(Duration::from_millis(2));
-            }
+            let _ = self.read_called.send(());
+            // Owner unwind also disconnects the release channel.
+            let _ = self.release.recv();
+            Ok(0)
         }
     }
 
-    let read_called = Arc::new(AtomicBool::new(false));
-    let release = Arc::new(AtomicBool::new(false));
+    let (read_tx, read_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
     let cancellation = Arc::new(AtomicBool::new(false));
     let source = BlockingSource {
-        read_called: read_called.clone(),
-        release: release.clone(),
+        read_called: read_tx,
+        release: release_rx,
     };
 
     let mut reader = InterruptibleRemoteStreamReader::spawn(source, cancellation.clone());
     let (tx, _rx) = tokio::sync::mpsc::channel(TERMINAL_STREAM_EVENT_QUEUE_CAPACITY);
 
     // Wait until the worker thread is actually parked inside `read()`.
-    let start = std::time::Instant::now();
-    while !read_called.load(Ordering::SeqCst) {
-        assert!(
-            start.elapsed() < Duration::from_secs(2),
-            "worker thread never entered the mock BlockingSource::read"
-        );
-        std::thread::sleep(Duration::from_millis(1));
-    }
+    phase_sync::receive(&read_rx, "worker entered the mock BlockingSource::read");
 
     let cancel_thread = std::thread::spawn({
         let cancellation = cancellation.clone();
         move || {
+            // Pacing only: success never depends on entering the wait first.
             std::thread::sleep(Duration::from_millis(25));
             cancellation.store(true, Ordering::SeqCst);
         }
@@ -1499,14 +1477,10 @@ fn interruptible_remote_stream_reader_spawn_unblocks_on_cancellation() {
     cancel_thread.join().unwrap();
     // Let the worker thread drain its parked read so this test doesn't
     // leave a detached thread attached to a stale socket mock.
-    release.store(true, Ordering::SeqCst);
+    drop(release_tx);
 
     assert_eq!(err.status, StatusCode::BAD_GATEWAY);
     assert_eq!(err.message, "terminal stream client disconnected");
-    assert!(
-        read_called.load(Ordering::SeqCst),
-        "the spawn path must actually drive read_remote_stream_response"
-    );
 }
 
 // Pins that forward_remote_terminal_stream_reader_capped rejects an

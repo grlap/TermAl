@@ -1204,15 +1204,19 @@ fn coordination_cli_validates_class_and_trims_identifier_values() {
 
 #[test]
 fn coordination_cli_words_select_the_entry_point_mode() {
+    let expected = default_termal_session_id();
     let mode = Mode::parse(cli_args(&["sessions", "list", "--json"])).expect("sessions list should parse");
-    assert!(matches!(
-        mode,
-        Mode::CoordinationCli(CoordinationCliInvocation {
-            command: CoordinationCliCommand::SessionsList { as_session: None },
+    let Mode::CoordinationCli(invocation) = mode else {
+        panic!("sessions list must select the coordination CLI mode");
+    };
+    assert_eq!(
+        invocation,
+        CoordinationCliInvocation {
+            command: CoordinationCliCommand::SessionsList { as_session: expected },
             json: true,
             base_url: None,
-        })
-    ));
+        }
+    );
 
     let help = Mode::parse(cli_args(&["mailbox", "--help"])).expect("mailbox help should parse");
     assert!(matches!(

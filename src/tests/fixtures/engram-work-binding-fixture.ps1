@@ -40,6 +40,8 @@ if ($env:ENGRAM_HOME -ne $engramHome -or $env:ENGRAM_ACTOR_ID -ne $actorId -or $
     exit 7
 }
 $mode = (Get-Content -LiteralPath $projectFile -Raw).Trim()
+$phase = if ($operation -eq "focus") { "focus:$workRef" } else { $operation }
+Add-Content -LiteralPath (Join-Path $engramHome "work-read-phases") -Value $phase
 $marker = Join-Path $engramHome "work-next-read"
 $lockRetryMarker = Join-Path $engramHome "work-lock-retried"
 if ($operation -eq "next") {

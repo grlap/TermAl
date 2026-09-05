@@ -565,7 +565,12 @@ fn project_digest_routes_dirty_project_prompts_to_non_delegation_session() {
         .execute_project_action(&project_id, "keep-iterating")
         .unwrap();
 
-    match input_rx.recv_timeout(Duration::from_secs(1)).unwrap() {
+    match recv_within_guard(
+        &input_rx,
+        "project digest routes dirty project prompts to non delegation session: runtime command 1",
+    )
+    .unwrap()
+    {
         CodexRuntimeCommand::Prompt {
             session_id,
             command,
@@ -644,7 +649,12 @@ fn project_digest_routes_clean_continue_to_non_delegation_session() {
         .execute_project_action(&project_id, "continue")
         .unwrap();
 
-    match input_rx.recv_timeout(Duration::from_secs(1)).unwrap() {
+    match recv_within_guard(
+        &input_rx,
+        "project digest routes clean continue to non delegation session: runtime command 1",
+    )
+    .unwrap()
+    {
         CodexRuntimeCommand::Prompt {
             session_id,
             command,
@@ -725,7 +735,12 @@ fn project_digest_routes_error_fix_it_to_non_delegation_session() {
 
     state.execute_project_action(&project_id, "fix-it").unwrap();
 
-    match input_rx.recv_timeout(Duration::from_secs(1)).unwrap() {
+    match recv_within_guard(
+        &input_rx,
+        "project digest routes error fix it to non delegation session: runtime command 1",
+    )
+    .unwrap()
+    {
         CodexRuntimeCommand::Prompt {
             session_id,
             command,
@@ -820,7 +835,12 @@ fn project_digest_error_actions_skip_latest_errored_parent_target() {
 
     state.execute_project_action(&project_id, "fix-it").unwrap();
 
-    match input_rx.recv_timeout(Duration::from_secs(1)).unwrap() {
+    match recv_within_guard(
+        &input_rx,
+        "project digest error actions skip latest errored parent target: runtime command 1",
+    )
+    .unwrap()
+    {
         CodexRuntimeCommand::Prompt {
             session_id,
             command,
@@ -888,7 +908,12 @@ fn project_action_approve_routes_to_the_live_project_approval() {
         .execute_project_action(&project_id, "approve")
         .unwrap();
 
-    match input_rx.recv_timeout(Duration::from_secs(1)).unwrap() {
+    match recv_within_guard(
+        &input_rx,
+        "project action approve routes to the live project approval: runtime command 1",
+    )
+    .unwrap()
+    {
         CodexRuntimeCommand::JsonRpcResponse { response } => {
             assert_eq!(response.request_id, json!("req-project-approve"));
             assert_eq!(
@@ -953,7 +978,12 @@ fn project_action_keep_iterating_dispatches_a_follow_up_prompt() {
         .execute_project_action(&project_id, "keep-iterating")
         .unwrap();
 
-    match input_rx.recv_timeout(Duration::from_secs(1)).unwrap() {
+    match recv_within_guard(
+        &input_rx,
+        "project action keep iterating dispatches a follow up prompt: runtime command 1",
+    )
+    .unwrap()
+    {
         CodexRuntimeCommand::Prompt {
             session_id: runtime_session_id,
             command,

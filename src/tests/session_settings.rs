@@ -167,9 +167,11 @@ fn opencode_model_refresh_restarts_ready_runtime_before_handshake() {
         test_acp_runtime_handle(AcpAgent::OpenCode, "opencode-fresh-refresh");
     state.install_test_acp_runtime_override(AcpAgent::OpenCode, fresh_runtime);
     let responder = std::thread::spawn(move || {
-        match fresh_input_rx
-            .recv_timeout(Duration::from_secs(1))
-            .expect("fresh runtime should receive config refresh")
+        match recv_within_guard(
+            &fresh_input_rx,
+            "fresh runtime should receive config refresh",
+        )
+        .expect("fresh runtime should receive config refresh")
         {
             AcpRuntimeCommand::RefreshSessionConfig {
                 command,
@@ -300,9 +302,11 @@ fn model_refresh_clears_engram_quarantine_before_attaching_successor_runtime() {
         test_acp_runtime_handle(AcpAgent::Cursor, "quarantined-cursor-refresh-fresh");
     state.install_test_acp_runtime_override(AcpAgent::Cursor, fresh_runtime);
     let responder = std::thread::spawn(move || {
-        match fresh_input_rx
-            .recv_timeout(Duration::from_secs(1))
-            .expect("fresh Cursor runtime should receive config refresh")
+        match recv_within_guard(
+            &fresh_input_rx,
+            "fresh Cursor runtime should receive config refresh",
+        )
+        .expect("fresh Cursor runtime should receive config refresh")
         {
             AcpRuntimeCommand::RefreshSessionConfig { response_tx, .. } => response_tx
                 .send(Ok(()))
@@ -2051,8 +2055,7 @@ fn updates_claude_session_model_settings_without_restarting_runtime() {
         .expect("Claude session should exist");
     assert!(!record.runtime_reset_required);
 
-    let command = input_rx
-        .recv_timeout(Duration::from_secs(1))
+    let command = recv_within_guard(&input_rx, "Claude model update should arrive")
         .expect("Claude model update should arrive");
     match command {
         ClaudeRuntimeCommand::SetModel(model) => assert_eq!(model, "opus"),
@@ -2461,9 +2464,11 @@ fn runtime_model_sync_preserves_the_installed_engram_actor_identity() {
         );
     }
 
-    match runtime_rx
-        .recv_timeout(Duration::from_millis(100))
-        .expect("Cursor mode change should remain a hot ACP update")
+    match recv_within_guard(
+        &runtime_rx,
+        "Cursor mode change should remain a hot ACP update",
+    )
+    .expect("Cursor mode change should remain a hot ACP update")
     {
         AcpRuntimeCommand::JsonRpcMessage(message) => {
             assert_eq!(

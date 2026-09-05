@@ -37,16 +37,22 @@ if ($workIndex -ge 0 -and ($args -contains "next") -and ($args -contains "--cont
         exit 9
     }
     $mode = (Get-Content -LiteralPath $projectFile -Raw).Trim()
-    if ($mode -eq "fixture-work-next-slow") {
-        Start-Sleep -Milliseconds 400
+    if ($mode -eq "fixture-work-next-gated" -and
+        -not (Test-Path -LiteralPath (Join-Path $engramHome "work-context-released"))) {
+        & (Join-Path $engramHome "work-context-gate.cmd") > $null
+        if ($LASTEXITCODE -ne 0) { throw "work-context release helper failed" }
     }
     [Console]::Out.WriteLine("Engram work context for $($env:ENGRAM_SESSION_ID) as $($env:ENGRAM_ACTOR_ID)")
     exit 0
 }
 
 if (($args -contains "authority") -and ($args -contains "revoke")) {
+    $revocationPhases = Join-Path $engramHome "authority-revoke-phases"
+    [System.IO.File]::AppendAllText($revocationPhases, "$PID entered`n")
     $mode = (Get-Content -LiteralPath $projectFile -Raw).Trim()
+    [System.IO.File]::AppendAllText($revocationPhases, "$PID mode-read`n")
     $args | ConvertTo-Json -Compress | Set-Content -LiteralPath (Join-Path $engramHome "engram-authority-revoke-args.json")
+    [System.IO.File]::AppendAllText($revocationPhases, "$PID argv-written`n")
     if ($mode -eq "fixture-authority-revoke-fail") {
         [Console]::Error.WriteLine("scripted authority revoke failure")
         exit 9
@@ -60,6 +66,8 @@ if (($args -contains "authority") -and ($args -contains "revoke")) {
         }
     }
     [Console]::Out.WriteLine("fixture-revocation-hash")
+    [Console]::Out.Flush()
+    [System.IO.File]::AppendAllText($revocationPhases, "$PID exiting`n")
     exit 0
 }
 
@@ -151,6 +159,31 @@ function Write-EvaluationRefusal([string] $code) {
     }
 }
 
+# Tree fixtures publish startup only after the test owns the descendant's
+# process handle. Cold process startup is not part of a request deadline.
+$initialMode = (Get-Content -LiteralPath $projectFile -Raw).Trim()
+if ($initialMode.StartsWith("fixture-tree-")) {
+    $descendantPath = Join-Path $engramHome "engram-descendant.ps1"
+    if ($initialMode -eq "fixture-tree-eof") {
+        # Shell launch avoids inheriting extra control-pipe handles on Windows.
+        # The test awaits the descendant's TCP publication before requesting EOF.
+        Start-Process -FilePath "powershell.exe" -ArgumentList @(
+            "-NoLogo", "-NoProfile", "-NonInteractive", "-File", $descendantPath
+        ) -WindowStyle Hidden
+    } else {
+    $processInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $processInfo.FileName = "powershell.exe"
+    $processInfo.Arguments = "-NoLogo -NoProfile -NonInteractive -File `"$descendantPath`""
+    $processInfo.UseShellExecute = $false
+    $processInfo.CreateNoWindow = $true
+    $processInfo.RedirectStandardOutput = $true
+    $descendantProcess = [System.Diagnostics.Process]::Start($processInfo)
+    do {
+        $readyLine = $descendantProcess.StandardOutput.ReadLine()
+        if ($null -eq $readyLine) { throw "descendant exited before readiness" }
+    } while (-not $readyLine.Contains("termal-descendant-ready"))
+    }
+}
 [Console]::Out.WriteLine("termal-engram-control-fixture-ready")
 [Console]::Out.Flush()
 
@@ -160,52 +193,20 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
         exit 0
     }
     if ($mode -eq "fixture-hang") {
-        Start-Sleep -Seconds 30
-        continue
+        # No response and no timer: the host must kill this blocked reader.
+        [void][Console]::In.ReadLine()
+        exit 0
     }
     if ($mode.StartsWith("fixture-tree-")) {
-        $descendantPath = Join-Path $engramHome "engram-descendant.ps1"
         if ($mode -eq "fixture-tree-eof") {
-            Start-Process -FilePath "powershell.exe" -ArgumentList @(
-                "-NoLogo",
-                "-NoProfile",
-                "-NonInteractive",
-                "-File",
-                $descendantPath
-            ) -WindowStyle Hidden
-        } else {
-            $processInfo = [System.Diagnostics.ProcessStartInfo]::new()
-            $processInfo.FileName = "powershell.exe"
-            $processInfo.Arguments = "-NoLogo -NoProfile -NonInteractive -File `"$descendantPath`""
-            $processInfo.UseShellExecute = $false
-            $processInfo.CreateNoWindow = $true
-            [System.Diagnostics.Process]::Start($processInfo) | Out-Null
-        }
-        $spawnedPath = Join-Path $engramHome "engram-descendant-spawned"
-        $spawnDeadline = [DateTime]::UtcNow.AddSeconds(10)
-        while (-not (Test-Path -LiteralPath $spawnedPath) -and [DateTime]::UtcNow -lt $spawnDeadline) {
-            Start-Sleep -Milliseconds 10
-        }
-        if (-not (Test-Path -LiteralPath $spawnedPath)) {
-            exit 3
-        }
-        if ($mode -eq "fixture-tree-eof") {
-            $releasePath = Join-Path $engramHome "engram-eof-release"
-            $releaseDeadline = [DateTime]::UtcNow.AddSeconds(10)
-            while (-not (Test-Path -LiteralPath $releasePath) -and [DateTime]::UtcNow -lt $releaseDeadline) {
-                Start-Sleep -Milliseconds 10
-            }
-            if (-not (Test-Path -LiteralPath $releasePath)) {
-                exit 4
-            }
             exit 0
         }
         if ($mode -eq "fixture-tree-reply") {
             Write-Result @{ routing_token = $routingToken; status = @{ phase = "ready" } }
             continue
         }
-        Start-Sleep -Seconds 30
-        continue
+        [void][Console]::In.ReadLine()
+        exit 0
     }
     if ($mode -eq "fixture-malformed") {
         [Console]::Out.WriteLine('{"status":')

@@ -252,9 +252,11 @@ impl OrderedStateBroadcasterHarness {
 
     fn wait_for_processed(&self, expected_count: usize) {
         for _ in 0..expected_count {
-            self.processed_rx
-                .recv_timeout(Duration::from_secs(2))
-                .expect("test broadcaster should process queued work");
+            recv_within_guard(
+                &self.processed_rx,
+                "test broadcaster should process queued work",
+            )
+            .expect("test broadcaster should process queued work");
         }
     }
 }
@@ -1537,9 +1539,11 @@ async fn send_message_route_returns_metadata_and_publishes_prompt_delta() {
     .await;
 
     assert_eq!(status, StatusCode::ACCEPTED);
-    match input_rx
-        .recv_timeout(Duration::from_secs(1))
-        .expect("route should enqueue the runtime prompt before returning")
+    match recv_within_guard(
+        &input_rx,
+        "route should enqueue the runtime prompt before returning",
+    )
+    .expect("route should enqueue the runtime prompt before returning")
     {
         ClaudeRuntimeCommand::Prompt(command) => {
             assert_eq!(command.text, "Visible route prompt");
@@ -2619,8 +2623,7 @@ async fn codex_mcp_servers_route_paginates_and_sanitizes_status() {
 
     let server = std::thread::spawn(move || {
         for expected_cursor in [None, Some("page-2")] {
-            let command = input_rx
-                .recv_timeout(Duration::from_secs(1))
+            let command = recv_within_guard(&input_rx, "Codex MCP status request should arrive")
                 .expect("Codex MCP status request should arrive");
             match command {
                 CodexRuntimeCommand::JsonRpcRequest {
@@ -2729,9 +2732,9 @@ async fn codex_mcp_servers_route_bounds_unfinished_pagination() {
 
     let server = std::thread::spawn(move || {
         for page_index in 0..CODEX_MCP_STATUS_MAX_PAGES {
-            let command = input_rx
-                .recv_timeout(Duration::from_secs(1))
-                .expect("bounded Codex MCP status request should arrive");
+            let command =
+                recv_within_guard(&input_rx, "bounded Codex MCP status request should arrive")
+                    .expect("bounded Codex MCP status request should arrive");
             match command {
                 CodexRuntimeCommand::JsonRpcRequest {
                     method,
@@ -2786,8 +2789,7 @@ async fn codex_mcp_servers_route_rejects_a_repeated_pagination_cursor() {
 
     let server = std::thread::spawn(move || {
         for expected_cursor in [None, Some("loop")] {
-            let command = input_rx
-                .recv_timeout(Duration::from_secs(1))
+            let command = recv_within_guard(&input_rx, "Codex MCP status request should arrive")
                 .expect("Codex MCP status request should arrive");
             match command {
                 CodexRuntimeCommand::JsonRpcRequest {
@@ -3005,8 +3007,7 @@ async fn codex_thread_action_routes_update_session_state() {
             request_started_rx
                 .recv()
                 .expect("matching Codex thread action request should start");
-            let command = input_rx
-                .recv_timeout(Duration::from_secs(1))
+            let command = recv_within_guard(&input_rx, "Codex thread action should arrive")
                 .expect("Codex thread action should arrive");
             match command {
                 CodexRuntimeCommand::JsonRpcRequest {
@@ -3181,8 +3182,7 @@ async fn codex_thread_rollback_route_falls_back_when_history_is_unavailable() {
         .expect("shared Codex runtime mutex poisoned") = Some(runtime);
 
     std::thread::spawn(move || {
-        let command = input_rx
-            .recv_timeout(Duration::from_secs(1))
+        let command = recv_within_guard(&input_rx, "Codex rollback command should arrive")
             .expect("Codex rollback command should arrive");
         match command {
             CodexRuntimeCommand::JsonRpcRequest {
@@ -3284,8 +3284,7 @@ async fn codex_thread_fork_route_returns_created_response() {
         .expect("shared Codex runtime mutex poisoned") = Some(runtime);
 
     std::thread::spawn(move || {
-        let command = input_rx
-            .recv_timeout(Duration::from_secs(1))
+        let command = recv_within_guard(&input_rx, "Codex fork command should arrive")
             .expect("Codex fork command should arrive");
         match command {
             CodexRuntimeCommand::JsonRpcRequest {

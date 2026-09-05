@@ -39,6 +39,9 @@
 // `src/remote.rs`) and never touches a local runtime.
 
 #[cfg(test)]
+const TEST_PHASE_DEADLOCK_GUARD: Duration = Duration::from_secs(60);
+
+#[cfg(test)]
 struct TestStopFenceGate {
     claimed_tx: std::sync::mpsc::Sender<()>,
     release_rx: std::sync::mpsc::Receiver<()>,
@@ -62,9 +65,16 @@ struct TestStopFenceGateControl {
 #[cfg(test)]
 impl TestStopFenceGateControl {
     fn wait_until_claimed(&self) {
+        let started = std::time::Instant::now();
         self.claimed_rx
-            .recv_timeout(Duration::from_secs(2))
-            .expect("Stop should claim its callback fence");
+            .recv_timeout(TEST_PHASE_DEADLOCK_GUARD)
+            .unwrap_or_else(|error| {
+                panic!(
+                    "Stop fixture claim phase for {} did not complete after {:?}: {error}",
+                    self.key.1,
+                    started.elapsed()
+                )
+            });
     }
 
     fn release(&self) {
@@ -77,6 +87,9 @@ impl TestStopFenceGateControl {
 #[cfg(test)]
 impl Drop for TestStopFenceGateControl {
     fn drop(&mut self) {
+        // Unwind/cancellation must release a claimed worker as well as remove
+        // an unclaimed registration. A fixture is never synchronized by expiry.
+        let _ = self.release_tx.send(());
         TEST_STOP_FENCE_GATES
             .lock()
             .expect("test Stop fence gate mutex poisoned")
@@ -121,12 +134,11 @@ fn wait_at_test_stop_fence_gate(state: &AppState, session_id: &str) {
         .expect("test Stop fence gate mutex poisoned")
         .remove(&test_stop_fence_gate_key(state, session_id));
     if let Some(gate) = gate {
-        gate.claimed_tx
-            .send(())
-            .expect("test Stop fence observer should remain connected");
-        gate.release_rx
-            .recv_timeout(Duration::from_secs(5))
-            .expect("test Stop fence gate should be released");
+        if gate.claimed_tx.send(()).is_ok() {
+            // The observer owns the release, including Drop on panic. Grant
+            // revocation may perform process I/O while it holds this phase.
+            let _ = gate.release_rx.recv();
+        }
     }
 }
 

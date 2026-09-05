@@ -944,9 +944,11 @@ fn delegation_wait_dispatches_resume_prompt_to_idle_parent_runtime() {
         )
         .expect("delegation should be created");
 
-    match input_rx
-        .recv_timeout(Duration::from_secs(1))
-        .expect("delegation child prompt should be delivered first")
+    match recv_within_guard(
+        &input_rx,
+        "delegation child prompt should be delivered first",
+    )
+    .expect("delegation child prompt should be delivered first")
     {
         CodexRuntimeCommand::Prompt {
             session_id,
@@ -982,8 +984,7 @@ fn delegation_wait_dispatches_resume_prompt_to_idle_parent_runtime() {
         .refresh_delegation_for_child_session(&created.delegation.child_session_id)
         .expect("child completion should resume the parent");
 
-    match input_rx
-        .recv_timeout(Duration::from_secs(1))
+    match recv_within_guard(&input_rx, "parent resume prompt should dispatch to runtime")
         .expect("parent resume prompt should dispatch to runtime")
     {
         CodexRuntimeCommand::Prompt {
@@ -1032,9 +1033,11 @@ fn stop_session_keeps_queued_work_idle_and_cancels_late_delegation_resume() {
         )
         .expect("delegation should be created");
 
-    match input_rx
-        .recv_timeout(Duration::from_secs(1))
-        .expect("delegation child prompt should be delivered first")
+    match recv_within_guard(
+        &input_rx,
+        "delegation child prompt should be delivered first",
+    )
+    .expect("delegation child prompt should be delivered first")
     {
         CodexRuntimeCommand::Prompt { session_id, .. } => {
             assert_eq!(session_id, created.delegation.child_session_id);
@@ -1114,8 +1117,7 @@ fn stop_session_keeps_queued_work_idle_and_cancels_late_delegation_resume() {
     let stop_state = state.clone();
     let stop_parent_session_id = parent_session_id.clone();
     let stop_handle = std::thread::spawn(move || stop_state.stop_session(&stop_parent_session_id));
-    match input_rx
-        .recv_timeout(Duration::from_secs(1))
+    match recv_within_guard(&input_rx, "parent interrupt should be delivered")
         .expect("parent interrupt should be delivered")
     {
         CodexRuntimeCommand::InterruptTurn { response_tx, .. } => {
@@ -1311,9 +1313,11 @@ fn delegation_wait_reconciles_after_restart_recovery() {
         restarted.commit_locked(&mut inner).unwrap();
     }
     restarted.dispatch_orphaned_workflow_prompts();
-    match input_rx
-        .recv_timeout(Duration::from_secs(1))
-        .expect("workflow recovery should dispatch the mailbox wake first")
+    match recv_within_guard(
+        &input_rx,
+        "workflow recovery should dispatch the mailbox wake first",
+    )
+    .expect("workflow recovery should dispatch the mailbox wake first")
     {
         CodexRuntimeCommand::Prompt { command, .. } => {
             assert!(command.prompt.contains(&mailbox_id));

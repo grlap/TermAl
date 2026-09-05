@@ -2677,6 +2677,8 @@ fn sha256_hex(bytes: &[u8]) -> String {
 #[derive(Clone)]
 struct EngramBindingTarget {
     adapter: Arc<EngramHostAdapter>,
+    #[cfg(test)]
+    test_dispatch_budget: Option<Duration>,
     connection: EngramConnectionConfig,
     settings: EngramProjectSettings,
     project_id: String,
@@ -2703,6 +2705,14 @@ struct EngramBootRecoveryCompletion {
 }
 
 impl EngramBindingTarget {
+    fn remaining_dispatch_timeout(&self, started_at: std::time::Instant) -> Option<Duration> {
+        let budget = Duration::from_millis(ENGRAM_DISPATCH_BUDGET_MS);
+        #[cfg(test)]
+        let budget = self.test_dispatch_budget.unwrap_or(budget);
+        let remaining = budget.checked_sub(started_at.elapsed())?;
+        (!remaining.is_zero()).then(|| self.settings.call_timeout().min(remaining))
+    }
+
     fn checkpoint_for_project_reset_off_lock(
         &self,
     ) -> std::result::Result<(), EngramTransportError> {
@@ -4027,10 +4037,9 @@ impl AppState {
                             EngramControlFailMode::Degraded,
                         );
                     };
-                    let Some(timeout) = engram_remaining_dispatch_timeout(
-                        dispatch_budget_started_at,
-                        target.settings.call_timeout(),
-                    ) else {
+                    let Some(timeout) =
+                        target.remaining_dispatch_timeout(dispatch_budget_started_at)
+                    else {
                         break (
                             EngramControlCardDecision::Degraded,
                             Some("dispatch_budget_exhausted".to_owned()),
@@ -4128,10 +4137,9 @@ impl AppState {
                                 // budget only after the refreshed bind exists.
                                 dispatch_budget_started_at = std::time::Instant::now();
                             }
-                            let Some(timeout) = engram_remaining_dispatch_timeout(
-                                dispatch_budget_started_at,
-                                reevaluate_target.settings.call_timeout(),
-                            ) else {
+                            let Some(timeout) =
+                                reevaluate_target.remaining_dispatch_timeout(dispatch_budget_started_at)
+                            else {
                                 break (
                                     EngramControlCardDecision::Degraded,
                                     Some("dispatch_budget_exhausted".to_owned()),
@@ -4687,6 +4695,8 @@ impl AppState {
         );
         Ok(Some(EngramBindingTarget {
             adapter: inner.engram_host_adapter.clone(),
+            #[cfg(test)]
+            test_dispatch_budget: inner.test_engram_dispatch_budget,
             connection: EngramConnectionConfig {
                 binary_path,
                 project_file: root.join(".engram-project"),
@@ -4772,6 +4782,8 @@ impl AppState {
         );
         Ok(Some(EngramBindingTarget {
             adapter: inner.engram_host_adapter.clone(),
+            #[cfg(test)]
+            test_dispatch_budget: inner.test_engram_dispatch_budget,
             connection: EngramConnectionConfig {
                 binary_path,
                 project_file: root.join(".engram-project"),
@@ -4954,12 +4966,9 @@ impl AppState {
         let was_rebind = target.rebind_required || target.circuit_open;
         if target.rebind_required || target.circuit_open {
             if let Some(routing_token) = target.routing_token.clone() {
-                let timeout =
-                    engram_remaining_dispatch_timeout(
-                        recovery_started_at,
-                        target.settings.call_timeout(),
-                    )
-                        .ok_or_else(|| {
+                let timeout = target
+                    .remaining_dispatch_timeout(recovery_started_at)
+                    .ok_or_else(|| {
                         EngramTransportError::deadline("Engram rebind budget exhausted")
                     })?;
                 let status_started_at = std::time::Instant::now();
@@ -5007,13 +5016,11 @@ impl AppState {
                         target.active_grant_id = None;
                     }
                     if let Some(grant_id) = status.open_grant_id.as_deref() {
-                        let timeout = engram_remaining_dispatch_timeout(
-                            recovery_started_at,
-                            target.settings.call_timeout(),
-                        )
-                        .ok_or_else(|| {
-                            EngramTransportError::deadline("Engram rebind budget exhausted")
-                        })?;
+                        let timeout = target
+                            .remaining_dispatch_timeout(recovery_started_at)
+                            .ok_or_else(|| {
+                                EngramTransportError::deadline("Engram rebind budget exhausted")
+                            })?;
                         let checkpoint_started_at = std::time::Instant::now();
                         let checkpoint = target
                             .adapter
@@ -5383,9 +5390,7 @@ impl AppState {
                 requested_effects: target.effects.clone(),
                 resource_intents: Vec::new(),
             };
-            let Some(timeout) =
-                engram_remaining_dispatch_timeout(started_at, target.settings.call_timeout())
-            else {
+            let Some(timeout) = target.remaining_dispatch_timeout(started_at) else {
                 break EngramDispatchEvaluation::Degraded {
                     code: "dispatch_budget_exhausted".to_owned(),
                     detail:
@@ -5637,15 +5642,6 @@ fn engram_bind_retry_delay(failure_count: u8) -> Duration {
         3 => 30,
         _ => 60,
     })
-}
-
-fn engram_remaining_dispatch_timeout(
-    started_at: std::time::Instant,
-    call_timeout: Duration,
-) -> Option<Duration> {
-    let budget = Duration::from_millis(ENGRAM_DISPATCH_BUDGET_MS);
-    let remaining = budget.checked_sub(started_at.elapsed())?;
-    (!remaining.is_zero()).then(|| call_timeout.min(remaining))
 }
 
 fn engram_begin_refusal_allows_reevaluation(code: &str) -> bool {

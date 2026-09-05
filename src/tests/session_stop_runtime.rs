@@ -121,8 +121,7 @@ fn stops_shared_codex_sessions_via_turn_interrupt() {
     }
 
     std::thread::spawn(move || {
-        let command = input_rx
-            .recv_timeout(Duration::from_secs(1))
+        let command = recv_within_guard(&input_rx, "Codex interrupt command should arrive")
             .expect("Codex interrupt command should arrive");
         match command {
             CodexRuntimeCommand::InterruptTurn {
@@ -185,7 +184,8 @@ fn stops_shared_codex_sessions_via_turn_interrupt() {
 #[test]
 fn terminal_delegation_cleanup_detaches_shared_codex_child_without_interrupt() {
     let session_id = "delegation-child-shared-codex".to_owned();
-    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let process_owner = phase_sync::ParkedProcess::spawn();
+    let process = process_owner.process.clone();
     let (input_tx, input_rx) = mpsc::channel();
     let runtime = SharedCodexRuntime {
         runtime_id: "shared-codex-terminal-delegation".to_owned(),
@@ -261,7 +261,8 @@ fn terminal_delegation_cleanup_detaches_shared_codex_child_without_interrupt() {
 #[test]
 fn terminal_delegation_cleanup_defers_shared_codex_detach_when_sessions_lock_is_held() {
     let session_id = "delegation-child-shared-codex-locked".to_owned();
-    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let process_owner = phase_sync::ParkedProcess::spawn();
+    let process = process_owner.process.clone();
     let (input_tx, input_rx) = mpsc::channel();
     let runtime = SharedCodexRuntime {
         runtime_id: "shared-codex-terminal-delegation-locked".to_owned(),
@@ -319,7 +320,7 @@ fn terminal_delegation_cleanup_defers_shared_codex_detach_when_sessions_lock_is_
     ));
     drop(sessions_guard);
 
-    let deadline = std::time::Instant::now() + Duration::from_secs(1);
+    let completion = phase_sync::PollGuard::new();
     loop {
         let detached = {
             let sessions = runtime
@@ -336,10 +337,7 @@ fn terminal_delegation_cleanup_defers_shared_codex_detach_when_sessions_lock_is_
         if detached {
             break;
         }
-        if std::time::Instant::now() >= deadline {
-            panic!("deferred shared Codex detach did not complete");
-        }
-        std::thread::sleep(Duration::from_millis(5));
+        completion.wait("deferred shared Codex detach");
     }
     assert!(!shared_child_has_exited(&process, "shared Codex runtime").unwrap());
 
@@ -358,7 +356,8 @@ fn terminal_delegation_cleanup_defers_shared_codex_detach_when_sessions_lock_is_
 fn stop_session_detaches_shared_codex_session_when_interrupt_fails() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Codex);
-    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let process_owner = phase_sync::ParkedProcess::spawn();
+    let process = process_owner.process.clone();
     let (input_tx, input_rx) = mpsc::channel();
     let runtime = SharedCodexRuntime {
         runtime_id: "shared-codex-stop-fail".to_owned(),
@@ -476,7 +475,8 @@ fn stop_session_detaches_shared_codex_session_when_interrupt_fails() {
 fn stop_session_pauses_queued_prompt_after_shared_codex_interrupt_failure() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Codex);
-    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let process_owner = phase_sync::ParkedProcess::spawn();
+    let process = process_owner.process.clone();
     let (input_tx, input_rx) = mpsc::channel();
     let runtime = SharedCodexRuntime {
         runtime_id: "shared-codex-stop-fail-queued".to_owned(),
@@ -564,8 +564,7 @@ fn stop_session_pauses_queued_prompt_after_shared_codex_interrupt_failure() {
     let mut delta_events = state.subscribe_delta_events();
 
     let command_thread = std::thread::spawn(move || {
-        let interrupt = input_rx
-            .recv_timeout(Duration::from_secs(1))
+        let interrupt = recv_within_guard(&input_rx, "Codex interrupt command should arrive")
             .expect("Codex interrupt command should arrive");
         match interrupt {
             CodexRuntimeCommand::InterruptTurn {
@@ -747,7 +746,8 @@ fn stop_session_pauses_queued_prompt_after_shared_codex_interrupt_failure() {
 fn stop_session_losing_ownership_preserves_successor_runtime_and_queue() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Cursor);
-    let original_process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let original_process_owner = phase_sync::ParkedProcess::spawn();
+    let original_process = original_process_owner.process.clone();
     let (original_input_tx, _original_input_rx) = mpsc::channel();
     let original_runtime = AcpRuntimeHandle {
         agent: AcpAgent::Cursor,
@@ -756,7 +756,8 @@ fn stop_session_losing_ownership_preserves_successor_runtime_and_queue() {
         process: original_process.clone(),
         turn_lifecycle: Arc::new((Mutex::new(false), Condvar::new())),
     };
-    let successor_process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let successor_process_owner = phase_sync::ParkedProcess::spawn();
+    let successor_process = successor_process_owner.process.clone();
     let (successor_input_tx, successor_input_rx) = mpsc::channel();
     let successor_runtime = AcpRuntimeHandle {
         agent: AcpAgent::Cursor,
@@ -863,7 +864,8 @@ fn stop_session_losing_ownership_preserves_successor_runtime_and_queue() {
 fn stop_session_rolls_back_queued_successor_when_persist_fails() {
     let mut state = test_app_state();
     let session_id = test_session_id(&state, Agent::Cursor);
-    let original_process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let original_process_owner = phase_sync::ParkedProcess::spawn();
+    let original_process = original_process_owner.process.clone();
     let (original_input_tx, original_input_rx) = mpsc::channel();
     let original_runtime = AcpRuntimeHandle {
         agent: AcpAgent::Cursor,
@@ -872,7 +874,8 @@ fn stop_session_rolls_back_queued_successor_when_persist_fails() {
         process: original_process.clone(),
         turn_lifecycle: Arc::new((Mutex::new(false), Condvar::new())),
     };
-    let successor_process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let successor_process_owner = phase_sync::ParkedProcess::spawn();
+    let successor_process = successor_process_owner.process.clone();
     let (successor_input_tx, successor_input_rx) = mpsc::channel();
     let successor_runtime = AcpRuntimeHandle {
         agent: AcpAgent::Cursor,
@@ -1023,7 +1026,8 @@ fn stop_session_rolls_back_queued_successor_when_persist_fails() {
 fn stop_session_restores_parent_delegation_wait_when_persist_fails() {
     let mut state = test_app_state();
     let session_id = test_session_id(&state, Agent::Cursor);
-    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let process_owner = phase_sync::ParkedProcess::spawn();
+    let process = process_owner.process.clone();
     let (input_tx, input_rx) = mpsc::channel();
     let runtime = AcpRuntimeHandle {
         agent: AcpAgent::Cursor,
@@ -1121,7 +1125,8 @@ fn stop_session_restores_parent_delegation_wait_when_persist_fails() {
 fn stop_session_keeps_queued_prompt_idle_when_successor_start_fails() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Cursor);
-    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let process_owner = phase_sync::ParkedProcess::spawn();
+    let process = process_owner.process.clone();
     let (input_tx, input_rx) = mpsc::channel();
     let runtime = AcpRuntimeHandle {
         agent: AcpAgent::Cursor,
@@ -1237,7 +1242,8 @@ fn stop_session_keeps_queued_prompt_idle_when_successor_start_fails() {
 fn stop_session_returns_an_error_when_a_dedicated_runtime_refuses_to_stop() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Claude);
-    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let process_owner = phase_sync::ParkedProcess::spawn();
+    let process = process_owner.process.clone();
     let (input_tx, input_rx) = mpsc::channel();
     let runtime = ClaudeRuntimeHandle {
         runtime_id: "claude-stop-fail".to_owned(),
@@ -1314,7 +1320,8 @@ fn stop_session_returns_an_error_when_a_dedicated_runtime_refuses_to_stop() {
 fn stop_session_keeps_the_previous_state_visible_until_shutdown_completes() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Claude);
-    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let process_owner = phase_sync::ParkedProcess::spawn();
+    let process = process_owner.process.clone();
     let (input_tx, input_rx) = mpsc::channel();
     let runtime = ClaudeRuntimeHandle {
         runtime_id: "claude-stop-concurrent-read".to_owned(),
@@ -1332,33 +1339,24 @@ fn stop_session_keeps_the_previous_state_visible_until_shutdown_completes() {
         inner.sessions[index].session.preview = "Streaming reply...".to_owned();
     }
 
+    let stop_gate = install_test_stop_fence_gate(&state, &session_id);
     let stop_state = state.clone();
     let stop_session_id = session_id.clone();
     let stop_handle = std::thread::spawn(move || stop_state.stop_session(&stop_session_id));
 
-    let deadline = std::time::Instant::now() + Duration::from_secs(1);
-    loop {
-        {
-            let inner = state.inner.lock().expect("state mutex poisoned");
-            let record = inner
-                .sessions
-                .iter()
-                .find(|record| record.session.id == session_id)
-                .expect("Claude session should exist");
-            if record.runtime_stop_in_progress {
-                assert_eq!(record.session.status, SessionStatus::Active);
-                assert_eq!(record.session.preview, "Streaming reply...");
-                break;
-            }
-        }
+    stop_gate.wait_until_claimed();
 
-        if std::time::Instant::now() >= deadline {
-            panic!("stop_session did not enter the shutdown window in time");
-        }
-
-        std::thread::sleep(Duration::from_millis(5));
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let record = inner
+            .sessions
+            .iter()
+            .find(|record| record.session.id == session_id)
+            .unwrap();
+        assert!(record.runtime_stop_in_progress);
+        assert_eq!(record.session.status, SessionStatus::Active);
+        assert_eq!(record.session.preview, "Streaming reply...");
     }
-
     let snapshot = state.full_snapshot();
     let session = snapshot
         .sessions
@@ -1368,6 +1366,7 @@ fn stop_session_keeps_the_previous_state_visible_until_shutdown_completes() {
     assert_eq!(session.status, SessionStatus::Active);
     assert_eq!(session.preview, "Streaming reply...");
 
+    stop_gate.release();
     let stopped_snapshot = stop_handle
         .join()
         .expect("stop_session thread should join cleanly")
@@ -1406,7 +1405,8 @@ fn stop_session_keeps_the_previous_state_visible_until_shutdown_completes() {
 fn stop_session_returns_conflict_when_already_stopping() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Claude);
-    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let process_owner = phase_sync::ParkedProcess::spawn();
+    let process = process_owner.process.clone();
     let (input_tx, input_rx) = mpsc::channel();
     let runtime = ClaudeRuntimeHandle {
         runtime_id: "claude-stop-conflict".to_owned(),
@@ -1424,30 +1424,12 @@ fn stop_session_returns_conflict_when_already_stopping() {
         inner.sessions[index].session.preview = "Streaming reply...".to_owned();
     }
 
+    let stop_gate = install_test_stop_fence_gate(&state, &session_id);
     let stop_state = state.clone();
     let stop_session_id = session_id.clone();
     let stop_handle = std::thread::spawn(move || stop_state.stop_session(&stop_session_id));
 
-    let deadline = std::time::Instant::now() + Duration::from_secs(1);
-    loop {
-        let stop_in_progress = {
-            let inner = state.inner.lock().expect("state mutex poisoned");
-            inner
-                .sessions
-                .iter()
-                .find(|record| record.session.id == session_id)
-                .expect("Claude session should exist")
-                .runtime_stop_in_progress
-        };
-        if stop_in_progress {
-            break;
-        }
-        if std::time::Instant::now() >= deadline {
-            panic!("stop_session did not enter the shutdown window in time");
-        }
-
-        std::thread::sleep(Duration::from_millis(5));
-    }
+    stop_gate.wait_until_claimed();
 
     let error = match state.stop_session(&session_id) {
         Ok(_) => panic!("a second stop should conflict while shutdown is in flight"),
@@ -1456,6 +1438,7 @@ fn stop_session_returns_conflict_when_already_stopping() {
     assert_eq!(error.status, StatusCode::CONFLICT);
     assert_eq!(error.message, "session is already stopping");
 
+    stop_gate.release();
     let stopped_snapshot = stop_handle
         .join()
         .expect("stop_session thread should join cleanly")
@@ -2268,7 +2251,8 @@ fn shared_codex_runtime_exit_clears_state_and_kills_process() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Codex);
     let idle_session_id = test_session_id(&state, Agent::Codex);
-    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let process_owner = phase_sync::ParkedProcess::spawn();
+    let process = process_owner.process.clone();
     let (input_tx, _input_rx) = mpsc::channel();
     let runtime = SharedCodexRuntime {
         runtime_id: "shared-codex-timeout".to_owned(),

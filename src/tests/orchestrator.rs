@@ -501,7 +501,8 @@ async fn orchestrator_stop_route_preserves_running_state_when_a_child_stop_fails
         .expect("reviewer session should be mapped")
         .session_id
         .clone();
-    let failing_process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let failing_process_owner = phase_sync::ParkedProcess::spawn();
+    let failing_process = failing_process_owner.process.clone();
     let (planner_input_tx, _planner_input_rx) = mpsc::channel();
     let planner_runtime = ClaudeRuntimeHandle {
         runtime_id: "route-orchestrator-stop-fail".to_owned(),
@@ -3601,10 +3602,11 @@ fn stop_session_does_not_schedule_orchestrator_transitions() {
         .session_id
         .clone();
     let (input_tx, _input_rx) = mpsc::channel();
+    let process_owner = phase_sync::ParkedProcess::spawn();
     let runtime = ClaudeRuntimeHandle {
         runtime_id: "orchestrator-stop-transition".to_owned(),
         input_tx,
-        process: Arc::new(SharedChild::new(test_sleep_child()).unwrap()),
+        process: process_owner.process.clone(),
     };
 
     {

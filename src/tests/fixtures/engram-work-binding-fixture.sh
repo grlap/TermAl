@@ -43,6 +43,11 @@ done
 [ "${ENGRAM_ACTOR_CONTEXT:-}" = "$actor_context" ] || exit 7
 [ "${ENGRAM_SESSION_ID:-}" = "$session_id" ] || exit 7
 mode=$(tr -d '\r\n' < "$project_file")
+if [ "$operation" = focus ]; then
+  printf 'focus:%s\n' "$work_ref" >> "$engram_home/work-read-phases"
+else
+  printf '%s\n' "$operation" >> "$engram_home/work-read-phases"
+fi
 marker="$engram_home/work-next-read"
 lock_retry_marker="$engram_home/work-lock-retried"
 if [ "$operation" = next ]; then

@@ -340,17 +340,15 @@ fn wait_for_terminal_output_snapshot(
     expected_output: &str,
     expected_truncated: bool,
 ) {
-    let deadline = std::time::Instant::now() + Duration::from_secs(1);
+    let deadline = phase_sync::PollGuard::new();
     loop {
         let snapshot = snapshot_terminal_output_buffer(buffer);
         if snapshot == (expected_output.to_owned(), expected_truncated) {
             return;
         }
-        assert!(
-            std::time::Instant::now() < deadline,
+        deadline.wait(format_args!(
             "terminal output buffer snapshot stayed at {snapshot:?}"
-        );
-        std::thread::sleep(Duration::from_millis(10));
+        ));
     }
 }
 
@@ -378,24 +376,27 @@ fn terminal_output_reader_timeout_returns_non_empty_shared_prefix() {
     tx.send(b"more".to_vec()).unwrap();
     wait_for_terminal_output_snapshot(&buffer, "prefix-more", false);
 
-    let started = std::time::Instant::now();
-    let (output, truncated) = join_terminal_output_reader(
-        reader,
-        done_rx,
-        buffer,
-        "stdout",
-        Duration::from_millis(100),
-        None,
+    let (result_tx, result_rx) = mpsc::channel();
+    let joiner = std::thread::spawn(move || {
+        let result = join_terminal_output_reader(
+            reader,
+            done_rx,
+            buffer,
+            "stdout",
+            Duration::from_millis(100),
+            None,
+        );
+        let _ = result_tx.send(result);
+    });
+    let (output, truncated) = phase_sync::receive(
+        &result_rx,
+        "reader timeout returns while its input sender remains open",
     )
     .expect("reader timeout should return buffered output");
+    joiner.join().unwrap();
 
     assert_eq!(output, "prefix-more");
     assert!(truncated);
-    assert!(
-        started.elapsed() < Duration::from_secs(1),
-        "timeout path should return promptly"
-    );
-
     drop(tx);
 }
 
@@ -491,23 +492,27 @@ fn terminal_output_shared_buffer_round_trips_from_reader_thread() {
     assert!(truncated);
 }
 
-/// Yields a single fixed-size chunk per `read()` call, sleeping briefly
-/// between chunks so intermediate snapshots on the main thread have a
-/// chance to observe the in-progress shared buffer state. Used to
-/// exercise the `TerminalOutputBuffer` concurrency contract: one writer
-/// thread appending via `read_capped_terminal_output_into`, one
-/// snapshotter thread reading via `snapshot_terminal_output_buffer`.
-struct SlowChunkedReader {
+/// Publishes one complete chunk before parking on the next read. The test
+/// snapshots that intermediate state, then releases the rest of the writer.
+struct GatedChunkedReader {
     chunk: &'static [u8],
     remaining: usize,
+    reads: usize,
+    first_appended: mpsc::Sender<()>,
+    release: mpsc::Receiver<()>,
 }
 
-impl std::io::Read for SlowChunkedReader {
+impl std::io::Read for GatedChunkedReader {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         if self.remaining == 0 {
             return Ok(0);
         }
-        std::thread::sleep(Duration::from_micros(200));
+        if self.reads == 1 {
+            let _ = self.first_appended.send(());
+            // Disconnect releases the fixture during parent assertion unwind.
+            let _ = self.release.recv();
+        }
+        self.reads += 1;
         let take = self.chunk.len().min(buf.len());
         buf[..take].copy_from_slice(&self.chunk[..take]);
         self.remaining -= 1;
@@ -536,10 +541,15 @@ fn terminal_output_buffer_supports_concurrent_writer_and_snapshotter() {
 
     let buffer = new_terminal_output_buffer();
     let writer_buffer = buffer.clone();
+    let (first_tx, first_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
     let writer = std::thread::spawn(move || {
-        let reader = SlowChunkedReader {
+        let reader = GatedChunkedReader {
             chunk: CHUNK,
             remaining: CHUNK_COUNT,
+            reads: 0,
+            first_appended: first_tx,
+            release: release_rx,
         };
         read_capped_terminal_output_into(reader, &writer_buffer)
     });
@@ -547,18 +557,16 @@ fn terminal_output_buffer_supports_concurrent_writer_and_snapshotter() {
     // Capture at least one snapshot before the writer can finish, and
     // keep capturing until it does. Every snapshot MUST be a valid
     // prefix of the final buffer.
+    phase_sync::receive(&first_rx, "first terminal output chunk appended");
     let mut intermediate_snapshots = Vec::new();
     let (early, _) = snapshot_terminal_output_buffer(&buffer);
+    assert_eq!(early, std::str::from_utf8(CHUNK).unwrap());
     intermediate_snapshots.push(early);
+    release_tx.send(()).unwrap();
     while !writer.is_finished() {
         let (output, _) = snapshot_terminal_output_buffer(&buffer);
         intermediate_snapshots.push(output);
-        // Yield between snapshots so the writer thread can make progress
-        // on single-core CI runners and on Windows where the default
-        // timer resolution is ~15.6ms: a tight hot-spin here would
-        // starve the 200μs `SlowChunkedReader` sleep and leave the
-        // snapshotter spinning in kernel-mode before any chunk is
-        // appended to the buffer.
+        // Yield between observations without assuming the writer has advanced.
         std::thread::yield_now();
     }
     writer
@@ -1333,11 +1341,7 @@ async fn terminal_run_route_limits_concurrent_commands() {
         // `terminal_run_route_proxies_valid_remote_multibyte_commands` for
         // the full rationale).
         loop {
-            let mut stream = accept_test_connection_with_timeout(
-                &listener,
-                "terminal limit remote listener",
-                std::time::Duration::from_secs(10),
-            );
+            let mut stream = accept_test_connection(&listener, "terminal limit remote listener");
             let mut buffer = Vec::new();
             let mut chunk = [0u8; 4096];
             let header_end = loop {

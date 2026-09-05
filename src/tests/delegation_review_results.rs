@@ -177,9 +177,11 @@ fn codex_reviewer_auto_accepts_only_authorized_review_result_control_plane_reque
         )
         .expect("authorized control-plane request should be handled")
     );
-    let response = input_rx
-        .recv_timeout(Duration::from_secs(1))
-        .expect("Codex should receive an automatic control-plane response");
+    let response = recv_within_guard(
+        &input_rx,
+        "Codex should receive an automatic control-plane response",
+    )
+    .expect("Codex should receive an automatic control-plane response");
     assert!(matches!(
         response,
         CodexRuntimeCommand::JsonRpcResponse {

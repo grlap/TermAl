@@ -239,8 +239,7 @@ fn acp_session_resume_attempts_load_when_session_load_support_is_unknown() {
         )
     });
 
-    let (_load_request_id, load_sender) =
-        take_pending_acp_request(&pending_requests, Duration::from_secs(1));
+    let (_load_request_id, load_sender) = take_pending_acp_request(&pending_requests);
     load_sender
         .send(Ok(json!({
             "configOptions": [
@@ -364,8 +363,7 @@ fn acp_session_load_method_not_found_downgrades_capability_and_starts_fresh() {
         )
     });
 
-    let (_load_request_id, load_sender) =
-        take_pending_acp_request(&pending_requests, Duration::from_secs(1));
+    let (_load_request_id, load_sender) = take_pending_acp_request(&pending_requests);
     load_sender
         .send(Err(AcpResponseError::JsonRpc(AcpJsonRpcError {
             code: Some(-32601),
@@ -374,8 +372,7 @@ fn acp_session_load_method_not_found_downgrades_capability_and_starts_fresh() {
         })))
         .expect("session/load rejection should send");
 
-    let (_new_request_id, new_sender) =
-        take_pending_acp_request(&pending_requests, Duration::from_secs(1));
+    let (_new_request_id, new_sender) = take_pending_acp_request(&pending_requests);
     new_sender
         .send(Ok(json!({
             "sessionId": "legacy-cursor-fresh",
@@ -471,8 +468,7 @@ fn acp_session_resume_prefers_resume_when_explicitly_supported() {
         )
     });
 
-    let (_resume_request_id, resume_sender) =
-        take_pending_acp_request(&pending_requests, Duration::from_secs(1));
+    let (_resume_request_id, resume_sender) = take_pending_acp_request(&pending_requests);
     resume_sender
         .send(Ok(json!({
             "configOptions": [
@@ -577,8 +573,7 @@ fn acp_session_resume_typed_invalid_session_starts_fresh_for_cursor() {
         )
     });
 
-    let (_resume_request_id, resume_sender) =
-        take_pending_acp_request(&pending_requests, Duration::from_secs(1));
+    let (_resume_request_id, resume_sender) = take_pending_acp_request(&pending_requests);
     resume_sender
         .send(Err(AcpResponseError::JsonRpc(AcpJsonRpcError {
             code: Some(-32602),
@@ -587,8 +582,7 @@ fn acp_session_resume_typed_invalid_session_starts_fresh_for_cursor() {
         })))
         .expect("typed resume rejection should send");
 
-    let (_new_request_id, new_sender) =
-        take_pending_acp_request(&pending_requests, Duration::from_secs(1));
+    let (_new_request_id, new_sender) = take_pending_acp_request(&pending_requests);
     new_sender
         .send(Ok(json!({
             "sessionId": "cursor-session-fresh",
@@ -719,8 +713,7 @@ fn acp_session_resume_skips_load_when_session_load_is_explicitly_unsupported() {
         )
     });
 
-    let (_new_request_id, new_sender) =
-        take_pending_acp_request(&pending_requests, Duration::from_secs(1));
+    let (_new_request_id, new_sender) = take_pending_acp_request(&pending_requests);
     new_sender
         .send(Ok(json!({
             "sessionId": "cursor-session-new",
@@ -849,7 +842,8 @@ fn acp_cancel_before_external_session_ready_is_a_noop() {
 // terminating the detached subprocess.
 #[test]
 fn acp_stop_preserves_continuity_after_cancelled_prompt_settles() {
-    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let fixture = phase_sync::ParkedProcess::spawn();
+    let process = fixture.process.clone();
     let (input_tx, input_rx) = mpsc::channel();
     let turn_lifecycle: AcpTurnLifecycle = Arc::new((Mutex::new(true), Condvar::new()));
     let runtime = AcpRuntimeHandle {
@@ -860,8 +854,7 @@ fn acp_stop_preserves_continuity_after_cancelled_prompt_settles() {
         turn_lifecycle: turn_lifecycle.clone(),
     };
     let responder = std::thread::spawn(move || {
-        match input_rx
-            .recv_timeout(Duration::from_secs(1))
+        match recv_within_guard(&input_rx, "cancel command should arrive")
             .expect("cancel command should arrive")
         {
             AcpRuntimeCommand::Cancel => {
@@ -875,12 +868,7 @@ fn acp_stop_preserves_continuity_after_cancelled_prompt_settles() {
         .stop_with_grace(Duration::from_secs(1))
         .expect("clean ACP stop should succeed");
     responder.join().expect("cancel responder should finish");
-    assert!(
-        wait_for_shared_child_exit_timeout(&process, Duration::from_secs(1), "test ACP")
-            .expect("child status should be readable")
-            .is_some(),
-        "cleanly canceled ACP subprocess should still be reaped"
-    );
+    phase_sync::process_exit(&process, "cleanly canceled ACP subprocess reaped");
 }
 
 // Pins the never-settles branch without timing assertions: once cancel was
@@ -889,7 +877,8 @@ fn acp_stop_preserves_continuity_after_cancelled_prompt_settles() {
 // the typed resume classifier rather than this local process observation.
 #[test]
 fn acp_stop_kills_after_cancel_grace_when_prompt_never_settles() {
-    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let fixture = phase_sync::ParkedProcess::spawn();
+    let process = fixture.process.clone();
     let (input_tx, input_rx) = mpsc::channel();
     let turn_lifecycle: AcpTurnLifecycle = Arc::new((Mutex::new(true), Condvar::new()));
     let runtime = AcpRuntimeHandle {
@@ -900,8 +889,7 @@ fn acp_stop_kills_after_cancel_grace_when_prompt_never_settles() {
         turn_lifecycle,
     };
     let responder = std::thread::spawn(move || {
-        match input_rx
-            .recv_timeout(Duration::from_secs(1))
+        match recv_within_guard(&input_rx, "cancel command should arrive")
             .expect("cancel command should arrive")
         {
             AcpRuntimeCommand::Cancel => {}
@@ -913,11 +901,9 @@ fn acp_stop_kills_after_cancel_grace_when_prompt_never_settles() {
         .stop_with_grace(Duration::from_millis(20))
         .expect("fallback ACP stop should kill the process");
     responder.join().expect("cancel responder should finish");
-    assert!(
-        wait_for_shared_child_exit_timeout(&process, Duration::from_secs(1), "test ACP")
-            .expect("child status should be readable")
-            .is_some(),
-        "never-settling ACP subprocess should be killed after the grace bound"
+    phase_sync::process_exit(
+        &process,
+        "never-settling ACP subprocess killed after cancel grace",
     );
 }
 
@@ -926,7 +912,8 @@ fn acp_stop_kills_after_cancel_grace_when_prompt_never_settles() {
 // the external ACP session invalid and therefore must not request id clearing.
 #[test]
 fn acp_stop_with_disconnected_writer_kills_but_preserves_continuity() {
-    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let fixture = phase_sync::ParkedProcess::spawn();
+    let process = fixture.process.clone();
     let (input_tx, input_rx) = mpsc::channel();
     drop(input_rx);
     let runtime = AcpRuntimeHandle {
@@ -939,17 +926,13 @@ fn acp_stop_with_disconnected_writer_kills_but_preserves_continuity() {
 
     shutdown_stopped_runtime(KillableRuntime::Acp(runtime), "disconnected ACP test")
         .expect("disconnected cancel should fall back to process termination");
-    assert!(
-        wait_for_shared_child_exit_timeout(&process, Duration::from_secs(1), "test ACP")
-            .expect("child status should be readable")
-            .is_some(),
-        "disconnected ACP subprocess should still be reaped"
-    );
+    phase_sync::process_exit(&process, "disconnected ACP subprocess reaped");
 }
 
 #[test]
 fn cursor_deliberate_stop_keeps_immediate_termination_contract() {
-    let process = Arc::new(SharedChild::new(test_sleep_child()).unwrap());
+    let fixture = phase_sync::ParkedProcess::spawn();
+    let process = fixture.process.clone();
     let (input_tx, input_rx) = mpsc::channel();
     let runtime = AcpRuntimeHandle {
         agent: AcpAgent::Cursor,
@@ -966,11 +949,9 @@ fn cursor_deliberate_stop_keeps_immediate_termination_contract() {
         matches!(input_rx.try_recv(), Err(mpsc::TryRecvError::Disconnected)),
         "the OpenCode-only graceful stop must not enqueue session/cancel for Cursor"
     );
-    assert!(
-        wait_for_shared_child_exit_timeout(&process, Duration::from_secs(1), "test Cursor ACP")
-            .expect("child status should be readable")
-            .is_some(),
-        "Cursor subprocess should be reaped immediately"
+    phase_sync::process_exit(
+        &process,
+        "Cursor subprocess reaped without ACP cancellation",
     );
 }
 

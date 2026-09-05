@@ -76,8 +76,7 @@ async fn send_message_route_accepts_ten_mebibyte_image_body() {
         .expect("message route should respond");
 
     assert_eq!(response.status(), StatusCode::ACCEPTED);
-    match input_rx
-        .recv_timeout(Duration::from_secs(1))
+    match recv_within_guard(&input_rx, "route should enqueue the image prompt")
         .expect("route should enqueue the image prompt")
     {
         ClaudeRuntimeCommand::Prompt(command) => {

@@ -2089,9 +2089,11 @@ fn concurrent_shutdown_waits_for_join_owner_before_publishing_stopped() {
         first.shutdown_persist_blocking();
     });
 
-    shutdown_seen_rx
-        .recv_timeout(std::time::Duration::from_secs(1))
-        .expect("first shutdown caller should signal the worker");
+    recv_within_guard(
+        &shutdown_seen_rx,
+        "first shutdown caller should signal the worker",
+    )
+    .expect("first shutdown caller should signal the worker");
     assert!(
         state.persist_worker_alive.load(Ordering::Acquire),
         "alive must stay true while the join owner is still waiting",
@@ -2124,9 +2126,11 @@ fn concurrent_shutdown_waits_for_join_owner_before_publishing_stopped() {
     second_joiner
         .join()
         .expect("second shutdown caller should not panic");
-    second_done_rx
-        .recv_timeout(std::time::Duration::from_secs(1))
-        .expect("second shutdown caller should return after join owner finishes");
+    recv_within_guard(
+        &second_done_rx,
+        "second shutdown caller should return after join owner finishes",
+    )
+    .expect("second shutdown caller should return after join owner finishes");
     assert!(
         !state.persist_worker_alive.load(Ordering::Acquire),
         "alive should flip only after the worker has exited",
@@ -2191,9 +2195,11 @@ fn shutdown_persist_blocking_persists_delta_committed_while_joining_worker() {
         shutdown_state.shutdown_persist_blocking();
     });
 
-    shutdown_seen_rx
-        .recv_timeout(std::time::Duration::from_secs(1))
-        .expect("shutdown should reach the worker before the late mutation");
+    recv_within_guard(
+        &shutdown_seen_rx,
+        "shutdown should reach the worker before the late mutation",
+    )
+    .expect("shutdown should reach the worker before the late mutation");
 
     {
         let mut inner = state.inner.lock().expect("state mutex poisoned");

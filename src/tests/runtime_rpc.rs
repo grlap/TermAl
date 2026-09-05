@@ -90,13 +90,15 @@ fn acp_json_rpc_request_without_timeout_waits_for_late_response() {
             .unwrap();
     });
 
-    let (request_id, sender) = take_pending_acp_request(&pending_requests, Duration::from_secs(1));
+    let (request_id, sender) = take_pending_acp_request(&pending_requests);
 
     sender.send(Ok(json!({ "ok": true }))).unwrap();
 
-    let (written, result) = result_rx
-        .recv_timeout(Duration::from_secs(1))
-        .expect("late ACP response should unblock the prompt request");
+    let (written, result) = recv_within_guard(
+        &result_rx,
+        "late ACP response should unblock the prompt request",
+    )
+    .expect("late ACP response should unblock the prompt request");
     assert!(written.contains("\"method\":\"session/prompt\""));
     assert!(written.contains(&format!("\"id\":\"{request_id}\"")));
     assert_eq!(result, json!({ "ok": true }));
@@ -138,14 +140,13 @@ fn codex_json_rpc_request_without_timeout_waits_for_late_response() {
             .unwrap();
     });
 
-    let (request_id, sender) =
-        take_pending_codex_request(&pending_requests, Duration::from_secs(1));
+    let (request_id, sender) = take_pending_codex_request(&pending_requests);
 
     sender.send(Ok(json!({ "ok": true }))).unwrap();
 
-    let (written, result) = result_rx
-        .recv_timeout(Duration::from_secs(1))
-        .expect("late Codex response should unblock the request");
+    let (written, result) =
+        recv_within_guard(&result_rx, "late Codex response should unblock the request")
+            .expect("late Codex response should unblock the request");
     assert!(written.contains("\"method\":\"turn/start\""));
     assert!(written.contains(&format!("\"id\":\"{request_id}\"")));
     assert_eq!(result, json!({ "ok": true }));
@@ -181,8 +182,7 @@ fn codex_json_rpc_request_without_timeout_preserves_json_rpc_errors() {
         result_tx.send(result).unwrap();
     });
 
-    let (request_id, sender) =
-        take_pending_codex_request(&pending_requests, Duration::from_secs(1));
+    let (request_id, sender) = take_pending_codex_request(&pending_requests);
 
     assert!(!request_id.is_empty());
     sender
@@ -192,7 +192,7 @@ fn codex_json_rpc_request_without_timeout_preserves_json_rpc_errors() {
         .unwrap();
 
     assert_eq!(
-        result_rx.recv_timeout(Duration::from_secs(1)).unwrap(),
+        recv_within_guard(&result_rx, "result_rx publication").unwrap(),
         Err(CodexResponseError::JsonRpc(
             "thread/start rejected the request".to_owned(),
         ))
@@ -294,7 +294,11 @@ fn acp_prompt_command_keeps_writer_loop_responsive_while_waiting_for_response() 
 
     let writer_thread = std::thread::spawn(move || {
         let mut stdin = thread_writer;
-        while let Ok(command) = input_rx.recv_timeout(Duration::from_millis(250)) {
+        // The fixture publishes exactly a prompt and an approval response;
+        // scheduler idleness is not a writer shutdown signal. Return the
+        // receiver so the join handle retains it through prompt settlement.
+        for _ in 0..2 {
+            let command = phase_sync::receive(&input_rx, "ACP prompt-loop command");
             match command {
                 AcpRuntimeCommand::Prompt(prompt) => handle_acp_prompt_command(
                     &mut stdin,
@@ -326,6 +330,7 @@ fn acp_prompt_command_keeps_writer_loop_responsive_while_waiting_for_response() 
                 }
             }
         }
+        input_rx
     });
 
     input_tx
@@ -340,7 +345,7 @@ fn acp_prompt_command_keeps_writer_loop_responsive_while_waiting_for_response() 
         }))
         .unwrap();
 
-    let deadline = std::time::Instant::now() + Duration::from_secs(1);
+    let deadline = phase_sync::PollGuard::new();
     loop {
         if pending_requests
             .lock()
@@ -350,11 +355,9 @@ fn acp_prompt_command_keeps_writer_loop_responsive_while_waiting_for_response() 
         {
             break;
         }
-        assert!(
-            std::time::Instant::now() < deadline,
+        deadline.wait(format_args!(
             "prompt request should stay pending while waiting for a response"
-        );
-        std::thread::sleep(Duration::from_millis(10));
+        ));
     }
 
     input_tx
@@ -371,7 +374,7 @@ fn acp_prompt_command_keeps_writer_loop_responsive_while_waiting_for_response() 
         ))
         .unwrap();
 
-    let deadline = std::time::Instant::now() + Duration::from_secs(1);
+    let deadline = phase_sync::PollGuard::new();
     loop {
         let written = writer.contents();
         if written.contains("\"method\":\"session/prompt\"")
@@ -380,11 +383,9 @@ fn acp_prompt_command_keeps_writer_loop_responsive_while_waiting_for_response() 
         {
             break;
         }
-        assert!(
-            std::time::Instant::now() < deadline,
+        deadline.wait(format_args!(
             "writer loop should remain able to write approval responses while prompt is pending"
-        );
-        std::thread::sleep(Duration::from_millis(10));
+        ));
     }
 
     let sender = {
@@ -400,10 +401,27 @@ fn acp_prompt_command_keeps_writer_loop_responsive_while_waiting_for_response() 
             .remove(&request_id)
             .expect("prompt request sender should still be pending")
     };
+    assert!(*turn_lifecycle.0.lock().unwrap());
     sender.send(Ok(json!({ "ok": true }))).unwrap();
+    {
+        let (lock, settled) = &*turn_lifecycle;
+        let (active, _) = settled
+            .wait_timeout_while(lock.lock().unwrap(), phase_sync::DEADLOCK_GUARD, |active| {
+                *active
+            })
+            .unwrap();
+        assert!(
+            !*active,
+            "ACP prompt response did not settle the active turn"
+        );
+    }
 
+    let input_rx = writer_thread.join().unwrap();
+    assert!(
+        matches!(input_rx.try_recv(), Err(mpsc::TryRecvError::Empty)),
+        "ACP prompt-loop fixture received an extra command after prompt and approval reply"
+    );
     drop(input_tx);
-    writer_thread.join().unwrap();
 }
 
 // pins the ACP exit-path cleanup: `fail_pending_acp_requests` drains every
@@ -430,7 +448,7 @@ fn fail_pending_acp_requests_releases_waiters() {
             .is_empty()
     );
     assert_eq!(
-        rx.recv_timeout(Duration::from_secs(1)).unwrap(),
+        recv_within_guard(&rx, "rx publication").unwrap(),
         Err(AcpResponseError::Transport(
             "Cursor ACP runtime exited.".to_owned()
         ))
@@ -464,7 +482,7 @@ fn fail_pending_codex_requests_releases_waiters() {
             .is_empty()
     );
     assert_eq!(
-        rx.recv_timeout(Duration::from_secs(1)).unwrap(),
+        recv_within_guard(&rx, "rx publication").unwrap(),
         Err(CodexResponseError::Transport(
             "shared Codex app-server exited while waiting for a pending response".to_owned()
         ))

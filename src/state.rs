@@ -1258,6 +1258,10 @@ struct StateInner {
     /// clone this handle while holding `inner`, but must release the state
     /// mutex before invoking any control operation.
     engram_host_adapter: Arc<EngramHostAdapter>,
+    /// Ordering fixtures use scheduling headroom without changing budget tests
+    /// in other states or the production dispatch deadline.
+    #[cfg(test)]
+    test_engram_dispatch_budget: Option<Duration>,
     /// Runtime-only cache of projects whose non-empty `.engram-project`
     /// marker was confirmed off the global state mutex. Hot locked paths may
     /// consult this set but must never touch the filesystem themselves.
@@ -1366,6 +1370,8 @@ impl StateInner {
         Self {
             codex: CodexState::default(),
             engram_host_adapter: Arc::new(EngramHostAdapter::default()),
+            #[cfg(test)]
+            test_engram_dispatch_budget: None,
             engram_declared_project_ids: HashSet::new(),
             engram_declaration_checked_project_ids: HashSet::new(),
             engram_project_resets: EngramProjectResetFences::default(),

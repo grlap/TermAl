@@ -266,9 +266,11 @@ fn mismatched_turn_started_preserves_the_exact_watchdog() {
     assert!(session.turn_started);
     drop(sessions);
     assert_eq!(
-        cancel_rx
-            .recv_timeout(Duration::from_secs(1))
-            .expect("matching turn/started should cancel the watchdog"),
+        recv_within_guard(
+            &cancel_rx,
+            "matching turn/started should cancel the watchdog"
+        )
+        .expect("matching turn/started should cancel the watchdog"),
         ()
     );
 }
@@ -350,9 +352,11 @@ fn turn_started_without_event_id_uses_the_armed_response_turn_id() {
     assert!(session.turn_started_watchdog_cancel_tx.is_none());
     drop(sessions);
     assert_eq!(
-        cancel_rx
-            .recv_timeout(Duration::from_secs(1))
-            .expect("fallback turn/started should cancel the watchdog"),
+        recv_within_guard(
+            &cancel_rx,
+            "fallback turn/started should cancel the watchdog"
+        )
+        .expect("fallback turn/started should cancel the watchdog"),
         ()
     );
 }
@@ -417,9 +421,11 @@ fn fully_idless_turn_started_cancels_the_armed_watchdog_and_completes() {
     )
     .expect("the id-less notification should prove the armed turn started");
     assert_eq!(
-        cancel_rx
-            .recv_timeout(Duration::from_secs(1))
-            .expect("id-less turn/started should cancel the armed watchdog"),
+        recv_within_guard(
+            &cancel_rx,
+            "id-less turn/started should cancel the armed watchdog"
+        )
+        .expect("id-less turn/started should cancel the armed watchdog"),
         ()
     );
     {
@@ -804,8 +810,7 @@ fn shared_codex_turn_completed_without_thread_id_routes_by_active_turn_id() {
     assert_eq!(session.preview, "Ready for a prompt.");
     assert!(session.messages.is_empty());
     assert_eq!(
-        cancel_rx
-            .recv_timeout(Duration::from_secs(1))
+        recv_within_guard(&cancel_rx, "turn/completed should cancel an armed watchdog")
             .expect("turn/completed should cancel an armed watchdog"),
         ()
     );
@@ -3965,7 +3970,7 @@ fn shared_codex_completed_turn_cleanup_expires_late_event_window() {
             .insert("msg-final".to_owned());
     }
 
-    let deadline = std::time::Instant::now() + Duration::from_secs(1);
+    let deadline = phase_sync::PollGuard::new();
     loop {
         let cleanup_complete = {
             let sessions = runtime
@@ -3989,11 +3994,9 @@ fn shared_codex_completed_turn_cleanup_expires_late_event_window() {
         if cleanup_complete {
             break;
         }
-        assert!(
-            std::time::Instant::now() < deadline,
+        deadline.wait(format_args!(
             "completed turn cleanup should clear residual turn state"
-        );
-        std::thread::sleep(Duration::from_millis(10));
+        ));
     }
 
     handle_shared_codex_app_server_message(
@@ -4325,9 +4328,11 @@ fn shared_codex_turn_completed_error_clears_recorder_state() {
         .expect("updated session should be present");
     assert_eq!(session.status, SessionStatus::Error);
     assert_eq!(
-        cancel_rx
-            .recv_timeout(Duration::from_secs(1))
-            .expect("turn/completed error should cancel an armed watchdog"),
+        recv_within_guard(
+            &cancel_rx,
+            "turn/completed error should cancel an armed watchdog"
+        )
+        .expect("turn/completed error should cancel an armed watchdog"),
         ()
     );
 }
@@ -4634,8 +4639,7 @@ fn shared_codex_error_notification_clears_recorder_state() {
         .expect("updated session should be present");
     assert_eq!(session.status, SessionStatus::Error);
     assert_eq!(
-        cancel_rx
-            .recv_timeout(Duration::from_secs(1))
+        recv_within_guard(&cancel_rx, "fatal error should cancel an armed watchdog")
             .expect("fatal error should cancel an armed watchdog"),
         ()
     );
