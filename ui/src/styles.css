@@ -5504,11 +5504,72 @@ textarea {
   background: var(--activity-bg);
 }
 
-.conversation-live-tail {
-  /* LIVE TURN and queued prompts are regular transcript content. Attached
-     growth is corrected by the scroll controller in the same pre-paint commit;
-     positioning this wrapper separately would create a second movement
-     authority and make the first manual scroll use different geometry. */
+/* This sibling of .message-stack always reserves exactly three CSS pixels.
+   No status selector may change its box or the transcript's viewport height. */
+.session-activity-strip {
+  position: relative;
+  flex: 0 0 3px;
+  height: 3px;
+  min-height: 3px;
+  max-height: 3px;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  background: var(--line);
+  cursor: help;
+}
+
+.session-activity-strip-track {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  opacity: 1;
+  transition: opacity 280ms ease;
+}
+
+.session-activity-strip-fill {
+  display: block;
+  height: 100%;
+  background: var(--signal-blue);
+  transform-origin: left center;
+}
+
+.session-activity-strip[data-state="idle"] .session-activity-strip-track {
+  opacity: 0;
+}
+
+.session-activity-strip[data-state="approval"] .session-activity-strip-fill,
+.session-activity-strip[data-state="paused"] .session-activity-strip-fill {
+  background: var(--muted);
+}
+
+.session-activity-strip[data-state="error"] .session-activity-strip-fill {
+  background: var(--signal-red);
+}
+
+.session-activity-strip[data-animated="true"] .session-activity-strip-fill {
+  animation: session-activity-sweep 3200ms ease-in-out infinite;
+}
+
+@keyframes session-activity-sweep {
+  0% { transform: translateX(-35%) scaleX(0.35); opacity: 0.45; }
+  50% { opacity: 1; }
+  100% { transform: translateX(100%) scaleX(0.35); opacity: 0.45; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .session-activity-strip[data-animated] .session-activity-strip-fill {
+    animation: none;
+    transform: none;
+  }
+  .session-activity-strip .session-activity-strip-track,
+  .session-activity-strip .activity-tooltip {
+    transition: none;
+  }
+}
+
+.conversation-queued-tail {
+  /* Only queued prompts and their stable Resume action belong in this group. */
   display: grid;
   gap: var(--message-stack-gap);
   align-content: start;
@@ -5521,22 +5582,7 @@ textarea {
   align-content: start;
 }
 
-.activity-card-live {
-  position: relative;
-  overflow: visible;
-  gap: calc(0.72rem * var(--density-scale));
-  padding: calc(0.68rem * var(--density-scale))
-    calc(0.95rem * var(--density-scale));
-}
-
-.activity-card-live .activity-spinner {
-  width: calc(1.9rem * var(--density-scale));
-  height: calc(1.9rem * var(--density-scale));
-  border-width: 2.25px;
-}
-
-/* Paused queue: same footprint as the live card, but a static glyph instead
-   of a spinner so it never reads as work in progress. */
+/* Paused queue: an actionable stable state with a static glyph. */
 .activity-card-queue-paused {
   position: relative;
   display: flex;
@@ -5593,31 +5639,6 @@ textarea {
   min-width: 0;
 }
 
-.activity-card-live h3 {
-  font-size: 0.92rem;
-  line-height: 1.08;
-}
-
-.activity-card-live p {
-  font-size: 0.92rem;
-  line-height: 1.08;
-}
-
-.activity-card-live .activity-card-prompt {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.activity-card-live .card-label {
-  font-size: 0.66rem;
-  line-height: 1;
-}
-
-.activity-card-live.has-tooltip {
-  cursor: help;
-}
-
 .activity-card h3,
 .activity-card p {
   margin: 0;
@@ -5654,9 +5675,9 @@ textarea {
   border-color: var(--tooltip-arrow) transparent transparent transparent;
 }
 
-.activity-card-live:hover .activity-tooltip,
-.activity-card-live:focus-visible .activity-tooltip,
-.activity-card-live:focus-within .activity-tooltip {
+.session-activity-strip:hover .activity-tooltip,
+.session-activity-strip:focus-visible .activity-tooltip,
+.session-activity-strip:focus-within .activity-tooltip {
   opacity: 1;
   transform: translateY(0) scale(1);
 }

@@ -54,6 +54,7 @@ import {
   AgentSessionPanel,
   AgentSessionPanelFooter,
 } from "./panels/AgentSessionPanel";
+import { SessionActivityStrip } from "./panels/session-activity-cards";
 import { useSessionRecordSnapshot } from "./session-store";
 import { DiffPanel } from "./panels/DiffPanel";
 import { FileSystemPanel } from "./panels/FileSystemPanel";
@@ -96,7 +97,6 @@ import {
   labelForPaneViewMode,
   primaryModifierLabel,
   resolvePaneDropPlacementFromPointer,
-  resolveLiveWaitingIndicatorPrompt,
   type DraftImageAttachment,
 } from "./app-utils";
 import { buildConnectionRetryDisplayStateByMessageId } from "./connection-retry";
@@ -122,10 +122,7 @@ import {
   spawnDelegationCommand,
   type CreateComposerDelegationOptions,
 } from "./delegation-commands";
-import {
-  delegationWaitIndicatorPrompt,
-  hasAgentOutputAfterLatestUserPrompt,
-} from "./SessionPaneView.waiting-indicator";
+import { delegationWaitIndicatorPrompt } from "./SessionPaneView.waiting-indicator";
 import { resolveSessionPaneScrollStateKey } from "./SessionPaneView.scroll-key";
 import { useSessionPaneScrollState } from "./SessionPaneView.scroll";
 import { useSessionPaneSourceFileState } from "./SessionPaneView.source-file";
@@ -505,25 +502,12 @@ export function SessionPaneView({
     !isSessionBusy &&
     !isSending &&
     activeDelegationWaits.length > 0;
-  // The live-turn indicator mirrors the authoritative backend turn state:
-  // `status === "active"` means a turn is in progress (the agent is working),
-  // flipped to idle only on the turn's `result` event. We deliberately do NOT
-  // infer "turn done" from message content — an agent can emit a file-change
-  // summary and keep working (e.g. run a command), so a content heuristic
-  // produces false negatives that make a busy session read as idle.
-  const showLiveTurnWaitingIndicator =
+  // Busy state is independent of which transcript messages are resident.
+  const showWaitingIndicator =
     isSessionTabActive &&
     pane.viewMode === "session" &&
     Boolean(activeSession) &&
-    (activeSession?.status === "active" ||
-      activeSession?.status === "stopping" ||
-      (!isSessionBusy &&
-        isSending &&
-        !hasAgentOutputAfterLatestUserPrompt(activeSession?.messages ?? [])));
-  const showWaitingIndicator =
-    showLiveTurnWaitingIndicator || showDelegationWaitIndicator;
-  const activeSessionMessages = activeSession?.messages;
-  const activeSessionStatus = activeSession?.status;
+    (isSessionBusy || isSending || showDelegationWaitIndicator);
   // Delegated children are transcript/control surfaces owned by the parent
   // delegation flow: keep transcript tools reachable, but do not allow prompts
   // or new delegations to be injected from the child pane.
@@ -569,40 +553,6 @@ export function SessionPaneView({
       activeSession.hasOlderHistory === true ||
       activeSession.hasNewerHistory === true),
   );
-  const waitingIndicatorPrompt = useMemo(() => {
-    if (showDelegationWaitIndicator) {
-      return delegationWaitIndicatorPrompt(activeDelegationWaits);
-    }
-    if (
-      !showLiveTurnWaitingIndicator ||
-      !activeSession ||
-      (!isSessionBusy && isSending)
-    ) {
-      return null;
-    }
-
-    return resolveLiveWaitingIndicatorPrompt(
-      activeSession && activeSessionStatus
-        ? {
-            liveActivity: activeSession.liveActivity,
-            status: activeSessionStatus,
-          }
-        : null,
-    );
-  }, [
-    activeDelegationWaits,
-    activeSession,
-    activeSessionStatus,
-    isSending,
-    isSessionBusy,
-    showDelegationWaitIndicator,
-    showLiveTurnWaitingIndicator,
-  ]);
-  const waitingIndicatorKind = showDelegationWaitIndicator
-    ? "delegationWait"
-    : isSending && !isSessionBusy
-      ? "send"
-      : "liveTurn";
   const composerInputDisabled = !activeSession || isStopping;
   const composerSendDisabled = !activeSession || isSending || isStopping;
   const scrollStateKey = resolveSessionPaneScrollStateKey(
@@ -1923,9 +1873,6 @@ export function SessionPaneView({
             activeSessionId={activeSession?.id ?? null}
             isLoading={isLoading}
             isUpdating={isUpdating}
-            showWaitingIndicator={showWaitingIndicator}
-            waitingIndicatorKind={waitingIndicatorKind}
-            waitingIndicatorPrompt={waitingIndicatorPrompt}
             commandMessages={commandMessages}
             diffMessages={diffMessages}
             onApprovalDecision={onApprovalDecision}
@@ -1954,6 +1901,18 @@ export function SessionPaneView({
           />
         )}
       </section>
+      {isSessionTabActive && pane.viewMode === "session" && activeSession ? (
+        <SessionActivityStrip
+          session={activeSession}
+          isSending={isSending}
+          isStopping={isStopping}
+          delegationWaitPrompt={
+            showDelegationWaitIndicator
+              ? delegationWaitIndicatorPrompt(activeDelegationWaits)
+              : null
+          }
+        />
+      ) : null}
       {showDelegatedChildFooter ? (
         <footer className="composer delegated-child-footer">
           {effectiveShowNewResponseIndicator ? (

@@ -711,9 +711,7 @@ describe("App live state — reconnect", () => {
       }
 
       await clickAndSettle(sessionRowButton);
-      expect(
-        screen.getByText("Working on the current turn..."),
-      ).toBeInTheDocument();
+      expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "working");
       fetchMock.mockClear();
 
       act(() => {
@@ -1078,9 +1076,7 @@ describe("App live state — reconnect", () => {
       }
 
       await clickAndSettle(sessionRowButton);
-      expect(
-        screen.getByText("Working on the current turn..."),
-      ).toBeInTheDocument();
+      expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "working");
       expect(stateRequestCount).toBe(0);
 
       act(() => {
@@ -1132,9 +1128,7 @@ describe("App live state — reconnect", () => {
       expect(
         screen.getAllByText("Recovered queued reconnect session"),
       ).toHaveLength(2);
-      expect(
-        screen.queryByText("Working on the current turn..."),
-      ).not.toBeInTheDocument();
+      expect(document.querySelector(".session-activity-strip[data-state=working]")).toBeNull();
     } finally {
       vi.useRealTimers();
       scrollIntoViewSpy.mockRestore();
@@ -1345,9 +1339,7 @@ describe("App live state — reconnect", () => {
       }
 
       await clickAndSettle(sessionRowButton);
-      expect(
-        screen.getByText("Working on the current turn..."),
-      ).toBeInTheDocument();
+      expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "working");
       fetchMock.mockClear();
 
       act(() => {
@@ -1438,9 +1430,7 @@ describe("App live state — reconnect", () => {
         screen.getAllByText("Recovered after coalesced reconnect."),
       ).toHaveLength(2);
       expect(screen.queryByText("Still syncing.")).not.toBeInTheDocument();
-      expect(
-        screen.queryByText("Working on the current turn..."),
-      ).not.toBeInTheDocument();
+      expect(document.querySelector(".session-activity-strip[data-state=working]")).toBeNull();
     } finally {
       vi.useRealTimers();
       scrollIntoViewSpy.mockRestore();
@@ -1509,7 +1499,7 @@ describe("App live state — reconnect", () => {
       }
 
       await clickAndSettle(sessionRowButton);
-      await screen.findByText("Working on the current turn...");
+      await waitFor(() => expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "working"));
       act(() => {
         eventSource.dispatchError();
       });
@@ -1546,9 +1536,7 @@ describe("App live state — reconnect", () => {
       await waitFor(() => {
         expect(screen.getAllByText("Here.")).toHaveLength(2);
       });
-      expect(
-        screen.queryByText("Working on the current turn..."),
-      ).not.toBeInTheDocument();
+      expect(document.querySelector(".session-activity-strip[data-state=working]")).toBeNull();
       expect(
         fetchMock.mock.calls.some(([url]) => String(url) === "/api/state"),
       ).toBe(false);
@@ -2927,7 +2915,7 @@ describe("App live state — reconnect", () => {
       }
 
       await clickAndSettle(sessionRowButton);
-      await screen.findByText("Working on the current turn...");
+      await waitFor(() => expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "working"));
       act(() => {
         eventSource.dispatchError();
       });
@@ -2943,9 +2931,7 @@ describe("App live state — reconnect", () => {
       await waitFor(() => {
         expect(screen.getAllByText("Here.")).toHaveLength(2);
       });
-      expect(
-        screen.queryByText("Working on the current turn..."),
-      ).not.toBeInTheDocument();
+      expect(document.querySelector(".session-activity-strip[data-state=working]")).toBeNull();
     } finally {
       scrollIntoViewSpy.mockRestore();
       restoreGlobal("fetch", originalFetch);
@@ -3054,9 +3040,7 @@ describe("App live state — reconnect", () => {
       }
 
       await clickAndSettle(sessionRowButton);
-      expect(
-        screen.getByText("Working on the current turn..."),
-      ).toBeInTheDocument();
+      expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "working");
       fetchMock.mockClear();
       stateRequestCount = 0;
 
@@ -3092,9 +3076,7 @@ describe("App live state — reconnect", () => {
         screen.queryByLabelText("Control panel backend connecting"),
       ).toBeNull();
       expect(screen.getAllByText("Partial output.")).toHaveLength(2);
-      expect(
-        screen.getByText("Working on the current turn..."),
-      ).toBeInTheDocument();
+      expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "working");
     } finally {
       vi.useRealTimers();
       scrollIntoViewSpy.mockRestore();
@@ -3205,9 +3187,7 @@ describe("App live state — reconnect", () => {
       }
 
       await clickAndSettle(sessionRowButton);
-      expect(
-        screen.getByText("Working on the current turn..."),
-      ).toBeInTheDocument();
+      expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "working");
       fetchMock.mockClear();
       stateRequestCount = 0;
 
@@ -3256,9 +3236,7 @@ describe("App live state — reconnect", () => {
       expect(
         screen.getAllByText("Here after stale reconnect state."),
       ).toHaveLength(1);
-      expect(
-        screen.queryByText("Working on the current turn..."),
-      ).not.toBeInTheDocument();
+      expect(document.querySelector(".session-activity-strip[data-state=working]")).toBeNull();
     } finally {
       vi.useRealTimers();
       scrollIntoViewSpy.mockRestore();

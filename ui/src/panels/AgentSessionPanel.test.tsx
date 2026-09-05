@@ -23,15 +23,13 @@ import {
 } from "./AgentSessionPanel";
 import { splitAgentCommandResolverTail } from "./session-agent-command-submission";
 import { VirtualizedConversationMessageList } from "./VirtualizedConversationMessageList";
-import {
-  ConversationTailPresence,
-  RunningIndicator,
-} from "./session-activity-cards";
+import { SessionActivityStrip } from "./session-activity-cards";
 import { notifyMessageStackScrollWrite } from "../message-stack-scroll-sync";
 import { MessageCard } from "../message-cards";
 import {
   resetSessionStoreForTesting,
   syncComposerSessionsStore,
+  useSessionRecordSnapshot,
 } from "../session-store";
 import {
   DEFAULT_CONVERSATION_MARKER_COLOR,
@@ -372,8 +370,6 @@ function createAgentSessionPanelHarness(
       activeSessionId={activeSession?.id ?? null}
       isLoading={false}
       isUpdating={false}
-      showWaitingIndicator={false}
-      waitingIndicatorPrompt={null}
       commandMessages={[]}
       diffMessages={[]}
       scrollContainerRef={scrollContainerRef}
@@ -511,22 +507,18 @@ describe("splitAgentCommandResolverTail", () => {
 });
 
 describe("AgentSessionPanel conversation caching", () => {
-  it("keeps the active live-tail content stable while streamed content changes", () => {
+  it("keeps the activity status node stable while explicit prompt context changes", () => {
     const { rerender } = render(
-      <ConversationTailPresence active>
-        <span>First streamed state</span>
-      </ConversationTailPresence>,
+      <SessionActivityStrip session={{ agent: "Codex", status: "active", liveActivity: { prompt: "First prompt" } }} />,
     );
-    const content = screen.getByText("First streamed state");
+    const content = screen.getByRole("status");
 
     rerender(
-      <ConversationTailPresence active>
-        <span>Second streamed state</span>
-      </ConversationTailPresence>,
+      <SessionActivityStrip session={{ agent: "Codex", status: "active", liveActivity: { prompt: "Second prompt" } }} />,
     );
 
-    expect(screen.getByText("Second streamed state")).toBeInTheDocument();
-    expect(screen.getByText("Second streamed state")).toBe(content);
+    expect(screen.getByRole("status")).toHaveTextContent("Second prompt");
+    expect(screen.getByRole("status")).toBe(content);
   });
 
   it("does not render a queued prompt once the matching message is visible", () => {
@@ -584,8 +576,6 @@ describe("AgentSessionPanel conversation caching", () => {
         activeSessionId={activeSessionId}
         isLoading={false}
         isUpdating={false}
-        showWaitingIndicator={false}
-        waitingIndicatorPrompt={null}
         commandMessages={[]}
         diffMessages={[]}
         scrollContainerRef={{ current: document.createElement("section") }}
@@ -671,8 +661,6 @@ describe("AgentSessionPanel conversation caching", () => {
           activeSessionId="session-a"
           isLoading={false}
           isUpdating={false}
-          showWaitingIndicator={false}
-          waitingIndicatorPrompt={null}
           commandMessages={[]}
           diffMessages={[]}
           scrollContainerRef={
@@ -757,7 +745,6 @@ describe("AgentSessionPanel conversation caching", () => {
           },
         ],
       }),
-      showWaitingIndicator: false,
     });
 
     const queuedPromptCard = screen
@@ -769,7 +756,7 @@ describe("AgentSessionPanel conversation caching", () => {
 
     expect(queuedPromptCard).not.toBeNull();
     expect(pendingPromptQueue).not.toBeNull();
-    expect(pendingPromptQueue?.closest(".conversation-live-tail")).not.toBeNull();
+    expect(pendingPromptQueue?.closest(".conversation-queued-tail")).not.toBeNull();
     expect(pendingPromptQueue).toContainElement(
       queuedPromptCard as HTMLElement,
     );
@@ -806,27 +793,14 @@ describe("AgentSessionPanel conversation caching", () => {
           },
         ],
       }),
-      showWaitingIndicator: false,
     });
 
-    const handoffCard = screen
-      .getByText("Queue")
-      .closest(".activity-card-queue-handoff");
     const queuedPromptCard = document.querySelector(".pending-prompt-card");
-    const liveTail = handoffCard?.closest(".conversation-live-tail");
-
-    expect(handoffCard).not.toBeNull();
-    expect(
-      screen.getByText("Codex is starting the next turn"),
-    ).toBeInTheDocument();
-    expect(liveTail).not.toBeNull();
-    expect(liveTail).toContainElement(queuedPromptCard as HTMLElement);
-    expect(
-      Boolean(
-        queuedPromptCard!.compareDocumentPosition(handoffCard!) &
-        Node.DOCUMENT_POSITION_FOLLOWING,
-      ),
-    ).toBe(true);
+    const queuedTail = queuedPromptCard?.closest(".conversation-queued-tail");
+    expect(queuedTail).toContainElement(queuedPromptCard as HTMLElement);
+    expect(queuedTail?.querySelectorAll(".pending-prompt-card")).toHaveLength(1);
+    expect(document.querySelector(".activity-card-queue-handoff")).toBeNull();
+    expect(screen.getByRole("button", { name: "Cancel queued prompt" })).toBeInTheDocument();
   });
 
   it("shows the paused-queue card with a Resume action instead of the handoff spinner after Stop", () => {
@@ -859,7 +833,6 @@ describe("AgentSessionPanel conversation caching", () => {
           },
         ],
       }),
-      showWaitingIndicator: false,
       onResumeSessionQueue,
     });
 
@@ -896,7 +869,6 @@ describe("AgentSessionPanel conversation caching", () => {
           },
         ],
       }),
-      showWaitingIndicator: true,
     });
 
     const queuedPromptCard = screen
@@ -940,7 +912,6 @@ describe("AgentSessionPanel conversation caching", () => {
       }),
       onCancelQueuedPrompt,
       onOpenMailbox,
-      showWaitingIndicator: true,
     });
 
     expect(
@@ -986,7 +957,6 @@ describe("AgentSessionPanel conversation caching", () => {
           },
         ],
       }),
-      showWaitingIndicator: true,
     });
 
     const queuedPromptCard = screen
@@ -1033,7 +1003,6 @@ describe("AgentSessionPanel conversation caching", () => {
           },
         ],
       }),
-      showWaitingIndicator: true,
     });
 
     const queuedPromptCard = screen
@@ -1081,7 +1050,6 @@ describe("AgentSessionPanel conversation caching", () => {
           },
         ],
       }),
-      showWaitingIndicator: true,
     });
 
     const queuedPromptCard = screen
@@ -1126,7 +1094,6 @@ describe("AgentSessionPanel conversation caching", () => {
         ],
       }),
       onCancelQueuedPrompt,
-      showWaitingIndicator: false,
     });
 
     expect(screen.getByText("Optimistic follow-up")).toBeInTheDocument();
@@ -1151,7 +1118,6 @@ describe("AgentSessionPanel conversation caching", () => {
           },
         ],
       }),
-      showWaitingIndicator: false,
     });
 
     expect(
@@ -1159,7 +1125,7 @@ describe("AgentSessionPanel conversation caching", () => {
     ).not.toHaveAttribute("title");
   });
 
-  it("keeps the attached live-turn tail calm while assistant output grows above queued prompts", () => {
+  it("keeps the queued-prompt group calm while assistant output grows above queued prompts", () => {
     const scrollNode = document.createElement("section");
     let scrollTop = 120;
     const scrollWrites: number[] = [];
@@ -1210,16 +1176,9 @@ describe("AgentSessionPanel conversation caching", () => {
         pendingPrompts: [firstPendingPrompt, secondPendingPrompt],
       }),
       scrollContainerRef: { current: scrollNode },
-      showWaitingIndicator: true,
-      waitingIndicatorPrompt: "Current prompt",
     });
 
-    const liveTail = screen
-      .getByText("Live turn")
-      .closest(".conversation-live-tail");
-    const liveTurnCard = screen
-      .getByText("Live turn")
-      .closest(".activity-card-live");
+    const liveTail = document.querySelector(".conversation-queued-tail");
     const firstQueuedPromptCard = screen
       .getByText("Queued follow-up A")
       .closest(".pending-prompt-card");
@@ -1233,9 +1192,9 @@ describe("AgentSessionPanel conversation caching", () => {
     expect(firstQueuedPromptCard).not.toBeNull();
     expect(secondQueuedPromptCard).not.toBeNull();
     expect(pendingPromptQueue).not.toBeNull();
-    expect(liveTail).toHaveAttribute("data-tail-follow", "attached");
-    expect(liveTurnCard).not.toBeNull();
-    expect(pendingPromptQueue?.closest(".conversation-live-tail")).toBe(
+    expect(liveTail).not.toHaveAttribute("data-tail-follow");
+    expect(document.querySelector(".activity-card-live")).toBeNull();
+    expect(pendingPromptQueue?.closest(".conversation-queued-tail")).toBe(
       liveTail,
     );
     expect(
@@ -1245,17 +1204,10 @@ describe("AgentSessionPanel conversation caching", () => {
         ) & Node.DOCUMENT_POSITION_FOLLOWING,
       ),
     ).toBe(true);
-    expect(
-      Boolean(
-        secondQueuedPromptCard!.compareDocumentPosition(liveTurnCard!) &
-        Node.DOCUMENT_POSITION_FOLLOWING,
-      ),
-    ).toBe(true);
     expect(liveTail).toContainElement(firstQueuedPromptCard as HTMLElement);
     expect(liveTail).toContainElement(
       secondQueuedPromptCard as HTMLElement,
     );
-    expect(liveTail).toContainElement(liveTurnCard as HTMLElement);
     expect(pendingPromptQueue).toContainElement(
       firstQueuedPromptCard as HTMLElement,
     );
@@ -1288,14 +1240,13 @@ describe("AgentSessionPanel conversation caching", () => {
       });
     });
 
-    expect(screen.getByText("Live turn").closest(".activity-card-live")).toBe(
-      liveTurnCard,
-    );
+    expect(document.querySelector(".conversation-queued-tail")).toBe(liveTail);
+    expect(screen.getByText("Queued follow-up A").closest(".pending-prompt-card")).toBe(firstQueuedPromptCard);
     expect(scrollTop).toBe(120);
     expect(scrollWrites).toEqual([]);
   });
 
-  it("keeps the live-turn tail in normal flow across attachment state", async () => {
+  it("keeps the queued-prompt group in normal flow across attachment state", async () => {
     const nodeFsModule = "node:fs";
     const { readFileSync } = (await import(nodeFsModule)) as {
       readFileSync: (path: string, encoding: "utf8") => string;
@@ -1316,14 +1267,14 @@ describe("AgentSessionPanel conversation caching", () => {
       /--message-stack-block-padding\s*:\s*var\(--space-2xl\)\s*;/,
     );
     const baseDeclarations = stylesCss.match(
-      /\.conversation-live-tail\s*\{([^}]*)\}/s,
+      /\.conversation-queued-tail\s*\{([^}]*)\}/s,
     )?.[1];
     expect(baseDeclarations).toBeDefined();
     expect(baseDeclarations).not.toMatch(
       /(?:^|;)\s*position\s*:\s*(?:sticky|fixed|absolute)\s*(?:;|$)/,
     );
     const attachedDeclarations = stylesCss.match(
-      /\.conversation-live-tail\[data-tail-follow="attached"\]\s*\{([^}]*)\}/s,
+      /\.conversation-queued-tail\[data-tail-follow="attached"\]\s*\{([^}]*)\}/s,
     )?.[1];
     // Attachment is scroll-controller intent only. Synchronous pre-paint
     // growth correction keeps the in-flow tail stable without a second
@@ -1332,6 +1283,7 @@ describe("AgentSessionPanel conversation caching", () => {
 
     const activeSession = makeSession("session-a", {
       status: "active",
+      pendingPrompts: [{ id: "queued-flow", timestamp: "10:01", text: "Queued in flow" }],
       messages: [
         {
           id: "message-user",
@@ -1344,20 +1296,16 @@ describe("AgentSessionPanel conversation caching", () => {
     });
     const renderPanel = createAgentSessionPanelHarness({
       activeSession,
-      showWaitingIndicator: true,
-      waitingIndicatorPrompt: "Current prompt",
     });
     const { rerender } = render(renderPanel({ liveTailPinned: true }));
 
-    const liveTail = screen
-      .getByText("Live turn")
-      .closest(".conversation-live-tail");
+    const liveTail = screen.getByText("Queued in flow").closest(".conversation-queued-tail");
     expect(liveTail).not.toBeNull();
-    expect(liveTail).toHaveAttribute("data-tail-follow", "attached");
+    expect(liveTail).not.toHaveAttribute("data-tail-follow");
 
     rerender(renderPanel({ liveTailPinned: false }));
-    expect(liveTail).toHaveAttribute("data-tail-follow", "detached");
-    expect(liveTail).toHaveClass("conversation-live-tail");
+    expect(liveTail).not.toHaveAttribute("data-tail-follow");
+    expect(liveTail).toHaveClass("conversation-queued-tail");
   });
 
   it("reveals only appended transcript entries with paint-only motion", async () => {
@@ -1427,7 +1375,7 @@ describe("AgentSessionPanel conversation caching", () => {
     ).toBeNull();
     expect(
       container.querySelector(
-        ".conversation-live-tail.conversation-message-entry-reveal",
+        ".conversation-queued-tail.conversation-message-entry-reveal",
       ),
     ).toBeNull();
 
@@ -1624,8 +1572,6 @@ describe("AgentSessionPanel conversation caching", () => {
           },
         ],
       }),
-      showWaitingIndicator: true,
-      waitingIndicatorPrompt: "Current live command",
       liveTailPinned: true,
     });
     await act(async () => {
@@ -1637,11 +1583,11 @@ describe("AgentSessionPanel conversation caching", () => {
       screen.queryByText("Queued at the live tail"),
     ).not.toBeInTheDocument();
     expect(
-      document.querySelector(".conversation-live-tail"),
+      document.querySelector(".conversation-queued-tail"),
     ).not.toBeInTheDocument();
   });
 
-  it("keeps the shared queued tail mounted when the waiting indicator clears", async () => {
+  it("keeps the queued tail mounted when explicit turn state becomes idle", async () => {
     vi.useFakeTimers();
     const activeSession = makeSession("session-a", {
       status: "active",
@@ -1664,14 +1610,10 @@ describe("AgentSessionPanel conversation caching", () => {
     });
     const renderPanel = createAgentSessionPanelHarness({
       activeSession,
-      showWaitingIndicator: true,
-      waitingIndicatorPrompt: "Current prompt",
     });
     const { rerender } = render(renderPanel({ liveTailPinned: true }));
 
-    const liveTail = screen
-      .getByText("Live turn")
-      .closest(".conversation-live-tail");
+    const liveTail = document.querySelector(".conversation-queued-tail");
     const queuedPromptCard = screen
       .getByText("Queued follow-up after current turn")
       .closest(".pending-prompt-card");
@@ -1682,12 +1624,13 @@ describe("AgentSessionPanel conversation caching", () => {
       await vi.advanceTimersToNextTimerAsync();
     });
 
-    rerender(
-      renderPanel({
-        showWaitingIndicator: false,
-        waitingIndicatorPrompt: null,
-      }),
-    );
+    act(() => {
+      syncComposerSessionsStore({
+        sessions: [{ ...activeSession, status: "idle" }],
+        draftsBySessionId: {}, draftAttachmentsBySessionId: {},
+      });
+    });
+    rerender(renderPanel());
 
     expect(screen.queryByText("Live turn")).not.toBeInTheDocument();
     expect(
@@ -1702,11 +1645,11 @@ describe("AgentSessionPanel conversation caching", () => {
     expect(
       screen
         .getByText("Queued follow-up after current turn")
-        .closest(".conversation-live-tail"),
+        .closest(".conversation-queued-tail"),
     ).toBe(liveTail);
   });
 
-  it("suppresses a stale idle live-turn tail after visible agent output", () => {
+  it("shows idle status after visible agent output", () => {
     const activeSession = makeSession("session-a", {
       status: "idle",
       messages: [
@@ -1730,14 +1673,14 @@ describe("AgentSessionPanel conversation caching", () => {
 
     renderSessionPanelWithDefaults({
       activeSession,
-      showWaitingIndicator: true,
-      waitingIndicatorPrompt: null,
     });
+    render(<SessionActivityStrip session={activeSession} />);
 
-    expect(screen.queryByText("Live turn")).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Codex is idle");
+    expect(document.querySelector(".activity-card-live")).toBeNull();
   });
 
-  it("keeps delegation wait tails visible after prior assistant output", () => {
+  it("keeps delegation status available after prior assistant output", () => {
     const activeSession = makeSession("session-a", {
       status: "idle",
       messages: [
@@ -1761,13 +1704,11 @@ describe("AgentSessionPanel conversation caching", () => {
 
     renderSessionPanelWithDefaults({
       activeSession,
-      showWaitingIndicator: true,
-      waitingIndicatorKind: "delegationWait",
-      waitingIndicatorPrompt:
-        "Waiting on 1 delegation wait covering 2 delegated sessions: review fan-in",
     });
+    render(<SessionActivityStrip session={activeSession} delegationWaitPrompt="Waiting on 1 delegation wait covering 2 delegated sessions: review fan-in" />);
 
-    expect(screen.getByText("Live turn")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Codex is waiting for delegated sessions");
+    expect(document.querySelector(".activity-card-live")).toBeNull();
     expect(screen.getByRole("tooltip")).toHaveTextContent(
       "Waiting on 1 delegation wait covering 2 delegated sessions: review fan-in",
     );
@@ -1796,15 +1737,11 @@ describe("AgentSessionPanel conversation caching", () => {
 
     renderSessionPanelWithDefaults({
       activeSession,
-      showWaitingIndicator: true,
-      waitingIndicatorKind: "send",
-      waitingIndicatorPrompt: null,
     });
+    render(<SessionActivityStrip session={activeSession} isSending />);
 
-    expect(screen.getByText("Live turn")).toBeInTheDocument();
-    expect(
-      screen.getByText("Working on the current turn..."),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Codex is sending a prompt");
+    expect(document.querySelector(".activity-card-live")).toBeNull();
   });
 
   it("keeps send waiting feedback visible during an active turn after file output", () => {
@@ -1831,18 +1768,14 @@ describe("AgentSessionPanel conversation caching", () => {
 
     renderSessionPanelWithDefaults({
       activeSession,
-      showWaitingIndicator: true,
-      waitingIndicatorKind: "send",
-      waitingIndicatorPrompt: null,
     });
+    render(<SessionActivityStrip session={activeSession} isSending />);
 
-    expect(screen.getByText("Live turn")).toBeInTheDocument();
-    expect(
-      screen.getByText("Working on the current turn..."),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Codex is working");
+    expect(document.querySelector(".activity-card-live")).toBeNull();
   });
 
-  it("keeps the live-turn indicator visible while active, even after file-change output", () => {
+  it("keeps working status while active, even after file-change output", () => {
     const activeSession = makeSession("session-a", {
       status: "active",
       messages: [
@@ -1869,11 +1802,11 @@ describe("AgentSessionPanel conversation caching", () => {
 
     renderSessionPanelWithDefaults({
       activeSession,
-      showWaitingIndicator: true,
-      waitingIndicatorPrompt: null,
     });
+    render(<SessionActivityStrip session={activeSession} />);
 
-    expect(screen.getByText("Live turn")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Codex is working");
+    expect(document.querySelector(".activity-card-live")).toBeNull();
   });
 
   it("renders conversation marker chips and navigates between markers", () => {
@@ -2225,8 +2158,6 @@ describe("AgentSessionPanel conversation caching", () => {
           activeSessionId="session-b"
           isLoading={false}
           isUpdating={false}
-          showWaitingIndicator={false}
-          waitingIndicatorPrompt={null}
           commandMessages={[]}
           diffMessages={[]}
           scrollContainerRef={{ current: detachedScrollRoot }}
@@ -4344,8 +4275,6 @@ describe("AgentSessionPanel conversation caching", () => {
         activeSessionId={activeSession.id}
         isLoading={false}
         isUpdating={false}
-        showWaitingIndicator={false}
-        waitingIndicatorPrompt={null}
         commandMessages={[]}
         diffMessages={[]}
         scrollContainerRef={{ current: document.createElement("section") }}
@@ -4418,8 +4347,6 @@ describe("AgentSessionPanel conversation caching", () => {
         activeSessionId={activeSession.id}
         isLoading={false}
         isUpdating={false}
-        showWaitingIndicator={false}
-        waitingIndicatorPrompt={null}
         commandMessages={[]}
         diffMessages={[]}
         scrollContainerRef={{ current: document.createElement("section") }}
@@ -4617,8 +4544,6 @@ describe("AgentSessionPanel conversation caching", () => {
         activeSessionId={activeSession.id}
         isLoading={false}
         isUpdating={false}
-        showWaitingIndicator={false}
-        waitingIndicatorPrompt={null}
         commandMessages={[]}
         diffMessages={[]}
         scrollContainerRef={scrollContainerRef}
@@ -4703,8 +4628,6 @@ describe("AgentSessionPanel conversation caching", () => {
         activeSessionId={activeSession.id}
         isLoading={false}
         isUpdating={false}
-        showWaitingIndicator={false}
-        waitingIndicatorPrompt={null}
         commandMessages={[]}
         diffMessages={[]}
         scrollContainerRef={{ current: document.createElement("section") }}
@@ -4796,8 +4719,6 @@ describe("AgentSessionPanel conversation caching", () => {
         activeSessionId={activeSession.id}
         isLoading={false}
         isUpdating={false}
-        showWaitingIndicator={false}
-        waitingIndicatorPrompt={null}
         commandMessages={[]}
         diffMessages={[]}
         scrollContainerRef={{ current: document.createElement("section") }}
@@ -4843,7 +4764,11 @@ describe("AgentSessionPanel conversation caching", () => {
     );
   });
 
-  it("refreshes the live turn tooltip from the latest session store record", () => {
+  it("refreshes the activity tooltip from the latest session store record", () => {
+    function StoredActivity() {
+      const session = useSessionRecordSnapshot("active-session");
+      return session ? <SessionActivityStrip session={session} /> : null;
+    }
     const initialSession = makeSession("active-session", {
       status: "active",
       liveActivity: { prompt: "old prompt" },
@@ -4859,9 +4784,8 @@ describe("AgentSessionPanel conversation caching", () => {
     });
     renderSessionPanelWithDefaults({
       activeSession: initialSession,
-      showWaitingIndicator: true,
-      waitingIndicatorPrompt: "old prompt",
     });
+    render(<StoredActivity />);
 
     expect(screen.getByRole("tooltip")).toHaveTextContent("old prompt");
 

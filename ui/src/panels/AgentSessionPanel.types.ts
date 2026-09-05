@@ -26,7 +26,6 @@ import type {
   McpElicitationAction,
   SandboxMode,
   Session,
-  SessionLiveActivity,
   SessionModelOptionsRefreshRequest,
 } from "../types";
 import type { PaneViewMode } from "../workspace-types";
@@ -39,8 +38,6 @@ import type {
   VirtualizedConversationMessageListHandleRef,
 } from "./virtualized-conversation-types";
 import type { SpawnDelegationOptions } from "./agent-session-panel-helpers";
-
-export type WaitingIndicatorKind = "liveTurn" | "delegationWait" | "send";
 
 export type DraftImageAttachment = ImageAttachment & {
   base64Data: string;
@@ -100,9 +97,6 @@ export type AgentSessionPanelProps = {
   scrollStateKey?: string;
   isLoading: boolean;
   isUpdating: boolean;
-  showWaitingIndicator: boolean;
-  waitingIndicatorKind?: WaitingIndicatorKind;
-  waitingIndicatorPrompt: string | null;
   commandMessages: CommandMessage[];
   diffMessages: DiffMessage[];
   scrollContainerRef: RefObject<HTMLElement | null>;
@@ -164,9 +158,6 @@ export type SessionBodyProps = {
   scrollStateKey: string;
   isLoading: boolean;
   isUpdating: boolean;
-  showWaitingIndicator: boolean;
-  waitingIndicatorKind: WaitingIndicatorKind;
-  waitingIndicatorPrompt: string | null;
   commandMessages: CommandMessage[];
   diffMessages: DiffMessage[];
   onApprovalDecision: (
@@ -308,10 +299,6 @@ export type SessionConversationPageProps = {
   virtualizerHandleRef?: VirtualizedConversationMessageListHandleRef;
   isActive: boolean;
   isLoading: boolean;
-  showWaitingIndicator: boolean;
-  waitingIndicatorKind: WaitingIndicatorKind;
-  waitingIndicatorPrompt: string | null;
-  waitingIndicatorActivity?: SessionLiveActivity | null;
   onApprovalDecision: (
     sessionId: string,
     messageId: string,

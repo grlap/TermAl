@@ -422,7 +422,7 @@ describe("App prompt-send and live-turn scroll", () => {
     },
   );
 
-  it("makes room when the first agent card appears above the live turn", async () => {
+  it("follows genuinely appended agent output above the composer", async () => {
     await withVerifiedNoReactActWarnings(async () => {
       let scrollHeight = 1000;
       const restoreScrollGeometry = stubElementScrollGeometry({
@@ -499,14 +499,14 @@ describe("App prompt-send and live-turn scroll", () => {
               projectId: "project-termal",
               workdir: "/projects/termal",
               status: "active",
-              preview: "Current response.",
-              messages,
+              preview: "New response.",
+              messages: [...messages, { id: "new-agent-output", type: "text", author: "assistant", timestamp: "10:02", text: "New response." }],
             }),
           ],
         });
         await settleAsyncUi();
 
-        expect(screen.getByText("Live turn")).toBeInTheDocument();
+        expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-animated", "true");
         expect(messageStack).toHaveClass("is-tail-following");
         expect(
           Math.max(...scrollToTopsWithBehavior(scrollToMock, "auto")),
@@ -520,7 +520,7 @@ describe("App prompt-send and live-turn scroll", () => {
     });
   });
 
-  it("follows live-turn growth while its visible pane is unfocused", async () => {
+  it("keeps status-only updates still and follows real growth in an unfocused pane", async () => {
     await withVerifiedNoReactActWarnings(async () => {
       let scrollHeight = 1000;
       const restoreScrollGeometry = stubElementScrollGeometry({
@@ -679,7 +679,6 @@ describe("App prompt-send and live-turn scroll", () => {
         });
         scrollToMock.mockClear();
 
-        scrollHeight = 1120;
         await dispatchStateEvent(latestEventSource(), {
           revision: 2,
           projects: [
@@ -702,7 +701,20 @@ describe("App prompt-send and live-turn scroll", () => {
         });
         await settleAsyncUi();
 
-        expect(screen.getByText("Live turn")).toBeInTheDocument();
+        expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-animated", "true");
+        expect(messageStack.scrollTop).toBe(800);
+        expect(scrollToTopsWithBehavior(scrollToMock, "auto")).toEqual([]);
+        scrollHeight = 1120;
+        await dispatchStateEvent(latestEventSource(), {
+          revision: 3,
+          projects: [{ id: "project-termal", name: "TermAl", rootPath: "/projects/termal" }],
+          sessions: [makeSession("session-1", {
+            name: "Session 1", projectId: "project-termal", workdir: "/projects/termal",
+            status: "active", preview: "New output",
+            messages: [...messages, { id: "unfocused-new-output", type: "text", author: "assistant", timestamp: "10:02", text: "New output" }],
+          })],
+        });
+        await settleAsyncUi();
         expect(messageStack.scrollTop).toBe(920);
         expect(filterScrollToCallsAt(scrollToMock, 920, "auto")).toHaveLength(1);
         scrollToMock.mockClear();
@@ -722,7 +734,7 @@ describe("App prompt-send and live-turn scroll", () => {
     });
   });
 
-  it("does not repeat bottom-follow while the live waiting indicator remains visible", async () => {
+  it("does not scroll for repeated status-only activity updates", async () => {
     await withVerifiedNoReactActWarnings(async () => {
       let scrollHeight = 1000;
       const restoreScrollGeometry = stubElementScrollGeometry({
@@ -789,7 +801,6 @@ describe("App prompt-send and live-turn scroll", () => {
         });
         scrollToMock.mockClear();
 
-        scrollHeight = 1120;
         await dispatchStateEvent(latestEventSource(), {
           ...baseState,
           revision: 3,
@@ -806,15 +817,11 @@ describe("App prompt-send and live-turn scroll", () => {
         });
         await settleAsyncUi();
 
-        expect(screen.getByText("Live turn")).toBeInTheDocument();
-        expect(
-          Math.max(...scrollToTopsWithBehavior(scrollToMock, "auto")),
-        ).toBeGreaterThan(800);
-        expect(messageStack.scrollTop).toBeGreaterThan(800);
-        expect(messageStack.scrollTop).toBeLessThanOrEqual(920);
+        expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-animated", "true");
+        expect(scrollToTopsWithBehavior(scrollToMock, "auto")).toEqual([]);
+        expect(messageStack.scrollTop).toBe(800);
 
         scrollToMock.mockClear();
-        scrollHeight = 1140;
         await dispatchStateEvent(latestEventSource(), {
           ...baseState,
           revision: 4,
@@ -831,10 +838,9 @@ describe("App prompt-send and live-turn scroll", () => {
         });
         await settleAsyncUi();
 
-        expect(screen.getByText("Live turn")).toBeInTheDocument();
-        expect(filterScrollToCallsAt(scrollToMock, 940, "auto")).toEqual([]);
-        expect(messageStack.scrollTop).toBeGreaterThan(800);
-        expect(messageStack.scrollTop).toBeLessThanOrEqual(920);
+        expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-animated", "true");
+        expect(scrollToTopsWithBehavior(scrollToMock, "auto")).toEqual([]);
+        expect(messageStack.scrollTop).toBe(800);
       } finally {
         context.cleanup();
         restoreScrollGeometry();

@@ -208,6 +208,54 @@ vi.mock("./MonacoCodeEditor", () => ({
 describe("App scroll behaviour", () => {
   installAppScrollTestHarness();
 
+  it.each([true, false])("keeps status-only activity outside transcript geometry with FOLLOW=%s", async (follow) => {
+    await withVerifiedNoReactActWarnings(async () => {
+      const restoreGeometry = stubElementScrollGeometry({
+        clientHeight: 200,
+        scrollHeight: () => 1000 + (document.querySelector(".activity-card-live") ? 120 : 0),
+      });
+      mockScrollToAndApplyTop();
+      const context = await renderAppWithProjectAndSession();
+      try {
+        const stack = document.querySelector<HTMLElement>(".workspace-pane.active .message-stack")!;
+        const initialSession = getSessionRecordSnapshotForTesting("session-1")!;
+        await act(async () => {
+          if (!follow) fireEvent.mouseDown(stack);
+          stack.scrollTop = follow ? 800 : 400;
+          fireEvent.scroll(stack);
+          await flushUiWork();
+        });
+        const initialStrip = stack.parentElement?.querySelector(".session-activity-strip");
+        for (const [status, stripState] of [
+          ["active", "working"], ["approval", "approval"],
+          ["stopping", "stopping"], ["idle", "idle"],
+        ] as const) {
+          await act(async () => {
+            upsertSessionStoreSession({
+              committedDraft: "", draftAttachments: [],
+              session: { ...initialSession, status },
+            });
+            await flushUiWork();
+          });
+          expect(stack.scrollHeight).toBe(1000);
+          expect(stack.clientHeight).toBe(200);
+          expect(stack.scrollTop).toBe(follow ? 800 : 400);
+          expect(stack.classList.contains("is-tail-following")).toBe(follow);
+          const strip = stack.parentElement?.querySelector(".session-activity-strip");
+          expect(strip).toBe(initialStrip);
+          expect(strip).toHaveAttribute("data-state", stripState);
+          expect(stack.nextElementSibling).toBe(strip);
+          expect(strip?.nextElementSibling).toHaveClass("composer");
+          expect(stack.querySelector(".session-activity-strip, .activity-card-live")).toBeNull();
+          expect(screen.queryByRole("button", { name: /New response|New activity/ })).toBeNull();
+        }
+      } finally {
+        context.cleanup();
+        restoreGeometry();
+      }
+    });
+  });
+
   it("cancels a pending settle-to-bottom frame when Ctrl+PageUp jumps to the top", async () => {
     await withVerifiedNoReactActWarnings(async () => {
       const originalPlatform = Object.getOwnPropertyDescriptor(
@@ -2252,14 +2300,12 @@ describe("App scroll behaviour", () => {
     });
   });
 
-  it("keeps the final reply visible when it replaces live turn after earlier output", async () => {
+  it("keeps the final reply visible after a status-only turn completion", async () => {
     await withVerifiedNoReactActWarnings(async () => {
       let transcriptScrollHeight = 1000;
       const restoreScrollGeometry = stubElementScrollGeometry({
         clientHeight: 200,
-        scrollHeight: () =>
-          transcriptScrollHeight +
-          (document.querySelector(".activity-card-live") ? 120 : 0),
+        scrollHeight: () => transcriptScrollHeight,
       });
       const scrollToMock = mockScrollToAndApplyTop();
       const context = await renderAppWithProjectAndSession();
@@ -2305,10 +2351,10 @@ describe("App scroll behaviour", () => {
         await dispatchStateEvent(latestEventSource(), activeState);
         await settleAsyncUi();
 
-        expect(screen.getByText("Live turn")).toBeInTheDocument();
+        expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-animated", "true");
         expect(
-          document.querySelector(".activity-card-live"),
-        ).toBeInTheDocument();
+          document.querySelector(".session-activity-strip"),
+        ).toHaveAttribute("data-state", "working");
 
         const messageStack = Array.from(
           document.querySelectorAll(".message-stack"),
@@ -2321,16 +2367,16 @@ describe("App scroll behaviour", () => {
           throw new Error("Message stack not found");
         }
 
-        messageStack.scrollTop = 920;
+        messageStack.scrollTop = 800;
         await act(async () => {
           fireEvent.scroll(messageStack);
           await flushUiWork();
         });
         scrollToMock.mockClear();
 
-        // The backend can publish idle before the final transcript delta. This
-        // status-only commit removes LIVE TURN without changing messages, so it
-        // must arm (rather than consume) final-message synchronization.
+        // Idle can arrive before the final delta. The permanent strip changes
+        // paint only: this commit must not change geometry or consume the
+        // pending final-message synchronization.
         await dispatchStateEvent(latestEventSource(), {
           ...activeState,
           revision: 3,
@@ -2347,11 +2393,12 @@ describe("App scroll behaviour", () => {
           ],
         });
         await settleAsyncUi();
-        expect(screen.queryByText("Live turn")).not.toBeInTheDocument();
+        expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "idle");
 
-        // Emulate the browser's automatic clamp after the in-flow LIVE TURN
-        // card disappears, then isolate writes caused by the later final delta.
-        messageStack.scrollTop = 800;
+        expect(messageStack.scrollTop).toBe(800);
+        expect(messageStack.scrollHeight).toBe(1000);
+        expect(messageStack.clientHeight).toBe(200);
+        expect(scrollToTopsForElementWithBehavior(scrollToMock, messageStack, "auto")).toEqual([]);
         scrollToMock.mockClear();
 
         // This turn already has agent output (the command), so final text is not
@@ -2388,7 +2435,7 @@ describe("App scroll behaviour", () => {
         expect(
           within(messageStack).getByText("Final response"),
         ).toBeInTheDocument();
-        expect(screen.queryByText("Live turn")).not.toBeInTheDocument();
+        expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "idle");
         expect(
           document.querySelector(".activity-card-live"),
         ).not.toBeInTheDocument();
@@ -2528,7 +2575,7 @@ describe("App scroll behaviour", () => {
         });
         await settleAsyncUi();
 
-        expect(screen.getByText("Live turn")).toBeInTheDocument();
+        expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-animated", "true");
         expect(messageStack).not.toHaveClass("is-tail-following");
         expect(filterScrollToCallsAt(scrollToMock, 920, "auto")).toEqual([]);
         expect(messageStack.scrollTop).toBe(440);
@@ -2539,7 +2586,7 @@ describe("App scroll behaviour", () => {
     });
   });
 
-  it("bottom-follows the live waiting indicator through the virtualized transcript boundary", async () => {
+  it("keeps status changes still and follows appended virtualized transcript content", async () => {
     await withVerifiedNoReactActWarnings(async () => {
       let scrollHeight = 1000;
       const restoreScrollGeometry = stubElementScrollGeometry({
@@ -2601,7 +2648,6 @@ describe("App scroll behaviour", () => {
         });
         scrollToMock.mockClear();
 
-        scrollHeight = 1120;
         await dispatchStateEvent(latestEventSource(), {
           ...baseState,
           revision: 3,
@@ -2620,7 +2666,17 @@ describe("App scroll behaviour", () => {
           await settleAsyncUi();
         }
 
-        expect(screen.getByText("Live turn")).toBeInTheDocument();
+        expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-animated", "true");
+        expect(messageStack.scrollTop).toBe(800);
+        expect(scrollToTopsWithBehavior(scrollToMock, "auto")).toEqual([]);
+        scrollHeight = 1120;
+        await dispatchStateEvent(latestEventSource(), {
+          ...baseState, revision: 4,
+          sessions: [{ ...baseState.sessions[0], status: "active",
+            messages: [...messages, { id: "message-appended-91", type: "text", timestamp: "10:02", author: "assistant", text: "Genuinely new output" }],
+          }],
+        });
+        await settleAsyncUi();
         expect(messageStack.scrollTop).toBe(920);
         expect(
           filterScrollToCallsAt(scrollToMock, 920, "auto").length,
@@ -3130,17 +3186,16 @@ describe("App scroll behaviour", () => {
         });
         await settleAsyncUi();
 
-        const liveTurnCard = screen
-          .getByText("Live turn")
-          .closest(".activity-card-live");
+        const activityStrip = messageStack.parentElement?.querySelector(".session-activity-strip");
         const queuedPromptCard = screen
           .getByText("Queued follow-up")
           .closest(".pending-prompt-card");
-        expect(liveTurnCard).not.toBeNull();
+        expect(activityStrip).toHaveAttribute("data-state", "working");
+        expect(messageStack.nextElementSibling).toBe(activityStrip);
         expect(queuedPromptCard).not.toBeNull();
         expect(
           Boolean(
-            queuedPromptCard!.compareDocumentPosition(liveTurnCard!) &
+            queuedPromptCard!.compareDocumentPosition(activityStrip!) &
             Node.DOCUMENT_POSITION_FOLLOWING,
           ),
         ).toBe(true);
@@ -3537,25 +3592,22 @@ describe("App scroll behaviour", () => {
         });
         await settleAsyncUi();
 
-        const liveTail = screen
-          .getByText("Live turn")
-          .closest(".conversation-live-tail");
-        expect(liveTail).not.toBeNull();
-        expect(liveTail).toHaveAttribute("data-tail-follow", "attached");
+        expect(messageStack.nextElementSibling).toHaveClass("session-activity-strip");
+        expect(messageStack).toHaveClass("is-tail-following");
 
         messageStack.scrollTop = 800;
         await act(async () => {
           fireEvent.scroll(messageStack);
           await flushUiWork();
         });
-        expect(liveTail).toHaveAttribute("data-tail-follow", "attached");
+        expect(messageStack).toHaveClass("is-tail-following");
 
         messageStack.scrollTop = 640;
         await act(async () => {
           fireEvent.scroll(messageStack);
           await flushUiWork();
         });
-        expect(liveTail).toHaveAttribute("data-tail-follow", "detached");
+        expect(messageStack).not.toHaveClass("is-tail-following");
 
         const spaceDownEvent = new KeyboardEvent("keydown", {
           bubbles: true,
@@ -3573,7 +3625,7 @@ describe("App scroll behaviour", () => {
           fireEvent.scroll(messageStack);
           await flushUiWork();
         });
-        expect(liveTail).toHaveAttribute("data-tail-follow", "attached");
+        expect(messageStack).toHaveClass("is-tail-following");
 
         // Trackpad momentum and touch overscroll often continue after the
         // transcript has reached its physical bottom. Those no-op gestures
@@ -3588,15 +3640,14 @@ describe("App scroll behaviour", () => {
           });
           await flushUiWork();
         });
-        expect(liveTail).toHaveAttribute("data-tail-follow", "attached");
+        expect(messageStack).toHaveClass("is-tail-following");
 
         act(() => {
           fireEvent.wheel(messageStack, { deltaY: -20 });
         });
-        // Sticky LIVE TURN ownership must be gone in the input task itself;
-        // waiting for the resulting native scroll or an animation frame lets
-        // the card overlay history for one painted frame.
-        expect(liveTail).toHaveAttribute("data-tail-follow", "detached");
+        // Reader input must revoke FOLLOW in the input task, before another
+        // frame can pull the transcript back to the bottom.
+        expect(messageStack).not.toHaveClass("is-tail-following");
         await act(async () => {
           await flushUiWork();
         });
@@ -3608,7 +3659,7 @@ describe("App scroll behaviour", () => {
           fireEvent.mouseUp(document);
           await flushUiWork();
         });
-        expect(liveTail).toHaveAttribute("data-tail-follow", "attached");
+        expect(messageStack).toHaveClass("is-tail-following");
 
         const arrowUpEvent = new KeyboardEvent("keydown", {
           bubbles: true,
@@ -3623,12 +3674,12 @@ describe("App scroll behaviour", () => {
         // native scroll after the synchronous 40 px step.
         expect(arrowUpEvent.defaultPrevented).toBe(true);
         expect(messageStack.scrollTop).toBe(760);
-        expect(liveTail).toHaveAttribute("data-tail-follow", "detached");
+        expect(messageStack).not.toHaveClass("is-tail-following");
         await act(async () => {
           fireEvent.scroll(messageStack);
           await flushUiWork();
         });
-        expect(liveTail).toHaveAttribute("data-tail-follow", "detached");
+        expect(messageStack).not.toHaveClass("is-tail-following");
 
         scrollHeight = 1120;
         await dispatchStateEvent(latestEventSource(), {
@@ -3676,7 +3727,7 @@ describe("App scroll behaviour", () => {
         await settleAsyncUi();
 
         expect(messageStack.scrollTop).toBeLessThan(920);
-        expect(liveTail).toHaveAttribute("data-tail-follow", "detached");
+        expect(messageStack).not.toHaveClass("is-tail-following");
         expect(
           await screen.findByRole("button", { name: "New response" }),
         ).toBeInTheDocument();
@@ -3690,7 +3741,7 @@ describe("App scroll behaviour", () => {
           fireEvent.scroll(messageStack);
           await flushUiWork();
         });
-        expect(liveTail).toHaveAttribute("data-tail-follow", "detached");
+        expect(messageStack).not.toHaveClass("is-tail-following");
         expect(
           messageStack.scrollHeight - messageStack.clientHeight - messageStack.scrollTop,
         ).toBeLessThanOrEqual(SESSION_PHYSICAL_BOTTOM_TOLERANCE_PX);
@@ -3708,7 +3759,7 @@ describe("App scroll behaviour", () => {
           fireEvent.mouseUp(document);
           await flushUiWork();
         });
-        expect(liveTail).toHaveAttribute("data-tail-follow", "attached");
+        expect(messageStack).toHaveClass("is-tail-following");
         expect(
           screen.queryByRole("button", { name: "New response" }),
         ).not.toBeInTheDocument();
@@ -3717,7 +3768,7 @@ describe("App scroll behaviour", () => {
           fireEvent.wheel(messageStack, { deltaY: -40 });
         });
         expect(messageStack.scrollTop).toBe(880);
-        expect(liveTail).toHaveAttribute("data-tail-follow", "detached");
+        expect(messageStack).not.toHaveClass("is-tail-following");
 
         const arrowDownEvent = new KeyboardEvent("keydown", {
           bubbles: true,
@@ -3729,12 +3780,12 @@ describe("App scroll behaviour", () => {
         });
         expect(arrowDownEvent.defaultPrevented).toBe(true);
         expect(messageStack.scrollTop).toBe(920);
-        expect(liveTail).toHaveAttribute("data-tail-follow", "attached");
+        expect(messageStack).toHaveClass("is-tail-following");
         expect(
           screen.queryByRole("button", { name: "New response" }),
         ).not.toBeInTheDocument();
 
-        // Any deliberate transcript navigation switches LIVE TURN back to
+        // Any deliberate upward transcript navigation switches the pane back to
         // normal flow before the custom non-passive wheel writer moves the
         // container. Downward navigation must obey the same mode switch as an
         // upward escape; reaching the real bottom can attach it again later.
@@ -3743,7 +3794,7 @@ describe("App scroll behaviour", () => {
           fireEvent.wheel(messageStack, { deltaY: 20 });
           await flushUiWork();
         });
-        expect(liveTail).toHaveAttribute("data-tail-follow", "detached");
+        expect(messageStack).not.toHaveClass("is-tail-following");
       } finally {
         context.cleanup();
         restoreScrollGeometry();
@@ -3809,11 +3860,8 @@ describe("App scroll behaviour", () => {
         });
         await settleAsyncUi();
 
-        const liveTail = screen
-          .getByText("Live turn")
-          .closest(".conversation-live-tail");
-        expect(liveTail).not.toBeNull();
-        expect(liveTail).toHaveAttribute("data-tail-follow", "attached");
+        expect(messageStack.nextElementSibling).toHaveClass("session-activity-strip");
+        expect(messageStack).toHaveClass("is-tail-following");
 
         messageStack.scrollTop = 800;
         await act(async () => {
@@ -3827,7 +3875,7 @@ describe("App scroll behaviour", () => {
           await flushUiWork();
         });
 
-        expect(liveTail).toHaveAttribute("data-tail-follow", "attached");
+        expect(messageStack).toHaveClass("is-tail-following");
       } finally {
         context.cleanup();
         restoreScrollGeometry();
@@ -4015,7 +4063,7 @@ describe("App scroll behaviour", () => {
           for (let iteration = 0; iteration < 10; iteration += 1) {
             await settleAsyncUi();
           }
-          expect(screen.getByText("Live turn")).toBeInTheDocument();
+          expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-animated", "true");
           expect(messageStack.scrollTop).toBe(920);
           expect(queryTailIndicator()).toBeNull();
 

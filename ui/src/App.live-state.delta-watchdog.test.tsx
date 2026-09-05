@@ -441,9 +441,7 @@ describe("App live state - delta-gap core", () => {
       }
 
       await clickAndSettle(sessionRowButton);
-      expect(
-        screen.getByText("Working on the current turn..."),
-      ).toBeInTheDocument();
+      expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "working");
       fetchMock.mockClear();
       stateRequestCount = 0;
 
@@ -485,9 +483,7 @@ describe("App live state - delta-gap core", () => {
           }),
         ]),
       );
-      expect(
-        screen.queryByText("Working on the current turn..."),
-      ).not.toBeInTheDocument();
+      expect(document.querySelector(".session-activity-strip[data-state=working]")).toBeNull();
     } finally {
       vi.useRealTimers();
       setDocumentVisibilityState(originalVisibilityState);
@@ -590,9 +586,7 @@ describe("App live state - delta-gap core", () => {
       await settleAsyncUi();
 
       await openSessionByName("Codex Session");
-      expect(
-        screen.getByText("Working on the current turn..."),
-      ).toBeInTheDocument();
+      expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "working");
       fetchMock.mockClear();
       stateRequestCount = 0;
 
@@ -638,9 +632,7 @@ describe("App live state - delta-gap core", () => {
           }),
         ]),
       );
-      expect(
-        screen.queryByText("Working on the current turn..."),
-      ).not.toBeInTheDocument();
+      expect(document.querySelector(".session-activity-strip[data-state=working]")).toBeNull();
     } finally {
       vi.useRealTimers();
       setDocumentVisibilityState(originalVisibilityState);
@@ -888,9 +880,7 @@ describe("App live state - delta-gap core", () => {
         await settleAsyncUi();
 
         await openSessionByName("Codex Session");
-        expect(
-          screen.getByText("Working on the current turn..."),
-        ).toBeInTheDocument();
+        expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "working");
         fetchMock.mockClear();
         stateRequestCount = 0;
 
@@ -925,9 +915,7 @@ describe("App live state - delta-gap core", () => {
             }),
           ]),
         );
-        expect(
-          screen.queryByText("Working on the current turn..."),
-        ).not.toBeInTheDocument();
+        expect(document.querySelector(".session-activity-strip[data-state=working]")).toBeNull();
       } finally {
         vi.useRealTimers();
         setDocumentVisibilityState(originalVisibilityState);
@@ -1042,9 +1030,7 @@ describe("App live state - delta-gap core", () => {
       }
 
       await clickAndSettle(sessionRowButton);
-      expect(
-        screen.getByText("Working on the current turn..."),
-      ).toBeInTheDocument();
+      expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "working");
       fetchMock.mockClear();
       stateRequestCount = 0;
 
@@ -1085,9 +1071,7 @@ describe("App live state - delta-gap core", () => {
           }),
         ]),
       );
-      expect(
-        screen.queryByText("Working on the current turn..."),
-      ).not.toBeInTheDocument();
+      expect(document.querySelector(".session-activity-strip[data-state=working]")).toBeNull();
     } finally {
       vi.useRealTimers();
       setDocumentVisibilityState(originalVisibilityState);
@@ -1525,9 +1509,7 @@ describe("App live state - delta-gap core", () => {
       expect(getSessionRecordSnapshotForTesting("session-1")).toMatchObject({
         status: "idle",
       });
-      expect(
-        screen.queryByText("Working on the current turn..."),
-      ).not.toBeInTheDocument();
+      expect(document.querySelector(".session-activity-strip[data-state=working]")).toBeNull();
     } finally {
       vi.useRealTimers();
       setDocumentVisibilityState(originalVisibilityState);
@@ -1684,9 +1666,7 @@ describe("App live state - delta-gap core", () => {
       }
 
       await clickAndSettle(quietSessionRowButton);
-      expect(
-        screen.getByText("Working on the current turn..."),
-      ).toBeInTheDocument();
+      expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "working");
       fetchMock.mockClear();
       stateRequestCount = 0;
 
@@ -1805,9 +1785,7 @@ describe("App live state - delta-gap core", () => {
       expect(watchdogTriggered).toBe(true);
       expect(stateFetchCallCount()).toBe(1);
       expect(screen.getAllByText("Recovered quiet session.")).toHaveLength(1);
-      expect(
-        screen.queryByText("Working on the current turn..."),
-      ).not.toBeInTheDocument();
+      expect(document.querySelector(".session-activity-strip[data-state=working]")).toBeNull();
     } finally {
       vi.useRealTimers();
       setDocumentVisibilityState(originalVisibilityState);
@@ -1919,9 +1897,7 @@ describe("App live state - delta-gap core", () => {
       }
 
       await clickAndSettle(sessionRowButton);
-      expect(
-        screen.getByText("Working on the current turn..."),
-      ).toBeInTheDocument();
+      expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "working");
       fetchMock.mockClear();
 
       // After one stale window the watchdog should fire even though no

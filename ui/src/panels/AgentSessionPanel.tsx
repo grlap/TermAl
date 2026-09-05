@@ -19,12 +19,8 @@ import {
 import { SessionComposer } from "./AgentSessionPanel.composer";
 import { MessageSlot, PanelEmptyState } from "./session-message-leaves";
 import {
-  ConversationTailEntry,
-  ConversationTailPresence,
   PendingPromptCard,
-  QueuedTurnHandoffIndicator,
   QueuePausedIndicator,
-  RunningIndicator,
 } from "./session-activity-cards";
 import { VirtualizedConversationMessageList } from "./VirtualizedConversationMessageList";
 import { type RenderMessageCard } from "./virtualized-conversation-types";
@@ -69,7 +65,6 @@ import {
   commandMessagesForPaneViewMode,
   diffMessagesForPaneViewMode,
 } from "../SessionPaneView.messages";
-import { shouldShowAgentSessionWaitingIndicator } from "./AgentSessionPanel.waiting-indicator";
 import { useSessionRecordSnapshot } from "../session-store";
 import { useStableEvent } from "./use-stable-event";
 import {
@@ -87,7 +82,6 @@ import type {
   PendingPrompt,
   ConversationMarker,
   CreateConversationMarkerOptions,
-  SessionLiveActivity,
 } from "../types";
 import type {
   AgentSessionPanelFooterProps,
@@ -153,9 +147,6 @@ export function AgentSessionPanel({
   scrollStateKey = `${paneId}:${viewMode}:${activeSessionId ?? "empty"}`,
   isLoading,
   isUpdating,
-  showWaitingIndicator,
-  waitingIndicatorKind = "liveTurn",
-  waitingIndicatorPrompt,
   commandMessages: fallbackCommandMessages,
   diffMessages: fallbackDiffMessages,
   scrollContainerRef,
@@ -219,9 +210,6 @@ export function AgentSessionPanel({
       scrollStateKey={scrollStateKey}
       isLoading={isLoading}
       isUpdating={isUpdating}
-      showWaitingIndicator={showWaitingIndicator}
-      waitingIndicatorKind={waitingIndicatorKind}
-      waitingIndicatorPrompt={waitingIndicatorPrompt}
       commandMessages={fallbackCommandMessages}
       diffMessages={fallbackDiffMessages}
       onApprovalDecision={stableOnApprovalDecision}
@@ -338,9 +326,6 @@ const SessionBody = memo(
     scrollStateKey,
     isLoading,
     isUpdating,
-    showWaitingIndicator,
-    waitingIndicatorKind,
-    waitingIndicatorPrompt,
     commandMessages: fallbackCommandMessages,
     diffMessages: fallbackDiffMessages,
     onApprovalDecision,
@@ -365,7 +350,6 @@ const SessionBody = memo(
     renderPromptSettings,
   }: SessionBodyProps): JSX.Element | null {
     const activeSession = useSessionRecordSnapshot(activeSessionId);
-    const activeSessionStatus = activeSession?.status;
     const commandMessages = useMemo(
       () =>
         activeSession
@@ -380,17 +364,6 @@ const SessionBody = memo(
           : fallbackDiffMessages,
       [activeSession, fallbackDiffMessages, viewMode],
     );
-    const shouldResolveLiveWaitingActivity =
-      showWaitingIndicator &&
-      waitingIndicatorKind === "liveTurn" &&
-      activeSessionStatus === "active";
-    const resolvedWaitingIndicatorActivity: SessionLiveActivity | null =
-      shouldResolveLiveWaitingActivity
-        ? (activeSession?.liveActivity ?? null)
-        : waitingIndicatorPrompt
-          ? { prompt: waitingIndicatorPrompt }
-          : null;
-
     if (!activeSession) {
       return (
         <PanelEmptyState
@@ -409,8 +382,7 @@ const SessionBody = memo(
         activeSession.pendingPrompts ?? EMPTY_PENDING_PROMPTS;
       if (
         activeSession.messages.length === 0 &&
-        activePendingPrompts.length === 0 &&
-        !showWaitingIndicator
+        activePendingPrompts.length === 0
       ) {
         return (
           <PanelEmptyState
@@ -438,12 +410,6 @@ const SessionBody = memo(
             virtualizerHandleRef={virtualizerHandleRef}
             isActive
             isLoading={isLoading}
-            showWaitingIndicator={showWaitingIndicator}
-            waitingIndicatorKind={waitingIndicatorKind}
-            waitingIndicatorPrompt={
-              resolvedWaitingIndicatorActivity?.prompt ?? waitingIndicatorPrompt
-            }
-            waitingIndicatorActivity={resolvedWaitingIndicatorActivity}
             onApprovalDecision={onApprovalDecision}
             onUserInputSubmit={onUserInputSubmit}
             pendingUserInputMessageIds={pendingUserInputMessageIds}
@@ -528,8 +494,6 @@ const SessionBody = memo(
     previous.scrollStateKey === next.scrollStateKey &&
     previous.isLoading === next.isLoading &&
     previous.isUpdating === next.isUpdating &&
-    previous.showWaitingIndicator === next.showWaitingIndicator &&
-    previous.waitingIndicatorPrompt === next.waitingIndicatorPrompt &&
     previous.commandMessages === next.commandMessages &&
     previous.diffMessages === next.diffMessages &&
     previous.onApprovalDecision === next.onApprovalDecision &&
@@ -578,10 +542,6 @@ const SessionConversationPage = memo(
     virtualizerHandleRef,
     isActive,
     isLoading,
-    showWaitingIndicator,
-    waitingIndicatorKind,
-    waitingIndicatorPrompt,
-    waitingIndicatorActivity,
     onApprovalDecision,
     onUserInputSubmit,
     pendingUserInputMessageIds,
@@ -675,14 +635,10 @@ const SessionConversationPage = memo(
         ? visiblePendingPromptsBase
         : filteredPendingPrompts;
     }, [visibleMessages.length, visibleMessageIds, visiblePendingPromptsBase]);
-    const effectiveShowWaitingIndicator =
-      !hasNewerHistory &&
-      shouldShowAgentSessionWaitingIndicator({
-        showWaitingIndicator,
-        waitingIndicatorKind,
-        sessionStatus: session.status,
-        visibleMessages,
-      });
+    const isTurnActive =
+      session.status === "active" ||
+      session.status === "approval" ||
+      session.status === "stopping";
     const overviewMessageCount = Math.max(
       session.messageCount ?? 0,
       overviewMessages.length,
@@ -713,9 +669,7 @@ const SessionConversationPage = memo(
       0;
     const messageRevealIds = useConversationMessageRevealIds({
       isActive,
-      liveTurnVisible:
-        effectiveShowWaitingIndicator &&
-        waitingIndicatorKind !== "delegationWait",
+      isTurnActive,
       messages: visibleMessages,
       pendingPromptIds: visiblePendingPromptIds,
       revealScopeKey: scrollStateKey,
@@ -1196,8 +1150,7 @@ const SessionConversationPage = memo(
 
     if (
       visibleMessages.length === 0 &&
-      visiblePendingPrompts.length === 0 &&
-      !effectiveShowWaitingIndicator
+      visiblePendingPrompts.length === 0
     ) {
       return (
         <div
@@ -1252,37 +1205,15 @@ const SessionConversationPage = memo(
         forceVirtualized={hasOlderHistory || hasNewerHistory}
       />
     );
-    // The backend projects its explicit-resume latch as `queuePaused`. While
-    // it is set nothing will start on its own, so the paused card must win
-    // over the "starting the next turn" handoff, which is only an inference
-    // from an idle session that still has queued prompts.
     const queuePaused =
-      !effectiveShowWaitingIndicator &&
+      !isTurnActive &&
       Boolean(session.queuePaused) &&
       visiblePendingPrompts.length > 0;
-    const queueHandoffPrompt =
-      !effectiveShowWaitingIndicator &&
-      !queuePaused &&
-      session.status === "idle" &&
-      visibleMessages.length > 0
-        ? (visiblePendingPrompts[0]?.text ?? null)
-        : null;
-    const liveTurnCard = effectiveShowWaitingIndicator ? (
-      <RunningIndicator
-        agent={session.agent}
-        activity={waitingIndicatorActivity}
-        lastPrompt={waitingIndicatorPrompt}
-      />
-    ) : queuePaused ? (
+    const pausedQueueCard = queuePaused ? (
       <QueuePausedIndicator
         agent={session.agent}
         queuedCount={visiblePendingPrompts.length}
         onResume={() => onResumeSessionQueue?.(session.id)}
-      />
-    ) : queueHandoffPrompt ? (
-      <QueuedTurnHandoffIndicator
-        agent={session.agent}
-        prompt={queueHandoffPrompt}
       />
     ) : null;
     const pendingPromptCards = visiblePendingPrompts.map((prompt) => (
@@ -1297,24 +1228,22 @@ const SessionConversationPage = memo(
         }
         onSearchItemMount={onConversationSearchItemMount}
       >
-        <ConversationTailEntry>
-          <PendingPromptCard
-            prompt={prompt}
-            sessionId={session.id}
-            onOpenMailbox={onOpenMailbox}
-            onCancel={() => onCancelQueuedPrompt(session.id, prompt.id)}
-            searchQuery={
-              conversationSearchActiveItemKey === `pendingPrompt:${prompt.id}`
-                ? conversationSearchQuery
-                : ""
-            }
-            searchHighlightTone={
-              conversationSearchActiveItemKey === `pendingPrompt:${prompt.id}`
-                ? "active"
-                : "match"
-            }
-          />
-        </ConversationTailEntry>
+        <PendingPromptCard
+          prompt={prompt}
+          sessionId={session.id}
+          onOpenMailbox={onOpenMailbox}
+          onCancel={() => onCancelQueuedPrompt(session.id, prompt.id)}
+          searchQuery={
+            conversationSearchActiveItemKey === `pendingPrompt:${prompt.id}`
+              ? conversationSearchQuery
+              : ""
+          }
+          searchHighlightTone={
+            conversationSearchActiveItemKey === `pendingPrompt:${prompt.id}`
+              ? "active"
+              : "match"
+          }
+        />
       </MessageSlot>
     ));
     const pendingPromptQueue =
@@ -1324,25 +1253,12 @@ const SessionConversationPage = memo(
           {pendingPromptCards}
         </div>
       ) : null;
-    const liveTail = (
-      <ConversationTailPresence
-        active={pendingPromptQueue !== null || liveTurnCard !== null}
-      >
-        {/*
-          Queued prompts and LIVE TURN are one visual tail. While the scroll
-          controller owns tail follow, it moves the whole transcript before
-          paint to keep this in-flow group stable. Explicit user navigation
-          detaches that scroll intent; the cards always travel with transcript.
-        */}
-        <div
-          className="conversation-live-tail"
-          data-tail-follow={liveTailPinned ? "attached" : "detached"}
-        >
-          {pendingPromptQueue}
-          {liveTurnCard}
-        </div>
-      </ConversationTailPresence>
-    );
+    const queuedTail = pendingPromptQueue ? (
+      <div className="conversation-queued-tail">
+        {pendingPromptQueue}
+        {pausedQueueCard}
+      </div>
+    ) : null;
     const markerNavigation = isMarkerPanelVisible ? (
       <ConversationMarkerFloatingWindow
         markers={sortedMarkers}
@@ -1358,9 +1274,8 @@ const SessionConversationPage = memo(
         {markerNavigation}
         {conversationMessages}
         {markerContextMenuNode}
-        {/* The shared tail keeps queued prompts mounted while LIVE TURN enters
-        or exits, avoiding two independently moving bottom anchors. */}
-        {liveTail}
+        {/* Queued content retains its identity across activity state changes. */}
+        {queuedTail}
       </>
     );
     // Overview eligibility, rather than async response readiness, owns the
@@ -1410,9 +1325,6 @@ const SessionConversationPage = memo(
     previous.virtualizerHandleRef === next.virtualizerHandleRef &&
     previous.isActive === next.isActive &&
     previous.isLoading === next.isLoading &&
-    previous.showWaitingIndicator === next.showWaitingIndicator &&
-    previous.waitingIndicatorPrompt === next.waitingIndicatorPrompt &&
-    previous.waitingIndicatorActivity === next.waitingIndicatorActivity &&
     previous.onUserInputSubmit === next.onUserInputSubmit &&
     previous.pendingUserInputMessageIds ===
       next.pendingUserInputMessageIds &&

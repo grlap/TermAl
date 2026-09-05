@@ -125,6 +125,8 @@ describe("session pane scroll observers", () => {
       isSessionTabActive: false,
       isSending: false,
       showWaitingIndicator: false,
+      visibleContentSignature: "initial",
+      visibleMessageContentSignature: "initial",
     };
     const beforePaint: number[] = [];
     const hook = renderHook(
@@ -181,23 +183,25 @@ describe("session pane scroll observers", () => {
     expect(node.scrollTop).toBe(1_100);
   });
 
-  it.each([true, false])("repins waiting-indicator growth before paint with focus=%s", (isActive) => {
+  it.each([true, false])("ignores status-only activity and follows subsequent content growth with focus=%s", (isActive) => {
     const { hook, node, visibleProps, beforePaint, grow } = renderVisiblePane(true, isActive);
-    grow(1_120);
     hook.rerender({ ...visibleProps, showWaitingIndicator: true });
+    expect(node.scrollTop).toBe(800);
+    expect(hook.result.current.showNewResponseIndicator).toBe(false);
+    grow(1_120);
+    hook.rerender({ ...visibleProps, showWaitingIndicator: true,
+      visibleContentSignature: "streamed-content", visibleMessageContentSignature: "streamed-content" });
     expect(beforePaint[beforePaint.length - 1]).toBe(920);
     expect(node.scrollTop).toBe(920);
     expect(hook.result.current.liveTailPinned).toBe(true);
   });
 
   it.each([true, false])("does not treat an external sending-status edge as this pane's Send (focus=%s)", (isActive) => {
-    const { hook, node, visibleProps, animationFrames, grow } = renderVisiblePane(false, isActive);
-    grow(1_120);
+    const { hook, node, visibleProps, animationFrames } = renderVisiblePane(false, isActive);
     hook.rerender({ ...visibleProps, isSending: true });
     expect(node.scrollTop).toBe(400);
     expect(hook.result.current.liveTailPinned).toBe(false);
-    expect(hook.result.current.showNewResponseIndicator).toBe(true);
-    expect(hook.result.current.newResponseIndicatorLabel).toBe("New activity");
+    expect(hook.result.current.showNewResponseIndicator).toBe(false);
     expect(animationFrames.size).toBe(0);
   });
 
@@ -392,8 +396,7 @@ describe("session pane scroll observers", () => {
     conversationPage.className = "session-conversation-page is-active";
     const transcriptCard = document.createElement("article");
     const liveTail = document.createElement("div");
-    liveTail.className = "conversation-live-tail";
-    liveTail.setAttribute("data-tail-follow", "attached");
+    liveTail.className = "conversation-queued-tail";
     conversationPage.append(transcriptCard, liveTail);
     scrollNode.append(conversationPage);
     let liveTailContentTop = 900;
@@ -934,7 +937,7 @@ describe("session pane scroll observers", () => {
     });
   });
 
-  it("repins the first live-turn frame before later layout observers run", () => {
+  it("repins prompt-send content growth before later layout observers run", () => {
     let scrollHeight = 1_000;
     const scrollNode = document.createElement("section");
     Object.defineProperties(scrollNode, {
@@ -980,7 +983,7 @@ describe("session pane scroll observers", () => {
     );
     scrollTo.mockClear();
 
-    // LIVE TURN adds height in this commit. The hook's layout effect must move
+    // The submitted prompt adds height in this commit. The layout effect moves
     // the real viewport before a later layout observer (and therefore paint)
     // can see the old bottom.
     scrollHeight = 1_120;

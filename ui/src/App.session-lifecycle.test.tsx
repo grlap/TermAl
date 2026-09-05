@@ -2033,8 +2033,8 @@ describe("App session lifecycle", () => {
         // No SSE state arrives here: the active session exists only because the
         // create-session REST flow adopted it locally.
         expect(
-          document.querySelector(".activity-card-live")?.textContent,
-        ).toContain("Working on the current turn...");
+          document.querySelector(".session-activity-strip"),
+        ).toHaveAttribute("data-state", "working");
         fetchStateSpy.mockClear();
 
         // Keep one real watchdog interval and own every update it can trigger
@@ -2049,7 +2049,7 @@ describe("App session lifecycle", () => {
 
         await waitFor(() => {
           expect(fetchStateSpy).toHaveBeenCalledTimes(1);
-          expect(document.querySelector(".activity-card-live")).toBeNull();
+          expect(document.querySelector(".session-activity-strip[data-state=working]")).toBeNull();
         });
       } finally {
         window.history.replaceState(window.history.state, "", originalUrl);

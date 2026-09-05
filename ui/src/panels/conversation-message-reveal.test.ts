@@ -24,7 +24,7 @@ const input = (
   overrides: Partial<ConversationMessageRevealInput> = {},
 ): ConversationMessageRevealInput => ({
   isActive: true,
-  liveTurnVisible: false,
+  isTurnActive: false,
   messageIds,
   pendingPromptIds: [],
   userScrollGeneration: 0,
@@ -155,14 +155,14 @@ describe("conversation message reveal continuity", () => {
     expect(appended.revealMessageIds).toEqual(["message-3"]);
   });
 
-  it("does not reveal a final message that replaces the live-turn surface", () => {
+  it("does not reveal a final message at explicit turn completion", () => {
     const live = advance(
       null,
-      input(["message-1"], { liveTurnVisible: true }),
+      input(["message-1"], { isTurnActive: true }),
     );
     const completed = advance(
       live.nextState,
-      input(["message-1", "message-final"], { liveTurnVisible: false }),
+      input(["message-1", "message-final"], { isTurnActive: false }),
     );
     const later = advance(
       completed.nextState,
@@ -251,7 +251,7 @@ function DelayedMountHarness({
 }) {
   const revealIds = useConversationMessageRevealIds({
     isActive: true,
-    liveTurnVisible: false,
+    isTurnActive: false,
     messages: makeMessages(messageIds),
     pendingPromptIds: [],
     revealScopeKey,
@@ -280,7 +280,7 @@ function RevealScopeProbe({
 }) {
   const revealIds = useConversationMessageRevealIds({
     isActive: true,
-    liveTurnVisible: false,
+    isTurnActive: false,
     messages: makeMessages(messageIds),
     pendingPromptIds: [],
     revealScopeKey,

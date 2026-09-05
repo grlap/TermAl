@@ -1,88 +1,48 @@
 import { describe, expect, it } from "vitest";
-import { shouldShowAgentSessionWaitingIndicator } from "./AgentSessionPanel.waiting-indicator";
-import type { Message } from "../types";
+import { resolveSessionActivity, type SessionActivityOptions } from "./AgentSessionPanel.waiting-indicator";
 
-const userMessage: Message = {
-  id: "message-user",
-  type: "text",
-  timestamp: "10:00",
-  author: "you",
-  text: "Prompt",
-};
-
-const assistantMessage: Message = {
-  id: "message-assistant",
-  type: "text",
-  timestamp: "10:01",
-  author: "assistant",
-  text: "Answer",
-};
-
-const fileChangesMessage: Message = {
-  id: "message-files",
-  type: "fileChanges",
-  timestamp: "10:02",
-  author: "assistant",
-  title: "Agent changed 1 file",
-  files: [{ path: "src/main.rs", kind: "modified" }],
-};
-
-describe("shouldShowAgentSessionWaitingIndicator", () => {
-  it("hides when the upstream waiting flag is false", () => {
-    expect(
-      shouldShowAgentSessionWaitingIndicator({
-        showWaitingIndicator: false,
-        waitingIndicatorKind: "liveTurn",
-        sessionStatus: "active",
-        visibleMessages: [userMessage],
-      }),
-    ).toBe(false);
+describe("explicit session activity", () => {
+  const session = { agent: "Codex" as const, status: "idle" as const };
+  it.each([
+    [{ session }, "idle", false],
+    [{ session: { ...session, status: "active" } }, "working", true],
+    [{ session: { ...session, status: "stopping" } }, "stopping", true],
+    [{ session: { ...session, status: "approval" } }, "approval", false],
+    [{ session: { ...session, status: "error" } }, "error", false],
+    [{ session, isSending: true }, "sending", true],
+    [{ session, isStopping: true }, "stopping", true],
+    [{ session, delegationWaitPrompt: "Waiting for reviewers" }, "waiting", false],
+    [{ session: { ...session, pendingPrompts: [{ id: "q", timestamp: "10:00", text: "Next task" }] } }, "queued", true],
+    [{ session: { ...session, queuePaused: true, pendingPrompts: [{ id: "q", timestamp: "10:00", text: "Next task" }] } }, "paused", false],
+  ] satisfies [SessionActivityOptions, string, boolean][])("resolves explicit state %#", (options, state, animated) => {
+    expect(resolveSessionActivity(options)).toMatchObject({ state, animated });
   });
 
-  it("always keeps send and delegation waits visible", () => {
-    for (const waitingIndicatorKind of ["send", "delegationWait"] as const) {
-      expect(
-        shouldShowAgentSessionWaitingIndicator({
-          showWaitingIndicator: true,
-          waitingIndicatorKind,
-          sessionStatus: "idle",
-          visibleMessages: [userMessage, fileChangesMessage],
-        }),
-      ).toBe(true);
+  it("never reads messages to decide whether a send, wait, or active turn exists", () => {
+    for (const status of ["idle", "active", "stopping"] as const) {
+      const source = { ...session, status };
+      Object.defineProperty(source, "messages", { get() { throw new Error("Transcript residency is not status"); } });
+      expect(() => resolveSessionActivity({ session: source, isSending: true })).not.toThrow();
+      expect(() => resolveSessionActivity({ session: source, delegationWaitPrompt: "Review fan-in" })).not.toThrow();
     }
   });
 
-  it("suppresses stale live-turn waits after assistant output", () => {
-    expect(
-      shouldShowAgentSessionWaitingIndicator({
-        showWaitingIndicator: true,
-        waitingIndicatorKind: "liveTurn",
-        sessionStatus: "idle",
-        visibleMessages: [userMessage, assistantMessage],
-      }),
-    ).toBe(false);
+  it("uses the explicit user prompt rather than shell-command output", () => {
+    expect(resolveSessionActivity({ session: {
+      ...session, status: "active",
+      liveActivity: { prompt: " /review-code ", command: "cargo test", commandStatus: "running" },
+    } })).toMatchObject({ state: "working", prompt: "/review-code" });
   });
 
-  it("keeps active live-turn waits visible while the turn is active, even after file-change output", () => {
-    expect(
-      shouldShowAgentSessionWaitingIndicator({
-        showWaitingIndicator: true,
-        waitingIndicatorKind: "liveTurn",
-        sessionStatus: "active",
-        visibleMessages: [userMessage, assistantMessage],
-      }),
-    ).toBe(true);
+  it("does not reuse stale live activity when idle or sending", () => {
+    const source = { ...session, liveActivity: { prompt: "Previous turn" } };
+    expect(resolveSessionActivity({ session: source }).prompt).toBeNull();
+    expect(resolveSessionActivity({ session: source, isSending: true }).prompt).toBeNull();
+  });
 
-    // A file-change summary is not a "turn done" signal — the agent can edit
-    // files and keep working (e.g. run a command). While the backend still
-    // reports `active`, the live-turn indicator must stay visible.
-    expect(
-      shouldShowAgentSessionWaitingIndicator({
-        showWaitingIndicator: true,
-        waitingIndicatorKind: "liveTurn",
-        sessionStatus: "active",
-        visibleMessages: [userMessage, fileChangesMessage],
-      }),
-    ).toBe(true);
+  it("uses pending prompt context during queue handoff and never spins a paused queue", () => {
+    const source = { ...session, pendingPrompts: [{ id: "q", timestamp: "10:00", text: "Next task" }] };
+    expect(resolveSessionActivity({ session: source })).toMatchObject({ state: "queued", prompt: "Next task" });
+    expect(resolveSessionActivity({ session: { ...source, queuePaused: true } })).toMatchObject({ state: "paused", animated: false });
   });
 });

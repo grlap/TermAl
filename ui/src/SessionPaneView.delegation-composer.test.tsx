@@ -6,6 +6,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -658,8 +659,13 @@ describe("SessionPaneView composer delegation click-through", () => {
     await settleAsyncUi();
 
     expect(screen.getByRole("button", { name: "Find" })).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("Codex is running");
-    expect(screen.getByRole("status").querySelector(".activity-spinner")).not.toBeNull();
+    const footer = document.querySelector<HTMLElement>(".delegated-child-footer")!;
+    const footerStatus = within(footer).getByRole("status");
+    expect(footerStatus).toHaveTextContent("Codex is running");
+    expect(footerStatus.querySelector(".activity-spinner")).not.toBeNull();
+    const strip = document.querySelector(".message-stack")?.nextElementSibling;
+    expect(strip).toHaveClass("session-activity-strip");
+    expect(strip).toHaveAttribute("data-state", "working");
     expect(screen.queryByLabelText(`Message ${session.name}`)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Delegate" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Send" })).not.toBeInTheDocument();

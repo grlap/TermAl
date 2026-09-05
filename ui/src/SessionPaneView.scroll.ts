@@ -280,9 +280,6 @@ export function useSessionPaneScrollState({
   const settledScrollToBottomCancelRef = useRef<(() => void) | null>(null);
   const settledScrollToBottomKindRef =
     useRef<MessageStackScrollWriteKind | null>(null);
-  const previousShowWaitingIndicatorByKeyRef = useRef<
-    Record<string, boolean | undefined>
-  >({});
   const latestTurnOutputByKeyRef = useRef<
     Record<string, LatestTurnOutputState | undefined>
   >({});
@@ -597,9 +594,8 @@ export function useSessionPaneScrollState({
     });
   }
 
-  // LIVE TURN is always an ordinary in-flow transcript card. Attachment is
-  // scroll-controller intent only: it decides whether the whole transcript
-  // follows the bottom, never whether the card receives separate positioning.
+  // Attachment is scroll-controller intent only: it decides whether the whole
+  // transcript follows the bottom. Queued cards never get separate positioning.
   const tailFollowIntent =
     liveTailPinnedByKey[scrollStateKey] ??
     savedScrollPosition?.shouldStick ??
@@ -930,7 +926,7 @@ export function useSessionPaneScrollState({
     // Attached content growth is not navigation. Keep the entire transcript
     // in one coordinate system and correct its real bottom in the same commit
     // that mounted or measured the growth. A velocity-bounded rAF follow here
-    // would expose one or more painted frames with LIVE TURN displaced.
+    // would expose one or more painted frames with the transcript tail displaced.
     cancelSettledScrollToBottom();
     scrollToLatestMessage("auto", true, "bottom_follow", {
       snapBottomFollowBeforePaint: true,
@@ -1145,7 +1141,7 @@ export function useSessionPaneScrollState({
       }
       // ResizeObserver runs before paint. During attached live flow every
       // measured growth or collapse must converge here; deferring growth to a
-      // smooth animation frame makes LIVE TURN visibly jump first.
+      // smooth animation frame makes the transcript tail visibly jump first.
       if (shouldRepinEveryMeasuredPixel) {
         repinAttachedLiveContentBeforePaint();
         return;
@@ -1413,9 +1409,8 @@ export function useSessionPaneScrollState({
       // This is the shared first-write path for app-owned Arrow/Page input and
       // native wheel/trackpad input. React's delegated wheel handler observes
       // the native listener only after it has called preventDefault(), so
-      // transfer scroll authority here before the first write. LIVE TURN is
-      // already in the transcript's coordinate system and needs no separate
-      // presentation handoff. A delta reaching bottom stays attached.
+      // transfer scroll authority here before the first write. All transcript
+      // content shares one coordinate system. A delta reaching bottom stays attached.
       // Manual navigation is direction-independent and remains detached until
       // the physical bottom; the shared sticky-bottom band only absorbs
       // layout jitter while already attached.
@@ -1454,12 +1449,11 @@ export function useSessionPaneScrollState({
       return undefined;
     }
     if (!getTailFollowIntent()) {
-      setNewResponseIndicator(scrollStateKey, true, "activity");
       return undefined;
     }
     repinAttachedLiveContentBeforePaint();
     // The prompt send can commit before the composer collapses or the pending
-    // prompt/live-turn cards finish changing transcript geometry. Keep one
+    // prompt cards finish changing transcript geometry. Keep one
     // bounded follow alive across those later frames; explicit reader input
     // clears tail intent and the controller's ownership guard stops it before
     // another write can pull a detached viewport back to the tail.
@@ -2436,8 +2430,8 @@ export function useSessionPaneScrollState({
   ) {
     // Nested scrollables (code/table panes), transcript controls, and gestures
     // that cannot change scrollTop do not transfer authority away from live
-    // follow. Only a real transcript-navigation intent detaches the in-flow
-    // LIVE TURN from the viewport bottom.
+    // follow. Only a real transcript-navigation intent detaches the reader
+    // from the viewport bottom.
     const node = messageStackRef.current;
     if (
       event.type === "wheel" &&
@@ -3012,48 +3006,6 @@ export function useSessionPaneScrollState({
     isSessionTabActive,
     paneViewMode,
     scrollStateKey,
-  ]);
-
-  useLayoutEffect(() => {
-    const previousByKey = previousShowWaitingIndicatorByKeyRef.current;
-    const wasShowing = previousByKey[scrollStateKey] ?? false;
-
-    if (!showWaitingIndicator) {
-      previousByKey[scrollStateKey] = false;
-      return;
-    }
-
-    if (
-      deferContentScrollEffects ||
-      !activeSession ||
-      activeSession.hasNewerHistory === true ||
-      !isSessionTabActive ||
-      paneViewMode !== "session"
-    ) {
-      return;
-    }
-
-    if (wasShowing) {
-      return;
-    }
-
-    previousByKey[scrollStateKey] = true;
-
-    if (!getTailFollowIntent()) {
-      setNewResponseIndicator(scrollStateKey, true, "activity");
-      return;
-    }
-
-    repinAttachedLiveContentBeforePaint();
-    return undefined;
-  }, [
-    activeSession?.id,
-    activeSession?.hasNewerHistory,
-    deferContentScrollEffects,
-    isSessionTabActive,
-    paneViewMode,
-    scrollStateKey,
-    showWaitingIndicator,
   ]);
 
   useLayoutEffect(() => {

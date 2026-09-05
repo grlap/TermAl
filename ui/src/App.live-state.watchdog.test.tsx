@@ -482,9 +482,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       await settleAsyncUi();
       expect(screen.getByText("Codex needs approval")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
-      expect(
-        screen.getByText("Working on the current turn..."),
-      ).toBeInTheDocument();
+      expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "working");
       fetchMock.mockClear();
 
       // The stale-threshold classification for a resolved approval is pinned
@@ -496,9 +494,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       await settleAsyncUi();
 
       expect(stateFetchCallCount()).toBe(0);
-      expect(
-        screen.getByText("Working on the current turn..."),
-      ).toBeInTheDocument();
+      expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "working");
     } finally {
       vi.useRealTimers();
       setDocumentVisibilityState(originalVisibilityState);
@@ -652,9 +648,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       }
 
       await clickAndSettle(sessionRowButton);
-      expect(
-        screen.getByText("Working on the current turn..."),
-      ).toBeInTheDocument();
+      expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "working");
       expect(
         screen.getByRole("button", { name: "Cancel queued prompt" }),
       ).toBeInTheDocument();
@@ -671,9 +665,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       ).toBeGreaterThan(0);
       // This recovery snapshot keeps the session active; the live-turn
       // affordance should remain visible until the turn settles.
-      expect(
-        screen.getByText("Working on the current turn..."),
-      ).toBeInTheDocument();
+      expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "working");
       expect(
         screen.getByRole("button", { name: "Cancel queued prompt" }),
       ).toBeInTheDocument();
@@ -832,9 +824,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       }
 
       await clickAndSettle(sessionRowButton);
-      expect(
-        screen.getByText("Working on the current turn..."),
-      ).toBeInTheDocument();
+      expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "working");
       expect(
         screen.getByRole("button", { name: "Cancel queued prompt" }),
       ).toBeInTheDocument();
@@ -848,9 +838,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       expect(
         screen.getByRole("button", { name: "Cancel queued prompt" }),
       ).toBeInTheDocument();
-      expect(
-        screen.getByText("Working on the current turn..."),
-      ).toBeInTheDocument();
+      expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "working");
     } finally {
       vi.useRealTimers();
       setDocumentVisibilityState(originalVisibilityState);
@@ -993,9 +981,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       }
 
       await clickAndSettle(sessionRowButton);
-      expect(
-        screen.getByText("Working on the current turn..."),
-      ).toBeInTheDocument();
+      expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "working");
       expect(
         screen.getByRole("button", { name: "Cancel queued prompt" }),
       ).toBeInTheDocument();
@@ -1011,9 +997,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
 
       expect(stateFetchCallCount()).toBe(1);
       expect(screen.getAllByText("Current turn finished.")).toHaveLength(2);
-      expect(
-        screen.queryByText("Working on the current turn..."),
-      ).not.toBeInTheDocument();
+      expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "idle");
       expect(
         screen.queryByRole("button", { name: "Cancel queued prompt" }),
       ).not.toBeInTheDocument();
@@ -1126,9 +1110,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       }
 
       await clickAndSettle(sessionRowButton);
-      expect(
-        screen.getByText("Working on the current turn..."),
-      ).toBeInTheDocument();
+      expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "working");
       fetchMock.mockClear();
 
       vi.setSystemTime(
@@ -1141,9 +1123,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
 
       expect(stateFetchCallCount()).toBe(1);
       expect(screen.getAllByText("Here after clock jump.")).toHaveLength(2);
-      expect(
-        screen.queryByText("Working on the current turn..."),
-      ).not.toBeInTheDocument();
+      expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "idle");
     } finally {
       vi.useRealTimers();
       setDocumentVisibilityState(originalVisibilityState);
@@ -1350,9 +1330,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       }
 
       await clickAndSettle(sessionRowButton);
-      expect(
-        screen.getByText("Working on the current turn..."),
-      ).toBeInTheDocument();
+      expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "working");
       fetchMock.mockClear();
 
       await act(async () => {
@@ -1446,9 +1424,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
 
       expect(stateFetchCallCount()).toBe(1);
       expect(screen.getAllByText("Recovered after wake.")).toHaveLength(1);
-      expect(
-        screen.getByText("Working on the current turn..."),
-      ).toBeInTheDocument();
+      expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "working");
     } finally {
       vi.useRealTimers();
       setDocumentVisibilityState(originalVisibilityState);
@@ -1544,9 +1520,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       }
 
       await clickAndSettle(sessionRowButton);
-      expect(
-        screen.getByText("Working on the current turn..."),
-      ).toBeInTheDocument();
+      expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "working");
       fetchMock.mockClear();
 
       await act(async () => {
@@ -1640,9 +1614,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
 
       expect(stateFetchCallCount()).toBe(1);
       expect(screen.getAllByText("Recovered from live state.")).toHaveLength(1);
-      expect(
-        screen.getByText("Working on the current turn..."),
-      ).toBeInTheDocument();
+      expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "working");
     } finally {
       vi.useRealTimers();
       setDocumentVisibilityState(originalVisibilityState);
@@ -1738,9 +1710,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       }
 
       await clickAndSettle(sessionRowButton);
-      expect(
-        screen.getByText("Working on the current turn..."),
-      ).toBeInTheDocument();
+      expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "working");
       fetchMock.mockClear();
 
       await act(async () => {
@@ -1822,9 +1792,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       expect(
         screen.getAllByText("Recovered from live delta.").length,
       ).toBeGreaterThan(0);
-      expect(
-        screen.getByText("Working on the current turn..."),
-      ).toBeInTheDocument();
+      expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "working");
     } finally {
       vi.useRealTimers();
       setDocumentVisibilityState(originalVisibilityState);
@@ -1944,26 +1912,20 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       }
 
       await clickAndSettle(sessionRowButton);
-      expect(
-        screen.getByText("Working on the current turn..."),
-      ).toBeInTheDocument();
+      expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "working");
       fetchMock.mockClear();
 
       await advanceTimers(LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS + 1000);
       await settleAsyncUi();
 
       expect(stateFetchCallCount()).toBe(1);
-      expect(
-        screen.getByText("Working on the current turn..."),
-      ).toBeInTheDocument();
+      expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "working");
 
       await advanceTimers(1000);
       await settleAsyncUi();
 
       expect(stateFetchCallCount()).toBe(1);
-      expect(
-        screen.getByText("Working on the current turn..."),
-      ).toBeInTheDocument();
+      expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "working");
 
       await advanceTimers(
         LIVE_SESSION_WATCHDOG_RESYNC_RETRY_COOLDOWN_MS - 1000,
@@ -1972,9 +1934,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
 
       expect(stateFetchCallCount()).toBe(2);
       expect(screen.getAllByText("Here after retry.")).toHaveLength(1);
-      expect(
-        screen.queryByText("Working on the current turn..."),
-      ).not.toBeInTheDocument();
+      expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "idle");
     } finally {
       vi.useRealTimers();
       setDocumentVisibilityState(originalVisibilityState);
@@ -2121,9 +2081,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       }
 
       await clickAndSettle(sessionRowButton);
-      expect(
-        screen.getByText("Working on the current turn..."),
-      ).toBeInTheDocument();
+      expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "working");
       fetchMock.mockClear();
 
       // 15s stale threshold + 1s watchdog tick margin -> first watchdog resync.
@@ -2131,9 +2089,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       await settleAsyncUi();
 
       expect(stateFetchCallCount()).toBe(1);
-      expect(
-        screen.getByText("Working on the current turn..."),
-      ).toBeInTheDocument();
+      expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "working");
 
       // One tick short of the cooldown boundary: watchdog must stay quiet.
       await advanceTimers(
@@ -2142,9 +2098,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       await settleAsyncUi();
 
       expect(stateFetchCallCount()).toBe(1);
-      expect(
-        screen.getByText("Working on the current turn..."),
-      ).toBeInTheDocument();
+      expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "working");
 
       // Crossing the next 1s tick moves the watchdog past the cooldown boundary.
       await advanceTimers(1000);
@@ -2154,9 +2108,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       expect(screen.getAllByText("Here after enforced cooldown.")).toHaveLength(
         1,
       );
-      expect(
-        screen.queryByText("Working on the current turn..."),
-      ).not.toBeInTheDocument();
+      expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "idle");
     } finally {
       vi.useRealTimers();
       setDocumentVisibilityState(originalVisibilityState);
@@ -2300,9 +2252,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       }
 
       await clickAndSettle(sessionRowButton);
-      expect(
-        screen.getByText("Working on the current turn..."),
-      ).toBeInTheDocument();
+      expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "working");
       fetchMock.mockClear();
       stateRequestCount = 0;
 
@@ -2311,9 +2261,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       await settleAsyncUi();
 
       expect(stateFetchCallCount()).toBe(1);
-      expect(
-        screen.getByText("Working on the current turn..."),
-      ).toBeInTheDocument();
+      expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "working");
 
       // A fresh SSE state payload should clear the residual watchdog cooldown and
       // reset the stale-transport timer from this newer live activity.
@@ -2355,9 +2303,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       await settleAsyncUi();
 
       expect(stateFetchCallCount()).toBe(1);
-      expect(
-        screen.getByText("Working on the current turn..."),
-      ).toBeInTheDocument();
+      expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "working");
 
       // The next 1s watchdog tick should fire immediately once transport is stale again.
       await advanceTimers(1000);
@@ -2367,9 +2313,7 @@ describe("App live state - watchdog follow-up and cooldown paths", () => {
       expect(screen.getAllByText("Here after cleared cooldown.")).toHaveLength(
         1,
       );
-      expect(
-        screen.queryByText("Working on the current turn..."),
-      ).not.toBeInTheDocument();
+      expect(document.querySelector(".session-activity-strip")).toHaveAttribute("data-state", "idle");
     } finally {
       vi.useRealTimers();
       setDocumentVisibilityState(originalVisibilityState);

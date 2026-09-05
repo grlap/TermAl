@@ -27,7 +27,7 @@ import {
 } from "./AgentSessionPanel";
 import { splitAgentCommandResolverTail } from "./session-agent-command-submission";
 import { VirtualizedConversationMessageList } from "./VirtualizedConversationMessageList";
-import { RunningIndicator } from "./session-activity-cards";
+import { SessionActivityStrip } from "./session-activity-cards";
 import {
   MESSAGE_STACK_BOTTOM_REPIN_REQUEST_EVENT,
   notifyMessageStackScrollWrite,
@@ -248,8 +248,6 @@ function createAgentSessionPanelHarness(
       activeSessionId={activeSession?.id ?? null}
       isLoading={false}
       isUpdating={false}
-      showWaitingIndicator={false}
-      waitingIndicatorPrompt={null}
       commandMessages={[]}
       diffMessages={[]}
       scrollContainerRef={scrollContainerRef}
@@ -566,49 +564,45 @@ function recordTextareaHeightWrites(
 
 describe("AgentSessionPanelFooter", () => {
   it("does not conflate a user slash command with an agent shell command", () => {
-    render(<RunningIndicator agent="Codex" lastPrompt="/review-code" />);
+    render(<SessionActivityStrip session={{ agent: "Codex", status: "active", liveActivity: { prompt: "/review-code" } }} />);
 
     expect(screen.queryByText("Agent command")).not.toBeInTheDocument();
-    expect(screen.getByText("Current prompt")).toBeInTheDocument();
-    expect(screen.getAllByText("/review-code")).toHaveLength(2);
+    expect(screen.getByRole("status")).toHaveTextContent("Codex is working: /review-code");
+    expect(screen.getByRole("tooltip")).toHaveTextContent("/review-code");
   });
 
-  it("keeps the live turn anchored to the user prompt while an agent command runs", () => {
+  it("keeps activity context anchored to the user prompt while an agent command runs", () => {
     render(
-      <RunningIndicator
-        agent="Codex"
-        activity={{
+      <SessionActivityStrip
+        session={{ agent: "Codex", status: "active", liveActivity: {
           prompt: "/review-code",
           command: "cargo test --workspace",
           commandStatus: "running",
-        }}
-        lastPrompt={null}
+        } }}
       />,
     );
 
     expect(screen.queryByText("Agent command")).not.toBeInTheDocument();
     expect(screen.queryByText("Executing an agent command...")).not.toBeInTheDocument();
     expect(screen.queryByText("cargo test --workspace")).not.toBeInTheDocument();
-    expect(screen.getAllByText("/review-code")).toHaveLength(2);
+    expect(screen.getByRole("tooltip")).toHaveTextContent("/review-code");
     expect(screen.getByRole("tooltip")).toHaveTextContent("/review-code");
   });
 
-  it("uses neutral live-turn copy when no user prompt is available", () => {
+  it("uses neutral activity copy when no user prompt is available", () => {
     render(
-      <RunningIndicator
-        agent="Codex"
-        activity={{
+      <SessionActivityStrip
+        session={{ agent: "Codex", status: "active", liveActivity: {
           prompt: "",
           command: "cargo test --workspace",
           commandStatus: "running",
-        }}
-        lastPrompt={null}
+        } }}
       />,
     );
 
-    expect(screen.getByText("Working on the current turn...")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Codex is working");
     expect(screen.queryByText("cargo test --workspace")).not.toBeInTheDocument();
-    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+    expect(screen.getByRole("tooltip")).toHaveTextContent("No current prompt");
   });
 
   it("marks the real composer input for overview focus deferral", () => {

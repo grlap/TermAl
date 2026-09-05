@@ -1,7 +1,7 @@
 // Owns: pane-scroll-scoped continuity for one-shot, paint-only reveals of
 // newly appended resident transcript messages.
 // Does not own: card layout, scroll anchoring, virtualization measurements,
-// message hydration, or LIVE TURN presentation.
+// message hydration, or activity-strip presentation.
 
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 
@@ -9,14 +9,14 @@ import type { Message } from "../types";
 
 export type ConversationMessageRevealInput = {
   isActive: boolean;
-  liveTurnVisible: boolean;
+  isTurnActive: boolean;
   messageIds: readonly string[];
   pendingPromptIds: readonly string[];
   userScrollGeneration: number;
 };
 
 export type ConversationMessageRevealState = {
-  liveTurnVisible: boolean;
+  isTurnActive: boolean;
   pendingRevealIds: ReadonlyMap<string, number>;
   pendingPromptIds: ReadonlySet<string>;
   tailMessageId: string | null;
@@ -107,7 +107,7 @@ export function resolveConversationMessageRevealTransition(
     }
   });
   const nextState: ConversationMessageRevealState = {
-    liveTurnVisible: input.liveTurnVisible,
+    isTurnActive: input.isTurnActive,
     pendingRevealIds,
     pendingPromptIds: new Set(input.pendingPromptIds),
     tailMessageId: currentTailMessageId,
@@ -135,9 +135,9 @@ export function resolveConversationMessageRevealTransition(
     return { nextState, revealMessageIds: [] };
   }
 
-  if (previous.liveTurnVisible && !input.liveTurnVisible) {
-    // The final resident message can replace LIVE TURN in the same commit. Its
-    // content is a continuity handoff, not a new visual object to flash again.
+  if (previous.isTurnActive && !input.isTurnActive) {
+    // Completing a turn preserves the final response's visual continuity.
+    // This is explicit turn state, not the presence or height of an activity card.
     return { nextState, revealMessageIds: [] };
   }
 
@@ -159,14 +159,14 @@ export function resolveConversationMessageRevealTransition(
 
 export function useConversationMessageRevealIds({
   isActive,
-  liveTurnVisible,
+  isTurnActive,
   messages,
   pendingPromptIds,
   revealScopeKey,
   userScrollGeneration,
 }: {
   isActive: boolean;
-  liveTurnVisible: boolean;
+  isTurnActive: boolean;
   messages: readonly Message[];
   pendingPromptIds: readonly string[];
   revealScopeKey: string;
@@ -179,14 +179,14 @@ export function useConversationMessageRevealIds({
   const input = useMemo<ConversationMessageRevealInput>(
     () => ({
       isActive,
-      liveTurnVisible,
+      isTurnActive,
       messageIds,
       pendingPromptIds,
       userScrollGeneration,
     }),
     [
       isActive,
-      liveTurnVisible,
+      isTurnActive,
       messageIds,
       pendingPromptIds,
       userScrollGeneration,

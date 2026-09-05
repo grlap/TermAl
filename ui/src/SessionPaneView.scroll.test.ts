@@ -1779,8 +1779,7 @@ describe("session pane historical-window tail state", () => {
     const transcriptCard = document.createElement("article");
     transcriptCard.className = "conversation-message-entry-reveal";
     const liveTail = document.createElement("div");
-    liveTail.className = "conversation-live-tail";
-    liveTail.setAttribute("data-tail-follow", "attached");
+    liveTail.className = "conversation-queued-tail";
     conversationPage.append(transcriptCard, liveTail);
     scrollNode.append(conversationPage);
     let scrollTop = 800;
@@ -3868,7 +3867,7 @@ describe("session pane historical-window tail state", () => {
     expect(hook.result.current.liveTailPinned).toBe(false);
   });
 
-  it("restores attached presentation when a downward page command reaches the physical bottom", () => {
+  it("restores FOLLOW when a downward page command reaches the physical bottom", () => {
     vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
     vi.stubGlobal("cancelAnimationFrame", vi.fn());
     const activeSession = session(false);
@@ -3883,8 +3882,7 @@ describe("session pane historical-window tail state", () => {
     const conversationPage = document.createElement("div");
     conversationPage.className = "session-conversation-page is-active";
     const liveTail = document.createElement("div");
-    liveTail.className = "conversation-live-tail";
-    liveTail.setAttribute("data-tail-follow", "attached");
+    liveTail.className = "conversation-queued-tail";
     conversationPage.append(liveTail);
     scrollNode.append(conversationPage);
     Object.defineProperties(scrollNode, {
@@ -3910,7 +3908,7 @@ describe("session pane historical-window tail state", () => {
     });
 
     expect(scrollNode.scrollTop).toBe(800);
-    expect(liveTail).toHaveAttribute("data-tail-follow", "attached");
+    expect(liveTail).not.toHaveAttribute("data-tail-follow");
     expect(paneScrollPositions[scrollStateKey]).toEqual({
       top: 800,
       shouldStick: true,
@@ -3918,7 +3916,7 @@ describe("session pane historical-window tail state", () => {
     expect(hook.result.current.liveTailPinned).toBe(true);
   });
 
-  it("keeps attached presentation when a downward wheel lands inside the fractional physical-bottom tolerance", () => {
+  it("keeps FOLLOW when a downward wheel lands inside the fractional physical-bottom tolerance", () => {
     vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
     vi.stubGlobal("cancelAnimationFrame", vi.fn());
     const activeSession = session(false);
@@ -3933,8 +3931,7 @@ describe("session pane historical-window tail state", () => {
     const conversationPage = document.createElement("div");
     conversationPage.className = "session-conversation-page is-active";
     const liveTail = document.createElement("div");
-    liveTail.className = "conversation-live-tail";
-    liveTail.setAttribute("data-tail-follow", "attached");
+    liveTail.className = "conversation-queued-tail";
     conversationPage.append(liveTail);
     scrollNode.append(conversationPage);
     Object.defineProperties(scrollNode, {
@@ -3966,7 +3963,7 @@ describe("session pane historical-window tail state", () => {
 
     expect(wheelEvent.defaultPrevented).toBe(true);
     expect(scrollNode.scrollTop).toBe(796.5);
-    expect(liveTail).toHaveAttribute("data-tail-follow", "attached");
+    expect(liveTail).not.toHaveAttribute("data-tail-follow");
     expect(paneScrollPositions[scrollStateKey]).toEqual({
       top: 796.5,
       shouldStick: true,

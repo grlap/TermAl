@@ -12,6 +12,7 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { SessionActivityStrip } from "./session-activity-cards";
 import {
   StrictMode,
   useLayoutEffect,
@@ -33,7 +34,6 @@ import {
   type RenderMessageCard,
   type VirtualizedConversationMessageListHandleRef,
 } from "./virtualized-conversation-types";
-import { RunningIndicator } from "./session-activity-cards";
 import { usePendingUserInputSubmissions } from "./pending-user-input-submissions";
 import {
   MESSAGE_STACK_SCROLL_WRITE_EVENT,
@@ -310,8 +310,6 @@ function createAgentSessionPanelHarness(
       activeSessionId={activeSession?.id ?? null}
       isLoading={false}
       isUpdating={false}
-      showWaitingIndicator={false}
-      waitingIndicatorPrompt={null}
       commandMessages={[]}
       diffMessages={[]}
       scrollContainerRef={scrollContainerRef}
@@ -565,8 +563,6 @@ describe("AgentSessionPanel virtualization", () => {
           // visual spans instead of named buttons.
           messages: makeTextMessages(40),
         }),
-        showWaitingIndicator: true,
-        waitingIndicatorPrompt: "run the build",
       });
 
       await screen.findByLabelText(/^Conversation overview,/);
@@ -599,7 +595,8 @@ describe("AgentSessionPanel virtualization", () => {
         virtualizedListBefore,
       );
       expect(rail.parentElement).toHaveClass("workspace-pane");
-      expect(container.querySelector(".activity-card-live")).toBeInTheDocument();
+      expect(container.querySelector(".activity-card-live")).toBeNull();
+      expect(container.querySelector(".conversation-queued-tail")).toBeNull();
     } finally {
       window.ResizeObserver = OriginalResizeObserver;
     }
@@ -915,8 +912,7 @@ describe("AgentSessionPanel virtualization", () => {
         text: `Assistant output ${index}`,
       }),
     );
-    renderSessionPanelWithDefaults({
-      activeSession: makeSession("active-session", {
+    const activeSession = makeSession("active-session", {
         status: "active",
         messages: assistantOnlyTail,
         messagesLoaded: false,
@@ -926,16 +922,15 @@ describe("AgentSessionPanel virtualization", () => {
           command: "cargo test session_history",
           commandStatus: "running",
         },
-      }),
-      showWaitingIndicator: true,
-      waitingIndicatorPrompt: null,
+    });
+    renderSessionPanelWithDefaults({ activeSession });
+    render(<SessionActivityStrip session={activeSession} />);
+    await act(async () => {
+      await Promise.resolve();
     });
 
-    expect(
-      await screen.findByText("Fix the paging bug", {
-        selector: ".activity-card-prompt",
-      }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Codex is working: Fix the paging bug");
+    expect(screen.getByRole("tooltip")).toHaveTextContent("Fix the paging bug");
     expect(screen.queryByText("cargo test session_history")).toBeNull();
     expect(screen.queryByText("Agent command")).toBeNull();
   });
@@ -991,8 +986,6 @@ describe("AgentSessionPanel virtualization", () => {
           messages: makeTextMessages(40),
         }),
         scrollContainerRef: { current: scrollNode },
-        showWaitingIndicator: true,
-        waitingIndicatorPrompt: "run the build",
       });
 
       await waitFor(() => {
@@ -1167,8 +1160,6 @@ describe("AgentSessionPanel virtualization", () => {
         activeSessionId={activeSessionId}
         isLoading={false}
         isUpdating={false}
-        showWaitingIndicator={false}
-        waitingIndicatorPrompt={null}
         commandMessages={[]}
         diffMessages={[]}
         scrollContainerRef={{ current: document.createElement("section") }}

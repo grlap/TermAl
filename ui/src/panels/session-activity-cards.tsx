@@ -1,48 +1,9 @@
-// Small React cards the session panel renders as the live-state
-// footer of a conversation: the "Live turn" / "Command" spinner
-// shown while an agent is actively working, and the "Queued
-// prompt" bubble shown when a user-authored prompt is waiting for
-// the current turn to finish.
-//
-// What this file owns:
-//   - `RunningIndicator` — the activity card that reports the
-//     agent's live turn status. Renders a pulsing dot, the agent
-//     name ("Claude is working" / "Codex is working" etc.), and
-//     latest user prompt as the turn context. When `lastPrompt` is
-//     present, attaches a hover/focus tooltip with the complete prompt.
-//     Agent commands stay in transcript command cards and never replace
-//     the user intent summarized here. Emits `role="status"` +
-//     `aria-live="polite"`.
-//   - `QueuePausedIndicator` — the no-spinner card shown while the
-//     backend reports `queuePaused` (queued prompts parked behind the
-//     explicit-resume latch a Stop leaves); offers a Resume action.
-//   - `PendingPromptCard` — the user-side queued-prompt bubble
-//     shown in the transcript while a prompt is waiting to be
-//     submitted. Reuses `<MessageMeta>` + `<MessageAttachmentList>`
-//     + `<ExpandedPromptPanel>` so search-highlight and attachment
-//     chips match the rest of the transcript. Structured mailbox
-//     wake-ups reuse `<MailboxMessageLink>` instead of exposing the
-//     agent activation boilerplate. Wraps its body in a `memo`
-//     comparator keyed on its render data and actions to avoid
-//     re-rendering on unrelated parent state changes.
-//
-// What this file does NOT own:
-//   - `<ExpandedPromptPanel>` and the expansion logic — lives in
-//     `../ExpandedPromptPanel`.
-//   - `<MessageMeta>` / `<MessageAttachmentList>` /
-//     `promptCommandMetaLabel` / `imageAttachmentSummaryLabel` —
-//     live in `./session-message-leaves`.
-//   - Search-highlight types — live in `../search-highlight`; plain-text
-//     rendering and non-destructive path breaks live in
-//     `../plain-text-wrapping`.
-//   - The panel shell, virtualisation, composer, or any stateful
-//     session wiring — all of that stays in
-//     `./AgentSessionPanel.tsx`.
-//
-// Split out of `ui/src/panels/AgentSessionPanel.tsx`. Same class
-// names and the same queued-prompt behavior.
+// Owns: fixed composer-adjacent activity status and in-flow queued-prompt cards.
+// Does not own: session state, transcript virtualization, or scroll authority.
+// Split from: ui/src/panels/AgentSessionPanel.tsx.
+// Transient agent activity must never add or remove transcript height.
 
-import { memo, type ReactNode } from "react";
+import { memo, useId } from "react";
 import {
   DELEGATION_FAN_IN_AUTHOR_LABEL,
   isDelegationFanInText,
@@ -58,7 +19,11 @@ import {
 import { MailboxMessageLink } from "../mailbox-message-link";
 import { renderPlainTextWithSoftBreaks } from "../plain-text-wrapping";
 import type { SearchHighlightTone } from "../search-highlight";
-import type { PendingPrompt, Session, SessionLiveActivity } from "../types";
+import type { PendingPrompt, Session } from "../types";
+import {
+  resolveSessionActivity,
+  type SessionActivityOptions,
+} from "./AgentSessionPanel.waiting-indicator";
 import {
   MessageAttachmentList,
   MessageMeta,
@@ -66,105 +31,39 @@ import {
   promptCommandMetaLabel,
 } from "./session-message-leaves";
 
-export function ConversationTailEntry({ children }: { children: ReactNode }) {
-  return children;
-}
-
-export function ConversationTailPresence({
-  active,
-  children,
-}: {
-  active: boolean;
-  children: ReactNode;
-}) {
-  // A completed turn can insert its final transcript card in the same commit
-  // that removes this live card. Keeping an exiting height placeholder would
-  // make those two layout changes pull the bottom-follow target in opposite
-  // directions across animation frames. Entry is equally atomic: animating its
-  // grid row used to move the bottom target for 220 ms while the first response
-  // chunks were also changing transcript height.
-  if (!active) {
-    return null;
-  }
-
-  return children;
-}
-
-export function RunningIndicator({
-  agent,
-  activity,
-  lastPrompt,
-}: {
-  agent: Session["agent"];
-  activity?: SessionLiveActivity | null;
-  lastPrompt: string | null;
-}) {
-  const prompt = activity?.prompt.trim() || lastPrompt?.trim() || null;
-  const tooltipText = prompt;
-
+export function SessionActivityStrip(options: SessionActivityOptions) {
+  const activity = resolveSessionActivity(options);
+  const tooltipId = useId();
   return (
-    <article
-      className={`activity-card activity-card-live ${tooltipText ? "has-tooltip" : ""}`}
-      role="status"
-      aria-live="polite"
-      tabIndex={tooltipText ? 0 : undefined}
-    >
-      <div className="activity-spinner" aria-hidden="true" />
-      <div className="activity-card-copy">
-        <div className="activity-card-heading">
-          <div className="card-label">Live turn</div>
-        </div>
-        <h3>{agent} is working</h3>
-        <p className={prompt ? "activity-card-prompt" : undefined}>
-          {prompt ?? "Working on the current turn..."}
-        </p>
-      </div>
-      {tooltipText ? (
-        <div className="activity-tooltip" role="tooltip">
-          <div className="activity-tooltip-label">Current prompt</div>
-          <p>{tooltipText}</p>
-        </div>
-      ) : null}
-    </article>
-  );
-}
-
-export function QueuedTurnHandoffIndicator({
-  agent,
-  prompt,
-}: {
-  agent: Session["agent"];
-  prompt: string;
-}) {
-  const normalizedPrompt = prompt.trim();
-
-  return (
-    <article
-      className="activity-card activity-card-live activity-card-queue-handoff has-tooltip"
-      role="status"
-      aria-live="polite"
+    <div
+      className="session-activity-strip"
+      data-state={activity.state}
+      data-animated={activity.animated ? "true" : "false"}
       tabIndex={0}
+      aria-describedby={tooltipId}
     >
-      <div className="activity-spinner" aria-hidden="true" />
-      <div className="activity-card-copy">
-        <div className="activity-card-heading">
-          <div className="card-label">Queue</div>
-        </div>
-        <h3>{agent} is starting the next turn</h3>
-        <p className="activity-card-prompt">{normalizedPrompt}</p>
+      <span className="session-activity-strip-track" aria-hidden="true">
+        <span className="session-activity-strip-fill" />
+      </span>
+      <span
+        className="visually-hidden"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+      >
+        {activity.label}
+        {activity.prompt ? `: ${activity.prompt}` : ""}
+      </span>
+      <div className="activity-tooltip" role="tooltip" id={tooltipId}>
+        <div className="activity-tooltip-label">{activity.label}</div>
+        <p>{activity.prompt ?? "No current prompt"}</p>
       </div>
-      <div className="activity-tooltip" role="tooltip">
-        <div className="activity-tooltip-label">Queued prompt</div>
-        <p>{normalizedPrompt}</p>
-      </div>
-    </article>
+    </div>
   );
 }
 
-// Rendered instead of the handoff spinner while the backend reports
-// `queuePaused`: a user Stop parked the queued prompts behind the
-// explicit-resume latch, so nothing starts until the user sends a new
-// prompt or presses Resume. Deliberately no spinner — nothing is running.
+// A paused queue is actionable transcript content, not transient activity.
+// Keep Resume beside the queued prompts until the backend releases its latch.
 export function QueuePausedIndicator({
   agent,
   queuedCount,
