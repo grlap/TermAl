@@ -40,7 +40,10 @@ import {
   CONTROL_PANEL_PANE_WIDTH_FALLBACK_PX,
   resolveStandaloneControlPanelDockWidthRatio,
 } from "./control-panel-layout";
-import { resolveSettledScrollMinimumAttempts } from "./scroll-position";
+import {
+  SESSION_PHYSICAL_BOTTOM_TOLERANCE_PX,
+  resolveSettledScrollMinimumAttempts,
+} from "./scroll-position";
 import {
   MESSAGE_STACK_SCROLL_WRITE_EVENT,
   MESSAGE_STACK_USER_SCROLL_INTENT_EVENT,
@@ -3681,20 +3684,24 @@ describe("App scroll behaviour", () => {
         await act(async () => {
           // A layout clamp can leave a detached pane half a CSS pixel from the
           // exact maximum while already inside the physical-bottom tolerance.
-          // That ownerless geometry update must remain detached.
+          // That ownerless update stays detached, but the visible bottom clears
+          // the notice independently of the reader's follow choice.
           messageStack.scrollTop = 919.5;
           fireEvent.scroll(messageStack);
           await flushUiWork();
         });
         expect(liveTail).toHaveAttribute("data-tail-follow", "detached");
         expect(
-          screen.getByRole("button", { name: "New response" }),
-        ).toBeInTheDocument();
+          messageStack.scrollHeight - messageStack.clientHeight - messageStack.scrollTop,
+        ).toBeLessThanOrEqual(SESSION_PHYSICAL_BOTTOM_TOLERANCE_PX);
+        expect(
+          screen.queryByRole("button", { name: "New response" }),
+        ).not.toBeInTheDocument();
 
         await act(async () => {
           // The final input-owned 0.5px step is still real reader movement. It
-          // reaches the bottom, reattaches live follow, and removes the stale
-          // overlay from the fully visible LIVE TURN card.
+          // reaches the bottom and reattaches live follow; the seen-response
+          // notice is already gone before this explicit navigation.
           fireEvent.mouseDown(messageStack);
           messageStack.scrollTop = 920;
           fireEvent.scroll(messageStack);

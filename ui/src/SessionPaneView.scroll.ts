@@ -408,6 +408,8 @@ export function useSessionPaneScrollState({
   const sessionSearchItemRefsRef = useRef<Record<string, HTMLElement | null>>(
     {},
   );
+  // Unseen tail activity is independent of the reader's FOLLOW/STAY choice.
+  // Seeing the real tail clears this flag without granting follow authority.
   const [newResponseIndicatorByKey, setNewResponseIndicatorByKey] = useState<
     Record<string, NewResponseIndicatorKind | undefined>
   >({});
@@ -748,17 +750,61 @@ export function useSessionPaneScrollState({
     [isSessionTabActive, paneViewMode, scrollStateKey],
   );
 
+  function isRealTranscriptTailVisible() {
+    const node = messageStackRef.current;
+    if (
+      !node ||
+      node.clientHeight <= 0 ||
+      node.closest("[hidden]") ||
+      hasUnloadedNewerHistory ||
+      !isSessionTabActive ||
+      paneViewMode !== "session" ||
+      currentScrollStateKeyRef.current !== scrollStateKey
+    ) {
+      return false;
+    }
+    const page = node.querySelector(".session-conversation-page:not([hidden])");
+    if (!page && node.querySelector(".session-conversation-page")) {
+      return false;
+    }
+    const list = (page ?? node).querySelector(".virtualized-message-list");
+    // A temporary bottom spacer or activation estimate is not visible output.
+    // Only measured, mounted tail content can acknowledge an unseen response.
+    if (
+      node.dataset.virtualizedBottomBoundaryReveal === "true" ||
+      list?.matches(
+        ".is-measuring-post-activation, .is-bottom-boundary-revealing",
+      ) ||
+      list?.lastElementChild?.classList.contains("virtualized-message-spacer")
+    ) {
+      return false;
+    }
+    return isMessageStackAtPhysicalBottom(
+      node.scrollTop,
+      node.scrollHeight,
+      node.clientHeight,
+    );
+  }
+
+  function clearSeenTailIndicator() {
+    if (isRealTranscriptTailVisible()) {
+      setNewResponseIndicator(scrollStateKey, false);
+    }
+  }
+
   function setNewResponseIndicator(
     key: string,
     visible: boolean,
     kind: NewResponseIndicatorKind = "response",
   ) {
+    const unseen =
+      visible && !(key === scrollStateKey && isRealTranscriptTailVisible());
     startTransition(() => {
       setNewResponseIndicatorByKey((current) => {
         const currentKind = current[key];
         if (
-          (!visible && currentKind === undefined) ||
-          (visible &&
+          (!unseen && currentKind === undefined) ||
+          (unseen &&
             (currentKind === kind ||
               (currentKind === "response" && kind === "activity")))
         ) {
@@ -766,7 +812,7 @@ export function useSessionPaneScrollState({
         }
 
         const nextState = { ...current };
-        if (visible) {
+        if (unseen) {
           nextState[key] = kind;
         } else {
           delete nextState[key];
@@ -963,6 +1009,7 @@ export function useSessionPaneScrollState({
         return;
       }
       if (!getTailFollowIntent()) {
+        clearSeenTailIndicator();
         return;
       }
       // Layout requests during live flow belong to the same pre-paint append
@@ -1076,6 +1123,7 @@ export function useSessionPaneScrollState({
       previousContentHeight = resizeMeasurement.nextContentHeightBaseline;
       previousViewportHeight = resizeMeasurement.nextViewportHeightBaseline;
       if (!resizeMeasurement.shouldRepin) {
+        clearSeenTailIndicator();
         return;
       }
       if (currentScrollStateKeyRef.current !== scrollStateKey) {
@@ -1092,6 +1140,7 @@ export function useSessionPaneScrollState({
           // inside the message fixed while that late layout settles.
           restoreMountedDetachedMessageAnchor(node, saved);
         }
+        clearSeenTailIndicator();
         return;
       }
       // ResizeObserver runs before paint. During attached live flow every
@@ -1294,12 +1343,26 @@ export function useSessionPaneScrollState({
     visibleMessageContentSignature,
   ]);
 
+  function followVisibleTailFromDownwardInput(deltaY: number) {
+    if (
+      Number.isFinite(deltaY) &&
+      deltaY >= 0.5 &&
+      !getTailFollowIntent() &&
+      isRealTranscriptTailVisible()
+    ) {
+      // Reuse explicit boundary navigation so the pane and virtualizer receive
+      // the same authority change, even though this gesture cannot move pixels.
+      scrollMessageStackToBoundary("bottom");
+    }
+  }
+
   function scrollMessageStackByDelta(
     deltaY: number,
     options: {
       keyboardDirection?: "down" | "up";
       keyboardInputTimestamp?: number;
       scrollKind?: MessageStackScrollWriteKind;
+      userInitiated?: boolean;
     } = {},
   ) {
     const node = messageStackRef.current;
@@ -1331,6 +1394,9 @@ export function useSessionPaneScrollState({
         deltaY,
       )
     ) {
+      if (options.userInitiated) {
+        followVisibleTailFromDownwardInput(deltaY);
+      }
       return;
     }
 
@@ -1419,6 +1485,7 @@ export function useSessionPaneScrollState({
         keyboardDirection: direction < 0 ? "up" : "down",
         keyboardInputTimestamp,
         scrollKind: "page_jump",
+        userInitiated: true,
       },
     );
   }
@@ -1627,12 +1694,14 @@ export function useSessionPaneScrollState({
           deltaY,
         )
       ) {
+        followVisibleTailFromDownwardInput(deltaY);
         return;
       }
 
       event.preventDefault();
       scrollMessageStackByDelta(deltaY, {
         scrollKind: "incremental",
+        userInitiated: true,
       });
     },
   );
@@ -1939,6 +2008,7 @@ export function useSessionPaneScrollState({
             keyboardDirection: keyboardIntent.direction,
             keyboardInputTimestamp: publication.inputTimestamp,
             scrollKind: "incremental",
+            userInitiated: true,
           },
         );
         return;
@@ -2449,6 +2519,7 @@ export function useSessionPaneScrollState({
                 keyboardDirection: keyboardIntent.direction,
                 keyboardInputTimestamp: publication.inputTimestamp,
                 scrollKind: "incremental",
+                userInitiated: true,
               },
             );
             return;
@@ -2523,6 +2594,7 @@ export function useSessionPaneScrollState({
       })
     ) {
       clearMessageStackVirtualizerPositionCorrection(node);
+      clearSeenTailIndicator();
       return;
     }
     const isVirtualizerPositionCorrection =
@@ -2682,6 +2754,7 @@ export function useSessionPaneScrollState({
         captureRecordedDetachedPaneScrollPosition(node);
       setTailFollowIntent(false);
       cancelSettledScrollToBottom();
+      clearSeenTailIndicator();
       return;
     }
     if (movedUpAfterUserEscape || movedUpFromRecordedPosition) {
@@ -2768,6 +2841,7 @@ export function useSessionPaneScrollState({
       keepPaneScrollPositionPinned(node);
       setNewResponseIndicator(scrollStateKey, false);
     }
+    clearSeenTailIndicator();
   }
 
   function scheduleDetachedMessageStackRestore(targetTop: number) {
@@ -3210,6 +3284,14 @@ export function useSessionPaneScrollState({
     // a sending-status change alone must never reattach a detached reader.
     return followLatestMessageForPromptSend();
   }, [isSending, paneViewMode, scrollStateKey]);
+
+  // Check after this commit's restore/append effects have resolved their DOM
+  // geometry, never against a saved scroll target or a different tab's layout.
+  useLayoutEffect(() => {
+    if (newResponseIndicatorKind !== null) {
+      clearSeenTailIndicator();
+    }
+  });
 
   return {
     captureDetachedMessageStackPosition,

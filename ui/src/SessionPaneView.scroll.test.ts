@@ -59,6 +59,177 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("seen transcript tail without follow intent", () => {
+  function renderDetachedTail(hasNewerHistory = false) {
+    const frames = installAnimationFrameHarness(1_000 / 60);
+    const node = document.createElement("section");
+    const page = document.createElement("div");
+    page.className = "session-conversation-page";
+    node.append(page);
+    let height = 1_000;
+    let top = 600;
+    Object.defineProperties(node, {
+      clientHeight: { value: 200 },
+      scrollHeight: { get: () => height },
+      scrollTop: {
+        get: () => Math.min(top, Math.max(height - 200, 0)),
+        set: (value: number) => { top = value; },
+      },
+      scrollTo: {
+        value: (options: ScrollToOptions) => {
+          if (typeof options.top === "number") node.scrollTop = options.top;
+        },
+      },
+    });
+    page.getBoundingClientRect = () => ({ height } as DOMRect);
+    const key = "pane-1:session-history";
+    let currentSession = session(hasNewerHistory);
+    let revision = 0;
+    const shared = {
+      ...params(currentSession),
+      paneScrollPositions: { [key]: { top, shouldStick: false } },
+      paneShouldStickToBottomRef: { current: { [key]: false } },
+    };
+    const hook = renderHook(({ visible }) => {
+      const state = useSessionPaneScrollState({
+        ...shared,
+        activeSession: currentSession,
+        isSessionTabActive: visible,
+        visibleContentSignature: `content-${revision}`,
+        visibleMessageContentSignature: `messages-${revision}`,
+      });
+      useLayoutEffect(() => {
+        state.messageStackRef.current = node;
+      }, [state.messageStackRef]);
+      return state;
+    }, { initialProps: { visible: false } });
+    hook.rerender({ visible: true });
+    frames.drainAnimationFrames();
+    const append = () => {
+      revision += 1;
+      currentSession = {
+        ...currentSession,
+        messages: [...currentSession.messages, {
+          id: `new-response-${revision}`,
+          author: "assistant",
+          type: "text",
+          timestamp: "12:01",
+          text: `New output ${revision}`,
+        }],
+      };
+      hook.rerender({ visible: true });
+    };
+    const scroll = () => act(() => {
+      hook.result.current.handleMessageStackScroll({
+        currentTarget: node,
+      } as ReactUIEvent<HTMLElement>);
+    });
+    return { hook, node, page, append, scroll, ...frames,
+      resize: (nextHeight: number) => { height = nextHeight; },
+    };
+  }
+
+  it("clears a seen response after a shrink without enabling follow, then advertises later growth", () => {
+    const { hook, node, append, resize, scroll } = renderDetachedTail();
+    append();
+    expect(hook.result.current.showNewResponseIndicator).toBe(true);
+    resize(800);
+    scroll();
+    expect(node.scrollTop).toBe(600);
+    expect(hook.result.current.liveTailPinned).toBe(false);
+    expect(hook.result.current.showNewResponseIndicator).toBe(false);
+    resize(1_200);
+    append();
+    expect(node.scrollTop).toBe(600);
+    expect(hook.result.current.liveTailPinned).toBe(false);
+    expect(hook.result.current.showNewResponseIndicator).toBe(true);
+  });
+
+  it("does not advertise newly rendered output that already fits in the viewport", () => {
+    const { hook, append, resize } = renderDetachedTail();
+    resize(180);
+    append();
+    expect(hook.result.current.liveTailPinned).toBe(false);
+    expect(hook.result.current.showNewResponseIndicator).toBe(false);
+  });
+
+  it.each(["wheel", "page down"])("accepts deliberate %s at a detached real bottom and follows later output", (input) => {
+    const { hook, node, append, resize, scroll } = renderDetachedTail();
+    append();
+    resize(800);
+    scroll();
+    act(() => {
+      if (input === "wheel") {
+        node.dispatchEvent(new WheelEvent("wheel", {
+          deltaY: 40, bubbles: true, cancelable: true,
+        }));
+      } else {
+        hook.result.current.scrollMessageStackByPage(1);
+      }
+    });
+    expect(hook.result.current.liveTailPinned).toBe(true);
+    expect(hook.result.current.showNewResponseIndicator).toBe(false);
+    resize(1_200);
+    append();
+    expect(node.scrollTop).toBe(1_000);
+    expect(hook.result.current.liveTailPinned).toBe(true);
+  });
+
+  it("keeps Jump to latest at a historical window's physical bottom", () => {
+    const { hook, node, append, resize, scroll } = renderDetachedTail(true);
+    append();
+    resize(800);
+    scroll();
+    act(() => {
+      node.dispatchEvent(new WheelEvent("wheel", {
+        deltaY: 40, bubbles: true, cancelable: true,
+      }));
+    });
+    expect(hook.result.current.liveTailPinned).toBe(false);
+    expect(hook.result.current.showNewResponseIndicator).toBe(true);
+    expect(hook.result.current.newResponseIndicatorLabel).toBe("Jump to latest");
+  });
+
+  it.each(["bottom spacer", "activation measurement", "boundary reveal", "hidden page"])(
+    "does not acknowledge estimated tail visibility during %s",
+    (pendingLayout) => {
+      const { hook, node, page, append, resize, scroll } = renderDetachedTail();
+      append();
+      const list = document.createElement("div");
+      list.className = "virtualized-message-list";
+      const lastPage = document.createElement("div");
+      lastPage.className = "virtualized-message-page";
+      list.append(lastPage);
+      page.append(list);
+      if (pendingLayout === "bottom spacer") {
+        lastPage.className = "virtualized-message-spacer";
+      } else if (pendingLayout === "activation measurement") {
+        list.classList.add("is-measuring-post-activation");
+      } else if (pendingLayout === "hidden page") {
+        page.hidden = true;
+      } else {
+        node.dataset.virtualizedBottomBoundaryReveal = "true";
+      }
+      resize(800);
+      scroll();
+      expect(hook.result.current.showNewResponseIndicator).toBe(true);
+      act(() => {
+        node.dispatchEvent(new WheelEvent("wheel", {
+          deltaY: 40, bubbles: true, cancelable: true,
+        }));
+      });
+      expect(hook.result.current.liveTailPinned).toBe(false);
+      lastPage.className = "virtualized-message-page";
+      list.classList.remove("is-measuring-post-activation");
+      delete node.dataset.virtualizedBottomBoundaryReveal;
+      page.hidden = false;
+      scroll();
+      expect(hook.result.current.showNewResponseIndicator).toBe(false);
+      expect(hook.result.current.liveTailPinned).toBe(false);
+    },
+  );
+});
+
 describe("session pane historical-window tail state", () => {
   it("records transcript ownership before an inactive pane becomes active", async () => {
     const liveSession = session(false);

@@ -27,6 +27,77 @@ afterEach(() => {
 });
 
 describe("session pane scroll observers", () => {
+  it.each(["content shrink", "viewport growth"])(
+    "clears a seen tail after %s without a scroll event or a FOLLOW change",
+    (resizeKind) => {
+      const callbacks = new Set<ResizeObserverCallback>();
+      class ResizeObserverHarness {
+        constructor(private readonly callback: ResizeObserverCallback) {
+          callbacks.add(callback);
+        }
+        observe() {}
+        unobserve() {}
+        disconnect() { callbacks.delete(this.callback); }
+      }
+      vi.stubGlobal("ResizeObserver", ResizeObserverHarness);
+      const frames = installAnimationFrameHarness(1_000 / 60);
+      const node = document.createElement("section");
+      const page = document.createElement("div");
+      page.className = "session-conversation-page";
+      node.append(page);
+      let height = 1_000;
+      let viewportHeight = 200;
+      Object.defineProperties(node, {
+        clientHeight: { get: () => viewportHeight },
+        scrollHeight: { get: () => height },
+        scrollTop: { writable: true, value: 600 },
+      });
+      page.getBoundingClientRect = () => ({ height } as DOMRect);
+      const key = "pane-1:session-history";
+      const initialSession = session(false);
+      const shared = {
+        ...params(initialSession),
+        paneScrollPositions: { [key]: { top: 600, shouldStick: false } },
+        paneShouldStickToBottomRef: { current: { [key]: false } },
+      };
+      const hook = renderHook(({ currentSession, visible }) => {
+        const state = useSessionPaneScrollState({
+          ...shared,
+          activeSession: currentSession,
+          isSessionTabActive: visible,
+          visibleContentSignature: String(currentSession.messages.length),
+          visibleMessageContentSignature: String(currentSession.messages.length),
+        });
+        useLayoutEffect(() => {
+          state.messageStackRef.current = node;
+        }, [state.messageStackRef]);
+        return state;
+      }, { initialProps: { currentSession: initialSession, visible: false } });
+      hook.rerender({ currentSession: initialSession, visible: true });
+      frames.drainAnimationFrames();
+      hook.rerender({
+        visible: true,
+        currentSession: {
+          ...initialSession,
+          messages: [...initialSession.messages, {
+            id: "new-response", type: "text", author: "assistant",
+            text: "Unseen output", timestamp: "12:01",
+          }],
+        },
+      });
+      expect(hook.result.current.showNewResponseIndicator).toBe(true);
+      if (resizeKind === "content shrink") height = 800;
+      else viewportHeight = 400;
+      act(() => {
+        callbacks.forEach((callback) => callback([], {} as ResizeObserver));
+      });
+      expect(hook.result.current.showNewResponseIndicator).toBe(false);
+      expect(hook.result.current.liveTailPinned).toBe(false);
+      expect(shared.paneShouldStickToBottomRef.current[key]).toBe(false);
+      expect(node.scrollTop).toBe(600);
+    },
+  );
+
   function renderVisiblePane(shouldStick = true, isActive = true) {
     const frames = installAnimationFrameHarness(1_000 / 60);
     let height = 1_000;
