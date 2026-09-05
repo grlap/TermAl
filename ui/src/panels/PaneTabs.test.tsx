@@ -24,7 +24,7 @@ import type { WorkspaceTabDrag } from "../tab-drag";
 import { PaneTabs, type PaneTabDecoration } from "./PaneTabs";
 import { formatVisibleTabLabel } from "./pane-tab-labels";
 import type { CodexState, Project, RemoteConfig, Session } from "../types";
-import type { WorkspaceTab } from "../workspace";
+import type { WorkspaceTab } from "../workspace-types";
 
 vi.mock("../api", async () => {
   const actual = await vi.importActual<typeof import("../api")>("../api");

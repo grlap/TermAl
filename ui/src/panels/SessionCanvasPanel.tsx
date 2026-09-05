@@ -17,10 +17,10 @@ import { TAB_DRAG_MIME_TYPE, type WorkspaceTabDrag } from "../tab-drag";
 import type { Session } from "../types";
 import {
   WORKSPACE_CANVAS_DEFAULT_ZOOM,
-  normalizeWorkspaceCanvasZoom,
   type WorkspaceCanvasCard,
   type WorkspaceCanvasTab,
-} from "../workspace";
+} from "../workspace-types";
+import { normalizeWorkspaceCanvasZoom } from "../workspace-normalize";
 
 const CANVAS_WIDTH_PX = 3600;
 const CANVAS_HEIGHT_PX = 2400;

@@ -232,7 +232,9 @@ describe("SessionPaneView retry display state", () => {
                 revision: 1,
                 updatedAt: "2026-07-25 12:00:00",
                 controlPanelSide: "left",
-                workspace: { activePaneId: null, panes: [], root: null },
+                workspace: { lastContentPaneId: null,
+                lastViewerPaneId: null,
+                activePaneId: null, panes: [], root: null },
               },
             });
           }

@@ -26,7 +26,6 @@ refreshThemeKindCacheFromDocument();
 // falling back to the global preference keys for workspaces that haven't saved yet.
 const earlyWorkspaceLayout = getStoredWorkspaceLayout(ensureWorkspaceViewId());
 const earlyThemePreferences = getStoredThemePreferences({
-  themeId: earlyWorkspaceLayout?.themeId,
   lightThemeId: earlyWorkspaceLayout?.lightThemeId,
   darkThemeId: earlyWorkspaceLayout?.darkThemeId,
   themeMode: earlyWorkspaceLayout?.themeMode,

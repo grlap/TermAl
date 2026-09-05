@@ -40,7 +40,7 @@ import type {
   Session,
   StateSessionSummary,
 } from "./types";
-import type { WorkspaceState } from "./workspace";
+import type { WorkspaceState } from "./workspace-types";
 
 export class EventSourceMock {
   static instances: EventSourceMock[] = [];
@@ -207,6 +207,8 @@ export function makeWorkspaceLayoutResponse(
       updatedAt: "2026-03-30 09:00:00",
       controlPanelSide: "left" as const,
       workspace: {
+        lastContentPaneId: null,
+        lastViewerPaneId: null,
         root: null,
         panes: [],
         activePaneId: null,

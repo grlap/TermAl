@@ -22,23 +22,12 @@ export type SessionHistoryPageDemand = {
 
 export function resolveHasOlderSessionHistory({
   hasOlderHistory,
-  messageCount,
-  messagesLoaded,
-  residentMessageCount,
 }: {
   hasOlderHistory?: boolean;
-  messageCount?: number | null;
-  messagesLoaded?: boolean | null;
-  residentMessageCount: number;
 }) {
-  // The summary count remains authoritative while the resident transcript is a
-  // bounded suffix; messagesLoaded=false is the legacy explicit window signal.
-  return (
-    hasOlderHistory ??
-    (messagesLoaded === false ||
-      (messagesLoaded !== true &&
-        (messageCount ?? 0) > residentMessageCount))
-  );
+  // Only explicit window metadata authorizes pagination. An unhydrated or
+  // malformed shape cannot prove that an older page exists.
+  return hasOlderHistory === true;
 }
 
 export function requestSessionHistoryPage(sessionId: string) {

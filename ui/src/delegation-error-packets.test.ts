@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { ApiRequestError } from "./api";
+import { ApiRequestError } from "./api-request";
 import {
   resumeWaitFailurePacket,
   spawnDelegationFailurePacket,

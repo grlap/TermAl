@@ -94,19 +94,6 @@ const NOOP_CODEX_APP_REQUEST_SUBMIT: (
   result: JsonValue,
 ) => void = () => {};
 
-// Re-exported for backwards compatibility with callers that used to import
-// the type from this module before the helpers were split out into
-// `./markdown-links`.
-export type { MarkdownFileLinkTarget } from "./markdown-links";
-export { areMarkdownLineMarkersEqual } from "./markdown-line-markers";
-export { DiffCard } from "./diff-card";
-export {
-  isDelegationFanInText,
-  shouldCollapseDelegationFanInMessage,
-} from "./delegation-fan-in";
-export { MarkdownContent } from "./markdown-content";
-export { MessageMetaMarkerMenuProvider } from "./message-meta-marker-menu-context";
-
 export const MessageCard = memo(
   function MessageCard({
     appearance = "dark",

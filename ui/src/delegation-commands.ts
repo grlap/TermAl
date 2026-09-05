@@ -44,12 +44,6 @@ import type {
 } from "./types";
 import type { DelegationResultPacket } from "./delegation-result-types";
 
-export type {
-  MixedServerInstanceRecoveryGroup,
-  WaitDelegationErrorKind,
-  WaitDelegationErrorPacket,
-} from "./delegation-error-packets";
-
 export const DEFAULT_DELEGATION_WAIT_INTERVAL_MS = 1000;
 export const DEFAULT_DELEGATION_WAIT_TIMEOUT_MS = 5 * 60 * 1000;
 export const MIN_DELEGATION_WAIT_INTERVAL_MS = 500;
@@ -236,8 +230,6 @@ export type DelegationStatusCommandResult = {
   revision: number;
   serverInstanceId: string;
 };
-
-export type { DelegationResultPacket } from "./delegation-result-types";
 
 export type WaitDelegationsOutcome = "completed" | "timeout" | "error";
 

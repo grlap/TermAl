@@ -36,7 +36,7 @@ import type {
   TabDropPlacement,
   WorkspacePane,
   WorkspaceResponseBoardView,
-} from "./workspace";
+} from "./workspace-types";
 
 export type SessionPaneViewProps = {
   pane: WorkspacePane;

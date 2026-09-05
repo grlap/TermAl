@@ -3,12 +3,14 @@ import { describe, expect, it } from "vitest";
 import {
   activatePane,
   openMailboxInWorkspaceState,
-  type WorkspaceState,
 } from "./workspace";
+import { type WorkspaceState } from "./workspace-types";
 import { isWorkspaceTab } from "./workspace-tab-validation";
 
 function workspace(): WorkspaceState {
   return {
+    lastContentPaneId: null,
+    lastViewerPaneId: null,
     root: { type: "pane", paneId: "pane-1" },
     panes: [
       {

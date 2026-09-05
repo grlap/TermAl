@@ -26,17 +26,17 @@ import {
   AppearancePreferencesPanel,
   MarkdownPreferencesPanel,
   RemotePreferencesPanel,
-  TelegramPreferencesPanel,
-  EngramPreferencesPanel,
   ClaudeApprovalsPreferencesPanel,
   CodexPromptPreferencesPanel,
   CursorPreferencesPanel,
   GeminiPreferencesPanel,
   OpenCodePreferencesPanel,
-  ThemedCombobox,
   CURSOR_MODE_OPTIONS,
   GEMINI_APPROVAL_OPTIONS,
 } from "./preferences-panels";
+import { TelegramPreferencesPanel } from "./preferences/telegram-preferences-panel";
+import { EngramPreferencesPanel } from "./preferences/engram-preferences-panel";
+import { ThemedCombobox } from "./preferences/themed-combobox";
 import { SettingsDialogShell } from "./preferences/SettingsDialogShell";
 import { SettingsTabBar } from "./preferences/SettingsTabBar";
 import type { PreferencesTabId } from "./preferences/preferences-tabs";

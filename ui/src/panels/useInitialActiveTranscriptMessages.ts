@@ -170,24 +170,16 @@ function isNestedEditablePageDemandFallback(
 // inherit an old gesture and cascade through additional history pages.
 export function useInitialActiveTranscriptMessages({
   isActive,
-  messageCount,
   messages,
-  messagesLoaded,
   hasOlderHistory: explicitHasOlderHistory,
   hasNewerHistory: explicitHasNewerHistory,
   scrollContainerRef,
   sessionId,
 }: {
   isActive: boolean;
-  // The session's TRUE transcript length, which is NOT `messages.length` while a
-  // large session is tail-hydrated: `messages` then holds only the 20-message
-  // tail window. Keying page eligibility off `messages.length` made a 12k-message
-  // session look complete, so the demand listeners below never attached and the
-  // reader was stranded on the tail. Optional/nullable so
-  // callers without a summary count fall back to what they hold.
-  messageCount?: number | null;
   messages: Message[];
-  messagesLoaded?: boolean | null;
+  // Pagination is authorized by explicit current window metadata, not counts
+  // or hydration status. Unknown availability does not request a page.
   hasOlderHistory?: boolean;
   hasNewerHistory?: boolean;
   scrollContainerRef: RefObject<HTMLElement | null>;
@@ -196,9 +188,6 @@ export function useInitialActiveTranscriptMessages({
   const hasMessages = messages.length > 0;
   const hasOlderHistory = resolveHasOlderSessionHistory({
     hasOlderHistory: explicitHasOlderHistory,
-    messageCount,
-    messagesLoaded,
-    residentMessageCount: messages.length,
   });
   const hasNewerHistory = explicitHasNewerHistory ?? false;
   const requestOlderTranscriptPage = useCallback(() => {

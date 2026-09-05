@@ -82,8 +82,8 @@ import {
   createOrchestratorListTab,
   createProjectListTab,
   createSessionListTab,
-  type WorkspaceTab,
-} from "./workspace";
+} from "./workspace-tabs";
+import { type WorkspaceTab } from "./workspace-types";
 
 export function createControlPanelSectionLauncherTab(
   sectionId: ControlPanelSectionId,

@@ -6,7 +6,7 @@ import {
 } from "./rendered-diff-view";
 import type { SourceRenderableRegion } from "../source-renderers";
 
-vi.mock("../message-cards", () => ({
+vi.mock("../markdown-content", () => ({
   // The real `MarkdownContent` does mermaid / KaTeX / link plumbing
   // that's outside this navigation test's contract. Mock it to a
   // simple `<pre>` so each region's body is a stable target the

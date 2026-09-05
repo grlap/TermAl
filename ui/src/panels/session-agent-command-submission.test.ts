@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ApiRequestError } from "../api";
+import { ApiRequestError } from "../api-request";
 import type { AgentCommand } from "../types";
 import {
   formatAgentCommandResolverError,

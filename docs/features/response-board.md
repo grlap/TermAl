@@ -63,6 +63,8 @@ dropping, and persisted API geometry remain zoom-independent. Position and
 dimensions, placement, and tab membership are persisted in `termal.sqlite`.
 The workspace layout persists the active inner tab and each tab's camera, so
 two board panes remain independent.
+Old browser-global zoom keys are ignored, never read or migrated. Without a
+current per-inner-tab workspace camera the board starts from its default view.
 
 Fresh state initializes only the tabbed/staging schema. A database containing
 the obsolete singleton `board_cards` shape is unsupported and rejected at boot

@@ -23,7 +23,10 @@ import {
   sourceFileStateFromResponse,
 } from "./source-file-state";
 import type { WorkspaceFilesChangedEvent } from "./types";
-import type { PaneViewMode, WorkspaceSourceTab } from "./workspace";
+import type {
+  PaneViewMode,
+  WorkspaceSourceTab,
+} from "./workspace-types";
 import { workspaceFilesChangedEventChangeForPath } from "./workspace-file-events";
 
 const EMPTY_SOURCE_FILE_STATE: SourceFileState = {

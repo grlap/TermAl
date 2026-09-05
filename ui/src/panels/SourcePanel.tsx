@@ -1,6 +1,7 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { copyTextToClipboard } from "../clipboard";
-import { MarkdownContent, type MarkdownFileLinkTarget } from "../message-cards";
+import { MarkdownContent } from "../markdown-content";
+import { type MarkdownFileLinkTarget } from "../markdown-links";
 import type { MonacoCodeEditorStatus, MonacoInlineZone } from "../MonacoCodeEditor";
 import { resolveMonacoLanguage, type MonacoAppearance } from "../monaco";
 import {

@@ -8,7 +8,7 @@ import type {
   Message,
   Session,
 } from "./types";
-import type { PaneViewMode } from "./workspace";
+import type { PaneViewMode } from "./workspace-types";
 import { buildMessageListSignature } from "./app-utils";
 
 export function commandMessagesForPaneViewMode(

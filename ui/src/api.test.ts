@@ -2,6 +2,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   ApiRequestError,
+  isBackendUnavailableError,
+} from "./api-request";
+import {
   cancelDelegation,
   createConversationMarker,
   createOrchestratorInstance,
@@ -18,13 +21,9 @@ import {
   fetchTelegramStatus,
   fetchWorkspaceLayout,
   fetchState,
-  isBackendUnavailableError,
   registerRemoteTermal,
-  runTerminalCommand,
-  runTerminalCommandStream,
   saveFile,
   submitUserInput,
-  TERMINAL_SSE_BUFFER_MAX_CHARS,
   testTelegramConnection,
   updateConversationMarker,
   updateEngramHostSettings,
@@ -33,6 +32,11 @@ import {
   verifyProjectEngramSettings,
   waiveEngramObligation,
 } from "./api";
+import {
+  runTerminalCommand,
+  runTerminalCommandStream,
+  TERMINAL_SSE_BUFFER_MAX_CHARS,
+} from "./api-terminal";
 
 describe("updateEngramHostSettings", () => {
   const originalFetch = globalThis.fetch;

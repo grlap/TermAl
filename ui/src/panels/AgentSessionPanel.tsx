@@ -26,10 +26,8 @@ import {
   QueuePausedIndicator,
   RunningIndicator,
 } from "./session-activity-cards";
-import {
-  VirtualizedConversationMessageList,
-  type RenderMessageCard,
-} from "./VirtualizedConversationMessageList";
+import { VirtualizedConversationMessageList } from "./VirtualizedConversationMessageList";
+import { type RenderMessageCard } from "./virtualized-conversation-types";
 import { usePendingUserInputSubmissions } from "./pending-user-input-submissions";
 import {
   CONVERSATION_OVERVIEW_MIN_MESSAGES,
@@ -78,7 +76,7 @@ import {
   includeUndeferredMessageTail,
   useInitialActiveTranscriptMessages,
 } from "./useInitialActiveTranscriptMessages";
-import { MessageMetaMarkerMenuProvider } from "../message-cards";
+import { MessageMetaMarkerMenuProvider } from "../message-meta-marker-menu-context";
 import { normalizeConversationMarkerColor } from "../conversation-marker-colors";
 import {
   cancelPendingSessionTranscriptCommit,
@@ -98,8 +96,6 @@ import type {
   SessionBodyProps,
   SessionConversationPageProps,
 } from "./AgentSessionPanel.types";
-
-export { splitAgentCommandResolverTail } from "./session-agent-command-submission";
 
 const EMPTY_PENDING_PROMPTS: readonly PendingPrompt[] = [];
 const EMPTY_CONVERSATION_MARKERS: readonly ConversationMarker[] = [];
@@ -618,11 +614,7 @@ const SessionConversationPage = memo(
       requestOlderTranscriptPage,
     } = useInitialActiveTranscriptMessages({
       isActive,
-      // Summary count, not `baseVisibleMessages.length`: while a large session is
-      // tail-hydrated the latter is only the 20-message window.
-      messageCount: session.messageCount,
       messages: baseVisibleMessages,
-      messagesLoaded: session.messagesLoaded,
       hasOlderHistory: session.hasOlderHistory,
       hasNewerHistory: session.hasNewerHistory,
       scrollContainerRef,

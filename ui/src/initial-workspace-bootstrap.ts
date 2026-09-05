@@ -58,7 +58,6 @@ export function createInitialWorkspaceBootstrap(workspaceViewId: string) {
   const controlPanelSide: ControlPanelSide =
     storedLayout?.controlPanelSide ?? "left";
   const themePreferences = getStoredThemePreferences({
-    themeId: storedLayout?.themeId,
     lightThemeId: storedLayout?.lightThemeId,
     darkThemeId: storedLayout?.darkThemeId,
     themeMode: storedLayout?.themeMode,
@@ -87,6 +86,8 @@ export function createInitialWorkspaceBootstrap(workspaceViewId: string) {
     storedLayout?.densityPercent ?? getStoredDensityPreference();
   const workspace = hydrateControlPanelLayout(
     storedLayout?.workspace ?? {
+      lastContentPaneId: null,
+      lastViewerPaneId: null,
       root: null,
       panes: [],
       activePaneId: null,

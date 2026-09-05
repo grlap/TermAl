@@ -16,7 +16,8 @@ import {
 } from "../api";
 import { copyTextToClipboard } from "../clipboard";
 import { FileTabIcon } from "../file-tab-icon";
-import { MarkdownContent, type MarkdownFileLinkTarget } from "../message-cards";
+import { MarkdownContent } from "../markdown-content";
+import { type MarkdownFileLinkTarget } from "../markdown-links";
 import type { MonacoCodeEditorHandle, MonacoCodeEditorStatus } from "../MonacoCodeEditor";
 import type { MonacoDiffEditorHandle, MonacoDiffEditorStatus } from "../MonacoDiffEditor";
 import { buildDiffPreviewModel } from "../diff-preview";

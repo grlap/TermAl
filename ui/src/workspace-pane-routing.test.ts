@@ -4,17 +4,19 @@
 
 import { describe, expect, it, vi } from "vitest";
 
+import { createSessionTab } from "./workspace-tabs";
 import {
-  createSessionTab,
   openDiffPreviewInWorkspaceState,
   openSourceInWorkspaceState,
   placeDraggedTab,
   placeExternalTab,
   placeSessionDropInWorkspaceState,
+} from "./workspace";
+import {
   type WorkspacePane,
   type WorkspaceState,
   type WorkspaceTab,
-} from "./workspace";
+} from "./workspace-types";
 
 function makeSessionTab(id: string, sessionId: string): WorkspaceTab {
   return { id, kind: "session", sessionId };
@@ -57,6 +59,8 @@ function makeControlPane(): WorkspacePane {
 
 function makeSinglePaneWorkspace(pane: WorkspacePane): WorkspaceState {
   return {
+    lastContentPaneId: null,
+    lastViewerPaneId: null,
     root: { type: "pane", paneId: pane.id },
     panes: [pane],
     activePaneId: pane.id,
@@ -69,6 +73,8 @@ function makeControlSplitWorkspace() {
   ]);
   const controlPane = makeControlPane();
   const workspace: WorkspaceState = {
+    lastContentPaneId: null,
+    lastViewerPaneId: null,
     root: {
       id: "split-root",
       type: "split",

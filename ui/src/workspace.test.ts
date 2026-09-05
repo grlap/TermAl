@@ -38,10 +38,12 @@ import {
   updateSplitRatio,
   upsertCanvasSessionCard,
   workspaceHasDelegatedChildSessionReferences,
+} from "./workspace";
+import {
   type WorkspacePane,
   type WorkspaceState,
   type WorkspaceTab,
-} from "./workspace";
+} from "./workspace-types";
 
 function makeSession(id: string): Session {
   return {
@@ -281,6 +283,8 @@ function makePane(
 
 function makeSinglePaneWorkspace(pane: WorkspacePane): WorkspaceState {
   return {
+    lastContentPaneId: null,
+    lastViewerPaneId: null,
     root: {
       type: "pane",
       paneId: pane.id,
@@ -296,6 +300,8 @@ function makeSplitWorkspace(
   activePaneId: string = firstPane.id,
 ): WorkspaceState {
   return {
+    lastContentPaneId: null,
+    lastViewerPaneId: null,
     root: {
       id: "split-1",
       type: "split",
@@ -390,6 +396,8 @@ describe("workspace helpers", () => {
   it("openSessionInWorkspaceState creates the first pane for an empty workspace", () => {
     const next = openSessionInWorkspaceState(
       {
+        lastContentPaneId: null,
+        lastViewerPaneId: null,
         root: null,
         panes: [],
         activePaneId: null,
@@ -510,6 +518,8 @@ describe("workspace helpers", () => {
       },
     );
     const workspace: WorkspaceState = {
+      lastContentPaneId: null,
+      lastViewerPaneId: null,
       root: {
         id: "split-root",
         type: "split",
@@ -638,6 +648,8 @@ describe("workspace helpers", () => {
       },
     );
     const workspace = {
+      lastContentPaneId: null,
+      lastViewerPaneId: null,
       root: {
         id: "split-root",
         type: "split" as const,
@@ -805,6 +817,8 @@ describe("workspace helpers", () => {
       },
     );
     const workspace = {
+      lastContentPaneId: null,
+      lastViewerPaneId: null,
       root: {
         id: "split-root",
         type: "split" as const,
@@ -921,6 +935,8 @@ describe("workspace helpers", () => {
       },
     );
     const workspace: WorkspaceState = {
+      lastContentPaneId: null,
+      lastViewerPaneId: null,
       root: {
         id: "split-root",
         type: "split",
@@ -1001,6 +1017,7 @@ describe("workspace helpers", () => {
       },
     );
     const workspace: WorkspaceState = {
+      lastViewerPaneId: null,
       root: {
         id: "split-root",
         type: "split",
@@ -1350,6 +1367,8 @@ describe("workspace helpers", () => {
   });
   it("dockControlPanelAtWorkspaceEdge preserves the resized control panel width", () => {
     const workspace = {
+      lastContentPaneId: null,
+      lastViewerPaneId: null,
       root: {
         id: "split-1",
         type: "split" as const,
@@ -1391,6 +1410,8 @@ describe("workspace helpers", () => {
 
   it("dockControlPanelAtWorkspaceEdge preserves control panel width when moving sides", () => {
     const workspace = {
+      lastContentPaneId: null,
+      lastViewerPaneId: null,
       root: {
         id: "split-1",
         type: "split" as const,
@@ -1648,6 +1669,8 @@ describe("workspace helpers", () => {
       },
     );
     const workspace: WorkspaceState = {
+      lastContentPaneId: null,
+      lastViewerPaneId: null,
       root: {
         id: "split-root",
         type: "split",
@@ -1899,6 +1922,8 @@ describe("workspace helpers", () => {
       { activeTabId: "tab-b1", activeSessionId: "session-b1" },
     );
     const workspace: WorkspaceState = {
+      lastContentPaneId: null,
+      lastViewerPaneId: null,
       root: {
         id: "split-root",
         type: "split",
@@ -2966,6 +2991,8 @@ describe("workspace helpers", () => {
       },
     );
     const workspace = {
+      lastContentPaneId: null,
+      lastViewerPaneId: null,
       root: {
         id: "split-root",
         type: "split" as const,
@@ -3145,6 +3172,8 @@ describe("workspace helpers", () => {
 
   it("ensureControlPanelInWorkspaceState creates a control panel pane for an empty workspace", () => {
     const next = ensureControlPanelInWorkspaceState({
+      lastContentPaneId: null,
+      lastViewerPaneId: null,
       root: null,
       panes: [],
       activePaneId: null,
@@ -4548,6 +4577,8 @@ describe("workspace helpers", () => {
 
     const rebuilt = reconcileWorkspaceState(
       {
+        lastContentPaneId: null,
+        lastViewerPaneId: null,
         root: null,
         panes: [],
         activePaneId: null,
@@ -4874,6 +4905,8 @@ describe("workspace helpers", () => {
     };
     const next = reconcileWorkspaceState(
       {
+        lastContentPaneId: null,
+        lastViewerPaneId: null,
         root: null,
         panes: [],
         activePaneId: null,
@@ -4895,6 +4928,8 @@ describe("workspace helpers", () => {
   it("reconcileWorkspaceState keeps an empty workspace when every session is pruned", () => {
     const next = reconcileWorkspaceState(
       {
+        lastContentPaneId: null,
+        lastViewerPaneId: null,
         root: null,
         panes: [],
         activePaneId: null,
@@ -4909,6 +4944,8 @@ describe("workspace helpers", () => {
     );
 
     expect(next).toEqual({
+      lastContentPaneId: null,
+      lastViewerPaneId: null,
       root: null,
       panes: [],
       activePaneId: null,
@@ -4962,6 +4999,8 @@ describe("workspace helpers", () => {
 
   it("dockControlPanelAtWorkspaceEdge uses a preferred control panel width ratio when provided", () => {
     const workspace = {
+      lastContentPaneId: null,
+      lastViewerPaneId: null,
       root: {
         id: "split-1",
         type: "split" as const,

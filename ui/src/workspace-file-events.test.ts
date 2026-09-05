@@ -10,7 +10,7 @@ import {
   workspaceFilesChangedEventTouchesRoot,
   workspacePathContains,
 } from "./workspace-file-events";
-import type { WorkspaceDiffPreviewTab } from "./workspace";
+import type { WorkspaceDiffPreviewTab } from "./workspace-types";
 import type {
   WorkspaceFileChange,
   WorkspaceFilesChangedEvent,

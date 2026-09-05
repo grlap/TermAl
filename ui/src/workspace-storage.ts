@@ -22,10 +22,12 @@ import {
   normalizeWorkspaceStatePaths,
   stripDiffPreviewDocumentContentFromWorkspaceState,
   stripLoadingGitDiffPreviewTabsFromWorkspaceState,
+} from "./workspace";
+import {
   type WorkspaceNode,
   type WorkspacePane,
   type WorkspaceState,
-} from "./workspace";
+} from "./workspace-types";
 import {
   isPaneViewMode,
   isSessionPaneViewMode,
@@ -39,7 +41,6 @@ export type ControlPanelSide = "left" | "right";
 
 export type StoredWorkspaceLayout = {
   controlPanelSide: ControlPanelSide;
-  themeId?: ThemeId;
   lightThemeId?: ThemeId;
   darkThemeId?: ThemeId;
   themeMode?: ThemeMode;
@@ -54,6 +55,32 @@ export type StoredWorkspaceLayout = {
   densityPercent?: number;
   workspace: WorkspaceState;
 };
+
+const CURRENT_LAYOUT_FIELDS = [
+  "controlPanelSide",
+  "lightThemeId",
+  "darkThemeId",
+  "themeMode",
+  "styleId",
+  "markdownThemeId",
+  "markdownStyleId",
+  "diagramThemeOverrideMode",
+  "diagramLook",
+  "diagramPalette",
+  "fontSizePx",
+  "editorFontSizePx",
+  "densityPercent",
+  "workspace",
+] as const satisfies readonly (keyof StoredWorkspaceLayout)[];
+
+function currentLayoutFields(layout: StoredWorkspaceLayout): StoredWorkspaceLayout {
+  // Unknown fields never become persistence authority or get mirrored on save.
+  return Object.fromEntries(
+    CURRENT_LAYOUT_FIELDS.filter((key) =>
+      Object.prototype.hasOwnProperty.call(layout, key),
+    ).map((key) => [key, layout[key]]),
+  ) as StoredWorkspaceLayout;
+}
 
 export function createWorkspaceViewId(): string {
   return `workspace-${crypto.randomUUID()}`;
@@ -98,7 +125,7 @@ export function persistWorkspaceLayout(
   }
 
   const persistedLayout = {
-    ...layout,
+    ...currentLayoutFields(layout),
     workspace: stripDiffPreviewDocumentContentFromWorkspaceState(
       stripLoadingGitDiffPreviewTabsFromWorkspaceState(layout.workspace),
     ),
@@ -128,7 +155,7 @@ export function parseStoredWorkspaceLayout(
   try {
     const parsed = normalizeStoredWorkspaceRoutingHints(
       normalizeStoredWorkspaceTabVisitHistories(
-        normalizeStoredWorkspaceLayoutPreferences(JSON.parse(raw)),
+        normalizeStoredDiagramLook(JSON.parse(raw)),
       ),
     );
     if (!isStoredWorkspaceLayout(parsed)) {
@@ -136,7 +163,7 @@ export function parseStoredWorkspaceLayout(
     }
 
     return {
-      ...parsed,
+      ...currentLayoutFields(parsed),
       workspace: stripDiffPreviewDocumentContentFromWorkspaceState(
         normalizeWorkspaceStatePaths(parsed.workspace),
       ),
@@ -219,21 +246,18 @@ function normalizeStoredWorkspaceTabVisitHistories(value: unknown): unknown {
   };
 }
 
-function normalizeStoredWorkspaceLayoutPreferences(value: unknown): unknown {
-  if (!isRecord(value)) {
+function normalizeStoredDiagramLook(value: unknown): unknown {
+  if (
+    !isRecord(value) ||
+    value.diagramLook === undefined ||
+    isDiagramLook(value.diagramLook as string)
+  ) {
     return value;
   }
-
-  // Retired enum values are accepted only at this persisted/wire boundary
-  // and are dropped before current schema validation. Unknown non-retired
-  // values still reject the layout in `isStoredWorkspaceLayout`.
-  if (value.diagramLook !== "neo") {
-    return value;
-  }
-
-  const normalized = { ...value };
-  delete normalized.diagramLook;
-  return normalized;
+  // An unknown cosmetic preference has no authority over the pane arrangement.
+  // Drop it generically so the current preference/default can supply the look.
+  const { diagramLook: _ignored, ...layout } = value;
+  return layout;
 }
 
 function isStoredWorkspaceLayout(
@@ -250,10 +274,7 @@ function isStoredWorkspaceLayout(
     return false;
   }
 
-  // themeId and styleId are optional - accept absent, reject invalid
-  if (value.themeId !== undefined && !isThemeId(value.themeId as string)) {
-    return false;
-  }
+  // Current appearance preferences may be absent to use their defaults.
   if (
     value.lightThemeId !== undefined &&
     !isThemeId(value.lightThemeId as string)
@@ -349,10 +370,8 @@ function isWorkspaceState(value: unknown): value is WorkspaceState {
     !isRecord(value) ||
     !Array.isArray(value.panes) ||
     !isNullableString(value.activePaneId) ||
-    (value.lastContentPaneId !== undefined &&
-      !isNullableString(value.lastContentPaneId)) ||
-    (value.lastViewerPaneId !== undefined &&
-      !isNullableString(value.lastViewerPaneId))
+    !isNullableString(value.lastContentPaneId) ||
+    !isNullableString(value.lastViewerPaneId)
   ) {
     return false;
   }
@@ -367,14 +386,12 @@ function isWorkspaceState(value: unknown): value is WorkspaceState {
     return false;
   }
   if (
-    value.lastContentPaneId !== undefined &&
     value.lastContentPaneId !== null &&
     !paneIds.has(value.lastContentPaneId)
   ) {
     return false;
   }
   if (
-    value.lastViewerPaneId !== undefined &&
     value.lastViewerPaneId !== null &&
     !paneIds.has(value.lastViewerPaneId)
   ) {

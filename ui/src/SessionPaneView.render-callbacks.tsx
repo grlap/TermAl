@@ -21,9 +21,13 @@ import {
   GeminiPromptSettingsCard,
   OpenCodePromptSettingsCard,
 } from "./prompt-settings-cards";
-import { CommandCard, DiffCard, MessageCard } from "./message-cards";
+import {
+  CommandCard,
+  MessageCard,
+} from "./message-cards";
+import { DiffCard } from "./diff-card";
 import type { MonacoAppearance } from "./monaco";
-import type { RenderMessageCard } from "./panels/VirtualizedConversationMessageList";
+import type { RenderMessageCard } from "./panels/virtualized-conversation-types";
 import type { ConnectionRetryDisplayState } from "./connection-retry";
 import type {
   CommandMessage,

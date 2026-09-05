@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   WORKSPACE_LAYOUT_STORAGE_KEY,
@@ -233,43 +233,21 @@ describe("workspace storage", () => {
     expect(parsed?.workspace.panes).toHaveLength(1);
   });
 
-  it("accepts layouts that predate advisory pane-routing ids", () => {
-    const parsed = parseStoredWorkspaceLayout(
-      JSON.stringify({
-        controlPanelSide: "left",
-        workspace: {
-          root: { type: "pane", paneId: "pane-session" },
-          panes: [
-            {
-              id: "pane-session",
-              tabs: [
-                {
-                  id: "tab-session",
-                  kind: "session",
-                  sessionId: "session-1",
-                },
-              ],
-              activeTabId: "tab-session",
-              activeSessionId: "session-1",
-              viewMode: "session",
-              lastSessionViewMode: "session",
-              sourcePath: null,
-            },
-          ],
-          activePaneId: "pane-session",
-        },
-      }),
-    );
-
-    expect(parsed).not.toBeNull();
-    expect(parsed?.workspace.lastContentPaneId).toBeUndefined();
-    expect(parsed?.workspace.lastViewerPaneId).toBeUndefined();
+  it("ignores layouts missing either required pane-routing field", () => {
+    const workspace = { root: null, panes: [], activePaneId: null, lastContentPaneId: null, lastViewerPaneId: null };
+    for (const key of ["lastContentPaneId", "lastViewerPaneId"] as const) {
+      const incomplete: Partial<typeof workspace> = { ...workspace };
+      delete incomplete[key];
+      expect(parseStoredWorkspaceLayout(JSON.stringify({ controlPanelSide: "left", workspace: incomplete }))).toBeNull();
+    }
   });
 
   it("strips full Markdown diff document content before persisting layout", () => {
     const layout: StoredWorkspaceLayout = {
       controlPanelSide: "right",
       workspace: {
+        lastContentPaneId: null,
+        lastViewerPaneId: null,
         root: {
           type: "pane",
           paneId: "pane-diff",
@@ -349,6 +327,8 @@ describe("workspace storage", () => {
     const layout: StoredWorkspaceLayout = {
       controlPanelSide: "left",
       workspace: {
+        lastContentPaneId: null,
+        lastViewerPaneId: null,
         root: {
           id: "split-1",
           type: "split",
@@ -424,6 +404,8 @@ describe("workspace storage", () => {
     const layout: StoredWorkspaceLayout = {
       controlPanelSide: "left",
       workspace: {
+        lastContentPaneId: null,
+        lastViewerPaneId: null,
         root: null,
         panes: [],
         activePaneId: null,
@@ -441,10 +423,69 @@ describe("workspace storage", () => {
     expect(getStoredWorkspaceLayout(workspaceViewId)).toBeNull();
   });
 
+  it("never reads the retired unscoped layout key", () => {
+    window.localStorage.setItem(
+      "termal-workspace-layout",
+      JSON.stringify({
+        controlPanelSide: "right",
+        themeId: "terminal",
+        workspace: {
+          root: null,
+          panes: [],
+          activePaneId: null,
+        },
+      }),
+    );
+    const read = vi.spyOn(window.localStorage, "getItem");
+    try {
+      expect(getStoredWorkspaceLayout(workspaceViewId)).toBeNull();
+      expect(read).not.toHaveBeenCalledWith("termal-workspace-layout");
+      expect(read).toHaveBeenCalledWith(
+        `${WORKSPACE_LAYOUT_STORAGE_KEY}:${workspaceViewId}`,
+      );
+    } finally {
+      read.mockRestore();
+    }
+  });
+
+  it("ignores retired theme fields and writes only current layout preferences", () => {
+    const layout: StoredWorkspaceLayout = {
+      controlPanelSide: "right",
+      lightThemeId: "heather",
+      darkThemeId: "fjord",
+      themeMode: "auto",
+      workspace: {
+        root: null,
+        panes: [],
+        activePaneId: null,
+        lastContentPaneId: null,
+        lastViewerPaneId: null,
+      },
+    };
+    const withUnknownFields = {
+      ...layout,
+      themeId: "terminal",
+      futurePreference: "ignored",
+    };
+    expect(parseStoredWorkspaceLayout(JSON.stringify(withUnknownFields))).toEqual(
+      layout,
+    );
+    persistWorkspaceLayout(workspaceViewId, withUnknownFields);
+    expect(
+      JSON.parse(
+        window.localStorage.getItem(
+          `${WORKSPACE_LAYOUT_STORAGE_KEY}:${workspaceViewId}`,
+        )!,
+      ),
+    ).toEqual(layout);
+  });
+
   it("ignores the old global key", () => {
     const layout: StoredWorkspaceLayout = {
       controlPanelSide: "left",
       workspace: {
+        lastContentPaneId: null,
+        lastViewerPaneId: null,
         root: null,
         panes: [],
         activePaneId: null,
@@ -463,6 +504,8 @@ describe("workspace storage", () => {
     const raw = JSON.stringify({
       controlPanelSide: "left",
       workspace: {
+        lastContentPaneId: null,
+        lastViewerPaneId: null,
         root: null,
         panes: [],
         activePaneId: null,
@@ -472,6 +515,8 @@ describe("workspace storage", () => {
     expect(parseStoredWorkspaceLayout(raw)).toEqual({
       controlPanelSide: "left",
       workspace: {
+        lastContentPaneId: null,
+        lastViewerPaneId: null,
         root: null,
         panes: [],
         activePaneId: null,
@@ -486,6 +531,8 @@ describe("workspace storage", () => {
       darkThemeId: "fjord",
       themeMode: "auto",
       workspace: {
+        lastContentPaneId: null,
+        lastViewerPaneId: null,
         root: null,
         panes: [],
         activePaneId: null,
@@ -503,6 +550,8 @@ describe("workspace storage", () => {
     const baseLayout = {
       controlPanelSide: "left",
       workspace: {
+        lastContentPaneId: null,
+        lastViewerPaneId: null,
         root: null,
         panes: [],
         activePaneId: null,
@@ -510,7 +559,6 @@ describe("workspace storage", () => {
     };
 
     for (const invalidPreference of [
-      { themeId: "missing-theme" },
       { lightThemeId: "missing-light-theme" },
       { darkThemeId: "missing-dark-theme" },
       { themeMode: "sometimes" },
@@ -528,6 +576,8 @@ describe("workspace storage", () => {
       controlPanelSide: "left",
       diagramLook: "handDrawn",
       workspace: {
+        lastContentPaneId: null,
+        lastViewerPaneId: null,
         root: null,
         panes: [],
         activePaneId: null,
@@ -538,6 +588,8 @@ describe("workspace storage", () => {
       controlPanelSide: "left",
       diagramLook: "handDrawn",
       workspace: {
+        lastContentPaneId: null,
+        lastViewerPaneId: null,
         root: null,
         panes: [],
         activePaneId: null,
@@ -545,68 +597,39 @@ describe("workspace storage", () => {
     });
   });
 
-  it("drops the retired Mermaid neo look without rejecting the layout", () => {
-    const legacyFile = String.raw`\\?\C:\repo\docs\demo.md`;
-    const normalizedFile = String.raw`C:\repo\docs\demo.md`;
-    const raw = JSON.stringify({
-      controlPanelSide: "left",
-      diagramLook: "neo",
-      workspace: {
-        root: {
-          type: "pane",
-          paneId: "pane-a",
+  it.each(["neo", "unknown-look"])(
+    "drops unsupported diagram look %s without changing the layout",
+    (diagramLook) => {
+      const layout = {
+        controlPanelSide: "right",
+        lightThemeId: "heather",
+        darkThemeId: "fjord",
+        themeMode: "auto",
+        workspace: {
+          root: { type: "pane", paneId: "pane-a" },
+          panes: [
+            {
+              id: "pane-a",
+              tabs: [
+                { id: "tab-a", kind: "session", sessionId: "session-a" },
+              ],
+              activeTabId: "tab-a",
+              activeSessionId: "session-a",
+              viewMode: "session",
+              lastSessionViewMode: "session",
+              sourcePath: null,
+            },
+          ],
+          activePaneId: "pane-a",
+          lastContentPaneId: "pane-a",
+          lastViewerPaneId: null,
         },
-        panes: [
-          {
-            id: "pane-a",
-            tabs: [
-              {
-                id: "tab-source",
-                kind: "source",
-                path: legacyFile,
-                originSessionId: "session-1",
-              },
-            ],
-            activeTabId: "tab-source",
-            activeSessionId: "session-1",
-            viewMode: "source",
-            lastSessionViewMode: "session",
-            sourcePath: legacyFile,
-          },
-        ],
-        activePaneId: "pane-a",
-      },
-    });
-
-    expect(parseStoredWorkspaceLayout(raw)).toEqual({
-      controlPanelSide: "left",
-      workspace: {
-        root: {
-          type: "pane",
-          paneId: "pane-a",
-        },
-        panes: [
-          {
-            id: "pane-a",
-            tabs: [
-              {
-                id: "tab-source",
-                kind: "source",
-                path: normalizedFile,
-                originSessionId: "session-1",
-              },
-            ],
-            activeTabId: "tab-source",
-            activeSessionId: "session-1",
-            viewMode: "source",
-            lastSessionViewMode: "session",
-            sourcePath: normalizedFile,
-          },
-        ],
-        activePaneId: "pane-a",
-      },
-    });
-  });
+      };
+      expect(
+        parseStoredWorkspaceLayout(JSON.stringify({ ...layout, diagramLook })),
+      ).toEqual(layout);
+    },
+  );
 
   it("parses and normalizes legacy Windows workspace paths", () => {
     const legacyRoot = String.raw`\\?\C:\repo`;
@@ -616,6 +639,8 @@ describe("workspace storage", () => {
     const raw = JSON.stringify({
       controlPanelSide: "left",
       workspace: {
+        lastContentPaneId: null,
+        lastViewerPaneId: null,
         root: {
           type: "pane",
           paneId: "pane-a",
@@ -680,6 +705,8 @@ describe("workspace storage", () => {
     expect(parseStoredWorkspaceLayout(raw)).toEqual({
       controlPanelSide: "left",
       workspace: {
+        lastContentPaneId: null,
+        lastViewerPaneId: null,
         root: {
           type: "pane",
           paneId: "pane-a",
@@ -758,6 +785,8 @@ describe("workspace storage", () => {
     const raw = JSON.stringify({
       controlPanelSide: "left",
       workspace: {
+        lastContentPaneId: null,
+        lastViewerPaneId: null,
         root: {
           type: "pane",
           paneId: "pane-a",
@@ -822,6 +851,8 @@ describe("workspace storage", () => {
     expect(parseStoredWorkspaceLayout(raw)).toEqual({
       controlPanelSide: "left",
       workspace: {
+        lastContentPaneId: null,
+        lastViewerPaneId: null,
         root: {
           type: "pane",
           paneId: "pane-a",
@@ -923,6 +954,8 @@ describe("workspace storage", () => {
       const malformed = {
         controlPanelSide: "left",
         workspace: {
+          lastContentPaneId: null,
+          lastViewerPaneId: null,
           root: {
             type: "pane",
             paneId: "pane-a",
@@ -973,6 +1006,8 @@ describe("workspace storage", () => {
     const malformed = {
       controlPanelSide: "left",
       workspace: {
+        lastContentPaneId: null,
+        lastViewerPaneId: null,
         root: {
           type: "pane",
           paneId: "pane-a",
@@ -1011,6 +1046,8 @@ describe("workspace storage", () => {
     const malformed = {
       controlPanelSide: "left",
       workspace: {
+        lastContentPaneId: null,
+        lastViewerPaneId: null,
         root: {
           type: "pane",
           paneId: "pane-a",
@@ -1050,6 +1087,8 @@ describe("workspace storage", () => {
     const malformed = {
       controlPanelSide: "left",
       workspace: {
+        lastContentPaneId: null,
+        lastViewerPaneId: null,
         root: {
           type: "pane",
           paneId: "pane-a",
@@ -1088,6 +1127,8 @@ describe("workspace storage", () => {
     const malformed = {
       controlPanelSide: "left",
       workspace: {
+        lastContentPaneId: null,
+        lastViewerPaneId: null,
         root: {
           type: "pane",
           paneId: "missing-pane",

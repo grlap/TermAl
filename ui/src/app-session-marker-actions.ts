@@ -24,7 +24,8 @@ import {
 } from "./conversation-marker-session-mutations";
 import { isServerInstanceMismatch } from "./state-revision";
 import type { CreateConversationMarkerOptions, Session } from "./types";
-import { findWorkspacePaneIdForSession, type WorkspaceState } from "./workspace";
+import { findWorkspacePaneIdForSession } from "./workspace";
+import { type WorkspaceState } from "./workspace-types";
 
 type MarkerActions = Pick<
   UseAppSessionActionsReturn,

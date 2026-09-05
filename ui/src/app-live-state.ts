@@ -68,8 +68,8 @@ import {
   SESSION_HISTORY_PAGE_MESSAGE_COUNT,
   SESSION_TAIL_WINDOW_MESSAGE_COUNT,
 } from "./session-tail-policy";
+import { ApiRequestError } from "./api-request";
 import {
-  ApiRequestError,
   fetchSessionHistory,
   fetchSessionTail,
   type CreateSessionResponse,
@@ -179,23 +179,6 @@ import {
 import { useAppLiveStateRenderSchedulers } from "./app-live-state-render-schedulers";
 import { useAppLiveStateTransport } from "./app-live-state-transport";
 import { reconcileAdoptedSessionsWorkspace } from "./app-live-state-workspace-reconciliation";
-
-export type {
-  AdoptCreatedSessionOutcome,
-  AdoptSessionsOptions,
-  AdoptStateOptions,
-  SessionHydrationTarget,
-  UseAppLiveStateAdoptionRefs,
-  UseAppLiveStateParams,
-  UseAppLiveStatePreferenceSetters,
-  UseAppLiveStateReturn,
-  UseAppLiveStateStateSetters,
-} from "./app-live-state-types";
-export {
-  resolveAdoptStateSessionOptions,
-  SESSION_HYDRATION_FIRST_RETRY_DELAY_MS,
-  SESSION_HYDRATION_MAX_RETRY_ATTEMPTS,
-} from "./app-live-state-hydration";
 
 function rememberServerInstanceId(
   seenServerInstanceIdsRef: MutableRefObject<Set<string>>,

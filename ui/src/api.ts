@@ -47,20 +47,6 @@ import {
   requestJsonFirst,
 } from "./api-request";
 
-export {
-  ApiRequestError,
-  isBackendUnavailableError,
-  type ApiRequestErrorKind,
-} from "./api-request";
-export {
-  runTerminalCommand,
-  runTerminalCommandStream,
-  TERMINAL_SSE_BUFFER_MAX_CHARS,
-  type TerminalCommandOutputEvent,
-  type TerminalCommandResponse,
-  type TerminalOutputStream,
-} from "./api-terminal";
-
 export type StateResponse = {
   revision: number;
   /**
@@ -263,7 +249,6 @@ export type WorkspaceLayoutDocument = {
   revision: number;
   updatedAt: string;
   controlPanelSide: "left" | "right";
-  themeId?: string;
   lightThemeId?: string;
   darkThemeId?: string;
   themeMode?: "light" | "dark" | "auto";
@@ -271,7 +256,7 @@ export type WorkspaceLayoutDocument = {
   markdownThemeId?: string;
   markdownStyleId?: string;
   diagramThemeOverrideMode?: "on" | "off";
-  diagramLook?: "classic" | "handDrawn" | "neo";
+  diagramLook?: "classic" | "handDrawn";
   diagramPalette?: "match" | "default" | "dark" | "forest" | "neutral" | "base";
   fontSizePx?: number;
   editorFontSizePx?: number;
@@ -288,7 +273,6 @@ export type WorkspaceLayoutSummary = {
   revision: number;
   updatedAt: string;
   controlPanelSide: "left" | "right";
-  themeId?: string;
   lightThemeId?: string;
   darkThemeId?: string;
   themeMode?: "light" | "dark" | "auto";
@@ -769,7 +753,6 @@ export function saveWorkspaceLayout(
   workspaceId: string,
   payload: {
     controlPanelSide: "left" | "right";
-    themeId?: string;
     lightThemeId?: string;
     darkThemeId?: string;
     themeMode?: "light" | "dark" | "auto";
@@ -777,7 +760,7 @@ export function saveWorkspaceLayout(
     markdownThemeId?: string;
     markdownStyleId?: string;
     diagramThemeOverrideMode?: "on" | "off";
-    diagramLook?: "classic" | "handDrawn" | "neo";
+    diagramLook?: "classic" | "handDrawn";
     diagramPalette?:
       "match" | "default" | "dark" | "forest" | "neutral" | "base";
     fontSizePx?: number;

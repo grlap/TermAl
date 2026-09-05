@@ -12,7 +12,7 @@ import {
 } from "./conversation-markers";
 import { DEFAULT_CONVERSATION_MARKER_COLOR } from "../conversation-marker-colors";
 import type { ConversationMarker, Message } from "../types";
-import type { VirtualizedConversationMessageListHandle } from "./VirtualizedConversationMessageList";
+import type { VirtualizedConversationMessageListHandle } from "./virtualized-conversation-types";
 
 function makeMessage(id: string): Message {
   return {

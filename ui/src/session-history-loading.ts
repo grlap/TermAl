@@ -11,7 +11,8 @@
 //
 // Split from: ui/src/app-live-state.ts.
 
-import { ApiRequestError, fetchSessionHistory } from "./api";
+import { ApiRequestError } from "./api-request";
+import { fetchSessionHistory } from "./api";
 import { SESSION_HISTORY_PAGE_MESSAGE_COUNT } from "./session-tail-policy";
 import {
   appendSessionHistoryPage,

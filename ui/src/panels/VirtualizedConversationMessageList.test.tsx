@@ -13,14 +13,18 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   VIRTUALIZED_USER_SCROLL_ADJUSTMENT_COOLDOWN_MS,
-  VirtualizedConversationMessageList,
-  resolveBottomReentryScrollKind,
-  resolveNativeScrollKind,
   resolvePrependedMessageCount,
   resolveVirtualizedScrollWriteTarget,
+} from "./virtualized-conversation-controller";
+import {
+  VirtualizedConversationMessageList,
   retainLatestVisibleMessageAnchor,
-  type VirtualizedConversationMessageListHandleRef,
 } from "./VirtualizedConversationMessageList";
+import {
+  resolveBottomReentryScrollKind,
+  resolveNativeScrollKind,
+} from "./virtualized-conversation-scroll-events";
+import { type VirtualizedConversationMessageListHandleRef } from "./virtualized-conversation-types";
 import {
   VIRTUALIZED_MESSAGE_GAP_PX,
   buildVirtualizedMessageLayout,

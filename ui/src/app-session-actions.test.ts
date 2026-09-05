@@ -1,3 +1,4 @@
+import { ApiRequestError } from "./api-request";
 import { waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -6,7 +7,7 @@ import { useAppSessionActions } from "./app-session-actions";
 import { reconcileStateSessionSummaries } from "./session-reconcile";
 import type { StateResponse } from "./api";
 import type { AgentType, ConversationMarker, Project, Session } from "./types";
-import type { WorkspaceState } from "./workspace";
+import type { WorkspaceState } from "./workspace-types";
 
 type TestSession = Session & { messageCount: number; queuePaused: boolean };
 
@@ -80,6 +81,8 @@ function makeConversationMarker(
 
 function makeWorkspace(): WorkspaceState {
   return {
+    lastContentPaneId: null,
+    lastViewerPaneId: null,
     root: {
       type: "pane",
       paneId: "pane-1",
@@ -712,6 +715,8 @@ describe("useAppSessionActions", () => {
     vi.spyOn(api, "renameSession").mockResolvedValue(state);
     const params = makeSessionActionsParams();
     params.lookups.workspace = {
+      lastContentPaneId: null,
+      lastViewerPaneId: null,
       root: {
         id: "split-1",
         type: "split",
@@ -881,7 +886,7 @@ describe("useAppSessionActions", () => {
 
   it("treats a model refresh conflict as a benign lifecycle deferral", async () => {
     vi.spyOn(api, "refreshSessionModelOptions").mockRejectedValue(
-      new api.ApiRequestError(
+      new ApiRequestError(
         "request-failed",
         "session model options cannot be refreshed while the session is active or stopping",
         { status: 409 },

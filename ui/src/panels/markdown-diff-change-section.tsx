@@ -90,7 +90,8 @@ import {
   type KeyboardEvent,
 } from "react";
 import { flushSync } from "react-dom";
-import { MarkdownContent, type MarkdownFileLinkTarget } from "../message-cards";
+import { MarkdownContent } from "../markdown-content";
+import { type MarkdownFileLinkTarget } from "../markdown-links";
 import type { MonacoAppearance } from "../monaco";
 import { getMarkdownDiffSegmentLineNumber } from "./diff-panel-helpers";
 import {

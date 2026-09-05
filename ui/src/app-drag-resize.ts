@@ -29,11 +29,13 @@ import {
   placeExternalTab,
   placeSessionDropInWorkspaceState,
   updateSplitRatio,
+} from "./workspace";
+import {
   type TabDropPlacement,
   type WorkspacePane,
   type WorkspaceState,
   type WorkspaceTab,
-} from "./workspace";
+} from "./workspace-types";
 import type { ControlPanelSectionId } from "./panels/ControlPanelSurface";
 import type { ControlPanelSide } from "./workspace-storage";
 import { TAB_DRAG_STALE_TIMEOUT_MS } from "./app-shell-internals";

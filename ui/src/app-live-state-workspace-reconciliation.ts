@@ -11,8 +11,8 @@ import {
   openSessionInWorkspaceState,
   reconcileWorkspaceState,
   workspaceHasDelegatedChildSessionReferences,
-  type WorkspaceState,
 } from "./workspace";
+import { type WorkspaceState } from "./workspace-types";
 
 type ReconcileAdoptedSessionsWorkspaceOptions = {
   applyControlPanelLayout: (workspace: WorkspaceState) => WorkspaceState;

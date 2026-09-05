@@ -20,8 +20,8 @@ import * as slashPalette from "./session-slash-palette";
 import {
   AgentSessionPanel,
   AgentSessionPanelFooter,
-  splitAgentCommandResolverTail,
 } from "./AgentSessionPanel";
+import { splitAgentCommandResolverTail } from "./session-agent-command-submission";
 import { VirtualizedConversationMessageList } from "./VirtualizedConversationMessageList";
 import {
   ConversationTailPresence,

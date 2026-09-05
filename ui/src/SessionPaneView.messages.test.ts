@@ -12,7 +12,7 @@ import {
   visibleMessagesForPaneViewMode,
 } from "./SessionPaneView.messages";
 import type { CommandMessage, DiffMessage, Message, Session } from "./types";
-import type { PaneViewMode } from "./workspace";
+import type { PaneViewMode } from "./workspace-types";
 
 function textMessage(id: string, author: Message["author"]): Message {
   return {

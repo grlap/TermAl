@@ -14,18 +14,20 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   canMoveMessageStackByDelta,
-  isFirstAgentOutputForObservedPrompt,
   isMessageStackAtPhysicalBottom,
+  resolveNewResponseIndicatorVisibility,
+  resolveSessionPageScrollDistance,
+  useSessionPaneScrollState,
+} from "./SessionPaneView.scroll";
+import {
+  isFirstAgentOutputForObservedPrompt,
   resolveLatestTurnOutputState,
   resolveLatestTurnTailSignature,
-  resolveNewResponseIndicatorVisibility,
   resolvePostLiveMessageFollowTransition,
   resolveSessionBottomFollowPersistedScrollTop,
   resolveSessionBottomFollowScrollTop,
   resolveSessionBottomFollowWriteScrollTop,
-  resolveSessionPageScrollDistance,
-  useSessionPaneScrollState,
-} from "./SessionPaneView.scroll";
+} from "./session-live-tail-follow";
 import {
   MESSAGE_STACK_BOTTOM_FOLLOW_SCROLL_MS,
   MESSAGE_STACK_POINTER_OWNERSHIP_MS,

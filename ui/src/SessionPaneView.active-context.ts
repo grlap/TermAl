@@ -10,7 +10,7 @@ import {
 } from "./session-model-utils";
 import { resolveSessionPaneActiveTab } from "./SessionPaneView.active-tab";
 import type { Project, Session } from "./types";
-import type { WorkspacePane } from "./workspace";
+import type { WorkspacePane } from "./workspace-types";
 
 type SessionPaneActiveContextOptions = {
   pane: WorkspacePane;

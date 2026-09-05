@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 
-import { ApiRequestError, type CreateDelegationRequest } from "./api";
+import { ApiRequestError } from "./api-request";
+import { type CreateDelegationRequest } from "./api";
 import type { SpawnDelegationTransportFailurePacket } from "./delegation-error-packets";
 import {
   cancelDelegationCommand,
@@ -26,9 +27,9 @@ import {
   type DelegationCommandTransport,
   type SpawnReviewerBatchFailure,
   type SpawnReviewerBatchCommandResult,
-  type WaitDelegationErrorPacket,
   type WaitDelegationsResult,
 } from "./delegation-commands";
+import { type WaitDelegationErrorPacket } from "./delegation-error-packets";
 import type { DelegationRecord, DelegationResult, Session } from "./types";
 
 type CreateDelegationTransportResponse = Awaited<

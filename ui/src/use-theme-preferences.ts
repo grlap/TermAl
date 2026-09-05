@@ -22,7 +22,6 @@ import {
   applyThemePreference,
   getSystemThemeKind,
   getThemeKind,
-  persistThemePreference,
   persistThemePreferences,
   resolveEffectiveThemeId,
   resolveEffectiveThemeKind,
@@ -85,7 +84,6 @@ export function useThemePreferencesState(
 
   useLayoutEffect(() => {
     applyThemePreference(themeId);
-    persistThemePreference(themeId);
     persistThemePreferences(themePreferences);
   }, [themeId, themePreferences]);
 

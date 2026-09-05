@@ -42,10 +42,12 @@ import {
 import {
   findNearestSessionPaneId,
   rescopeControlSurfacePane,
+} from "./workspace";
+import {
   type WorkspacePane,
   type WorkspaceState,
   type WorkspaceTab,
-} from "./workspace";
+} from "./workspace-types";
 import {
   getActiveWorkspacePaneTab,
   resolveWorkspaceTabProjectId,

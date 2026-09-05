@@ -40,12 +40,10 @@ function makeScrollNodeRef() {
 }
 
 function renderTranscriptDemandHook({
-  hasNewerHistory,
-  hasOlderHistory,
+  hasNewerHistory = false,
+  hasOlderHistory = true,
   isActive = true,
-  messageCount = 600,
   messages = makeTextMessages(20),
-  messagesLoaded = false,
   scrollContainerRef = {
     current: document.createElement("div"),
   } as RefObject<HTMLElement | null>,
@@ -54,9 +52,7 @@ function renderTranscriptDemandHook({
   hasNewerHistory?: boolean;
   hasOlderHistory?: boolean;
   isActive?: boolean;
-  messageCount?: number | null;
   messages?: Message[];
-  messagesLoaded?: boolean | null;
   scrollContainerRef?: RefObject<HTMLElement | null>;
   sessionId?: string;
 } = {}) {
@@ -65,9 +61,7 @@ function renderTranscriptDemandHook({
       hasNewerHistory,
       hasOlderHistory,
       isActive,
-      messageCount,
       messages,
-      messagesLoaded,
       scrollContainerRef,
       sessionId,
     },
@@ -133,9 +127,8 @@ describe("useInitialActiveTranscriptMessages", () => {
 
   it("does not request history when the supplied transcript is complete", () => {
     const hook = renderTranscriptDemandHook({
-      messageCount: 3,
       messages: makeTextMessages(3),
-      messagesLoaded: true,
+      hasOlderHistory: false,
     });
 
     expect(hook.result.current.hasOlderHistory).toBe(false);
@@ -167,12 +160,10 @@ describe("useInitialActiveTranscriptMessages", () => {
       hook.result.current.requestOlderTranscriptPage();
     });
     hook.rerender({
-      hasNewerHistory: undefined,
-      hasOlderHistory: undefined,
+      hasNewerHistory: false,
+      hasOlderHistory: true,
       isActive: true,
-      messageCount: 600,
       messages: makeTextMessages(84),
-      messagesLoaded: false,
       scrollContainerRef: ref,
       sessionId: "session-a",
     });

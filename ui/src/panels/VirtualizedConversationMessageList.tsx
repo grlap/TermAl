@@ -111,33 +111,6 @@ import type {
   Message,
 } from "../types";
 
-export type {
-  BoundCodexAppRequestSubmitHandler,
-  BoundMcpElicitationSubmitHandler,
-  BoundUserInputSubmitHandler,
-  CodexAppRequestSubmitHandler,
-  McpElicitationSubmitHandler,
-  RenderMessageCard,
-  UserInputSubmitHandler,
-  VirtualizedConversationJumpOptions,
-  VirtualizedConversationLayoutMessage,
-  VirtualizedConversationLayoutSnapshot,
-  VirtualizedConversationMessageListHandle,
-  VirtualizedConversationMessageListHandleRef,
-  VirtualizedConversationViewportSnapshot,
-} from "./virtualized-conversation-types";
-export type { VirtualizedRange } from "./virtualized-conversation-measurement";
-export {
-  resolveBottomReentryScrollKind,
-  resolveNativeScrollKind,
-} from "./virtualized-conversation-scroll-events";
-
-export {
-  VIRTUALIZED_USER_SCROLL_ADJUSTMENT_COOLDOWN_MS,
-  resolvePrependedMessageCount,
-  resolveVirtualizedScrollWriteTarget,
-} from "./virtualized-conversation-controller";
-
 const EMPTY_MATCHED_ITEM_KEYS = new Set<string>();
 const EMPTY_PENDING_USER_INPUT_MESSAGE_IDS = new Set<string>();
 

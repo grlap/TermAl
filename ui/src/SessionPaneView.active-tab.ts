@@ -2,7 +2,10 @@
 // Does not own: tab rendering, workspace tree mutation, or view-mode fallback behavior.
 // Split from: ui/src/SessionPaneView.tsx.
 
-import type { WorkspacePane, WorkspaceTab } from "./workspace";
+import type {
+  WorkspacePane,
+  WorkspaceTab,
+} from "./workspace-types";
 
 export function resolveSessionPaneActiveTab(
   pane: Pick<WorkspacePane, "activeTabId" | "tabs">,

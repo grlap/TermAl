@@ -9,7 +9,7 @@ import type {
   RemoteConfig,
   Session,
 } from "./types";
-import type { WorkspacePane } from "./workspace";
+import type { WorkspacePane } from "./workspace-types";
 
 const delegationActionMockState = vi.hoisted(() => ({
   autoOpenDelegationOnLayout: false,

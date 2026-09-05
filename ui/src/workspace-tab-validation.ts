@@ -1,4 +1,8 @@
-import type { PaneViewMode, SessionPaneViewMode, WorkspaceTab } from "./workspace";
+import type {
+  PaneViewMode,
+  SessionPaneViewMode,
+  WorkspaceTab,
+} from "./workspace-types";
 
 const DIFF_CHANGE_TYPES = ["edit", "create"] as const;
 const SESSION_PANE_VIEW_MODES: readonly SessionPaneViewMode[] = [

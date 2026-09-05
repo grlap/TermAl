@@ -24,12 +24,10 @@ import * as slashPalette from "./session-slash-palette";
 import {
   AgentSessionPanel,
   AgentSessionPanelFooter,
-  splitAgentCommandResolverTail,
 } from "./AgentSessionPanel";
-import {
-  VIRTUALIZED_USER_SCROLL_ADJUSTMENT_COOLDOWN_MS,
-  VirtualizedConversationMessageList,
-} from "./VirtualizedConversationMessageList";
+import { splitAgentCommandResolverTail } from "./session-agent-command-submission";
+import { VIRTUALIZED_USER_SCROLL_ADJUSTMENT_COOLDOWN_MS } from "./virtualized-conversation-controller";
+import { VirtualizedConversationMessageList } from "./VirtualizedConversationMessageList";
 import { RunningIndicator } from "./session-activity-cards";
 import {
   notifyMessageStackScrollWrite,

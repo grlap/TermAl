@@ -49,7 +49,8 @@
 // fence syntax, same header copy, same kind-label ordering.
 
 import { MarkdownDocumentView } from "../MarkdownDocumentView";
-import { MarkdownContent, type MarkdownFileLinkTarget } from "../message-cards";
+import { MarkdownContent } from "../markdown-content";
+import { type MarkdownFileLinkTarget } from "../markdown-links";
 import type { MonacoAppearance } from "../monaco";
 import type { SourceRenderableRegion } from "../source-renderers";
 

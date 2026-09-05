@@ -8,7 +8,7 @@ import {
   upsertSessionStoreSession,
 } from "./session-store";
 import type { Session } from "./types";
-import type { WorkspacePane } from "./workspace";
+import type { WorkspacePane } from "./workspace-types";
 
 const scrollMockState = vi.hoisted(() => ({
   params: [] as Array<{

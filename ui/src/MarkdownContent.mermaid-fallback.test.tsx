@@ -63,7 +63,7 @@ describe("MarkdownContent Mermaid dynamic import fallback", () => {
     delete mermaidWindow.__termalMermaidBundleLoadPromise;
 
     try {
-      const { MarkdownContent } = await import("./message-cards");
+      const { MarkdownContent } = await import("./markdown-content");
 
       render(
         <MarkdownContent

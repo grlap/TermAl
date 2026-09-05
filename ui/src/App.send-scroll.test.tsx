@@ -586,6 +586,8 @@ describe("App prompt-send and live-turn scroll", () => {
         JSON.stringify({
           controlPanelSide: "left",
           workspace: {
+            lastContentPaneId: null,
+            lastViewerPaneId: null,
             root: {
               id: "split-root",
               type: "split",

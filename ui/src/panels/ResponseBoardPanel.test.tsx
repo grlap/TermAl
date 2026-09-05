@@ -20,10 +20,8 @@ import {
   RESPONSE_BOARD_MESSAGE_MIME,
   writeResponseBoardMessageDragData,
 } from "../response-board";
-import {
-  ResponseBoardPanel,
-  responseBoardViewShowsAnyCard,
-} from "./ResponseBoardPanel";
+import { ResponseBoardPanel } from "./ResponseBoardPanel";
+import { responseBoardViewShowsAnyCard } from "./response-board-camera";
 
 vi.mock("../api", () => ({
   RESPONSE_BOARD_DEFAULT_TAB_ID: "response-board-default",
@@ -2744,6 +2742,40 @@ describe("ResponseBoardPanel", () => {
       });
     } finally {
       vi.useRealTimers();
+    }
+  });
+
+  it("ignores the retired browser-global zoom key on load and camera updates", async () => {
+    const retiredKey = "termal.response-board.zoom.v1";
+    window.localStorage.setItem(retiredKey, "2");
+    const read = vi.spyOn(window.localStorage, "getItem");
+    const write = vi.spyOn(window.localStorage, "setItem");
+    // Prove the spies observe the installed browser storage implementation.
+    expect(window.localStorage.getItem(retiredKey)).toBe("2");
+    window.localStorage.setItem(retiredKey, "2");
+    expect(read).toHaveBeenCalledWith(retiredKey);
+    expect(write).toHaveBeenCalledWith(retiredKey, "2");
+    read.mockClear();
+    write.mockClear();
+    const view = render(
+      <ResponseBoardPanel
+        refreshToken="current-camera"
+        workspaceTabId="workspace-board-current"
+        onOpenSource={() => {}}
+      />,
+    );
+    try {
+      await screen.findByText("Drag a staged response here, or drop a transcript message.");
+      expect(screen.getByRole("button", { name: "Fit board in view" })).toHaveTextContent("100%");
+      fireEvent.click(screen.getByRole("button", { name: "Zoom out" }));
+      expect(screen.getByRole("button", { name: "Fit board in view" })).toHaveTextContent("83%");
+      expect(read.mock.calls.some(([key]) => key === retiredKey)).toBe(false);
+      expect(write.mock.calls.some(([key]) => key === retiredKey)).toBe(false);
+    } finally {
+      view.unmount();
+      read.mockRestore();
+      write.mockRestore();
+      window.localStorage.removeItem(retiredKey);
     }
   });
 

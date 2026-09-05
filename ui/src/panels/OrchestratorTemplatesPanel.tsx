@@ -18,7 +18,7 @@ import {
   updateOrchestratorTemplate,
 } from "../api";
 import { sanitizeUserFacingErrorMessage } from "../error-messages";
-import { ThemedCombobox } from "../preferences-panels";
+import { ThemedCombobox } from "../preferences/themed-combobox";
 import { isLocalRemoteId } from "../remotes";
 import { dispatchOrchestratorTemplatesChangedEvent } from "../orchestrator-templates-events";
 import {

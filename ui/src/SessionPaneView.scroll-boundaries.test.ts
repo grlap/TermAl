@@ -420,7 +420,7 @@ describe("session pane scroll boundaries", () => {
     hook.rerender({
       activeSession: {
         ...session(false),
-        hasOlderHistory: undefined,
+        hasOlderHistory: true,
       },
     });
 

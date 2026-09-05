@@ -53,6 +53,7 @@ describe("useThemePreferencesState", () => {
   });
 
   it("switches the applied theme without a reload", () => {
+    window.localStorage.setItem("termal-ui-theme", "terminal");
     installMatchMedia(false);
     const { result } = renderHook(() =>
       useThemePreferencesState({
@@ -65,6 +66,10 @@ describe("useThemePreferencesState", () => {
     expect(document.documentElement.dataset.theme).toBe("warm-light");
     act(() => result.current.toggleThemeKind());
     expect(document.documentElement.dataset.theme).toBe("dark");
+    expect(window.localStorage.getItem("termal-ui-theme")).toBe("terminal");
+    expect(window.localStorage.getItem("termal-ui-theme-light")).toBe("warm-light");
+    expect(window.localStorage.getItem("termal-ui-theme-dark")).toBe("dark");
+    expect(window.localStorage.getItem("termal-ui-theme-mode")).toBe("dark");
   });
 
   it("follows matchMedia live in Auto and keeps a manual session override", () => {

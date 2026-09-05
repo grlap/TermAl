@@ -2,7 +2,10 @@
 // Does not own: scroll restoration effects, DOM measurement, or pane rendering.
 // Split from: ui/src/SessionPaneView.tsx.
 
-import type { PaneViewMode, WorkspaceTab } from "./workspace";
+import type {
+  PaneViewMode,
+  WorkspaceTab,
+} from "./workspace-types";
 
 export function resolveSessionPaneScrollStateKey(
   paneId: string,

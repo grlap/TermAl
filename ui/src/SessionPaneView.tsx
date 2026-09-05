@@ -39,7 +39,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { resolveControlPanelWorkspaceRoot } from "./session-model-utils";
-import { ThemedCombobox } from "./preferences-panels";
+import { ThemedCombobox } from "./preferences/themed-combobox";
 import { SessionFindBar } from "./SessionFindBar";
 import { useStableEvent } from "./panels/use-stable-event";
 import { resolveWorkspaceScopedSessionId } from "./control-surface-state";
@@ -76,7 +76,7 @@ import {
   type TabDropPlacement,
   type WorkspacePane,
   type WorkspaceSessionTab,
-} from "./workspace";
+} from "./workspace-types";
 import { dataTransferHasSessionDragType } from "./session-drag";
 import {
   TAB_DRAG_MIME_TYPE,

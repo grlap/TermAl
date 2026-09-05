@@ -4,12 +4,14 @@ import {
   activatePane,
   openResponseBoardInWorkspaceState,
   setResponseBoardWorkspaceState,
-  type WorkspaceState,
 } from "./workspace";
+import { type WorkspaceState } from "./workspace-types";
 import { isWorkspaceTab } from "./workspace-tab-validation";
 
 function splitWorkspace(): WorkspaceState {
   return {
+    lastContentPaneId: null,
+    lastViewerPaneId: null,
     root: {
       id: "split-1",
       type: "split",

@@ -12,36 +12,26 @@ import {
 } from "./session-history-demand";
 
 describe("resolveHasOlderSessionHistory", () => {
-  it("uses explicit availability and the same legacy window fallback", () => {
+  it("uses only explicit history availability, never inferred hydration or counts", () => {
     expect(
       resolveHasOlderSessionHistory({
         hasOlderHistory: false,
-        messageCount: 5_000,
-        messagesLoaded: false,
-        residentMessageCount: 20,
       }),
     ).toBe(false);
     expect(
       resolveHasOlderSessionHistory({
-        messageCount: 5_000,
-        messagesLoaded: undefined,
-        residentMessageCount: 20,
+        hasOlderHistory: true,
       }),
     ).toBe(true);
-    expect(
-      resolveHasOlderSessionHistory({
-        messageCount: 20,
-        messagesLoaded: false,
-        residentMessageCount: 20,
-      }),
-    ).toBe(true);
-    expect(
-      resolveHasOlderSessionHistory({
-        messageCount: 20,
-        messagesLoaded: true,
-        residentMessageCount: 20,
-      }),
-    ).toBe(false);
+    expect(resolveHasOlderSessionHistory({})).toBe(false);
+    // An explicit undefined current field satisfies TypeScript's weak-type check.
+    const retiredShape = {
+      messageCount: 5_000,
+      messagesLoaded: false,
+      residentMessageCount: 20,
+      hasOlderHistory: undefined,
+    };
+    expect(resolveHasOlderSessionHistory(retiredShape)).toBe(false);
   });
 });
 

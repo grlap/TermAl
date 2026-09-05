@@ -23,7 +23,11 @@ import {
 import { attachSessionDragData } from "./session-drag";
 import { TAB_DRAG_MIME_TYPE, type WorkspaceTabDrag } from "./tab-drag";
 import type { ControlPanelSide } from "./workspace-storage";
-import type { WorkspacePane, WorkspaceState, WorkspaceTab } from "./workspace";
+import type {
+  WorkspacePane,
+  WorkspaceState,
+  WorkspaceTab,
+} from "./workspace-types";
 
 class BroadcastChannelMock {
   static instances: BroadcastChannelMock[] = [];
@@ -45,6 +49,8 @@ function makeWorkspace(): WorkspaceState {
     { id: "tab-b", kind: "session", sessionId: "session-b" },
   ] as const;
   return {
+    lastContentPaneId: null,
+    lastViewerPaneId: null,
     root: { type: "pane", paneId: "pane-a" },
     activePaneId: "pane-a",
     panes: [
@@ -63,6 +69,8 @@ function makeWorkspace(): WorkspaceState {
 
 function makeSplitWorkspace(): WorkspaceState {
   return {
+    lastContentPaneId: null,
+    lastViewerPaneId: null,
     root: {
       id: "split-root",
       type: "split",
@@ -110,6 +118,8 @@ function removeSecondPane(workspace: WorkspaceState): WorkspaceState {
 
 function makeControlPanelSplitWorkspace(): WorkspaceState {
   return {
+    lastContentPaneId: null,
+    lastViewerPaneId: null,
     root: {
       id: "split-root",
       type: "split",
@@ -148,6 +158,8 @@ function makeControlPanelSplitWorkspace(): WorkspaceState {
 
 function makeDuplicateSessionWorkspace(): WorkspaceState {
   return {
+    lastContentPaneId: null,
+    lastViewerPaneId: null,
     root: {
       id: "split-outer",
       type: "split",

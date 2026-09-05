@@ -163,6 +163,8 @@ function storeFilesystemWorkspace(workspaceId: string) {
     JSON.stringify({
       controlPanelSide: "left",
       workspace: {
+        lastContentPaneId: null,
+        lastViewerPaneId: null,
         root: {
           type: "pane",
           paneId: "pane-files",
@@ -235,6 +237,8 @@ describe("App workspaceFilesChanged buffering", () => {
                 updatedAt: "2026-04-11 09:00:00",
                 controlPanelSide: "left",
                 workspace: {
+                  lastContentPaneId: null,
+                  lastViewerPaneId: null,
                   root: null,
                   panes: [],
                   activePaneId: null,

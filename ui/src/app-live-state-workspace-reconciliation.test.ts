@@ -2,7 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 
 import { reconcileAdoptedSessionsWorkspace } from "./app-live-state-workspace-reconciliation";
 import type { Session } from "./types";
-import type { WorkspaceState, WorkspaceTab } from "./workspace";
+import type {
+  WorkspaceState,
+  WorkspaceTab,
+} from "./workspace-types";
 
 function makeSession(
   id: string,
@@ -42,6 +45,8 @@ function makeWorkspaceWithTabs(
   activeSessionId: string | null = null,
 ): WorkspaceState {
   return {
+    lastContentPaneId: null,
+    lastViewerPaneId: null,
     root: {
       type: "pane",
       paneId: "pane-1",

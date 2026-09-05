@@ -17,7 +17,6 @@ import {
   fetchGitDiff,
   fetchGitStatus,
   fetchState,
-  isBackendUnavailableError,
   pauseOrchestratorInstance,
   resumeOrchestratorInstance,
   stopOrchestratorInstance,
@@ -28,6 +27,7 @@ import {
   type StateResponse,
   updateAppSettings,
 } from "./api";
+import { isBackendUnavailableError } from "./api-request";
 import { AgentIcon } from "./agent-icon";
 import {
   createSessionModelHint,
@@ -50,10 +50,10 @@ import {
   RemotePreferencesPanel,
   ClaudeApprovalsPreferencesPanel,
   CodexPromptPreferencesPanel,
-  ThemedCombobox,
   CURSOR_MODE_OPTIONS,
   GEMINI_APPROVAL_OPTIONS,
 } from "./preferences-panels";
+import { ThemedCombobox } from "./preferences/themed-combobox";
 import { SettingsDialogShell } from "./preferences/SettingsDialogShell";
 import { SettingsTabBar } from "./preferences/SettingsTabBar";
 import type { PreferencesTabId } from "./preferences/preferences-tabs";
@@ -82,11 +82,10 @@ import {
 import { createInitialWorkspaceBootstrap } from "./initial-workspace-bootstrap";
 import { useAppPreferencesState } from "./app-preferences-state";
 import { useAppWorkspaceLayout } from "./app-workspace-layout";
-import { useAppLiveState, type SessionHydrationTarget } from "./app-live-state";
-import {
-  useAppSessionActions,
-  type ActionStateClassifierContext,
-} from "./app-session-actions";
+import { useAppLiveState } from "./app-live-state";
+import { type SessionHydrationTarget } from "./app-live-state-types";
+import { useAppSessionActions } from "./app-session-actions";
+import { type ActionStateClassifierContext } from "./app-session-actions-types";
 import { useAppDragResize } from "./app-drag-resize";
 import {
   beginSessionPaneScrollPositionMigration,
@@ -158,7 +157,6 @@ import {
   activatePane,
   closeWorkspaceTab,
   CONTROL_SURFACE_KINDS,
-  DEFAULT_CONTROL_PANEL_DOCK_WIDTH_RATIO,
   dockControlPanelAtWorkspaceEdge,
   ensureControlPanelInWorkspaceState,
   findNearestControlSurfacePaneId,
@@ -188,10 +186,13 @@ import {
   updateGitDiffPreviewTabInWorkspaceState,
   updateSplitRatio,
   upsertCanvasSessionCard,
+} from "./workspace";
+import {
+  DEFAULT_CONTROL_PANEL_DOCK_WIDTH_RATIO,
   type SessionPaneViewMode,
   type TabDropPlacement,
   type WorkspaceState,
-} from "./workspace";
+} from "./workspace-types";
 import {
   ensureWorkspaceViewId,
   type ControlPanelSide,
@@ -838,7 +839,6 @@ export default function App() {
     controlPanelSide,
     setControlPanelSide,
     preferences: {
-      themeId,
       lightThemeId,
       darkThemeId,
       themeMode,

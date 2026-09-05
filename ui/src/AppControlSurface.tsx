@@ -30,14 +30,14 @@ import {
 import { FileSystemPanel } from "./panels/FileSystemPanel";
 import { GitStatusPanel } from "./panels/GitStatusPanel";
 import { OrchestratorTemplateLibraryPanel } from "./panels/OrchestratorTemplateLibraryPanel";
-import { ThemedCombobox } from "./preferences-panels";
+import { ThemedCombobox } from "./preferences/themed-combobox";
 import { attachSessionDragData } from "./session-drag";
 import { primaryModifierLabel, type SessionFlagMap } from "./app-utils";
 import {
   type WorkspacePane,
   type WorkspaceState,
   type WorkspaceTab,
-} from "./workspace";
+} from "./workspace-types";
 import { useControlSurfaceScope } from "./app-control-panel-state";
 import type { BackendConnectionState } from "./backend-connection";
 import type {

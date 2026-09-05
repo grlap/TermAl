@@ -4,7 +4,10 @@
 // `delegation-commands.ts`. Split out of `ui/src/delegation-commands.ts`
 // during the command-surface extraction.
 
-import { ApiRequestError, type ApiRequestErrorKind } from "./api";
+import {
+  ApiRequestError,
+  type ApiRequestErrorKind,
+} from "./api-request";
 import { sanitizeUserFacingErrorMessage } from "./error-messages";
 
 export type MixedServerInstanceErrorPacket = {

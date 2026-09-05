@@ -44,10 +44,8 @@ import { createPortal } from "react-dom";
 
 import { clamp } from "./app-utils";
 import type { StateResponse } from "./api";
-import {
-  EngramProjectSettingsDialog,
-  type ProjectEngramVerificationState,
-} from "./EngramProjectSettingsDialog";
+import { EngramProjectSettingsDialog } from "./EngramProjectSettingsDialog";
+import { type ProjectEngramVerificationState } from "./EngramProjectSettingsPanel";
 import { describeProjectEngramState } from "./EngramProjectSettingsPanel";
 import { ALL_PROJECTS_FILTER_ID } from "./project-filters";
 import { describeProjectScope } from "./session-model-utils";

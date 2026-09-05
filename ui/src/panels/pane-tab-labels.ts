@@ -31,7 +31,7 @@
 // directly from here.
 
 import type { SessionSummarySnapshot } from "../session-store";
-import type { WorkspaceTab } from "../workspace";
+import type { WorkspaceTab } from "../workspace-types";
 
 export function formatVisibleTabLabel(
   tab: WorkspaceTab,

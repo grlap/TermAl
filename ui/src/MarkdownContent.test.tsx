@@ -4,7 +4,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as clipboard from "./clipboard";
 import * as connectionRetry from "./connection-retry";
-import { MarkdownContent, MessageCard } from "./message-cards";
+import { MarkdownContent } from "./markdown-content";
+import { MessageCard } from "./message-cards";
 import { areMarkdownLineMarkersEqual } from "./markdown-line-markers";
 import type {
   CodexAppRequestMessage,

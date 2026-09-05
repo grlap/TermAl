@@ -30,7 +30,7 @@ import type { ConversationOverviewViewport } from "./conversation-overview-map";
 import type {
   VirtualizedConversationMessageListHandle,
   VirtualizedConversationMessageListHandleRef,
-} from "./VirtualizedConversationMessageList";
+} from "./virtualized-conversation-types";
 
 const EMPTY_OVERVIEW_VIEWPORT: ConversationOverviewViewport = {
   startPosition: 0,

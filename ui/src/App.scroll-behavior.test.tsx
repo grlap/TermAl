@@ -964,6 +964,8 @@ describe("App scroll behaviour", () => {
         JSON.stringify({
           controlPanelSide: "left",
           workspace: {
+            lastContentPaneId: null,
+            lastViewerPaneId: null,
             root: {
               type: "pane",
               paneId: "pane-session",
@@ -1257,6 +1259,8 @@ describe("App scroll behaviour", () => {
         JSON.stringify({
           controlPanelSide: "left",
           workspace: {
+            lastContentPaneId: null,
+            lastViewerPaneId: null,
             root: {
               type: "pane",
               paneId: "pane-session",
@@ -1684,6 +1688,8 @@ describe("App scroll behaviour", () => {
         JSON.stringify({
           controlPanelSide: "left",
           workspace: {
+            lastContentPaneId: null,
+            lastViewerPaneId: null,
             root: {
               id: "split-root",
               type: "split",
@@ -4452,6 +4458,8 @@ describe("App scroll behaviour", () => {
       JSON.stringify({
         controlPanelSide: "left",
         workspace: {
+          lastContentPaneId: null,
+          lastViewerPaneId: null,
           root: {
             id: "split-root",
             type: "split",

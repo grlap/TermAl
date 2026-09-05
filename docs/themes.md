@@ -63,7 +63,6 @@ The active preferences are stored under:
 
 | Preference | Storage key | Default |
 |------------|-------------|---------|
-| Active color theme compatibility key | `termal-ui-theme` | resolved member of the pair |
 | Light color theme | `termal-ui-theme-light` | `warm-light` |
 | Dark color theme | `termal-ui-theme-dark` | `dark` |
 | Theme mode | `termal-ui-theme-mode` | `auto` |
@@ -71,6 +70,16 @@ The active preferences are stored under:
 | UI font size | `termal-ui-font-size` | `16` |
 | Editor font size | `termal-editor-font-size` | `13` |
 | UI density | `termal-ui-density` | `100` |
+
+Browser color-theme persistence uses only the light/dark pair and mode. The
+client neither reads nor writes the old `termal-ui-theme` key or `themeId`
+layout field, and does not migrate them; a browser holding only old keys starts
+from current defaults. This retirement is browser-side: the server still accepts
+the inert `themeId` field when supplied and returns it when present. A replacement
+PUT that omits it clears the stored value, including saves from the updated client.
+Removal of the server-side field remains part of the final no-legacy audit.
+See [Multi-Browser Workspaces](features/multi-browser-workspaces.md)
+for the current layout contract and workspace-over-global preference precedence.
 
 The DOM application model is:
 

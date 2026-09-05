@@ -11,7 +11,6 @@ import {
   DEFAULT_DARK_THEME_ID,
   DEFAULT_LIGHT_THEME_ID,
   DEFAULT_THEME_MODE,
-  DEFAULT_THEME_ID,
   DENSITY_STORAGE_KEY,
   DIAGRAM_LOOKS,
   DIAGRAM_LOOK_STORAGE_KEY,
@@ -35,7 +34,6 @@ import {
   DARK_THEME_STORAGE_KEY,
   LIGHT_THEME_STORAGE_KEY,
   THEME_MODE_STORAGE_KEY,
-  THEME_STORAGE_KEY,
   THEMES,
   applyDensityPreference,
   applyDiagramLookPreference,
@@ -59,7 +57,6 @@ import {
   getStoredMarkdownThemePreference,
   getStoredStylePreference,
   getStoredThemePreferences,
-  getStoredThemePreference,
   getThemeKind,
   refreshThemeKindCacheFromDocument,
   isDiagramLook,
@@ -79,7 +76,6 @@ import {
   persistMarkdownThemePreference,
   persistStylePreference,
   persistThemePreferences,
-  persistThemePreference,
   resolveEffectiveThemeId,
 } from "./themes";
 
@@ -97,38 +93,73 @@ describe("theme helpers", () => {
     document.documentElement.style.removeProperty("--density-scale");
   });
 
-  it("returns the default theme when storage is empty or invalid", () => {
-    expect(getStoredThemePreference()).toBe(DEFAULT_THEME_ID);
-
-    window.localStorage.setItem(THEME_STORAGE_KEY, "not-a-theme");
-    expect(getStoredThemePreference()).toBe(DEFAULT_THEME_ID);
-  });
-
-  it("reads and persists valid stored themes", () => {
-    persistThemePreference("terminal");
-    expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe("terminal");
-    expect(getStoredThemePreference()).toBe("terminal");
-  });
-
-  it("migrates the legacy single theme into the matching pair slot", () => {
-    const style = document.createElement("style");
-    style.textContent = `
-      [data-theme="warm-light"] { color-scheme: light; }
-      [data-theme="terminal"] { color-scheme: dark; }
-    `;
-    document.head.append(style);
-    refreshThemeKindCacheFromDocument();
-    window.localStorage.setItem(THEME_STORAGE_KEY, "terminal");
-
-    expect(getStoredThemePreferences()).toEqual({
+  it("returns current defaults when storage is empty or current values are invalid", () => {
+    const defaults = {
       lightThemeId: DEFAULT_LIGHT_THEME_ID,
-      darkThemeId: "terminal",
-      themeMode: "dark",
-    });
-    expect(getThemeKind("terminal")).toBe("dark");
+      darkThemeId: DEFAULT_DARK_THEME_ID,
+      themeMode: DEFAULT_THEME_MODE,
+    };
+    expect(getStoredThemePreferences()).toEqual(defaults);
+    window.localStorage.setItem(LIGHT_THEME_STORAGE_KEY, "not-a-theme");
+    window.localStorage.setItem(DARK_THEME_STORAGE_KEY, "not-a-theme");
+    window.localStorage.setItem(THEME_MODE_STORAGE_KEY, "not-a-mode");
+    expect(getStoredThemePreferences()).toEqual(defaults);
+  });
 
-    style.remove();
-    refreshThemeKindCacheFromDocument();
+  it("never reads or writes the retired theme key", () => {
+    window.localStorage.setItem("termal-ui-theme", "terminal");
+    const read = vi.spyOn(window.localStorage, "getItem");
+    const write = vi.spyOn(window.localStorage, "setItem");
+    try {
+      expect(getStoredThemePreferences()).toEqual({
+        lightThemeId: DEFAULT_LIGHT_THEME_ID,
+        darkThemeId: DEFAULT_DARK_THEME_ID,
+        themeMode: DEFAULT_THEME_MODE,
+      });
+      persistThemePreferences({
+        lightThemeId: "heather",
+        darkThemeId: "fjord",
+        themeMode: "auto",
+      });
+      expect(read.mock.calls).toEqual(
+        expect.arrayContaining([
+          [LIGHT_THEME_STORAGE_KEY],
+          [DARK_THEME_STORAGE_KEY],
+          [THEME_MODE_STORAGE_KEY],
+        ]),
+      );
+      expect(write.mock.calls).toEqual(
+        expect.arrayContaining([
+          [LIGHT_THEME_STORAGE_KEY, "heather"],
+          [DARK_THEME_STORAGE_KEY, "fjord"],
+          [THEME_MODE_STORAGE_KEY, "auto"],
+        ]),
+      );
+      expect(read.mock.calls.some(([key]) => key === "termal-ui-theme")).toBe(false);
+      expect(write.mock.calls.some(([key]) => key === "termal-ui-theme")).toBe(false);
+    } finally {
+      read.mockRestore();
+      write.mockRestore();
+    }
+    expect(window.localStorage.getItem("termal-ui-theme")).toBe("terminal");
+    expect(getStoredThemePreferences()).toEqual({
+      lightThemeId: "heather",
+      darkThemeId: "fjord",
+      themeMode: "auto",
+    });
+  });
+
+  it("uses defaults when a workspace has only the retired theme field", () => {
+    // An explicit undefined current field satisfies TypeScript's weak-type check.
+    const retiredPreferences = {
+      themeId: "terminal",
+      themeMode: undefined,
+    };
+    expect(getStoredThemePreferences(retiredPreferences)).toEqual({
+      lightThemeId: DEFAULT_LIGHT_THEME_ID,
+      darkThemeId: DEFAULT_DARK_THEME_ID,
+      themeMode: DEFAULT_THEME_MODE,
+    });
   });
 
   it("reads cached theme kinds without mutating the DOM during consumers", () => {
@@ -155,26 +186,18 @@ describe("theme helpers", () => {
     refreshThemeKindCacheFromDocument();
   });
 
-  it("lets a workspace legacy theme override the matching stored pair slot", () => {
-    persistThemePreferences({
-      lightThemeId: "heather",
-      darkThemeId: "fjord",
-      themeMode: "auto",
-    });
-
-    expect(getStoredThemePreferences({ themeId: "terminal" })).toEqual({
-      lightThemeId: "heather",
-      darkThemeId: "terminal",
-      themeMode: "dark",
-    });
+  it("ignores a retired workspace theme while retaining current stored preferences", () => {
+    const current = { lightThemeId: "heather", darkThemeId: "fjord", themeMode: "auto" } as const;
+    persistThemePreferences(current);
+    const retiredPreferences = { themeId: "terminal", themeMode: undefined };
+    expect(getStoredThemePreferences(retiredPreferences)).toEqual(current);
   });
 
-  it("prefers workspace pair preferences over a workspace legacy theme", () => {
+  it("reads current workspace theme preferences", () => {
     expect(
       getStoredThemePreferences({
         lightThemeId: "heather",
         darkThemeId: "fjord",
-        themeId: "terminal",
         themeMode: "auto",
       }),
     ).toEqual({
@@ -184,13 +207,13 @@ describe("theme helpers", () => {
     });
   });
 
-  it("lets stored pair preferences suppress the local legacy theme", () => {
+  it("reads current stored theme preferences independently of retired storage", () => {
     persistThemePreferences({
       lightThemeId: "heather",
       darkThemeId: "fjord",
       themeMode: "auto",
     });
-    window.localStorage.setItem(THEME_STORAGE_KEY, "terminal");
+    window.localStorage.setItem("termal-ui-theme", "terminal");
 
     expect(getStoredThemePreferences()).toEqual({
       lightThemeId: "heather",
@@ -317,7 +340,6 @@ describe("theme helpers", () => {
     const themeIds = THEMES.map((theme) => theme.id);
     const styleIds = STYLES.map((style) => style.id);
 
-    expect(themeIds).toContain(DEFAULT_THEME_ID);
     expect(themeIds).toEqual(
       expect.arrayContaining([
         "gallery-white",

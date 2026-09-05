@@ -20,18 +20,20 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   canMoveMessageStackByDelta,
   claimMessageStackBottomRepinAuthority,
-  isFirstAgentOutputForObservedPrompt,
   isMessageStackAtPhysicalBottom,
+  resolveNewResponseIndicatorVisibility,
+  resolveSessionPageScrollDistance,
+  useSessionPaneScrollState,
+} from "./SessionPaneView.scroll";
+import {
+  isFirstAgentOutputForObservedPrompt,
   resolveLatestTurnOutputState,
   resolveLatestTurnTailSignature,
-  resolveNewResponseIndicatorVisibility,
   resolvePostLiveMessageFollowTransition,
   resolveSessionBottomFollowPersistedScrollTop,
   resolveSessionBottomFollowScrollTop,
   resolveSessionBottomFollowWriteScrollTop,
-  resolveSessionPageScrollDistance,
-  useSessionPaneScrollState,
-} from "./SessionPaneView.scroll";
+} from "./session-live-tail-follow";
 import {
   MESSAGE_STACK_BOTTOM_FOLLOW_SCROLL_MS,
   MESSAGE_STACK_POINTER_OWNERSHIP_MS,
@@ -524,7 +526,7 @@ describe("session pane body-keyboard and selection ownership", () => {
     const exerciseBoundary = (
       activeSession: Session,
       key: "Home" | "End",
-      expectedDirection: "start" | "tail",
+      expectedDirection: "start" | "tail" | null,
     ) => {
       const scrollNode = document.createElement("section");
       const messageCard = document.createElement("article");
@@ -572,11 +574,15 @@ describe("session pane body-keyboard and selection ownership", () => {
         });
 
         expect(normalizedIntentListener).not.toHaveBeenCalled();
-        expect(demands).toHaveLength(1);
-        expect(demands[0]).toMatchObject({
-          direction: expectedDirection,
-          sessionId: "session-history",
-        });
+        if (expectedDirection === null) {
+          expect(demands).toEqual([]);
+        } else {
+          expect(demands).toHaveLength(1);
+          expect(demands[0]).toMatchObject({
+            direction: expectedDirection,
+            sessionId: "session-history",
+          });
+        }
       } finally {
         const cleanupRequestId = demands[0]?.requestId;
         if (cleanupRequestId !== undefined) {
@@ -592,16 +598,17 @@ describe("session pane body-keyboard and selection ownership", () => {
 
     exerciseBoundary(session(false), "Home", "start");
     exerciseBoundary(session(true), "End", "tail");
+    exerciseBoundary({ ...session(true), hasOlderHistory: undefined }, "Home", null);
+    exerciseBoundary({ ...session(true), hasOlderHistory: false }, "Home", null);
     exerciseBoundary(
-      { ...session(true), hasOlderHistory: undefined },
+      { ...session(true), hasOlderHistory: true },
       "Home",
       "start",
     );
     exerciseBoundary(
       {
         ...session(true),
-        hasOlderHistory: undefined,
-        messagesLoaded: undefined,
+        hasOlderHistory: true,
         messageCount: 2,
       },
       "Home",

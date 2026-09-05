@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { resolveSessionPaneActiveTab } from "./SessionPaneView.active-tab";
-import type { WorkspacePane, WorkspaceTab } from "./workspace";
+import type {
+  WorkspacePane,
+  WorkspaceTab,
+} from "./workspace-types";
 
 const firstTab: WorkspaceTab = {
   id: "session-tab",

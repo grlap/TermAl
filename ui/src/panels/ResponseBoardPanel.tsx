@@ -28,7 +28,7 @@ import {
   readResponseBoardMessageDragData,
   subscribeResponseBoardInvalidation,
 } from "../response-board";
-import type { WorkspaceResponseBoardView } from "../workspace";
+import type { WorkspaceResponseBoardView } from "../workspace-types";
 import {
   clampBoardZoom,
   fitResponseBoardCardsInView,
@@ -46,11 +46,6 @@ import {
 import { ResponseBoardTabStrip } from "./ResponseBoardTabStrip";
 import { useCommittedRef } from "./use-committed-ref";
 import { useResponseBoardTabs } from "./use-response-board-tabs";
-
-export {
-  fitResponseBoardCardsInView,
-  responseBoardViewShowsAnyCard,
-} from "./response-board-camera";
 
 const BOARD_PADDING = 72;
 const CARD_PATCH_DEBOUNCE_MS = 250;

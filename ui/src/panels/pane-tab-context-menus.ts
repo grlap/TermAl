@@ -50,7 +50,10 @@ import {
 } from "../path-display";
 import type { SessionSummarySnapshot } from "../session-store";
 import type { Project } from "../types";
-import type { WorkspaceGitStatusTab, WorkspaceTab } from "../workspace";
+import type {
+  WorkspaceGitStatusTab,
+  WorkspaceTab,
+} from "../workspace-types";
 
 export type GitTabContextMenuAction = "push" | "sync";
 

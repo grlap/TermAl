@@ -5,10 +5,8 @@
 // Split from AgentSessionPanel.tsx to keep the panel focused on composition.
 
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
-import {
-  ApiRequestError,
-  type ResolveAgentCommandResponse,
-} from "../api";
+import { ApiRequestError } from "../api-request";
+import { type ResolveAgentCommandResponse } from "../api";
 import { formatUserFacingError } from "../error-messages";
 import {
   parseAgentCommandDraft,

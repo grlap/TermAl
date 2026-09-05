@@ -51,7 +51,7 @@ import {
 } from "react";
 import type { GitDiffSection } from "../api";
 import type { buildDiffPreviewModel } from "../diff-preview";
-import type { MarkdownFileLinkTarget } from "../message-cards";
+import type { MarkdownFileLinkTarget } from "../markdown-links";
 import type { MonacoAppearance } from "../monaco";
 import { DiffNavArrow } from "./DiffPanelIcons";
 import {

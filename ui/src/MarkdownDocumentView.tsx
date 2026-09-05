@@ -11,7 +11,8 @@
 //   - Editable rendered-Markdown commit plumbing. SourcePanel's
 //     editable preview uses `EditableRenderedMarkdownSection` instead.
 
-import { MarkdownContent, type MarkdownFileLinkTarget } from "./message-cards";
+import { MarkdownContent } from "./markdown-content";
+import { type MarkdownFileLinkTarget } from "./markdown-links";
 import type { MonacoAppearance } from "./monaco";
 
 export function MarkdownDocumentView({

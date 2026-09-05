@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { SessionPaneView } from "./SessionPaneView";
 import type { Session } from "./types";
-import type { WorkspacePane } from "./workspace";
+import type { WorkspacePane } from "./workspace-types";
 
 vi.mock("./SessionPaneView.scroll", async () => {
   const React = await import("react");

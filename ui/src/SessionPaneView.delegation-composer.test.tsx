@@ -29,7 +29,7 @@ import type {
   RemoteConfig,
   Session,
 } from "./types";
-import type { WorkspacePane } from "./workspace";
+import type { WorkspacePane } from "./workspace-types";
 import type {
   SpawnDelegationCommandResult,
 } from "./delegation-commands";

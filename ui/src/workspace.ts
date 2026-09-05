@@ -17,7 +17,6 @@ import {
   projectOriginProps,
   sourceFocusProps,
 } from "./workspace-normalize";
-export { normalizeWorkspaceCanvasZoom } from "./workspace-normalize";
 import {
   createCanvasTab,
   createControlPanelTab,
@@ -44,55 +43,8 @@ import {
   normalizeResponseBoardViews,
   setResponseBoardWorkspaceStateInPanes,
 } from "./workspace-response-board";
-export {
-  createCanvasTab,
-  createControlPanelTab,
-  createDiffPreviewTab,
-  createFilesystemTab,
-  createGitStatusTab,
-  createInstructionDebuggerTab,
-  createMailboxTab,
-  createOrchestratorCanvasTab,
-  createOrchestratorListTab,
-  createProjectListTab,
-  createResponseBoardTab,
-  createSessionListTab,
-  createSessionTab,
-  createSourceTab,
-  createTerminalTab,
-} from "./workspace-tabs";
-export type {
-  OpenSourceTabOptions,
-  PaneViewMode,
-  SessionPaneViewMode,
-  TabDropPlacement,
-  WorkspaceCanvasCard,
-  WorkspaceCanvasTab,
-  WorkspaceControlPanelTab,
-  WorkspaceDiffPreviewTab,
-  WorkspaceFilesystemTab,
-  WorkspaceGitStatusTab,
-  WorkspaceInstructionDebuggerTab,
-  WorkspaceMailboxTab,
-  WorkspaceNode,
-  WorkspaceOrchestratorCanvasTab,
-  WorkspaceOrchestratorListTab,
-  WorkspaceOriginOnlyTab,
-  WorkspacePane,
-  WorkspaceProjectListTab,
-  WorkspaceResponseBoardTab,
-  WorkspaceResponseBoardView,
-  WorkspaceSessionListTab,
-  WorkspaceSessionTab,
-  WorkspaceSourceFocus,
-  WorkspaceSourceTab,
-  WorkspaceState,
-  WorkspaceTab,
-  WorkspaceTerminalTab,
-} from "./workspace-types";
 import {
   DEFAULT_CONTROL_PANEL_DOCK_WIDTH_RATIO,
-  WORKSPACE_CANVAS_DEFAULT_ZOOM,
   type OpenSourceTabOptions,
   type PaneViewMode,
   type SessionPaneViewMode,
@@ -120,12 +72,7 @@ import {
   type WorkspaceTab,
   type WorkspaceTerminalTab,
 } from "./workspace-types";
-export {
-  DEFAULT_CONTROL_PANEL_DOCK_WIDTH_RATIO,
-  WORKSPACE_CANVAS_DEFAULT_ZOOM,
-  WORKSPACE_CANVAS_MAX_ZOOM,
-  WORKSPACE_CANVAS_MIN_ZOOM,
-} from "./workspace-types";
+
 const DEFAULT_ADJACENT_PANE_SPLIT_RATIO = 0.5;
 
 export type ReconcileWorkspaceStateOptions = {
@@ -557,6 +504,8 @@ export function reconcileWorkspaceState(
 
   if (!root) {
     return {
+      lastContentPaneId: null,
+      lastViewerPaneId: null,
       root: null,
       panes: [],
       activePaneId: null,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { resolveSessionPaneScrollStateKey } from "./SessionPaneView.scroll-key";
-import type { WorkspaceTab } from "./workspace";
+import type { WorkspaceTab } from "./workspace-types";
 
 describe("resolveSessionPaneScrollStateKey", () => {
   it("uses stable panel-specific keys for non-session tabs", () => {

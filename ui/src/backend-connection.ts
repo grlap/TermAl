@@ -31,7 +31,7 @@
 // Split out of `ui/src/App.tsx`. Same values, same strings, same
 // function signatures.
 
-import { isBackendUnavailableError } from "./api";
+import { isBackendUnavailableError } from "./api-request";
 
 export type BackendConnectionState =
   | "connecting"

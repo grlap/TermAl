@@ -41,10 +41,10 @@ import {
   deleteWorkspaceLayout,
   fetchWorkspaceLayout,
   fetchWorkspaceLayouts,
-  isBackendUnavailableError,
   saveWorkspaceLayout,
   type WorkspaceLayoutSummary,
 } from "./api";
+import { isBackendUnavailableError } from "./api-request";
 import { hydrateControlPanelLayout } from "./control-panel-layout";
 import type { BackendConnectionState } from "./backend-connection";
 import { resolveRecoveredWorkspaceLayoutRequestError } from "./state-adoption";
@@ -54,8 +54,8 @@ import {
   stripDiffPreviewDocumentContentFromWorkspaceState,
   stripLoadingGitDiffPreviewTabsFromWorkspaceState,
   workspaceHasDelegatedChildSessionReferences,
-  type WorkspaceState,
 } from "./workspace";
+import { type WorkspaceState } from "./workspace-types";
 import { appTestHooks } from "./app-test-hooks";
 import {
   createWorkspaceViewId,
@@ -96,7 +96,6 @@ export type UseAppWorkspaceLayoutParams = {
   controlPanelSide: ControlPanelSide;
   setControlPanelSide: Dispatch<SetStateAction<ControlPanelSide>>;
   preferences: {
-    themeId: ThemeId;
     lightThemeId: ThemeId;
     darkThemeId: ThemeId;
     themeMode: ThemeMode;
@@ -141,14 +140,13 @@ export type UseAppWorkspaceLayoutParams = {
 
 type FetchedWorkspaceThemeFields = Pick<
   StoredWorkspaceLayout,
-  "themeId" | "lightThemeId" | "darkThemeId" | "themeMode"
+  "lightThemeId" | "darkThemeId" | "themeMode"
 >;
 
 export function resolveFetchedWorkspaceThemePreferences(
   layout: FetchedWorkspaceThemeFields,
 ): ThemePreferences | null {
   if (
-    layout.themeId === undefined &&
     layout.lightThemeId === undefined &&
     layout.darkThemeId === undefined &&
     layout.themeMode === undefined
@@ -156,9 +154,7 @@ export function resolveFetchedWorkspaceThemePreferences(
     return null;
   }
 
-  // Use the same precedence and legacy migration as cold-start hydration.
-  // In particular, a legacy themeId-only layout pins the matching mode so
-  // live hydration immediately reproduces the saved appearance.
+  // Live hydration uses the same current preference slots as cold start.
   return getStoredThemePreferences(layout);
 }
 
@@ -237,7 +233,6 @@ export function useAppWorkspaceLayout(
     applyControlPanelLayout,
   } = params;
   const {
-    themeId,
     lightThemeId,
     darkThemeId,
     themeMode,
@@ -599,7 +594,6 @@ export function useAppWorkspaceLayout(
           ? parseStoredWorkspaceLayout(
               JSON.stringify({
                 controlPanelSide: response.layout.controlPanelSide,
-                themeId: response.layout.themeId,
                 lightThemeId: response.layout.lightThemeId,
                 darkThemeId: response.layout.darkThemeId,
                 themeMode: response.layout.themeMode,
@@ -852,7 +846,6 @@ export function useAppWorkspaceLayout(
       );
     const layout: WorkspaceLayoutPersistencePayload = {
       controlPanelSide,
-      themeId,
       lightThemeId,
       darkThemeId,
       themeMode,
@@ -896,7 +889,6 @@ export function useAppWorkspaceLayout(
     markdownStyleId,
     markdownThemeId,
     styleId,
-    themeId,
     lightThemeId,
     darkThemeId,
     themeMode,

@@ -460,10 +460,11 @@ Ownership split:
   stack.
 
 `Home` requests the bounded start page whenever
-`resolveHasOlderSessionHistory` reports older content: an explicit
-`hasOlderHistory` value wins; otherwise `messagesLoaded === false` or an
-authoritative summary count larger than the resident message suffix indicates a
-windowed transcript. The pane gives up tail-follow immediately, then applies the
+`resolveHasOlderSessionHistory` sees `hasOlderHistory === true` in the current
+window metadata. Missing availability does not authorize pagination; neither
+hydration status nor a difference between total and resident message counts is
+a substitute. Newer-page demand likewise uses explicit `hasNewerHistory`.
+The pane gives up tail-follow immediately, then applies the
 top seek after that request settles so stale restore work cannot win the write.
 The completion is guarded by a pane-local navigation generation both before it
 schedules and inside its animation frame. Any later manual transcript gesture

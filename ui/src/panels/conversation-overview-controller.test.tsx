@@ -7,7 +7,7 @@ import {
   conversationOverviewViewportFromResidentWindow,
   useConversationOverviewController,
 } from "./conversation-overview-controller";
-import type { VirtualizedConversationMessageListHandle } from "./VirtualizedConversationMessageList";
+import type { VirtualizedConversationMessageListHandle } from "./virtualized-conversation-types";
 
 const { fetchSessionOverview, requestSessionHistoryAroundPage } = vi.hoisted(
   () => ({

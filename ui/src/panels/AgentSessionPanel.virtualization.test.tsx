@@ -26,13 +26,13 @@ import {
   AgentSessionPanel,
   AgentSessionPanelFooter,
   ConversationMessageList,
-  splitAgentCommandResolverTail,
 } from "./AgentSessionPanel";
+import { splitAgentCommandResolverTail } from "./session-agent-command-submission";
+import { VirtualizedConversationMessageList } from "./VirtualizedConversationMessageList";
 import {
-  VirtualizedConversationMessageList,
   type RenderMessageCard,
   type VirtualizedConversationMessageListHandleRef,
-} from "./VirtualizedConversationMessageList";
+} from "./virtualized-conversation-types";
 import { RunningIndicator } from "./session-activity-cards";
 import { usePendingUserInputSubmissions } from "./pending-user-input-submissions";
 import {
@@ -462,6 +462,7 @@ describe("AgentSessionPanel virtualization", () => {
       const markerSession = makeSession("marker-session", {
         messages: makeTextMessages(1),
         messagesLoaded: false,
+        hasOlderHistory: true,
         messageCount: 1_000,
         markers: [
           makeConversationMarker({
@@ -519,6 +520,7 @@ describe("AgentSessionPanel virtualization", () => {
       const searchSession = makeSession("search-session", {
         messages: makeTextMessages(1),
         messagesLoaded: false,
+        hasOlderHistory: true,
       });
       renderSessionPanelWithDefaults({
         activeSession: searchSession,

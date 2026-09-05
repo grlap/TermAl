@@ -9,7 +9,8 @@ import {
   migrateSessionPaneScrollPosition,
   type PaneScrollPositionsByPane,
 } from "./pane-scroll-position-migration";
-import { splitPane, type WorkspaceState } from "./workspace";
+import { splitPane } from "./workspace";
+import { type WorkspaceState } from "./workspace-types";
 
 function scrollKey(
   paneId: string,
@@ -173,6 +174,8 @@ describe("migrateSessionPaneScrollPosition", () => {
 
   it("preserves the moved active session position when splitPane creates its target", () => {
     const workspace: WorkspaceState = {
+      lastContentPaneId: null,
+      lastViewerPaneId: null,
       root: { type: "pane", paneId: "pane-source" },
       activePaneId: "pane-source",
       panes: [

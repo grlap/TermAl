@@ -244,20 +244,12 @@ export type WorkspaceState = {
   /**
    * Most recently active primary pane containing conversations or other
    * non-viewer workspace content rather than only ambient control surfaces.
-   *
-   * This is optional so layouts persisted before the routing model was added
-   * remain valid. The workspace reducer derives a fallback from the active or
-   * first content-capable pane until the user focuses workspace content.
    */
-  lastContentPaneId?: string | null;
+  lastContentPaneId: string | null;
   /**
    * Most recently active pane used for source and diff-preview tabs.
-   *
-   * Optional for compatibility with layouts persisted before the viewer lane
-   * was introduced. The reducer derives a viewer pane from existing tabs when
-   * this field is absent or stale.
    */
-  lastViewerPaneId?: string | null;
+  lastViewerPaneId: string | null;
 };
 
 export type TabDropPlacement = "left" | "right" | "top" | "bottom" | "tabs";

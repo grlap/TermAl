@@ -1,4 +1,3 @@
-export const THEME_STORAGE_KEY = "termal-ui-theme";
 export const LIGHT_THEME_STORAGE_KEY = "termal-ui-theme-light";
 export const DARK_THEME_STORAGE_KEY = "termal-ui-theme-dark";
 export const THEME_MODE_STORAGE_KEY = "termal-ui-theme-mode";
@@ -193,7 +192,6 @@ export type ThemePreferences = {
   themeMode: ThemeMode;
 };
 
-export const DEFAULT_THEME_ID: ThemeId = "warm-light";
 export const DEFAULT_LIGHT_THEME_ID: ThemeId = "warm-light";
 export const DEFAULT_DARK_THEME_ID: ThemeId = "dark";
 export const DEFAULT_THEME_MODE: ThemeMode = "auto";
@@ -513,20 +511,10 @@ export function isDiagramPalette(
   return DIAGRAM_PALETTES.some((palette) => palette.id === value);
 }
 
-export function getStoredThemePreference(): ThemeId {
-  if (typeof window === "undefined") {
-    return DEFAULT_THEME_ID;
-  }
-
-  const storedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
-  return isThemeId(storedTheme) ? storedTheme : DEFAULT_THEME_ID;
-}
-
 export function getStoredThemePreferences(
   workspacePreferences: Partial<{
     darkThemeId: unknown;
     lightThemeId: unknown;
-    themeId: unknown;
     themeMode: unknown;
   }> = {},
 ): ThemePreferences {
@@ -539,30 +527,12 @@ export function getStoredThemePreferences(
     "dark",
   );
   const storedThemeMode = readStoredThemeMode();
-  const workspaceHasPairPreference =
-    workspacePreferences.lightThemeId !== undefined ||
-    workspacePreferences.darkThemeId !== undefined ||
-    workspacePreferences.themeMode !== undefined;
-  const workspaceThemeId =
-    typeof workspacePreferences.themeId === "string"
-      ? workspacePreferences.themeId
-      : null;
-  const workspaceLegacyTheme: ThemeId | null = isThemeId(workspaceThemeId)
-    ? workspaceThemeId
-    : null;
-  const storedLegacyTheme =
-    typeof window === "undefined"
-      ? null
-      : window.localStorage.getItem(THEME_STORAGE_KEY);
-  const legacyTheme = workspaceLegacyTheme ??
-    (isThemeId(storedLegacyTheme) ? storedLegacyTheme : null);
-
-  let lightThemeId = themeForKindOrFallback(
+  const lightThemeId = themeForKindOrFallback(
     workspacePreferences.lightThemeId,
     "light",
     storedLightTheme ?? DEFAULT_LIGHT_THEME_ID,
   );
-  let darkThemeId = themeForKindOrFallback(
+  const darkThemeId = themeForKindOrFallback(
     workspacePreferences.darkThemeId,
     "dark",
     storedDarkTheme ?? DEFAULT_DARK_THEME_ID,
@@ -571,27 +541,9 @@ export function getStoredThemePreferences(
     typeof workspacePreferences.themeMode === "string"
       ? workspacePreferences.themeMode
       : null;
-  let themeMode: ThemeMode = isThemeMode(workspaceThemeMode)
+  const themeMode: ThemeMode = isThemeMode(workspaceThemeMode)
     ? workspaceThemeMode
     : (storedThemeMode ?? DEFAULT_THEME_MODE);
-
-  const hasStoredPairPreference =
-    storedLightTheme !== null ||
-    storedDarkTheme !== null ||
-    storedThemeMode !== null;
-  if (
-    legacyTheme &&
-    !workspaceHasPairPreference &&
-    (!hasStoredPairPreference || workspaceLegacyTheme !== null)
-  ) {
-    const legacyKind = getThemeKind(legacyTheme);
-    if (legacyKind === "dark") {
-      darkThemeId = legacyTheme;
-    } else {
-      lightThemeId = legacyTheme;
-    }
-    themeMode = legacyKind;
-  }
 
   return { lightThemeId, darkThemeId, themeMode };
 }
@@ -603,14 +555,6 @@ export function getStoredStylePreference(): StyleId {
 
   const storedStyle = window.localStorage.getItem(STYLE_STORAGE_KEY);
   return isStyleId(storedStyle) ? storedStyle : DEFAULT_STYLE_ID;
-}
-
-export function persistThemePreference(themeId: ThemeId) {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  window.localStorage.setItem(THEME_STORAGE_KEY, themeId);
 }
 
 export function persistThemePreferences(preferences: ThemePreferences) {

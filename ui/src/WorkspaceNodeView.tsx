@@ -70,7 +70,7 @@ import {
   type WorkspaceNode,
   type WorkspacePane,
   type WorkspaceResponseBoardView,
-} from "./workspace";
+} from "./workspace-types";
 import type { MonacoAppearance } from "./monaco";
 import {
   type WorkspaceTabDrag,

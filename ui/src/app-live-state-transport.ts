@@ -19,9 +19,9 @@ import {
 } from "react";
 import {
   fetchState,
-  isBackendUnavailableError,
   type StateResponse,
 } from "./api";
+import { isBackendUnavailableError } from "./api-request";
 import {
   LIVE_SESSION_RESUME_WATCHDOG_DRIFT_MS,
   LIVE_SESSION_WATCHDOG_RESYNC_RETRY_COOLDOWN_MS,

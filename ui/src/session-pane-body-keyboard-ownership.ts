@@ -10,7 +10,7 @@ import { useCallback, useEffect, useRef, type RefObject } from "react";
 
 import { canNestedScrollableConsumeWheel } from "./app-utils";
 import { messageStackOwnsBodyKeyboardScroll } from "./message-stack-scroll-sync";
-import type { PaneViewMode } from "./workspace";
+import type { PaneViewMode } from "./workspace-types";
 
 export function useSessionPaneBodyKeyboardOwnership({
   messageStackRef,

@@ -9,7 +9,10 @@ import type {
   PendingPrompt,
   Session,
 } from "./types";
-import type { PaneViewMode, TabDropPlacement } from "./workspace";
+import type {
+  PaneViewMode,
+  TabDropPlacement,
+} from "./workspace-types";
 import type { GitDiffRequestPayload, GitDiffSection } from "./api";
 import { formatUserFacingError } from "./error-messages";
 

@@ -1,4 +1,4 @@
-import type { WorkspaceTab } from "./workspace";
+import type { WorkspaceTab } from "./workspace-types";
 import { isWorkspaceTab } from "./workspace-tab-validation";
 
 export const TAB_DRAG_CHANNEL_NAME = "termal-workspace-tab-drag";

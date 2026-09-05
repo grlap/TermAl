@@ -39,7 +39,7 @@ import {
   LIVE_SESSION_RESUME_WATCHDOG_INTERVAL_MS,
   RECONNECT_STATE_RESYNC_MAX_DELAY_MS,
 } from "./app-shell-internals";
-import { ThemedCombobox } from "./preferences-panels";
+import { ThemedCombobox } from "./preferences/themed-combobox";
 import {
   describeCodexModelAdjustmentNotice,
   describeSessionModelRefreshError,
@@ -71,7 +71,10 @@ import {
 import type { AgentReadiness, OrchestratorInstance, Session } from "./types";
 import * as workspaceStorage from "./workspace-storage";
 import { WORKSPACE_LAYOUT_STORAGE_KEY } from "./workspace-storage";
-import type { WorkspaceState, WorkspaceTab } from "./workspace";
+import type {
+  WorkspaceState,
+  WorkspaceTab,
+} from "./workspace-types";
 import type { AppTestStateResponse } from "./app-test-harness";
 import {
   EventSourceMock,

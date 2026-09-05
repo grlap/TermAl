@@ -13,8 +13,6 @@ import {
 import { DialogCloseIcon } from "./message-card-icons";
 import type { Project } from "./types";
 
-export type { ProjectEngramVerificationState } from "./EngramProjectSettingsPanel";
-
 export function EngramProjectSettingsDialog({
   project,
   onClose,

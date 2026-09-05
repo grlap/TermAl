@@ -51,7 +51,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { GitDiffDocumentContent } from "../api";
-import { MarkdownContent } from "../message-cards";
+import { MarkdownContent } from "../markdown-content";
 import type { MonacoAppearance } from "../monaco";
 import {
   countMathExpressions,

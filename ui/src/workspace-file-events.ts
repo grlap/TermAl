@@ -3,7 +3,7 @@ import type {
   WorkspaceFileChangeKind,
   WorkspaceFilesChangedEvent,
 } from "./types";
-import type { WorkspaceDiffPreviewTab } from "./workspace";
+import type { WorkspaceDiffPreviewTab } from "./workspace-types";
 
 type WorkspaceFileChangeScope = {
   rootPath?: string | null;

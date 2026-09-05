@@ -4,7 +4,7 @@ import { cleanup } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { Session } from "../types";
-import type { WorkspaceCanvasTab } from "../workspace";
+import type { WorkspaceCanvasTab } from "../workspace-types";
 import { SessionCanvasPanel } from "./SessionCanvasPanel";
 
 describe("SessionCanvasPanel", () => {

@@ -1,3 +1,4 @@
+import { ApiRequestError } from "./api-request";
 // App.preferences.test.tsx
 //
 // Owns: App-level tests for the preferences surface and the
@@ -35,7 +36,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "./api";
 import { ACTIVE_PROMPT_POLL_INTERVAL_MS } from "./active-prompt-poll";
 import App from "./App";
-import { ThemedCombobox } from "./preferences-panels";
+import { ThemedCombobox } from "./preferences/themed-combobox";
 import {
   describeCodexModelAdjustmentNotice,
   describeSessionModelRefreshError,
@@ -73,7 +74,10 @@ import type {
 } from "./types";
 import * as workspaceStorage from "./workspace-storage";
 import { WORKSPACE_LAYOUT_STORAGE_KEY } from "./workspace-storage";
-import type { WorkspaceState, WorkspaceTab } from "./workspace";
+import type {
+  WorkspaceState,
+  WorkspaceTab,
+} from "./workspace-types";
 import type { AppTestStateResponse } from "./app-test-harness";
 import {
   EventSourceMock,
@@ -683,7 +687,7 @@ describe("App preferences", () => {
         });
         await act(async () => {
           rejectUpdateAppSettings(
-            new api.ApiRequestError(
+            new ApiRequestError(
               "backend-unavailable",
               "backend restarted",
               {

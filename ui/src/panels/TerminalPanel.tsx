@@ -9,12 +9,12 @@ import {
   useSyncExternalStore,
 } from "react";
 
+import { ApiRequestError } from "../api-request";
 import {
-  ApiRequestError,
   runTerminalCommandStream,
   type TerminalCommandOutputEvent,
   type TerminalCommandResponse,
-} from "../api";
+} from "../api-terminal";
 import { getErrorMessage } from "../app-utils";
 import { assertNever } from "../exhaustive";
 

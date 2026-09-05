@@ -1,3 +1,4 @@
+import { ApiRequestError } from "./api-request";
 import { act, render, waitFor } from "@testing-library/react";
 import { createElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -7,11 +8,13 @@ import {
   SESSION_HYDRATION_FIRST_RETRY_DELAY_MS,
   SESSION_HYDRATION_MAX_RETRY_ATTEMPTS,
   resolveAdoptStateSessionOptions,
-  useAppLiveState,
+} from "./app-live-state-hydration";
+import { useAppLiveState } from "./app-live-state";
+import {
   type SessionHydrationTarget,
   type UseAppLiveStateParams,
   type UseAppLiveStateReturn,
-} from "./app-live-state";
+} from "./app-live-state-types";
 import { RECONNECT_STATE_RESYNC_DELAY_MS } from "./app-shell-internals";
 import {
   getSessionRecordSnapshotForTesting,
@@ -41,7 +44,7 @@ import type {
   Session,
   StateSessionSummary,
 } from "./types";
-import type { WorkspaceState } from "./workspace";
+import type { WorkspaceState } from "./workspace-types";
 
 const PAGED_TRANSCRIPT_MESSAGE_COUNT =
   SESSION_HISTORY_PAGE_MESSAGE_COUNT + SESSION_TAIL_WINDOW_MESSAGE_COUNT;
@@ -255,6 +258,8 @@ function makeStateResponse(session: Session, revision = 2): StateResponse {
 
 function makeWorkspace(): WorkspaceState {
   return {
+    lastContentPaneId: null,
+    lastViewerPaneId: null,
     root: {
       type: "pane",
       paneId: "pane-1",
@@ -739,6 +744,8 @@ describe("deferred session-store sync", () => {
     params.adoptionRefs.sessionsRef.current = previousSessions;
     const setSessions = vi.fn() as typeof params.stateSetters.setSessions;
     const currentWorkspace: WorkspaceState = {
+      lastContentPaneId: null,
+      lastViewerPaneId: null,
       root: {
         type: "pane",
         paneId: "pane-1",
@@ -3164,7 +3171,7 @@ describe("hydration adoption side effects", () => {
           sessionMutationStamp: 1,
         }),
       });
-      const requestError = new api.ApiRequestError(
+      const requestError = new ApiRequestError(
         "request-failed",
         "session history unavailable",
         { status },

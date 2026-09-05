@@ -15,7 +15,7 @@ import {
   createWorkspaceTabDrag,
   type WorkspaceTabDrag,
 } from "../tab-drag";
-import type { WorkspaceTab } from "../workspace";
+import type { WorkspaceTab } from "../workspace-types";
 
 export type ControlPanelSectionId =
   | "files"

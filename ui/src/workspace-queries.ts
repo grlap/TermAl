@@ -70,13 +70,13 @@ import {
 } from "./control-panel-layout";
 import type { ControlPanelSectionId } from "./panels/ControlPanelSurface";
 import type { Session } from "./types";
+import { CONTROL_SURFACE_KINDS } from "./workspace";
 import {
-  CONTROL_SURFACE_KINDS,
   type WorkspaceNode,
   type WorkspacePane,
   type WorkspaceState,
   type WorkspaceTab,
-} from "./workspace";
+} from "./workspace-types";
 
 export function workspaceNodeContainsControlPanel(
   node: WorkspaceNode,

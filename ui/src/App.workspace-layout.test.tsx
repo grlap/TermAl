@@ -38,7 +38,7 @@ import * as api from "./api";
 import { ACTIVE_PROMPT_POLL_INTERVAL_MS } from "./active-prompt-poll";
 import App from "./App";
 import { resolveFetchedWorkspaceThemePreferences } from "./app-workspace-layout";
-import { ThemedCombobox } from "./preferences-panels";
+import { ThemedCombobox } from "./preferences/themed-combobox";
 import {
   describeCodexModelAdjustmentNotice,
   describeSessionModelRefreshError,
@@ -71,7 +71,10 @@ import type { AgentReadiness, OrchestratorInstance, Session } from "./types";
 import * as workspaceStorage from "./workspace-storage";
 import { WORKSPACE_LAYOUT_STORAGE_KEY } from "./workspace-storage";
 import { persistThemePreferences } from "./themes";
-import type { WorkspaceState, WorkspaceTab } from "./workspace";
+import type {
+  WorkspaceState,
+  WorkspaceTab,
+} from "./workspace-types";
 import type { AppTestStateResponse } from "./app-test-harness";
 import {
   EventSourceMock,
@@ -255,20 +258,20 @@ describe("App workspace layout", () => {
     );
   });
 
-  it("migrates a live legacy theme layout with the cold-start precedence", () => {
-    persistThemePreferences({
+  it("ignores a fetched layout with only the retired theme field", () => {
+    const current = {
       lightThemeId: "heather",
       darkThemeId: "fjord",
       themeMode: "auto",
-    });
-
-    expect(
-      resolveFetchedWorkspaceThemePreferences({ themeId: "terminal" }),
-    ).toEqual({
-      lightThemeId: "heather",
-      darkThemeId: "terminal",
-      themeMode: "dark",
-    });
+    } as const;
+    persistThemePreferences(current);
+    // An explicit undefined current field satisfies TypeScript's weak-type check.
+    const retiredTheme = {
+      themeId: "terminal",
+      themeMode: undefined,
+    };
+    expect(resolveFetchedWorkspaceThemePreferences(retiredTheme)).toBeNull();
+    expect(resolveFetchedWorkspaceThemePreferences(current)).toEqual(current);
   });
 
   afterEach(async () => {
@@ -538,6 +541,8 @@ describe("App workspace layout", () => {
         JSON.stringify({
           controlPanelSide: "left",
           workspace: {
+            lastContentPaneId: null,
+            lastViewerPaneId: null,
             root: null,
             panes: [],
             activePaneId: null,
@@ -648,6 +653,8 @@ describe("App workspace layout", () => {
         JSON.stringify({
           controlPanelSide: "left",
           workspace: {
+            lastContentPaneId: null,
+            lastViewerPaneId: null,
             root: null,
             panes: [],
             activePaneId: null,
@@ -778,6 +785,8 @@ describe("App workspace layout", () => {
         JSON.stringify({
           controlPanelSide: "left",
           workspace: {
+            lastContentPaneId: null,
+            lastViewerPaneId: null,
             root: null,
             panes: [],
             activePaneId: null,
@@ -919,6 +928,8 @@ describe("App workspace layout", () => {
         JSON.stringify({
           controlPanelSide: "left",
           workspace: {
+            lastContentPaneId: null,
+            lastViewerPaneId: null,
             root: null,
             panes: [],
             activePaneId: null,
@@ -1086,6 +1097,8 @@ describe("App workspace layout", () => {
         JSON.stringify({
           controlPanelSide: "left",
           workspace: {
+            lastContentPaneId: null,
+            lastViewerPaneId: null,
             root: null,
             panes: [],
             activePaneId: null,
@@ -1097,6 +1110,8 @@ describe("App workspace layout", () => {
         JSON.stringify({
           controlPanelSide: "right",
           workspace: {
+            lastContentPaneId: null,
+            lastViewerPaneId: null,
             root: null,
             panes: [],
             activePaneId: null,
@@ -1483,6 +1498,8 @@ describe("App workspace layout", () => {
       JSON.stringify({
         controlPanelSide: "left",
         workspace: {
+          lastContentPaneId: null,
+          lastViewerPaneId: null,
           root: {
             id: "split-root",
             type: "split",
@@ -1586,6 +1603,8 @@ describe("App workspace layout", () => {
             updatedAt: "2026-03-30 09:00:00",
             controlPanelSide: "left",
             workspace: {
+              lastContentPaneId: null,
+              lastViewerPaneId: null,
               root: {
                 id: "split-root",
                 type: "split",
@@ -1716,6 +1735,8 @@ describe("App workspace layout", () => {
       fetchWorkspaceLayoutDeferred.resolve(
         makeWorkspaceLayoutResponse({
           workspace: {
+            lastContentPaneId: null,
+            lastViewerPaneId: null,
             root: {
               type: "pane",
               paneId: "pane-restored",
@@ -1820,6 +1841,8 @@ describe("App workspace layout", () => {
       workspaceStorage.persistWorkspaceLayout(workspaceViewId, {
         controlPanelSide: "left",
         workspace: {
+          lastContentPaneId: null,
+          lastViewerPaneId: null,
           root: {
             type: "pane",
             paneId: "pane-restored",
@@ -1925,6 +1948,8 @@ describe("App workspace layout", () => {
       workspaceStorage.persistWorkspaceLayout(workspaceViewId, {
         controlPanelSide: "left",
         workspace: {
+          lastContentPaneId: null,
+          lastViewerPaneId: null,
           root: {
             type: "pane",
             paneId: "pane-restored",
@@ -2109,6 +2134,8 @@ describe("App workspace layout", () => {
         fetchWorkspaceLayoutDeferred.resolve(
           makeWorkspaceLayoutResponse({
             workspace: {
+              lastContentPaneId: null,
+              lastViewerPaneId: null,
               root: {
                 type: "pane",
                 paneId: "pane-stale",

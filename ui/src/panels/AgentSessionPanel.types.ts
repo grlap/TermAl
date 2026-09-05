@@ -29,7 +29,7 @@ import type {
   SessionLiveActivity,
   SessionModelOptionsRefreshRequest,
 } from "../types";
-import type { PaneViewMode } from "../workspace";
+import type { PaneViewMode } from "../workspace-types";
 import type {
   CodexAppRequestSubmitHandler,
   McpElicitationSubmitHandler,
@@ -37,7 +37,7 @@ import type {
   UserInputSubmitHandler,
   VirtualizedConversationMessageListHandle,
   VirtualizedConversationMessageListHandleRef,
-} from "./VirtualizedConversationMessageList";
+} from "./virtualized-conversation-types";
 import type { SpawnDelegationOptions } from "./agent-session-panel-helpers";
 
 export type WaitingIndicatorKind = "liveTurn" | "delegationWait" | "send";

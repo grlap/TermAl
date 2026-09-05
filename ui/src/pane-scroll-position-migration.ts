@@ -3,7 +3,7 @@
 // Split from: ui/src/App.tsx and ui/src/SessionPaneView.scroll.ts.
 
 import { resolveSessionPaneScrollStateKey } from "./SessionPaneView.scroll-key";
-import type { SessionPaneViewMode } from "./workspace";
+import type { SessionPaneViewMode } from "./workspace-types";
 
 const SESSION_SCROLL_VIEW_MODES: readonly SessionPaneViewMode[] = [
   "session",

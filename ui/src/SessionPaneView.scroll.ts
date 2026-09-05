@@ -32,7 +32,7 @@ import {
   clamp,
 } from "./app-utils";
 import { cancelConversationMessageEntryReveals } from "./panels/conversation-message-reveal";
-import type { VirtualizedConversationMessageListHandle } from "./panels/VirtualizedConversationMessageList";
+import type { VirtualizedConversationMessageListHandle } from "./panels/virtualized-conversation-types";
 import {
   findMountedMessageSlotById,
   getMountedSlotViewportOffsetPx,
@@ -100,17 +100,7 @@ import {
 } from "./session-live-tail-follow";
 import type { SessionSearchMatch } from "./session-find";
 import type { Message, Session } from "./types";
-import type { PaneViewMode } from "./workspace";
-
-export {
-  isFirstAgentOutputForObservedPrompt,
-  resolveLatestTurnOutputState,
-  resolveLatestTurnTailSignature,
-  resolvePostLiveMessageFollowTransition,
-  resolveSessionBottomFollowPersistedScrollTop,
-  resolveSessionBottomFollowScrollTop,
-  resolveSessionBottomFollowWriteScrollTop,
-} from "./session-live-tail-follow";
+import type { PaneViewMode } from "./workspace-types";
 
 const SESSION_PAGE_SCROLL_VIEWPORT_FACTOR = 0.85;
 const SESSION_PAGE_SCROLL_MINIMUM_PX = 160;
@@ -413,9 +403,6 @@ export function useSessionPaneScrollState({
     activeSession &&
       resolveHasOlderSessionHistory({
         hasOlderHistory: activeSession.hasOlderHistory,
-        messageCount: activeSession.messageCount,
-        messagesLoaded: activeSession.messagesLoaded,
-        residentMessageCount: activeSession.messages.length,
       }),
   );
   const sessionSearchItemRefsRef = useRef<Record<string, HTMLElement | null>>(

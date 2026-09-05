@@ -68,6 +68,29 @@ The browser still keeps a per-workspace local cache as a warm-start fallback,
 but the server is the source of truth. Same-tab workspace switches should flush
 any pending debounced save before navigation so the backend copy stays current.
 
+Only `termal-workspace-layout:<workspace-id>` is read for a browser layout.
+Old unscoped localStorage keys are ignored, never read or migrated. A browser
+holding only old keys starts from defaults until a valid current server layout
+is loaded. A current workspace has explicit nullable `lastContentPaneId` and
+`lastViewerPaneId` routing fields alongside `root`, `panes`, and `activePaneId`;
+documents missing either routing field are ignored rather than upgraded.
+Current stale-pane routing recovery and per-pane scroll-state moves are separate
+runtime behaviors and are unchanged.
+
+Browser theme persistence uses only `lightThemeId`, `darkThemeId`, and
+`themeMode`, with global browser slots `termal-ui-theme-light`, `termal-ui-theme-dark`, and
+`termal-ui-theme-mode`. The client neither reads nor writes the retired `themeId`
+layout field or `termal-ui-theme` key. This retirement is browser-side: the server
+still accepts the inert `themeId` field when supplied and returns it when present.
+A replacement PUT that omits it clears the stored value, including saves from
+the updated client. Removal of the server-side field remains part of the final
+no-legacy audit. Current workspace theme fields take
+precedence over current global slots, then built-in defaults.
+See [Configurable UI Themes](../themes.md) for the current preference keys.
+Unknown cosmetic `diagramLook` values are dropped without changing the pane/tab
+arrangement; the current stored preference or default supplies the look. There
+is no mapping from a retired look to another look.
+
 ## Data model
 
 Workspace views live in the main persisted backend state alongside projects,

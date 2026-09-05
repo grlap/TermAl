@@ -1,11 +1,11 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { ApiRequestError } from "../api-request";
 import {
-  ApiRequestError,
   runTerminalCommandStream,
   type TerminalCommandResponse,
-} from "../api";
+} from "../api-terminal";
 import {
   TerminalPanel,
   formatTerminalResult,
@@ -18,8 +18,8 @@ import {
   type TerminalHistoryEntry,
 } from "./TerminalPanel";
 
-vi.mock("../api", async () => {
-  const actual = await vi.importActual<typeof import("../api")>("../api");
+vi.mock("../api-terminal", async () => {
+  const actual = await vi.importActual<typeof import("../api-terminal")>("../api-terminal");
   return {
     ...actual,
     runTerminalCommandStream: vi.fn(),

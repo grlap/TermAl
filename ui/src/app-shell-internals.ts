@@ -60,7 +60,7 @@ import type {
   ThemeId,
   ThemeMode,
 } from "./themes";
-import type { WorkspaceState } from "./workspace";
+import type { WorkspaceState } from "./workspace-types";
 import type { ControlPanelSide } from "./workspace-storage";
 
 export const TAB_DRAG_STALE_TIMEOUT_MS = 15000;
@@ -82,7 +82,6 @@ export type WorkspaceLayoutPersistencePayload = {
   editorFontSizePx: number;
   fontSizePx: number;
   styleId: StyleId;
-  themeId: ThemeId;
   lightThemeId: ThemeId;
   darkThemeId: ThemeId;
   themeMode: ThemeMode;

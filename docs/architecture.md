@@ -1142,7 +1142,13 @@ Session creation returns `CreateSessionResponse { sessionId, session, revision, 
 18 selectable color themes (defined in `themes.ts`) are stored as `.css` files
 in `ui/src/themes/`. Each theme defines CSS custom properties (`--ink`,
 `--paper`, `--line`, background gradients, Monaco colors, etc.). The active
-theme is set via `data-theme` on `<html>` and persisted to `localStorage`.
+theme is set via `data-theme` on `<html>`. Persistence stores the light/dark
+pair and mode in `lightThemeId`, `darkThemeId`, and `themeMode`, backed by the
+current `termal-ui-theme-light`, `termal-ui-theme-dark`, and
+`termal-ui-theme-mode` browser keys. Old keys are ignored, never read or
+migrated; a browser containing only old keys starts from defaults. Workspace
+layout validation and precedence are described in
+[Multi-Browser Workspaces](features/multi-browser-workspaces.md).
 
 Chrome style is separate from color theme. The user can keep the theme's own
 chrome or choose Terminal, Editorial, Studio, or Blueprint styling with
@@ -1150,6 +1156,10 @@ chrome or choose Terminal, Editorial, Studio, or Blueprint styling with
 runtime preferences.
 
 ### Message Rendering
+
+Frontend imports refer directly to the module that owns a value or type.
+Extracted helpers are not forwarded through their previous UI component or API
+module; this also applies to test imports and module mocks.
 
 Messages are rendered as typed cards:
 

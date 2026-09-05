@@ -5,14 +5,14 @@
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 
 import type { UpdateConversationMarkerRequest } from "./api";
-import type { UseAppLiveStateReturn } from "./app-live-state";
+import type { UseAppLiveStateReturn } from "./app-live-state-types";
 import type { SessionErrorMap, SessionNoticeMap } from "./app-shell-internals";
 import type {
   DraftImageAttachment,
   SessionAgentCommandMap,
   SessionFlagMap,
 } from "./app-utils";
-import type { WorkspaceState } from "./workspace";
+import type { WorkspaceState } from "./workspace-types";
 import type {
   AgentReadiness,
   AgentType,

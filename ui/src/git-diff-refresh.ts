@@ -33,7 +33,7 @@
 import type { GitDiffRequestPayload, GitDiffSection } from "./api";
 import type { WorkspaceFilesChangedEvent } from "./types";
 import { workspaceFilesChangedEventTouchesGitDiffTab } from "./workspace-file-events";
-import type { WorkspaceState } from "./workspace";
+import type { WorkspaceState } from "./workspace-types";
 
 export type GitDiffPreviewRefresh = {
   request: GitDiffRequestPayload;

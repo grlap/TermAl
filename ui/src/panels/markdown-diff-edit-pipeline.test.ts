@@ -25,7 +25,7 @@ import { createElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { safeDecodeMarkdownHref } from "../markdown-links";
-import { MarkdownContent } from "../message-cards";
+import { MarkdownContent } from "../markdown-content";
 import {
   insertSanitizedMarkdownPaste,
   isSafePastedMarkdownHref,

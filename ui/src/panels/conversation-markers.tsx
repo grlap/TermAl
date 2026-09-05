@@ -20,7 +20,7 @@ import { useCommittedRef } from "./use-committed-ref";
 import { createPortal } from "react-dom";
 
 import { DiffNavArrow } from "./DiffPanelIcons";
-import type { VirtualizedConversationMessageListHandle } from "./VirtualizedConversationMessageList";
+import type { VirtualizedConversationMessageListHandle } from "./virtualized-conversation-types";
 import { normalizeConversationMarkerColor } from "../conversation-marker-colors";
 import type {
   ConversationMarker,

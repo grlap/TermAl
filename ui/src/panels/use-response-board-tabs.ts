@@ -8,7 +8,7 @@ import {
   fetchResponseBoardTabs,
   type ResponseBoardTab,
 } from "../api";
-import type { WorkspaceResponseBoardView } from "../workspace";
+import type { WorkspaceResponseBoardView } from "../workspace-types";
 import { useCommittedRef } from "./use-committed-ref";
 
 type BoardView = WorkspaceResponseBoardView;

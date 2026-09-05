@@ -11,8 +11,8 @@
 //
 // Split out of: ui/src/App.tsx (Slice 14 of docs/app-split-plan.md).
 
+import { ApiRequestError } from "./api-request";
 import {
-  ApiRequestError,
   cancelQueuedPrompt,
   resumeSessionQueue,
   createProject,
@@ -33,14 +33,10 @@ import {
   updateSessionSettings,
   type StateResponse,
 } from "./api";
-import type { AdoptStateOptions } from "./app-live-state";
+import type { AdoptStateOptions } from "./app-live-state-types";
 import type {
   HandleNewSessionArgs,
   UseAppSessionActionsParams,
-  UseAppSessionActionsReturn,
-} from "./app-session-actions-types";
-export type {
-  ActionStateClassifierContext,
   UseAppSessionActionsReturn,
 } from "./app-session-actions-types";
 import { startActivePromptPoll } from "./active-prompt-poll";

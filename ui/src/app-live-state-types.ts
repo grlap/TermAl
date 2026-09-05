@@ -36,7 +36,7 @@ import type {
   SessionErrorMap,
   SessionNoticeMap,
 } from "./app-shell-internals";
-import type { WorkspaceState } from "./workspace";
+import type { WorkspaceState } from "./workspace-types";
 import type { ControlPanelSide } from "./workspace-storage";
 
 // Outcome of `adoptCreatedSessionResponse`:

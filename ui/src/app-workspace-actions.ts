@@ -52,12 +52,14 @@ import {
   splitPane,
   updateGitDiffPreviewTabInWorkspaceState,
   upsertCanvasSessionCard,
+} from "./workspace";
+import {
   type SessionPaneViewMode,
   type WorkspacePane,
   type WorkspaceResponseBoardView,
   type WorkspaceState,
   type WorkspaceTab,
-} from "./workspace";
+} from "./workspace-types";
 import { resolveWorkspaceTabProjectId } from "./workspace-queries";
 import { workspacePaneHasRoomForViewerSplit } from "./workspace-viewer-layout";
 import type { PaneScrollPositionMigration } from "./pane-scroll-position-migration";

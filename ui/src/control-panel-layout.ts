@@ -44,9 +44,11 @@
 import { clamp } from "./app-utils";
 import {
   DEFAULT_CONTROL_PANEL_DOCK_WIDTH_RATIO,
+  type WorkspaceState,
+} from "./workspace-types";
+import {
   dockControlPanelAtWorkspaceEdge,
   ensureControlPanelInWorkspaceState,
-  type WorkspaceState,
 } from "./workspace";
 import type { ControlPanelSide } from "./workspace-storage";
 

@@ -59,7 +59,11 @@ import {
 } from "../tab-drag";
 import { measurePaneTabStatusTooltipPosition } from "../pane-tab-status-tooltip";
 import type { CodexState, Project, RemoteConfig } from "../types";
-import type { TabDropPlacement, WorkspaceGitStatusTab, WorkspaceTab } from "../workspace";
+import type {
+  TabDropPlacement,
+  WorkspaceGitStatusTab,
+  WorkspaceTab,
+} from "../workspace-types";
 
 type ActiveSessionTooltipState = {
   id: string;
