@@ -260,12 +260,20 @@ fn ensure_sqlite_coordination_schema_for_path(
 ) -> Result<()> {
     let write_lock = sqlite_state_write_lock(path);
     let _write_guard = lock_sqlite_state_writer(&write_lock);
-    ensure_sqlite_coordination_schema(connection).with_context(|| {
+    // This connection-local setting must precede the initialization transaction.
+    // Persistent PRAGMAs still wait until the current-schema guard succeeds.
+    let setup = (|| {
+        connection
+            .execute_batch("PRAGMA foreign_keys = ON;")
+            .context("failed to enable coordination foreign keys")?;
+        ensure_sqlite_coordination_schema(connection)
+    })().with_context(|| {
         format!(
             "failed to open or validate coordination database `{}`",
             path.display()
         )
-    })
+    });
+    finish_sqlite_state_file_setup(path, setup)
 }
 
 fn bootstrap_coordination_database(coordination_path: &FsPath) -> Result<rusqlite::Connection> {
@@ -278,14 +286,14 @@ fn bootstrap_coordination_database(coordination_path: &FsPath) -> Result<rusqlit
     {
         let write_lock = sqlite_state_write_lock(coordination_path);
         let _write_guard = lock_sqlite_state_writer(&write_lock);
-        configure_sqlite_state_connection(&connection).with_context(|| {
+        let setup = configure_sqlite_state_connection(&connection).with_context(|| {
             format!(
                 "failed to configure SQLite pragmas for `{}`",
                 coordination_path.display()
             )
-        })?;
+        });
+        finish_sqlite_state_file_setup(coordination_path, setup)?;
     }
-    harden_sqlite_state_file_permissions(coordination_path)?;
     verify_persist_commit_integrity(coordination_path)?;
     Ok(connection)
 }
@@ -294,6 +302,62 @@ fn bootstrap_coordination_database(coordination_path: &FsPath) -> Result<rusqlit
 mod sqlite_coordination_tests {
     use super::*;
     use std::time::Instant;
+
+    #[test]
+    fn path_aware_coordination_setup_enforces_foreign_keys_before_fixture_writes() {
+        let root = TestTempRoot::create("termal-coordination-foreign-keys");
+        let path = root.path().join("coordination.sqlite");
+        for _ in 0..2 {
+            let connection = open_sqlite_state_connection_unconfigured(&path).unwrap();
+            connection.execute_batch("PRAGMA foreign_keys = OFF;").unwrap();
+            ensure_sqlite_coordination_schema_for_path(&connection, &path).unwrap();
+            assert_eq!(
+                connection.query_row("PRAGMA foreign_keys", [], |row| row.get::<_, i32>(0)).unwrap(),
+                1
+            );
+            connection.execute_batch(
+                "INSERT INTO mailboxes(id, participant_key, created_at, next_sequence)
+                 VALUES('parent', 'participants', 'now', 1);
+                 INSERT INTO mailbox_participants(mailbox_id, session_id, display_name, joined_at)
+                 VALUES('parent', 'session', 'Participant', 'now');
+                 DELETE FROM mailboxes WHERE id = 'parent';"
+            ).unwrap();
+            assert_eq!(
+                connection.query_row("SELECT COUNT(*) FROM mailbox_participants", [], |row| row.get::<_, i64>(0)).unwrap(),
+                0,
+                "participant deletion must cascade on fresh and reopened handles"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn coordination_setup_hardens_owned_sidecars_even_when_schema_validation_fails() {
+        use std::os::unix::fs::PermissionsExt;
+        for fail_schema in [false, true] {
+            let root = TestTempRoot::create("termal-coordination-permission-phases");
+            let path = root.path().join("coordination.sqlite");
+            let connection = bootstrap_coordination_database(&path).unwrap();
+            if fail_schema {
+                connection.execute("UPDATE meta SET value = 'wrong' WHERE key = 'coordination_schema_version'", []).unwrap();
+            } else {
+                connection.execute("UPDATE meta SET value = value", []).unwrap();
+            }
+            let sidecars = [sqlite_sidecar_path(&path, "-wal"), sqlite_sidecar_path(&path, "-shm")];
+            for file in &sidecars {
+                assert!(file.is_file());
+                fs::set_permissions(file, fs::Permissions::from_mode(0o666)).unwrap();
+            }
+            let expected_error = ensure_sqlite_coordination_schema(&connection).err().map(|error| format!(
+                "failed to open or validate coordination database `{}`: {error:#}", path.display()
+            ));
+            let result = ensure_sqlite_coordination_schema_for_path(&connection, &path);
+            assert_eq!(result.err().map(|error| format!("{error:#}")), expected_error);
+            for file in &sidecars {
+                assert_eq!(fs::metadata(file).unwrap().permissions().mode() & 0o777, 0o600);
+            }
+        }
+    }
 
     struct SchemaInitializationChild {
         child: Option<Child>,

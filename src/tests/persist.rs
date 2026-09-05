@@ -1178,6 +1178,50 @@ fn persisted_state_requires_project_remote_id() {
     );
 }
 
+#[test]
+fn persisted_state_rejects_duplicate_project_ids() {
+    let mut inner = StateInner::new();
+    let project = inner.create_project(
+        None,
+        "/tmp/first-project".to_owned(),
+        default_local_remote_id(),
+    );
+    let err_text = persisted_state_load_error_after_mutation(inner, |encoded| {
+        let projects = encoded["projects"]
+            .as_array_mut()
+            .expect("projects should be an array");
+        let mut duplicate = projects[0].clone();
+        duplicate["name"] = json!("Different project with the same id");
+        duplicate["rootPath"] = json!("/tmp/second-project");
+        projects.push(duplicate);
+    });
+    assert!(
+        err_text.contains(&format!("duplicate persisted project id `{}`", project.id)),
+        "{err_text}"
+    );
+}
+
+#[test]
+fn sqlite_load_rejects_duplicate_project_ids_even_without_sessions() {
+    let root = TestTempRoot::create("termal-duplicate-project-ids");
+    let path = root.database_path();
+    let mut inner = StateInner::new();
+    let project = inner.create_project(
+        None,
+        root.path().to_string_lossy().into_owned(),
+        default_local_remote_id(),
+    );
+    inner.projects.push(project.clone());
+    persist_state(&path, &inner).expect("seed duplicate ids in the metadata row");
+    let error = match load_state(&path) {
+        Ok(_) => panic!("duplicate ids must abort boot before project lookup can be ambiguous"),
+        Err(error) => error,
+    };
+    assert!(
+        format!("{error:#}").contains(&format!("duplicate persisted project id `{}`", project.id))
+    );
+}
+
 // Pins that injecting two remotes sharing the same `id` fails load
 // with a `duplicate remote id` validation error. Guards against the
 // remote registry accepting ambiguous ids that would let sessions
@@ -3556,6 +3600,204 @@ fn sqlite_prompt_history_load_uses_empty_history_when_normalized_row_is_absent()
             .is_empty(),
         "an absent normalized row means empty composer history; transcript prompts are not fallback authority"
     );
+}
+
+#[test]
+fn sqlite_missing_prompt_history_emits_a_diagnostic_without_resurrecting_prompts() {
+    const CASE_ENV: &str = "TERMAL_TEST_MISSING_PROMPT_HISTORY_CASE";
+    const TEST_NAME: &str =
+        "sqlite_missing_prompt_history_emits_a_diagnostic_without_resurrecting_prompts";
+    const CASES: &[(&str, usize)] = &[
+        ("old-user-missing", 1),
+        ("old-user-empty", 0),
+        ("assistant-only", 0),
+        ("empty-session", 0),
+        ("two-sessions", 2),
+        ("six-sessions", 6),
+        ("excluded-empty-user", 1),
+        ("excluded-oversized-user", 1),
+    ];
+    if let Ok(case) = std::env::var(CASE_ENV) {
+        let expected_count = CASES.iter().find(|(name, _)| *name == case).unwrap().1;
+        let root = TestTempRoot::create("termal-history-diagnostic");
+        let path = root.database_path();
+        let mut inner = StateInner::new();
+        let delta_only = case.starts_with("excluded-");
+        // Boot-validated empty store, followed by a genuine first-session delta.
+        persist_state(&path, &inner).unwrap();
+        let mut session_ids = Vec::new();
+        for _ in 0..expected_count.max(1) {
+            let session_id = inner
+                .create_session(Agent::Claude, None, "/tmp".to_owned(), None, None)
+                .session
+                .id;
+            let index = inner.find_session_index(&session_id).unwrap();
+            if case != "empty-session" {
+                for position in 0..=SQLITE_SESSION_TAIL_MESSAGES {
+                    let is_user = position == 0 && case != "assistant-only";
+                    let text = if is_user && case == "excluded-empty-user" {
+                        " \t ".to_owned()
+                    } else if is_user && case == "excluded-oversized-user" {
+                        "x".repeat(SESSION_PROMPT_HISTORY_MAX_BYTES + 1)
+                    } else {
+                        "private prompt must never be logged or restored".to_owned()
+                    };
+                    push_message_on_record(
+                        inner.session_mut_by_index(index).unwrap(),
+                        Message::Text {
+                            id: format!("history-diagnostic-{position}"),
+                            timestamp: stamp_now(),
+                            author: if is_user {
+                                Author::You
+                            } else {
+                                Author::Assistant
+                            },
+                            text,
+                            expanded_text: None,
+                            source: None,
+                            attachments: Vec::new(),
+                        },
+                    );
+                }
+            }
+            if delta_only {
+                assert_eq!(inner.sessions[index].prompt_history_mutation_stamp, 0);
+                assert!(inner.sessions[index].session.prompt_history.is_empty());
+            }
+            session_ids.push(session_id);
+        }
+        if delta_only {
+            let delta = inner.collect_persist_delta(0);
+            assert_eq!(delta.changed_sessions.len(), session_ids.len());
+            assert!(
+                delta
+                    .changed_sessions
+                    .iter()
+                    .all(|record| !record.persist_prompt_history)
+            );
+            let mut cache = SqlitePersistConnectionCache::new();
+            persist_delta_via_cache(&mut cache, &path, &delta).unwrap();
+        } else {
+            persist_state(&path, &inner).expect("seed normalized fixture");
+        }
+        let connection = rusqlite::Connection::open(&path).unwrap();
+        if delta_only {
+            assert_eq!(
+                connection
+                    .query_row("SELECT COUNT(*) FROM session_prompt_histories", [], |row| {
+                        row.get::<_, i64>(0)
+                    })
+                    .unwrap(),
+                0,
+                "excluded prompts legitimately create no history row on delta persistence"
+            );
+        } else {
+            for session_id in &session_ids {
+                if case == "old-user-empty" {
+                    connection.execute(
+                        "UPDATE session_prompt_histories SET value_json = '[]' WHERE session_id = ?1",
+                        [session_id],
+                    ).unwrap();
+                } else {
+                    connection
+                        .execute(
+                            "DELETE FROM session_prompt_histories WHERE session_id = ?1",
+                            [session_id],
+                        )
+                        .unwrap();
+                }
+            }
+        }
+        drop(connection);
+        let loaded = load_state(&path)
+            .expect("diagnostic is not a load failure")
+            .unwrap();
+        for session_id in &session_ids {
+            let record = &loaded.sessions[loaded.find_session_index(session_id).unwrap()];
+            assert!(
+                record.session.prompt_history.is_empty(),
+                "transcript is never composer-history authority"
+            );
+            assert!(
+                record.session.messages.iter().all(|message| !matches!(
+                    message,
+                    Message::Text {
+                        author: Author::You,
+                        ..
+                    }
+                )),
+                "fixture puts its user message outside the boot tail"
+            );
+            eprintln!("history diagnostic probe checked session `{session_id}`");
+        }
+        eprintln!("history diagnostic store `{}`", path.display());
+        return;
+    }
+
+    // Child-only environment, with a relocation-safe filter and an execution
+    // marker that fails explicitly if a renamed test runs zero child tests.
+    let test_module = module_path!()
+        .split_once("::")
+        .map_or(module_path!(), |(_, module)| module);
+    let exact_test_filter = format!("{test_module}::{TEST_NAME}");
+    for &(case, expected_count) in CASES {
+        let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+        command
+            .args(["--exact", &exact_test_filter, "--nocapture"])
+            .env(CASE_ENV, case);
+        let (status, stderr) = phase_sync::CapturedStderrProcess::spawn(&mut command)
+            .wait_with_stderr("missing-history diagnostic probe completes");
+        assert!(status.success(), "{case}: {stderr}");
+        let session_ids = stderr
+            .lines()
+            .filter(|line| line.starts_with("history diagnostic probe checked session"))
+            .map(|line| line.split('`').nth(1).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            session_ids.len(),
+            expected_count.max(1),
+            "the exact probe `{exact_test_filter}` must execute: {stderr}"
+        );
+        let summaries = stderr
+            .lines()
+            .filter(|line| line.starts_with("persist> history info:"))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            summaries.len(),
+            usize::from(expected_count > 0),
+            "{case}: {stderr}"
+        );
+        if let Some(summary) = summaries.first() {
+            assert!(summary.contains(&format!("for {expected_count} session(s)")));
+            for session_id in session_ids.iter().take(5) {
+                assert!(summary.contains(session_id));
+            }
+            if expected_count > 5 {
+                assert!(summary.contains("…"));
+                assert!(!summary.contains(session_ids[5]));
+            }
+            let path = stderr
+                .lines()
+                .find(|line| line.starts_with("history diagnostic store"))
+                .unwrap()
+                .split('`')
+                .nth(1)
+                .unwrap();
+            assert!(summary.contains(path));
+            assert!(summary.contains(
+                "expected when every stored user prompt is empty or exceeds the history size limit"
+            ));
+            assert!(!summary.contains("corrupt") && !summary.contains("lost"));
+        }
+        assert!(
+            !stderr.contains("private prompt must never be logged or restored"),
+            "diagnostics must not expose prompt contents"
+        );
+        assert!(
+            !stderr.contains(&"x".repeat(1024)),
+            "oversized prompt must not be logged"
+        );
+    }
 }
 
 #[test]

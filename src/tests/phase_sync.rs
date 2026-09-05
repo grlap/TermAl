@@ -1,8 +1,162 @@
 //! Event-driven fixture waits. The limit diagnoses deadlocks, not performance.
+//! Also owns captured-stderr subprocess lifetimes, including drain and teardown.
 
 use super::*;
 
 pub(super) use crate::TEST_PHASE_DEADLOCK_GUARD as DEADLOCK_GUARD;
+
+/// Drains stderr from spawn onward and owns every waiter until teardown. Unlike
+/// an exit-only assertion, this owner also kills/reaps on timeout or unwind.
+pub(super) struct CapturedStderrProcess {
+    process: Arc<SharedChild>,
+    exit_rx: mpsc::Receiver<std::io::Result<std::process::ExitStatus>>,
+    waiter: Option<std::thread::JoinHandle<()>>,
+    reader: Option<std::thread::JoinHandle<std::io::Result<Vec<u8>>>>,
+}
+
+impl CapturedStderrProcess {
+    pub(super) fn spawn(command: &mut Command) -> Self {
+        command.stdout(Stdio::null()).stderr(Stdio::piped());
+        let process =
+            Arc::new(SharedChild::spawn(command).expect("spawn captured diagnostic process"));
+        let (exit_tx, exit_rx) = mpsc::channel();
+        let mut owner = Self {
+            process,
+            exit_rx,
+            waiter: None,
+            reader: None,
+        };
+        let mut stderr = owner.process.take_stderr().expect("diagnostic stderr pipe");
+        owner.reader = Some(std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            stderr.read_to_end(&mut bytes)?;
+            Ok(bytes)
+        }));
+        let process = owner.process.clone();
+        owner.waiter = Some(std::thread::spawn(move || {
+            let _ = exit_tx.send(process.wait());
+        }));
+        owner
+    }
+
+    #[track_caller]
+    pub(super) fn wait_with_stderr(self, phase: &str) -> (std::process::ExitStatus, String) {
+        let (status, bytes) = self
+            .wait_with_limit(DEADLOCK_GUARD, phase)
+            .unwrap_or_else(|error| panic!("{error}"));
+        (
+            status,
+            String::from_utf8(bytes).expect("diagnostic stderr should be UTF-8"),
+        )
+    }
+
+    fn wait_with_limit(
+        mut self,
+        limit: Duration,
+        phase: &str,
+    ) -> std::result::Result<(std::process::ExitStatus, Vec<u8>), String> {
+        let exit = self.exit_rx.recv_timeout(limit);
+        if !matches!(&exit, Ok(Ok(_))) {
+            let _ = self.process.kill();
+            let _ = self.process.wait();
+        }
+        self.waiter
+            .take()
+            .unwrap()
+            .join()
+            .map_err(|_| format!("{phase}: exit waiter panicked"))?;
+        let bytes = self
+            .reader
+            .take()
+            .unwrap()
+            .join()
+            .map_err(|_| format!("{phase}: stderr reader panicked"))?
+            .map_err(|error| format!("{phase}: stderr read failed: {error}"))?;
+        let status = exit
+            .map_err(|error| {
+                format!(
+                    "{phase}: exit was not published: {error}; stderr: {}",
+                    String::from_utf8_lossy(&bytes)
+                )
+            })?
+            .map_err(|error| format!("{phase}: process wait failed: {error}"))?;
+        Ok((status, bytes))
+    }
+}
+
+impl Drop for CapturedStderrProcess {
+    fn drop(&mut self) {
+        let _ = self.process.kill();
+        let _ = self.process.wait();
+        if let Some(waiter) = self.waiter.take() {
+            let _ = waiter.join();
+        }
+        if let Some(reader) = self.reader.take() {
+            let _ = reader.join();
+        }
+    }
+}
+
+fn captured_process_fixture(mode: &str) -> CapturedStderrProcess {
+    let module = module_path!().split_once("::").unwrap().1;
+    let mut command = Command::new(std::env::current_exe().unwrap());
+    command
+        .args([
+            "--exact",
+            &format!("{module}::captured_stderr_fixture_child"),
+            "--nocapture",
+        ])
+        .env("TERMAL_TEST_CAPTURED_STDERR", mode)
+        .stdin(Stdio::piped());
+    CapturedStderrProcess::spawn(&mut command)
+}
+
+#[test]
+fn captured_stderr_fixture_child() {
+    let Ok(mode) = std::env::var("TERMAL_TEST_CAPTURED_STDERR") else {
+        return;
+    };
+    if mode == "large-output" {
+        // Far beyond common pipe capacities: waiting before draining deadlocks.
+        std::io::stderr()
+            .write_all(&vec![b'x'; 1024 * 1024])
+            .unwrap();
+    } else {
+        assert_eq!(mode, "parked");
+        let mut byte = [0];
+        let _ = std::io::stdin().read(&mut byte);
+    }
+}
+
+#[test]
+fn captured_stderr_drains_output_larger_than_a_pipe_before_exit() {
+    let (status, stderr) =
+        captured_process_fixture("large-output").wait_with_stderr("large stderr probe");
+    assert!(status.success());
+    assert_eq!(stderr.len(), 1024 * 1024);
+    assert!(stderr.bytes().all(|byte| byte == b'x'));
+}
+
+#[test]
+fn captured_stderr_timeout_kills_and_reaps_without_waiting_for_natural_exit() {
+    let owner = captured_process_fixture("parked");
+    let process = owner.process.clone();
+    let result = owner.wait_with_limit(Duration::ZERO, "forced diagnostic timeout");
+    assert!(result.unwrap_err().contains("forced diagnostic timeout"));
+    assert!(process.try_wait().unwrap().is_some());
+}
+
+#[test]
+fn captured_stderr_owner_reaps_and_joins_on_assertion_unwind() {
+    let owner = captured_process_fixture("parked");
+    let process = owner.process.clone();
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+        let _owner = owner;
+        panic!("synthetic assertion failure while diagnostic process is owned");
+    }));
+    assert!(result.is_err());
+    assert!(process.try_wait().unwrap().is_some());
+}
 
 /// An external work-context fixture stays in flight until its owning test
 /// releases it. Dropping the owner releases both current and subsequent reads.

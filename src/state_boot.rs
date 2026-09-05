@@ -21,7 +21,7 @@
 //   that the user has explicitly ignored (via
 //   `ignore_discovered_codex_thread`) are skipped.
 // - `validate_projects_consistent`: runs a defensive check that
-//   every `session.project_id` still points at a project in
+//   project ids are unique and every `session.project_id` points at a project in
 //   `self.projects`. Inconsistencies from stale-state files surface
 //   as errors rather than silent orphaned references.
 // - `normalize_local_paths`: canonicalizes on-disk paths so
@@ -160,12 +160,16 @@ impl StateInner {
         }
     }
 
-    /// Asserts that every `session.project_id` references a project
-    /// that actually exists in `self.projects`. Returns an error when
+    /// Asserts that project ids are unique and every `session.project_id`
+    /// references a project in `self.projects`. Returns an error when
     /// a persisted state file is internally inconsistent — boot aborts
     /// rather than loading garbage into memory.
     fn validate_projects_consistent(&self) -> Result<()> {
+        let mut project_ids = HashSet::new();
         for project in &self.projects {
+            if !project_ids.insert(project.id.as_str()) {
+                return Err(anyhow!("duplicate persisted project id `{}`", project.id));
+            }
             let remote_id = project.remote_id.trim();
             if remote_id.is_empty() {
                 return Err(anyhow!(

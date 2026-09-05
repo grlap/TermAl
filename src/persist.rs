@@ -1,7 +1,10 @@
 /*
 SQLite-backed session state persistence.
 
-Owns the on-disk schema entry point (`ensure_sqlite_state_schema`), connection
+Owns the validate-before-mutate schema entry points: startup uses
+`ensure_sqlite_state_schema_for_load` (including metadata authority checks),
+while already boot-validated stores use bounded `ensure_sqlite_state_schema`
+on write-connection reopens. Also owns connection
 lifecycle (`open_sqlite_state_connection`, `SqlitePersistConnectionCache`),
 load path (`load_state_for_boot`, `load_state_from_sqlite_with_connection`),
 and the per-transaction write helpers used by the background persist thread
@@ -30,7 +33,7 @@ const SQLITE_SESSION_TAIL_MESSAGES: usize = 64;
 /// Per-database writer locks shared by every in-process SQLite write path.
 ///
 /// WAL lets readers coexist, but SQLite still permits only one writer. The
-/// The state persist worker has its own database domain. Within the separate
+/// state persist worker has its own database domain. Within the separate
 /// coordination database, mailbox and board stores own independent
 /// connections, so relying on SQLite's busy timeout alone can surface ordinary
 /// in-process contention as `SQLITE_BUSY`. Serialize writers targeting the same
@@ -227,6 +230,10 @@ fn wait_for_sqlite_state_writer_issued_tickets(
     }
 }
 
+/// Opens and hardens the main file and any existing sidecars before persistent
+/// PRAGMAs or schema maintenance. This handle is not ready for writes: callers
+/// must complete the applicable path-aware schema setup (including foreign-key
+/// enforcement and post-WAL hardening), or explicitly configure it themselves.
 fn open_sqlite_state_connection_unconfigured(path: &FsPath) -> Result<rusqlite::Connection> {
     if let Some(parent) = path.parent() {
         harden_local_state_directory_permissions(parent)?;
@@ -258,14 +265,49 @@ fn configure_sqlite_state_connection(connection: &rusqlite::Connection) -> Resul
 
 fn open_sqlite_state_connection(path: &FsPath) -> Result<rusqlite::Connection> {
     let connection = open_sqlite_state_connection_unconfigured(path)?;
-    {
+    let setup = {
         let write_lock = sqlite_state_write_lock(path);
         let _write_guard = lock_sqlite_state_writer(&write_lock);
-        configure_sqlite_state_connection(&connection)
-            .with_context(|| format!("failed to configure SQLite pragmas for `{}`", path.display()))?;
-    }
-    harden_sqlite_state_file_permissions(path)?;
+        let setup = configure_sqlite_state_connection(&connection)
+            .with_context(|| format!("failed to configure SQLite pragmas for `{}`", path.display()));
+        finish_sqlite_state_file_setup(path, setup)
+    };
+    setup?;
     Ok(connection)
+}
+
+/// The opener hardens existing files before PRAGMAs, but enabling WAL or doing
+/// maintenance can create new WAL/SHM/journal files. Always perform this second
+/// pass, including after a setup error while the connection still owns them.
+/// Preserve the original setup error verbatim; report any additional hardening
+/// failure separately. Successful setup must never hide a hardening failure.
+/// Call while holding the path's writer guard, before releasing the connection,
+/// so another in-process writer cannot create sidecars between setup and chmod.
+fn finish_sqlite_state_file_setup<T>(path: &FsPath, setup: Result<T>) -> Result<T> {
+    let hardening = harden_sqlite_state_file_permissions(path);
+    resolve_sqlite_state_setup_result(path, setup, hardening)
+}
+
+/// Keep error precedence independent of the platform-specific permission pass.
+/// Rewrapping a setup failure would change existing fail-closed error chains;
+/// the secondary diagnostic includes both failures so it stands on its own.
+fn resolve_sqlite_state_setup_result<T>(
+    path: &FsPath,
+    setup: Result<T>,
+    hardening: Result<()>,
+) -> Result<T> {
+    match setup {
+        Ok(value) => hardening.map(|()| value),
+        Err(error) => {
+            if let Err(hardening_error) = hardening {
+                eprintln!(
+                    "persist> setup failed for `{}`: {error:#}; additionally failed to harden SQLite files: {hardening_error:#}",
+                    path.display()
+                );
+            }
+            Err(error)
+        }
+    }
 }
 
 fn open_sqlite_state_read_connection(path: &FsPath) -> Result<rusqlite::Connection> {
@@ -1391,6 +1433,32 @@ fn seed_current_state_auxiliary_tables(connection: &rusqlite::Connection) {
         .expect("current auxiliary state tables should initialize");
 }
 
+/// Shared current core fixture. Tests may explicitly drop only the two
+/// maintenance-owned message columns to exercise validate-before-backfill.
+#[cfg(test)]
+fn seed_current_state_core_tables(connection: &rusqlite::Connection) {
+    connection
+        .execute_batch(SQLITE_STATE_CORE_SCHEMA_SQL)
+        .expect("current core state tables should initialize");
+    connection
+        .execute_batch("PRAGMA foreign_keys = ON;")
+        .expect("fixture writes must enforce foreign keys");
+    for (key, value) in [
+        ("schema_version", SQLITE_SCHEMA_VERSION),
+        (
+            SQLITE_PROMPT_HISTORY_STORAGE_KEY,
+            SQLITE_PROMPT_HISTORY_STORAGE_VERSION,
+        ),
+    ] {
+        connection
+            .execute(
+                "INSERT INTO meta(key, value) VALUES(?1, ?2)",
+                rusqlite::params![key, value],
+            )
+            .expect("current authority marker should seed");
+    }
+}
+
 #[cfg(test)]
 fn seed_current_state_metadata(connection: &rusqlite::Connection) {
     connection
@@ -1407,6 +1475,8 @@ fn seed_current_state_metadata(connection: &rusqlite::Connection) {
 include!("persist_sqlite_overview.rs");
 #[cfg(test)]
 include!("persist_sqlite_overview_tests.rs");
+#[cfg(test)]
+include!("persist_sqlite_maintenance_tests.rs");
 
 fn ensure_sqlite_state_schema_for_path(
     connection: &rusqlite::Connection,
@@ -1414,12 +1484,13 @@ fn ensure_sqlite_state_schema_for_path(
 ) -> Result<()> {
     let write_lock = sqlite_state_write_lock(path);
     let _write_guard = lock_sqlite_state_writer(&write_lock);
-    ensure_sqlite_state_schema(connection).with_context(|| {
+    let setup = ensure_sqlite_state_schema(connection).with_context(|| {
         format!(
             "failed to validate or initialize state database `{}`",
             path.display()
         )
-    })
+    });
+    finish_sqlite_state_file_setup(path, setup)
 }
 
 fn ensure_sqlite_state_schema_for_load_path(
@@ -1428,12 +1499,13 @@ fn ensure_sqlite_state_schema_for_load_path(
 ) -> Result<Option<PersistedState>> {
     let write_lock = sqlite_state_write_lock(path);
     let _write_guard = lock_sqlite_state_writer(&write_lock);
-    ensure_sqlite_state_schema_for_load(connection).with_context(|| {
+    let setup = ensure_sqlite_state_schema_for_load(connection).with_context(|| {
         format!(
             "failed to validate or initialize state database `{}`",
             path.display()
         )
-    })
+    });
+    finish_sqlite_state_file_setup(path, setup)
 }
 
 #[cfg(test)]
@@ -1710,7 +1782,7 @@ mod sqlite_schema_tests {
     #[test]
     fn sqlite_schema_guard_rejects_missing_metadata_with_normalized_rows_without_rewriting() {
         let state_root = TestTempRoot::create("termal-state-missing-metadata-guard");
-        let path = state_root.path().join("termal.sqlite");
+        let path = state_root.database_path();
         {
             let connection = open_sqlite_state_connection_unconfigured(&path)
                 .expect("file-backed sqlite should open");
@@ -1757,7 +1829,7 @@ mod sqlite_schema_tests {
     #[test]
     fn sqlite_schema_guard_rejects_structurally_invalid_metadata_without_rewriting() {
         let state_root = TestTempRoot::create("termal-state-invalid-metadata-guard");
-        let path = state_root.path().join("termal.sqlite");
+        let path = state_root.database_path();
         {
             let connection = open_sqlite_state_connection_unconfigured(&path)
                 .expect("file-backed sqlite should open");
@@ -1847,7 +1919,7 @@ mod sqlite_schema_tests {
     #[test]
     fn sqlite_write_only_schema_setup_skips_legacy_scan_and_typed_metadata_deserialization() {
         let state_root = TestTempRoot::create("termal-state-write-only-schema-setup");
-        let path = state_root.path().join("termal.sqlite");
+        let path = state_root.database_path();
         {
             let connection = open_sqlite_state_connection_unconfigured(&path)
                 .expect("file-backed sqlite should open");
@@ -1989,7 +2061,7 @@ mod sqlite_schema_tests {
     #[test]
     fn sqlite_schema_guard_rejects_foreign_column_shape_without_rewriting_the_database() {
         let state_root = TestTempRoot::create("termal-state-column-guard");
-        let path = state_root.path().join("termal.sqlite");
+        let path = state_root.database_path();
         {
             let connection = open_sqlite_state_connection_unconfigured(&path)
                 .expect("file-backed sqlite should open");
@@ -2042,35 +2114,16 @@ mod sqlite_schema_tests {
     fn current_schema_backfills_compact_session_overview_metadata() {
         let connection =
             rusqlite::Connection::open_in_memory().expect("in-memory sqlite should open");
+        seed_current_state_core_tables(&connection);
+        connection
+            .execute_batch(
+                "ALTER TABLE messages DROP COLUMN overview_kind;
+                 ALTER TABLE messages DROP COLUMN is_user;",
+            )
+            .expect("remove only the maintenance-owned columns");
         connection
             .execute_batch(
                 "
-                PRAGMA foreign_keys = ON;
-                CREATE TABLE meta (
-                  key TEXT PRIMARY KEY,
-                  value TEXT NOT NULL
-                );
-                INSERT INTO meta(key, value) VALUES('schema_version', '2');
-                INSERT INTO meta(key, value)
-                VALUES('prompt_history_storage_version', '1');
-                CREATE TABLE sessions (
-                  id TEXT PRIMARY KEY,
-                  value_json TEXT NOT NULL
-                );
-                CREATE TABLE messages (
-                  session_id TEXT NOT NULL,
-                  position INTEGER NOT NULL CHECK(position >= 0),
-                  message_id TEXT NOT NULL,
-                  value_json TEXT NOT NULL,
-                  PRIMARY KEY(session_id, position),
-                  UNIQUE(session_id, message_id),
-                  FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
-                ) WITHOUT ROWID;
-                CREATE TABLE session_overviews (
-                  session_id TEXT PRIMARY KEY,
-                  value_blob BLOB NOT NULL,
-                  FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
-                ) WITHOUT ROWID;
                 INSERT INTO sessions(id, value_json) VALUES('session-1', '{}');
                 INSERT INTO messages(session_id, position, message_id, value_json)
                 VALUES(
@@ -2091,7 +2144,7 @@ mod sqlite_schema_tests {
                 );
                 ",
             )
-            .expect("legacy v2 fixture should initialize");
+            .expect("current schema maintenance fixture should initialize");
         seed_current_state_auxiliary_tables(&connection);
         seed_current_state_metadata(&connection);
 
@@ -2202,35 +2255,16 @@ mod sqlite_schema_tests {
     fn current_schema_isolates_malformed_overview_backfill_per_session() {
         let connection =
             rusqlite::Connection::open_in_memory().expect("in-memory sqlite should open");
+        seed_current_state_core_tables(&connection);
+        connection
+            .execute_batch(
+                "ALTER TABLE messages DROP COLUMN overview_kind;
+                 ALTER TABLE messages DROP COLUMN is_user;",
+            )
+            .expect("remove only the maintenance-owned columns");
         connection
             .execute_batch(
                 "
-                PRAGMA foreign_keys = ON;
-                CREATE TABLE meta (
-                  key TEXT PRIMARY KEY,
-                  value TEXT NOT NULL
-                );
-                INSERT INTO meta(key, value) VALUES('schema_version', '2');
-                INSERT INTO meta(key, value)
-                VALUES('prompt_history_storage_version', '1');
-                CREATE TABLE sessions (
-                  id TEXT PRIMARY KEY,
-                  value_json TEXT NOT NULL
-                );
-                CREATE TABLE messages (
-                  session_id TEXT NOT NULL,
-                  position INTEGER NOT NULL CHECK(position >= 0),
-                  message_id TEXT NOT NULL,
-                  value_json TEXT NOT NULL,
-                  PRIMARY KEY(session_id, position),
-                  UNIQUE(session_id, message_id),
-                  FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
-                ) WITHOUT ROWID;
-                CREATE TABLE session_overviews (
-                  session_id TEXT PRIMARY KEY,
-                  value_blob BLOB NOT NULL,
-                  FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
-                ) WITHOUT ROWID;
                 INSERT INTO sessions(id, value_json)
                 VALUES('healthy-local', '{}'), ('gapped-local', '{}');
                 INSERT INTO messages(session_id, position, message_id, value_json)
@@ -2373,11 +2407,6 @@ fn load_state_from_sqlite_with_connection(
 ) -> Result<(Option<StateInner>, rusqlite::Connection)> {
     let connection = open_sqlite_state_connection_unconfigured(path)?;
     let persisted = ensure_sqlite_state_schema_for_load_path(&connection, path)?;
-    // `open_sqlite_state_connection_unconfigured` already hardens the fresh
-    // handle, but
-    // schema initialization can create or recreate SQLite sidecars, so the
-    // startup read path deliberately re-runs the full main/sidecar pass.
-    harden_sqlite_state_file_permissions(path)?;
     let (
         mut session_records,
         mut quarantined_session_ids,
@@ -2457,6 +2486,8 @@ fn load_session_records_from_sqlite_with_skipped(
     let mut records = Vec::new();
     let mut quarantined_ids = BTreeSet::new();
     let mut skipped = 0;
+    let mut missing_history_count = 0;
+    let mut missing_history_sample = Vec::new();
     for row in rows {
         let (session_id, encoded) = match row {
             Ok(row) => row,
@@ -2469,7 +2500,7 @@ fn load_session_records_from_sqlite_with_skipped(
                 continue;
             }
         };
-        let loaded_record = (|| -> Result<PersistedSessionRecord> {
+        let loaded_record = (|| -> Result<(PersistedSessionRecord, bool)> {
             let mut record: PersistedSessionRecord = serde_json::from_str(&encoded)
                 .with_context(|| format!("failed to parse persisted session `{session_id}`"))?;
             if record.session.id != session_id {
@@ -2492,17 +2523,39 @@ fn load_session_records_from_sqlite_with_skipped(
                 format!("persisted session `{session_id}` has invalid remote proxy identity")
             })?;
             load_persisted_session_tail(connection, path, &mut record)?;
-            load_persisted_prompt_history(connection, path, &mut record)?;
-            Ok(record)
+            let missing_history = load_persisted_prompt_history(connection, path, &mut record)?;
+            Ok((record, missing_history))
         })();
         match loaded_record {
-            Ok(record) => records.push(record),
+            Ok((record, missing_history)) => {
+                if missing_history {
+                    missing_history_count += 1;
+                    if missing_history_sample.len() < 5 {
+                        missing_history_sample.push(session_id);
+                    }
+                }
+                records.push(record);
+            }
             Err(err) => {
                 skipped += 1;
                 quarantined_ids.insert(session_id.clone());
                 eprintln!("persist> skipping invalid session `{session_id}`: {err:#}");
             }
         }
+    }
+    if missing_history_count > 0 {
+        // Delta persistence need not write an empty history row: empty/oversized
+        // prompts, non-Text user messages and partial-window updates can leave
+        // its independent mutation stamp unchanged. is_user metadata cannot
+        // distinguish those legitimate states from an absent row. Report one
+        // neutral summary, never claim corruption or reconstruct from text.
+        if missing_history_count > missing_history_sample.len() {
+            missing_history_sample.push("…".to_owned());
+        }
+        eprintln!(
+            "persist> history info: loaded empty composer history for {missing_history_count} session(s) with user messages and no normalized history row; sessions=[{}], store=`{}`; this is expected when every stored user prompt is empty or exceeds the history size limit (also possible for non-text user messages or partial-window updates); otherwise the normalized row is absent",
+            missing_history_sample.join(", "), path.display()
+        );
     }
     Ok((records, quarantined_ids, skipped))
 }
@@ -2511,7 +2564,7 @@ fn load_persisted_prompt_history(
     connection: &rusqlite::Connection,
     path: &FsPath,
     record: &mut PersistedSessionRecord,
-) -> Result<()> {
+) -> Result<bool> {
     let stored_history = connection
         .query_row(
             "SELECT value_json
@@ -2528,6 +2581,7 @@ fn load_persisted_prompt_history(
                 path.display()
             )
         })?;
+    let mut missing_history_with_user_messages = false;
     record.session.prompt_history = match stored_history {
         Some(encoded) => normalize_prompt_history(
             serde_json::from_str::<Vec<String>>(&encoded).with_context(|| {
@@ -2537,9 +2591,29 @@ fn load_persisted_prompt_history(
                 )
             })?,
         ),
-        None => Vec::new(),
+        None => {
+            // Diagnose from normalized message metadata, including user messages
+            // older than the loaded tail. Never reconstruct composer history
+            // from transcript content. Only the missing-row path pays this scan:
+            // the session_id prefix seeks, then EXISTS may inspect that session's
+            // entire message range if no user message matches. Present rows skip it.
+            let has_user_messages: bool = connection
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM messages WHERE session_id = ?1 AND is_user = 1)",
+                    rusqlite::params![record.session.id],
+                    |row| row.get(0),
+                )
+                .with_context(|| {
+                    format!(
+                        "failed to inspect user-message metadata for `{}`",
+                        record.session.id
+                    )
+                })?;
+            missing_history_with_user_messages = has_user_messages;
+            Vec::new()
+        }
     };
-    Ok(())
+    Ok(missing_history_with_user_messages)
 }
 
 fn load_persisted_session_tail(
@@ -3308,9 +3382,6 @@ fn persist_state_parts_to_sqlite(
 
     let mut connection = open_sqlite_state_connection_unconfigured(path)?;
     ensure_sqlite_state_schema_for_path(&connection, path)?;
-    // Schema setup enables WAL and may create sidecars after the opener's
-    // initial permission pass, so harden them before the write transaction.
-    harden_sqlite_state_file_permissions(path)?;
     persist_state_parts_via_connection(
         &mut connection,
         path,
@@ -3326,10 +3397,10 @@ fn persist_state_parts_to_sqlite(
 
 /// Applies one persist transaction to an already-open SQLite connection.
 ///
-/// Assumes the caller has run [`ensure_sqlite_state_schema`] at least once
-/// for this connection. Used by the background persist thread so the
-/// per-persist hot path does not pay for opening a fresh connection or
-/// re-running the schema-version upsert on every commit.
+/// Requires successful path-aware schema setup: validate before maintenance,
+/// enable foreign keys, and harden newly created sidecars before writes. The
+/// background persist thread reuses that validated connection; its hot path
+/// does not reopen or repeat schema validation and maintenance on every commit.
 fn persist_state_parts_via_connection(
     connection: &mut rusqlite::Connection,
     path: &FsPath,
@@ -3425,8 +3496,8 @@ fn persist_state_parts_via_connection(
 /// Thread-local SQLite connection cache for the background persist thread.
 ///
 /// Every queued persist previously opened a fresh SQLite connection and
-/// re-ran `ensure_sqlite_state_schema`. The persist thread writes many times during an active
-/// session, so amortizing that fixed cost to one open-and-validate per
+/// re-ran `ensure_sqlite_state_schema`. The persist thread writes many times
+/// during an active session, so amortizing that cost to one open-and-validate per
 /// thread lifetime removes the biggest per-persist overhead.
 ///
 /// Production seeds this cache from the connection validated during process
@@ -3482,11 +3553,8 @@ impl SqlitePersistConnectionCache {
             }
             let connection = open_sqlite_state_connection_unconfigured(path)?;
             ensure_sqlite_state_schema_for_path(&connection, path)?;
-            // Deliberately repeat the `_unconfigured` opener's hardening after
-            // schema validation because SQLite may create sidecars between the
-            // two points; cached reuses skip this until the next successful
-            // commit.
-            harden_sqlite_state_file_permissions(path)?;
+            // Path-aware setup already hardened the files created by WAL and
+            // maintenance. Cached reuse hardens them again after each commit.
             self.path = Some(path.to_path_buf());
             self.connection = Some(connection);
         }
@@ -3497,7 +3565,8 @@ impl SqlitePersistConnectionCache {
     }
 
     /// Drops the cached connection so the next `connection_for` call
-    /// reopens fresh and re-runs `ensure_sqlite_state_schema`.
+    /// reopens fresh and repeats bounded validate-before-mutate schema setup
+    /// and both permission passes (not the startup-only authority scan).
     ///
     /// Invoked when a persist operation fails. The cached connection
     /// may be in a poisoned or transaction-stuck state
