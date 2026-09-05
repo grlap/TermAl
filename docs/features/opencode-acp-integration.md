@@ -3,6 +3,9 @@
 This document describes OpenCode as a first-class TermAl agent through
 OpenCode's Agent Client Protocol server.
 
+Supported baseline and shared capability/error rules:
+[Current Agent Integration Contracts](current-agent-contracts.md#acp-advertised-capabilities-and-typed-permissions).
+
 ## Status
 
 Implemented through the shared ACP runtime. OpenCode sessions participate in
@@ -131,8 +134,8 @@ by OpenCode. The app-level OpenCode model default applies to new sessions;
 
 OpenCode `session/request_permission` calls use the shared ACP approval path.
 TermAl preserves the exact OpenCode option ids for allow-once, allow-always, and
-reject decisions. Typed ACP option kinds take precedence over fuzzy legacy
-names, so a generic `allow` label cannot accidentally select allow-always.
+reject decisions. Only exact ACP v1 option kinds select permission outcomes;
+names and opaque option ids never grant permission authority.
 Multiple requests are kept in arrival order: a later card cannot overtake the
 queue head, and the session remains in Approval until every pending request is
 resolved.

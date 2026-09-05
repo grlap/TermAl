@@ -36,9 +36,8 @@ const CLAUDE_RATE_LIMIT_RETRY_BASE_DELAY: Duration = Duration::from_secs(1);
 /// retry without changing the request.
 ///
 /// Claude Code 2.1.220 exposes these in terminal stream-json result objects as
-/// `api_error_status`. The exact `API Error: <status>` parser below is a
-/// compatibility fallback for older CLI builds that omit the numeric field;
-/// it intentionally does not match human prose such as "Overloaded".
+/// `api_error_status`. Missing or malformed numeric status stays terminal;
+/// result prose is never a substitute for this current wire field.
 fn claude_transient_api_status(message: &Value) -> Option<u16> {
     if message.get("type").and_then(Value::as_str) != Some("result")
         || message.get("is_error").and_then(Value::as_bool) != Some(true)
@@ -46,34 +45,11 @@ fn claude_transient_api_status(message: &Value) -> Option<u16> {
         return None;
     }
 
-    if let Some(status) = message.get("api_error_status") {
-        return status
-            .as_u64()
-            .and_then(|status| u16::try_from(status).ok())
-            .filter(|status| matches!(status, 429 | 503 | 529));
-    }
-
     message
-        .get("result")
-        .and_then(Value::as_str)
-        .and_then(claude_api_error_status_from_result)
+        .get("api_error_status")
+        .and_then(Value::as_u64)
+        .and_then(|status| u16::try_from(status).ok())
         .filter(|status| matches!(status, 429 | 503 | 529))
-}
-
-fn claude_api_error_status_from_result(result: &str) -> Option<u16> {
-    let rest = result.trim().strip_prefix("API Error: ")?;
-    let digits = rest
-        .chars()
-        .take_while(char::is_ascii_digit)
-        .collect::<String>();
-    if digits.len() != 3 {
-        return None;
-    }
-    let trailing = rest.get(digits.len()..)?;
-    if !trailing.starts_with(char::is_whitespace) {
-        return None;
-    }
-    digits.parse().ok()
 }
 
 fn claude_transient_api_retry_delay(

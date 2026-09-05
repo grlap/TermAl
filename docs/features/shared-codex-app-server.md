@@ -18,6 +18,10 @@ Related briefs: [agent-delegation-sessions.md](./agent-delegation-sessions.md),
 [sqlite-session-storage.md](./sqlite-session-storage.md). Architecture overview:
 [../architecture.md](../architecture.md).
 
+The supported app-server schema, typed text events, and catalog-only Fast
+dispatch contract are pinned in
+[Current Agent Integration Contracts](current-agent-contracts.md#codex-typed-events-and-catalog-only-fast-dispatch).
+
 ## The one fact everything follows from
 
 **Codex does not run one process per chat. One long-lived Codex process hosts every

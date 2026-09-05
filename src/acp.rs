@@ -31,11 +31,10 @@
 //    proceeding. Gemini is the typical caller; Claude Code usually
 //    skips this phase.
 // 3. **session/resume, session/load, or session/new** — use resume when
-//    explicitly advertised, otherwise use the legacy load capability when
-//    supported. A typed method-not-found can downgrade optimistic legacy load
-//    probing for non-OpenCode agents. OpenCode load/resume failures always
-//    surface and preserve continuity; the user starts a separate session if
-//    recovery is impossible.
+//    explicitly advertised, otherwise use explicitly advertised load support.
+//    A saved id with neither capability is an error, not permission to probe
+//    or start over. Continuation failures preserve the id for every agent;
+//    session/new is only for a conversation without an existing external id.
 // 4. **session/set_mode** + **session/set_model** — apply the user's
 //    saved approval-mode / model preferences before the first prompt
 //    so the agent doesn't default to something the user didn't pick.
@@ -63,15 +62,13 @@
 // legitimately take minutes for a single turn — but the writer
 // enforces a stdin-write watchdog so a hung pipe fails fast.
 //
-// Fallback rules for session load
-// -------------------------------
+// Continuity rules for session load/resume
+// ---------------------------------------
 //
-// OpenCode 1.18.8 has no typed invalid-session discriminator on load/resume,
-// so it never participates in an automatic fallback that would silently
-// replace conversation memory. Gemini retains its documented typed
-// invalid-session compatibility fallback; legacy non-OpenCode agents may also
-// fall back after a typed JSON-RPC method-not-found proves `session/load`
-// unsupported.
+// The pinned agent contracts establish no invalid-id discriminator that
+// authorizes replacing conversation memory. Generic error codes, nested hints,
+// and prose therefore never trigger automatic session/new or a capability
+// downgrade. See docs/features/current-agent-contracts.md for the evidence.
 
 const ACP_CANCEL_GRACE: Duration = Duration::from_secs(2);
 const MAX_ACP_OPTION_LABEL_CHARS: usize = 200;
@@ -448,41 +445,10 @@ fn maybe_authenticate_acp_runtime(
     Ok(())
 }
 
-/// Upgrades `capabilities.supports_session_load` to `Some(true)`
-/// after an observed-working `session/load` (or a
-/// wrong-session-id-but-method-exists error). Safe to call when the
-/// capabilities bundle has not yet been initialized; inserts a
-/// default bundle in that case.
-fn note_acp_session_load_supported(runtime_state: &Arc<Mutex<AcpRuntimeState>>) {
-    let mut state = runtime_state
-        .lock()
-        .expect("ACP runtime state mutex poisoned");
-    state
-        .capabilities
-        .get_or_insert_with(AcpCapabilities::default)
-        .supports_session_load = Some(true);
-}
-
-/// Downgrades legacy optimistic `session/load` probing after a typed
-/// method-not-found response. Future prompts start a fresh session directly
-/// instead of repeatedly exercising an unsupported method.
-fn note_acp_session_load_unsupported(runtime_state: &Arc<Mutex<AcpRuntimeState>>) {
-    let mut state = runtime_state
-        .lock()
-        .expect("ACP runtime state mutex poisoned");
-    state
-        .capabilities
-        .get_or_insert_with(AcpCapabilities::default)
-        .supports_session_load = Some(false);
-}
-
 /// Records ACP runtime capabilities from initialize.
 ///
-/// Installs an `AcpCapabilities` bundle on the runtime state the first
-/// time the initialize response arrives. If the response omits the
-/// capability flag entirely (older agents), leaves
-/// `supports_session_load = None` so `ensure_acp_session_ready` can
-/// probe optimistically — see `AcpCapabilities::session_load_supported_or_unknown`.
+/// Only the ACP v1 `agentCapabilities` envelope is authoritative. Omitted
+/// capabilities are unsupported; requests never probe an older protocol.
 fn update_acp_runtime_capabilities(
     runtime_state: &Arc<Mutex<AcpRuntimeState>>,
     initialize_result: &Value,
@@ -493,12 +459,8 @@ fn update_acp_runtime_capabilities(
         .lock()
         .expect("ACP runtime state mutex poisoned");
     let capabilities = state.capabilities.get_or_insert_with(AcpCapabilities::default);
-    if supports_session_load.is_some() {
-        capabilities.supports_session_load = supports_session_load;
-    }
-    if supports_session_resume.is_some() {
-        capabilities.supports_session_resume = supports_session_resume;
-    }
+    capabilities.supports_session_load = supports_session_load;
+    capabilities.supports_session_resume = supports_session_resume;
 }
 
 /// Returns whether ACP initialize reported session/load support.
@@ -506,23 +468,16 @@ fn acp_supports_session_load(initialize_result: &Value) -> Option<bool> {
     initialize_result
         .pointer("/agentCapabilities/loadSession")
         .and_then(Value::as_bool)
-        .or_else(|| {
-            initialize_result
-                .pointer("/capabilities/loadSession")
-                .and_then(Value::as_bool)
-        })
 }
 
 /// Returns whether ACP initialize explicitly advertised session/resume.
 ///
-/// ACP v1 represents session capabilities as objects (`"resume": {}`), while
-/// a few implementations use booleans. Presence of a non-null object is
-/// therefore affirmative; explicit `false` remains authoritative.
+/// ACP v1 represents this capability as an object (`"resume": {}`). Other
+/// shapes do not advertise support.
 fn acp_supports_session_resume(initialize_result: &Value) -> Option<bool> {
     initialize_result
         .pointer("/agentCapabilities/sessionCapabilities/resume")
-        .or_else(|| initialize_result.pointer("/capabilities/sessionCapabilities/resume"))
-        .map(|value| value.as_bool().unwrap_or(!value.is_null()))
+        .map(Value::is_object)
 }
 
 /// Handles select ACP auth method.
@@ -877,12 +832,7 @@ fn ensure_acp_session_ready_inner(
             .expect("ACP runtime state mutex poisoned");
         let capabilities = state.capabilities.as_ref();
         let session_load_allowed = capabilities
-            .map(AcpCapabilities::session_load_supported_or_unknown)
-            // No capabilities bundle yet means initialize has not
-            // reported either way — fall back to the optimistic
-            // "try anyway" rule, matching the previous
-            // `supports_session_load != Some(false)` semantics.
-            .unwrap_or(true);
+            .is_some_and(AcpCapabilities::session_load_supported);
         let session_resume_allowed = capabilities
             .is_some_and(AcpCapabilities::session_resume_supported);
         (
@@ -906,6 +856,12 @@ fn ensure_acp_session_ready_inner(
     };
 
     let resume_session_id = command.resume_session_id.as_deref();
+    if resume_session_id.is_some() && !session_resume_allowed && !session_load_allowed {
+        bail!(
+            "{} did not advertise ACP session/resume or session/load; the stored session id is preserved. Use a supported agent build or create a new session to start fresh",
+            agent.label()
+        );
+    }
     let session_result = if let Some(resume_session_id) =
         resume_session_id.filter(|_| session_resume_allowed)
     {
@@ -923,19 +879,6 @@ fn ensure_acp_session_ready_inner(
         );
         match result {
             Ok(value) => (resume_session_id.to_owned(), value),
-            Err(err)
-                if agent != AcpAgent::OpenCode
-                    && acp_json_rpc_response_error(&err)
-                        .is_some_and(AcpJsonRpcError::is_invalid_session_identifier) =>
-            {
-                start_acp_session(
-                    writer,
-                    pending_requests,
-                    agent,
-                    &command.cwd,
-                    mcp_servers.clone(),
-                )?
-            }
             Err(err) => return Err(opencode_continuity_error(agent, err)),
         }
     } else if let Some(resume_session_id) =
@@ -966,38 +909,7 @@ fn ensure_acp_session_ready_inner(
             state.is_loading_history = false;
         }
         match result {
-            Ok(value) => {
-                note_acp_session_load_supported(runtime_state);
-                (resume_session_id.to_owned(), value)
-            }
-            Err(err) if agent == AcpAgent::Gemini && is_gemini_invalid_session_load_error(&err) => {
-                // Gemini's invalid-session-id error still proves the
-                // agent HAS `session/load` — the id just didn't match
-                // an existing session. Upgrade the capability so
-                // subsequent resumes skip the optimistic fallback.
-                note_acp_session_load_supported(runtime_state);
-                start_acp_session(
-                    writer,
-                    pending_requests,
-                    agent,
-                    &command.cwd,
-                    mcp_servers.clone(),
-                )?
-            }
-            Err(err)
-                if agent != AcpAgent::OpenCode
-                    && acp_json_rpc_response_error(&err)
-                        .is_some_and(|error| error.code == Some(-32601)) =>
-            {
-                note_acp_session_load_unsupported(runtime_state);
-                start_acp_session(
-                    writer,
-                    pending_requests,
-                    agent,
-                    &command.cwd,
-                    mcp_servers.clone(),
-                )?
-            }
+            Ok(value) => (resume_session_id.to_owned(), value),
             Err(err) => return Err(opencode_continuity_error(agent, err)),
         }
     } else {
@@ -1251,15 +1163,17 @@ fn handle_acp_request(
             let approval = AcpPendingApproval {
                 allow_once_option_id: find_acp_permission_option(
                     &options,
-                    &["allow-once", "allow_once", "allow"],
+                    &["allow_once"],
                 ),
                 allow_always_option_id: find_acp_permission_option(
                     &options,
-                    &["allow-always", "allow_always", "always", "acceptForSession"],
+                    &["allow_always"],
                 ),
+                // Prefer a one-time refusal. If only persistent refusal exists,
+                // deny the effect; the agent owns the scope of that denial.
                 reject_option_id: find_acp_permission_option(
                     &options,
-                    &["reject-once", "reject_once", "reject", "deny", "decline"],
+                    &["reject_once", "reject_always"],
                 ),
                 request_id,
             };
@@ -1629,53 +1543,18 @@ fn acp_cursor_mode(update: &Value) -> Option<CursorMode> {
         .and_then(|value| parse_cursor_mode_acp_value(&value))
 }
 
-/// Finds ACP permission option.
-fn find_acp_permission_option(options: &[Value], hints: &[&str]) -> Option<String> {
-    let normalized_hints = hints
-        .iter()
-        .map(|hint| normalize_acp_permission_hint(hint))
-        .collect::<Vec<_>>();
-    let normalized_options = options
-        .iter()
-        .filter_map(|option| {
-            let option_id = option
-                .get("optionId")
-                .or_else(|| option.get("id"))
-                .and_then(Value::as_str)?;
-            let candidates = [
-                Some(option_id),
-                option.get("kind").and_then(Value::as_str),
-                option.get("name").and_then(Value::as_str),
-            ]
-            .into_iter()
-            .flatten()
-            .map(normalize_acp_permission_hint)
-            .collect::<Vec<_>>();
-            Some((option_id, candidates))
+/// Selects an exact ACP v1 kind and returns its opaque optionId unchanged.
+/// Neither display text nor identifier spelling grants permission authority.
+fn find_acp_permission_option(options: &[Value], kinds: &[&str]) -> Option<String> {
+    kinds.iter().find_map(|kind| {
+        options.iter().find_map(|option| {
+            if option.get("kind").and_then(Value::as_str) != Some(*kind) {
+                return None;
+            }
+            option.get("optionId").and_then(Value::as_str)
+                .filter(|id| !id.is_empty()).map(str::to_owned)
         })
-        .collect::<Vec<_>>();
-
-    // ACP's typed `kind` is authoritative. Search each hint across every
-    // option before falling back to fuzzy names so a generic legacy hint such
-    // as `allow` cannot bind an earlier `allow_always` option when
-    // `allow_once` is present later in the array.
-    for hint in &normalized_hints {
-        if let Some((option_id, _)) = normalized_options
-            .iter()
-            .find(|(_, candidates)| candidates.iter().any(|candidate| candidate == hint))
-        {
-            return Some((*option_id).to_owned());
-        }
-    }
-    None
-}
-
-/// Normalizes ACP permission option identifiers across agents.
-fn normalize_acp_permission_hint(value: &str) -> String {
-    value
-        .trim()
-        .to_ascii_lowercase()
-        .replace(['-', ' '], "_")
+    })
 }
 
 /// Summarizes a permission request without losing OpenCode's structured tool
@@ -1950,69 +1829,6 @@ fn parse_acp_json_rpc_error(error: &Value) -> AcpJsonRpcError {
             .unwrap_or_else(|| summarize_error(error)),
         data: error.get("data").cloned(),
     }
-}
-
-/// Returns whether a Gemini session/load failure should fall back to session/new.
-fn is_gemini_invalid_session_load_error(err: &anyhow::Error) -> bool {
-    err.downcast_ref::<AcpResponseError>()
-        .and_then(AcpResponseError::as_json_rpc)
-        .is_some_and(AcpJsonRpcError::is_invalid_session_identifier)
-        || err
-            .chain()
-            .any(|chain_err| chain_err.to_string().contains("Invalid session identifier"))
-}
-
-/// Returns whether ACP error data explicitly reports an invalid session identifier.
-fn acp_error_data_indicates_invalid_session_identifier(value: &Value) -> bool {
-    acp_error_data_indicates_invalid_session_identifier_with_depth(value, 10)
-}
-
-/// Returns whether ACP error data explicitly reports an invalid session identifier.
-fn acp_error_data_indicates_invalid_session_identifier_with_depth(
-    value: &Value,
-    remaining_depth: u8,
-) -> bool {
-    match value {
-        Value::String(reason) => acp_reason_indicates_invalid_session_identifier(reason),
-        _ if remaining_depth == 0 => false,
-        Value::Array(entries) => entries.iter().any(|entry| {
-            acp_error_data_indicates_invalid_session_identifier_with_depth(
-                entry,
-                remaining_depth - 1,
-            )
-        }),
-        Value::Object(fields) => {
-            for key in ["reason", "type", "error", "code", "details"] {
-                if fields.get(key).is_some_and(|entry| {
-                    acp_error_data_indicates_invalid_session_identifier_with_depth(
-                        entry,
-                        remaining_depth - 1,
-                    )
-                }) {
-                    return true;
-                }
-            }
-            false
-        }
-        _ => false,
-    }
-}
-
-/// Normalizes reason strings used for invalid-session identifiers across ACP agents.
-fn acp_reason_indicates_invalid_session_identifier(reason: &str) -> bool {
-    // Gemini uses these typed reason values in its invalid-session envelopes.
-    // OpenCode deliberately does not use this classifier: 1.18.8 exposes no
-    // typed invalid-session discriminator safe enough to authorize clearing
-    // persisted conversation continuity.
-    let normalized = reason
-        .chars()
-        .filter(|character| character.is_ascii_alphanumeric())
-        .map(|character| character.to_ascii_lowercase())
-        .collect::<String>();
-    matches!(
-        normalized.as_str(),
-        "invalidsessionidentifier" | "invalidsessionid" | "invalidsession"
-    )
 }
 
 fn log_unhandled_acp_event(agent: AcpAgent, context: &str, message: &Value) {

@@ -738,10 +738,6 @@ fn handle_repl_codex_app_server_notification(
                 recorder,
             )?;
         }
-        // Current Codex app-server text uses typed v2 notifications. Ignore
-        // legacy text mirrors instead of merging two differently chunked
-        // streams into the same transcript message.
-        "codex/event/agent_message_content_delta" | "codex/event/agent_message" => {}
         "codex/event/task_complete" => {
             handle_repl_codex_task_complete(
                 message,

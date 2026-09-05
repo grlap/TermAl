@@ -5,6 +5,9 @@ Protocol) mode.
 
 Reference: [`agent-integration-comparison.md`](./agent-integration-comparison.md)
 
+Supported baseline and exact capability/permission rules:
+[Current Agent Integration Contracts](current-agent-contracts.md#acp-advertised-capabilities-and-typed-permissions).
+
 ## Status
 
 Implemented in TermAl via the shared ACP adapter.

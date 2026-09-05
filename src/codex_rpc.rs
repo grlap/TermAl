@@ -12,6 +12,8 @@
 // Extracted from codex.rs so the event-handler block can stay separate
 // from the transport layer.
 
+const CODEX_MODEL_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// The `initialize` params every Codex app-server handshake sends — shared by
 /// the persistent app-server writer (`src/codex.rs`) and the REPL path
 /// (`src/turns.rs`) so the two cannot drift.
@@ -170,6 +172,27 @@ fn send_codex_json_rpc_request_inner(
 /// through `input_tx` to fetch the next page.
 const SHARED_CODEX_MODEL_LIST_MAX_PAGES: usize = 50;
 
+/// Walks the same current model/list contract for the blocking REPL transport.
+fn read_codex_model_options(
+    mut request_page: impl FnMut(Value) -> Result<Value>,
+) -> Result<Vec<SessionModelOption>> {
+    let mut cursor = None::<String>;
+    let mut options = Vec::new();
+    for _ in 0..SHARED_CODEX_MODEL_LIST_MAX_PAGES {
+        let result = request_page(json!({
+            "cursor": cursor,
+            "includeHidden": false,
+            "limit": 100,
+        }))?;
+        options.extend(codex_model_options(&result));
+        cursor = result.get("nextCursor").and_then(Value::as_str).map(str::to_owned);
+        if cursor.is_none() {
+            return Ok(options);
+        }
+    }
+    bail!("Codex model list pagination exceeded {SHARED_CODEX_MODEL_LIST_MAX_PAGES} pages")
+}
+
 fn fire_codex_model_list_page(
     writer: &mut impl Write,
     pending_requests: &CodexPendingRequestMap,
@@ -198,7 +221,7 @@ fn fire_codex_model_list_page(
             &waiter_pending,
             pending,
             "model/list",
-            Some(Duration::from_secs(30)),
+            Some(CODEX_MODEL_DISCOVERY_TIMEOUT),
         ) {
             Ok(result) => {
                 let mut model_options = accumulated;

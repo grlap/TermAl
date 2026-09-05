@@ -1695,48 +1695,38 @@ fn codex_model_options_parses_max_and_ultra_reasoning_levels() {
 }
 
 #[test]
-fn codex_model_options_parses_legacy_fast_tier_fields_and_preserves_live_ids() {
-    let model_list = json!({
+fn codex_model_options_requires_current_tiers_and_preserves_advertised_ids() {
+    let options = codex_model_options(&json!({
         "data": [
-            {
-                "model": "camel-fast",
-                "additionalSpeedTiers": ["fast"]
-            },
-            {
-                "model": "snake-fast",
-                "additional_speed_tiers": ["FAST"]
-            },
-            {
-                "model": "custom-fast",
-                "serviceTiers": [{ "id": "turbo", "name": "Fast" }]
-            }
+            { "model": "old-camel", "additionalSpeedTiers": ["fast"] },
+            { "model": "old-snake", "additional_speed_tiers": ["FAST"] },
+            { "model": "old-tiers", "service_tiers": [{ "id": "priority", "name": "Fast" }] },
+            { "model": "custom-fast", "serviceTiers": [{ "id": "Turbo-EXACT", "name": "Fast" }] }
         ]
-    });
-
-    let options = codex_model_options(&model_list);
-    for model in ["camel-fast", "snake-fast"] {
-        let option = codex_model_option(model, &options).expect("legacy model should parse");
-        assert_eq!(
-            option.service_tiers,
-            vec![SessionModelServiceTier {
-                id: CODEX_FAST_SERVICE_TIER.to_owned(),
-                label: "Fast".to_owned(),
-                description: Some("1.5x speed, increased usage".to_owned()),
-            }]
+    }));
+    for model in ["old-camel", "old-snake", "old-tiers"] {
+        assert!(
+            codex_model_option(model, &options)
+                .unwrap()
+                .service_tiers
+                .is_empty()
         );
+        assert!(codex_fast_service_tier_value(model, &options, true).is_err());
     }
     assert_eq!(
-        codex_fast_service_tier_value("custom-fast", &options, true).as_deref(),
-        Some("turbo"),
-        "dispatch must use the catalog-advertised tier id rather than hardcoding priority"
+        codex_fast_service_tier_value("custom-fast", &options, true)
+            .unwrap()
+            .as_deref(),
+        Some("Turbo-EXACT")
+    );
+    let error = codex_fast_service_tier_value("unknown-after-restart", &[], true).unwrap_err();
+    assert!(error.to_string().contains("/fast"));
+    assert_eq!(
+        codex_fast_service_tier_value("custom-fast", &options, false).unwrap(),
+        None
     );
     assert_eq!(
-        codex_fast_service_tier_value("unknown-after-restart", &[], true).as_deref(),
-        Some(CODEX_FAST_SERVICE_TIER),
-        "persisted Fast authority needs the canonical fallback until the catalog refreshes"
-    );
-    assert_eq!(
-        codex_fast_service_tier_value("custom-fast", &options, false),
+        codex_fast_service_tier_value("unknown-after-restart", &[], false).unwrap(),
         None
     );
 }
@@ -1793,7 +1783,7 @@ fn codex_fast_mode_is_catalog_gated_and_clears_on_unsupported_model_switch() {
             default_reasoning_effort: Some(CodexReasoningEffort::Medium),
             supported_reasoning_efforts: vec![CodexReasoningEffort::Medium],
             service_tiers: vec![SessionModelServiceTier {
-                id: CODEX_FAST_SERVICE_TIER.to_owned(),
+                id: "priority".to_owned(),
                 label: "Fast".to_owned(),
                 description: Some("1.5x speed, increased usage".to_owned()),
             }],

@@ -86,7 +86,6 @@ fn run_codex_turn(
     recorder: &mut dyn TurnRecorder,
 ) -> Result<String> {
     let cwd = normalize_local_user_facing_path(cwd);
-    let service_tier = codex_fast_service_tier_value(model, &[], fast_mode);
     let codex_home = prepare_termal_codex_home(&cwd, "repl")?;
     let mut command = codex_command()?;
     command
@@ -140,6 +139,27 @@ fn run_codex_turn(
             &mut child_stdin,
             &json_rpc_notification_message("initialized"),
         )?;
+
+        let model_options = if fast_mode {
+            read_codex_model_options(|params| {
+                send_repl_codex_json_rpc_request(
+                    &mut child_stdin,
+                    &stdout_rx,
+                    &mut repl_state,
+                    recorder,
+                    approval_policy,
+                    "model/list",
+                    params,
+                    CODEX_MODEL_DISCOVERY_TIMEOUT,
+                )
+            })
+            .with_context(|| {
+                format!("{}; model discovery failed", unresolved_codex_fast_error(model))
+            })?
+        } else {
+            Vec::new()
+        };
+        let service_tier = codex_fast_service_tier_value(model, &model_options, fast_mode)?;
 
         let thread_result = match external_session_id {
             Some(thread_id) => send_repl_codex_json_rpc_request(

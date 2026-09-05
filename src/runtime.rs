@@ -102,22 +102,23 @@ struct CodexPromptCommand {
     sandbox_mode: CodexSandboxMode,
 }
 
-/// App-server service-tier id used when Codex Fast authority survives a
-/// restart before the model catalog has been refreshed. A live catalog tier
-/// id takes precedence over this compatibility fallback.
-const CODEX_FAST_SERVICE_TIER: &str = "priority";
-
+/// Finds Fast in the active model's advertised service tiers.
 fn codex_fast_service_tier<'a>(
     model: &str,
-    model_options: &'a [SessionModelOption],
+    options: &'a [SessionModelOption],
 ) -> Option<&'a SessionModelServiceTier> {
-    codex_model_option(model, model_options).and_then(|option| {
+    codex_model_option(model, options).and_then(|option| {
         option.service_tiers.iter().find(|tier| {
             tier.label.eq_ignore_ascii_case("fast")
-                || tier.id.eq_ignore_ascii_case(CODEX_FAST_SERVICE_TIER)
+                || tier.id.eq_ignore_ascii_case("priority")
                 || tier.id.eq_ignore_ascii_case("fast")
         })
     })
+}
+
+/// The retry must keep Fast enabled; only an explicit user choice selects Standard.
+fn unresolved_codex_fast_error(model: &str) -> anyhow::Error {
+    anyhow!("Codex Fast is enabled, but the current model catalog does not advertise a Fast service tier for '{model}'. Retry after refreshing the model catalog, or use /fast or settings to select Standard")
 }
 
 fn codex_model_supports_fast(model: &str, model_options: &[SessionModelOption]) -> bool {
@@ -128,12 +129,13 @@ fn codex_fast_service_tier_value(
     model: &str,
     model_options: &[SessionModelOption],
     fast_mode: bool,
-) -> Option<String> {
-    fast_mode.then(|| {
-        codex_fast_service_tier(model, model_options)
-            .map(|tier| tier.id.clone())
-            .unwrap_or_else(|| CODEX_FAST_SERVICE_TIER.to_owned())
-    })
+) -> Result<Option<String>> {
+    if !fast_mode {
+        return Ok(None);
+    }
+    codex_fast_service_tier(model, model_options)
+        .map(|tier| Some(tier.id.clone()))
+        .ok_or_else(|| unresolved_codex_fast_error(model))
 }
 
 /// Represents a Codex JSON RPC response command.
@@ -477,30 +479,19 @@ struct AcpRuntimeState {
 /// authoritative for this runtime's lifetime".
 #[derive(Clone, Default)]
 struct AcpCapabilities {
-    /// `Some(true)` — remote confirmed `session/load` support via the
-    /// initialize response. `Some(false)` — remote confirmed it is
-    /// NOT supported. `None` — initialize response did not carry the
-    /// capability flag at all (older agents), so we probe
-    /// optimistically and upgrade to `Some(true)` on first successful
-    /// load or to `Some(false)` on a definitive not-supported error.
-    /// The tri-state is intentional — see `ensure_acp_session_ready`
-    /// for the "not known to be unsupported; try anyway" rule.
+    /// Only `Some(true)` from ACP v1 initialize permits `session/load`.
+    /// An omitted flag is unsupported, not permission to probe.
     supports_session_load: Option<bool>,
     /// `Some(true)` means the agent explicitly advertised ACP
     /// `session/resume`, which restores a session without replaying its
-    /// transcript. Unlike `session/load`, an omitted resume capability is
-    /// treated as unsupported: resume is newer and there is no safe legacy
-    /// probe because an unknown-method failure must not disturb continuity.
+    /// transcript. An omitted or malformed capability is unsupported.
     supports_session_resume: Option<bool>,
 }
 
 impl AcpCapabilities {
-    /// Returns true unless `supports_session_load` is explicitly
-    /// known to be false. Encodes the "try optimistically when
-    /// capability flag is absent" rule so call sites don't have to
-    /// repeat the negated Option comparison.
-    fn session_load_supported_or_unknown(&self) -> bool {
-        self.supports_session_load != Some(false)
+    /// Returns whether initialize explicitly advertised `session/load`.
+    fn session_load_supported(&self) -> bool {
+        self.supports_session_load == Some(true)
     }
 
     /// Returns whether the runtime explicitly advertised `session/resume`.
@@ -553,6 +544,7 @@ enum TurnDispatch {
     PersistentCodex {
         active_turn_generation: u64,
         command: CodexPromptCommand,
+        service_tier: Result<Option<String>>,
         engram_dispatch_generation: Option<u64>,
         mailbox_notification: Option<MailboxNotificationDelivery>,
         runtime_token: RuntimeToken,
@@ -702,16 +694,6 @@ struct AcpJsonRpcError {
     code: Option<i64>,
     message: String,
     data: Option<Value>,
-}
-
-impl AcpJsonRpcError {
-    /// Returns whether the error explicitly reports an invalid stored session identifier.
-    fn is_invalid_session_identifier(&self) -> bool {
-        self.data
-            .as_ref()
-            .is_some_and(acp_error_data_indicates_invalid_session_identifier)
-            || self.message.contains("Invalid session identifier")
-    }
 }
 
 impl std::fmt::Display for AcpJsonRpcError {
@@ -1051,9 +1033,8 @@ fn codex_model_options(model_list_result: &Value) -> Vec<SessionModelOption> {
                 .collect::<Vec<_>>();
             supported_reasoning_efforts.sort_by_key(|effort| codex_reasoning_effort_rank(*effort));
             supported_reasoning_efforts.dedup();
-            let mut service_tiers = entry
+            let service_tiers = entry
                 .get("serviceTiers")
-                .or_else(|| entry.get("service_tiers"))
                 .and_then(Value::as_array)
                 .into_iter()
                 .flatten()
@@ -1061,12 +1042,10 @@ fn codex_model_options(model_list_result: &Value) -> Vec<SessionModelOption> {
                     let id = tier
                         .get("id")
                         .and_then(Value::as_str)
-                        .map(str::trim)
-                        .filter(|id| !id.is_empty())?
+                        .filter(|id| !id.trim().is_empty())?
                         .to_owned();
                     let label = tier
                         .get("name")
-                        .or_else(|| tier.get("label"))
                         .and_then(Value::as_str)
                         .map(str::trim)
                         .filter(|label| !label.is_empty())
@@ -1085,26 +1064,6 @@ fn codex_model_options(model_list_result: &Value) -> Vec<SessionModelOption> {
                     })
                 })
                 .collect::<Vec<_>>();
-            if !service_tiers.iter().any(|tier| {
-                tier.label.eq_ignore_ascii_case("fast")
-                    || tier.id.eq_ignore_ascii_case(CODEX_FAST_SERVICE_TIER)
-                    || tier.id.eq_ignore_ascii_case("fast")
-            })
-                && entry
-                    .get("additionalSpeedTiers")
-                    .or_else(|| entry.get("additional_speed_tiers"))
-                    .and_then(Value::as_array)
-                    .into_iter()
-                    .flatten()
-                    .filter_map(Value::as_str)
-                    .any(|tier| tier.eq_ignore_ascii_case("fast"))
-            {
-                service_tiers.push(SessionModelServiceTier {
-                    id: CODEX_FAST_SERVICE_TIER.to_owned(),
-                    label: "Fast".to_owned(),
-                    description: Some("1.5x speed, increased usage".to_owned()),
-                });
-            }
             Some(SessionModelOption {
                 label,
                 value,

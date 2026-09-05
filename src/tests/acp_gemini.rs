@@ -1,16 +1,15 @@
-// ACP (Agent Client Protocol) is the JSON-RPC dialect spoken by Claude Code,
-// Gemini CLI, Cursor, and OpenCode; TermAl implements the client side and drives
+// ACP (Agent Client Protocol) is the JSON-RPC dialect spoken by Gemini CLI,
+// Cursor, and OpenCode; TermAl implements the client side and drives
 // each agent through `initialize`, `session/new`, optional `session/resume` or
 // `session/load`, and prompt turns. Resume is used only when explicitly
-// advertised under `sessionCapabilities.resume`; older agents without that
-// capability retain the optimistic `session/load` compatibility path.
+// advertised under `sessionCapabilities.resume`; `session/load` likewise
+// requires explicit support. Continuation errors never replace the saved id.
 // Gemini CLI adds its own quirks: it reads `~/.gemini/settings.json` and
 // `.env` files from the home directory only, so workspace-local `.env` files
 // must be ignored for credentials (they can be committed to a repo and leak
 // keys). TermAl also writes an override settings file on Windows to force
 // `enableInteractiveShell=false` for headless ACP runs. Production surfaces
-// live in `src/runtime.rs`: `acp_supports_session_load`, `acp_session_resume`
-// via `ensure_acp_session_ready`, and the Gemini settings/env helpers.
+// live in `src/acp.rs` and `src/gemini.rs`; protocol types live in runtime.rs.
 
 use super::*;
 
@@ -119,57 +118,47 @@ fn acp_supports_session_load_reads_agent_capabilities() {
     );
 }
 
-// Pins the legacy top-level `capabilities.loadSession` fallback and confirms an
-// empty initialize response returns `None` (unknown). Guards against dropping
-// the legacy envelope, which older agents still emit, or collapsing absent
-// to `Some(false)` and skipping the speculative `session/load` branch.
+// Capability authority comes only from the ACP v1 envelope and shapes.
 #[test]
-fn acp_supports_session_load_reads_legacy_capabilities() {
+fn acp_capabilities_reject_legacy_envelopes_and_malformed_flags() {
     assert_eq!(
         acp_supports_session_load(&json!({
-            "capabilities": {
-                "loadSession": false,
-            }
+            "capabilities": { "loadSession": true }
         })),
-        Some(false)
+        None
+    );
+    assert_eq!(
+        acp_supports_session_load(&json!({
+            "agentCapabilities": { "loadSession": "true" }
+        })),
+        None
     );
     assert_eq!(acp_supports_session_load(&json!({})), None);
-}
-
-// Pins ACP v1's object-shaped `sessionCapabilities.resume`, while retaining
-// compatibility with boolean capability shims and a legacy envelope. Absence
-// remains `None` and explicit false remains authoritative.
-#[test]
-fn acp_supports_session_resume_reads_object_boolean_and_legacy_capabilities() {
     assert_eq!(
         acp_supports_session_resume(&json!({
-            "agentCapabilities": {
-                "sessionCapabilities": {
-                    "resume": {}
-                }
-            }
+            "agentCapabilities": { "sessionCapabilities": { "resume": {} } }
         })),
         Some(true)
     );
+    for value in [
+        json!(true),
+        json!(false),
+        json!(null),
+        json!([]),
+        json!("resume"),
+    ] {
+        assert_eq!(
+            acp_supports_session_resume(&json!({
+                "agentCapabilities": { "sessionCapabilities": { "resume": value } }
+            })),
+            Some(false)
+        );
+    }
     assert_eq!(
         acp_supports_session_resume(&json!({
-            "agentCapabilities": {
-                "sessionCapabilities": {
-                    "resume": false
-                }
-            }
+            "capabilities": { "sessionCapabilities": { "resume": {} } }
         })),
-        Some(false)
-    );
-    assert_eq!(
-        acp_supports_session_resume(&json!({
-            "capabilities": {
-                "sessionCapabilities": {
-                    "resume": true
-                }
-            }
-        })),
-        Some(true)
+        None
     );
     assert_eq!(acp_supports_session_resume(&json!({})), None);
 }
@@ -182,17 +171,13 @@ fn acp_runtime_state_defaults_session_load_support_to_unknown() {
     let default_state = AcpRuntimeState::default();
     assert!(
         default_state.capabilities.is_none(),
-        "default capabilities must be None so the optimistic \
-         session/load path fires before initialize completes"
+        "default capabilities must not authorize a session/load probe"
     );
 }
 
-// Pins the optimistic path: with `supports_session_load = None`, `ensure_acp_session_ready`
-// writes `session/load`, not `session/new`, and promotes the capability to
-// `Some(true)` on success. Guards against older agents being forced into fresh
-// sessions (losing history) when capability advertisement is missing.
+// Explicit loadSession support resumes the saved conversation and suppresses replay.
 #[test]
-fn acp_session_resume_attempts_load_when_session_load_support_is_unknown() {
+fn acp_session_resume_loads_when_explicitly_advertised() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
@@ -212,6 +197,12 @@ fn acp_session_resume_attempts_load_when_session_load_support_is_unknown() {
         .expect("Cursor session should be created");
     let pending_requests = Arc::new(Mutex::new(HashMap::new()));
     let runtime_state = Arc::new(Mutex::new(AcpRuntimeState::default()));
+    update_acp_runtime_capabilities(
+        &runtime_state,
+        &json!({
+            "agentCapabilities": { "loadSession": true }
+        }),
+    );
     let writer = SharedBufferWriter::default();
     let thread_writer = writer.clone();
     let thread_pending_requests = pending_requests.clone();
@@ -281,7 +272,7 @@ fn acp_session_resume_attempts_load_when_session_load_support_is_unknown() {
     assert_emitted_acp_delegation_mcp_descriptor(&written, "session/load", &created.session_id);
     assert!(
         !written.contains("\"method\":\"session/new\""),
-        "session/new should not be written when resuming with unknown capability support\n{written}"
+        "session/new should not be written when resuming with advertised load support\n{written}"
     );
 
     let session = state
@@ -311,101 +302,59 @@ fn acp_session_resume_attempts_load_when_session_load_support_is_unknown() {
     );
 }
 
-// Pins the compatibility downgrade for legacy non-OpenCode ACP agents that do
-// not advertise load support. A typed method-not-found response proves that
-// `session/load` is unavailable, so the same activation starts a fresh session
-// and future activations skip the unsupported request.
+// A missing capability must not replace an existing conversation.
 #[test]
-fn acp_session_load_method_not_found_downgrades_capability_and_starts_fresh() {
-    let state = test_app_state();
-    let created = state
-        .create_session(CreateSessionRequest {
-            agent: Some(Agent::Cursor),
-            name: Some("Legacy Cursor Resume".to_owned()),
-            workdir: Some("/tmp".to_owned()),
-            project_id: None,
-            model: Some("auto".to_owned()),
-            approval_policy: None,
-            reasoning_effort: None,
-            sandbox_mode: None,
-            cursor_mode: Some(CursorMode::Ask),
-            claude_approval_mode: None,
-            claude_effort: None,
-            gemini_approval_mode: None,
-        })
-        .expect("Cursor session should be created");
-    let pending_requests = Arc::new(Mutex::new(HashMap::new()));
-    let runtime_state = Arc::new(Mutex::new(AcpRuntimeState::default()));
-    let writer = SharedBufferWriter::default();
-    let thread_writer = writer.clone();
-    let thread_pending_requests = pending_requests.clone();
-    let thread_state = state.clone();
-    let thread_runtime_state = runtime_state.clone();
-    let thread_session_id = created.session_id.clone();
-    let handle = std::thread::spawn(move || {
-        let mut stdin = thread_writer;
-        ensure_acp_session_ready(
-            &mut stdin,
-            &thread_pending_requests,
-            &thread_state,
-            &thread_session_id,
-            &thread_runtime_state,
-            AcpAgent::Cursor,
-            &AcpPromptCommand {
-                cwd: "/tmp".to_owned(),
-                cursor_mode: Some(CursorMode::Ask),
-                model: "auto".to_owned(),
-                opencode_effort: None,
-                opencode_mode: None,
-                prompt: "Resume on a legacy agent".to_owned(),
-                resume_session_id: Some("legacy-cursor-session".to_owned()),
-            },
-        )
-    });
-
-    let (_load_request_id, load_sender) = take_pending_acp_request(&pending_requests);
-    load_sender
-        .send(Err(AcpResponseError::JsonRpc(AcpJsonRpcError {
-            code: Some(-32601),
-            message: "Method not found".to_owned(),
-            data: None,
-        })))
-        .expect("session/load rejection should send");
-
-    let (_new_request_id, new_sender) = take_pending_acp_request(&pending_requests);
-    new_sender
-        .send(Ok(json!({
-            "sessionId": "legacy-cursor-fresh",
-            "configOptions": []
-        })))
-        .expect("session/new response should send");
-
-    let external_session_id = handle
-        .join()
-        .expect("Cursor ACP worker should finish")
-        .expect("method-not-found should fall back to a fresh session");
-    assert_eq!(external_session_id, "legacy-cursor-fresh");
-
-    let written = writer.contents();
-    assert!(
-        written.contains("\"method\":\"session/load\"")
-            && written.contains("\"method\":\"session/new\""),
-        "the optimistic load should be followed by one fresh-session fallback\n{written}"
-    );
-    let runtime_state = runtime_state
-        .lock()
-        .expect("ACP runtime state mutex poisoned");
-    assert_eq!(
-        runtime_state
-            .capabilities
-            .as_ref()
-            .and_then(|caps| caps.supports_session_load),
-        Some(false)
-    );
-    assert_eq!(
-        runtime_state.current_session_id.as_deref(),
-        Some("legacy-cursor-fresh")
-    );
+fn acp_session_resume_without_advertised_capability_preserves_saved_id() {
+    for agent in [Agent::Cursor, Agent::Gemini, Agent::OpenCode] {
+        for capabilities in [
+            None,
+            Some(AcpCapabilities::default()),
+            Some(AcpCapabilities {
+                supports_session_load: Some(false),
+                supports_session_resume: Some(false),
+            }),
+        ] {
+            let state = test_app_state();
+            let session_id = test_session_id(&state, agent);
+            state
+                .set_external_session_id(&session_id, "saved-session".to_owned())
+                .unwrap();
+            let pending = Arc::new(Mutex::new(HashMap::new()));
+            let runtime = Arc::new(Mutex::new(AcpRuntimeState {
+                capabilities,
+                ..AcpRuntimeState::default()
+            }));
+            let mut writer = SharedBufferWriter::default();
+            let error = ensure_acp_session_ready(
+                &mut writer,
+                &pending,
+                &state,
+                &session_id,
+                &runtime,
+                agent.acp_runtime().unwrap(),
+                &AcpPromptCommand {
+                    cwd: "/tmp".to_owned(),
+                    cursor_mode: None,
+                    model: "auto".to_owned(),
+                    opencode_effort: None,
+                    opencode_mode: None,
+                    prompt: "Continue".to_owned(),
+                    resume_session_id: Some("saved-session".to_owned()),
+                },
+            )
+            .expect_err("missing capability cannot start or replace a conversation");
+            assert!(error.to_string().contains("did not advertise"), "{error:#}");
+            assert!(writer.contents().is_empty());
+            assert!(pending.lock().unwrap().is_empty());
+            let inner = state.inner.lock().unwrap();
+            let index = inner.find_session_index(&session_id).unwrap();
+            assert_eq!(
+                inner.sessions[index].external_session_id.as_deref(),
+                Some("saved-session")
+            );
+            assert!(runtime.lock().unwrap().current_session_id.is_none());
+        }
+    }
 }
 
 // Pins the preferred restart path: an explicitly advertised resume capability
@@ -512,96 +461,114 @@ fn acp_session_resume_prefers_resume_when_explicitly_supported() {
     );
 }
 
-// Pins the typed recovery boundary for resume-capable ACP agents. A confirmed
-// invalid-session identifier may start a replacement conversation for
-// Cursor/Gemini, while OpenCode deliberately preserves its archived
-// continuity instead of using this fallback.
+// Neither a generic error code nor nested/prose invalid-id hints authorize
+// replacing the conversation after an advertised continuation method fails.
 #[test]
-fn acp_session_resume_typed_invalid_session_starts_fresh_for_cursor() {
-    let state = test_app_state();
-    let created = state
-        .create_session(CreateSessionRequest {
-            agent: Some(Agent::Cursor),
-            name: Some("Cursor Typed Resume Recovery".to_owned()),
-            workdir: Some("/tmp".to_owned()),
-            project_id: None,
-            model: Some("auto".to_owned()),
-            approval_policy: None,
-            reasoning_effort: None,
-            sandbox_mode: None,
-            cursor_mode: Some(CursorMode::Ask),
-            claude_approval_mode: None,
-            claude_effort: None,
-            gemini_approval_mode: None,
-        })
-        .expect("Cursor session should be created");
-    let pending_requests = Arc::new(Mutex::new(HashMap::new()));
-    let runtime_state = Arc::new(Mutex::new(AcpRuntimeState {
-        current_session_id: None,
-        is_loading_history: false,
-        opencode_reconcile_fingerprints: VecDeque::new(),
-        opencode_config_notification_tx: None,
-        capabilities: Some(AcpCapabilities {
-            supports_session_load: Some(true),
-            supports_session_resume: Some(true),
-        }),
-    }));
-    let writer = SharedBufferWriter::default();
-    let thread_writer = writer.clone();
-    let thread_pending_requests = pending_requests.clone();
-    let thread_state = state.clone();
-    let thread_runtime_state = runtime_state.clone();
-    let thread_session_id = created.session_id.clone();
-    let handle = std::thread::spawn(move || {
-        let mut stdin = thread_writer;
-        ensure_acp_session_ready(
-            &mut stdin,
-            &thread_pending_requests,
-            &thread_state,
-            &thread_session_id,
-            &thread_runtime_state,
-            AcpAgent::Cursor,
-            &AcpPromptCommand {
-                cwd: "/tmp".to_owned(),
-                cursor_mode: Some(CursorMode::Ask),
-                model: "auto".to_owned(),
-                opencode_effort: None,
-                opencode_mode: None,
-                prompt: "Recover from a missing Cursor session".to_owned(),
-                resume_session_id: Some("cursor-session-missing".to_owned()),
-            },
-        )
-    });
-
-    let (_resume_request_id, resume_sender) = take_pending_acp_request(&pending_requests);
-    resume_sender
-        .send(Err(AcpResponseError::JsonRpc(AcpJsonRpcError {
-            code: Some(-32602),
-            message: "resume rejected".to_owned(),
-            data: Some(json!({ "type": "invalidSessionIdentifier" })),
-        })))
-        .expect("typed resume rejection should send");
-
-    let (_new_request_id, new_sender) = take_pending_acp_request(&pending_requests);
-    new_sender
-        .send(Ok(json!({
-            "sessionId": "cursor-session-fresh",
-            "configOptions": []
-        })))
-        .expect("session/new response should send");
-
-    let external_session_id = handle
-        .join()
-        .expect("Cursor ACP worker should finish")
-        .expect("typed invalid resume should start fresh");
-    assert_eq!(external_session_id, "cursor-session-fresh");
-    let written = writer.contents();
-    assert!(
-        written.contains("\"method\":\"session/resume\"")
-            && written.contains("\"method\":\"session/new\"")
-            && !written.contains("\"method\":\"session/load\""),
-        "typed invalid resume should fall directly back to session/new\n{written}"
-    );
+fn acp_continuation_errors_preserve_saved_id_and_advertised_capabilities() {
+    for agent in [Agent::Cursor, Agent::Gemini, Agent::OpenCode] {
+        for resume in [false, true] {
+            for (code, message, data) in [
+                (-32601, "Method not found", Value::Null),
+                (
+                    -32602,
+                    "resume rejected",
+                    json!({"type": "invalidSessionIdentifier"}),
+                ),
+                (
+                    -32603,
+                    "Invalid session identifier",
+                    json!({"details": [{"error": "invalidSessionId"}]}),
+                ),
+            ] {
+                let state = test_app_state();
+                let session_id = test_session_id(&state, agent);
+                state
+                    .set_external_session_id(&session_id, "saved-session".to_owned())
+                    .unwrap();
+                let pending = Arc::new(Mutex::new(HashMap::new()));
+                let runtime = Arc::new(Mutex::new(AcpRuntimeState {
+                    capabilities: Some(AcpCapabilities {
+                        supports_session_load: Some(true),
+                        supports_session_resume: Some(resume),
+                    }),
+                    ..AcpRuntimeState::default()
+                }));
+                let writer = SharedBufferWriter::default();
+                let worker_state = state.clone();
+                let worker_session = session_id.clone();
+                let worker_pending = pending.clone();
+                let worker_runtime = runtime.clone();
+                let mut worker_writer = writer.clone();
+                let worker = std::thread::spawn(move || {
+                    ensure_acp_session_ready(
+                        &mut worker_writer,
+                        &worker_pending,
+                        &worker_state,
+                        &worker_session,
+                        &worker_runtime,
+                        agent.acp_runtime().unwrap(),
+                        &AcpPromptCommand {
+                            cwd: "/tmp".to_owned(),
+                            cursor_mode: None,
+                            model: "auto".to_owned(),
+                            opencode_effort: None,
+                            opencode_mode: None,
+                            prompt: "Continue".to_owned(),
+                            resume_session_id: Some("saved-session".to_owned()),
+                        },
+                    )
+                });
+                let (_, response) = take_pending_acp_request(&pending);
+                assert_eq!(runtime.lock().unwrap().is_loading_history, !resume);
+                response
+                    .send(Err(AcpResponseError::JsonRpc(AcpJsonRpcError {
+                        code: Some(code),
+                        message: message.to_owned(),
+                        data: Some(data),
+                    })))
+                    .unwrap();
+                worker
+                    .join()
+                    .unwrap()
+                    .expect_err("continuation must fail visibly");
+                let requests = writer
+                    .contents()
+                    .lines()
+                    .map(|line| serde_json::from_str::<Value>(line).unwrap())
+                    .collect::<Vec<_>>();
+                assert_eq!(requests.len(), 1, "no session/new fallback is permitted");
+                assert_eq!(
+                    requests[0]["method"],
+                    if resume {
+                        "session/resume"
+                    } else {
+                        "session/load"
+                    }
+                );
+                let inner = state.inner.lock().unwrap();
+                let index = inner.find_session_index(&session_id).unwrap();
+                assert_eq!(
+                    inner.sessions[index].external_session_id.as_deref(),
+                    Some("saved-session")
+                );
+                let runtime = runtime.lock().unwrap();
+                assert!(!runtime.is_loading_history);
+                assert!(runtime.current_session_id.is_none());
+                assert_eq!(
+                    runtime.capabilities.as_ref().unwrap().supports_session_load,
+                    Some(true)
+                );
+                assert_eq!(
+                    runtime
+                        .capabilities
+                        .as_ref()
+                        .unwrap()
+                        .supports_session_resume,
+                    Some(resume)
+                );
+            }
+        }
+    }
 }
 
 #[test]
@@ -650,142 +617,6 @@ fn established_cursor_config_refresh_preserves_legacy_noop_contract() {
     )
     .expect("established Cursor refresh should remain a successful no-op");
     assert!(writer.contents().is_empty());
-}
-
-// Pins the short-circuit: with `supports_session_load = Some(false)`,
-// `ensure_acp_session_ready` writes `session/new` and never `session/load`,
-// and the capability stays `Some(false)`. Guards against wasting a round-trip
-// (and surfacing a spurious error) against agents that explicitly opted out.
-#[test]
-fn acp_session_resume_skips_load_when_session_load_is_explicitly_unsupported() {
-    let state = test_app_state();
-    let created = state
-        .create_session(CreateSessionRequest {
-            agent: Some(Agent::Cursor),
-            name: Some("Cursor Resume".to_owned()),
-            workdir: Some("/tmp".to_owned()),
-            project_id: None,
-            model: Some("auto".to_owned()),
-            approval_policy: None,
-            reasoning_effort: None,
-            sandbox_mode: None,
-            cursor_mode: Some(CursorMode::Ask),
-            claude_approval_mode: None,
-            claude_effort: None,
-            gemini_approval_mode: None,
-        })
-        .expect("Cursor session should be created");
-    let pending_requests = Arc::new(Mutex::new(HashMap::new()));
-    let runtime_state = Arc::new(Mutex::new(AcpRuntimeState {
-        current_session_id: None,
-        is_loading_history: false,
-        opencode_reconcile_fingerprints: VecDeque::new(),
-        opencode_config_notification_tx: None,
-        capabilities: Some(AcpCapabilities {
-            supports_session_load: Some(false),
-            supports_session_resume: None,
-        }),
-    }));
-    let writer = SharedBufferWriter::default();
-    let thread_writer = writer.clone();
-    let thread_pending_requests = pending_requests.clone();
-    let thread_state = state.clone();
-    let thread_runtime_state = runtime_state.clone();
-    let thread_session_id = created.session_id.clone();
-    let handle = std::thread::spawn(move || {
-        let mut stdin = thread_writer;
-        ensure_acp_session_ready(
-            &mut stdin,
-            &thread_pending_requests,
-            &thread_state,
-            &thread_session_id,
-            &thread_runtime_state,
-            AcpAgent::Cursor,
-            &AcpPromptCommand {
-                cwd: "/tmp".to_owned(),
-                cursor_mode: Some(CursorMode::Ask),
-                model: "auto".to_owned(),
-                opencode_effort: None,
-                opencode_mode: None,
-                prompt: "Resume the prior session".to_owned(),
-                resume_session_id: Some("cursor-session-1".to_owned()),
-            },
-        )
-    });
-
-    let (_new_request_id, new_sender) = take_pending_acp_request(&pending_requests);
-    new_sender
-        .send(Ok(json!({
-            "sessionId": "cursor-session-new",
-            "configOptions": [
-                {
-                    "id": "model",
-                    "currentValue": "auto",
-                    "options": [
-                        {
-                            "value": "auto",
-                            "name": "Auto"
-                        }
-                    ]
-                },
-                {
-                    "id": "mode",
-                    "currentValue": "ask",
-                    "options": [
-                        {
-                            "value": "ask",
-                            "name": "Ask"
-                        }
-                    ]
-                }
-            ]
-        })))
-        .expect("session/new response should send");
-
-    let external_session_id = handle
-        .join()
-        .expect("Cursor ACP worker should finish")
-        .expect("Cursor resume should start a fresh ACP session");
-    assert_eq!(external_session_id, "cursor-session-new");
-
-    let written = writer.contents();
-    assert!(
-        !written.contains("\"method\":\"session/load\""),
-        "session/load should not be written when support is explicitly unavailable\n{written}"
-    );
-    assert!(
-        written.contains("\"method\":\"session/new\""),
-        "session/new should be written when support is explicitly unavailable\n{written}"
-    );
-    assert_emitted_acp_delegation_mcp_descriptor(&written, "session/new", &created.session_id);
-
-    let session = state
-        .snapshot()
-        .sessions
-        .into_iter()
-        .find(|session| session.id == created.session_id)
-        .expect("updated Cursor session should be present");
-    assert_eq!(
-        session.external_session_id.as_deref(),
-        Some("cursor-session-new")
-    );
-
-    let runtime_state = runtime_state
-        .lock()
-        .expect("ACP runtime state mutex poisoned");
-    assert_eq!(
-        runtime_state.current_session_id.as_deref(),
-        Some("cursor-session-new")
-    );
-    assert_eq!(
-        runtime_state
-            .capabilities
-            .as_ref()
-            .and_then(|caps| caps.supports_session_load),
-        Some(false),
-        "explicit not-supported capability must persist unchanged \
-         through the session/new fallback"
-    );
 }
 
 // Pins the ACP cancel wire contract: the active external session id is sent in
@@ -874,7 +705,7 @@ fn acp_stop_preserves_continuity_after_cancelled_prompt_settles() {
 // Pins the never-settles branch without timing assertions: once cancel was
 // queued but the prompt lifecycle remains active beyond the injected
 // grace, the subprocess is killed but the external session id remains owned by
-// the typed resume classifier rather than this local process observation.
+// the explicit continuation contract rather than this local process observation.
 #[test]
 fn acp_stop_kills_after_cancel_grace_when_prompt_never_settles() {
     let fixture = phase_sync::ParkedProcess::spawn();
@@ -953,47 +784,6 @@ fn cursor_deliberate_stop_keeps_immediate_termination_contract() {
         &process,
         "Cursor subprocess reaped without ACP cancellation",
     );
-}
-
-// Pins `is_gemini_invalid_session_load_error` matching "Invalid session identifier"
-// when it appears as an inner anyhow source, not just the outermost message.
-// Guards against a `.to_string()`-only check that would miss the substring once
-// a context like "session/load failed" is layered on top.
-#[test]
-fn gemini_invalid_session_load_error_matches_wrapped_chain_messages() {
-    let err = anyhow::anyhow!("Invalid session identifier").context("session/load failed");
-    assert!(is_gemini_invalid_session_load_error(&err));
-}
-
-// Pins `acp_error_data_indicates_invalid_session_identifier` descending through
-// `details` wrapper fields and arrays while honoring the depth cap — 10 levels
-// match, 11 do not. Guards against unbounded recursion on hostile payloads and
-// against false negatives when agents wrap the marker in their own envelopes.
-#[test]
-fn acp_invalid_session_identifier_detection_handles_wrappers_and_depth_limits() {
-    assert!(acp_error_data_indicates_invalid_session_identifier(
-        &json!({
-            "details": [{
-                "error": "invalidSessionId"
-            }]
-        })
-    ));
-
-    let mut boundary = json!("invalidSessionIdentifier");
-    for _ in 0..10 {
-        boundary = json!({ "details": boundary });
-    }
-    assert!(acp_error_data_indicates_invalid_session_identifier(
-        &boundary
-    ));
-
-    let mut nested = json!("invalidSessionIdentifier");
-    for _ in 0..11 {
-        nested = json!({ "details": nested });
-    }
-    assert!(!acp_error_data_indicates_invalid_session_identifier(
-        &nested
-    ));
 }
 
 // Pins `disable_gemini_interactive_shell_in_settings` flipping
@@ -1145,8 +935,7 @@ fn find_gemini_env_file_reads_home_directory_env_files() {
 //
 // Serialized via `TEST_HOME_ENV_MUTEX` and explicitly isolates HOME plus
 // every Gemini/Google env var that `select_acp_auth_method` reads. Without
-// isolation this test raced `gemini_invalid_session_load_falls_back_to_session_new`
-// in `src/tests/mod.rs` (which sets `GEMINI_API_KEY=test-key-not-real`) —
+// isolation, a sibling test setting a synthetic GEMINI_API_KEY could interfere:
 // `env_var_source("GEMINI_API_KEY")` would see the sibling test's process-
 // env value, `gemini_api_key_source()` would return `Some(...)`, and this
 // assertion would flip from `None` to `Some("gemini-api-key")`.

@@ -4,6 +4,9 @@ This document tracks Gemini as a first-class TermAl agent.
 
 Reference: [`agent-integration-comparison.md`](./agent-integration-comparison.md)
 
+Supported baseline and continuation-error/permission rules:
+[Current Agent Integration Contracts](current-agent-contracts.md#acp-advertised-capabilities-and-typed-permissions).
+
 ## Status
 
 Implemented in TermAl via the shared ACP adapter.

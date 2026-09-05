@@ -37,6 +37,11 @@ struct StartedTurn {
     message_delta: StartedTurnMessageDelta,
 }
 
+enum CodexServiceTierPreparation {
+    Ready(Option<String>),
+    Superseded,
+}
+
 struct StartedTurnMessageDelta {
     session_id: String,
     message_id: String,
@@ -95,6 +100,73 @@ To reply to the sender, use the TermAl MCP tool `termal_send_to_session` with `s
 }
 
 impl AppState {
+    /// Resolves an admitted Fast turn before any thread/turn request is queued.
+    /// Discovery runs on the Fast delivery worker, never the shared stdout reader,
+    /// and waits outside StateInner; its result belongs only to the same
+    /// runtime and turn generation. Publishing capabilities never changes Fast
+    /// authority or re-normalizes the admitted command's model/settings.
+    fn prepare_codex_service_tier_off_lock(
+        &self,
+        session_id: &str,
+        runtime_token: &RuntimeToken,
+        active_turn_generation: u64,
+        model: &str,
+        service_tier: Result<Option<String>>,
+        sender: &mpsc::Sender<CodexRuntimeCommand>,
+    ) -> Result<CodexServiceTierPreparation> {
+        if let Ok(tier) = service_tier {
+            return Ok(CodexServiceTierPreparation::Ready(tier));
+        }
+        let (response_tx, response_rx) = mpsc::channel();
+        {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            if !inner.sessions.iter().any(|record| {
+                record.session.id == session_id
+                    && record.runtime.matches_runtime_token(runtime_token)
+                    && record.active_turn_generation == active_turn_generation
+                    && !record.runtime_stop_in_progress
+                    && record.session.status == SessionStatus::Active
+            }) {
+                return Ok(CodexServiceTierPreparation::Superseded);
+            }
+            sender
+                .send(CodexRuntimeCommand::RefreshModelList { response_tx })
+                .context("failed to queue Codex model discovery; Fast remains enabled")?;
+        }
+        let refreshed = response_rx
+            .recv_timeout(CODEX_MODEL_DISCOVERY_TIMEOUT)
+            .context("Codex model discovery did not return a result; Fast remains enabled")
+            .and_then(|result| {
+                result.map_err(|detail| {
+                    anyhow!("Codex model discovery failed; Fast remains enabled: {detail}")
+                })
+            });
+
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let Some(index) = inner.find_session_index(session_id) else {
+            return Ok(CodexServiceTierPreparation::Superseded);
+        };
+        let record = &inner.sessions[index];
+        if !record.runtime.matches_runtime_token(runtime_token)
+            || record.active_turn_generation != active_turn_generation
+            || record.runtime_stop_in_progress
+            || record.session.status != SessionStatus::Active
+        {
+            return Ok(CodexServiceTierPreparation::Superseded);
+        }
+        let options = refreshed?;
+        let resolved = codex_fast_service_tier_value(model, &options, true);
+        if record.session.model_options != options {
+            inner
+                .session_mut_by_index(index)
+                .expect("session index should be valid")
+                .session
+                .model_options = options;
+            self.commit_locked(&mut inner)?;
+        }
+        resolved.map(CodexServiceTierPreparation::Ready)
+    }
+
     fn prepare_next_queued_turn_engram_off_lock(
         &self,
         session_id: &str,
@@ -512,6 +584,11 @@ impl AppState {
 
                 TurnDispatch::PersistentCodex {
                     active_turn_generation,
+                    service_tier: codex_fast_service_tier_value(
+                        &record.session.model,
+                        &record.session.model_options,
+                        record.session.codex_fast_mode,
+                    ),
                     command: CodexPromptCommand {
                         active_turn_generation,
                         approval_policy: record.codex_approval_policy,
@@ -520,11 +597,8 @@ impl AppState {
                         model: record.session.model.clone(),
                         prompt: runtime_prompt.to_owned(),
                         reasoning_effort: record.codex_reasoning_effort,
-                        service_tier: codex_fast_service_tier_value(
-                            &record.session.model,
-                            &record.session.model_options,
-                            record.session.codex_fast_mode,
-                        ),
+                        // Resolved off the state lock before runtime delivery.
+                        service_tier: None,
                         resume_thread_id: record.external_session_id.clone(),
                         sandbox_mode: record.codex_sandbox_mode,
                     },

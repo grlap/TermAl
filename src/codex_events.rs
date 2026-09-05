@@ -965,11 +965,6 @@ fn handle_shared_codex_app_server_notification(
                 recorder,
             )?;
         }
-        // Current Codex app-server text is carried by the typed v2
-        // `item/agentMessage/delta` + `item/completed` lifecycle above.
-        // Consuming these legacy mirrors as well would merge two differently
-        // chunked streams and corrupt repetitive Markdown such as tables.
-        "codex/event/agent_message_content_delta" | "codex/event/agent_message" => {}
         "codex/event/task_complete" => {
             if shared_codex_session_thread_id(method, message).is_some() {
                 handle_shared_codex_task_complete(

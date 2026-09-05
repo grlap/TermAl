@@ -2,6 +2,10 @@
 
 Cross-agent reference for TermAl adapter design.
 
+TermAl's supported request, event, permission, and error boundaries are pinned in
+[Current Agent Integration Contracts](current-agent-contracts.md). That contract
+governs adapter behavior; the broader comparison below is protocol background.
+
 Capability details in this document were last verified on 2026-08-13. Agent
 products and ACP are evolving independently, so implementation decisions must
 be based on the capability advertised by the connected runtime rather than on

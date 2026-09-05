@@ -1595,9 +1595,9 @@ fn cursor_permission_request(request_id: &str) -> Value {
             "toolName": "edit_file",
             "description": "Edit src/main.rs",
             "options": [
-                { "optionId": "allow-once" },
-                { "optionId": "allow-always" },
-                { "optionId": "reject-once" }
+                { "optionId": "allow-once", "kind": "allow_once", "name": "Allow once" },
+                { "optionId": "allow-always", "kind": "allow_always", "name": "Always allow" },
+                { "optionId": "reject-once", "kind": "reject_once", "name": "Reject" }
             ]
         }
     })
@@ -1895,139 +1895,6 @@ fn shutdown_repl_codex_process_forces_running_process_after_timeout() {
 
     assert!(forced_shutdown);
     assert!(!status.success());
-}
-
-// Tests that Gemini falls back from a rejected session/load to a new ACP session.
-#[test]
-fn gemini_invalid_session_load_falls_back_to_session_new() {
-    // Hold the home-env mutex and set a dummy GEMINI_API_KEY so
-    // validate_agent_session_setup passes on machines without real Gemini
-    // credentials.  The API key is never used for a real network call — the
-    // ACP runtime is driven by SharedBufferWriter throughout the test.
-    let _env_lock = TEST_HOME_ENV_MUTEX
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let _api_key = ScopedEnvVar::set("GEMINI_API_KEY", "test-key-not-real");
-
-    let state = test_app_state();
-    let created = state
-        .create_session(CreateSessionRequest {
-            agent: Some(Agent::Gemini),
-            name: Some("Gemini Resume".to_owned()),
-            workdir: Some("/tmp".to_owned()),
-            project_id: None,
-            model: Some("gemini-pro".to_owned()),
-            approval_policy: None,
-            reasoning_effort: None,
-            sandbox_mode: None,
-            cursor_mode: None,
-            claude_approval_mode: None,
-            claude_effort: None,
-            gemini_approval_mode: Some(default_gemini_approval_mode()),
-        })
-        .expect("Gemini session should be created");
-    let pending_requests = Arc::new(Mutex::new(HashMap::new()));
-    let runtime_state = Arc::new(Mutex::new(AcpRuntimeState {
-        current_session_id: None,
-        is_loading_history: false,
-        opencode_reconcile_fingerprints: VecDeque::new(),
-        opencode_config_notification_tx: None,
-        capabilities: Some(AcpCapabilities {
-            supports_session_load: Some(true),
-            supports_session_resume: None,
-        }),
-    }));
-    let writer = SharedBufferWriter::default();
-    let thread_writer = writer.clone();
-    let thread_pending_requests = pending_requests.clone();
-    let thread_state = state.clone();
-    let thread_runtime_state = runtime_state.clone();
-    let thread_session_id = created.session_id.clone();
-    let handle = std::thread::spawn(move || {
-        let mut stdin = thread_writer;
-        ensure_acp_session_ready(
-            &mut stdin,
-            &thread_pending_requests,
-            &thread_state,
-            &thread_session_id,
-            &thread_runtime_state,
-            AcpAgent::Gemini,
-            &AcpPromptCommand {
-                cwd: "/tmp".to_owned(),
-                cursor_mode: None,
-                model: "gemini-pro".to_owned(),
-                opencode_effort: None,
-                opencode_mode: None,
-                prompt: "Resume the prior session".to_owned(),
-                resume_session_id: Some("gemini-session-stale".to_owned()),
-            },
-        )
-    });
-
-    let (_load_request_id, load_sender) = take_pending_acp_request(&pending_requests);
-    load_sender
-        .send(Err(AcpResponseError::JsonRpc(AcpJsonRpcError {
-            code: Some(-32602),
-            message: "Invalid session identifier".to_owned(),
-            data: Some(json!({
-                "reason": "invalidSessionIdentifier",
-            })),
-        })))
-        .expect("session/load response should send");
-
-    let (_new_request_id, new_sender) = take_pending_acp_request(&pending_requests);
-    new_sender
-        .send(Ok(json!({
-            "sessionId": "gemini-session-new",
-            "configOptions": [
-                {
-                    "id": "model",
-                    "currentValue": "gemini-pro",
-                    "options": [
-                        {
-                            "value": "gemini-pro",
-                            "name": "Gemini Pro"
-                        }
-                    ]
-                }
-            ]
-        })))
-        .expect("session/new response should send");
-
-    let external_session_id = handle
-        .join()
-        .expect("Gemini ACP worker should finish")
-        .expect("Gemini fallback should recover with a new session");
-    assert_eq!(external_session_id, "gemini-session-new");
-    let written = writer.contents();
-    let load_index = written
-        .find("\"method\":\"session/load\"")
-        .expect("session/load request should be written");
-    let new_index = written
-        .find("\"method\":\"session/new\"")
-        .expect("session/new request should be written");
-    assert!(
-        load_index < new_index,
-        "session/load should happen before session/new\n{written}"
-    );
-    let session = state
-        .snapshot()
-        .sessions
-        .into_iter()
-        .find(|session| session.id == created.session_id)
-        .expect("updated Gemini session should be present");
-    assert_eq!(
-        session.external_session_id.as_deref(),
-        Some("gemini-session-new")
-    );
-    assert_eq!(
-        runtime_state
-            .lock()
-            .expect("ACP runtime state mutex poisoned")
-            .current_session_id
-            .as_deref(),
-        Some("gemini-session-new")
-    );
 }
 
 // Tests that shared Codex global notices update Codex state.

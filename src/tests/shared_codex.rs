@@ -95,7 +95,7 @@ fn prompt_during_codex_thread_setup_does_not_start_a_second_thread() {
         model: "gpt-5.4".to_owned(),
         prompt: prompt.to_owned(),
         reasoning_effort: CodexReasoningEffort::Medium,
-        service_tier: Some(CODEX_FAST_SERVICE_TIER.to_owned()),
+        service_tier: Some("priority".to_owned()),
         resume_thread_id: None,
         sandbox_mode: CodexSandboxMode::WorkspaceWrite,
     };
@@ -1112,7 +1112,7 @@ fn shared_codex_turn_started_notification_does_not_restore_pending_state() {
             model: "gpt-5.4".to_owned(),
             prompt: "inspect race handling".to_owned(),
             reasoning_effort: CodexReasoningEffort::Medium,
-            service_tier: Some(CODEX_FAST_SERVICE_TIER.to_owned()),
+            service_tier: Some("priority".to_owned()),
             resume_thread_id: None,
             sandbox_mode: CodexSandboxMode::WorkspaceWrite,
         },

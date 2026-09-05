@@ -97,8 +97,52 @@ fn record_rejected_turn_dispatch(
     true
 }
 
-/// Delivers turn dispatch.
+/// Keeps transport readers free to route replies needed by Fast discovery.
 fn deliver_turn_dispatch(state: &AppState, dispatch: TurnDispatch) -> Result<(), ApiError> {
+    if matches!(
+        &dispatch,
+        TurnDispatch::PersistentCodex { service_tier: Err(_), .. }
+    ) {
+        let worker_state = state.clone();
+        let session_id = dispatch.session_id().to_owned();
+        let runtime_token = dispatch.runtime_token().clone();
+        let generation = dispatch.active_turn_generation();
+        let notification = dispatch.mailbox_notification().cloned();
+        // Completion callbacks run on the shared stdout reader. Waiting there
+        // for model/list would prevent that same reader from routing its reply.
+        // Only unresolved Fast needs a worker; ready tiers retain direct delivery.
+        if let Err(err) = std::thread::Builder::new()
+            .name("codex-fast-dispatch".to_owned())
+            .spawn(move || {
+                if let Err(err) = deliver_turn_dispatch_now(&worker_state, dispatch) {
+                    // The delivery path records the guarded session error. Do
+                    // not escalate a destination failure to the shared reader.
+                    eprintln!("Codex Fast dispatch> {}", err.message);
+                }
+            })
+        {
+            let detail = format!("failed to start Codex Fast discovery worker: {err}");
+            return if record_rejected_turn_dispatch(
+                state,
+                &session_id,
+                &detail,
+                notification.as_ref(),
+                None,
+                &runtime_token,
+                generation,
+            ) {
+                Err(ApiError::internal(detail))
+            } else {
+                Ok(())
+            };
+        }
+        return Ok(());
+    }
+    deliver_turn_dispatch_now(state, dispatch)
+}
+
+/// Performs delivery on the caller for ready commands, or on the Fast worker.
+fn deliver_turn_dispatch_now(state: &AppState, dispatch: TurnDispatch) -> Result<(), ApiError> {
     let active_turn_generation = dispatch.active_turn_generation();
     let runtime_token = dispatch.runtime_token().clone();
     let delivered_session_id = dispatch.session_id().to_owned();
@@ -158,17 +202,66 @@ fn deliver_turn_dispatch(state: &AppState, dispatch: TurnDispatch) -> Result<(),
         }
         TurnDispatch::PersistentCodex {
             active_turn_generation: _,
-            command,
+            mut command,
+            service_tier,
             engram_dispatch_generation: _,
             mailbox_notification,
             runtime_token: _,
             sender,
             session_id,
         } => {
+            let resolved_tier = state.prepare_codex_service_tier_off_lock(
+                &session_id,
+                &runtime_token,
+                active_turn_generation,
+                &command.model,
+                service_tier,
+                &sender,
+            );
+            command.service_tier = match resolved_tier {
+                Ok(CodexServiceTierPreparation::Ready(tier)) => tier,
+                Ok(CodexServiceTierPreparation::Superseded) => {
+                    // The terminal/Stop owner retains and recovers the record's
+                    // active mailbox boundary. A stale discovery must not
+                    // requeue its copy over a successor or a user-held wake.
+                    return Ok(());
+                }
+                Err(err) => {
+                    let detail = format!("failed to resolve Codex Fast before dispatch: {err:#}. Retry or select Standard with /fast or settings");
+                    return if record_rejected_turn_dispatch(
+                        state,
+                        &session_id,
+                        &detail,
+                        mailbox_notification.as_ref(),
+                        None,
+                        &runtime_token,
+                        active_turn_generation,
+                    ) {
+                        Err(ApiError::internal(detail))
+                    } else {
+                        Ok(())
+                    };
+                }
+            };
+            // Stop/restart or a newer turn can supersede discovery while it is
+            // waiting. Check and enqueue under the same lock as those transitions.
+            let inner = state.inner.lock().expect("state mutex poisoned");
+            let Some(index) = inner.find_session_index(&session_id) else {
+                return Ok(());
+            };
+            let record = &inner.sessions[index];
+            if !record.runtime.matches_runtime_token(&runtime_token)
+                || record.active_turn_generation != active_turn_generation
+                || record.runtime_stop_in_progress
+                || record.session.status != SessionStatus::Active
+            {
+                return Ok(());
+            }
             if let Err(err) = sender.send(CodexRuntimeCommand::Prompt {
                 session_id: session_id.clone(),
                 command,
             }) {
+                drop(inner);
                 record_rejected_turn_dispatch(
                     state,
                     &session_id,

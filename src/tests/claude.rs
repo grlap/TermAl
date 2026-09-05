@@ -869,7 +869,7 @@ fn claude_transient_api_retry_accepts_success_subtype_when_is_error_is_true() {
 }
 
 #[test]
-fn claude_transient_api_retry_has_bounded_exact_legacy_fallback() {
+fn claude_transient_api_retry_requires_numeric_status_and_never_parses_prose() {
     for status in [429, 503, 529] {
         let message = json!({
             "type": "result",
@@ -877,7 +877,21 @@ fn claude_transient_api_retry_has_bounded_exact_legacy_fallback() {
             "is_error": true,
             "result": format!("API Error: {status} temporary failure")
         });
-        assert_eq!(claude_transient_api_status(&message), Some(status));
+        assert_eq!(claude_transient_api_status(&message), None);
+        for malformed in [
+            json!(null),
+            json!(status.to_string()),
+            json!(529.5),
+            json!(-1),
+            json!(true),
+        ] {
+            let mut malformed_message = message.clone();
+            malformed_message["api_error_status"] = malformed;
+            assert_eq!(claude_transient_api_status(&malformed_message), None);
+        }
+        let mut numeric_message = message;
+        numeric_message["api_error_status"] = json!(status);
+        assert_eq!(claude_transient_api_status(&numeric_message), Some(status));
     }
 
     for message in [

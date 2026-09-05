@@ -2,7 +2,7 @@
 
 This document describes the current session-scoped model controls in TermAl.
 
-Backlog source: [`docs/bugs.md`](../bugs.md)
+Protocol baseline: [Current Agent Integration Contracts](current-agent-contracts.md).
 
 ## Status
 
@@ -56,9 +56,11 @@ palette.
   requests remain interactive. An active read-only delegation always wins over
   AutoApprove and receives the normal decline response instead of an approval.
 - Fast mode appears only when the active model's `model/list` entry advertises
-  the Fast service tier. TermAl sends the tier id advertised by the catalog
-  (`priority` in the current catalog and compatibility fallback); Standard
-  sends an explicit null so a previously sticky tier is cleared.
+  the Fast service tier. TermAl sends the exact tier id advertised by the
+  catalog; Standard sends an explicit null so a previously sticky tier is
+  cleared. If a persisted Fast choice cannot be resolved, dispatch requests the
+  live catalog first. An unavailable catalog or missing tier fails visibly,
+  preserves Fast, and offers retry or Standard through `/fast` or settings.
 - `/fast` opens the same Standard/Fast choice in the composer. Switching to a
   model that does not advertise Fast safely resets the session to Standard.
 - Reasoning-effort options are filtered by the selected model's supported

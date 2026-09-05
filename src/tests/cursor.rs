@@ -364,30 +364,49 @@ fn cursor_ask_mode_queues_acp_permission_requests() {
 }
 
 #[test]
-fn acp_permission_matching_prefers_typed_kind_over_generic_hint_order() {
+fn acp_permission_matching_uses_exact_kinds_and_preserves_opaque_ids() {
     let options = vec![
         json!({ "optionId": "always", "kind": "allow_always", "name": "Always allow" }),
         json!({ "optionId": "once", "kind": "allow_once", "name": "Allow once" }),
     ];
 
     assert_eq!(
-        find_acp_permission_option(&options, &["allow-once", "allow_once", "allow"]),
+        find_acp_permission_option(&options, &["allow_once"]),
         Some("once".to_owned()),
-        "the generic `allow` fallback must not capture an earlier allow-always option"
+        "one-time approval must not select permanent approval"
     );
     assert_eq!(
-        find_acp_permission_option(
-            &options,
-            &["allow-always", "allow_always", "always", "acceptForSession"],
-        ),
+        find_acp_permission_option(&options, &["allow_always"],),
         Some("always".to_owned())
     );
     let allow_always_only =
         vec![json!({ "optionId": "always", "kind": "allow_always", "name": "Always allow" })];
     assert_eq!(
-        find_acp_permission_option(&allow_always_only, &["allow-once", "allow_once", "allow"]),
+        find_acp_permission_option(&allow_always_only, &["allow_once"]),
         None,
-        "a generic allow hint must not escalate one-turn approval to allow-always"
+        "one-time approval must not select permanent approval"
+    );
+    let deceptive = vec![
+        json!({ "optionId": "allow_once", "kind": "allow_always", "name": "Allow once" }),
+        json!({ "optionId": "allow-once", "name": "Allow once" }),
+        json!({ "optionId": "old", "kind": "allow-once" }),
+        json!({ "id": "old-id-field", "kind": "allow_once" }),
+        json!({ "optionId": "", "kind": "allow_once" }),
+    ];
+    assert_eq!(
+        find_acp_permission_option(&deceptive, &["allow_once"]),
+        None
+    );
+    let opaque =
+        vec![json!({ "optionId": "Reject-OPAQUE-42", "kind": "allow_once", "name": "Reject" })];
+    assert_eq!(
+        find_acp_permission_option(&opaque, &["allow_once"]),
+        Some("Reject-OPAQUE-42".to_owned())
+    );
+    let reject = vec![json!({ "optionId": "no", "kind": "reject_always" })];
+    assert_eq!(
+        find_acp_permission_option(&reject, &["reject_once", "reject_always"]),
+        Some("no".to_owned())
     );
 }
 

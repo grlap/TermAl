@@ -20,6 +20,450 @@
 
 use super::*;
 
+fn codex_fast_dispatch_fixture(
+    fast: bool,
+    options: Vec<SessionModelOption>,
+) -> (
+    AppState,
+    String,
+    TurnDispatch,
+    mpsc::Receiver<CodexRuntimeCommand>,
+) {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let (runtime, input_rx) = test_codex_runtime_handle("fast-discovery");
+    {
+        let mut inner = state.inner.lock().unwrap();
+        let index = inner.find_session_index(&session_id).unwrap();
+        let record = &mut inner.sessions[index];
+        record.runtime = SessionRuntime::Codex(runtime);
+        record.session.model = "catalog-model".to_owned();
+        record.session.codex_fast_mode = fast;
+        record.session.model_options = options;
+    }
+    let result = state
+        .dispatch_turn(
+            &session_id,
+            SendMessageRequest {
+                text: "Continue".to_owned(),
+                expanded_text: None,
+                attachments: Vec::new(),
+                source_session_id: None,
+                source_mailbox: None,
+            },
+        )
+        .unwrap();
+    let DispatchTurnResult::Dispatched(dispatch) = result else {
+        panic!("idle session must dispatch")
+    };
+    (state, session_id, dispatch, input_rx)
+}
+
+fn codex_fast_catalog() -> Vec<SessionModelOption> {
+    codex_model_options(&json!({ "data": [{
+        "model": "catalog-model",
+        "serviceTiers": [{ "id": "Turbo-EXACT", "name": "Fast", "description": "Fast service" }]
+    }] }))
+}
+
+// Drive both completion and JSON-RPC replies on one reader, exactly like the
+// shared stdout loop. A hand-fed discovery response bypasses this dependency
+// and cannot prove that completion-triggered delivery leaves the reader free.
+#[test]
+fn codex_fast_queued_completion_keeps_shared_reader_routing_responses() {
+    for catalog_succeeds in [true, false] {
+        let (state, session_id, first_dispatch, _) = codex_fast_dispatch_fixture(false, Vec::new());
+        drop(first_dispatch);
+        let process_owner = phase_sync::ParkedProcess::spawn();
+        let (runtime, input_rx, process) = test_shared_codex_runtime_with_process(
+            "fast-completion-reader",
+            process_owner.process.clone(),
+        );
+        {
+            let mut inner = state.inner.lock().unwrap();
+            let index = inner.find_session_index(&session_id).unwrap();
+            let record = &mut inner.sessions[index];
+            record.runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+                runtime_id: runtime.runtime_id.clone(),
+                input_tx: runtime.input_tx.clone(),
+                process,
+                shared_session: Some(SharedCodexSessionHandle {
+                    runtime: runtime.clone(),
+                    session_id: session_id.clone(),
+                }),
+            });
+            record.external_session_id = Some("fast-thread".to_owned());
+            record.session.codex_fast_mode = true;
+        }
+        runtime.sessions.lock().unwrap().insert(
+            session_id.clone(),
+            SharedCodexSessionState {
+                thread_id: Some("fast-thread".to_owned()),
+                turn_id: Some("first-turn".to_owned()),
+                turn_started: true,
+                ..SharedCodexSessionState::default()
+            },
+        );
+        runtime
+            .thread_sessions
+            .lock()
+            .unwrap()
+            .insert("fast-thread".to_owned(), session_id.clone());
+        assert!(matches!(
+            state
+                .dispatch_turn(
+                    &session_id,
+                    SendMessageRequest {
+                        text: "Queued Fast turn".to_owned(),
+                        expanded_text: None,
+                        attachments: Vec::new(),
+                        source_session_id: None,
+                        source_mailbox: None,
+                    }
+                )
+                .unwrap(),
+            DispatchTurnResult::Queued
+        ));
+
+        let pending: CodexPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
+        std::thread::scope(|scope| {
+            let (frames_tx, frames_rx) = mpsc::channel::<Value>();
+            let (completion_tx, completion_rx) = mpsc::channel();
+            let reader_state = &state;
+            let reader_runtime = &runtime;
+            let reader_pending = &pending;
+            let reader = scope.spawn(move || {
+                for frame in frames_rx {
+                    let result = handle_shared_codex_app_server_message(
+                        &frame,
+                        reader_state,
+                        &reader_runtime.runtime_id,
+                        reader_pending,
+                        &reader_runtime.sessions,
+                        &reader_runtime.thread_sessions,
+                        &reader_runtime.input_tx,
+                    );
+                    if frame["method"] == "turn/completed" {
+                        completion_tx
+                            .send(result.map_err(|err| format!("{err:#}")))
+                            .unwrap();
+                    } else {
+                        result.unwrap();
+                    }
+                }
+            });
+            frames_tx
+                .send(json!({ "method": "turn/completed", "params": {
+                "threadId": "fast-thread", "turn": { "id": "first-turn", "status": "completed" }
+            } }))
+                .unwrap();
+            let CodexRuntimeCommand::RefreshModelList { response_tx } =
+                phase_sync::receive(&input_rx, "completion dispatch requests Fast catalog")
+            else {
+                panic!("queued Fast must discover before any thread/turn request")
+            };
+            let mut wire = Vec::new();
+            fire_codex_model_list_page(
+                &mut wire,
+                &pending,
+                &runtime.input_tx,
+                None,
+                Vec::new(),
+                1,
+                response_tx,
+            )
+            .unwrap();
+            let request: Value = serde_json::from_slice(&wire).unwrap();
+            assert_eq!(request["method"], "model/list");
+
+            // The model reply is deliberately withheld: completion must return
+            // without it, and that same reader must route an unrelated reply.
+            let completion = phase_sync::receive(
+                &completion_rx,
+                "shared reader returns from completion before catalog response",
+            );
+            assert!(
+                completion.is_ok(),
+                "shared reader blocked waiting for its own model/list response: {completion:?}"
+            );
+            let (unrelated_tx, unrelated_rx) = mpsc::channel();
+            pending
+                .lock()
+                .unwrap()
+                .insert("unrelated-request".to_owned(), unrelated_tx);
+            frames_tx
+                .send(json!({ "id": "unrelated-request", "result": { "routed": true } }))
+                .unwrap();
+            assert_eq!(
+                phase_sync::receive(&unrelated_rx, "other shared requests remain routable")
+                    .unwrap(),
+                json!({ "routed": true })
+            );
+            frames_tx.send(if catalog_succeeds {
+                json!({ "id": request["id"], "result": { "data": [{
+                    "model": "catalog-model", "serviceTiers": [{ "id": "Turbo-EXACT", "name": "Fast" }]
+                }], "nextCursor": null } })
+            } else {
+                json!({ "id": request["id"], "error": { "code": -32000, "message": "catalog unavailable" } })
+            }).unwrap();
+            if catalog_succeeds {
+                let CodexRuntimeCommand::Prompt {
+                    command,
+                    session_id: delivered_id,
+                } = phase_sync::receive(&input_rx, "routed catalog permits queued Fast prompt")
+                else {
+                    panic!("expected resolved Fast prompt")
+                };
+                assert_eq!(delivered_id, session_id);
+                assert_eq!(command.prompt, "Queued Fast turn");
+                assert_eq!(command.service_tier.as_deref(), Some("Turbo-EXACT"));
+            } else {
+                let guard = phase_sync::PollGuard::new();
+                loop {
+                    let inner = state.inner.lock().unwrap();
+                    if inner.sessions[inner.find_session_index(&session_id).unwrap()]
+                        .session
+                        .status
+                        == SessionStatus::Error
+                    {
+                        break;
+                    }
+                    drop(inner);
+                    guard.wait("catalog error terminalizes only its destination");
+                }
+                assert!(matches!(
+                    input_rx.try_recv(),
+                    Err(mpsc::TryRecvError::Empty)
+                ));
+            }
+            drop(frames_tx);
+            reader.join().unwrap();
+        });
+        assert!(pending.lock().unwrap().is_empty());
+        assert!(
+            process_owner.process.try_wait().unwrap().is_none(),
+            "catalog outcome must not kill the shared app-server"
+        );
+    }
+}
+
+// These direct-body tests join the delivery worker to inspect its final result
+// and generation guards. The reader-path test above owns the async handoff.
+#[test]
+fn codex_fast_dispatch_discovers_catalog_off_lock_before_prompt() {
+    let (state, session_id, dispatch, input_rx) = codex_fast_dispatch_fixture(true, Vec::new());
+    let worker_state = state.clone();
+    let worker = std::thread::spawn(move || deliver_turn_dispatch_now(&worker_state, dispatch));
+    let CodexRuntimeCommand::RefreshModelList { response_tx } =
+        phase_sync::receive(&input_rx, "Fast dispatch requests current model catalog")
+    else {
+        panic!("catalog discovery must precede any prompt")
+    };
+    // Prove the state lock is available while the response is still withheld,
+    // without racing the short enqueue critical section with try_lock.
+    let observer_state = state.clone();
+    let (lock_tx, lock_rx) = mpsc::channel();
+    let observer = std::thread::spawn(move || {
+        let _inner = observer_state.inner.lock().unwrap();
+        lock_tx.send(()).unwrap();
+    });
+    phase_sync::receive(&lock_rx, "state remains available during Fast discovery");
+    observer.join().unwrap();
+    assert!(matches!(
+        input_rx.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
+    response_tx.send(Ok(codex_fast_catalog())).unwrap();
+    worker.join().unwrap().unwrap();
+    let CodexRuntimeCommand::Prompt { command, .. } = input_rx.try_recv().unwrap() else {
+        panic!("resolved catalog should permit prompt delivery")
+    };
+    assert_eq!(command.service_tier.as_deref(), Some("Turbo-EXACT"));
+    let inner = state.inner.lock().unwrap();
+    assert_eq!(
+        inner.sessions[inner.find_session_index(&session_id).unwrap()]
+            .session
+            .model_options,
+        codex_fast_catalog(),
+        "current discovery must publish the catalog without rewriting Fast authority"
+    );
+    assert!(
+        inner.sessions[inner.find_session_index(&session_id).unwrap()]
+            .session
+            .codex_fast_mode
+    );
+}
+
+#[test]
+fn codex_fast_dispatch_failure_preserves_choice_and_sends_no_prompt() {
+    for response in [
+        Ok(Vec::new()),
+        Ok(vec![SessionModelOption::plain(
+            "catalog-model",
+            "catalog-model",
+        )]),
+        Ok(vec![SessionModelOption::plain(
+            "different-model",
+            "different-model",
+        )]),
+        Err("model/list unavailable".to_owned()),
+    ] {
+        let (state, session_id, dispatch, input_rx) = codex_fast_dispatch_fixture(true, Vec::new());
+        let worker_state = state.clone();
+        let worker = std::thread::spawn(move || deliver_turn_dispatch_now(&worker_state, dispatch));
+        let CodexRuntimeCommand::RefreshModelList { response_tx } =
+            phase_sync::receive(&input_rx, "unresolved Fast requests current model catalog")
+        else {
+            panic!("expected catalog discovery")
+        };
+        let expected_catalog = response.as_ref().ok().cloned();
+        response_tx.send(response).unwrap();
+        let error = worker
+            .join()
+            .unwrap()
+            .expect_err("unresolved Fast must fail before delivery");
+        assert!(error.message.contains("/fast"), "{}", error.message);
+        assert!(matches!(
+            input_rx.try_recv(),
+            Err(mpsc::TryRecvError::Disconnected)
+        ));
+        let inner = state.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(&session_id).unwrap()];
+        if let Some(expected_catalog) = expected_catalog {
+            assert_eq!(record.session.model_options, expected_catalog);
+        }
+        assert!(record.session.codex_fast_mode);
+        assert_eq!(record.session.status, SessionStatus::Error);
+        assert!(record.session.messages.iter().any(|message| {
+            matches!(message, Message::Text { text, .. } if text.contains("failed to resolve Codex Fast"))
+        }));
+    }
+}
+
+#[test]
+fn codex_fast_discovery_cannot_deliver_or_fail_a_superseding_turn() {
+    for supersession in ["turn", "runtime", "stop"] {
+        for succeeds in [false, true] {
+            let (state, session_id, dispatch, input_rx) =
+                codex_fast_dispatch_fixture(true, Vec::new());
+            let worker_state = state.clone();
+            let worker =
+                std::thread::spawn(move || deliver_turn_dispatch_now(&worker_state, dispatch));
+            let CodexRuntimeCommand::RefreshModelList { response_tx } =
+                phase_sync::receive(&input_rx, "Fast discovery waits before supersession")
+            else {
+                panic!("expected catalog discovery")
+            };
+            {
+                let mut inner = state.inner.lock().unwrap();
+                let index = inner.find_session_index(&session_id).unwrap();
+                let record = &mut inner.sessions[index];
+                match supersession {
+                    "turn" => record.active_turn_generation += 1,
+                    "runtime" => record.runtime = SessionRuntime::None,
+                    "stop" => record.runtime_stop_in_progress = true,
+                    _ => unreachable!(),
+                }
+            }
+            response_tx
+                .send(if succeeds {
+                    Ok(codex_fast_catalog())
+                } else {
+                    Err("old discovery failed".to_owned())
+                })
+                .unwrap();
+            worker.join().unwrap().unwrap();
+            assert!(matches!(
+                input_rx.try_recv(),
+                Err(mpsc::TryRecvError::Empty | mpsc::TryRecvError::Disconnected)
+            ));
+            let inner = state.inner.lock().unwrap();
+            assert!(
+                inner.sessions[inner.find_session_index(&session_id).unwrap()]
+                    .session
+                    .model_options
+                    .is_empty(),
+                "stale discovery must not publish a catalog"
+            );
+            assert_eq!(
+                inner.sessions[inner.find_session_index(&session_id).unwrap()]
+                    .session
+                    .status,
+                SessionStatus::Active
+            );
+        }
+    }
+}
+
+#[test]
+fn stale_codex_fast_dispatch_does_not_even_request_discovery() {
+    let (state, session_id, dispatch, input_rx) = codex_fast_dispatch_fixture(true, Vec::new());
+    {
+        let mut inner = state.inner.lock().unwrap();
+        let index = inner.find_session_index(&session_id).unwrap();
+        inner.sessions[index].active_turn_generation += 1;
+    }
+    deliver_turn_dispatch_now(&state, dispatch).unwrap();
+    assert!(matches!(
+        input_rx.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
+}
+
+#[test]
+fn codex_dispatch_with_resolved_choice_does_not_request_catalog() {
+    for fast in [false, true] {
+        let (state, _, dispatch, input_rx) = codex_fast_dispatch_fixture(
+            fast,
+            if fast {
+                codex_fast_catalog()
+            } else {
+                Vec::new()
+            },
+        );
+        deliver_turn_dispatch(&state, dispatch).unwrap();
+        let CodexRuntimeCommand::Prompt { command, .. } = input_rx.try_recv().unwrap() else {
+            panic!("a resolved choice needs no discovery")
+        };
+        assert_eq!(
+            command.service_tier.as_deref(),
+            fast.then_some("Turbo-EXACT")
+        );
+    }
+}
+
+#[test]
+fn repl_codex_catalog_reads_later_pages_and_bounds_pagination() {
+    let mut cursors = Vec::new();
+    let options = read_codex_model_options(|params| {
+        cursors.push(params["cursor"].clone());
+        Ok(if cursors.len() == 1 {
+            json!({ "data": [], "nextCursor": "page-2" })
+        } else {
+            json!({ "data": [{ "model": "catalog-model", "serviceTiers": [{ "id": "Exact", "name": "Fast" }] }], "nextCursor": null })
+        })
+    }).unwrap();
+    assert_eq!(cursors, vec![Value::Null, json!("page-2")]);
+    assert_eq!(
+        codex_fast_service_tier_value("catalog-model", &options, true)
+            .unwrap()
+            .as_deref(),
+        Some("Exact")
+    );
+    let mut calls = 0;
+    assert!(
+        read_codex_model_options(|_| {
+            calls += 1;
+            Ok(json!({ "data": [], "nextCursor": "again" }))
+        })
+        .unwrap_err()
+        .to_string()
+        .contains("pagination exceeded")
+    );
+    assert_eq!(calls, SHARED_CODEX_MODEL_LIST_MAX_PAGES);
+    assert!(read_codex_model_options(|_| Err(anyhow!("catalog unavailable"))).is_err());
+}
+
 // pins that `refresh_session_model_options` round-trips a
 // `RefreshModelList` command through the Codex runtime and persists
 // the returned options onto the session. guards against regressions

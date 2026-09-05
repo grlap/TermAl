@@ -847,6 +847,11 @@ The UI should still not evolve toward:
 
 ## Agent Integration
 
+The supported upstream baselines, required fields, and capability/error rules
+are pinned in [Current Agent Integration Contracts](features/current-agent-contracts.md).
+That contract separates current runtime recovery from unsupported-version
+fallbacks and defines catalog-only Codex Fast dispatch.
+
 ### Process descriptor capacity
 
 On Unix, TermAl raises its process-wide soft `RLIMIT_NOFILE` toward 8192 at
@@ -941,9 +946,11 @@ codex app-server   # JSON-RPC over stdin/stdout
 **Fast mode:** Codex `model/list` entries may advertise a `Fast` service tier.
 TermAl retains those tiers in `SessionModelOption`, exposes Fast only for the
 active supporting model, persists the session authority, and sends the
-catalog-advertised tier id (`priority` in the current catalog and compatibility
-fallback) on `thread/start`, `thread/resume`, and `turn/start`. Standard turns
-send `serviceTier: null` to clear a tier inherited by the thread.
+exact catalog-advertised tier id on `thread/start`, `thread/resume`, and
+`turn/start`. An unresolved Fast choice triggers live model discovery before
+dispatch; failure preserves Fast and reports a retryable error with a Standard
+escape hatch. Standard turns send `serviceTier: null` to clear a tier inherited
+by the thread. No tier id is synthesized from deprecated catalog fields.
 
 ### Cursor
 
