@@ -2035,10 +2035,11 @@ fn persist_worker_retry_wait_times_out_without_new_delta() {
     let retry_state = PersistWorkerRetryState {
         retry_after_failure: true,
         retry_delay: Duration::from_millis(1),
+        ..PersistWorkerRetryState::default()
     };
 
     assert_eq!(
-        retry_state.wait_for_next_tick(&persist_rx),
+        retry_state.wait_for_next_tick(&persist_rx, &mut PersistFenceBatch::default()),
         PersistWorkerWaitOutcome::Process,
         "timeout while the channel is still connected should trigger a retry tick"
     );
@@ -2050,13 +2051,14 @@ fn persist_worker_retry_wait_accepts_new_delta_during_backoff() {
     let retry_state = PersistWorkerRetryState {
         retry_after_failure: true,
         retry_delay: Duration::from_secs(30),
+        ..PersistWorkerRetryState::default()
     };
     persist_tx
         .send(PersistRequest::Delta)
         .expect("test persist signal should send");
 
     assert_eq!(
-        retry_state.wait_for_next_tick(&persist_rx),
+        retry_state.wait_for_next_tick(&persist_rx, &mut PersistFenceBatch::default()),
         PersistWorkerWaitOutcome::Process,
         "new persist signals during backoff should wake the worker immediately"
     );
@@ -2069,10 +2071,11 @@ fn persist_worker_retry_wait_observes_shutdown_during_backoff() {
     let retry_state = PersistWorkerRetryState {
         retry_after_failure: true,
         retry_delay: Duration::from_secs(30),
+        ..PersistWorkerRetryState::default()
     };
 
     assert_eq!(
-        retry_state.wait_for_next_tick(&persist_rx),
+        retry_state.wait_for_next_tick(&persist_rx, &mut PersistFenceBatch::default()),
         PersistWorkerWaitOutcome::Exit,
         "disconnected retry wait should stop the worker instead of spinning"
     );
@@ -2092,7 +2095,7 @@ fn persist_worker_wait_observes_explicit_shutdown_signal() {
     // while disconnect aborts immediately. See `app_boot.rs`'s persist
     // loop for the corresponding `should_exit_after_tick` handling.
     assert_eq!(
-        retry_state.wait_for_next_tick(&persist_rx),
+        retry_state.wait_for_next_tick(&persist_rx, &mut PersistFenceBatch::default()),
         PersistWorkerWaitOutcome::Shutdown,
         "explicit shutdown signal must be reported as Shutdown, not Exit",
     );
@@ -2107,10 +2110,11 @@ fn persist_worker_wait_observes_shutdown_during_retry_backoff() {
     let retry_state = PersistWorkerRetryState {
         retry_after_failure: true,
         retry_delay: Duration::from_secs(30),
+        ..PersistWorkerRetryState::default()
     };
 
     assert_eq!(
-        retry_state.wait_for_next_tick(&persist_rx),
+        retry_state.wait_for_next_tick(&persist_rx, &mut PersistFenceBatch::default()),
         PersistWorkerWaitOutcome::Shutdown,
         "shutdown during a retry backoff should still drain one final tick before exit",
     );
@@ -2484,18 +2488,16 @@ fn shutdown_persist_blocking_drains_and_joins_a_real_worker() {
         .name("test-persist-shutdown-loop".to_owned())
         .spawn(move || {
             let mut retry_state = PersistWorkerRetryState::default();
+            let mut fences = PersistFenceBatch::default();
             loop {
-                let outcome = retry_state.wait_for_next_tick(&persist_rx);
+                let outcome = retry_state.wait_for_next_tick(&persist_rx, &mut fences);
                 if matches!(outcome, PersistWorkerWaitOutcome::Exit) {
                     break;
                 }
-                let mut should_exit_after_tick =
-                    matches!(outcome, PersistWorkerWaitOutcome::Shutdown);
-                while let Ok(req) = persist_rx.try_recv() {
-                    if matches!(req, PersistRequest::Shutdown) {
-                        should_exit_after_tick = true;
-                    }
-                }
+                let should_exit_after_tick = fences.drain(
+                    &persist_rx,
+                    matches!(outcome, PersistWorkerWaitOutcome::Shutdown),
+                );
                 drained_ticks_for_thread.fetch_add(1, Ordering::SeqCst);
                 retry_state.record_result(&Ok(()));
                 if should_exit_after_tick {

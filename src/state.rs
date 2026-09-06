@@ -30,14 +30,17 @@ mutex.
 /// the global mutex, then clones each selected session/delegation in a separate
 /// acquisition before writing to SQLite via `persist_delta_via_cache` (see
 /// `persist.rs`).
-/// `PersistRequest` therefore carries only the wake signal; the full
-/// `PersistedState` snapshot that earlier versions cloned under the
-/// state mutex is no longer needed.
+/// Ordinary requests carry only a wake signal. Fences additionally carry a
+/// narrow content target and a completion handle, never a full state snapshot.
 enum PersistRequest {
     /// Incremental persist: the thread looks up the current
     /// `last_mutation_stamp` and writes only the sessions that
     /// advanced past the thread's own watermark.
     Delta,
+    /// A content-specific durability acknowledgement. Not yet used by request
+    /// handlers; ordinary state writes retain their asynchronous contract.
+    #[allow(dead_code)]
+    Fence(Box<PersistFence>),
     /// Graceful-shutdown signal: the persist worker performs one final
     /// drain-and-write tick (so any pending mutation reaches SQLite),
     /// then exits its loop. The matching `JoinHandle` lives on

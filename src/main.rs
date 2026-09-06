@@ -681,6 +681,7 @@ include!("codex_discovery.rs");
 include!("codex_validation.rs");
 include!("persisted_state.rs");
 include!("persist.rs");
+include!("persist_fence.rs");
 include!("coordination_persist.rs");
 include!("mailboxes.rs");
 include!("delegation_review_results.rs");

@@ -40,6 +40,8 @@
 
 const PERSIST_RETRY_SEED_DELAY: Duration = Duration::from_millis(250);
 const PERSIST_RETRY_MAX_DELAY: Duration = Duration::from_secs(30);
+const PERSIST_FENCE_RETRY_SEED_DELAY: Duration = Duration::from_millis(250);
+const PERSIST_FENCE_RETRY_MAX_DELAY: Duration = Duration::from_secs(30);
 const COORDINATION_CLEANUP_RETRY_SEED_DELAY: Duration = Duration::from_millis(250);
 const COORDINATION_CLEANUP_RETRY_MAX_DELAY: Duration = Duration::from_secs(30);
 
@@ -47,6 +49,7 @@ const COORDINATION_CLEANUP_RETRY_MAX_DELAY: Duration = Duration::from_secs(30);
 struct PersistWorkerRetryState {
     retry_after_failure: bool,
     retry_delay: Duration,
+    fence_retry_delay: Option<Duration>,
 }
 
 impl Default for PersistWorkerRetryState {
@@ -54,6 +57,7 @@ impl Default for PersistWorkerRetryState {
         Self {
             retry_after_failure: false,
             retry_delay: PERSIST_RETRY_SEED_DELAY,
+            fence_retry_delay: None,
         }
     }
 }
@@ -154,25 +158,33 @@ impl CoordinationCleanupRetryState {
 }
 
 impl PersistWorkerRetryState {
+    fn next_tick_delay(&self) -> Option<Duration> {
+        match (self.retry_after_failure.then_some(self.retry_delay), self.fence_retry_delay) {
+            (Some(failure), Some(fence)) => Some(failure.min(fence)),
+            (failure, fence) => failure.or(fence),
+        }
+    }
+
     fn wait_for_next_tick(
         &self,
         persist_rx: &mpsc::Receiver<PersistRequest>,
+        fences: &mut PersistFenceBatch,
     ) -> PersistWorkerWaitOutcome {
-        if self.retry_after_failure {
-            match persist_rx.recv_timeout(self.retry_delay) {
-                Ok(PersistRequest::Delta) => PersistWorkerWaitOutcome::Process,
-                Ok(PersistRequest::Shutdown) => PersistWorkerWaitOutcome::Shutdown,
-                // Synthetic retry tick: the previous attempt failed and the
-                // backoff window expired with no new signal, so try again.
-                Err(mpsc::RecvTimeoutError::Timeout) => PersistWorkerWaitOutcome::Process,
-                Err(mpsc::RecvTimeoutError::Disconnected) => PersistWorkerWaitOutcome::Exit,
-            }
-        } else {
-            match persist_rx.recv() {
-                Ok(PersistRequest::Delta) => PersistWorkerWaitOutcome::Process,
-                Ok(PersistRequest::Shutdown) => PersistWorkerWaitOutcome::Shutdown,
-                Err(_) => PersistWorkerWaitOutcome::Exit,
-            }
+        self.wait_for_next_tick_using(fences, |delay| match delay {
+            Some(delay) => persist_rx.recv_timeout(delay),
+            None => persist_rx.recv().map_err(|_| mpsc::RecvTimeoutError::Disconnected),
+        })
+    }
+
+    fn wait_for_next_tick_using(
+        &self,
+        fences: &mut PersistFenceBatch,
+        receive: impl FnOnce(Option<Duration>) -> std::result::Result<PersistRequest, mpsc::RecvTimeoutError>,
+    ) -> PersistWorkerWaitOutcome {
+        match receive(self.next_tick_delay()) {
+            Ok(request) => fences.accept(request),
+            Err(mpsc::RecvTimeoutError::Timeout) => PersistWorkerWaitOutcome::Process,
+            Err(mpsc::RecvTimeoutError::Disconnected) => PersistWorkerWaitOutcome::Exit,
         }
     }
 
@@ -193,6 +205,32 @@ impl PersistWorkerRetryState {
         // its unfinished outbox entries remain durable and never affect this
         // primary-state exit decision.
         shutdown_requested && !self.retry_after_failure
+    }
+
+    fn finish_fenced_tick(
+        &mut self,
+        result: &Result<()>,
+        shutdown_requested: bool,
+        fences: &mut PersistFenceBatch,
+    ) -> bool {
+        self.record_result(result);
+        if self.should_exit_after_tick(shutdown_requested) {
+            // A successful final write need not contain a superseded target.
+            // Such a fence gets an explicit shutdown result, not a lost sender.
+            fences.fail(PersistFenceError::Shutdown);
+            self.fence_retry_delay = None;
+            return true;
+        }
+        // Successful SQL does not mean a deferred content target materialized.
+        // Back off that work independently, so successful but unproductive ticks
+        // cannot reset its cadence. New channel messages still wake immediately.
+        fences.expire_resolved();
+        self.fence_retry_delay = fences.has_pending().then(|| {
+            self.fence_retry_delay.map_or(PERSIST_FENCE_RETRY_SEED_DELAY, |delay| {
+                (delay * 2).min(PERSIST_FENCE_RETRY_MAX_DELAY)
+            })
+        });
+        false
     }
 }
 
@@ -509,9 +547,11 @@ impl AppState {
                 let mut watermark: u64 = 0;
                 let mut prompt_history_carry = BTreeSet::new();
                 let mut retry_state = PersistWorkerRetryState::default();
+                let mut fences = PersistFenceBatch::default();
                 loop {
-                    let outcome = retry_state.wait_for_next_tick(&persist_rx);
+                    let outcome = retry_state.wait_for_next_tick(&persist_rx, &mut fences);
                     if matches!(outcome, PersistWorkerWaitOutcome::Exit) {
+                        fences.fail(PersistFenceError::WorkerStopped);
                         break;
                     }
                     let mut should_exit_after_tick =
@@ -525,11 +565,7 @@ impl AppState {
                     // flag so the very last delta reaches SQLite before
                     // we exit. See bugs.md "Server restart without
                     // browser refresh can lose the last streamed message".
-                    while let Ok(req) = persist_rx.try_recv() {
-                        if matches!(req, PersistRequest::Shutdown) {
-                            should_exit_after_tick = true;
-                        }
-                    }
+                    should_exit_after_tick = fences.drain(&persist_rx, should_exit_after_tick);
 
                     let result: Result<()> = (|| {
                         let delta = collect_persist_delta_from_shared_state_with_prompt_history_carry(
@@ -562,10 +598,11 @@ impl AppState {
                         // `changed_sessions` + `removed_session_ids` is
                         // fine; the transaction just upserts one
                         // app_state row.
-                        let persisted_session_ids = match persist_delta_via_cache(
+                        let persisted_session_ids = match persist_delta_with_fences(
                             &mut cache,
                             &persist_path_for_persist,
                             &delta,
+                            &mut fences,
                         ) {
                             Ok(persisted_session_ids) => persisted_session_ids,
                             Err(err) => {
@@ -628,8 +665,7 @@ impl AppState {
                     if let Err(err) = &result {
                         eprintln!("[termal] background persist failed: {err:#}");
                     }
-                    retry_state.record_result(&result);
-                    if retry_state.should_exit_after_tick(should_exit_after_tick) {
+                    if retry_state.finish_fenced_tick(&result, should_exit_after_tick, &mut fences) {
                         break;
                     }
                 }

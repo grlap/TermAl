@@ -59,6 +59,7 @@ pub use orchestrator::{
 mod peer_messages;
 mod persist;
 mod persist_delta;
+mod persist_fence;
 mod project_creation_races;
 mod project_digest;
 mod projects;
