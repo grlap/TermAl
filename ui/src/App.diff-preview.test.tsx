@@ -31,6 +31,8 @@ import {
   forwardRef,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
+  useRef,
   type ForwardedRef,
 } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -110,6 +112,10 @@ import {
   withVerifiedNoReactActWarnings,
 } from "./app-test-harness";
 
+const diffEditorReadiness = vi.hoisted(() => ({
+  onEditableCommit: null as ((editor: HTMLTextAreaElement) => void) | null,
+}));
+
 vi.mock("./MonacoDiffEditor", () => ({
   MonacoDiffEditor: forwardRef(function MonacoDiffEditorMock(
     {
@@ -142,6 +148,12 @@ vi.mock("./MonacoDiffEditor", () => ({
       setScrollTop: (scrollTop: number) => void;
     }>,
   ) {
+    const modifiedEditorRef = useRef<HTMLTextAreaElement>(null);
+    useLayoutEffect(() => {
+      if (!readOnly && modifiedEditorRef.current) {
+        diffEditorReadiness.onEditableCommit?.(modifiedEditorRef.current);
+      }
+    }, [readOnly]);
     useImperativeHandle(ref, () => ({
       getScrollTop: () => 0,
       goToNextChange: () => {},
@@ -165,6 +177,7 @@ vi.mock("./MonacoDiffEditor", () => ({
       <div>
         <div data-testid="monaco-diff-editor">{`${originalValue}=>${modifiedValue}`}</div>
         <textarea
+          ref={modifiedEditorRef}
           data-testid="monaco-diff-editor-modified"
           readOnly={readOnly}
           value={modifiedValue}
@@ -241,6 +254,7 @@ describe("App diff preview", () => {
   const originalCancelAnimationFrame = globalThis.cancelAnimationFrame;
 
   beforeEach(() => {
+    diffEditorReadiness.onEditableCommit = null;
     const { cancelAnimationFrameMock, requestAnimationFrameMock } =
       createScheduledAnimationFrameMocks();
     vi.stubGlobal("requestAnimationFrame", requestAnimationFrameMock);
@@ -258,6 +272,7 @@ describe("App diff preview", () => {
   });
 
   afterEach(async () => {
+    diffEditorReadiness.onEditableCommit = null;
     await act(async () => {
       cleanup();
       await flushUiWork();
@@ -626,12 +641,22 @@ describe("App diff preview", () => {
             workspace: diffWorkspace,
           }),
         );
-      const fetchFileSpy = vi.spyOn(api, "fetchFile").mockResolvedValue({
+      const fileResponse = {
         path: "/repo/docs/README.md",
         content: "# Title\n\nSaved body.\n",
         contentHash: "sha256:base",
         language: "markdown",
+      };
+      const pendingFile = createDeferred<typeof fileResponse>();
+      const fileRequested = createDeferred<void>();
+      const fetchFileSpy = vi.spyOn(api, "fetchFile").mockImplementation(() => {
+        fileRequested.resolve();
+        return pendingFile.promise;
       });
+      let editableEditor: HTMLTextAreaElement | null = null;
+      diffEditorReadiness.onEditableCommit = (editor) => {
+        editableEditor = editor;
+      };
       const saveFileSpy = vi
         .spyOn(api, "saveFile")
         .mockRejectedValueOnce(new Error("file changed on disk before save"))
@@ -659,13 +684,33 @@ describe("App diff preview", () => {
 
       try {
         await renderApp();
-        await waitFor(() => {
-          expect(fetchFileSpy).toHaveBeenCalledWith("/repo/docs/README.md", {
-            projectId: "project-termal",
-            sessionId: null,
-          });
+        await fileRequested.promise;
+        expect(fetchFileSpy).toHaveBeenCalledWith("/repo/docs/README.md", {
+          projectId: "project-termal",
+          sessionId: null,
         });
-        const editor = await screen.findByTestId("monaco-diff-editor-modified");
+        // Complete Markdown can open in Markdown view. This test exercises
+        // the Monaco save adapter, not the asynchronous default-view choice.
+        await clickAndSettle(screen.getByRole("button", { name: "All lines" }));
+        await act(async () => {
+          // DiffPanel mounts Monaco through lazy()/Suspense. Await that
+          // actual import boundary, not a wall-clock DOM query deadline.
+          await vi.dynamicImportSettled();
+        });
+        expect(editableEditor).toBeNull();
+        expect(screen.getByTestId("monaco-diff-editor-modified"))
+          .toHaveAttribute("readonly");
+        await act(async () => {
+          pendingFile.resolve(fileResponse);
+          await pendingFile.promise;
+        });
+        // The mock reports its editable layout commit, after both lazy mount
+        // and file hydration. A missing commit fails immediately and cannot
+        // be hidden by a larger findBy timeout.
+        expect(editableEditor).not.toBeNull();
+        const editor = editableEditor!;
+        expect(editor).not.toHaveAttribute("readonly");
+        expect(editor).toHaveValue(fileResponse.content);
         await act(async () => {
           fireEvent.change(editor, {
             target: { value: "# Title\n\nSaved body refined.\n" },
