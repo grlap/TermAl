@@ -453,7 +453,9 @@ fn coordination_cli_mailbox_send_resolves_names_and_posts_through_the_bridge() {
                         "sequence": 9,
                         "unreadDepth": 1,
                         "notificationDisposition": "deliveredToIdleSession",
-                        "duplicate": false
+                        "duplicate": false,
+                        "senderProcessedThrough": 9,
+                        "senderCursorAdvanced": true
                     }),
                 )
             }
@@ -542,6 +544,78 @@ fn coordination_cli_mailbox_commands_reject_child_and_self_targets_like_the_mcp_
 }
 
 #[test]
+fn mailbox_cursor_cli_send_exposes_both_receipt_snapshots() {
+    for (cursor, advanced) in [(9, true), (7, false)] {
+        let (base_url, _, server) = spawn_test_mcp_http_server(2, move |request| {
+            if request.path == "/api/state" {
+                return (200, root_inventory_state());
+            }
+            assert_eq!(request.path, "/api/sessions/session-root/mailboxes/send");
+            (202, json!({
+                "mailboxId": "mailbox-1",
+                "messageId": "mailbox-message-9",
+                "sequence": 9,
+                "unreadDepth": 1,
+                "notificationDisposition": "queuedBehindActiveTurn",
+                "duplicate": false,
+                "senderProcessedThrough": cursor,
+                "senderCursorAdvanced": advanced
+            }))
+        });
+        let command = CoordinationCliCommand::MailboxSend {
+            as_session: "session-root".to_owned(),
+            to: "session-peer".to_owned(),
+            message: CoordinationCliMessageSource::Inline("reply".to_owned()),
+            idempotency_key: "cursor-send".to_owned(),
+            topic: None,
+            state_stamp: None,
+            class: None,
+        };
+        let result = execute_coordination_cli(&command, &base_url).unwrap();
+        server.join().unwrap();
+        assert_eq!(result["senderProcessedThrough"], cursor);
+        assert_eq!(result["senderCursorAdvanced"], advanced);
+        let mut rendered = Vec::new();
+        render_coordination_cli_output(&command, &result, &mut rendered).unwrap();
+        let rendered = String::from_utf8(rendered).unwrap();
+        assert!(rendered.contains(&format!("senderProcessedThrough {cursor}")));
+        assert!(rendered.contains(&format!("senderCursorAdvanced {advanced}")));
+    }
+}
+
+#[test]
+fn mailbox_cursor_cli_read_uses_response_boundary_not_zero_default() {
+    for explicit in [None, Some(0)] {
+        let used = explicit.unwrap_or(7);
+        let (base_url, requests, server) = spawn_test_mcp_http_server(2, move |request| {
+            if request.path == "/api/state" {
+                return (200, root_inventory_state());
+            }
+            assert_eq!(request.path, "/api/sessions/session-root/mailboxes/mailbox-1/read");
+            (200, json!({ "afterSequence": used, "processedThrough": 7, "messages": [] }))
+        });
+        let command = CoordinationCliCommand::MailboxRead {
+            as_session: "session-root".to_owned(),
+            mailbox_id: "mailbox-1".to_owned(),
+            after_sequence: explicit,
+            limit: Some(5),
+        };
+        let result = execute_coordination_cli(&command, &base_url).unwrap();
+        server.join().unwrap();
+        let requests = requests.lock().unwrap();
+        let sent: Value = serde_json::from_str(&requests[1].body).unwrap();
+        assert_eq!(sent.get("afterSequence"), explicit.map(|value| json!(value)).as_ref());
+        assert_eq!(result["afterSequence"], used);
+        assert_eq!(result["processedThrough"], 7);
+        let mut rendered = Vec::new();
+        render_coordination_cli_output(&command, &result, &mut rendered).unwrap();
+        let rendered = String::from_utf8(rendered).unwrap();
+        assert!(rendered.contains(&format!("after #{used}")));
+        assert!(rendered.contains("processedThrough 7"));
+    }
+}
+
+#[test]
 fn coordination_cli_reports_unknown_callers_and_unreachable_servers_distinctly() {
     let (base_url, _requests, server) = spawn_test_mcp_http_server(1, |request| {
         assert_eq!(request.path, "/api/state");
@@ -585,7 +659,7 @@ fn coordination_cli_read_read_message_and_acknowledge_forward_exact_contracts() 
                 assert_eq!(body, json!({ "afterSequence": 7, "limit": 5 }));
                 (
                     200,
-                    json!([{
+                    json!({ "afterSequence": 7, "processedThrough": 7, "messages": [{
                         "id": "mailbox-message-8",
                         "mailboxId": "mailbox-1",
                         "sequence": 8,
@@ -598,7 +672,7 @@ fn coordination_cli_read_read_message_and_acknowledge_forward_exact_contracts() 
                         "topic": "hand-back",
                         "body": "verified",
                         "notificationState": "deliveredToIdleSession"
-                    }]),
+                    }]}),
                 )
             }
             _ => (
@@ -803,13 +877,13 @@ fn coordination_cli_renders_concise_human_output() {
             after_sequence: Some(8),
             limit: None,
         },
-        &json!({ "mailboxId": "mailbox-1", "messages": [] }),
+        &json!({ "mailboxId": "mailbox-1", "messages": [], "afterSequence": 8, "processedThrough": 8 }),
         &mut rendered,
     )
     .expect("an empty read should render");
     assert_eq!(
         String::from_utf8(rendered).expect("rendered read should be UTF-8"),
-        "no messages in mailbox-1 after #8\n"
+        "mailbox-1: afterSequence 8, processedThrough 8 (snapshot; reading does not acknowledge)\nno messages in mailbox-1 after #8\n"
     );
 }
 
@@ -902,7 +976,7 @@ fn coordination_cli_human_output_neutralizes_terminal_control_sequences() {
             after_sequence: None,
             limit: None,
         },
-        &json!({ "mailboxId": "mailbox-1", "messages": [message.clone()] }),
+        &json!({ "mailboxId": "mailbox-1", "messages": [message.clone()], "afterSequence": 0, "processedThrough": 0 }),
         &mut rendered,
     )
     .expect("hostile message should render");
@@ -918,7 +992,8 @@ fn coordination_cli_human_output_neutralizes_terminal_control_sequences() {
     // then the body block (which alone keeps its embedded newline, so two
     // lines), then a blank line. A peer name or topic carrying newlines must
     // not add lines of its own.
-    let lines = read.lines().collect::<Vec<_>>();
+    assert!(read.starts_with("mailbox-1: afterSequence 0, processedThrough 0"));
+    let lines = read.lines().skip(1).collect::<Vec<_>>();
     assert_eq!(lines.len(), 9, "unexpected line structure: {lines:?}");
     assert!(lines[0].starts_with("#1 2026-09-03T00:00:00Z from "));
     assert!(lines[0].contains("csi\u{FFFD}tab\u{FFFD}line"));
@@ -1064,7 +1139,7 @@ fn coordination_cli_rejects_malformed_successful_responses() {
         match (request.method.as_str(), request.path.as_str()) {
             ("GET", "/api/state") => (200, root_inventory_state()),
             ("POST", "/api/sessions/session-root/mailboxes/mailbox-1/read") => {
-                (200, json!([{ "id": 1 }]))
+                (200, json!({ "afterSequence": 0, "processedThrough": 0, "messages": [{ "id": 1 }] }))
             }
             _ => (404, json!({ "error": "unexpected" })),
         }
@@ -1075,11 +1150,10 @@ fn coordination_cli_rejects_malformed_successful_responses() {
         after_sequence: None,
         limit: None,
     };
-    let output = execute_coordination_cli(&command, &base_url).expect("bridge passes raw JSON");
+    let err = execute_coordination_cli(&command, &base_url)
+        .expect_err("bridge rejects invalid mailbox read envelopes");
     server.join().expect("test server should join");
-    let err = validate_coordination_cli_output(&command, &output)
-        .expect_err("a message without the wire fields must be unusable");
-    assert!(err.to_string().contains("messages:"));
+    assert!(err.to_string().contains("mailbox read response shape was invalid"));
 
     let (base_url, _requests, server) = spawn_test_mcp_http_server(2, |request| {
         match (request.method.as_str(), request.path.as_str()) {
@@ -1116,6 +1190,8 @@ fn coordination_cli_rejects_malformed_successful_responses() {
 
     let well_formed = json!({
         "mailboxId": "mailbox-1",
+        "afterSequence": 7,
+        "processedThrough": 7,
         "messages": [{
             "id": "mailbox-message-8",
             "mailboxId": "mailbox-1",
@@ -1140,6 +1216,20 @@ fn coordination_cli_rejects_malformed_successful_responses() {
         &well_formed,
     )
     .expect("a well-formed read must validate");
+    for field in ["afterSequence", "processedThrough"] {
+        let mut missing_cursor = well_formed.clone();
+        missing_cursor.as_object_mut().unwrap().remove(field);
+        let error = validate_coordination_cli_output(
+            &CoordinationCliCommand::MailboxRead {
+                as_session: "session-root".to_owned(),
+                mailbox_id: "mailbox-1".to_owned(),
+                after_sequence: None,
+                limit: None,
+            },
+            &missing_cursor,
+        ).expect_err("both cursor fields are required even on an explicit read");
+        assert!(error.to_string().contains(field));
+    }
 }
 
 #[test]

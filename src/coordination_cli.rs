@@ -37,6 +37,15 @@ Flags accept `--flag value` and `--flag=value`. `--as-session` is the root
 session the command acts as and defaults to TERMAL_SESSION_ID; delegation-child
 sessions are rejected exactly as they are for the peer MCP tools. `--base-url`
 defaults to TERMAL_BASE_URL, then http://127.0.0.1:<TERMAL_PORT or 8787>.
+Send receipts include senderProcessedThrough and senderCursorAdvanced. A fresh
+send advances the sender cursor over its own message only when the cursor sat
+immediately before it; unread inbound messages are never skipped. A duplicate
+returns the current cursor snapshot and senderCursorAdvanced=false.
+Read without --after starts after the caller's durable processedThrough;
+--after 0 explicitly replays history. Read output includes afterSequence (the
+boundary used) and processedThrough (the durable cursor snapshot). Reading
+never acknowledges. Snapshots can change concurrently; acknowledge still
+requires --expected and forward-only contiguous processing.
 Exit codes: 0 success; 2 usage or argument error (no request was sent);
 1 any failure after a request was attempted (details on stderr).";
 
@@ -600,13 +609,9 @@ fn validate_coordination_cli_output(
             {
                 return Err(unusable("`mailboxId` is missing".to_owned()));
             }
-            let messages = output
-                .get("messages")
-                .cloned()
-                .ok_or_else(|| unusable("`messages` is missing".to_owned()))?;
-            serde_json::from_value::<Vec<MailboxMessage>>(messages)
+            serde_json::from_value::<MailboxReadResponse>(output.clone())
                 .map(|_| ())
-                .map_err(|err| unusable(format!("messages: {err}")))
+                .map_err(|err| unusable(format!("mailbox read: {err}")))
         }
         CoordinationCliCommand::MailboxReadMessage { .. } => {
             serde_json::from_value::<MailboxMessage>(output.clone())
@@ -895,7 +900,7 @@ fn render_coordination_cli_output(
         }
         CoordinationCliCommand::MailboxSend { .. } => writeln!(
             out,
-            "delivered to {} via {}: message {} #{} (duplicate {}, notification {}, unreadDepth {})",
+            "delivered to {} via {}: message {} #{} (duplicate {}, notification {}, unreadDepth {}, senderProcessedThrough {}, senderCursorAdvanced {})",
             coordination_cli_field(output, "sessionId"),
             coordination_cli_field(output, "mailboxId"),
             coordination_cli_field(output, "messageId"),
@@ -903,12 +908,20 @@ fn render_coordination_cli_output(
             coordination_cli_field(output, "duplicate"),
             coordination_cli_field(output, "notificationDisposition"),
             coordination_cli_field(output, "unreadDepth"),
+            coordination_cli_field(output, "senderProcessedThrough"),
+            coordination_cli_field(output, "senderCursorAdvanced"),
         )?,
         CoordinationCliCommand::MailboxRead {
             mailbox_id,
-            after_sequence,
             ..
         } => {
+            writeln!(
+                out,
+                "{}: afterSequence {}, processedThrough {} (snapshot; reading does not acknowledge)",
+                mailbox_id,
+                coordination_cli_field(output, "afterSequence"),
+                coordination_cli_field(output, "processedThrough"),
+            )?;
             let messages = output
                 .get("messages")
                 .and_then(Value::as_array)
@@ -918,7 +931,7 @@ fn render_coordination_cli_output(
                 writeln!(
                     out,
                     "no messages in {mailbox_id} after #{}",
-                    after_sequence.unwrap_or(0)
+                    coordination_cli_field(output, "afterSequence")
                 )?;
             }
             for message in messages {

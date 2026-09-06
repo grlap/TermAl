@@ -305,8 +305,9 @@ fn append_retry_after_reopen_returns_original_durable_receipt() {
     assert_eq!(duplicate.notification_disposition, "durableButNotWoken");
     assert_eq!(
         store
-            .read_range("session-target", &first.mailbox_id, 0, 20)
+            .read_range("session-target", &first.mailbox_id, Some(0), 20)
             .expect("messages should read")
+            .messages
             .len(),
         1
     );
@@ -988,8 +989,8 @@ fn explicit_live_session_reactivation_restores_departed_mailbox_access() {
     assert_eq!(summaries.len(), 1);
     assert_eq!(summaries[0].id, committed.mailbox_id);
     let messages = store
-        .read_range("session-target", &committed.mailbox_id, 0, 10)
-        .expect("reactivated participant should read");
+        .read_range("session-target", &committed.mailbox_id, Some(0), 10)
+        .expect("reactivated participant should read").messages;
     assert_eq!(messages.len(), 1);
     let acknowledged = store
         .acknowledge(
@@ -1026,8 +1027,8 @@ fn mailbox_range_reads_leave_every_participant_cursor_unchanged() {
         .expect("mailbox summary should exist");
 
     let messages = store
-        .read_range("session-target", &mailbox_id, 0, 50)
-        .expect("mailbox range should read");
+        .read_range("session-target", &mailbox_id, Some(0), 50)
+        .expect("mailbox range should read").messages;
     assert_eq!(messages.len(), 1);
 
     let after = store
@@ -1081,14 +1082,15 @@ fn reactivation_rollback_restores_only_rows_cleared_by_that_attempt() {
 
     assert!(
         store
-            .read_range("session-target", &first.mailbox_id, 0, 10)
+            .read_range("session-target", &first.mailbox_id, Some(0), 10)
             .is_err(),
         "the originally departed mailbox should be restored to departed"
     );
     assert_eq!(
         store
-            .read_range("session-target", &fresh.mailbox_id, 0, 10)
+            .read_range("session-target", &fresh.mailbox_id, Some(0), 10)
             .expect("the newly-created mailbox must remain active")
+            .messages
             .len(),
         1
     );

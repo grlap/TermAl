@@ -22,6 +22,7 @@ import {
   fetchWorkspaceLayout,
   fetchState,
   registerRemoteTermal,
+  readMailbox,
   saveFile,
   submitUserInput,
   testTelegramConnection,
@@ -37,6 +38,36 @@ import {
   runTerminalCommandStream,
   TERMINAL_SSE_BUFFER_MAX_CHARS,
 } from "./api-terminal";
+
+describe("readMailbox", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("unwraps the cursor envelope while preserving explicit UI paging", async () => {
+    const messages = [{ id: "mailbox-message-8", sequence: 8 }];
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        messages,
+        afterSequence: 7,
+        processedThrough: 3,
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      readMailbox("session-reader", "mailbox-1", 7, 50),
+    ).resolves.toEqual(messages);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/sessions/session-reader/mailboxes/mailbox-1/read",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ afterSequence: 7, limit: 50 }),
+      }),
+    );
+  });
+});
 
 describe("updateEngramHostSettings", () => {
   const originalFetch = globalThis.fetch;

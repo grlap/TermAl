@@ -1126,7 +1126,9 @@ fn delegation_mcp_send_to_session_resolves_name_across_projects() {
                         "sequence": 1,
                         "unreadDepth": 1,
                         "notificationDisposition": "deliveredToIdleSession",
-                        "duplicate": false
+                        "duplicate": false,
+                        "senderProcessedThrough": 1,
+                        "senderCursorAdvanced": true
                     }),
                 )
             }
@@ -1206,7 +1208,9 @@ fn delegation_mcp_send_to_session_posts_message_to_target() {
                         "sequence": 1,
                         "unreadDepth": 1,
                         "notificationDisposition": "queuedBehindActiveTurn",
-                        "duplicate": false
+                        "duplicate": false,
+                        "senderProcessedThrough": 1,
+                        "senderCursorAdvanced": true
                     }),
                 )
             }
@@ -1270,7 +1274,9 @@ fn delegation_mcp_exact_id_burst_fetches_caller_eligibility_once() {
                             "sequence": next,
                             "unreadDepth": next,
                             "notificationDisposition": "queuedBehindActiveTurn",
-                            "duplicate": false
+                            "duplicate": false,
+                            "senderProcessedThrough": next,
+                            "senderCursorAdvanced": true
                         }),
                     )
                 }
@@ -1688,7 +1694,17 @@ fn delegation_mcp_mailbox_tools_list_read_exact_and_acknowledge() {
                     serde_json::from_str(&request.body).expect("read body should be JSON");
                 assert_eq!(body["afterSequence"], 1);
                 assert_eq!(body["limit"], 25);
-                (200, json!([{ "id": "mailbox-message-2", "sequence": 2 }]))
+                (200, json!({
+                    "afterSequence": 1,
+                    "processedThrough": 1,
+                    "messages": [{
+                        "id": "mailbox-message-2", "mailboxId": "mailbox-1", "sequence": 2,
+                        "senderSessionId": "session-peer", "senderName": "Peer",
+                        "targetSessionId": "session-parent", "targetName": "Parent",
+                        "createdAt": "2026-09-05T00:00:00Z", "class": "routine",
+                        "body": "reply", "notificationState": "queuedBehindActiveTurn"
+                    }]
+                }))
             }
             ("GET", "/api/sessions/session-parent/mailbox-messages/mailbox-message-2") => {
                 (200, json!({ "id": "mailbox-message-2", "sequence": 2 }))
@@ -1798,6 +1814,57 @@ fn delegation_mcp_spawn_session_posts_parent_scoped_request() {
     assert_eq!(response["childSessionId"], "session-child");
     server.join().expect("test server should join");
     assert_eq!(requests.lock().expect("request log mutex poisoned").len(), 1);
+}
+
+#[test]
+fn mailbox_cursor_mcp_send_preserves_both_receipt_snapshots() {
+    for (cursor, advanced) in [(9, true), (7, false)] {
+        let (base_url, _, server) = spawn_test_mcp_http_server(1, move |request| {
+            assert_eq!(request.path, "/api/sessions/session-parent/mailboxes/send");
+            (202, json!({
+                "mailboxId": "mailbox-1",
+                "messageId": "mailbox-message-9",
+                "sequence": 9,
+                "unreadDepth": 1,
+                "notificationDisposition": "queuedBehindActiveTurn",
+                "duplicate": false,
+                "senderProcessedThrough": cursor,
+                "senderCursorAdvanced": advanced
+            }))
+        });
+        let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url).unwrap();
+        let result = bridge.tool_send_to_session(json!({
+            "sessionId": "session-peer", "message": "reply", "idempotencyKey": "cursor-send"
+        })).unwrap();
+        server.join().unwrap();
+        assert_eq!(result["senderProcessedThrough"], cursor);
+        assert_eq!(result["senderCursorAdvanced"], advanced);
+    }
+}
+
+#[test]
+fn mailbox_cursor_mcp_read_preserves_omission_and_explicit_boundary() {
+    for explicit in [None, Some(0)] {
+        let used = explicit.unwrap_or(7);
+        let (base_url, requests, server) = spawn_test_mcp_http_server(1, move |_| {
+            (200, json!({ "afterSequence": used, "processedThrough": 7, "messages": [] }))
+        });
+        let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url).unwrap();
+        let mut arguments = json!({ "mailboxId": "mailbox-1", "limit": 5 });
+        if let Some(explicit) = explicit {
+            arguments["afterSequence"] = json!(explicit);
+        }
+        let result = bridge.tool_read_mailbox(arguments).unwrap();
+        server.join().unwrap();
+        let requests = requests.lock().unwrap();
+        let sent: Value = serde_json::from_str(&requests[0].body).unwrap();
+        assert_eq!(sent.get("afterSequence"), explicit.map(|value| json!(value)).as_ref());
+        assert_eq!(sent["limit"], 5);
+        assert_eq!(result["mailboxId"], "mailbox-1");
+        assert_eq!(result["afterSequence"], used);
+        assert_eq!(result["processedThrough"], 7);
+        assert_eq!(result["messages"], json!([]));
+    }
 }
 
 #[test]

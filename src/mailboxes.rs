@@ -95,6 +95,16 @@ struct MailboxAppendReceipt {
     unread_depth: u64,
     notification_disposition: String,
     duplicate: bool,
+    sender_processed_through: u64,
+    sender_cursor_advanced: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MailboxReadResponse {
+    messages: Vec<MailboxMessage>,
+    after_sequence: u64,
+    processed_through: u64,
 }
 
 struct MailboxAppendResult {
@@ -199,7 +209,7 @@ struct SendMailboxMessageRequest {
 #[serde(rename_all = "camelCase")]
 struct ReadMailboxRequest {
     #[serde(default)]
-    after_sequence: u64,
+    after_sequence: Option<u64>,
     #[serde(default = "default_mailbox_read_limit")]
     limit: u64,
 }
@@ -1073,7 +1083,7 @@ async fn read_mailbox(
     AxumPath((session_id, mailbox_id)): AxumPath<(String, String)>,
     State(state): State<AppState>,
     Json(request): Json<ReadMailboxRequest>,
-) -> Result<Json<Vec<MailboxMessage>>, ApiError> {
+) -> Result<Json<MailboxReadResponse>, ApiError> {
     let messages = run_blocking_api(move || {
         state.ensure_mailbox_session_active(&session_id)?;
         state
@@ -1453,6 +1463,11 @@ impl MailboxStore {
                     ),
                 ));
             }
+            let sender_processed_through = mailbox_processed_through(
+                &transaction,
+                &existing.mailbox_id,
+                &input.sender_session_id,
+            )?;
             transaction
                 .commit()
                 .map_err(|err| {
@@ -1474,6 +1489,8 @@ impl MailboxStore {
                     unread_depth: existing.unread_depth_at_append,
                     notification_disposition,
                     duplicate: true,
+                    sender_processed_through,
+                    sender_cursor_advanced: false,
                 },
                 finalization: None,
             });
@@ -1598,7 +1615,7 @@ impl MailboxStore {
         // the message immediately before it. If any peer message is still
         // unread below this one, the guard fails, the cursor stays put, and
         // that peer message cannot be silently consumed by an unrelated send.
-        transaction
+        let sender_cursor_advanced = transaction
             .execute(
                 "UPDATE mailbox_participants
                  SET processed_through = ?3
@@ -1608,7 +1625,11 @@ impl MailboxStore {
                    AND processed_through = ?3 - 1",
                 rusqlite::params![&mailbox_id, &input.sender_session_id, sequence],
             )
-            .context("failed to advance sender mailbox cursor")?;
+            .context("failed to advance sender mailbox cursor")? == 1;
+        // Prepare the receipt in the append transaction: no fallible cursor
+        // lookup after commit, and no claim that this snapshot fences later sends.
+        let sender_processed_through =
+            mailbox_processed_through(&transaction, &mailbox_id, &input.sender_session_id)?;
         self.register_pending_dispatch_outcome(&message_id);
         let finalization = MailboxDispatchFinalizationGuard {
             dispatch_finalization: self.dispatch_finalization.clone(),
@@ -1630,6 +1651,8 @@ impl MailboxStore {
                 unread_depth,
                 notification_disposition: notification_disposition.to_owned(),
                 duplicate: false,
+                sender_processed_through,
+                sender_cursor_advanced,
             },
             finalization: Some(finalization),
         })
@@ -2148,13 +2171,20 @@ impl MailboxStore {
         &self,
         session_id: &str,
         mailbox_id: &str,
-        after_sequence: u64,
+        after_sequence: Option<u64>,
         limit: u64,
-    ) -> Result<Vec<MailboxMessage>> {
+    ) -> Result<MailboxReadResponse> {
         let limit = limit.clamp(1, 200);
-        let connection = self.connection()?;
-        require_mailbox_participant(&connection, mailbox_id, session_id)?;
-        let mut statement = connection
+        let mut connection = self.connection()?;
+        // Snapshot authorization, cursor, and rows together, including when
+        // another store connection acknowledges concurrently.
+        let transaction = connection
+            .transaction()
+            .context("failed to begin mailbox read")?;
+        require_mailbox_participant(&transaction, mailbox_id, session_id)?;
+        let processed_through = mailbox_processed_through(&transaction, mailbox_id, session_id)?;
+        let after_sequence = after_sequence.unwrap_or(processed_through);
+        let mut statement = transaction
             .prepare(
                 "SELECT id, mailbox_id, sequence, sender_session_id, sender_name,
                         target_session_id, target_name, created_at, class, topic,
@@ -2182,8 +2212,16 @@ impl MailboxStore {
                 mailbox_message_from_row,
             )
             .context("failed to query mailbox messages")?;
-        rows.map(|row| row.context("failed to decode mailbox message"))
-            .collect()
+        let messages = rows
+            .map(|row| row.context("failed to decode mailbox message"))
+            .collect::<Result<Vec<_>>>()?;
+        drop(statement);
+        transaction.commit().context("failed to finish mailbox read")?;
+        Ok(MailboxReadResponse {
+            messages,
+            after_sequence,
+            processed_through,
+        })
     }
 
     fn read_message(
@@ -2597,6 +2635,21 @@ fn require_mailbox_participant(
         ));
     }
     Ok(())
+}
+
+fn mailbox_processed_through(
+    connection: &rusqlite::Connection,
+    mailbox_id: &str,
+    session_id: &str,
+) -> Result<u64> {
+    connection
+        .query_row(
+            "SELECT processed_through FROM mailbox_participants
+             WHERE mailbox_id = ?1 AND session_id = ?2",
+            rusqlite::params![mailbox_id, session_id],
+            |row| row.get(0),
+        )
+        .context("failed to read mailbox participant cursor")
 }
 
 fn mailbox_preview(body: &str) -> String {

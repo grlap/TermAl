@@ -1242,13 +1242,17 @@ export function readMailbox(
   afterSequence = 0,
   limit = 200,
 ) {
-  return request<MailboxMessage[]>(
+  return request<{
+    messages: MailboxMessage[];
+    afterSequence: number;
+    processedThrough: number;
+  }>(
     `/api/sessions/${encodeURIComponent(sessionId)}/mailboxes/${encodeURIComponent(mailboxId)}/read`,
     {
       method: "POST",
       body: JSON.stringify({ afterSequence, limit }),
     },
-  );
+  ).then((range) => range.messages);
 }
 
 export function readMailboxMessage(sessionId: string, messageId: string) {

@@ -23,6 +23,16 @@ acknowledge operations from the shell through the
 `termal_send_to_session` accepts a peer session id or name, a message body, and
 a required sender-supplied `idempotencyKey`.
 
+HTTP send receipts, `termal_send_to_session`, and CLI `mailbox send` also
+return `senderProcessedThrough` and `senderCursorAdvanced`. The first is the
+sender's durable cursor snapshot resulting from this operation; the second
+says whether this append advanced it. The cursor advances over the sender's
+own new message only when it already sat immediately before that message.
+An unread inbound gap prevents auto-advance; sending cannot skip that gap.
+These fields let a sender refresh its next acknowledgement's expected cursor
+without another list call. They are snapshots, not protection against a
+concurrent send or acknowledgement.
+
 1. TermAl resolves and validates both participants as local root sessions.
    Remote-backed root proxies remain outside the shipped eligibility rule; see
    [Planned remote access](#planned-remote-access).
@@ -181,8 +191,12 @@ state. This is state convergence, not a receipt mismatch.
 Idempotency keys are unique per sender session.
 
 - Retrying the same key with the same target and exact message intent returns
-  the original immutable dispatch receipt with `duplicate: true`, even after
+  the original message identity and immutable dispatch outcome with
+  `duplicate: true`, even after
   the message's `notificationState` advances. It does not insert or wake twice.
+  Cursor fields are deliberately not immutable: a retry returns the current
+  `senderProcessedThrough` snapshot and `senderCursorAdvanced: false`, because
+  that retry did not move the cursor.
   A concurrent retry that arrives while the original request is finalizing its
   dispatch outcome waits for that finalization without holding the SQLite
   writer slot, subject to the same five-second request deadline; expiry returns
@@ -204,7 +218,20 @@ instead of truncated.
 ## Reading and acknowledgement
 
 Mailbox reads are pull-based and ordered by sequence. Fetching never mutates a
-participant cursor. Human mailbox notifications render as a compact
+participant cursor. HTTP range reads return one envelope:
+`{messages, afterSequence, processedThrough}`. MCP and CLI JSON add `mailboxId`
+to that same shape; the CLI's human-readable output prints both cursor fields.
+Omitting `afterSequence` (CLI: omitting `--after`) reads after the requesting
+participant's durable `processedThrough`, so a routine unread read does not
+need a preceding list call once the mailbox id is known. An explicit boundary
+is unchanged: `afterSequence: 0` replays from the beginning, and a positive
+value reads strictly after that sequence, regardless of the durable cursor.
+The response's `afterSequence` is the actual boundary used; `processedThrough`
+is the participant's durable cursor at read time. Both and the returned rows
+come from the same SQLite read snapshot. Later concurrent operations may move
+the cursor before acknowledgement; the snapshot does not bypass CAS.
+
+Human mailbox notifications render as a compact
 sender/preview/unread link; the agent-only list/read/ack activation text remains
 stored but is not shown as the human card body. The link opens a dedicated
 read-only workspace tab with no agent, runtime, model, workdir, or composer.
@@ -222,8 +249,13 @@ agent cursor.
 Acknowledgement is a forward-only compare-and-swap:
 
 - `expectedProcessedThrough` is the cursor value the agent observed through
-  `termal_list_mailboxes` in its own participant entry.
+  a read response's `processedThrough`, a send receipt's
+  `senderProcessedThrough`, or `termal_list_mailboxes` in its own participant
+  entry. An explicit read's `afterSequence` is not necessarily that cursor.
 - `processedThrough` is the last sequence it processed.
+- Process messages contiguously; a send that leaves an unread gap does not
+  authorize acknowledging past that gap. Sending a reply can auto-advance the
+  cursor, so use its newer receipt snapshot when constructing the next CAS.
 - A stale expected value conflicts instead of overwriting another reader's
   progress when the requested cursor has not already been reached. Replaying
   an acknowledgement whose `processedThrough` is already satisfied succeeds

@@ -53,6 +53,204 @@ fn lightweight_test_state_does_not_hold_a_mailbox_database_descriptor() {
     );
 }
 
+async fn mailbox_cursor_http_post(state: &AppState, path: String, body: Value) -> Value {
+    let response = app_router(state.clone())
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(path)
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_vec(&body).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .expect("mailbox route should respond");
+    assert!(response.status().is_success(), "{}", response.status());
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    serde_json::from_slice(&bytes).unwrap()
+}
+
+async fn assert_mailbox_cursor_send_receipt(unread_inbound: bool) {
+    let (state, sender_id, target_id) = mailbox_test_state();
+    // Both directions remain queued; this test must not launch an agent.
+    {
+        let mut inner = state.inner.lock().unwrap();
+        let index = inner.find_session_index(&sender_id).unwrap();
+        inner.sessions[index].session.status = SessionStatus::Active;
+    }
+    if unread_inbound {
+        state
+            .append_mailbox_message_and_notify(&target_id, mailbox_send_request(&sender_id))
+            .unwrap();
+    }
+    let receipt = mailbox_cursor_http_post(
+        &state,
+        format!("/api/sessions/{sender_id}/mailboxes/send"),
+        json!({
+            "targetSessionId": target_id,
+            "message": "sender cursor boundary",
+            "idempotencyKey": "cursor-send"
+        }),
+    )
+    .await;
+    let expected_cursor = if unread_inbound { 0 } else { 1 };
+    assert_eq!(receipt["senderProcessedThrough"], expected_cursor);
+    assert_eq!(receipt["senderCursorAdvanced"], !unread_inbound);
+    let summaries = state.mailbox_store.list_for_session(&sender_id).unwrap();
+    let participant = summaries[0]
+        .participants
+        .iter()
+        .find(|participant| participant.session_id == sender_id)
+        .unwrap();
+    assert_eq!(participant.processed_through, expected_cursor);
+}
+
+#[tokio::test]
+async fn mailbox_cursor_http_send_contiguous_receipt() {
+    assert_mailbox_cursor_send_receipt(false).await;
+}
+
+#[tokio::test]
+async fn mailbox_cursor_http_send_preserves_unread_inbound() {
+    assert_mailbox_cursor_send_receipt(true).await;
+}
+
+async fn assert_mailbox_cursor_read(after_sequence: Option<u64>) {
+    let (state, sender_id, target_id) = mailbox_test_state();
+    let first = state
+        .append_mailbox_message_and_notify(&sender_id, mailbox_send_request(&target_id))
+        .unwrap();
+    state
+        .mailbox_store
+        .acknowledge(&target_id, &first.mailbox_id, 0, 1)
+        .unwrap();
+    let mut request = mailbox_send_request(&target_id);
+    request.idempotency_key = "cursor-read-second".to_owned();
+    state
+        .append_mailbox_message_and_notify(&sender_id, request)
+        .unwrap();
+    let mut body = json!({ "limit": 20 });
+    if let Some(after_sequence) = after_sequence {
+        body["afterSequence"] = json!(after_sequence);
+    }
+    let response = mailbox_cursor_http_post(
+        &state,
+        format!(
+            "/api/sessions/{target_id}/mailboxes/{}/read",
+            first.mailbox_id
+        ),
+        body,
+    )
+    .await;
+    assert_eq!(response["afterSequence"], after_sequence.unwrap_or(1));
+    assert_eq!(response["processedThrough"], 1);
+    let sequences: Vec<_> = response["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|message| message["sequence"].as_u64().unwrap())
+        .collect();
+    assert_eq!(
+        sequences,
+        if after_sequence.is_some() {
+            vec![1, 2]
+        } else {
+            vec![2]
+        }
+    );
+    let summaries = state.mailbox_store.list_for_session(&target_id).unwrap();
+    assert_eq!(summaries[0].unread_count, 1, "reads never acknowledge");
+}
+
+#[tokio::test]
+async fn mailbox_cursor_http_read_omitted_uses_durable_cursor() {
+    assert_mailbox_cursor_read(None).await;
+}
+
+#[tokio::test]
+async fn mailbox_cursor_http_read_explicit_zero_replays_history() {
+    assert_mailbox_cursor_read(Some(0)).await;
+}
+
+#[tokio::test]
+async fn mailbox_cursor_http_duplicate_reports_current_cursor_without_advancing() {
+    let (state, sender_id, target_id) = mailbox_test_state();
+    let send_path = format!("/api/sessions/{sender_id}/mailboxes/send");
+    let body = json!({
+        "targetSessionId": target_id,
+        "message": "first cursor snapshot",
+        "idempotencyKey": "cursor-retry"
+    });
+    let first = mailbox_cursor_http_post(&state, send_path.clone(), body.clone()).await;
+    state
+        .append_mailbox_message_and_notify(&sender_id, mailbox_send_request(&target_id))
+        .unwrap();
+    let duplicate = mailbox_cursor_http_post(&state, send_path, body).await;
+    assert_eq!(first["senderProcessedThrough"], 1);
+    assert_eq!(duplicate["senderProcessedThrough"], 2);
+    assert_eq!(duplicate["senderCursorAdvanced"], false);
+    assert_eq!(duplicate["duplicate"], true);
+    for field in [
+        "mailboxId",
+        "messageId",
+        "sequence",
+        "notificationDisposition",
+        "unreadDepth",
+    ] {
+        assert_eq!(
+            duplicate[field], first[field],
+            "immutable receipt field: {field}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn mailbox_cursor_http_reply_receipt_supports_next_cas_without_list() {
+    let (state, sender_id, target_id) = mailbox_test_state();
+    {
+        let mut inner = state.inner.lock().unwrap();
+        let index = inner.find_session_index(&sender_id).unwrap();
+        inner.sessions[index].session.status = SessionStatus::Active;
+    }
+    let receipt = state
+        .append_mailbox_message_and_notify(&sender_id, mailbox_send_request(&target_id))
+        .unwrap();
+    let mailbox_id = receipt.mailbox_id;
+    let read_path = format!("/api/sessions/{target_id}/mailboxes/{mailbox_id}/read");
+    let ack_path = format!("/api/sessions/{target_id}/mailboxes/{mailbox_id}/acknowledge");
+    let read = mailbox_cursor_http_post(&state, read_path.clone(), json!({})).await;
+    mailbox_cursor_http_post(
+        &state,
+        ack_path.clone(),
+        json!({
+            "expectedProcessedThrough": read["processedThrough"], "processedThrough": 1
+        }),
+    )
+    .await;
+    let reply = mailbox_cursor_http_post(&state, format!("/api/sessions/{target_id}/mailboxes/send"), json!({
+        "targetSessionId": sender_id, "message": "processed and replied", "idempotencyKey": "cursor-reply"
+    })).await;
+    assert_eq!(reply["senderProcessedThrough"], 2);
+    assert_eq!(reply["senderCursorAdvanced"], true);
+    let mut next = mailbox_send_request(&target_id);
+    next.idempotency_key = "cursor-next-inbound".to_owned();
+    state
+        .append_mailbox_message_and_notify(&sender_id, next)
+        .unwrap();
+    mailbox_cursor_http_post(
+        &state,
+        ack_path,
+        json!({
+            "expectedProcessedThrough": reply["senderProcessedThrough"], "processedThrough": 3
+        }),
+    )
+    .await;
+    let empty = mailbox_cursor_http_post(&state, read_path, json!({})).await;
+    assert_eq!(empty["afterSequence"], 3);
+    assert_eq!(empty["processedThrough"], 3);
+    assert_eq!(empty["messages"], json!([]));
+}
+
 #[test]
 fn mailbox_backend_rejects_exact_delegation_child_target_before_append() {
     let (state, sender_id, target_id) = mailbox_test_state();
@@ -108,7 +306,7 @@ async fn mailbox_read_routes_reject_delegation_children_as_non_peers() {
         AxumPath((target_id.clone(), receipt.mailbox_id.clone())),
         State(state.clone()),
         Json(ReadMailboxRequest {
-            after_sequence: 0,
+            after_sequence: Some(0),
             limit: 20,
         }),
     )
@@ -183,8 +381,9 @@ fn mailbox_send_commits_body_before_metadata_only_wake_and_retry_does_not_rewake
 
     let stored = state
         .mailbox_store
-        .read_range(&target_id, &first.mailbox_id, 0, 20)
-        .expect("durable body should be readable");
+        .read_range(&target_id, &first.mailbox_id, Some(0), 20)
+        .expect("durable body should be readable")
+        .messages;
     assert_eq!(stored.len(), 1);
     assert_eq!(
         stored[0].body,
@@ -223,8 +422,9 @@ fn mailbox_send_commits_body_before_metadata_only_wake_and_retry_does_not_rewake
     assert_eq!(
         state
             .mailbox_store
-            .read_range(&target_id, &first.mailbox_id, 0, 20)
+            .read_range(&target_id, &first.mailbox_id, Some(0), 20)
             .expect("both messages should remain durable")
+            .messages
             .len(),
         2
     );
@@ -345,13 +545,13 @@ async fn normal_mailbox_interactions_reactivate_stale_live_participants() {
         AxumPath((target_id.clone(), first.mailbox_id.clone())),
         State(state.clone()),
         Json(ReadMailboxRequest {
-            after_sequence: 0,
+            after_sequence: Some(0),
             limit: 20,
         }),
     )
     .await
     .expect("ordinary read should reactivate a stale live target");
-    assert_eq!(messages.len(), 2);
+    assert_eq!(messages.messages.len(), 2);
 
     state
         .mailbox_store
@@ -2575,15 +2775,18 @@ async fn mailbox_http_routes_append_read_and_acknowledge_without_implicit_read_a
     let read_json: Value =
         serde_json::from_slice(&read_body).expect("message JSON should deserialize");
     assert_eq!(
-        read_json[0]["notificationState"], "queuedBehindActiveTurn",
+        read_json["messages"][0]["notificationState"], "queuedBehindActiveTurn",
         "read responses expose the current mutable notification lifecycle"
     );
     assert!(
-        read_json[0].get("notificationDisposition").is_none(),
+        read_json["messages"][0]
+            .get("notificationDisposition")
+            .is_none(),
         "read responses must not reuse the immutable receipt field name"
     );
-    let messages: Vec<MailboxMessage> =
+    let range: MailboxReadResponse =
         serde_json::from_slice(&read_body).expect("messages should deserialize");
+    let messages = range.messages;
     assert_eq!(messages.len(), 1);
     assert_eq!(messages[0].body, "HTTP durable body");
 

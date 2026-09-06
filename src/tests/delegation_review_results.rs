@@ -865,13 +865,13 @@ async fn structured_review_envelopes_stay_out_of_routine_mailbox_surfaces() {
         AxumPath((parent_session_id.clone(), receipt.mailbox_id.clone())),
         State(state.clone()),
         Json(ReadMailboxRequest {
-            after_sequence: 0,
+            after_sequence: Some(0),
             limit: 20,
         }),
     )
     .await
     .expect("routine mailbox read should succeed");
-    assert!(messages.is_empty());
+    assert!(messages.messages.is_empty());
     assert!(
         state
             .mailbox_store
@@ -937,14 +937,14 @@ async fn structured_review_envelopes_stay_out_of_routine_mailbox_surfaces() {
         AxumPath((parent_session_id, receipt.mailbox_id)),
         State(state),
         Json(ReadMailboxRequest {
-            after_sequence: 0,
+            after_sequence: Some(0),
             limit: 20,
         }),
     )
     .await
     .expect("routine mailbox read should include ordinary content");
-    assert_eq!(messages.len(), 1);
-    assert_eq!(messages[0].body, "Visible coordination update.");
+    assert_eq!(messages.messages.len(), 1);
+    assert_eq!(messages.messages[0].body, "Visible coordination update.");
 }
 
 #[test]

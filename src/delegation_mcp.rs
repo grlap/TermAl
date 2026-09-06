@@ -1252,21 +1252,31 @@ impl TermalDelegationMcpBridge {
         let after_sequence = arguments
             .get("afterSequence")
             .map(|value| required_u64(Some(value), "afterSequence"))
-            .transpose()?
-            .unwrap_or(0);
+            .transpose()?;
         let limit = arguments
             .get("limit")
             .map(|value| required_u64(Some(value), "limit"))
             .transpose()?
             .unwrap_or(50);
-        let messages = self.post_json_with_safe_replay(
+        let mut body = json!({ "limit": limit });
+        if let Some(after_sequence) = after_sequence {
+            body["afterSequence"] = json!(after_sequence);
+        }
+        let response = self.post_json_with_safe_replay(
             &format!(
                 "/api/sessions/{}/mailboxes/{}/read",
                 self.serving_session_id, mailbox_id
             ),
-            &json!({ "afterSequence": after_sequence, "limit": limit }),
+            &body,
         )?;
-        Ok(json!({ "mailboxId": mailbox_id, "messages": messages }))
+        let range: MailboxReadResponse = serde_json::from_value(response)
+            .context("mailbox read response shape was invalid")?;
+        Ok(json!({
+            "mailboxId": mailbox_id,
+            "messages": range.messages,
+            "afterSequence": range.after_sequence,
+            "processedThrough": range.processed_through
+        }))
     }
 
     fn tool_read_mailbox_message(&self, arguments: Value) -> Result<Value> {
@@ -2304,7 +2314,7 @@ fn mcp_tools_list_result() -> Value {
             },
             {
                 "name": "termal_send_to_session",
-                "description": "Durably append a routine message to the neutral mailbox shared with another root-level TermAl session, then best-effort wake that peer with metadata only. `sessionId` accepts a TermAl id or case-insensitive session name; prefer an exact id for sustained traffic because names require peer discovery. `idempotencyKey` is required and sender-scoped: retrying the same intent returns the original receipt with duplicate=true; reusing it for different content conflicts. If transport fails before a receipt arrives, the append outcome is unknown: retry the exact same intent and key. Receipt `notificationDisposition` is the immutable point-in-time dispatch outcome; mailbox reads expose the evolving row lifecycle as `notificationState`. The durable body is fetched through termal_read_mailbox. FIRE-AND-FORGET — there is no reply to await.",
+                "description": "Durably append a routine message to the neutral mailbox shared with another root-level TermAl session, then best-effort wake that peer with metadata only. `sessionId` accepts a TermAl id or case-insensitive session name; prefer an exact id for sustained traffic because names require peer discovery. `idempotencyKey` is required and sender-scoped: retrying the same intent returns the original message and dispatch outcome with duplicate=true; reusing it for different content conflicts. If transport fails before a receipt arrives, the append outcome is unknown: retry the exact same intent and key. Receipt `notificationDisposition` is the immutable point-in-time dispatch outcome; mailbox reads expose the evolving row lifecycle as `notificationState`. `senderProcessedThrough` is the sender's resulting durable cursor snapshot; `senderCursorAdvanced` says whether this append advanced it. A fresh send advances only over its own message when the cursor already sat immediately before it, never skipping unread inbound messages. A duplicate returns the current cursor snapshot and senderCursorAdvanced=false. Use the snapshot for the next CAS acknowledgement, but concurrent progress can still require reconciliation. The durable body is fetched through termal_read_mailbox. FIRE-AND-FORGET — there is no reply to await.",
                 "inputSchema": {
                     "type": "object",
                     "required": ["sessionId", "message", "idempotencyKey"],
@@ -2340,7 +2350,7 @@ fn mcp_tools_list_result() -> Value {
             },
             {
                 "name": "termal_read_mailbox",
-                "description": "Fetch a FIFO range of durable mailbox messages. Each message's `notificationState` is the current mutable wake lifecycle state, not the sender receipt's immutable `notificationDisposition`. Reading never advances the processed cursor; acknowledge separately after processing.",
+                "description": "Fetch a FIFO range of durable mailbox messages. Omitted `afterSequence` starts after this participant's durable `processedThrough`; an explicit boundary keeps its meaning (0 replays history). Returns {mailboxId, messages, afterSequence, processedThrough}: afterSequence is the boundary actually used and processedThrough is the participant cursor from the same read snapshot. Neither is a guarantee against later concurrent progress. Each message's `notificationState` is the current mutable wake lifecycle state, not the sender receipt's immutable `notificationDisposition`. Reading never advances the cursor. Process contiguously, then acknowledge with expectedProcessedThrough from the snapshot; CAS remains forward-only.",
                 "inputSchema": {
                     "type": "object",
                     "required": ["mailboxId"],
