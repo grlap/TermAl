@@ -169,6 +169,7 @@ import {
 } from "./app-live-state-hydration";
 import {
   addSessionHistoryPageDemandListener,
+  resumeSessionHistoryDemandsAfterStateAdoption,
 } from "./session-history-demand";
 import {
   enqueueWorkspaceFilesChangedEvent as enqueueWorkspaceFilesChangedEventInGate,
@@ -1568,6 +1569,7 @@ export function useAppLiveState(
         setSelectedProjectId(openedSession.projectId ?? ALL_PROJECTS_FILTER_ID);
       }
     }
+    resumeSessionHistoryDemandsAfterStateAdoption();
     return true;
   }
 

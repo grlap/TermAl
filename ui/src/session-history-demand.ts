@@ -8,9 +8,20 @@ let nextHistoryDemandId = 1;
 let nextHistoryDemandListenerId = 1;
 const activeHistoryDemandListenerIds = new Set<number>();
 const acceptedCompletionIdsByListener = new Map<number, Set<number>>();
+// Explicit tail navigation may survive a rejected page, but only two fresh
+// snapshot adoptions may restart it. No render or elapsed-time retry loop.
+const MAX_TAIL_RECOVERY_RETRIES = 2;
 const historyDemandCompletions = new Map<
   number,
-  (applied: boolean) => void
+  {
+    resolve: (applied: boolean) => void;
+    cleanup: () => void;
+    recovery?: {
+      demand: SessionHistoryPageDemand;
+      retriesRemaining: number;
+      waitingForState: boolean;
+    };
+  }
 >();
 
 export type SessionHistoryPageDemand = {
@@ -18,6 +29,12 @@ export type SessionHistoryPageDemand = {
   direction: "older" | "start" | "newer" | "tail" | "around";
   position?: number;
   requestId?: number;
+  signal?: AbortSignal;
+};
+
+type TailHistoryDemandOptions = {
+  signal?: AbortSignal;
+  retryOnRecovery?: boolean;
 };
 
 export function resolveHasOlderSessionHistory({
@@ -46,8 +63,16 @@ export function requestSessionHistoryNewerPage(sessionId: string) {
   return requestCompletableSessionHistoryPage(sessionId, "newer");
 }
 
-export function requestSessionHistoryTailPage(sessionId: string) {
-  return requestCompletableSessionHistoryPage(sessionId, "tail");
+export function requestSessionHistoryTailPage(
+  sessionId: string,
+  options?: TailHistoryDemandOptions,
+) {
+  return requestCompletableSessionHistoryPage(
+    sessionId,
+    "tail",
+    undefined,
+    options,
+  );
 }
 
 export function requestSessionHistoryAroundPage(
@@ -65,24 +90,83 @@ function requestCompletableSessionHistoryPage(
   sessionId: string,
   direction: "older" | "start" | "newer" | "tail" | "around",
   position?: number,
+  options?: TailHistoryDemandOptions,
 ) {
   // Completable navigation is an immediate request/response contract. Unlike
   // passive older-page prefetch demand, it must not create a promise that can
   // live forever when the app-state owner is not mounted.
-  if (activeHistoryDemandListenerIds.size === 0) {
+  if (activeHistoryDemandListenerIds.size === 0 || options?.signal?.aborted) {
     return Promise.resolve(false);
   }
   const requestId = nextHistoryDemandId;
   nextHistoryDemandId += 1;
   return new Promise<boolean>((resolve) => {
-    historyDemandCompletions.set(requestId, resolve);
-    dispatchSessionHistoryDemand({
+    const demand: SessionHistoryPageDemand = {
       sessionId,
       direction,
       position,
       requestId,
+      ...(options?.signal ? { signal: options.signal } : {}),
+    };
+    const abort = () => completeSessionHistoryPageDemand(requestId, false);
+    historyDemandCompletions.set(requestId, {
+      resolve,
+      cleanup: () => options?.signal?.removeEventListener("abort", abort),
+      recovery:
+        direction === "tail" && options?.retryOnRecovery
+          ? {
+              demand,
+              retriesRemaining: MAX_TAIL_RECOVERY_RETRIES,
+              waitingForState: false,
+            }
+          : undefined,
     });
+    options?.signal?.addEventListener("abort", abort, { once: true });
+    dispatchSessionHistoryDemand(demand);
   });
+}
+
+// The loader calls this only for classified instance/metadata rejection, and
+// BEFORE requesting recovery: a synchronous adoption must not miss the waiter.
+export function deferSessionHistoryTailDemandUntilStateAdoption(
+  demand: SessionHistoryPageDemand,
+) {
+  const recovery =
+    demand.requestId === undefined
+      ? undefined
+      : historyDemandCompletions.get(demand.requestId)?.recovery;
+  if (!recovery || demand.signal?.aborted) {
+    return false;
+  }
+  if (recovery.waitingForState) {
+    return true;
+  }
+  if (recovery.retriesRemaining === 0) {
+    return false;
+  }
+  recovery.retriesRemaining -= 1;
+  recovery.waitingForState = true;
+  return true;
+}
+
+export function resumeSessionHistoryDemandsAfterStateAdoption() {
+  // A successful full-state adoption publishes session/instance refs before
+  // notifying us. Rejected snapshots and ordinary renders never reach here.
+  const waiting = [...historyDemandCompletions.values()].flatMap(
+    ({ recovery }) => recovery?.waitingForState ? [recovery] : [],
+  );
+  for (const recovery of waiting) {
+    const { demand } = recovery;
+    if (
+      demand.signal?.aborted ||
+      demand.requestId === undefined ||
+      !historyDemandCompletions.has(demand.requestId)
+    ) {
+      continue;
+    }
+    recovery.waitingForState = false;
+    dispatchSessionHistoryDemand(demand);
+  }
 }
 
 function demandKey(demand: SessionHistoryPageDemand) {
@@ -116,12 +200,18 @@ export function completeSessionHistoryPageDemand(
   if (requestId === undefined) {
     return;
   }
-  const complete = historyDemandCompletions.get(requestId);
+  const completion = historyDemandCompletions.get(requestId);
   historyDemandCompletions.delete(requestId);
+  completion?.cleanup();
+  for (const [key, demand] of pendingHistoryPageDemands) {
+    if (demand.requestId === requestId) {
+      pendingHistoryPageDemands.delete(key);
+    }
+  }
   for (const acceptedIds of acceptedCompletionIdsByListener.values()) {
     acceptedIds.delete(requestId);
   }
-  complete?.(applied);
+  completion?.resolve(applied);
 }
 
 export function addSessionHistoryPageDemandListener(

@@ -7,7 +7,8 @@
 // a small context so this module stays independent of app-live-state.ts.
 //
 // Post-fetch unmounts fail silently: a dead hook can neither publish the page
-// nor consume a recovery resync. Completable demand still settles in `finally`.
+// nor consume a recovery resync. Completable demand settles in `finally` unless
+// its explicit tail intent is retained by the bridge for state recovery.
 //
 // Split from: ui/src/app-live-state.ts.
 
@@ -24,6 +25,7 @@ import {
 } from "./session-history";
 import {
   completeSessionHistoryPageDemand,
+  deferSessionHistoryTailDemandUntilStateAdoption,
   type SessionHistoryPageDemand,
 } from "./session-history-demand";
 import { isServerInstanceMismatch } from "./state-revision";
@@ -162,8 +164,9 @@ export async function loadBoundedSessionHistoryWindow({
 }) {
   const { direction, requestId, sessionId } = demand;
   let applied = false;
+  let deferredForRecovery = false;
   try {
-    if (!context.isMounted()) {
+    if (!context.isMounted() || demand.signal?.aborted) {
       return;
     }
     const requestedSession = context.getSession(sessionId);
@@ -223,7 +226,7 @@ export async function loadBoundedSessionHistoryWindow({
       ...historyRequest,
       limit: SESSION_HISTORY_PAGE_MESSAGE_COUNT,
     });
-    if (!context.isMounted()) {
+    if (!context.isMounted() || demand.signal?.aborted) {
       // Do not schedule recovery work owned by a hook that has already gone
       // away. The `finally` block remains responsible for settling demand.
       return;
@@ -234,6 +237,8 @@ export async function loadBoundedSessionHistoryWindow({
         historyPage.serverInstanceId,
       )
     ) {
+      deferredForRecovery =
+        deferSessionHistoryTailDemandUntilStateAdoption(demand);
       context.requestActionRecoveryResync({
         allowUnknownServerInstance: true,
       });
@@ -277,9 +282,15 @@ export async function loadBoundedSessionHistoryWindow({
         return;
       }
     }
+    if (mergeOutcome.kind === "metadataChanged") {
+      deferredForRecovery =
+        deferSessionHistoryTailDemandUntilStateAdoption(demand);
+    }
     applied = applyHistoryMergeOutcome(mergeOutcome, context);
   } catch (error) {
-    if (!context.isMounted()) {
+    // A throwing recovery scheduler must not strand its registered waiter.
+    deferredForRecovery = false;
+    if (!context.isMounted() || demand.signal?.aborted) {
       return;
     }
     // Non-older directions are explicit navigation requests, so preserve
@@ -287,6 +298,8 @@ export async function loadBoundedSessionHistoryWindow({
     // serves passive hydration and separately treats 404/409 as benign races.
     context.reportRequestError(error);
   } finally {
-    completeSessionHistoryPageDemand(requestId, applied);
+    if (!deferredForRecovery) {
+      completeSessionHistoryPageDemand(requestId, applied);
+    }
   }
 }

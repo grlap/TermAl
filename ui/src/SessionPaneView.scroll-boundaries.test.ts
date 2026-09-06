@@ -30,6 +30,108 @@ afterEach(() => {
 });
 
 describe("session pane scroll boundaries", () => {
+  it.each(["reader", "tab", "key", "mode", "unmount", "focus"] as const)(
+    "cancels a pending tail navigation on scope/input changes, not visible-pane focus (%s)",
+    async (change) => {
+      const frames = installAnimationFrameHarness(1000 / 60);
+      const shared = params(session(true));
+      const node = document.createElement("section");
+      Object.defineProperties(node, {
+        clientHeight: { value: 200 },
+        scrollHeight: { value: 1000 },
+        scrollTop: { configurable: true, writable: true, value: 400 },
+      });
+      node.scrollTo = vi.fn((options: ScrollToOptions | number) => {
+        if (typeof options !== "number") node.scrollTop = options.top ?? 0;
+      }) as typeof node.scrollTo;
+      const demands: SessionHistoryPageDemand[] = [];
+      const remove = addSessionHistoryPageDemandListener((demand) => demands.push(demand));
+      const initialProps = {
+        isActive: true,
+        isSessionTabActive: false,
+        scrollStateKey: shared.scrollStateKey,
+        paneViewMode: "session" as "session" | "controlPanel",
+      };
+      const hook = renderHook(
+        (props) => useSessionPaneScrollState({ ...shared, ...props }),
+        { initialProps },
+      );
+      hook.result.current.messageStackRef.current = node;
+      const visibleProps = { ...initialProps, isSessionTabActive: true };
+      hook.rerender(visibleProps);
+      frames.drainAnimationFrames();
+      try {
+        act(() => hook.result.current.scrollMessageStackToBoundary("bottom"));
+        const demand = demands[0]!;
+        expect(demand.signal?.aborted).toBe(false);
+        if (change === "reader") {
+          act(() => hook.result.current.scrollMessageStackByPage(-1));
+        } else if (change === "tab") {
+          hook.rerender({ ...visibleProps, isSessionTabActive: false });
+        } else if (change === "key") {
+          hook.rerender({ ...visibleProps, scrollStateKey: "another-tab" });
+        } else if (change === "mode") {
+          hook.rerender({ ...visibleProps, paneViewMode: "controlPanel" });
+        } else if (change === "focus") {
+          hook.rerender({ ...visibleProps, isActive: false });
+        } else {
+          hook.unmount();
+        }
+        expect(demand.signal?.aborted).toBe(change !== "focus");
+        await act(async () => {
+          completeSessionHistoryPageDemand(demand.requestId, true);
+        });
+        frames.drainAnimationFrames();
+        if (change !== "focus") {
+          expect(hook.result.current.liveTailPinned).toBe(false);
+        }
+      } finally {
+        hook.unmount();
+        remove();
+      }
+    },
+  );
+
+  it("invalidates a completed tail jump before its frame when the tab is hidden", async () => {
+    const frames = installAnimationFrameHarness(1000 / 60);
+    const shared = params(session(true));
+    const node = document.createElement("section");
+    Object.defineProperties(node, {
+      clientHeight: { value: 200 },
+      scrollHeight: { value: 1000 },
+      scrollTop: { configurable: true, writable: true, value: 400 },
+    });
+    node.scrollTo = vi.fn((options: ScrollToOptions | number) => {
+      if (typeof options !== "number") node.scrollTop = options.top ?? 0;
+    }) as typeof node.scrollTo;
+    const demands: SessionHistoryPageDemand[] = [];
+    const remove = addSessionHistoryPageDemandListener((demand) => demands.push(demand));
+    const hook = renderHook(
+      ({ visible }) => useSessionPaneScrollState({
+        ...shared, isActive: true, isSessionTabActive: visible,
+      }),
+      { initialProps: { visible: false } },
+    );
+    hook.result.current.messageStackRef.current = node;
+    hook.rerender({ visible: true });
+    frames.drainAnimationFrames();
+    try {
+      await act(async () => {
+        hook.result.current.scrollMessageStackToBoundary("bottom");
+        completeSessionHistoryPageDemand(demands[0]!.requestId, true);
+      });
+      expect(frames.animationFrames.size).toBeGreaterThan(0);
+      hook.rerender({ visible: false });
+      vi.mocked(node.scrollTo).mockClear();
+      frames.drainAnimationFrames();
+      expect(node.scrollTo).not.toHaveBeenCalled();
+      expect(hook.result.current.liveTailPinned).toBe(false);
+    } finally {
+      hook.unmount();
+      remove();
+    }
+  });
+
   it.each(["layout", "pointer", "manual", "finished"] as const)(
     "preserves boundary FOLLOW across a transient height clamp, not newer input (%s)",
     (cause) => {

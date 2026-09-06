@@ -21,6 +21,7 @@ import {
   latestEventSource,
   makeSession,
   makeStateResponse,
+  makeStateSessionSummary,
   mockScrollToAndApplyTop,
   renderApp,
   renderAppWithProjectAndSession,
@@ -151,9 +152,16 @@ describe("App prompt-send and live-turn scroll", () => {
     });
   });
 
-  it.each([false, true])(
-    "loads the true tail on Send and respects intervening reader input (%s)",
-    async (navigateBeforeTailArrives) => {
+  it.each([
+    ["none", false],
+    ["none", true],
+    ["restart", false],
+    ["metadata", false],
+    ["restart", true],
+    ["metadata", true],
+  ] as const)(
+    "loads the true tail on Send through %s recovery, reader cancellation=%s",
+    async (recovery, navigateBeforeTailArrives) => {
       await withVerifiedNoReactActWarnings(async () => {
         const restoreScrollGeometry = stubElementScrollGeometry({
           clientHeight: 200,
@@ -195,7 +203,27 @@ describe("App prompt-send and live-turn scroll", () => {
           () => pendingSend.promise,
         );
         const context = await renderAppWithProjectAndSession();
+        const recoveryState = createDeferred<
+          Awaited<ReturnType<typeof api.fetchState>>
+        >();
+        const fetchStateSpy = vi.spyOn(api, "fetchState").mockImplementation(
+          () => recoveryState.promise,
+        );
         try {
+          // The shared render fixture's initial broad snapshot omits the
+          // instance id. Establish one explicitly before simulating a restart.
+          const initial = getSessionRecordSnapshotForTesting("session-1")!;
+          await dispatchStateEvent(
+            latestEventSource(),
+            makeStateResponse({
+              revision: 2,
+              serverInstanceId: "test-instance",
+              projects: [],
+              orchestrators: [],
+              workspaces: [],
+              sessions: [makeStateSessionSummary(initial)],
+            }),
+          );
           await act(async () => {
             expect(
               await requestSessionHistoryAroundPage("session-1", 500),
@@ -229,6 +257,30 @@ describe("App prompt-send and live-turn scroll", () => {
             getSessionRecordSnapshotForTesting("session-1")?.hasNewerHistory,
           ).toBe(true);
 
+          if (recovery !== "none") {
+            await act(async () => {
+              pendingTail.resolve({
+                messages: [{ ...historicalMessage, id: "rejected-tail" }],
+                nextBefore: "rejected-tail",
+                hasMore: true,
+                nextAfter: null,
+                hasNewer: false,
+                messageStartIndex: 999,
+                messageCount: 1_000,
+                revision: 2,
+                sessionMutationStamp: recovery === "metadata" ? 1 : 2,
+                serverInstanceId:
+                  recovery === "restart" ? "restarted-instance" : "test-instance",
+              });
+              await flushUiWork();
+            });
+            expect(fetchStateSpy).toHaveBeenCalledOnce();
+            expect(messageStack.scrollTop).toBe(400);
+            expect(
+              getSessionRecordSnapshotForTesting("session-1")?.messages[0]?.id,
+            ).toBe(historicalMessage.id);
+          }
+
           if (navigateBeforeTailArrives) {
             act(() => {
               fireEvent.keyDown(messageStack, {
@@ -240,7 +292,7 @@ describe("App prompt-send and live-turn scroll", () => {
             expect(messageStack.scrollTop).toBe(360);
           }
           await act(async () => {
-            pendingTail.resolve({
+            const freshTail = {
               messages: [
                 {
                   ...historicalMessage,
@@ -256,14 +308,41 @@ describe("App prompt-send and live-turn scroll", () => {
               messageCount: 1_000,
               revision: 3,
               sessionMutationStamp: 3,
-              serverInstanceId: "test-instance",
-            });
+              serverInstanceId:
+                recovery === "restart" ? "restarted-instance" : "test-instance",
+            };
+            if (recovery === "none") {
+              pendingTail.resolve(freshTail);
+            } else {
+              fetchHistorySpy.mockResolvedValue(freshTail);
+              const current = getSessionRecordSnapshotForTesting("session-1")!;
+              recoveryState.resolve(
+                makeStateResponse({
+                  revision: 3,
+                  serverInstanceId: freshTail.serverInstanceId,
+                  projects: [],
+                  orchestrators: [],
+                  workspaces: [],
+                  sessions: [makeStateSessionSummary({
+                    ...current,
+                    messageCount: 1_000,
+                    sessionMutationStamp: 3,
+                  })],
+                }),
+              );
+            }
             await flushUiWork();
           });
           await settleAsyncUi();
           expect(
             getSessionRecordSnapshotForTesting("session-1")?.hasNewerHistory,
-          ).toBe(false);
+          ).toBe(navigateBeforeTailArrives);
+          expect(
+            getSessionRecordSnapshotForTesting("session-1")?.messages[0]?.id,
+          ).toBe(navigateBeforeTailArrives ? historicalMessage.id : "tail-message");
+          expect(fetchHistorySpy).toHaveBeenCalledTimes(
+            recovery !== "none" && !navigateBeforeTailArrives ? 2 : 1,
+          );
           expect(messageStack.scrollTop).toBe(
             navigateBeforeTailArrives ? 360 : 800,
           );

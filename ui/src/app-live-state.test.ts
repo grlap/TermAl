@@ -4,6 +4,7 @@ import { createElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import * as api from "./api";
+import * as sessionHistoryDemand from "./session-history-demand";
 import {
   SESSION_HYDRATION_FIRST_RETRY_DELAY_MS,
   SESSION_HYDRATION_MAX_RETRY_ATTEMPTS,
@@ -3511,6 +3512,44 @@ describe("hydration adoption side effects", () => {
     expect(adopted?.hasNewerHistory).toBe(true);
     expect(adopted?.messageCount).toBe(1_001);
     expect(adopted?.sessionMutationStamp).toBe(9);
+  });
+
+  it("notifies tail recovery only after an accepted snapshot has published its instance and sessions", () => {
+    vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
+    vi.spyOn(api, "fetchState").mockImplementation(() => new Promise<StateResponse>(() => {}));
+    const initial = makeSession({ name: "Before recovery" });
+    const params = makeLiveStateParams(initial);
+    params.activeSession = null;
+    params.visibleSessionHydrationTargets = [];
+    let hook!: UseAppLiveStateReturn;
+    const rendered = renderLiveStateHarness(params, (next) => { hook = next; }, () => []);
+    const observed: { instance: string | null; name: string | undefined }[] = [];
+    const resume = sessionHistoryDemand.resumeSessionHistoryDemandsAfterStateAdoption;
+    vi.spyOn(sessionHistoryDemand, "resumeSessionHistoryDemandsAfterStateAdoption")
+      .mockImplementation(() => {
+        observed.push({
+          instance: params.adoptionRefs.lastSeenServerInstanceIdRef.current,
+          name: params.adoptionRefs.sessionsRef.current[0]?.name,
+        });
+        resume();
+      });
+    const snapshot = {
+      ...makeStateResponse(makeSession({ name: "After recovery" }), 2),
+      serverInstanceId: "server-b",
+    };
+    act(() => {
+      expect(hook.adoptState(snapshot)).toBe(false);
+    });
+    expect(observed).toEqual([]);
+    act(() => {
+      expect(hook.adoptState(snapshot, { allowUnknownServerInstance: true })).toBe(true);
+    });
+    expect(observed).toEqual([{ instance: "server-b", name: "After recovery" }]);
+    rendered.rerenderLiveState();
+    act(() => {
+      expect(hook.adoptState(snapshot)).toBe(false);
+    });
+    expect(observed).toHaveLength(1);
   });
 
   it("replaces a historical window with one bounded live-tail demand", async () => {

@@ -352,7 +352,10 @@ export function useSessionPaneScrollState({
     detachedScrollRestoreControllerRef.current;
   const currentScrollStateKeyRef = useCommittedRef(scrollStateKey);
   const pendingStartHistoryDemandRef = useRef<{ key: string } | null>(null);
-  const pendingTailHistoryDemandRef = useRef<{ key: string } | null>(null);
+  const pendingTailHistoryDemandRef = useRef<{
+    key: string;
+    controller: AbortController;
+  } | null>(null);
   const messageStackNavigationGenerationRef = useRef(0);
   const paneLastTouchClientYRef = useRef<number | null>(null);
   const messageStackWheelBurstGenerationRef = useRef(0);
@@ -427,6 +430,7 @@ export function useSessionPaneScrollState({
       pendingStartHistoryDemandRef.current = null;
     }
     if (pendingTailHistoryDemandRef.current?.key !== scrollStateKey) {
+      pendingTailHistoryDemandRef.current?.controller.abort();
       pendingTailHistoryDemandRef.current = null;
     }
     messageStackWheelBurstRef.current = null;
@@ -455,6 +459,7 @@ export function useSessionPaneScrollState({
       clearMessageStackVirtualizerPositionCorrection(node);
     }
     pendingStartHistoryDemandRef.current = null;
+    pendingTailHistoryDemandRef.current?.controller.abort();
     pendingTailHistoryDemandRef.current = null;
     return messageStackNavigationGenerationRef.current;
   }
@@ -732,6 +737,9 @@ export function useSessionPaneScrollState({
       // commits from cancelling convergence without scheduling a replacement.
       cancelSettledScrollToBottom();
       cancelPaneProgrammaticBottomFollow();
+      messageStackNavigationGenerationRef.current += 1;
+      pendingTailHistoryDemandRef.current?.controller.abort();
+      pendingTailHistoryDemandRef.current = null;
     },
     [isSessionTabActive, paneViewMode, scrollStateKey],
   );
@@ -1543,9 +1551,15 @@ export function useSessionPaneScrollState({
         setTailFollowIntent(false);
         setNewResponseIndicator(scrollStateKey, true);
         const requestedScrollStateKey = scrollStateKey;
-        const demand = { key: requestedScrollStateKey };
+        const demand = {
+          key: requestedScrollStateKey,
+          controller: new AbortController(),
+        };
         pendingTailHistoryDemandRef.current = demand;
-        void requestSessionHistoryTailPage(activeSession.id).then((applied) => {
+        void requestSessionHistoryTailPage(activeSession.id, {
+          signal: demand.controller.signal,
+          retryOnRecovery: true,
+        }).then((applied) => {
           if (pendingTailHistoryDemandRef.current === demand) {
             pendingTailHistoryDemandRef.current = null;
           }

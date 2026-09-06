@@ -14,7 +14,7 @@ vi.mock("./session-history-demand", async (importOriginal) => {
     await importOriginal<typeof import("./session-history-demand")>();
   return {
     ...actual,
-    completeSessionHistoryPageDemand: vi.fn(),
+    completeSessionHistoryPageDemand: vi.fn(actual.completeSessionHistoryPageDemand),
   };
 });
 
@@ -110,6 +110,165 @@ describe("session history loading", () => {
     vi.clearAllMocks();
     vi.restoreAllMocks();
   });
+
+  it.each(["instance", "metadata"] as const)(
+    "keeps a tail completion pending through %s recovery and publishes only the fresh tail",
+    async (reason) => {
+      const context = makeContext();
+      const current = session([message(0)], { messageCount: 2, sessionMutationStamp: 2 });
+      vi.mocked(context.getSession).mockReturnValue(current);
+      vi.mocked(context.publishSession).mockReturnValue(true);
+      const fresh = {
+        messages: [message(1)], messageCount: 2, hasMore: true, hasNewer: false,
+        nextBefore: "message-1", nextAfter: null, revision: 3,
+        serverInstanceId: "server-a", sessionMutationStamp: 3,
+      };
+      const fetch = vi.spyOn(api, "fetchSessionHistory")
+        .mockResolvedValueOnce({ ...fresh,
+          serverInstanceId: reason === "instance" ? "server-b" : "server-a",
+          sessionMutationStamp: 1,
+        })
+        .mockResolvedValue(fresh);
+      const loads: Promise<void>[] = [];
+      const remove = sessionHistoryDemand.addSessionHistoryPageDemandListener((demand) => {
+        loads.push(loadBoundedSessionHistoryWindow({ context, demand }));
+      });
+      try {
+        const applied = sessionHistoryDemand.requestSessionHistoryTailPage(current.id, { retryOnRecovery: true });
+        await loads[0];
+        expect(context.requestActionRecoveryResync).toHaveBeenCalledOnce();
+        expect(context.publishSession).not.toHaveBeenCalled();
+        expect(sessionHistoryDemand.completeSessionHistoryPageDemand).not.toHaveBeenCalled();
+        expect(fetch).toHaveBeenCalledOnce();
+        sessionHistoryDemand.resumeSessionHistoryDemandsAfterStateAdoption();
+        await loads[1];
+        await expect(applied).resolves.toBe(true);
+        expect(fetch).toHaveBeenCalledTimes(2);
+        expect(context.publishSession).toHaveBeenCalledOnce();
+        expect(context.publishSession).toHaveBeenCalledWith(expect.objectContaining({
+          messages: fresh.messages, hasNewerHistory: false,
+        }));
+        expect(sessionHistoryDemand.completeSessionHistoryPageDemand).toHaveBeenCalledOnce();
+      } finally {
+        remove();
+      }
+    },
+  );
+
+  it("registers recovery before a synchronous state adoption can resume the demand", async () => {
+    const context = makeContext();
+    vi.mocked(context.getSession).mockReturnValue(session([message(0)]));
+    vi.mocked(context.publishSession).mockReturnValue(true);
+    const page = { messages: [message(0)], messageCount: 1, hasMore: false,
+      revision: 1, serverInstanceId: "server-a", sessionMutationStamp: 1 };
+    vi.spyOn(api, "fetchSessionHistory")
+      .mockResolvedValueOnce({ ...page, serverInstanceId: "server-b" })
+      .mockResolvedValue(page);
+    vi.mocked(context.requestActionRecoveryResync).mockImplementation(() => {
+      sessionHistoryDemand.resumeSessionHistoryDemandsAfterStateAdoption();
+    });
+    const loads: Promise<void>[] = [];
+    const remove = sessionHistoryDemand.addSessionHistoryPageDemandListener((demand) => {
+      loads.push(loadBoundedSessionHistoryWindow({ context, demand }));
+    });
+    try {
+      const applied = sessionHistoryDemand.requestSessionHistoryTailPage("session-1", { retryOnRecovery: true });
+      await loads[0];
+      await expect(applied).resolves.toBe(true);
+      expect(api.fetchSessionHistory).toHaveBeenCalledTimes(2);
+      expect(context.publishSession).toHaveBeenCalledOnce();
+      expect(sessionHistoryDemand.completeSessionHistoryPageDemand).toHaveBeenCalledOnce();
+    } finally {
+      remove();
+    }
+  });
+
+  it("settles after recovery exhaustion and cannot revive on another adoption", async () => {
+    const context = makeContext();
+    vi.mocked(context.getSession).mockReturnValue(session([message(0)], { sessionMutationStamp: 2 }));
+    vi.spyOn(api, "fetchSessionHistory").mockResolvedValue({
+      messages: [message(0)], messageCount: 1, hasMore: false,
+      revision: 1, serverInstanceId: "server-a", sessionMutationStamp: 1,
+    });
+    const loads: Promise<void>[] = [];
+    const remove = sessionHistoryDemand.addSessionHistoryPageDemandListener((demand) => {
+      loads.push(loadBoundedSessionHistoryWindow({ context, demand }));
+    });
+    try {
+      const applied = sessionHistoryDemand.requestSessionHistoryTailPage("session-1", { retryOnRecovery: true });
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        await loads[attempt];
+        sessionHistoryDemand.resumeSessionHistoryDemandsAfterStateAdoption();
+      }
+      await expect(applied).resolves.toBe(false);
+      expect(api.fetchSessionHistory).toHaveBeenCalledTimes(3);
+      expect(context.publishSession).not.toHaveBeenCalled();
+      expect(sessionHistoryDemand.completeSessionHistoryPageDemand).toHaveBeenCalledOnce();
+    } finally {
+      remove();
+    }
+  });
+
+  it.each(["hard-error", "protocol-error", "scheduler-error"] as const)(
+    "terminates an opted-in demand on %s without later replay",
+    async (failure) => {
+      const context = makeContext();
+      vi.mocked(context.getSession).mockReturnValue(session([message(0)]));
+      const fetch = vi.spyOn(api, "fetchSessionHistory");
+      if (failure === "hard-error") {
+        fetch.mockRejectedValue(new Error("unavailable"));
+      } else {
+        fetch.mockResolvedValue({
+          messages: [message(0)], messageCount: 1, hasMore: false,
+          hasNewer: failure === "protocol-error", revision: 1,
+          serverInstanceId: failure === "scheduler-error" ? "server-b" : "server-a",
+          sessionMutationStamp: 1,
+        });
+        if (failure === "scheduler-error") {
+          vi.mocked(context.requestActionRecoveryResync).mockImplementation(() => {
+            throw new Error("recovery owner failed");
+          });
+        }
+      }
+      const remove = sessionHistoryDemand.addSessionHistoryPageDemandListener((demand) => {
+        void loadBoundedSessionHistoryWindow({ context, demand });
+      });
+      try {
+        await expect(sessionHistoryDemand.requestSessionHistoryTailPage("session-1", { retryOnRecovery: true }))
+          .resolves.toBe(false);
+        sessionHistoryDemand.resumeSessionHistoryDemandsAfterStateAdoption();
+        expect(fetch).toHaveBeenCalledOnce();
+        expect(context.reportRequestError).toHaveBeenCalledOnce();
+        expect(context.publishSession).not.toHaveBeenCalled();
+      } finally {
+        remove();
+      }
+    },
+  );
+
+  it.each(["valid-page", "mismatched-page", "error"] as const)(
+    "ignores a cancelled in-flight tail %s without publishing, reporting or recovering",
+    async (result) => {
+      const context = makeContext();
+      vi.mocked(context.getSession).mockReturnValue(session([message(0)]));
+      const pending = deferred<Awaited<ReturnType<typeof api.fetchSessionHistory>>>();
+      vi.spyOn(api, "fetchSessionHistory").mockReturnValue(pending.promise);
+      const controller = new AbortController();
+      const load = loadBoundedSessionHistoryWindow({ context, demand: {
+        direction: "tail", requestId: 201, sessionId: "session-1", signal: controller.signal,
+      } });
+      controller.abort();
+      if (result === "error") pending.reject(new Error("late failure"));
+      else pending.resolve({ messages: [message(0)], messageCount: 1, hasMore: false,
+        revision: 1, serverInstanceId: result === "valid-page" ? "server-a" : "server-b",
+        sessionMutationStamp: 1 });
+      await load;
+      expect(context.publishSession).not.toHaveBeenCalled();
+      expect(context.reportRequestError).not.toHaveBeenCalled();
+      expect(context.requestActionRecoveryResync).not.toHaveBeenCalled();
+      expectSingleDemandCompletion(201, false);
+    },
+  );
 
   it("reports one error to all waiters sharing a failed older-page load", async () => {
     const historyPage = deferred<
