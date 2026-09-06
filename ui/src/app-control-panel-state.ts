@@ -25,8 +25,6 @@ import {
   resolveControlPanelWorkspaceRoot,
   resolveRemoteConfig,
   remoteBadgeLabel,
-  usesSessionModelPicker,
-  NEW_SESSION_MODEL_OPTIONS,
   type ComboboxOption,
 } from "./session-model-utils";
 import { ALL_PROJECTS_FILTER_ID } from "./project-filters";
@@ -96,7 +94,6 @@ type UseAppControlPanelStateReturn = {
   newProjectSelectedRemote: RemoteConfig;
   newProjectUsesLocalRemote: boolean;
   createProjectRemoteOptions: readonly ComboboxOption[];
-  newSessionModelOptions: readonly ComboboxOption[];
   createSessionSelectedProject: Project | null;
   createSessionWorkspaceProject: Project | null;
   createSessionEffectiveProject: Project | null;
@@ -106,7 +103,6 @@ type UseAppControlPanelStateReturn = {
   createSessionProjectHint: string;
   createSessionUsesRemoteProject: boolean;
   createSessionProjectSelectionError: string | null;
-  createSessionUsesSessionModelPicker: boolean;
   createSessionAgentReadiness: AgentReadiness | null;
   createSessionBlocked: boolean;
   projectScopedSessions: Session[];
@@ -240,7 +236,6 @@ export function useAppControlPanelState({
       badges: [remoteBadgeLabel(remote)],
     }));
   }, [enabledProjectRemotes]);
-  const newSessionModelOptions = NEW_SESSION_MODEL_OPTIONS[newSessionAgent];
   const createSessionSelectedProject =
     createSessionProjectId === CREATE_SESSION_WORKSPACE_ID
       ? null
@@ -321,8 +316,6 @@ export function useAppControlPanelState({
     !projectLookup.has(activeSession.projectId)
       ? "The current workspace is tied to a project that is no longer available. Choose a project before creating a session."
       : null;
-  const createSessionUsesSessionModelPicker =
-    usesSessionModelPicker(newSessionAgent);
   const createSessionAgentReadiness = createSessionUsesRemoteProject
     ? null
     : (agentReadinessByAgent.get(newSessionAgent) ?? null);
@@ -573,7 +566,6 @@ export function useAppControlPanelState({
     newProjectSelectedRemote,
     newProjectUsesLocalRemote,
     createProjectRemoteOptions,
-    newSessionModelOptions,
     createSessionSelectedProject,
     createSessionWorkspaceProject,
     createSessionEffectiveProject,
@@ -583,7 +575,6 @@ export function useAppControlPanelState({
     createSessionProjectHint,
     createSessionUsesRemoteProject,
     createSessionProjectSelectionError,
-    createSessionUsesSessionModelPicker,
     createSessionAgentReadiness,
     createSessionBlocked,
     projectScopedSessions,

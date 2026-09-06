@@ -4,6 +4,61 @@
 
 ---
 
+## No-legacy audit — 2026-09-05
+
+This audit covers Rust, frontend TypeScript, scripts, tests and documentation.
+The inventory searched `legacy`, `migrat*`, compatibility/older-version
+promises, then broader `fallback`/`upgrade` matches. These words are not by
+themselves evidence of an old-schema path. Historical test inputs, negative
+rejection tests and source-extraction provenance are not promises to accept old
+application data.
+
+Removed in this cut:
+
+- The server's inert single `themeId` layout field and its round-trip promise;
+  [theme persistence](themes.md) uses the light/dark pair and mode.
+- OpenCode's load-time missing-effort backfill. An absent optional effort stays
+  absent in persistence; the current config consumer interprets it as Auto.
+  Nonempty invalid selections still fail validation. Current serializer-omitted
+  `codexFastMode: false` remains a valid compact representation.
+- The frontend's omitted-OpenCode-default and fictional non-picker agent
+  request branches. Every current agent has an explicit configured default.
+- Codex discovery's missing-column substitutions and guessed database names.
+  Its [versioned external schema](features/current-agent-contracts.md#codex-thread-database-discovery)
+  requires `state_5.sqlite` and all queried columns, retaining nullable values.
+- Stale plan promises for older frontend/remote wire adapters and ACP
+  load-error-to-new-session recovery. Current session identity is preserved.
+
+Retained inventory families are classified narrowly:
+
+| Classification | Current behavior and representative owners |
+| --- | --- |
+| Current temporal ordering | SSE reconnect/resnapshot fallback, exact revision and server-instance admission, late hydration/remote responses, mailbox cursor CAS, runtime/turn generations and interrupted-operation recovery. Owners include `app-live-state*`, `live-updates.ts`, `state-revision.ts`, `remote_state_events.rs`, `turn_lifecycle.rs` and their tests. An older event means an earlier event from this runtime, not an older client protocol. |
+| Current state movement | Pane scroll-position moves, tab routing, resident-history reveal/eviction, session-store materialization, source/shared Codex-home precedence, project/remote localization and derived SQLite overview/index maintenance. Owners include `pane-scroll-position-migration.ts`, `workspace*.ts`, transcript/marker hooks, `state_boot.rs`, `remote_sync.rs` and `persist_sqlite_overview.rs`. These move current state or rebuild derived data; they do not translate obsolete authoritative schemas. |
+| Current input/platform handling | Windows verbatim/case/separator path normalization; optional configuration and compact serde defaults; unknown/invalid-input rejection; Git patch-only document enrichment; bounded render-error/Markdown/Mermaid fallbacks; clipboard/caret/browser feature detection; CSS/viewport defaults; remote install platform selection; fixture text containing words such as “migration.” These do not accept a retired TermAl wire/storage shape. |
+| Explicit pinned external protocol | Advertised ACP v1 load/resume and permission kinds, Claude structural result status, Codex v2 methods/catalog fields and the 0.153.4 thread database. The [contract register](features/current-agent-contracts.md) supplies versioned evidence. A deprecated upstream method still advertised by that pin is different from a guessed old-protocol fallback. |
+| Current result-mode boundary | Human prose parsing in non-reviewer result handling is presentation for that mode, not recovery authority for reviewer delegations. Reviewer results require the validated structured submission; negative obsolete-shape and mirror-event tests guard against restoring removed authority. |
+
+Two exceptions are explicit, not a claim that every internal compatibility path
+has disappeared:
+
+- **Deferred internal compatibility:** mailbox participant reactivation still
+  repairs historical `left_at` rows. Removal is deferred until live coordination
+  state has been assessed. This audit does not alter those rows or the three
+  mailbox Rust implementation/test files. See [mailboxes](features/agent-mailboxes.md).
+- **Current state movement pending Engram cut-B:** the serde-skipped
+  `ProjectEngramSettings.work_authority_grant` test carrier and its cleanup
+  fixtures remain until that cut; no stored grant field is read through it.
+  This audit does not remove that cross-cut fixture carrier.
+
+[SQLite storage](features/sqlite-session-storage.md) already distinguishes
+supported current-schema maintenance from unsupported development databases:
+the latter require the named move/delete reset, not a row-by-row migration.
+[Previously persisted Codex ghosts](features/shared-codex-app-server.md#discovery-and-previously-persisted-ghost-sessions)
+require deliberate manual session removal; discovery filtering is not a
+retroactive pruner. The separate Markdown/diagram workspace-persistence feature
+gap is not implemented by retiring `themeId`.
+
 ## System Overview
 
 ```text
@@ -39,7 +94,7 @@ the linked parent/delegation identity, stores it without an early wake, and
 promotes it when the child turn becomes terminal. The accepted result remains
 authoritative across later child runtime failure or disappearance; those
 conditions are separate transport diagnostics. Human Markdown remains
-full output; legacy parsing is not used for these new structured reviews. The
+full output; prose parsing is never result authority for reviewer delegations. The
 submission contract is injected by TermAl for every reviewer-mode delegation,
 after repository-owned task text, so repositories do not need to modify their
 own review commands. Read-only policy remains a workspace boundary; this single
@@ -372,7 +427,7 @@ transactionally maintained one-byte-per-message SQLite overview blob. The rail
 uses only this position-space response; virtualizer layout snapshots, pixel
 estimates, focus state, and resident-message fallbacks are intentionally not
 part of the overview path. Bucket `h` counts source-free human text prompts,
-separately from compatibility field `u`, which can also include peer/mailbox
+separately from the broader user-author field `u`, which can also include peer/mailbox
 messages authored as `you`. The UI keeps ordinary kind buckets quiet and
 reserves strong accents for `h`, errors, markers, and the outlined viewport
 handle.

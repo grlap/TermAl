@@ -22,6 +22,22 @@ The supported app-server schema, typed text events, and catalog-only Fast
 dispatch contract are pinned in
 [Current Agent Integration Contracts](current-agent-contracts.md#codex-typed-events-and-catalog-only-fast-dispatch).
 
+## Discovery and previously persisted ghost sessions
+
+Boot discovery reads only the pinned Codex `state_5.sqlite` schema described in
+[the current external contract](current-agent-contracts.md#codex-thread-database-discovery).
+Shared-runtime and ordinary user homes are current sources, not alternate
+schema versions. Native subagent and validated TermAl delegation-bootstrap
+threads are excluded before the import limit.
+
+The removed boot-time ghost-pruner is not a migration service. Discovery
+filtering prevents new child-thread imports, but does **not** retroactively
+delete ghost sessions already saved in TermAl. Those entries require deliberate
+manual removal through the normal session-deletion UI after checking their
+identity; the audit never edits a running server's database. This preserves
+user-owned saved sessions rather than inferring deletion authority from a
+later discovery result.
+
 ## The one fact everything follows from
 
 **Codex does not run one process per chat. One long-lived Codex process hosts every

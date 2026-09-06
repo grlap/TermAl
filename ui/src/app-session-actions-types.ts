@@ -153,7 +153,6 @@ export type UseAppSessionActionsParams = {
 
 export type HandleNewSessionArgs = {
   agent: AgentType;
-  model: string;
   preferredPaneId?: string | null;
   projectSelectionId?: string;
 };

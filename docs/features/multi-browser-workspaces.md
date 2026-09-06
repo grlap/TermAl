@@ -77,15 +77,14 @@ documents missing either routing field are ignored rather than upgraded.
 Current stale-pane routing recovery and per-pane scroll-state moves are separate
 runtime behaviors and are unchanged.
 
-Browser theme persistence uses only `lightThemeId`, `darkThemeId`, and
-`themeMode`, with global browser slots `termal-ui-theme-light`, `termal-ui-theme-dark`, and
-`termal-ui-theme-mode`. The client neither reads nor writes the retired `themeId`
-layout field or `termal-ui-theme` key. This retirement is browser-side: the server
-still accepts the inert `themeId` field when supplied and returns it when present.
-A replacement PUT that omits it clears the stored value, including saves from
-the updated client. Removal of the server-side field remains part of the final
-no-legacy audit. Current workspace theme fields take
-precedence over current global slots, then built-in defaults.
+Theme persistence uses only `lightThemeId`, `darkThemeId`, and `themeMode`,
+with global browser slots `termal-ui-theme-light`, `termal-ui-theme-dark`, and
+`termal-ui-theme-mode`. The retired `themeId` field is absent from the server's
+document, summary and PUT types as well as the client contract. It is never
+stored or returned; an unknown request field does not acquire theme authority.
+The browser never reads or writes the retired `termal-ui-theme` key.
+Current workspace theme fields take precedence over current global slots,
+then built-in defaults.
 See [Configurable UI Themes](../themes.md) for the current preference keys.
 Unknown cosmetic `diagramLook` values are dropped without changing the pane/tab
 arrangement; the current stored preference or default supplies the look. There

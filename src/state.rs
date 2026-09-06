@@ -1198,7 +1198,6 @@ fn collect_workspace_layout_summaries<'a>(
             revision: layout.revision,
             updated_at: layout.updated_at.clone(),
             control_panel_side: layout.control_panel_side,
-            theme_id: layout.theme_id.clone(),
             light_theme_id: layout.light_theme_id.clone(),
             dark_theme_id: layout.dark_theme_id.clone(),
             theme_mode: layout.theme_mode.clone(),

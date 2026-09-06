@@ -61,7 +61,7 @@ not depend on remote `/api/state` for transcript repair after this refactor; it
 must hydrate the targeted remote session and then localize the returned session
 id/project/session references before writing the local proxy record.
 
-## Implementation Status - 2026-09-03
+## Implementation Status - 2026-09-05
 
 The current tree has completed the explicit metadata-first wire boundary:
 
@@ -79,7 +79,9 @@ The current tree has completed the explicit metadata-first wire boundary:
 
 Remaining work in this longer plan is limited to later retention/performance
 policy such as transcript eviction and baseline measurement; it does not reopen
-the wire compatibility shapes removed above.
+the wire shapes removed above. The phases below describe the ownership work;
+none permits an older client/server adapter. See the
+[dated no-legacy audit](architecture.md#no-legacy-audit--2026-09-05).
 
 ## Wire Model
 
@@ -190,19 +192,14 @@ decided ad hoc during implementation.
   filtering. Not monotone — compaction can reduce it. Used by the UI as a
   loading-skeleton height estimate and as the count half of the gap-detection
   tuple. `u32` is picked deliberately; `usize` has no portable wire width.
-- **Wire compatibility decision:** Phase 1 treats `messageCount` as a
-  coordinated current-tree wire bump. Current emitters serialize it on full
-  `Session` snapshots and every session-scoped `DeltaEvent`; current delta
-  deserializers require it. Mixed-version remote bridges across pre/post
-  `messageCount` binaries are not supported during the local-only development
-  phase. `Session.messageCount` still has a Rust serde default so older
-  persisted local JSON can load before the wire projection recomputes the
-  outbound value from the transcript.
-- **`messagesLoaded`**: always `false` in `StateSessionSummary` and is wire
-  redundant — the type itself is the discriminant. Keep it on the wire only
-  during the transitional adapter window (Phase 2 → Phase 3). It MUST be removed
-  from the wire type at Phase 5; the frontend derives `messagesLoaded` from its
-  local store thereafter.
+- **Current wire contract:** `messageCount` is required on broad summaries and
+  session-scoped deltas. Current full-session projections derive the count
+  from authoritative transcript metadata. The local `Session` representation's
+  serde default is not permission to accept an older broad wire payload.
+  Mixed-version remote bridges are unsupported.
+- **`messagesLoaded`**: local frontend/store hydration state only, absent from
+  `StateSessionSummary` on the wire. The dedicated summary type is the
+  discriminant; no empty-`messages` wire adapter exists.
 - **`preview: String`**: bounded by the existing preview helper to a short
   snippet (<= 240 bytes). Summaries MUST not embed full last-message text here.
 - **`pending_prompts`**: see "Bounded summary fields" below. This field does
@@ -317,18 +314,13 @@ commits to this contract (see below).
 - Concurrent `fetchSession(id)` calls for the same `id` are coalesced client-
   side; at most 4 distinct hydration fetches run in parallel.
 
-### Version negotiation
+### Current remote contract
 
-`HealthResponse` gains `supportsMetadataFirstState: true`. Remote proxies
-(`src/remote_routes.rs`, `RemoteRegistry`) inspect the bit during
-`start_event_bridge`:
-
-- Remote reports `true` → the local proxy consumes summary-only state and
-  issues targeted `GET /api/sessions/{id}` to the remote for active panes.
-- Remote reports `false` or absent → the local proxy treats the remote as
-  legacy: accepts full-session state from that remote and adapts to summaries
-  internally before forwarding to local UI. This path is marked for removal at
-  the same deadline as the transitional adapter (see Rollout Strategy).
+Remote proxies require the current metadata-first summary shape and issue
+targeted bounded session-detail requests. There is no
+`supportsMetadataFirstState` negotiation bit and no full-session-to-summary
+adapter for older remotes. Transport/revision recovery operates within the
+current contract, not by retrying an older protocol.
 
 ## Implementation Phases
 
@@ -505,9 +497,9 @@ Work:
 Exit criteria:
 
 - `/api/state` response bodies do not include a `messages` field for sessions,
-  or include only the temporary adapter-compatible empty `messages: []` with
-  `messagesLoaded: false` if the migration phase requires it.
-- `GET /api/sessions/{id}` still returns the full transcript.
+  including an empty array. Local materialization belongs to the store.
+- `GET /api/sessions/{id}` returns a bounded recent transcript tail; older
+  history uses the current bounded history-page API.
 - SSE `state` events have payload size proportional to session count, not total
   message count.
 - Orchestrator update deltas also have payload size proportional to referenced
@@ -644,7 +636,7 @@ Exit criteria:
 - Remote active panes recover transcripts without broad remote `/api/state`
   carrying messages.
 
-### Phase 5: Remove Transitional Adapters
+### Phase 5: Removed Transitional Adapters (Completed)
 
 Work:
 
@@ -655,9 +647,8 @@ Work:
 - Remove `messagesLoaded` from `StateSessionSummary` on the wire (see
   Contract Precisions — the bit is redundant with the type itself). Frontend
   continues to track `messagesLoaded` on its local `Session` / store records.
-- Drop the legacy-remote compatibility branch in the remote-proxy bridge
-  (the `supportsMetadataFirstState === false` path). All remotes in scope
-  are expected to speak the new protocol by this deadline.
+- Keep the remote-proxy bridge on the current summary contract. There is no
+  version-negotiated full-session branch.
 - Make TypeScript prevent direct message access from global state summaries:
   - `StateResponse.sessions: StateSessionSummary[]` (no union with
     `Session`).
@@ -699,8 +690,8 @@ Exit criteria:
 - `StateResponse` cannot carry full session messages at the type level.
 - UI code that needs messages goes through session-store hydration or
   `SessionResponse`; no `as Session` casts in production code.
-- Test fixtures either target the new contract or are explicitly annotated
-  as legacy-coverage tests.
+- Test fixtures target current behavior. Obsolete wire shapes appear only
+  as negative rejection inputs, never as supported compatibility fixtures.
 - Compile-time test pins the absence of `messages` on `StateSessionSummary`.
 - `docs/metadata-first-baseline.json` is compared against the final perf run
   and the delta is recorded in `docs/prompt-responsiveness-refactor-plan.md`.
@@ -716,9 +707,10 @@ Required updates:
     snapshot".
   - Change SSE `state` docs from "full StateResponse JSON" to
     "metadata-first StateResponse JSON".
-  - Document that `GET /api/sessions/{id}` is the full transcript hydration
-    route.
-  - Document `StateSessionSummary`, `messagesLoaded: false`, and `messageCount`.
+  - Document that `GET /api/sessions/{id}` is the bounded recent-tail
+    hydration route, with older history on the bounded history-page API.
+  - Document `StateSessionSummary` and required `messageCount`; hydration
+    flags belong only to local store records.
   - Update real-time update docs so delta gaps mention targeted session
     hydration when transcript repair is needed.
   - Update `DeltaEvent::OrchestratorsUpdated` docs to show summary/id payloads
@@ -733,15 +725,12 @@ Required updates:
   - Update completion criteria to include "global state parse time is
     independent of total transcript size".
 
-- `docs/bugs.md`
-  - Move "State snapshots still include full session transcripts on the wire"
-    to the fixed preamble once implemented.
-  - Remove or update task items that metadata-only snapshot coverage completes.
-  - Add any newly discovered follow-up bugs from the audit.
+- Beads tracks remaining actionable work; the retired Markdown bug ledger is
+  not a second tracker.
 
 - `docs/test.md`
   - Add testing guidance that global state fixtures should not include message
-    transcripts unless the test explicitly covers legacy/full-session paths.
+    transcripts; malformed full-session broad payloads belong only in rejection tests.
   - Add guidance for targeted session hydration tests.
   - Describe the `assertNoTranscriptInState(state)` helper and the
     `hydrateSessionForTest(id, messages)` helper, and require every
@@ -753,9 +742,8 @@ Required updates:
     stale error cases on `GET /api/sessions/{id}`, the client's required
     retry/eviction behavior, the hydration state machine, and the
     delta-on-un-hydrated-session policy.
-  - Add a **Version negotiation** note referencing
-    `HealthResponse.supportsMetadataFirstState` and the fallback path for
-    legacy remotes during the transitional window.
+  - Document the required current remote contract and the absence of
+    older-remote payload adapters.
   - Explicitly mark general pagination of `GET /api/sessions/{id}` as a
     non-goal for this plan. Tail-first hydration may use
     `GET /api/sessions/{id}?tail=N` as a bounded newest-message shortcut, but a
@@ -976,10 +964,9 @@ Fixture discipline:
   `fetchSession` against instance A resolves after the UI adopts
   instance B. Contract Precisions mandates `serverInstanceId` capture at
   send and reject on mismatch at receive.
-- **Mixed-version remote proxies.** Local-master talking to remote-branch
-  or vice versa. Version negotiation via
-  `HealthResponse.supportsMetadataFirstState` handles this; the
-  compatibility branch has a hard removal deadline at Phase 5.
+- **Mixed-version remote proxies.** They are unsupported. Current remote
+  schema rejection must remain visible; no full-session compatibility branch
+  masks an incompatible server.
 
 ## Rollout Strategy
 
@@ -993,25 +980,11 @@ Prefer a type-safe staged rollout:
 5. Remove temporary adapters and make transcript access impossible from
    global state types (Phase 5).
 
-**Transitional adapter discipline.** Do not ship a long-lived "empty
-messages but still typed as full Session" API. "Long-lived" is defined
-concretely:
-
-- Phase 2 and Phase 3 MUST land in the same merge series. No release tag
-  cuts between them.
-- The transitional `messages: []` adapter MUST NOT survive past the merge
-  of Phase 3. Phase 5 immediately follows as a cleanup commit.
-- CI gates: at Phase 5 merge, a schema test rejects any `StateResponse`
-  that contains a `messages` field on a session, even as `[]`.
-- The legacy-remote compatibility branch introduced in Phase 2 (for
-  `supportsMetadataFirstState === false` remotes) is removed at the same
-  deadline. Remotes that haven't updated by then fall back to the same
-  "hydrate on activation" path the local UI uses, not a separate code
-  path.
-
-New UI features landing between Phase 3 and Phase 5 MUST NOT introduce new
-uses of placeholder `messages: []` semantics. Reviewer discipline enforces
-this; the ESLint rule added in Phase 5 codifies it.
+**Current boundary discipline.** The transitional empty-message envelope and
+older-remote branches are removed. Schema tests must keep broad summaries free
+of `messages`, even `[]`; client features read transcripts from current local
+store records populated by targeted hydration. Later retention/performance work
+must not reintroduce an older wire adapter.
 
 ## Completion Criteria
 

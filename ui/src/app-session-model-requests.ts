@@ -3,10 +3,7 @@
 // Split from app-session-actions.ts to keep action orchestration smaller.
 
 import { assertNever } from "./exhaustive";
-import {
-  isDefaultModelPreference,
-  usesSessionModelPicker,
-} from "./session-model-utils";
+import { isDefaultModelPreference } from "./session-model-utils";
 import type { AgentType } from "./types";
 
 export type AppSessionDefaultModels = {
@@ -14,7 +11,7 @@ export type AppSessionDefaultModels = {
   Codex: string;
   Cursor: string;
   Gemini: string;
-  OpenCode?: string;
+  OpenCode: string;
 };
 
 export function configuredDefaultModelForAgent(
@@ -31,7 +28,7 @@ export function configuredDefaultModelForAgent(
     case "Gemini":
       return defaultModels.Gemini;
     case "OpenCode":
-      return defaultModels.OpenCode ?? "default";
+      return defaultModels.OpenCode;
     default:
       return assertNever(agent, "Unhandled default model agent");
   }
@@ -39,13 +36,8 @@ export function configuredDefaultModelForAgent(
 
 export function requestedModelForNewSession(
   agent: AgentType,
-  dialogModel: string,
   defaultModels: AppSessionDefaultModels,
 ): string | undefined {
-  if (!usesSessionModelPicker(agent)) {
-    return dialogModel.trim() || undefined;
-  }
-
   const defaultModel = configuredDefaultModelForAgent(agent, defaultModels).trim();
   if (isDefaultModelPreference(defaultModel)) {
     return undefined;

@@ -802,6 +802,105 @@ fn persisted_state_normalizes_legacy_local_verbatim_paths() {
     let _ = fs::remove_dir_all(project_root);
 }
 
+// A retired field in stored metadata is inert: loading keeps current layout
+// settings intact, and the next save serializes only the current contract.
+#[tokio::test]
+async fn sqlite_stored_workspace_theme_id_is_ignored_on_load_and_dropped_on_save() {
+    let state = test_app_state();
+    let path = state.persistence_path.as_path();
+    persist_state(path, &StateInner::new()).expect("current SQLite fixture should persist");
+    let mut metadata = sqlite_metadata_state_value(path);
+    let mut layout = json!({
+        "id": "workspace-stored",
+        "revision": 7,
+        "updatedAt": "2026-04-01 12:00:00",
+        "controlPanelSide": "right",
+        "themeId": "retired-stored-theme",
+        "lightThemeId": "warm-light",
+        "darkThemeId": "terminal",
+        "themeMode": "dark",
+        "styleId": "style-terminal",
+        "fontSizePx": 14,
+        "editorFontSizePx": 15,
+        "densityPercent": 90,
+        "workspace": {
+            "root": { "type": "pane", "paneId": "pane-a" },
+            "panes": [{
+                "id": "pane-a",
+                "tabs": [],
+                "activeTabId": null,
+                "activeSessionId": null,
+                "viewMode": "session",
+                "lastSessionViewMode": "session"
+            }],
+            "activePaneId": "pane-a",
+            "lastContentPaneId": "pane-a",
+            "lastViewerPaneId": null
+        }
+    });
+    metadata["workspaceLayouts"] = json!({ "workspace-stored": layout.clone() });
+    {
+        // Seed the stored field directly: a current typed serializer omits it.
+        let connection = rusqlite::Connection::open(path).expect("fixture database should open");
+        assert_eq!(
+            connection
+                .execute(
+                    "UPDATE app_state SET value_json = ?1 WHERE key = ?2",
+                    rusqlite::params![metadata.to_string(), SQLITE_METADATA_KEY],
+                )
+                .expect("stored workspace metadata should update"),
+            1
+        );
+    }
+
+    let loaded = load_state(path)
+        .expect("stored inert theme field must not prevent real SQLite loading")
+        .expect("fixture state should exist");
+    assert_eq!(loaded.workspace_layouts.len(), 1);
+    assert_eq!(
+        sqlite_metadata_state_value(path),
+        metadata,
+        "loading must not rewrite the stored workspace metadata"
+    );
+    layout.as_object_mut().unwrap().remove("themeId");
+    assert_eq!(
+        serde_json::to_value(&loaded.workspace_layouts["workspace-stored"]).unwrap(),
+        layout,
+        "the current appearance fields and pane arrangement must survive loading"
+    );
+    *state.inner.lock().expect("state mutex poisoned") = loaded;
+    let app = app_router(state.clone());
+    let (status, response): (StatusCode, Value) = request_json(
+        &app,
+        Request::builder()
+            .uri("/api/workspaces/workspace-stored")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(response["layout"], layout);
+
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        persist_state(path, &inner).expect("loaded workspace should save through SQLite");
+    }
+    let saved = sqlite_metadata_state_value(path);
+    assert_eq!(saved["workspaceLayouts"]["workspace-stored"], layout);
+    assert!(
+        saved["workspaceLayouts"]["workspace-stored"]
+            .get("themeId")
+            .is_none()
+    );
+    let reloaded = load_state(path)
+        .expect("saved current layout should reload")
+        .expect("saved state should exist");
+    assert_eq!(
+        serde_json::to_value(&reloaded.workspace_layouts["workspace-stored"]).unwrap(),
+        layout
+    );
+}
+
 // Pins that legacy `\\?\` verbatim prefixes inside workspace layout
 // tabs (filesystem `rootPath`, git/debug `workdir`, source `path`,
 // diff `filePath`, pane `sourcePath`) are all normalized on load.
@@ -826,7 +925,6 @@ fn persisted_state_normalizes_legacy_workspace_layout_paths() {
             revision: 1,
             updated_at: "2026-04-01 12:00:00".to_owned(),
             control_panel_side: WorkspaceControlPanelSide::Left,
-            theme_id: None,
             light_theme_id: None,
             dark_theme_id: None,
             theme_mode: None,
@@ -1392,67 +1490,53 @@ fn persisted_state_requires_opencode_settings() {
 }
 
 #[test]
-fn sqlite_startup_backfills_pre_effort_opencode_session_to_auto() {
-    let state_root = PersistTestRoot::new("opencode-effort-backfill");
+fn sqlite_optional_opencode_effort_stays_absent_while_consumer_uses_auto() {
+    let state_root = PersistTestRoot::new("opencode-optional-effort");
     let path = state_root.path().join("termal.sqlite");
     let mut inner = StateInner::new();
     let session_id = inner
         .create_session(
             Agent::OpenCode,
-            Some("Pre-effort OpenCode".to_owned()),
+            Some("OpenCode".to_owned()),
             "/tmp".to_owned(),
             None,
             None,
         )
         .session
         .id;
+    let index = inner.find_session_index(&session_id).unwrap();
+    inner.sessions[index].session.opencode_effort = None;
     persist_state(&path, &inner).expect("OpenCode fixture should persist");
-
-    let mut encoded: Value = serde_json::from_str(
-        &sqlite_row_json(&path, "sessions", &session_id)
-            .expect("persisted OpenCode row should exist"),
-    )
-    .expect("persisted OpenCode row should decode");
-    encoded["session"]
-        .as_object_mut()
-        .expect("persisted session should be an object")
-        .remove("opencodeEffort");
-    let connection = rusqlite::Connection::open(&path).expect("fixture database should reopen");
-    connection
-        .execute(
-            "UPDATE sessions SET value_json = ?2 WHERE id = ?1",
-            rusqlite::params![
-                session_id,
-                serde_json::to_string(&encoded).expect("legacy fixture should encode")
-            ],
-        )
-        .expect("legacy OpenCode row should update");
-    drop(connection);
+    let before = sqlite_row_json(&path, "sessions", &session_id).unwrap();
+    let encoded: Value = serde_json::from_str(&before).unwrap();
+    assert!(encoded["session"].get("opencodeEffort").is_none());
 
     let loaded = load_state(&path)
-        .expect("pre-effort OpenCode state should load")
-        .expect("pre-effort OpenCode state should exist");
-    let loaded_index = loaded
-        .find_session_index(&session_id)
-        .expect("pre-effort OpenCode session must not be quarantined");
+        .expect("current optional effort should load")
+        .expect("state should exist");
+    let loaded_index = loaded.find_session_index(&session_id).unwrap();
+    assert_eq!(loaded.sessions[loaded_index].session.opencode_effort, None);
     assert_eq!(
-        loaded.sessions[loaded_index]
-            .session
-            .opencode_effort
-            .as_deref(),
-        Some(OPENCODE_CONFIG_AUTO)
+        sqlite_row_json(&path, "sessions", &session_id).unwrap(),
+        before
     );
 
-    persist_state(&path, &loaded).expect("backfilled state should persist");
-    let healed: Value = serde_json::from_str(
-        &sqlite_row_json(&path, "sessions", &session_id)
-            .expect("healed OpenCode row should remain"),
-    )
-    .expect("healed OpenCode row should decode");
+    // Exercise the actual runtime-config consumer, not a test-side default.
+    let state = test_app_state();
+    *state.inner.lock().expect("state mutex poisoned") = loaded;
     assert_eq!(
-        healed["session"]["opencodeEffort"],
-        Value::String(OPENCODE_CONFIG_AUTO.to_owned())
+        state
+            .opencode_config_snapshot(&session_id)
+            .unwrap()
+            .effort_selection,
+        OPENCODE_CONFIG_AUTO
     );
+    let loaded = state.inner.lock().expect("state mutex poisoned");
+    assert_eq!(loaded.sessions[loaded_index].session.opencode_effort, None);
+    persist_state(&path, &loaded).expect("unchanged optional selection should persist");
+    let saved: Value =
+        serde_json::from_str(&sqlite_row_json(&path, "sessions", &session_id).unwrap()).unwrap();
+    assert!(saved["session"].get("opencodeEffort").is_none());
 }
 
 #[test]
@@ -1549,7 +1633,7 @@ fn persisted_state_requires_codex_prompt_fields() {
 }
 
 #[test]
-fn persisted_state_round_trips_codex_fast_mode_and_defaults_legacy_rows_off() {
+fn persisted_state_round_trips_codex_fast_mode_and_compact_false() {
     let mut inner = StateInner::new();
     let record = inner.create_session(
         Agent::Codex,
@@ -1570,14 +1654,17 @@ fn persisted_state_round_trips_codex_fast_mode_and_defaults_legacy_rows_off() {
         .expect("Fast-mode state should round trip");
     assert!(loaded.sessions[0].session.codex_fast_mode);
 
-    let mut legacy = encoded;
-    legacy["sessions"][0]["session"]
-        .as_object_mut()
-        .expect("persisted session should be an object")
-        .remove("codexFastMode");
-    let loaded_legacy =
-        state_inner_from_persisted_value(legacy).expect("pre-Fast session should load");
-    assert!(!loaded_legacy.sessions[0].session.codex_fast_mode);
+    // False is omitted by the current serializer, not an older row shape.
+    inner.sessions[index].session.codex_fast_mode = false;
+    let compact = persisted_state_value(&inner);
+    assert!(
+        compact["sessions"][0]["session"]
+            .get("codexFastMode")
+            .is_none()
+    );
+    let loaded =
+        state_inner_from_persisted_value(compact).expect("compact false should round trip");
+    assert!(!loaded.sessions[0].session.codex_fast_mode);
 }
 
 // Pins that a Codex session carrying an `externalSessionId` (a live

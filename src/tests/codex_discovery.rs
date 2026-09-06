@@ -1,34 +1,22 @@
-// Codex thread discovery and import. The Codex CLI persists each conversation
-// thread in a SQLite database under the user's Codex home (`state.db`, or a
-// versioned `state_<n>.sqlite` fallback after migrations). TermAl's discovery
-// feature scans those databases, filters threads whose `cwd` matches the
-// user's workdir, and imports them as local sessions so first-time users in
-// an existing workdir do not lose prior Codex history. Two home layouts
-// coexist: the legacy REPL install (`repl/`) and the current default
-// app-server install (`shared-app-server/`); TermAl prefers the shared-runtime
-// home and skips `repl/` entirely. Scope filtering runs BEFORE the per-home
-// row limit so a workdir's threads are never crowded out by unrelated rows.
-// Newer Codex schemas add optional columns (model, reasoning_effort) and the
-// query relies on them; legacy schemas surface a clear `no such column`
-// error instead of silently empty results. Import dedups by thread id (no
-// clones on refresh) and normalizes legacy `cwd` forms (Windows `\\?\`
-// verbatim, `~`, mixed separators) to the canonical project workdir.
-// Surfaces: `discover_codex_threads_from_home`,
-// `discover_codex_threads_from_sources`, `resolve_codex_threads_database_path`,
-// `StateInner::import_discovered_codex_threads`.
+// Codex thread discovery and import against the pinned 0.153.4 state_5.sqlite
+// schema (see docs/features/current-agent-contracts.md). Every queried column
+// must exist; nullable model, reasoning_effort and thread_source values are
+// valid. The shared-app-server home has precedence over the separate user
+// home, while the retired TermAl repl/ home is not imported.
+// Scope filtering and child classification run before the per-home row limit.
+// Import dedups by thread id and normalizes current Windows verbatim paths,
+// tilde expansion and separator variants without adapting stored schemas.
 
 use super::*;
 
-// pins that `resolve_codex_threads_database_path` picks the highest-versioned
-// `state_<n>.sqlite` when `state.db` is absent/empty and that every row column
-// (sandbox policy, approval mode, archived flag, model, reasoning effort)
-// round-trips into a `DiscoveredCodexThread`. guards against silently reading
-// a stale database or dropping optional fields during discovery.
+// Pins the supported filename and round-trip of nullable thread metadata.
+// A nonempty state.db must not shadow the current state_5.sqlite.
 #[test]
-fn discover_codex_threads_from_home_reads_latest_database() {
+fn discover_codex_threads_from_home_reads_pinned_database() {
     let codex_home = std::env::temp_dir().join(format!("termal-codex-home-{}", Uuid::new_v4()));
     let _temp_root = TestTempRoot::own(codex_home.clone());
-    fs::write(codex_home.join("state.db"), b"").unwrap_or_default();
+    fs::create_dir_all(&codex_home).unwrap();
+    fs::write(codex_home.join("state.db"), b"not the supported database").unwrap();
     write_test_codex_threads_db(
         &codex_home,
         &[(
@@ -62,76 +50,103 @@ fn discover_codex_threads_from_home_reads_latest_database() {
     );
 }
 
-// pins that Codex thread discovery treats `model` and `reasoning_effort` as
-// optional columns. Older Codex installs can lack them; discovery should still
-// import the thread metadata it can read instead of failing startup discovery.
+// Missing columns are a schema mismatch, not nullable current values.
+// Discovery remains read-only even when a schema is rejected.
 #[test]
-fn discover_codex_threads_from_home_tolerates_missing_optional_columns() {
-    let codex_home =
-        std::env::temp_dir().join(format!("termal-codex-home-legacy-{}", Uuid::new_v4()));
-    let _temp_root = TestTempRoot::own(codex_home.clone());
-    fs::create_dir_all(&codex_home).expect("test Codex home should be created");
-    let connection =
-        rusqlite::Connection::open(codex_home.join("state_5.sqlite")).expect("db should open");
-    connection
-        .execute_batch(
-            "create table threads (
-                id text primary key,
-                cwd text not null,
-                title text not null,
-                sandbox_policy text,
-                approval_mode text,
-                archived integer not null,
-                updated_at integer not null
-            );",
-        )
-        .expect("legacy threads table should be created");
-    connection
-        .execute(
-            "insert into threads (
-                id, cwd, title, sandbox_policy, approval_mode, archived, updated_at
-            ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            rusqlite::params![
-                "thread-legacy",
-                "/tmp/project",
-                "Legacy thread",
-                r#"{"type":"workspace-write"}"#,
-                "on-request",
-                0,
-                10,
-            ],
-        )
-        .expect("legacy thread row should insert");
-
-    let threads = discover_codex_threads_from_home(&codex_home, &[PathBuf::from("/tmp/project")])
-        .expect("legacy threads schema should load");
-    assert_eq!(threads.len(), 1);
-    assert_eq!(threads[0].id, "thread-legacy");
-    assert_eq!(threads[0].model, None);
-    assert_eq!(threads[0].reasoning_effort, None);
+fn discover_codex_threads_from_home_rejects_missing_current_columns() {
+    for column in ["model", "reasoning_effort", "source", "thread_source"] {
+        let codex_home =
+            std::env::temp_dir().join(format!("termal-codex-columns-{}", Uuid::new_v4()));
+        let _temp_root = TestTempRoot::own(codex_home.clone());
+        write_test_codex_threads_db(&codex_home, &[]);
+        let path = codex_home.join("state_5.sqlite");
+        let connection = rusqlite::Connection::open(&path).unwrap();
+        // Column names are a closed test-owned set, never user input.
+        connection
+            .execute_batch(&format!("ALTER TABLE threads DROP COLUMN {column}"))
+            .unwrap();
+        drop(connection);
+        let before = fs::read(&path).unwrap();
+        let error = discover_codex_threads_from_home(&codex_home, &[PathBuf::from("/tmp/project")])
+            .expect_err("a missing current column must not be synthesized");
+        assert!(error.to_string().contains(column), "{column}: {error:#}");
+        assert!(
+            fs::read(&path).unwrap() == before,
+            "discovery must not repair the database"
+        );
+    }
 }
 
-// pins that `resolve_codex_threads_database_path` only matches filenames of
-// the form `state_<numeric>.sqlite`, ignoring non-versioned sqlite files like
-// `state_preview.sqlite`. guards against discovery accidentally opening an
-// unrelated Codex sqlite artifact and failing with a schema error.
 #[test]
-fn resolve_codex_threads_database_path_skips_unrelated_entries() {
+fn resolve_codex_threads_database_path_uses_only_the_pinned_filename() {
     let codex_home =
         std::env::temp_dir().join(format!("termal-codex-home-scan-{}", Uuid::new_v4()));
     let _temp_root = TestTempRoot::own(codex_home.clone());
-    fs::create_dir_all(&codex_home).expect("test Codex home should be created");
-    fs::write(codex_home.join("state_9.sqlite"), b"sqlite").expect("valid state db should exist");
-    fs::write(codex_home.join("state_preview.sqlite"), b"broken")
-        .expect("unrelated sqlite file should be created");
-
-    let path = resolve_codex_threads_database_path(&codex_home)
-        .expect("database discovery should skip unrelated entries");
-
+    fs::create_dir_all(&codex_home).unwrap();
+    for name in [
+        "state.db",
+        "state_4.sqlite",
+        "state_9.sqlite",
+        "state_preview.sqlite",
+    ] {
+        fs::write(codex_home.join(name), b"unrelated").unwrap();
+    }
+    assert_eq!(resolve_codex_threads_database_path(&codex_home), None);
+    let supported = codex_home.join("state_5.sqlite");
+    fs::write(&supported, b"").unwrap();
+    assert_eq!(resolve_codex_threads_database_path(&codex_home), None);
+    fs::write(&supported, b"database").unwrap();
     assert_eq!(
-        path.file_name().and_then(|value| value.to_str()),
-        Some("state_9.sqlite")
+        resolve_codex_threads_database_path(&codex_home),
+        Some(supported)
     );
+}
+
+// The source and TermAl-root aliases below identify the same existing home:
+// candidate deduplication must produce one diagnostic, not repeated warnings.
+#[test]
+fn missing_pinned_codex_database_is_diagnosed_once_per_home() {
+    const TEST_NAME: &str = "missing_pinned_codex_database_is_diagnosed_once_per_home";
+    const PROBE_HOME: &str = "TERMAL_TEST_PINNED_CODEX_DISCOVERY_HOME";
+    if let Some(home) = std::env::var_os(PROBE_HOME) {
+        let home = PathBuf::from(home);
+        let result = discover_codex_threads_with_subagents_from_sources(
+            Some(&home),
+            &home,
+            &[PathBuf::from("/tmp/project")],
+        )
+        .expect("missing database should skip discovery without failing startup");
+        assert!(result.threads.is_empty());
+        eprintln!("pinned-codex-discovery-probe-ran");
+        return;
+    }
+    let home = std::env::temp_dir().join(format!("termal-codex-missing-db-{}", Uuid::new_v4()));
+    let _temp_root = TestTempRoot::own(home.clone());
+    fs::create_dir_all(&home).unwrap();
+    fs::write(home.join("state.db"), b"obsolete").unwrap();
+    fs::write(home.join("state_9.sqlite"), b"unrelated").unwrap();
+    let module = module_path!()
+        .split_once("::")
+        .map_or(module_path!(), |(_, module)| module);
+    let mut command = Command::new(std::env::current_exe().unwrap());
+    command
+        .args(["--exact", &format!("{module}::{TEST_NAME}"), "--nocapture"])
+        .env(PROBE_HOME, &home);
+    let (status, stderr) = phase_sync::CapturedStderrProcess::spawn(&mut command)
+        .wait_with_stderr("missing pinned Codex database diagnostic");
+    assert!(status.success(), "probe failed: {stderr}");
+    assert!(
+        stderr.contains("pinned-codex-discovery-probe-ran"),
+        "probe did not run: {stderr}"
+    );
+    let warnings = stderr
+        .lines()
+        .filter(|line| line.starts_with("codex discovery>"))
+        .collect::<Vec<_>>();
+    assert_eq!(warnings.len(), 1, "{stderr}");
+    assert!(warnings[0].contains("state_5.sqlite"));
+    assert!(warnings[0].contains("Codex 0.153.4"));
+    assert!(warnings[0].contains(home.to_string_lossy().as_ref()));
 }
 
 // pins the candidate-home priority: the `shared-app-server` home wins over
@@ -317,6 +332,8 @@ fn discover_codex_threads_from_home_filters_scopes_before_limiting_results() {
                 archived integer not null,
                 model text,
                 reasoning_effort text,
+                source text not null default 'cli',
+                thread_source text,
                 updated_at integer not null
             );",
         )
@@ -380,7 +397,7 @@ fn discover_codex_threads_from_home_limits_in_scope_results_per_home() {
     let _temp_root = TestTempRoot::own(codex_home.clone());
     fs::create_dir_all(&codex_home).expect("test Codex home should be created");
     let connection =
-        rusqlite::Connection::open(codex_home.join("state_7.sqlite")).expect("db should open");
+        rusqlite::Connection::open(codex_home.join("state_5.sqlite")).expect("db should open");
     connection
         .execute_batch(
             "create table threads (
@@ -392,6 +409,8 @@ fn discover_codex_threads_from_home_limits_in_scope_results_per_home() {
                 archived integer not null,
                 model text,
                 reasoning_effort text,
+                source text not null default 'cli',
+                thread_source text,
                 updated_at integer not null
             );",
         )
@@ -442,8 +461,8 @@ fn discover_codex_threads_from_home_limits_in_scope_results_per_home() {
 // The filter must run before the per-home limit: otherwise a busy parent with
 // hundreds of newer children can crowd an older top-level conversation out of
 // discovery even when every child is discarded afterward. `source` remains a
-// fallback for Codex databases that gained the nested source payload before
-// they gained the denormalized `thread_source` column value.
+// current discriminator when the nullable denormalized thread_source value
+// is absent. Both columns exist in the pinned schema.
 #[test]
 fn discover_codex_threads_from_home_excludes_subagents_before_limit_and_reports_ids() {
     let codex_home =
@@ -451,7 +470,7 @@ fn discover_codex_threads_from_home_excludes_subagents_before_limit_and_reports_
     let _temp_root = TestTempRoot::own(codex_home.clone());
     fs::create_dir_all(&codex_home).expect("test Codex home should be created");
     let connection =
-        rusqlite::Connection::open(codex_home.join("state_8.sqlite")).expect("db should open");
+        rusqlite::Connection::open(codex_home.join("state_5.sqlite")).expect("db should open");
     connection
         .execute_batch(
             "create table threads (
@@ -612,7 +631,7 @@ fn discover_codex_threads_from_home_retains_invalid_delegation_prefixes_and_null
     let _temp_root = TestTempRoot::own(codex_home.clone());
     fs::create_dir_all(&codex_home).expect("test Codex home should be created");
     let connection =
-        rusqlite::Connection::open(codex_home.join("state_8.sqlite")).expect("db should open");
+        rusqlite::Connection::open(codex_home.join("state_5.sqlite")).expect("db should open");
     connection
         .execute_batch(
             "create table threads (
@@ -624,6 +643,8 @@ fn discover_codex_threads_from_home_retains_invalid_delegation_prefixes_and_null
                 archived integer not null,
                 model text,
                 reasoning_effort text,
+                source text not null default 'cli',
+                thread_source text,
                 updated_at integer not null
             );",
         )
@@ -726,7 +747,7 @@ fn discover_codex_threads_from_home_rejects_delegation_marker_outside_normalized
     fs::create_dir_all(&outside_repo).expect("outside repository should be created");
     let raw_escaping_cwd = project_scope.join("..").join("outside").join("repo");
     let connection =
-        rusqlite::Connection::open(codex_home.join("state_8.sqlite")).expect("db should open");
+        rusqlite::Connection::open(codex_home.join("state_5.sqlite")).expect("db should open");
     connection
         .execute_batch(
             "create table threads (
@@ -738,6 +759,8 @@ fn discover_codex_threads_from_home_rejects_delegation_marker_outside_normalized
                 archived integer not null,
                 model text,
                 reasoning_effort text,
+                source text not null default 'cli',
+                thread_source text,
                 updated_at integer not null
             );",
         )
@@ -797,7 +820,7 @@ fn discover_codex_threads_from_home_retains_null_source_without_thread_source_co
     let _temp_root = TestTempRoot::own(codex_home.clone());
     fs::create_dir_all(&codex_home).expect("test Codex home should be created");
     let connection =
-        rusqlite::Connection::open(codex_home.join("state_8.sqlite")).expect("db should open");
+        rusqlite::Connection::open(codex_home.join("state_5.sqlite")).expect("db should open");
     connection
         .execute_batch(
             "create table threads (
@@ -810,6 +833,7 @@ fn discover_codex_threads_from_home_retains_null_source_without_thread_source_co
                 model text,
                 reasoning_effort text,
                 source text,
+                thread_source text,
                 updated_at integer not null
             );",
         )

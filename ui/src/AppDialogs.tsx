@@ -105,10 +105,6 @@ type AppDialogsProps = {
   handleCreateSessionDialogSubmit: () => Promise<void>;
   newSessionAgent: AgentType;
   onChangeNewSessionAgent: (nextValue: AgentType) => void;
-  createSessionUsesSessionModelPicker: boolean;
-  newSessionModel: string;
-  newSessionModelOptions: readonly ComboboxOption[];
-  onChangeNewSessionModel: (nextValue: string) => void;
   defaultCodexModel: string;
   handleDefaultCodexModelChange: (nextValue: string) => void;
   defaultCodexReasoningEffort: CodexReasoningEffort;
@@ -393,10 +389,6 @@ export function AppDialogs({
   handleCreateSessionDialogSubmit,
   newSessionAgent,
   onChangeNewSessionAgent,
-  createSessionUsesSessionModelPicker,
-  newSessionModel,
-  newSessionModelOptions,
-  onChangeNewSessionModel,
   defaultCodexModel,
   handleDefaultCodexModelChange,
   defaultCodexReasoningEffort,
@@ -741,32 +733,12 @@ export function AppDialogs({
                 />
               </div>
 
-              {createSessionUsesSessionModelPicker ? (
-                <div className="create-session-field">
-                  <label className="session-control-label">Model</label>
-                  <p className="create-session-field-hint">
-                    {createSessionModelHint(newSessionAgent)}
-                  </p>
-                </div>
-              ) : (
-                <div className="create-session-field">
-                  <label
-                    className="session-control-label"
-                    htmlFor="create-session-model"
-                  >
-                    Model
-                  </label>
-                  <ThemedCombobox
-                    id="create-session-model"
-                    value={newSessionModel}
-                    options={newSessionModelOptions}
-                    onChange={(nextValue) =>
-                      onChangeNewSessionModel(nextValue)
-                    }
-                    disabled={isCreating}
-                  />
-                </div>
-              )}
+              <div className="create-session-field">
+                <label className="session-control-label">Model</label>
+                <p className="create-session-field-hint">
+                  {createSessionModelHint(newSessionAgent)}
+                </p>
+              </div>
 
               {newSessionAgent === "Codex" ? (
                 <div className="create-session-field">

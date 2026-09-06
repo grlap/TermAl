@@ -223,8 +223,8 @@ server attaches to:
 - keep the first version thin and mechanical; do not redesign behavior yet
 - define slice ownership explicitly; once a slice moves into the store, the
   store becomes the only write target for that slice
-- keep legacy props only as read-only adapters derived from store-owned slices
-  during the transition
+- derive any required presentational props from store-owned selectors;
+  do not maintain a second session representation for old consumers
 - require structural sharing so unchanged selector reads preserve identity
 
 **Completion criteria:**
@@ -300,8 +300,8 @@ input.
   reconciliation when practical
 - exact-next-revision gate all delta application
 - keep revision and `serverInstanceId` updates atomic with snapshot adoption
-- keep one reducer/patch source feeding both the store and any temporary
-  read-only legacy adapters until the old path is removed
+- keep one reducer/patch source feeding the store; presentational props read
+  that current state without a separate adapter-owned copy
 
 **Likely affected files:**
 - `ui/src/app-live-state.ts`
@@ -364,8 +364,7 @@ Every node should be accepted only if all three are true:
    - no missed session status transitions
    - no broken recovery/open flows
    - no stale settings in the composer
-   - no split-brain state between the store and temporary legacy adapters during
-     migration
+   - no split-brain state between the store and selector-derived props
    - the newest assistant message becomes visible immediately after reconnect or
      snapshot repair without requiring another user action
 
@@ -412,17 +411,16 @@ The refactor needs both behavioral and performance-oriented coverage.
 - reject nodes that restore hidden-session churn while the active composer is in
   use
 
-## Migration Strategy
+## Current Ownership Refactor Sequence
 
 Do this incrementally, not as a flag day rewrite.
 
-Migration invariant:
+Current-state movement invariant (not stored-schema migration):
 
 - for any slice already owned by the store, every write goes through one
   reducer/patch source
-- legacy props remain temporary read-only adapters for migrated slices
-- snapshot and delta adoption must update the store and any temporary adapters
-  atomically until the old path is removed
+- presentational props are read-only projections from current selectors
+- snapshot and delta adoption update the same store authority atomically
 
 Recommended order:
 

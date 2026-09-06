@@ -50,7 +50,10 @@ older builds, the first eligible send, list, read, exact-message read, or
 acknowledgement automatically clears stale `left_at` markers, then revalidates
 the live session so a concurrent real deletion remains authoritative. This
 repair preserves the existing session id, transcript, mailbox history, and
-processed cursor.
+processed cursor. This is an explicitly deferred internal compatibility path,
+not current-schema normalization: removal requires assessing live coordination
+rows first. The final audit does not remove it or claim that all internal
+compatibility paths are gone.
 
 The same local-root requirement applies directly at the list, read,
 exact-message-read, and acknowledgement REST routes. Hidden sessions, remote

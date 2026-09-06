@@ -31,15 +31,12 @@ import { isBackendUnavailableError } from "./api-request";
 import { AgentIcon } from "./agent-icon";
 import {
   createSessionModelHint,
-  defaultNewSessionModel,
   describeProjectScope,
   resolveControlPanelWorkspaceRoot,
   resolveRemoteConfig,
   remoteBadgeLabel,
-  usesSessionModelPicker,
   CLAUDE_EFFORT_OPTIONS,
   CODEX_REASONING_EFFORT_OPTIONS,
-  NEW_SESSION_MODEL_OPTIONS,
   type ComboboxOption,
 } from "./session-model-utils";
 
@@ -298,15 +295,6 @@ export default function App() {
     useState<Record<string, DraftImageAttachment[]>>({});
   const [newSessionAgent, setNewSessionAgent] = useState<AgentType>("Codex");
   const lastNewSessionAgentSyncedSessionIdRef = useRef<string | null>(null);
-  const [newSessionModelByAgent, setNewSessionModelByAgent] = useState<
-    Record<AgentType, string>
-  >(() => ({
-    Claude: defaultNewSessionModel("Claude"),
-    Codex: defaultNewSessionModel("Codex"),
-    Cursor: defaultNewSessionModel("Cursor"),
-    Gemini: defaultNewSessionModel("Gemini"),
-    OpenCode: defaultNewSessionModel("OpenCode"),
-  }));
   const [isLoading, setIsLoading] = useState(true);
   const [hasAdoptedStateSnapshot, setHasAdoptedStateSnapshot] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
@@ -1128,7 +1116,6 @@ export default function App() {
     enabledProjectRemotes,
     newProjectSelectedRemote,
     createProjectRemoteOptions,
-    newSessionModelOptions,
     createSessionSelectedProject,
     createSessionWorkspaceProject,
     createSessionEffectiveProject,
@@ -1138,7 +1125,6 @@ export default function App() {
     createSessionProjectHint,
     createSessionUsesRemoteProject,
     createSessionProjectSelectionError,
-    createSessionUsesSessionModelPicker,
     createSessionAgentReadiness,
     createSessionBlocked,
     projectScopedSessions,
@@ -1176,9 +1162,6 @@ export default function App() {
     lastDerivedControlPanelFilesystemRootRef,
     lastDerivedControlPanelGitWorkdirRef,
   });
-  const newSessionModel =
-    newSessionModelByAgent[newSessionAgent] ??
-    defaultNewSessionModel(newSessionAgent);
   const {
     handleCreateSessionDialogSubmit,
     handleSidebarSessionClick,
@@ -1224,7 +1207,6 @@ export default function App() {
     gitDiffPreviewRefreshVersionsRef,
     attemptedGitDiffDocumentContentRestoreKeysRef,
     newSessionAgent,
-    newSessionModel,
     createSessionPaneId,
     createSessionProjectId,
     closePendingSessionRename,
@@ -2304,17 +2286,6 @@ export default function App() {
         handleCreateSessionDialogSubmit={handleCreateSessionDialogSubmit}
         newSessionAgent={newSessionAgent}
         onChangeNewSessionAgent={setNewSessionAgent}
-        createSessionUsesSessionModelPicker={
-          createSessionUsesSessionModelPicker
-        }
-        newSessionModel={newSessionModel}
-        newSessionModelOptions={newSessionModelOptions}
-        onChangeNewSessionModel={(nextValue) =>
-          setNewSessionModelByAgent((current) => ({
-            ...current,
-            [newSessionAgent]: nextValue,
-          }))
-        }
         defaultCodexReasoningEffort={defaultCodexReasoningEffort}
         defaultCodexModel={defaultCodexModel}
         handleDefaultCodexModelChange={handleDefaultCodexModelChange}

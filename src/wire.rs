@@ -578,7 +578,7 @@ struct Session {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     reasoning_effort: Option<CodexReasoningEffort>,
     /// Session-scoped Codex Fast-mode authority. The app-server represents
-    /// this as the catalog-advertised `priority` service tier.
+    /// this as the active model's catalog-advertised Fast service-tier id.
     #[serde(default, skip_serializing_if = "is_false")]
     codex_fast_mode: bool,
     sandbox_mode: Option<CodexSandboxMode>,
@@ -595,7 +595,8 @@ struct Session {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     opencode_model: Option<String>,
     /// Persisted OpenCode model-variant authority (`auto` or an explicit
-    /// model-specific ACP `effort` value).
+    /// model-specific ACP `effort` value). None leaves the consumer on Auto;
+    /// loading persisted state must not rewrite it into an explicit selection.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     opencode_effort: Option<String>,
     /// Effective live OpenCode reasoning variant reported by ACP.
@@ -2247,8 +2248,6 @@ struct WorkspaceLayoutDocument {
     updated_at: String,
     control_panel_side: WorkspaceControlPanelSide,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    theme_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     light_theme_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     dark_theme_id: Option<String>,
@@ -2281,8 +2280,6 @@ struct WorkspaceLayoutSummary {
     updated_at: String,
     control_panel_side: WorkspaceControlPanelSide,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    theme_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     light_theme_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     dark_theme_id: Option<String>,
@@ -2310,8 +2307,6 @@ struct WorkspaceLayoutsResponse {
 #[serde(rename_all = "camelCase")]
 struct PutWorkspaceLayoutRequest {
     control_panel_side: WorkspaceControlPanelSide,
-    #[serde(default)]
-    theme_id: Option<String>,
     #[serde(default)]
     light_theme_id: Option<String>,
     #[serde(default)]

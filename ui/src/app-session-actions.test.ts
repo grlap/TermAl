@@ -300,9 +300,7 @@ describe("useAppSessionActions", () => {
       params.defaults[defaultModelKey] = customModel;
       const actions = useAppSessionActions(params);
 
-      await expect(
-        actions.handleNewSession({ agent, model: "default" }),
-      ).resolves.toBe(true);
+      await expect(actions.handleNewSession({ agent })).resolves.toBe(true);
 
       expect(createSessionSpy).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -325,9 +323,7 @@ describe("useAppSessionActions", () => {
       params.defaults[defaultModelKey] = " DEFAULT ";
       const actions = useAppSessionActions(params);
 
-      await expect(
-        actions.handleNewSession({ agent, model: "default" }),
-      ).resolves.toBe(true);
+      await expect(actions.handleNewSession({ agent })).resolves.toBe(true);
 
       expect(createSessionSpy).toHaveBeenCalledWith(
         expect.objectContaining({ agent }),
@@ -349,7 +345,7 @@ describe("useAppSessionActions", () => {
     const actions = useAppSessionActions(makeSessionActionsParams());
 
     await expect(
-      actions.handleNewSession({ agent: "Codex", model: "default" }),
+      actions.handleNewSession({ agent: "Codex" }),
     ).resolves.toBe(true);
 
     const request = createSessionSpy.mock.calls[0]?.[0];

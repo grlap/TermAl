@@ -113,9 +113,9 @@ enum CreateSessionResponse {
   `session` as optional for this response.
 - Kept the compatibility surface out of the Rust wire contract; no current
   production path emits the old state-shaped response.
-- Keep any compatibility adapter local to the frontend only if older dev builds
-  still need to be tolerated during manual testing. Do not keep the Rust wire
-  contract optional just for that.
+- Current frontend and backend use the same required response contract.
+  Manual testing of older builds does not justify a frontend adapter or
+  optional Rust wire fields.
 
 **Coverage:**
 
@@ -357,12 +357,12 @@ enum AcpSessionState {
 - Replace `supports_session_load: Option<bool>` with initialized capabilities.
 - Keep `is_loading_history` attached to the active/loading session state rather
   than as an unrelated boolean.
-- Localize Gemini/Cursor session-load fallback behavior near the transition that
-  handles the failed load.
+- Keep advertised ACP load/resume failures attached to the existing session.
+  Typed lifecycle refactoring must not turn a failed continuation into session/new.
 
 **Coverage:**
 
-- Existing ACP load/new fallback tests.
+- Existing ACP advertised-capability and continuity-preservation tests.
 - New test proving prompt dispatch cannot proceed without an active ACP session.
 - New test proving capabilities are populated by initialize before config
   refresh uses them.
@@ -371,8 +371,8 @@ enum AcpSessionState {
 
 - Prompt/config helpers read active session state from a typed field, not a
   bare `Option<String>`.
-- ACP session-load fallback is represented as a state transition, not scattered
-  `Option` checks.
+- ACP session loading and visible failure are represented as explicit state
+  transitions, never a probe of unadvertised methods or a replacement session.
 
 ### Node 5: Two-Layer Orchestrator Lifecycle
 

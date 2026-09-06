@@ -139,6 +139,33 @@ Discovery failure records a guarded destination-session error, not a fatal
 shared-reader error. Superseded delivery leaves mailbox recovery to the current
 Stop/terminalization owner; a stale worker must not requeue a newer wake.
 
+## Codex thread-database discovery
+
+The database reader is pinned to public Codex tag `rust-v0.153.4`, inspected
+2026-09-05; this is independent of the app-server JSON-RPC schema above.
+
+- [`sqlite.rs`](https://github.com/openai/codex/blob/rust-v0.153.4/codex-rs/state/src/sqlite.rs)
+  defines `STATE_DB_FILENAME = "state_5.sqlite"` and joins that filename to
+  the configured SQLite home. It does not choose `state.db` or the greatest
+  numeric filename. TermAl reads only a nonempty regular `state_5.sqlite`
+  in each discovery home; unrelated files are not alternate versions to try.
+  An existing selected home without that usable file emits one diagnostic per
+  discovery pass naming the home, filename and pinned Codex version. Duplicate
+  home aliases are deduplicated; a missing home is not diagnosed.
+- [`0001_threads.sql`](https://github.com/openai/codex/blob/rust-v0.153.4/codex-rs/state/migrations/0001_threads.sql)
+  defines the core thread columns, including `source TEXT NOT NULL`.
+- [`0020_threads_model_reasoning_effort.sql`](https://github.com/openai/codex/blob/rust-v0.153.4/codex-rs/state/migrations/0020_threads_model_reasoning_effort.sql)
+  adds nullable `model` and `reasoning_effort` columns.
+- [`0030_threads_thread_source.sql`](https://github.com/openai/codex/blob/rust-v0.153.4/codex-rs/state/migrations/0030_threads_thread_source.sql)
+  adds nullable `thread_source`.
+
+All four columns must exist. Nullable **values** do not make a column optional:
+a missing column is a schema mismatch, never synthesized metadata. A null
+`thread_source` still permits classification using the current `source`
+JSON discriminator. Discovery queries remain read-only; TermAl does not run
+Codex's schema migrations or repair an unsupported database. Pin evidence
+came from public source, not from opening a live Codex database.
+
 See [shared app-server ownership](shared-codex-app-server.md),
 [model switching](model-switching.md), and the
 [Codex architecture](../architecture.md#codex).

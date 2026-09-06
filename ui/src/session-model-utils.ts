@@ -63,14 +63,6 @@ export const CLAUDE_EFFORT_OPTIONS = [
   { label: "max", value: "max", description: "Use the highest available effort" },
 ] as const;
 
-export const SESSION_SCOPED_MODEL_AGENTS = new Set<AgentType>([
-  "Claude",
-  "Codex",
-  "Cursor",
-  "Gemini",
-  "OpenCode",
-]);
-
 export const ALL_CODEX_REASONING_EFFORTS = CODEX_REASONING_EFFORT_OPTIONS.map(
   (option) => option.value,
 ) as CodexReasoningEffort[];
@@ -82,14 +74,6 @@ export const DEFAULT_CLAUDE_EFFORT: ClaudeEffortLevel = "default";
 export const DEFAULT_MODEL_PREFERENCE = "default";
 export const MAX_DEFAULT_MODEL_PREFERENCE_CHARS = 200;
 export const FALLBACK_CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh"] as ClaudeEffortLevel[];
-
-export function defaultNewSessionModel(agent: AgentType): string {
-  return NEW_SESSION_MODEL_OPTIONS[agent][0]?.value ?? "";
-}
-
-export function usesSessionModelPicker(agent: AgentType): boolean {
-  return SESSION_SCOPED_MODEL_AGENTS.has(agent);
-}
 
 export function isDefaultModelPreference(model: string): boolean {
   const trimmed = model.trim();
@@ -226,8 +210,8 @@ export function areRemoteConfigsEqual(left: readonly RemoteConfig[], right: read
 export function normalizeTelegramUiConfig(
   config?: TelegramUiConfig | null,
 ): NormalizedTelegramUiConfig {
-  // App-state snapshots may omit fields during migrations; the UI works with
-  // this normalized shape before comparing or applying Telegram config.
+  // Before initial state arrives there may be no Telegram configuration.
+  // Compare that current unconfigured state using the same concrete defaults.
   return {
     enabled: config?.enabled ?? false,
     forwardAssistantReplies: config?.forwardAssistantReplies ?? false,

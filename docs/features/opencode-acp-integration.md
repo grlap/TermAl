@@ -39,7 +39,7 @@ TermAl initializes ACP v1 over JSON-RPC stdio and then uses:
 - `session/new` for a new OpenCode conversation;
 - `session/resume` when OpenCode advertises resume support and TermAl has a
   persisted external session id;
-- the shared ACP `session/load` compatibility path only for agents that do not
+- the current advertised ACP `session/load` method only for agents that do not
   advertise resume but support the older load capability;
 - `session/prompt` for turns;
 - the `session/cancel` notification for user cancellation.

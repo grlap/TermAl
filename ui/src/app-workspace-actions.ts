@@ -85,7 +85,6 @@ type UseAppWorkspaceActionsParams = {
   gitDiffPreviewRefreshVersionsRef: MutableRefObject<Map<string, number>>;
   attemptedGitDiffDocumentContentRestoreKeysRef: MutableRefObject<Set<string>>;
   newSessionAgent: AgentType;
-  newSessionModel: string;
   createSessionPaneId: string | null;
   createSessionProjectId: string;
   closePendingSessionRename: (restoreFocus?: boolean) => void;
@@ -126,7 +125,6 @@ type UseAppWorkspaceActionsParams = {
   adoptState: (nextState: StateResponse) => boolean;
   handleNewSession: (options: {
     agent: AgentType;
-    model: string;
     preferredPaneId: string | null;
     projectSelectionId: string;
   }) => Promise<boolean>;
@@ -289,7 +287,6 @@ export function useAppWorkspaceActions({
   gitDiffPreviewRefreshVersionsRef,
   attemptedGitDiffDocumentContentRestoreKeysRef,
   newSessionAgent,
-  newSessionModel,
   createSessionPaneId,
   createSessionProjectId,
   closePendingSessionRename,
@@ -376,7 +373,6 @@ export function useAppWorkspaceActions({
   async function handleCreateSessionDialogSubmit() {
     const created = await handleNewSession({
       agent: newSessionAgent,
-      model: newSessionModel,
       preferredPaneId: createSessionPaneId,
       projectSelectionId: createSessionProjectId,
     });

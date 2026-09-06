@@ -71,13 +71,12 @@ The active preferences are stored under:
 | Editor font size | `termal-editor-font-size` | `13` |
 | UI density | `termal-ui-density` | `100` |
 
-Browser color-theme persistence uses only the light/dark pair and mode. The
-client neither reads nor writes the old `termal-ui-theme` key or `themeId`
-layout field, and does not migrate them; a browser holding only old keys starts
-from current defaults. This retirement is browser-side: the server still accepts
-the inert `themeId` field when supplied and returns it when present. A replacement
-PUT that omits it clears the stored value, including saves from the updated client.
-Removal of the server-side field remains part of the final no-legacy audit.
+Color-theme persistence uses only the light/dark pair and mode. Neither the
+browser nor the server reads, stores, or emits the retired `themeId` layout
+field as theme authority. The browser never reads or writes `termal-ui-theme`;
+old keys remain untouched and supply no defaults. Unknown fields in a layout
+request are ignored, not migrated into the current theme pair. The server's
+document, summary and PUT types carry only the current theme fields.
 See [Multi-Browser Workspaces](features/multi-browser-workspaces.md)
 for the current layout contract and workspace-over-global preference precedence.
 

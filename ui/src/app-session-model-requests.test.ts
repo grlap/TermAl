@@ -32,56 +32,45 @@ describe("app session model request helpers", () => {
     );
   });
 
-  it("uses dialog model text for agents without the session model picker", () => {
-    const legacyAgent = "Legacy" as never;
-
-    expect(
-      requestedModelForNewSession(legacyAgent, "  dialog-model  ", defaultModels),
-    ).toBe("dialog-model");
-    expect(
-      requestedModelForNewSession(legacyAgent, "   ", defaultModels),
-    ).toBeUndefined();
-  });
-
   it("uses configured app defaults for Cursor, Gemini, and OpenCode sessions", () => {
     expect(
-      requestedModelForNewSession("Cursor", "  cursor-dialog  ", defaultModels),
+      requestedModelForNewSession("Cursor", defaultModels),
     ).toBe("cursor-fast");
     expect(
-      requestedModelForNewSession("Gemini", "  gemini-dialog  ", defaultModels),
+      requestedModelForNewSession("Gemini", defaultModels),
     ).toBe("gemini-2.5-pro");
     expect(
-      requestedModelForNewSession("OpenCode", "  opencode-dialog  ", defaultModels),
+      requestedModelForNewSession("OpenCode", defaultModels),
     ).toBe("openai/gpt-5.6-sol");
   });
 
   it("omits default sentinel model values for picker-backed agents", () => {
     expect(
-      requestedModelForNewSession("Codex", "ignored", {
+      requestedModelForNewSession("Codex", {
         ...defaultModels,
         Codex: " DEFAULT ",
       }),
     ).toBeUndefined();
     expect(
-      requestedModelForNewSession("Claude", "ignored", {
+      requestedModelForNewSession("Claude", {
         ...defaultModels,
         Claude: " default ",
       }),
     ).toBeUndefined();
     expect(
-      requestedModelForNewSession("Cursor", "ignored", {
+      requestedModelForNewSession("Cursor", {
         ...defaultModels,
         Cursor: " default ",
       }),
     ).toBeUndefined();
     expect(
-      requestedModelForNewSession("Gemini", "ignored", {
+      requestedModelForNewSession("Gemini", {
         ...defaultModels,
         Gemini: " default ",
       }),
     ).toBeUndefined();
     expect(
-      requestedModelForNewSession("OpenCode", "ignored", {
+      requestedModelForNewSession("OpenCode", {
         ...defaultModels,
         OpenCode: " default ",
       }),
@@ -89,29 +78,21 @@ describe("app session model request helpers", () => {
   });
 
   it("sends configured default models for picker-backed agents", () => {
-    expect(requestedModelForNewSession("Codex", "ignored", defaultModels)).toBe(
+    expect(requestedModelForNewSession("Codex", defaultModels)).toBe(
       "gpt-5.5",
     );
-    expect(requestedModelForNewSession("Claude", "ignored", defaultModels)).toBe(
+    expect(requestedModelForNewSession("Claude", defaultModels)).toBe(
       "claude-sonnet-4.5",
     );
-    expect(requestedModelForNewSession("Cursor", "ignored", defaultModels)).toBe(
+    expect(requestedModelForNewSession("Cursor", defaultModels)).toBe(
       "cursor-fast",
     );
-    expect(requestedModelForNewSession("Gemini", "ignored", defaultModels)).toBe(
+    expect(requestedModelForNewSession("Gemini", defaultModels)).toBe(
       "gemini-2.5-pro",
     );
     expect(
-      requestedModelForNewSession("OpenCode", "ignored", defaultModels),
+      requestedModelForNewSession("OpenCode", defaultModels),
     ).toBe("openai/gpt-5.6-sol");
   });
 
-  it("uses Auto when legacy app state omitted the OpenCode default", () => {
-    const { OpenCode: _omitted, ...legacyDefaults } = defaultModels;
-
-    expect(configuredDefaultModelForAgent("OpenCode", legacyDefaults)).toBe("default");
-    expect(
-      requestedModelForNewSession("OpenCode", "ignored", legacyDefaults),
-    ).toBeUndefined();
-  });
 });

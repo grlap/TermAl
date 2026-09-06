@@ -4,7 +4,7 @@
 // The "persisted" types are the single source of truth for the disk
 // schema: they use `#[serde(rename_all = "camelCase")]`, `#[serde(default)]`,
 // and `skip_serializing_if` annotations to keep on-disk state compact
-// and forward-compatible. Every commit_locked() ultimately produces a
+// and explicit about the current storage shape. Every commit_locked() produces a
 // PersistedState that gets written to SQLite via src/persist.rs; every
 // startup load_state() reads it back and reconstructs StateInner.
 //
@@ -335,13 +335,9 @@ fn validate_remote_proxy_identity<'a>(
     }
 }
 
-/// Applies intentionally-supported defaults from earlier persisted session
-/// shapes before strict current-schema validation. Keep this narrow: missing
-/// required fields remain corruption unless a concrete upgrade is named here.
-fn backfill_persisted_session_defaults(session: &mut Session) {
-    if session.agent.supports_opencode_settings() && session.opencode_effort.is_none() {
-        session.opencode_effort = Some(OPENCODE_CONFIG_AUTO.to_owned());
-    }
+/// Enforces the same bounded prompt-history input policy used by live sessions.
+/// Optional settings retain their stored value; their consumers own defaults.
+fn normalize_persisted_session_prompt_history(session: &mut Session) {
     session.prompt_history = normalize_prompt_history(std::mem::take(&mut session.prompt_history));
 }
 
@@ -389,7 +385,7 @@ impl PersistedSessionRecord {
             )
         })?;
         let mut session = self.session;
-        backfill_persisted_session_defaults(&mut session);
+        normalize_persisted_session_prompt_history(&mut session);
         validate_persisted_session_fields(&session, self.external_session_id.as_deref())?;
         session.session_mutation_stamp = None;
         session.external_session_id = self.external_session_id.clone();
@@ -602,13 +598,8 @@ fn validate_persisted_session_fields(
         let effort = session
             .opencode_effort
             .as_deref()
-            .ok_or_else(|| {
-                anyhow!(
-                    "persisted session `{}` is missing opencodeEffort",
-                    session.id
-                )
-            })
-            .and_then(normalize_opencode_effort)?;
+            .map(normalize_opencode_effort)
+            .transpose()?;
         let effective_model = normalize_opencode_model(&session.model)?;
         let current_effort = session
             .opencode_current_effort
@@ -621,7 +612,7 @@ fn validate_persisted_session_fields(
             .map(normalize_opencode_mode)
             .transpose()?;
         if model != session.opencode_model.as_deref().unwrap_or_default()
-            || effort != session.opencode_effort.as_deref().unwrap_or_default()
+            || effort.as_deref() != session.opencode_effort.as_deref()
             || mode != session.opencode_mode.as_deref().unwrap_or_default()
             || effective_model != session.model
             || current_effort.as_deref() != session.opencode_current_effort.as_deref()

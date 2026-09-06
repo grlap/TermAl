@@ -59,7 +59,6 @@ import {
   describeCodexModelAdjustmentNotice,
   describeSessionModelRefreshError,
   resolveUnknownSessionModelSendAttempt,
-  usesSessionModelPicker,
 } from "./session-model-utils";
 import {
   buildOptimisticSessionSettingsUpdate,
@@ -214,7 +213,7 @@ export function useAppSessionActions(
       defaultCursorMode,
       defaultGeminiApprovalMode,
       defaultGeminiModel,
-      defaultOpenCodeModel = "default",
+      defaultOpenCodeModel,
     },
     refs: {
       isMountedRef,
@@ -748,15 +747,9 @@ export function useAppSessionActions(
 
   async function handleNewSession({
     agent,
-    model,
     preferredPaneId = null,
     projectSelectionId = CREATE_SESSION_WORKSPACE_ID,
   }: HandleNewSessionArgs) {
-    const trimmedModel = model.trim();
-    if (!trimmedModel && !usesSessionModelPicker(agent)) {
-      setRequestError("Choose a model.");
-      return false;
-    }
     if (
       projectSelectionId === CREATE_SESSION_WORKSPACE_ID &&
       !!activeSession?.projectId &&
@@ -798,7 +791,7 @@ export function useAppSessionActions(
         projectSelectionId === CREATE_SESSION_WORKSPACE_ID
           ? null
           : projectSelectionId;
-      const requestedModel = requestedModelForNewSession(agent, model, {
+      const requestedModel = requestedModelForNewSession(agent, {
         Claude: defaultClaudeModel,
         Codex: defaultCodexModel,
         Cursor: defaultCursorModel,

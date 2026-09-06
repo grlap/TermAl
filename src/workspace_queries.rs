@@ -72,7 +72,6 @@ impl AppState {
             revision: next_revision,
             updated_at: Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
             control_panel_side: request.control_panel_side,
-            theme_id: request.theme_id,
             light_theme_id: request.light_theme_id,
             dark_theme_id: request.dark_theme_id,
             theme_mode: request.theme_mode,

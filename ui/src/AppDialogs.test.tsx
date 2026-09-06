@@ -64,10 +64,6 @@ function createBaseProps(
     handleCreateSessionDialogSubmit: vi.fn(async () => {}),
     newSessionAgent: "Codex",
     onChangeNewSessionAgent: vi.fn(),
-    createSessionUsesSessionModelPicker: false,
-    newSessionModel: "gpt-5.4",
-    newSessionModelOptions: [{ label: "gpt-5.4", value: "gpt-5.4" }],
-    onChangeNewSessionModel: vi.fn(),
     defaultCodexModel: "default",
     handleDefaultCodexModelChange: vi.fn(),
     defaultCodexReasoningEffort,
@@ -219,6 +215,22 @@ function renderSettingsDialog(
   );
   return onClose;
 }
+
+describe("AppDialogs session model selection", () => {
+  it.each(["Claude", "Codex", "Cursor", "Gemini", "OpenCode"] as const)(
+    "keeps %s model selection on the session, not in the create dialog",
+    (newSessionAgent) => {
+      renderCreateSessionDialog({ newSessionAgent });
+      const dialog = within(screen.getByRole("dialog", { name: "New session" }));
+
+      expect(
+        dialog.getByText(/model selection lives on the session itself/),
+      ).toBeVisible();
+      expect(dialog.queryByRole("combobox", { name: /^Model$/ })).toBeNull();
+      expect(dialog.getByRole("button", { name: "Create session" })).toBeEnabled();
+    },
+  );
+});
 
 describe("AppDialogs create-dialog backdrop dismissal", () => {
   let originalPlatform: PropertyDescriptor | undefined;

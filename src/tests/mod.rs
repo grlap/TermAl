@@ -873,6 +873,8 @@ fn write_test_codex_threads_db(
                 archived integer not null,
                 model text,
                 reasoning_effort text,
+                source text not null default 'cli',
+                thread_source text,
                 updated_at integer not null
             );",
         )

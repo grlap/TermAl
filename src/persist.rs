@@ -2509,7 +2509,7 @@ fn load_session_records_from_sqlite_with_skipped(
                     record.session.id
                 );
             }
-            backfill_persisted_session_defaults(&mut record.session);
+            normalize_persisted_session_prompt_history(&mut record.session);
             validate_persisted_session_fields(
                 &record.session,
                 record.external_session_id.as_deref(),
@@ -2703,16 +2703,11 @@ fn load_persisted_session_tail(
     // transcript lives on the remote host, so its metadata can legitimately
     // know a count while zero `messages` rows exist locally.
     //
-    // A LOCAL session in the same shape must be quarantined instead. In
-    // particular, a v1 transcript migration can roll back one session while
-    // the outer schema migration advances to v2. Its legacy row still holds
-    // the only embedded transcript copy, but there are no normalized rows.
-    // Treating that as ordinary hydration clears the embedded messages in
-    // memory and lets the next persist overwrite the recovery copy. Return an
-    // error before mutating `record`; the row-level loader records the session
-    // in the runtime quarantine, and full persistence preserves its untouched
-    // row. The same local/remote distinction also fails safe for normalized
-    // local rows lost or damaged after migration.
+    // A LOCAL session in the same shape must be quarantined instead: its
+    // normalized SQLite rows are the transcript authority, not a cache that
+    // remote hydration can replace. Return before mutating record so the
+    // row-level loader quarantines the session and full persistence preserves
+    // the damaged rows for deliberate recovery instead of overwriting them.
     if let Some(reason) = unusable_tail {
         let is_remote_proxy = validate_remote_proxy_identity(
             record.remote_id.as_deref(),

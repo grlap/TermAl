@@ -1,6 +1,6 @@
 // Codex thread discovery + import — scans the SQLite thread databases
-// Codex CLI keeps under its home directory (`~/.codex/threads.db` plus
-// per-install variants) and surfaces matching threads so the user can
+// Codex 0.153.4 keeps as state_5.sqlite under each selected current home,
+// surfacing matching threads so the user can
 // import historical conversations into TermAl as local sessions.
 //
 // Covers: `DiscoveredCodexThread` projection, scope/home candidate
@@ -214,6 +214,12 @@ fn discover_codex_threads_with_subagents_from_home(
     discovery_scopes: &[PathBuf],
 ) -> Result<DiscoveredCodexThreads> {
     let Some(database_path) = resolve_codex_threads_database_path(codex_home) else {
+        if codex_home.is_dir() {
+            eprintln!(
+                "codex discovery> home '{}' has no usable state_5.sqlite (pinned to Codex 0.153.4); skipping thread import without trying alternate database names",
+                codex_home.display()
+            );
+        }
         return Ok(DiscoveredCodexThreads::default());
     };
     if discovery_scopes.is_empty() {
@@ -234,30 +240,16 @@ fn discover_codex_threads_with_subagents_from_home(
         .iter()
         .map(|scope| normalize_codex_discovery_path(scope))
         .collect::<Vec<_>>();
-    let has_model_column = codex_threads_table_has_column(&connection, "model")?;
-    let has_reasoning_effort_column =
-        codex_threads_table_has_column(&connection, "reasoning_effort")?;
-    let has_source_column = codex_threads_table_has_column(&connection, "source")?;
-    let has_thread_source_column =
-        codex_threads_table_has_column(&connection, "thread_source")?;
-    let model_select = if has_model_column { "model" } else { "null as model" };
-    let reasoning_effort_select = if has_reasoning_effort_column {
-        "reasoning_effort"
-    } else {
-        "null as reasoning_effort"
-    };
     let scope_sql = query_scope_patterns
         .iter()
         .map(|_| "(cwd = ? OR cwd LIKE ? ESCAPE '\\')")
         .collect::<Vec<_>>()
         .join(" OR ");
-    let subagent_predicate = codex_subagent_thread_predicate(
-        has_source_column,
-        has_thread_source_column,
-    );
-    let subagent_filter = subagent_predicate
-        .map(|predicate| format!(" and not ({predicate})"))
-        .unwrap_or_default();
+    // Codex 0.153.4 defines both columns; only thread_source's value may be
+    // absent. See the versioned schema evidence in current-agent-contracts.md.
+    let subagent_predicate =
+        "coalesce(thread_source, '') = 'subagent' or coalesce(source, '') like '{\"subagent\":%'";
+    let subagent_filter = format!(" and not ({subagent_predicate})");
 
     // TermAl Codex delegation sessions are ordinary top-level Codex threads
     // from the app-server's perspective, so Codex's native `subagent` fields
@@ -323,7 +315,7 @@ fn discover_codex_threads_with_subagents_from_home(
     )
     .unwrap_or(i64::MAX);
     let query = format!(
-        "select id, cwd, title, sandbox_policy, approval_mode, archived, {model_select}, {reasoning_effort_select}
+        "select id, cwd, title, sandbox_policy, approval_mode, archived, model, reasoning_effort
          from threads
          where ({scope_sql}){subagent_filter}
          order by updated_at desc
@@ -383,7 +375,7 @@ fn discover_codex_threads_with_subagents_from_home(
         }
     }
 
-    if let Some(subagent_predicate) = subagent_predicate {
+    {
         let query = format!(
             "select id, cwd
              from threads
@@ -415,34 +407,6 @@ fn discover_codex_threads_with_subagents_from_home(
     }
 
     Ok(discovery)
-}
-
-fn codex_subagent_thread_predicate(
-    has_source_column: bool,
-    has_thread_source_column: bool,
-) -> Option<&'static str> {
-    match (has_source_column, has_thread_source_column) {
-        (true, true) => Some(
-            "coalesce(thread_source, '') = 'subagent' or coalesce(source, '') like '{\"subagent\":%'",
-        ),
-        (true, false) => Some("coalesce(source, '') like '{\"subagent\":%'"),
-        (false, true) => Some("coalesce(thread_source, '') = 'subagent'"),
-        (false, false) => None,
-    }
-}
-
-fn codex_threads_table_has_column(
-    connection: &rusqlite::Connection,
-    column_name: &str,
-) -> Result<bool> {
-    let mut statement = connection.prepare("pragma table_info(threads)")?;
-    let rows = statement.query_map([], |row| row.get::<_, String>(1))?;
-    for row in rows {
-        if row? == column_name {
-            return Ok(true);
-        }
-    }
-    Ok(false)
 }
 
 /// Collects Codex discovery query scope strings.
@@ -507,48 +471,14 @@ fn codex_discovery_escape_like_literal(value: &str) -> String {
         .replace('_', "\\_")
 }
 
-/// Resolves Codex threads database path.
+/// Selects the supported Codex 0.153.4 state database, never a guessed version.
+/// The filename is pinned by codex-rs/state/src/sqlite.rs at that release.
 fn resolve_codex_threads_database_path(codex_home: &FsPath) -> Option<PathBuf> {
-    let primary = codex_home.join("state.db");
-    if primary
-        .metadata()
+    let path = codex_home.join("state_5.sqlite");
+    path.metadata()
         .ok()
         .filter(|metadata| metadata.is_file() && metadata.len() > 0)
-        .is_some()
-    {
-        return Some(primary);
-    }
-
-    let mut best_candidate: Option<(u64, PathBuf)> = None;
-    let entries = fs::read_dir(codex_home).ok()?;
-    for entry in entries {
-        let Ok(entry) = entry else {
-            continue;
-        };
-        let path = entry.path();
-        let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
-            continue;
-        };
-        let version = name
-            .strip_prefix("state_")
-            .and_then(|value| value.strip_suffix(".sqlite"))
-            .and_then(|value| value.parse::<u64>().ok());
-        let Some(version) = version else {
-            continue;
-        };
-        if !path.is_file() {
-            continue;
-        }
-
-        match &best_candidate {
-            Some((current_version, _)) if *current_version >= version => {}
-            _ => {
-                best_candidate = Some((version, path));
-            }
-        }
-    }
-
-    best_candidate.map(|(_, path)| path)
+        .map(|_| path)
 }
 
 /// Parses discovered Codex sandbox mode.
