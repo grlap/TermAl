@@ -125,6 +125,17 @@ type RecordedPaneScrollGeometry = {
   scrollHeight: number;
 };
 
+type PaneConversationPage = {
+  key: string;
+  node: HTMLElement;
+  page: HTMLElement | null;
+};
+
+type PaneResizeMeasurementBaseline = PaneConversationPage & {
+  contentHeight: number;
+  viewportHeight: number;
+};
+
 // PaneScrollPosition deliberately stays serialization-shaped: the bottom
 // sentinel and detached anchors are copied across tabs and panes. Geometry is
 // only needed while that exact in-memory position owns a mounted scroll node,
@@ -339,6 +350,16 @@ export function useSessionPaneScrollState({
     node: HTMLElement;
   } | null>(null);
   const liveFlowActiveRef = useCommittedRef(isSending || showWaitingIndicator);
+  // Both direct resize observations and child layout repin requests consume
+  // this baseline. Separate baselines let the virtualizer bypass idle jitter
+  // suppression, or consume a refinement before the other route can see it.
+  const resizeMeasurementBaselineRef =
+    useRef<PaneResizeMeasurementBaseline | null>(null);
+  const resolvedConversationPageRef = useRef<PaneConversationPage | null>(null);
+  const pendingConversationPageChangeRef = useRef<{
+    key: string;
+    node: HTMLElement;
+  } | null>(null);
   const paneTailFollowDetachedByKeyRef = useRef<
     Record<string, true | undefined>
   >({});
@@ -844,6 +865,65 @@ export function useSessionPaneScrollState({
     }
   }, [activeSession?.id, hasSessionFindQuery]);
 
+  function captureResizeMeasurement(
+    node: HTMLElement,
+  ): PaneResizeMeasurementBaseline {
+    let resolvedPage = resolvedConversationPageRef.current;
+    if (resolvedPage?.key !== scrollStateKey || resolvedPage.node !== node) {
+      // Resolve once on activation. Structural/visibility observations update
+      // this cache; per-frame follow writes only read the already resolved page.
+      resolvedPage = {
+        key: scrollStateKey,
+        node,
+        page: node.querySelector<HTMLElement>(
+          ".session-conversation-page:not([hidden]), .empty-state:not([hidden])",
+        ),
+      };
+      resolvedConversationPageRef.current = resolvedPage;
+      pendingConversationPageChangeRef.current = null;
+    }
+    const { page } = resolvedPage;
+    return {
+      key: scrollStateKey,
+      node,
+      page,
+      contentHeight: page?.getBoundingClientRect().height ?? node.scrollHeight,
+      viewportHeight: node.clientHeight,
+    };
+  }
+
+  function consumeResizeMeasurement(node: HTMLElement) {
+    const next = captureResizeMeasurement(node);
+    const previous = resizeMeasurementBaselineRef.current;
+    const pendingPageChange = pendingConversationPageChangeRef.current;
+    const activePageChanged =
+      pendingPageChange?.key === scrollStateKey && pendingPageChange.node === node;
+    if (activePageChanged) {
+      pendingConversationPageChangeRef.current = null;
+    }
+    if (!previous || previous.key !== next.key || previous.node !== node) {
+      resizeMeasurementBaselineRef.current = next;
+      return true;
+    }
+    const measurement = resolveSessionPaneResizeMeasurement({
+      activePageChanged,
+      nextContentHeight: next.contentHeight,
+      nextViewportHeight: next.viewportHeight,
+      previousContentHeight: previous.contentHeight,
+      previousViewportHeight: previous.viewportHeight,
+      shouldRepinEveryMeasuredPixel:
+        liveFlowActiveRef.current || isSettledProgrammaticBottomFollowActive(),
+    });
+    // Suppressed refinements retain the last handled baseline, not the latest
+    // scrollTop (which the browser may already have clamped on a tiny shrink).
+    resizeMeasurementBaselineRef.current = {
+      ...next,
+      contentHeight: measurement.nextContentHeightBaseline,
+      viewportHeight: measurement.nextViewportHeightBaseline,
+    };
+    return measurement.shouldRepin;
+  }
+
   function scrollToLatestMessage(
     behavior: ScrollBehavior,
     force = false,
@@ -858,6 +938,9 @@ export function useSessionPaneScrollState({
       return;
     }
 
+    // Explicit navigation and streaming writes establish a fresh measurement
+    // origin; they are never themselves filtered by the idle deadband.
+    resizeMeasurementBaselineRef.current = captureResizeMeasurement(node);
     const nextScrollTop = Math.max(node.scrollHeight - node.clientHeight, 0);
     const writeScrollTop =
       scrollKind === "bottom_follow"
@@ -961,6 +1044,7 @@ export function useSessionPaneScrollState({
       return false;
     }
 
+    resizeMeasurementBaselineRef.current = captureResizeMeasurement(node);
     const nextScrollTop = Math.max(node.scrollHeight - node.clientHeight, 0);
     if (Math.abs(node.scrollTop - nextScrollTop) > 0.5) {
       writeMessageStackScrollTopImmediately(node, nextScrollTop);
@@ -992,6 +1076,13 @@ export function useSessionPaneScrollState({
       return;
     }
 
+    if (
+      resizeMeasurementBaselineRef.current?.key !== scrollStateKey ||
+      resizeMeasurementBaselineRef.current.node !== node
+    ) {
+      resizeMeasurementBaselineRef.current = captureResizeMeasurement(node);
+    }
+
     // Every visible selected session tab owns its transcript's layout authority,
     // even when another pane has keyboard focus. Composer/page measurement may
     // need an immediate, same-task correction before paint in that non-focused
@@ -1013,6 +1104,16 @@ export function useSessionPaneScrollState({
         return;
       }
       if (!getTailFollowIntent()) {
+        clearSeenTailIndicator();
+        return;
+      }
+      if (
+        !liveFlowActiveRef.current &&
+        !isSettledProgrammaticBottomFollowActive() &&
+        !consumeResizeMeasurement(node)
+      ) {
+        // Claiming authority still suppresses the virtualizer fallback writer.
+        // Only measurement noise is ignored; FOLLOW remains explicit intent.
         clearSeenTailIndicator();
         return;
       }
@@ -1070,8 +1171,6 @@ export function useSessionPaneScrollState({
     }
 
     let conversationPage: HTMLElement | null = null;
-    let previousContentHeight = 0;
-    let previousViewportHeight = node.clientHeight;
     let resizeObserver: ResizeObserver;
     let pageVisibilityObserver: MutationObserver | null = null;
 
@@ -1083,6 +1182,18 @@ export function useSessionPaneScrollState({
         nextConversationPage instanceof HTMLElement
           ? nextConversationPage
           : null;
+      const previousPage = resolvedConversationPageRef.current;
+      if (
+        previousPage?.key === scrollStateKey &&
+        previousPage.node === node &&
+        previousPage.page !== nextPage
+      ) {
+        // Page identity is an observed structural edge, not a height baseline.
+        // A synchronous layout write may refresh that baseline before this
+        // delivery; retain the edge until one measurement consumes it.
+        pendingConversationPageChangeRef.current = { key: scrollStateKey, node };
+      }
+      resolvedConversationPageRef.current = { key: scrollStateKey, node, page: nextPage };
       if (nextPage === conversationPage) {
         return false;
       }
@@ -1091,8 +1202,6 @@ export function useSessionPaneScrollState({
       }
       pageVisibilityObserver?.disconnect();
       conversationPage = nextPage;
-      previousContentHeight =
-        conversationPage?.getBoundingClientRect().height ?? 0;
       if (conversationPage) {
         resizeObserver.observe(conversationPage);
         pageVisibilityObserver?.observe(conversationPage, {
@@ -1104,33 +1213,17 @@ export function useSessionPaneScrollState({
     };
 
     const repinAfterRelevantResize = () => {
-      const activePageChanged = bindActiveConversationPage();
-      const nextContentHeight =
-        conversationPage?.getBoundingClientRect().height ?? 0;
-      const nextViewportHeight = node.clientHeight;
+      if (currentScrollStateKeyRef.current !== scrollStateKey) {
+        return;
+      }
+      bindActiveConversationPage();
       const shouldRepinEveryMeasuredPixel =
         liveFlowActiveRef.current || isSettledProgrammaticBottomFollowActive();
       // Mermaid and other asynchronously measured cards can alternate by a
       // pixel or two while idle. Ignore that harmless jitter, but retain the
       // sub-pixel sensitivity needed while output is actively streaming.
-      const resizeMeasurement = resolveSessionPaneResizeMeasurement({
-        activePageChanged,
-        nextContentHeight,
-        nextViewportHeight,
-        previousContentHeight,
-        previousViewportHeight,
-        shouldRepinEveryMeasuredPixel,
-      });
-      // Keep the last handled baseline when idle jitter is suppressed. This
-      // lets same-direction one/two-pixel refinements accumulate past the
-      // threshold without reacting to a harmless back-and-forth wobble.
-      previousContentHeight = resizeMeasurement.nextContentHeightBaseline;
-      previousViewportHeight = resizeMeasurement.nextViewportHeightBaseline;
-      if (!resizeMeasurement.shouldRepin) {
+      if (!consumeResizeMeasurement(node)) {
         clearSeenTailIndicator();
-        return;
-      }
-      if (currentScrollStateKeyRef.current !== scrollStateKey) {
         return;
       }
       if (!getTailFollowIntent()) {
@@ -2933,6 +3026,7 @@ export function useSessionPaneScrollState({
     // tab's offset and then visibly jump it to the bottom. Establish attached
     // geometry during the layout phase; the settled follow below remains
     // responsible for measurements that arrive after this commit.
+    resizeMeasurementBaselineRef.current = captureResizeMeasurement(node);
     writeMessageStackScrollTopImmediately(
       node,
       Math.max(node.scrollHeight - node.clientHeight, 0),
