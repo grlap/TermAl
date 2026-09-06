@@ -1882,7 +1882,8 @@ fn mailbox_acknowledgement_bridge_error(err: anyhow::Error) -> anyhow::Error {
     {
         return anyhow!(
             "mailbox acknowledgement response was not received; the cursor outcome is unknown. \
-             Call termal_list_mailboxes before retrying, then use its processedThrough as \
+             Call termal_read_mailbox with afterSequence omitted, reconcile any unread bodies, \
+             then use read.processedThrough as \
              expectedProcessedThrough: {err}"
         );
     }
@@ -2342,7 +2343,7 @@ fn mcp_tools_list_result() -> Value {
             },
             {
                 "name": "termal_list_mailboxes",
-                "description": "List durable neutral mailboxes for this session, including participants, latest sequence, and this session's unread count. Takes no arguments.",
+                "description": "List durable neutral mailboxes for discovery, including participants, latest sequence, and this session's unread count. Takes no arguments. Listing is not required before reading a known mailbox id: call termal_read_mailbox with afterSequence omitted, process the bodies, then acknowledge using the returned cursor snapshot.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {}
@@ -2350,7 +2351,7 @@ fn mcp_tools_list_result() -> Value {
             },
             {
                 "name": "termal_read_mailbox",
-                "description": "Fetch a FIFO range of durable mailbox messages. Omitted `afterSequence` starts after this participant's durable `processedThrough`; an explicit boundary keeps its meaning (0 replays history). Returns {mailboxId, messages, afterSequence, processedThrough}: afterSequence is the boundary actually used and processedThrough is the participant cursor from the same read snapshot. Neither is a guarantee against later concurrent progress. Each message's `notificationState` is the current mutable wake lifecycle state, not the sender receipt's immutable `notificationDisposition`. Reading never advances the cursor. Process contiguously, then acknowledge with expectedProcessedThrough from the snapshot; CAS remains forward-only.",
+                "description": "Fetch a FIFO range of durable mailbox messages. Routine workflow: read -> process -> acknowledge; no prior list call is needed. Omitted `afterSequence` starts after this participant's durable `processedThrough`; an explicit boundary keeps its meaning (0 replays history). Returns {mailboxId, messages, afterSequence, processedThrough}: afterSequence is the boundary actually used and processedThrough is the participant cursor from the same read snapshot. Reading never advances the cursor. Process bodies contiguously, then call termal_acknowledge_mailbox with expectedProcessedThrough = read.processedThrough, or the newer send receipt's senderProcessedThrough after a reply, and processedThrough = the last processed sequence (not the wake's latest sequence). For another page before acknowledgement, pass the last read sequence as afterSequence. On a CAS conflict, read again with afterSequence omitted and reconcile concurrent progress; snapshots do not bypass CAS. Each message's notificationState is the mutable wake lifecycle state, not the sender receipt's immutable notificationDisposition.",
                 "inputSchema": {
                     "type": "object",
                     "required": ["mailboxId"],
@@ -2374,7 +2375,7 @@ fn mcp_tools_list_result() -> Value {
             },
             {
                 "name": "termal_acknowledge_mailbox",
-                "description": "Advance this session's mailbox processed cursor with a forward-only compare-and-swap. Supply the cursor value you observed and the sequence processed through. New progress requires the observed cursor to match; replay at or below the durable cursor succeeds idempotently after a lost response; only a stale attempt to advance past the durable cursor conflicts.",
+                "description": "Advance this session's mailbox processed cursor after contiguous processing with a forward-only compare-and-swap. First read with termal_read_mailbox and afterSequence omitted; a list call is not required. Set expectedProcessedThrough = read.processedThrough, or the newer send receipt's senderProcessedThrough after a reply. Set processedThrough to the last processed sequence, never skipping unread messages to reach a wake's latest sequence. New progress requires the observed cursor to match; replay at or below the durable cursor succeeds idempotently after a lost response; only a stale attempt to advance past the durable cursor conflicts. On conflict, read again without afterSequence and reconcile newer progress.",
                 "inputSchema": {
                     "type": "object",
                     "required": ["mailboxId", "expectedProcessedThrough", "processedThrough"],

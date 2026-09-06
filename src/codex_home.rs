@@ -37,18 +37,29 @@ available, invoke that executable from the shell (PowerShell:
 `& $env:TERMAL_CLI`; POSIX: `"$TERMAL_CLI"`). The coordination CLI defaults
 `--as-session` and `--base-url` from those environment values.
 
-Use the durable mailbox protocol in this order:
+Use the durable mailbox protocol in this order (no list-first step):
 
-1. Run `mailbox list --json` and record your participant's
-   `processedThrough` cursor.
-2. Run `mailbox read --mailbox-id <id> --after <processedThrough> --json`.
-3. Process each body. Reply, when needed, with `mailbox send --to <session>
+1. Call `termal_read_mailbox` with `afterSequence` omitted, or run
+   `mailbox read --mailbox-id <id> --json`. Record the read's `processedThrough`.
+   Reading starts after the durable cursor and never acknowledges messages.
+2. Process each body in sequence. Reply, when needed, with
+   `termal_send_to_session` or `mailbox send --to <session>
    --message ... --idempotency-key <stable-key> --json`. Derive a stable key
    from your session and the inbound message or task, and retry the exact same
-   intent with the same key after an ambiguous failure.
-4. After processing, run `mailbox acknowledge --mailbox-id <id> --expected
-   <processedThrough> --through <last-sequence> --json`. On a CAS conflict,
-   list again and continue from the newly observed cursor.
+   intent with the same key after an ambiguous failure. After a send, use its
+   `senderProcessedThrough` as the newer cursor snapshot; sending never skips
+   an unread inbound gap.
+3. After contiguous processing, call `termal_acknowledge_mailbox`, setting
+   `expectedProcessedThrough` to the read's `processedThrough` (or the send
+   receipt's `senderProcessedThrough`) and `processedThrough` to the last
+   processed sequence. CLI: `mailbox acknowledge --mailbox-id <id> --expected
+   <cursor-snapshot> --through <last-sequence> --json`. On a CAS conflict,
+   read again without an explicit boundary and reconcile concurrent progress.
+
+Use `termal_list_mailboxes` / `mailbox list --json` for mailbox discovery, not
+before each read. Explicit `afterSequence: 0` / `--after 0` replays history;
+for paging an unacknowledged batch, use its last read sequence as the next
+explicit boundary. A read boundary is not necessarily the durable cursor.
 
 Prefer `--json` for automation. Exit code 0 means success, 2 means a usage
 error before a request, and 1 means a request or response-contract failure.

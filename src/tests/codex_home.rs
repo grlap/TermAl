@@ -1,6 +1,16 @@
 use super::*;
 
 #[test]
+fn mailbox_wake_codex_instructions_teach_read_first_once() {
+    assert!(TERMAL_CODEX_AGENTS_SECTION.contains("`afterSequence` omitted"));
+    assert!(TERMAL_CODEX_AGENTS_SECTION.contains("mailbox read --mailbox-id <id> --json"));
+    assert!(TERMAL_CODEX_AGENTS_SECTION.contains("senderProcessedThrough"));
+    assert!(TERMAL_CODEX_AGENTS_SECTION.contains("expectedProcessedThrough"));
+    assert!(!TERMAL_CODEX_AGENTS_SECTION.contains("1. Run `mailbox list"));
+    assert!(!TERMAL_CODEX_AGENTS_SECTION.contains("--after <processedThrough>"));
+}
+
+#[test]
 fn codex_home_appends_one_managed_coordination_section_after_user_instructions() {
     let root = TestTempRoot::create("termal-codex-home-agents");
     let source = root.path().join("source");

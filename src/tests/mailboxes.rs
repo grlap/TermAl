@@ -45,6 +45,227 @@ fn mailbox_send_request(target_session_id: &str) -> SendMailboxMessageRequest {
 }
 
 #[test]
+fn mailbox_wake_exact_metadata_with_and_without_topic() {
+    for topic in [None, Some("architecture")] {
+        let (state, sender_id, target_id) = mailbox_test_state();
+        let mut request = mailbox_send_request(&target_id);
+        request.topic = topic.map(str::to_owned);
+        let receipt = state
+            .append_mailbox_message_and_notify(&sender_id, request)
+            .unwrap();
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let target = &inner.sessions[inner.find_session_index(&target_id).unwrap()];
+        let topic_line = topic.map_or(String::new(), |topic| format!("Topic: {topic}\n"));
+        for protocol_text in [
+            "First use",
+            "termal_list_mailboxes",
+            "If the TermAl MCP tools are unavailable",
+            "TERMAL_CLI",
+            "TERMAL_SESSION_ID",
+            "TERMAL_BASE_URL",
+            "expectedProcessedThrough",
+            "mailbox read --after",
+        ] {
+            assert!(
+                !target.queued_prompts[0]
+                    .pending_prompt
+                    .text
+                    .contains(protocol_text)
+            );
+        }
+        assert_eq!(
+            target.queued_prompts[0].pending_prompt.text,
+            format!(
+                "[TermAl mailbox notification]\n\
+                 Mailbox `{}` has 1 unread message(s). Latest inbound: #{} from Sol.\n\
+                 {topic_line}Read: `termal_read_mailbox`; acknowledge after processing.",
+                receipt.mailbox_id, receipt.sequence
+            ),
+            "a wake contains metadata and one pointer, not the body or protocol steps"
+        );
+    }
+}
+
+#[test]
+fn mailbox_wake_coalescing_uses_latest_topic_and_unread_count() {
+    let (state, sender_id, target_id) = mailbox_test_state();
+    state
+        .append_mailbox_message_and_notify(&sender_id, mailbox_send_request(&target_id))
+        .unwrap();
+    let mut request = mailbox_send_request(&target_id);
+    request.idempotency_key = "new-topic".to_owned();
+    request.topic = Some("review".to_owned());
+    let receipt = state
+        .append_mailbox_message_and_notify(&sender_id, request)
+        .unwrap();
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let target = &inner.sessions[inner.find_session_index(&target_id).unwrap()];
+    assert_eq!(target.queued_prompts.len(), 1);
+    assert_eq!(
+        target.queued_prompts[0].pending_prompt.text,
+        format!(
+            "[TermAl mailbox notification]\n\
+             Mailbox `{}` has 2 unread message(s). Latest inbound: #2 from Sol.\n\
+             Topic: review\n\
+             Read: `termal_read_mailbox`; acknowledge after processing.",
+            receipt.mailbox_id
+        )
+    );
+}
+
+#[test]
+fn mailbox_wake_display_bounds_multiline_metadata_without_changing_durable_fields() {
+    let (state, sender_id, target_id) = mailbox_test_state();
+    let sender_name = format!("Sol\n{}", "s".repeat(180));
+    let topic = format!("review\r\n{}", "ż".repeat(180));
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner.find_session_index(&sender_id).unwrap();
+        inner.sessions[index].session.name = sender_name.clone();
+    }
+    let mut request = mailbox_send_request(&target_id);
+    request.topic = Some(topic.clone());
+    let receipt = state
+        .append_mailbox_message_and_notify(&sender_id, request)
+        .unwrap();
+    let stored = state
+        .mailbox_store
+        .read_message(&target_id, &receipt.message_id)
+        .unwrap();
+    assert_eq!(stored.sender_name, sender_name);
+    assert_eq!(stored.topic, Some(topic));
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let target = &inner.sessions[inner.find_session_index(&target_id).unwrap()];
+    assert_eq!(
+        target.queued_prompts[0].pending_prompt.text,
+        format!(
+            "[TermAl mailbox notification]\n\
+             Mailbox `{}` has 1 unread message(s). Latest inbound: #1 from Sol {}….\n\
+             Topic: review {}…\n\
+             Read: `termal_read_mailbox`; acknowledge after processing.",
+            receipt.mailbox_id,
+            "s".repeat(156),
+            "ż".repeat(153)
+        )
+    );
+}
+
+#[test]
+fn mailbox_wake_drops_control_and_format_characters_without_changing_durable_topic() {
+    let (state, sender_id, target_id) = mailbox_test_state();
+    let format_characters: String = (0x200b..=0x200f)
+        .chain(0x202a..=0x202e)
+        .chain(0x2060..=0x2064)
+        .chain(0x2066..=0x2069)
+        .chain([0xfeff])
+        .map(|code_point| char::from_u32(code_point).expect("valid format code point"))
+        .collect();
+    let topic = format!("review{format_characters}\0\u{7}\u{7f}\u{9f}\t ready");
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner.find_session_index(&sender_id).unwrap();
+        inner.sessions[index].session.name = format!("S{format_characters}\0ol");
+    }
+    let mut request = mailbox_send_request(&target_id);
+    request.topic = Some(topic.clone());
+    let receipt = state
+        .append_mailbox_message_and_notify(&sender_id, request)
+        .expect("mailbox send should preserve durable metadata");
+    let stored = state
+        .mailbox_store
+        .read_message(&target_id, &receipt.message_id)
+        .expect("stored message should remain readable");
+    assert_eq!(stored.topic, Some(topic));
+    assert_eq!(stored.sender_name, format!("S{format_characters}\0ol"));
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let target = &inner.sessions[inner.find_session_index(&target_id).unwrap()];
+    assert_eq!(
+        target.queued_prompts[0].pending_prompt.text,
+        format!(
+            "[TermAl mailbox notification]\n\
+             Mailbox `{}` has 1 unread message(s). Latest inbound: #1 from Sol.\n\
+             Topic: review ready\n\
+             Read: `termal_read_mailbox`; acknowledge after processing.",
+            receipt.mailbox_id
+        )
+    );
+}
+
+#[test]
+fn mailbox_wake_recovery_preserves_topic_at_each_query_boundary() {
+    for query in ["current", "failed-delivery", "never-woken", "boot"] {
+        let (state, sender_id, target_id) = mailbox_test_state();
+        let mut receipts = Vec::new();
+        for topic in ["original", "latest"] {
+            receipts.push(
+                state
+                    .mailbox_store
+                    .append(&MailboxAppendInput {
+                        sender_session_id: sender_id.clone(),
+                        sender_name: "Sol".to_owned(),
+                        target_session_id: target_id.clone(),
+                        target_name: "Fable".to_owned(),
+                        body: "durable body, never a wake".to_owned(),
+                        idempotency_key: topic.to_owned(),
+                        topic: Some(topic.to_owned()),
+                        state_stamp: None,
+                    })
+                    .unwrap(),
+            );
+        }
+        let mailbox_id = &receipts[0].mailbox_id;
+        let recovery = if query == "boot" {
+            MailboxWakeupRecovery::AllUnreadAfterBoot
+        } else {
+            MailboxWakeupRecovery::NeverWoken
+        };
+        let wakeups = match query {
+            "current" => vec![
+                state
+                    .mailbox_store
+                    .unread_wakeup_for_mailbox(&target_id, mailbox_id)
+                    .unwrap()
+                    .unwrap(),
+            ],
+            "failed-delivery" => vec![
+                state
+                    .mailbox_store
+                    .unread_wakeup_for_mailbox_through(&target_id, mailbox_id, 1)
+                    .unwrap()
+                    .unwrap(),
+            ],
+            _ => state
+                .mailbox_store
+                .wakeups_for_session(&target_id, recovery)
+                .unwrap(),
+        };
+        assert_eq!(wakeups.len(), 1, "{query}");
+        assert!(
+            state
+                .queue_mailbox_wakeups_for_session(&target_id, wakeups, recovery)
+                .unwrap()
+        );
+        let (unread_count, latest_sequence, topic) = if query == "failed-delivery" {
+            (1, 1, "original")
+        } else {
+            (2, 2, "latest")
+        };
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let target = &inner.sessions[inner.find_session_index(&target_id).unwrap()];
+        assert_eq!(
+            target.queued_prompts[0].pending_prompt.text,
+            format!(
+                "[TermAl mailbox notification]\n\
+                 Mailbox `{mailbox_id}` has {unread_count} unread message(s). Latest inbound: #{latest_sequence} from Sol.\n\
+                 Topic: {topic}\n\
+                 Read: `termal_read_mailbox`; acknowledge after processing."
+            ),
+            "{query} recovery must use the same metadata-only wake shape"
+        );
+    }
+}
+
+#[test]
 fn lightweight_test_state_does_not_hold_a_mailbox_database_descriptor() {
     let state = test_app_state();
     assert!(
@@ -354,12 +575,11 @@ fn mailbox_send_commits_body_before_metadata_only_wake_and_retry_does_not_rewake
         assert_eq!(target.queued_prompts.len(), 1);
         let pending = &target.queued_prompts[0].pending_prompt;
         assert!(pending.text.contains(&first.mailbox_id));
-        assert!(pending.text.contains("termal_list_mailboxes"));
         assert!(pending.text.contains("termal_read_mailbox"));
-        assert!(pending.text.contains("expectedProcessedThrough"));
-        assert!(pending.text.contains("TERMAL_CLI"));
-        assert!(pending.text.contains("TERMAL_SESSION_ID"));
-        assert!(pending.text.contains("mailbox acknowledge --expected"));
+        assert!(pending.text.contains("Topic: architecture"));
+        assert!(!pending.text.contains("termal_list_mailboxes"));
+        assert!(!pending.text.contains("expectedProcessedThrough"));
+        assert!(!pending.text.contains("TERMAL_CLI"));
         assert!(
             !pending.text.contains("durable body"),
             "wake-up prompt must contain metadata only"
@@ -1842,7 +2062,13 @@ fn delivered_unacknowledged_notification_does_not_loop_or_starve_user_prompt() {
     };
     assert_eq!(
         first_prompt,
-        mailbox_notification_text(&receipt.mailbox_id, 1, receipt.sequence, "Sol"),
+        mailbox_notification_text(
+            &receipt.mailbox_id,
+            1,
+            receipt.sequence,
+            "Sol",
+            Some("architecture"),
+        ),
         "human-only queue presentation must not rewrite the agent-facing activation prompt"
     );
     deliver_turn_dispatch(&state, first).expect("runtime should accept the mailbox wake");
@@ -1997,7 +2223,8 @@ fn reopened_mailbox_store_recovers_lost_wake_before_receivers_next_turn() {
     };
     assert!(runtime_prompt.contains(&committed.mailbox_id));
     assert!(runtime_prompt.contains("termal_read_mailbox"));
-    assert!(runtime_prompt.contains("TERMAL_CLI"));
+    assert!(runtime_prompt.contains("Topic: recovery"));
+    assert!(!runtime_prompt.contains("TERMAL_CLI"));
     assert!(
         !runtime_prompt.contains("Committed before a simulated crash."),
         "recovery wake must remain metadata-only"

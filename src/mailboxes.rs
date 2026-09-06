@@ -144,6 +144,7 @@ struct MailboxUnreadWakeup {
     unread_count: u64,
     sender_session_id: String,
     sender_name: String,
+    topic: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -430,6 +431,7 @@ impl AppState {
             receipt.unread_depth,
             receipt.sequence,
             &sender_name,
+            input.topic.as_deref(),
         );
         let notification_request = SendMessageRequest {
             text: notification_text,
@@ -667,6 +669,7 @@ impl AppState {
                 wakeup.unread_count,
                 wakeup.sequence,
                 &wakeup.sender_name,
+                wakeup.topic.as_deref(),
             );
             let source = MessageSource::mailbox(
                 wakeup.sender_session_id,
@@ -862,6 +865,7 @@ impl AppState {
             wakeup.unread_count,
             wakeup.sequence,
             &wakeup.sender_name,
+            wakeup.topic.as_deref(),
         );
         let source = MessageSource::mailbox(
             wakeup.sender_session_id,
@@ -1023,18 +1027,18 @@ fn mailbox_notification_text(
     unread_count: u64,
     sequence: u64,
     sender_name: &str,
+    topic: Option<&str>,
 ) -> String {
+    // Display metadata is bounded and single-line; durable fields stay intact.
+    // The protocol is taught by tools/help and managed instructions, not wakes.
+    let sender_name = mailbox_preview(sender_name);
+    let topic_line = topic.map_or(String::new(), |topic| {
+        format!("Topic: {}\n", mailbox_preview(topic))
+    });
     format!(
         "[TermAl mailbox notification]\n\
          Mailbox `{mailbox_id}` has {unread_count} unread message(s). Latest inbound: #{sequence} from {sender_name}.\n\
-         First use `termal_list_mailboxes` to obtain your current `processedThrough` cursor, \
-         then use `termal_read_mailbox` with this mailbox id to fetch durable message bodies. \
-         After processing, call `termal_acknowledge_mailbox` with that cursor as \
-         `expectedProcessedThrough`. \
-         If the TermAl MCP tools are unavailable, invoke the executable in `TERMAL_CLI` \
-         from the shell. `TERMAL_SESSION_ID` and `TERMAL_BASE_URL` supply the CLI defaults; \
-         follow `mailbox list` -> `mailbox read --after <processedThrough>` -> process/reply \
-         with a stable idempotency key -> `mailbox acknowledge --expected <processedThrough>`."
+         {topic_line}Read: `termal_read_mailbox`; acknowledge after processing."
     )
 }
 
@@ -1990,7 +1994,7 @@ impl MailboxStore {
                         AND unread.sequence > mine.processed_through
                         AND COALESCE(unread.topic, '') != ?3
                     ),
-                    message.sender_session_id, message.sender_name
+                    message.sender_session_id, message.sender_name, message.topic
              FROM mailbox_participants mine
              JOIN mailbox_messages message
                ON message.mailbox_id = mine.mailbox_id
@@ -2014,6 +2018,7 @@ impl MailboxStore {
                     unread_count: row.get(2)?,
                     sender_session_id: row.get(3)?,
                     sender_name: row.get(4)?,
+                    topic: row.get(5)?,
                 })
             },
         );
@@ -2047,7 +2052,7 @@ impl MailboxStore {
                         AND unread.sequence <= ?3
                         AND COALESCE(unread.topic, '') != ?4
                     ),
-                    message.sender_session_id, message.sender_name
+                    message.sender_session_id, message.sender_name, message.topic
              FROM mailbox_participants mine
              JOIN mailbox_messages message
                ON message.mailbox_id = mine.mailbox_id
@@ -2077,6 +2082,7 @@ impl MailboxStore {
                     unread_count: row.get(2)?,
                     sender_session_id: row.get(3)?,
                     sender_name: row.get(4)?,
+                    topic: row.get(5)?,
                 })
             },
         );
@@ -2114,7 +2120,7 @@ impl MailboxStore {
                             AND unread.sequence > mine.processed_through
                             AND COALESCE(unread.topic, '') != ?3
                         ),
-                        message.sender_session_id, message.sender_name
+                        message.sender_session_id, message.sender_name, message.topic
                  FROM mailboxes m
                  JOIN mailbox_participants mine
                    ON mine.mailbox_id = m.id
@@ -2154,6 +2160,7 @@ impl MailboxStore {
                     unread_count: row.get(3)?,
                     sender_session_id: row.get(4)?,
                     sender_name: row.get(5)?,
+                    topic: row.get(6)?,
                 })
                 },
             )
@@ -2654,7 +2661,24 @@ fn mailbox_processed_through(
 
 fn mailbox_preview(body: &str) -> String {
     const MAX_CHARS: usize = 160;
-    let single_line = body.split_whitespace().collect::<Vec<_>>().join(" ");
+    // Normalize whitespace before dropping controls so line/tab boundaries still
+    // separate words. Remove invisible direction/format marks from display only.
+    let display_text: String = body
+        .chars()
+        .map(|character| if character.is_whitespace() { ' ' } else { character })
+        .filter(|character| {
+            !character.is_control()
+                && !matches!(
+                    character,
+                    '\u{200b}'..='\u{200f}'
+                        | '\u{202a}'..='\u{202e}'
+                        | '\u{2060}'..='\u{2064}'
+                        | '\u{2066}'..='\u{2069}'
+                        | '\u{feff}'
+                )
+        })
+        .collect();
+    let single_line = display_text.split_whitespace().collect::<Vec<_>>().join(" ");
     let mut chars = single_line.chars();
     let preview = chars.by_ref().take(MAX_CHARS).collect::<String>();
     if chars.next().is_some() {

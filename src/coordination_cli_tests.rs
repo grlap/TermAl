@@ -13,6 +13,16 @@
 use super::delegation_mcp_tests::spawn_test_mcp_http_server;
 use super::*;
 
+#[test]
+fn mailbox_wake_cli_help_teaches_read_first_and_snapshot_ack() {
+    assert!(COORDINATION_CLI_USAGE.contains("mailbox read --mailbox-id <id> --json"));
+    assert!(COORDINATION_CLI_USAGE.contains("read -> process/reply -> acknowledge"));
+    assert!(COORDINATION_CLI_USAGE.contains("read.processedThrough"));
+    assert!(COORDINATION_CLI_USAGE.contains("receipt.senderProcessedThrough"));
+    assert!(COORDINATION_CLI_USAGE.contains("not required before reading"));
+    assert!(COORDINATION_CLI_USAGE.contains("--after 0 explicitly replays history"));
+}
+
 fn cli_args(list: &[&str]) -> Vec<String> {
     list.iter().map(|argument| (*argument).to_owned()).collect()
 }

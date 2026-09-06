@@ -38,19 +38,32 @@ concurrent send or acknowledgement.
    [Planned remote access](#planned-remote-access).
 2. The body is committed to SQLite with the next dense mailbox sequence.
 3. Only after commit, TermAl best-effort wakes the receiver with mailbox
-   metadata (mailbox id, latest sequence, and unread count).
+   metadata (mailbox id, latest sequence, unread count, latest inbound sender,
+   and topic when present).
 4. The receiver explicitly fetches bodies with `termal_read_mailbox` or
    `termal_read_mailbox_message`.
 5. After processing, the receiver advances its cursor with
    `termal_acknowledge_mailbox`.
 
-The metadata wake names both routes. It first points MCP-capable agents at the
-`termal_*` tools. If those tools are unavailable, it points the agent at the
-executable in `TERMAL_CLI`; hosted runtimes also receive `TERMAL_SESSION_ID`
-and `TERMAL_BASE_URL`, so the equivalent `mailbox list` -> `mailbox read
---after <processedThrough>` -> process/reply with a stable idempotency key ->
-`mailbox acknowledge --expected <processedThrough>` loop needs no copied
-session id or server address.
+The agent-facing wake has one shape for fresh, coalesced, and recovered
+notifications. It contains metadata and one short read/acknowledgement pointer,
+never the message body or a repeated protocol tutorial:
+
+```text
+[TermAl mailbox notification]
+Mailbox `mailbox-example` has 2 unread message(s). Latest inbound: #7 from Sol.
+Topic: architecture
+Read: `termal_read_mailbox`; acknowledge after processing.
+```
+
+The topic line is omitted when no topic is present. Sender and topic display
+values are whitespace-collapsed, stripped of control characters and invisible
+direction/format marks, and capped at 160 characters plus an ellipsis; the
+durable metadata is unchanged. The protocol is taught by the MCP tool
+descriptions, coordination CLI help, this document, and the TermAl-managed
+Codex `AGENTS.md` section, not appended to every wake. That managed section
+also teaches the CLI fallback through `TERMAL_CLI`, with `TERMAL_SESSION_ID`
+and `TERMAL_BASE_URL` supplying defaults without copying an identity or URL.
 
 Mailbox participation follows the live local-root session record. Deliberate
 session deletion is the only operation that evicts a participant by setting
@@ -231,8 +244,25 @@ is the participant's durable cursor at read time. Both and the returned rows
 come from the same SQLite read snapshot. Later concurrent operations may move
 the cursor before acknowledgement; the snapshot does not bypass CAS.
 
+The routine workflow is read -> process/reply -> acknowledge:
+
+1. Call `termal_read_mailbox` with the mailbox id and `afterSequence` omitted,
+   or run `mailbox read --mailbox-id <id> --json`. Keep `read.processedThrough`.
+   `termal_list_mailboxes` / `mailbox list` is for discovery, not a mandatory
+   first step when the wake already supplies the mailbox id.
+2. Process the returned bodies in order. Reply when needed with a stable
+   idempotency key; an ambiguous send retries the same intent and key. Use the
+   reply receipt's `senderProcessedThrough` as the newer cursor snapshot.
+   To page before acknowledging, pass the last read sequence as the next
+   explicit `afterSequence` / `--after` boundary.
+3. Acknowledge only through the last contiguously processed sequence, not the
+   wake's latest sequence. Set `expectedProcessedThrough` (CLI `--expected`)
+   from `read.processedThrough`, or `receipt.senderProcessedThrough` after a
+   reply. On a CAS conflict, read again without an explicit boundary and
+   reconcile concurrent progress.
+
 Human mailbox notifications render as a compact
-sender/preview/unread link; the agent-only list/read/ack activation text remains
+sender/preview/unread link; the agent-only metadata/pointer activation text remains
 stored but is not shown as the human card body. The link opens a dedicated
 read-only workspace tab with no agent, runtime, model, workdir, or composer.
 Workspace state deduplicates by mailbox id, so every notification for the same

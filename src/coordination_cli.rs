@@ -46,6 +46,13 @@ Read without --after starts after the caller's durable processedThrough;
 boundary used) and processedThrough (the durable cursor snapshot). Reading
 never acknowledges. Snapshots can change concurrently; acknowledge still
 requires --expected and forward-only contiguous processing.
+Routine workflow: read -> process/reply -> acknowledge.
+Start with mailbox read --mailbox-id <id> --json (omit --after), then process
+the returned bodies in order. Set acknowledgement --expected from
+read.processedThrough, or receipt.senderProcessedThrough after a reply;
+--through is the last contiguously processed sequence, not the wake's latest.
+On a cursor conflict, read again without --after and reconcile newer progress.
+Mailbox list is for discovery; it is not required before reading a known id.
 Exit codes: 0 success; 2 usage or argument error (no request was sent);
 1 any failure after a request was attempted (details on stderr).";
 

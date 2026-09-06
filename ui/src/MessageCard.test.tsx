@@ -408,7 +408,12 @@ describe("MessageCard", () => {
       type: "text",
       author: "you",
       timestamp: "10:05",
-      text: "[TermAl mailbox notification] First use termal_list_mailboxes, then termal_read_mailbox, then termal_acknowledge_mailbox.",
+      text: [
+        "[TermAl mailbox notification]",
+        "Mailbox `mailbox-1` has 2 unread message(s). Latest inbound: #3 from Sol.",
+        "Topic: architecture",
+        "Read: `termal_read_mailbox`; acknowledge after processing.",
+      ].join("\n"),
       source: {
         kind: "mailbox",
         sessionId: "session-sol",
@@ -435,7 +440,8 @@ describe("MessageCard", () => {
     expect(
       screen.getByRole("button", { name: "Open mailbox →" }),
     ).toBeInTheDocument();
-    expect(screen.queryByText(/termal_list_mailboxes/i)).toBeNull();
+    expect(screen.queryByText(/Read:/i)).toBeNull();
+    expect(screen.queryByText("termal_read_mailbox")).toBeNull();
   });
 
   it("collapses a long peer message and provides a bottom hide control", () => {

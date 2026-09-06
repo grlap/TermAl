@@ -15,6 +15,33 @@ use std::thread;
 
 const TEST_MCP_HTTP_ACCEPT_DEADLINE: Duration = Duration::from_secs(10);
 
+#[test]
+fn mailbox_wake_tool_descriptions_teach_read_first_and_snapshot_ack() {
+    let tools = mcp_tools_list_result();
+    let description = |name: &str| {
+        tools["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|tool| tool["name"] == name)
+            .unwrap()["description"]
+            .as_str()
+            .unwrap()
+    };
+    let list = description("termal_list_mailboxes");
+    assert!(list.contains("discovery"));
+    assert!(list.contains("not required before reading"));
+    let read = description("termal_read_mailbox");
+    assert!(read.contains("Omitted `afterSequence`"));
+    assert!(read.contains("read -> process -> acknowledge"));
+    assert!(read.contains("read.processedThrough"));
+    assert!(read.contains("senderProcessedThrough"));
+    let acknowledge = description("termal_acknowledge_mailbox");
+    assert!(acknowledge.contains("afterSequence omitted"));
+    assert!(acknowledge.contains("read.processedThrough"));
+    assert!(acknowledge.contains("senderProcessedThrough"));
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct TestMcpHttpRequest {
     pub(crate) method: String,
@@ -1626,7 +1653,7 @@ fn delegation_mcp_acknowledgement_timeout_prescribes_cursor_reconciliation() {
     let message = err.to_string();
     assert!(
         message.contains("cursor outcome is unknown")
-            && message.contains("termal_list_mailboxes")
+            && message.contains("termal_read_mailbox with afterSequence omitted")
             && message.contains("expectedProcessedThrough"),
         "acknowledgement transport diagnostics must prescribe cursor reconciliation: {message}"
     );
@@ -1667,7 +1694,7 @@ fn delegation_mcp_acknowledgement_unusable_success_prescribes_cursor_reconciliat
         let message = error.to_string();
         assert!(
             message.contains("cursor outcome is unknown")
-                && message.contains("termal_list_mailboxes")
+                && message.contains("termal_read_mailbox with afterSequence omitted")
                 && message.contains("expectedProcessedThrough")
                 && message.contains("unusable successful response"),
             "ack decode/shape failures must prescribe cursor reconciliation: {message}"
