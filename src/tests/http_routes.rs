@@ -18,6 +18,73 @@
 
 use super::*;
 
+// The route body includes legal keep-alive comments. Exercise the reader
+// deterministically instead of depending on wall-clock load to produce one.
+#[tokio::test]
+async fn sse_reader_skips_comment_frames_before_lagged_and_keeps_boundaries() {
+    for chunks in [
+        vec![
+            ":\n\n",
+            "event: lagged\ndata: 1\n\n",
+            "event: state\ndata: {}\n\n",
+        ],
+        vec![
+            ": pulse\r\n: alive\r\n\r\n",
+            "event: lagged\ndata: 1\n\n",
+            "event: state\ndata: {}\n\n",
+        ],
+        vec![
+            ":\n",
+            "\nevent: lag",
+            "ged\ndata: 1\n\n",
+            "event: state\ndata: {}\n\n",
+        ],
+    ] {
+        let mut stream = Box::pin(async_stream::stream! {
+            for chunk in chunks {
+                yield Ok::<_, axum::Error>(axum::body::Bytes::from_static(chunk.as_bytes()));
+            }
+        });
+        assert_eq!(
+            next_sse_event(&mut stream).await,
+            "event: lagged\ndata: 1\n\n"
+        );
+        assert_eq!(
+            next_sse_event(&mut stream).await,
+            "event: state\ndata: {}\n\n"
+        );
+    }
+}
+
+#[tokio::test]
+async fn sse_reader_comment_only_eof_does_not_produce_a_phantom_event() {
+    let result = tokio::spawn(async {
+        let mut stream = Box::pin(async_stream::stream! {
+            yield Ok::<_, axum::Error>(axum::body::Bytes::from_static(b":\n\n"));
+        });
+        next_sse_event(&mut stream).await
+    })
+    .await;
+    assert!(
+        result
+            .expect_err("comment-only EOF must not return an event")
+            .is_panic()
+    );
+}
+
+#[tokio::test]
+async fn sse_reader_preserves_comments_inside_an_application_frame() {
+    let mut stream = Box::pin(async_stream::stream! {
+        yield Ok::<_, axum::Error>(axum::body::Bytes::from_static(
+            b": annotation\nevent: lagged\ndata: 1\n\n"
+        ));
+    });
+    assert_eq!(
+        next_sse_event(&mut stream).await,
+        ": annotation\nevent: lagged\ndata: 1\n\n"
+    );
+}
+
 #[tokio::test]
 async fn project_digest_and_action_routes_are_disabled() {
     let app = app_router(test_app_state());

@@ -720,7 +720,8 @@ fn claude_user_input_response_uses_permission_allow() {
 #[test]
 fn claude_initialize_does_not_advertise_the_removed_question_dialog() {
     let mut initialize = Vec::new();
-    write_claude_initialize(&mut initialize).expect("initialize should serialize");
+    write_claude_initialize(&mut initialize, &test_app_state(), "missing-session")
+        .expect("initialize should serialize");
     let initialize: Value =
         serde_json::from_slice(initialize.trim_ascii_end()).expect("initialize should be JSON");
     assert!(

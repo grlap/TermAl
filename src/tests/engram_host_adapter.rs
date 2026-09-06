@@ -15349,14 +15349,11 @@ fn acp_session_setup_uses_the_engram_snapshot_that_spawned_its_process() {
 
     let pending_requests = Arc::new(Mutex::new(HashMap::new()));
     let runtime_state = Arc::new(Mutex::new(AcpRuntimeState {
-        current_session_id: None,
-        is_loading_history: false,
-        opencode_reconcile_fingerprints: VecDeque::new(),
-        opencode_config_notification_tx: None,
         capabilities: Some(AcpCapabilities {
             supports_session_load: Some(false),
             supports_session_resume: None,
         }),
+        ..AcpRuntimeState::default()
     }));
     let writer = SharedBufferWriter::default();
     let thread_writer = writer.clone();

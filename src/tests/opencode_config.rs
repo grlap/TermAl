@@ -337,14 +337,11 @@ fn opencode_resume_survives_explicit_config_rejection() {
         .expect("OpenCode session should be created");
     let pending_requests = Arc::new(Mutex::new(HashMap::new()));
     let runtime_state = Arc::new(Mutex::new(AcpRuntimeState {
-        current_session_id: None,
-        is_loading_history: false,
-        opencode_reconcile_fingerprints: VecDeque::new(),
-        opencode_config_notification_tx: None,
         capabilities: Some(AcpCapabilities {
             supports_session_load: Some(true),
             supports_session_resume: Some(true),
         }),
+        ..AcpRuntimeState::default()
     }));
     let writer = SharedBufferWriter::default();
     let thread_writer = writer.clone();
@@ -581,14 +578,11 @@ fn opencode_generic_resume_error_preserves_continuity_without_fallback() {
 
     let pending_requests = Arc::new(Mutex::new(HashMap::new()));
     let runtime_state = Arc::new(Mutex::new(AcpRuntimeState {
-        current_session_id: None,
-        is_loading_history: false,
-        opencode_reconcile_fingerprints: VecDeque::new(),
-        opencode_config_notification_tx: None,
         capabilities: Some(AcpCapabilities {
             supports_session_load: Some(true),
             supports_session_resume: Some(true),
         }),
+        ..AcpRuntimeState::default()
     }));
     let writer = SharedBufferWriter::default();
     let thread_writer = writer.clone();
@@ -699,14 +693,11 @@ fn opencode_structured_missing_session_error_preserves_continuity_after_failure(
 
     let pending_requests = Arc::new(Mutex::new(HashMap::new()));
     let runtime_state = Arc::new(Mutex::new(AcpRuntimeState {
-        current_session_id: None,
-        is_loading_history: false,
-        opencode_reconcile_fingerprints: VecDeque::new(),
-        opencode_config_notification_tx: None,
         capabilities: Some(AcpCapabilities {
             supports_session_load: Some(true),
             supports_session_resume: Some(true),
         }),
+        ..AcpRuntimeState::default()
     }));
     let writer = SharedBufferWriter::default();
     let thread_writer = writer.clone();
@@ -776,8 +767,8 @@ fn opencode_structured_missing_session_error_preserves_continuity_after_failure(
 }
 
 // Pins R6's prompt boundary. OpenCode owns discovery of AGENTS.md/CLAUDE.md;
-// TermAl sends only the resolved task envelope and must not duplicate
-// repository instruction contents into the ACP prompt.
+// The stored task envelope stays user-only. The first wire prompt may carry
+// a separate TermAl host guidance block, never repository instruction contents.
 #[test]
 fn opencode_prompt_dispatch_does_not_inject_repository_instruction_files() {
     let state = test_app_state();
@@ -847,6 +838,22 @@ fn opencode_prompt_dispatch_does_not_inject_repository_instruction_files() {
     assert!(!runtime_prompt.contains("CLAUDE_SENTINEL"));
     assert!(!runtime_prompt.contains("AGENTS.md"));
     assert!(!runtime_prompt.contains("CLAUDE.md"));
+    assert!(!runtime_prompt.contains("TermAl host guidance"));
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let index = inner.find_session_index(&created.session_id).unwrap();
+    let session = &inner.sessions[index].session;
+    assert!(
+        !serde_json::to_string(&session.messages)
+            .unwrap()
+            .contains("TermAl host guidance")
+    );
+    assert!(
+        !session
+            .prompt_history
+            .iter()
+            .any(|text| text.contains("TermAl host guidance"))
+    );
+    drop(inner);
 
     fs::remove_dir_all(root).expect("OpenCode prompt test root should clean up");
 }
@@ -1219,10 +1226,7 @@ fn opencode_late_config_update_after_session_removal_is_nonfatal() {
     let state = test_app_state();
     let runtime_state = Arc::new(Mutex::new(AcpRuntimeState {
         current_session_id: Some("removed-opencode-session".to_owned()),
-        is_loading_history: false,
-        opencode_reconcile_fingerprints: VecDeque::new(),
-        opencode_config_notification_tx: None,
-        capabilities: None,
+        ..AcpRuntimeState::default()
     }));
     let pending_requests = Arc::new(Mutex::new(HashMap::new()));
     let mut writer = SharedBufferWriter::default();
@@ -1281,10 +1285,7 @@ fn opencode_config_rejection_reverts_to_current_without_failing_reconcile() {
         .expect("OpenCode session should be created");
     let runtime_state = Arc::new(Mutex::new(AcpRuntimeState {
         current_session_id: Some("opencode-session-config".to_owned()),
-        is_loading_history: false,
-        opencode_reconcile_fingerprints: VecDeque::new(),
-        opencode_config_notification_tx: None,
-        capabilities: None,
+        ..AcpRuntimeState::default()
     }));
     let pending_requests = Arc::new(Mutex::new(HashMap::new()));
     let writer = SharedBufferWriter::default();
@@ -1393,10 +1394,7 @@ fn opencode_duplicate_config_update_is_reconciled_once() {
         .expect("OpenCode session should be created");
     let runtime_state = Arc::new(Mutex::new(AcpRuntimeState {
         current_session_id: Some("opencode-session-dedupe".to_owned()),
-        is_loading_history: false,
-        opencode_reconcile_fingerprints: VecDeque::new(),
-        opencode_config_notification_tx: None,
-        capabilities: None,
+        ..AcpRuntimeState::default()
     }));
     let pending_requests = Arc::new(Mutex::new(HashMap::new()));
     let writer = SharedBufferWriter::default();
@@ -1534,10 +1532,7 @@ fn opencode_config_transport_failure_remains_runtime_fatal() {
         .expect("OpenCode session should be created");
     let runtime_state = Arc::new(Mutex::new(AcpRuntimeState {
         current_session_id: Some("opencode-session-transport".to_owned()),
-        is_loading_history: false,
-        opencode_reconcile_fingerprints: VecDeque::new(),
-        opencode_config_notification_tx: None,
-        capabilities: None,
+        ..AcpRuntimeState::default()
     }));
     let pending_requests = Arc::new(Mutex::new(HashMap::new()));
     let error = handle_opencode_config_reconcile_command(
@@ -1621,14 +1616,12 @@ fn opencode_live_config_commits_only_after_protocol_acknowledgement() {
     let pending_requests = Arc::new(Mutex::new(HashMap::new()));
     let runtime_state = Arc::new(Mutex::new(AcpRuntimeState {
         current_session_id: Some("opencode-live-config".to_owned()),
-        is_loading_history: false,
         opencode_reconcile_fingerprints: VecDeque::from([json!({
             "requestedModel": "auto",
             "requestedMode": "auto",
             "config": {"stale": true}
         })]),
-        opencode_config_notification_tx: None,
-        capabilities: None,
+        ..AcpRuntimeState::default()
     }));
     let writer = SharedBufferWriter::default();
     let thread_writer = writer.clone();
@@ -2640,10 +2633,7 @@ fn opencode_live_config_rejection_preserves_authority_and_runtime() {
     let pending_requests = Arc::new(Mutex::new(HashMap::new()));
     let runtime_state = Arc::new(Mutex::new(AcpRuntimeState {
         current_session_id: Some("opencode-rejected-config".to_owned()),
-        is_loading_history: false,
-        opencode_reconcile_fingerprints: VecDeque::new(),
-        opencode_config_notification_tx: None,
-        capabilities: None,
+        ..AcpRuntimeState::default()
     }));
     let writer = SharedBufferWriter::default();
     let thread_writer = writer.clone();
@@ -2728,10 +2718,7 @@ fn opencode_config_command_skips_apply_after_scheduling_waiter_expires() {
     let pending_requests = Arc::new(Mutex::new(HashMap::new()));
     let runtime_state = Arc::new(Mutex::new(AcpRuntimeState {
         current_session_id: Some("expired-opencode-config".to_owned()),
-        is_loading_history: false,
-        opencode_reconcile_fingerprints: VecDeque::new(),
-        opencode_config_notification_tx: None,
-        capabilities: None,
+        ..AcpRuntimeState::default()
     }));
     let writer = SharedBufferWriter::default();
     let mut stdin = writer.clone();
@@ -2879,10 +2866,7 @@ fn opencode_config_command_requires_post_start_authorization() {
     let pending_requests = Arc::new(Mutex::new(HashMap::new()));
     let runtime_state = Arc::new(Mutex::new(AcpRuntimeState {
         current_session_id: Some("canceled-opencode-config".to_owned()),
-        is_loading_history: false,
-        opencode_reconcile_fingerprints: VecDeque::new(),
-        opencode_config_notification_tx: None,
-        capabilities: None,
+        ..AcpRuntimeState::default()
     }));
     let writer = SharedBufferWriter::default();
     let thread_writer = writer.clone();

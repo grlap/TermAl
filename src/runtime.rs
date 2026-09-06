@@ -459,6 +459,9 @@ impl AcpPendingApproval {
 ///   call. Outside that window it must be false.
 #[derive(Default)]
 struct AcpRuntimeState {
+    /// Writer-owned: set only after the first host-guided prompt is flushed.
+    /// Process-local; external-session resume skips teaching independently.
+    host_guidance_sent: bool,
     capabilities: Option<AcpCapabilities>,
     current_session_id: Option<String>,
     is_loading_history: bool,

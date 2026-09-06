@@ -28,6 +28,7 @@ mod codex_protocol;
 mod codex_threads;
 mod conversation_markers;
 mod coordination_board_routes;
+mod coordination_instructions;
 mod cursor;
 mod delegation_child_links;
 mod delegation_lifecycle;
@@ -1682,7 +1683,29 @@ where
             event.push_str(
                 std::str::from_utf8(chunk.as_ref()).expect("SSE chunk should be valid UTF-8"),
             );
-            if event.contains("\n\n") || event.contains("\r\n\r\n") {
+            while let Some((boundary, separator_len)) = event
+                .find("\n\n")
+                .map(|offset| (offset, 2))
+                .into_iter()
+                .chain(event.find("\r\n\r\n").map(|offset| (offset, 4)))
+                .min_by_key(|(offset, _)| *offset)
+            {
+                let frame_end = boundary + separator_len;
+                if event[..boundary].lines().all(|line| line.starts_with(':')) {
+                    // A legal keep-alive is not an application event. Remove
+                    // only this complete frame, retaining any following bytes.
+                    event.drain(..frame_end);
+                    continue;
+                }
+                // Axum's in-process body yields one application event per
+                // frame. Fail explicitly if a different transport coalesces
+                // events: this stateless helper cannot retain a second event
+                // for the next call and must never silently discard it.
+                assert_eq!(
+                    frame_end,
+                    event.len(),
+                    "SSE test reader requires one application event per body frame"
+                );
                 return event;
             }
         }

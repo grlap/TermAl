@@ -2143,7 +2143,7 @@ fn delegation_write_policy_input_schema() -> Value {
 
 fn mcp_tools_list_result() -> Value {
     let write_policy_input_schema = delegation_write_policy_input_schema();
-    json!({
+    let mut result = json!({
         "tools": [
             {
                 "name": "termal_spawn_session",
@@ -2427,7 +2427,26 @@ fn mcp_tools_list_result() -> Value {
                 }
             }
         ]
-    })
+    });
+    // Keep one bootstrap body in tools/list; the other mailbox entry points
+    // point to the read tool while retaining their tool-specific contracts.
+    for tool in result["tools"].as_array_mut().expect("static MCP tools array") {
+        if matches!(tool["name"].as_str(), Some(
+            "termal_read_mailbox" | "termal_send_to_session" |
+            "termal_list_mailboxes" | "termal_acknowledge_mailbox"
+        )) {
+            let protocol = if tool["name"] == "termal_read_mailbox" {
+                TERMAL_MAILBOX_GUIDANCE
+            } else {
+                "Protocol: see termal_read_mailbox description"
+            };
+            tool["description"] = json!(format!(
+                "{}\n\n{protocol}",
+                tool["description"].as_str().expect("static tool description")
+            ));
+        }
+    }
+    result
 }
 
 fn mcp_json_rpc_result(id: Value, result: Value) -> Value {

@@ -381,14 +381,11 @@ fn acp_session_resume_prefers_resume_when_explicitly_supported() {
         .expect("Cursor session should be created");
     let pending_requests = Arc::new(Mutex::new(HashMap::new()));
     let runtime_state = Arc::new(Mutex::new(AcpRuntimeState {
-        current_session_id: None,
-        is_loading_history: false,
-        opencode_reconcile_fingerprints: VecDeque::new(),
-        opencode_config_notification_tx: None,
         capabilities: Some(AcpCapabilities {
             supports_session_load: Some(true),
             supports_session_resume: Some(true),
         }),
+        ..AcpRuntimeState::default()
     }));
     let writer = SharedBufferWriter::default();
     let thread_writer = writer.clone();
@@ -626,10 +623,7 @@ fn established_cursor_config_refresh_preserves_legacy_noop_contract() {
 fn acp_cancel_sends_notification_for_active_external_session() {
     let runtime_state = Arc::new(Mutex::new(AcpRuntimeState {
         current_session_id: Some("cursor-session-1".to_owned()),
-        is_loading_history: false,
-        opencode_reconcile_fingerprints: VecDeque::new(),
-        opencode_config_notification_tx: None,
-        capabilities: None,
+        ..AcpRuntimeState::default()
     }));
     let writer = SharedBufferWriter::default();
     let mut cancel_writer = writer.clone();

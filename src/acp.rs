@@ -559,18 +559,31 @@ fn handle_acp_prompt_command(
     // publishing here is idempotent. Production publishes before channel
     // enqueue so stop cannot race this writer-side activation point.
     set_acp_turn_active(turn_lifecycle, true);
+    // Host guidance is a separate wire-only content block, never task text.
+    // Only the serialized writer changes the latch; a failed write cannot
+    // consume teaching. Resumed conversations retain the provider's history,
+    // so only a fresh external session receives a new teaching block.
+    let guidance_sent = runtime_state
+        .lock()
+        .expect("ACP runtime state mutex poisoned")
+        .host_guidance_sent;
+    let guidance = if guidance_sent || command.resume_session_id.is_some() {
+        None
+    } else {
+        termal_root_mailbox_guidance(state, session_id)
+    };
+    let mut prompt_blocks = Vec::with_capacity(2);
+    prompt_blocks.push(json!({"type": "text", "text": command.prompt}));
+    if let Some(guidance) = &guidance {
+        prompt_blocks.push(json!({"type": "text", "text": guidance}));
+    }
     let pending_prompt_request = match start_acp_json_rpc_request(
         writer,
         pending_requests,
         "session/prompt",
         json!({
             "sessionId": external_session_id,
-            "prompt": [
-                {
-                    "type": "text",
-                    "text": command.prompt,
-                }
-            ],
+            "prompt": prompt_blocks,
         }),
         agent,
     ) {
@@ -581,6 +594,12 @@ fn handle_acp_prompt_command(
         }
     };
 
+    if guidance.is_some() {
+        runtime_state
+            .lock()
+            .expect("ACP runtime state mutex poisoned")
+            .host_guidance_sent = true;
+    }
     let pending_requests = pending_requests.clone();
     let wait_turn_lifecycle = turn_lifecycle.clone();
     let wait_state = state.clone();

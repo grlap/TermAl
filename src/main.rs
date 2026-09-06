@@ -669,6 +669,7 @@ include!("remote_sync.rs");
 include!("test_temp_root.rs");
 include!("state.rs");
 include!("engram_host_adapter.rs");
+include!("coordination_instructions.rs");
 include!("delegation_mcp.rs");
 include!("coordination_cli.rs");
 include!("engram_mcp_config.rs");

@@ -29,9 +29,17 @@ fn mailbox_wake_tool_descriptions_teach_read_first_and_snapshot_ack() {
             .unwrap()
     };
     let list = description("termal_list_mailboxes");
+    for name in [
+        "termal_list_mailboxes",
+        "termal_send_to_session", "termal_acknowledge_mailbox",
+    ] {
+        assert_eq!(description(name).matches(TERMAL_MAILBOX_GUIDANCE).count(), 0);
+        assert!(description(name).contains("Protocol: see termal_read_mailbox description"));
+    }
     assert!(list.contains("discovery"));
     assert!(list.contains("not required before reading"));
     let read = description("termal_read_mailbox");
+    assert_eq!(read.matches(TERMAL_MAILBOX_GUIDANCE).count(), 1);
     assert!(read.contains("Omitted `afterSequence`"));
     assert!(read.contains("read -> process -> acknowledge"));
     assert!(read.contains("read.processedThrough"));
@@ -40,6 +48,16 @@ fn mailbox_wake_tool_descriptions_teach_read_first_and_snapshot_ack() {
     assert!(acknowledge.contains("afterSequence omitted"));
     assert!(acknowledge.contains("read.processedThrough"));
     assert!(acknowledge.contains("senderProcessedThrough"));
+}
+
+#[test]
+fn mailbox_guidance_tools_list_contains_one_body_copy() {
+    let tools = mcp_tools_list_result();
+    let copies: usize = tools["tools"].as_array().unwrap().iter()
+        .map(|tool| tool["description"].as_str().unwrap()
+            .matches(TERMAL_MAILBOX_GUIDANCE).count())
+        .sum();
+    assert_eq!(copies, 1);
 }
 
 #[derive(Clone, Debug)]

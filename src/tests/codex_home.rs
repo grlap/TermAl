@@ -2,12 +2,14 @@ use super::*;
 
 #[test]
 fn mailbox_wake_codex_instructions_teach_read_first_once() {
-    assert!(TERMAL_CODEX_AGENTS_SECTION.contains("`afterSequence` omitted"));
-    assert!(TERMAL_CODEX_AGENTS_SECTION.contains("mailbox read --mailbox-id <id> --json"));
-    assert!(TERMAL_CODEX_AGENTS_SECTION.contains("senderProcessedThrough"));
-    assert!(TERMAL_CODEX_AGENTS_SECTION.contains("expectedProcessedThrough"));
-    assert!(!TERMAL_CODEX_AGENTS_SECTION.contains("1. Run `mailbox list"));
-    assert!(!TERMAL_CODEX_AGENTS_SECTION.contains("--after <processedThrough>"));
+    let section = termal_codex_agents_section();
+    assert_eq!(section.matches(TERMAL_MAILBOX_GUIDANCE).count(), 1);
+    assert!(section.contains("`afterSequence` omitted"));
+    assert!(section.contains("mailbox read --mailbox-id <id> --json"));
+    assert!(section.contains("senderProcessedThrough"));
+    assert!(section.contains("expectedProcessedThrough"));
+    assert!(!section.contains("1. Run `mailbox list"));
+    assert!(!section.contains("--after <processedThrough>"));
 }
 
 #[test]
@@ -54,7 +56,7 @@ fn codex_home_writes_coordination_instructions_without_a_source_home() {
         fs::read_to_string(target.join("AGENTS.md")).expect("managed AGENTS.md should be created");
     assert!(agents.starts_with(TERMAL_CODEX_AGENTS_SECTION_START));
     assert!(agents.contains("TERMAL_CLI"));
-    assert!(agents.contains("stable key"));
+    assert!(agents.contains("stable idempotencyKey"));
 }
 
 #[test]
@@ -63,11 +65,10 @@ fn missing_source_preserves_target_user_instructions_and_deduplicates_managed_se
     let source = root.path().join("missing-source");
     let target = root.path().join("target");
     fs::create_dir_all(&target).expect("target Codex home should be created");
+    let section = termal_codex_agents_section();
     fs::write(
         target.join("AGENTS.md"),
-        format!(
-            "# Existing user instructions\n\n{TERMAL_CODEX_AGENTS_SECTION}\n\n{TERMAL_CODEX_AGENTS_SECTION}\n"
-        ),
+        format!("# Existing user instructions\n\n{section}\n\n{section}\n"),
     )
     .expect("existing target AGENTS.md should write");
 

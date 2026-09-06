@@ -46,15 +46,12 @@ Read without --after starts after the caller's durable processedThrough;
 boundary used) and processedThrough (the durable cursor snapshot). Reading
 never acknowledges. Snapshots can change concurrently; acknowledge still
 requires --expected and forward-only contiguous processing.
-Routine workflow: read -> process/reply -> acknowledge.
-Start with mailbox read --mailbox-id <id> --json (omit --after), then process
-the returned bodies in order. Set acknowledgement --expected from
-read.processedThrough, or receipt.senderProcessedThrough after a reply;
---through is the last contiguously processed sequence, not the wake's latest.
-On a cursor conflict, read again without --after and reconcile newer progress.
-Mailbox list is for discovery; it is not required before reading a known id.
 Exit codes: 0 success; 2 usage or argument error (no request was sent);
 1 any failure after a request was attempted (details on stderr).";
+
+fn coordination_cli_usage() -> String {
+    format!("{COORDINATION_CLI_USAGE}\n\n{TERMAL_MAILBOX_GUIDANCE}")
+}
 
 /// `termal sessions list` needs no caller identity: the inventory tool only
 /// reads `/api/state` and never transmits the serving session id. The bridge
@@ -70,7 +67,7 @@ struct CoordinationCliUsageError(String);
 
 impl std::fmt::Display for CoordinationCliUsageError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(formatter, "{}\n\n{COORDINATION_CLI_USAGE}", self.0)
+        write!(formatter, "{}\n\n{}", self.0, coordination_cli_usage())
     }
 }
 
@@ -661,7 +658,7 @@ fn coordination_cli_error_is_broken_pipe(err: &anyhow::Error) -> bool {
 /// corresponding MCP tool would return.
 fn execute_coordination_cli(command: &CoordinationCliCommand, base_url: &str) -> Result<Value> {
     match command {
-        CoordinationCliCommand::Help => Ok(json!({ "usage": COORDINATION_CLI_USAGE })),
+        CoordinationCliCommand::Help => Ok(json!({ "usage": coordination_cli_usage() })),
         CoordinationCliCommand::SessionsList { as_session } => {
             let caller = as_session
                 .as_deref()
@@ -831,7 +828,7 @@ fn render_coordination_cli_output(
     out: &mut impl Write,
 ) -> Result<()> {
     match command {
-        CoordinationCliCommand::Help => writeln!(out, "{COORDINATION_CLI_USAGE}")?,
+        CoordinationCliCommand::Help => writeln!(out, "{}", coordination_cli_usage())?,
         CoordinationCliCommand::SessionsList { .. } => {
             let sessions = output
                 .get("sessions")

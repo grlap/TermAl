@@ -60,10 +60,45 @@ The topic line is omitted when no topic is present. Sender and topic display
 values are whitespace-collapsed, stripped of control characters and invisible
 direction/format marks, and capped at 160 characters plus an ellipsis; the
 durable metadata is unchanged. The protocol is taught by the MCP tool
-descriptions, coordination CLI help, this document, and the TermAl-managed
-Codex `AGENTS.md` section, not appended to every wake. That managed section
-also teaches the CLI fallback through `TERMAL_CLI`, with `TERMAL_SESSION_ID`
-and `TERMAL_BASE_URL` supplying defaults without copying an identity or URL.
+descriptions, coordination CLI help, this document, and managed host instructions,
+not appended to every wake. One agent-neutral body in
+`src/coordination_instructions.rs` mirrors this prose contract and is consumed
+verbatim by the Codex `AGENTS.md` section, Claude initialize's
+`appendSystemPrompt`, and a separate text block after the user's task in the
+first `session/prompt` for a fresh Gemini, Cursor or OpenCode conversation
+(see [OpenCode repository instructions](opencode-acp-integration.md#repository-instructions)).
+The block starts with `TermAl host guidance`;
+it does not change the resolved task, stored transcript or prompt history,
+and never copies repository instruction files. Claude's base system prompt
+and user/project/local settings discovery are preserved.
+
+Claude and ACP injection checks the live local-root record: hidden sessions,
+remote proxies and delegation/reviewer children receive no root teaching.
+Shared Codex homes contain a conditional root-only instruction, not an
+invitation for their delegated children to coordinate; child tool guards
+remain authoritative. ACP teaching is once per runtime process for a fresh
+external conversation, after a successful wire write/flush. Later prompts omit
+it. External-session resume/load omits teaching: the provider's conversation
+history retains the first turn's block. A fresh `session/new` teaches again;
+Claude initialize still supplies its system guidance on every runtime spawn.
+Failed ACP writes do not consume the latch. Partial writes cannot guarantee
+exactly-once provider delivery. The teaching latch is process-local, not a
+durable acknowledgement from the provider.
+
+The shared bootstrap body (bounded to 12 lines and 900 characters) is:
+
+```text
+TermAl root coordination; not for delegation children.
+Read: termal_read_mailbox, `afterSequence` omitted; save processedThrough. Reading never acknowledges.
+Process bodies in order; reply: termal_send_to_session, stable idempotencyKey; retry identical intent/key.
+Ack: termal_acknowledge_mailbox, expectedProcessedThrough = read.processedThrough (or senderProcessedThrough after send), processedThrough = last contiguous sequence. Conflict: re-read.
+CLI fallback: invoke TERMAL_CLI (PowerShell: & $env:TERMAL_CLI; POSIX: "$TERMAL_CLI").
+TERMAL_SESSION_ID / TERMAL_BASE_URL supply identity/URL; never impersonate.
+mailbox read --mailbox-id <id> --json (omit --after)
+mailbox send --to <id> --message <text> --idempotency-key <key> --json
+mailbox acknowledge --mailbox-id <id> --expected <cursor> --through <last> --json
+mailbox list is discovery only.
+```
 
 Mailbox participation follows the live local-root session record. Deliberate
 session deletion is the only operation that evicts a participant by setting

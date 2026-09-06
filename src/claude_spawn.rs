@@ -437,7 +437,7 @@ fn spawn_claude_runtime(
         let writer_replay_prompt = replay_prompt.clone();
         std::thread::spawn(move || {
             let mut stdin = stdin;
-            if let Err(err) = write_claude_initialize(&mut stdin) {
+            if let Err(err) = write_claude_initialize(&mut stdin, &writer_state, &writer_session_id) {
                 let _ = writer_state.handle_runtime_exit_if_matches(
                     &writer_session_id,
                     &writer_runtime_token,
@@ -1001,7 +1001,8 @@ fn claude_event_marks_engram_context_nudge(message: &Value) -> bool {
 }
 
 /// Writes Claude initialize.
-fn write_claude_initialize(writer: &mut impl Write) -> Result<()> {
+fn write_claude_initialize(writer: &mut impl Write, state: &AppState, session_id: &str) -> Result<()> {
+    let guidance = termal_root_mailbox_guidance(state, session_id).unwrap_or_default();
     write_claude_message(
         writer,
         &json!({
@@ -1011,7 +1012,7 @@ fn write_claude_initialize(writer: &mut impl Write) -> Result<()> {
                 "subtype": "initialize",
                 "hooks": {},
                 "systemPrompt": "",
-                "appendSystemPrompt": "",
+                "appendSystemPrompt": guidance,
             }
         }),
     )

@@ -273,13 +273,11 @@ fn acp_prompt_command_keeps_writer_loop_responsive_while_waiting_for_response() 
     let pending_requests = Arc::new(Mutex::new(HashMap::new()));
     let runtime_state = Arc::new(Mutex::new(AcpRuntimeState {
         current_session_id: Some("cursor-session-1".to_owned()),
-        is_loading_history: false,
-        opencode_reconcile_fingerprints: VecDeque::new(),
-        opencode_config_notification_tx: None,
         capabilities: Some(AcpCapabilities {
             supports_session_load: Some(true),
             supports_session_resume: None,
         }),
+        ..AcpRuntimeState::default()
     }));
     let turn_lifecycle: AcpTurnLifecycle = Arc::new((Mutex::new(false), Condvar::new()));
     let writer = SharedBufferWriter::default();

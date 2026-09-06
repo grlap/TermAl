@@ -158,8 +158,15 @@ runtime supports that policy.
 ## Repository instructions
 
 OpenCode owns discovery of repository instruction files such as `AGENTS.md` and
-`CLAUDE.md`. TermAl sends only the resolved user/task prompt through ACP and
-does not duplicate instruction-file contents into that prompt.
+`CLAUDE.md`. TermAl preserves the resolved user/task prompt without duplicating
+instruction-file contents. For a local root session, the first ACP wire prompt
+for a fresh external conversation also carries a separate `TermAl host guidance` text
+block teaching the [mailbox protocol and CLI fallback](agent-mailboxes.md).
+That host-owned bootstrap is never stored as user transcript or prompt-history
+text in TermAl; it follows the task block on the wire. Later prompts carry only
+the task. External-session resume/load does not repeat the block because the
+provider's persisted conversation already retains it; a fresh `session/new`
+teaches again.
 
 ## Deliberate v1 exclusions
 

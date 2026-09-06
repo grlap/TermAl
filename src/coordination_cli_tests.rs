@@ -15,12 +15,13 @@ use super::*;
 
 #[test]
 fn mailbox_wake_cli_help_teaches_read_first_and_snapshot_ack() {
-    assert!(COORDINATION_CLI_USAGE.contains("mailbox read --mailbox-id <id> --json"));
-    assert!(COORDINATION_CLI_USAGE.contains("read -> process/reply -> acknowledge"));
-    assert!(COORDINATION_CLI_USAGE.contains("read.processedThrough"));
-    assert!(COORDINATION_CLI_USAGE.contains("receipt.senderProcessedThrough"));
-    assert!(COORDINATION_CLI_USAGE.contains("not required before reading"));
-    assert!(COORDINATION_CLI_USAGE.contains("--after 0 explicitly replays history"));
+    let usage = coordination_cli_usage();
+    assert_eq!(usage.matches(TERMAL_MAILBOX_GUIDANCE).count(), 1);
+    assert!(usage.contains("mailbox read --mailbox-id <id> --json"));
+    assert!(usage.contains("read.processedThrough"));
+    assert!(usage.contains("senderProcessedThrough after send"));
+    assert!(usage.contains("mailbox list is discovery only"));
+    assert!(usage.contains("--after 0 explicitly replays history"));
 }
 
 fn cli_args(list: &[&str]) -> Vec<String> {
