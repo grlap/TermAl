@@ -7,7 +7,7 @@ import {
   estimatePageHeight,
   findPageIndexContainingMessage,
   findPageIndexContainingMessageBoundary,
-  pageExtendsMountedMeasurement,
+  pagePreservesMountedMeasurement,
 } from "./virtualized-conversation-measurement";
 import type { Message } from "../types";
 
@@ -210,8 +210,8 @@ describe("estimateConversationMessageHeight", () => {
   });
 });
 
-describe("pageExtendsMountedMeasurement", () => {
-  it("reuses a mounted page measurement only for an identity-preserving append", () => {
+describe("pagePreservesMountedMeasurement", () => {
+  it("reuses mounted geometry for same-identity content and append commits only", () => {
     const originalMessages = [
       makeTextMessage({ id: "message-1", text: "first" }),
       makeTextMessage({ id: "message-2", text: "second" }),
@@ -231,15 +231,47 @@ describe("pageExtendsMountedMeasurement", () => {
       messages: originalPage!.messages,
     };
 
-    expect(pageExtendsMountedMeasurement(appendedPage!, identity)).toBe(true);
-    expect(pageExtendsMountedMeasurement(differentPrefixPage!, identity)).toBe(
+    expect(pagePreservesMountedMeasurement(appendedPage!, identity)).toBe(true);
+    expect(pagePreservesMountedMeasurement(differentPrefixPage!, identity)).toBe(
       false,
     );
-    expect(pageExtendsMountedMeasurement(originalPage!, identity)).toBe(false);
+    expect(pagePreservesMountedMeasurement(originalPage!, identity)).toBe(true);
+    expect(pagePreservesMountedMeasurement({
+      ...originalPage!,
+      messages: originalMessages.map((message) => ({ ...message, text: "updated" })),
+      hasTrailingGap: true,
+    }, identity)).toBe(true);
+    expect(pagePreservesMountedMeasurement({
+      ...originalPage!,
+      messages: originalMessages.slice(0, 1),
+    }, identity)).toBe(false);
+    expect(pagePreservesMountedMeasurement({
+      ...originalPage!,
+      messages: [...originalMessages].reverse(),
+    }, identity)).toBe(false);
+    expect(pagePreservesMountedMeasurement({
+      ...originalPage!,
+      messages: [makeCommandMessage({ id: "message-1" }), originalMessages[1]!],
+    }, identity)).toBe(false);
+    expect(pagePreservesMountedMeasurement(originalPage!, undefined)).toBe(false);
   });
 });
 
 describe("buildMessagePages", () => {
+  it("keeps a partial tail band's identity when a message is appended", () => {
+    const messages = Array.from({ length: 14 }, (_, index) =>
+      makeTextMessage({ id: `message-${index}` }),
+    );
+    const before = buildMessagePages(messages);
+    const after = buildMessagePages([
+      ...messages,
+      makeTextMessage({ id: "message-14" }),
+    ]);
+
+    expect(after[1]!.key).toBe(before[1]!.key);
+    expect(after[1]!.messages).toHaveLength(7);
+  });
+
   it("keeps global page bands stable while a bounded tail window advances", () => {
     const messages = Array.from({ length: 20 }, (_, index) =>
       makeTextMessage({ id: `message-${100 + index}` }),
@@ -253,15 +285,15 @@ describe("buildMessagePages", () => {
     const advancedPages = buildMessagePages(advancedMessages, 101);
 
     expect(initialPages.map((page) => page.key)).toEqual([
-      "100:104:message-100:message-103",
-      "104:112:message-104:message-111",
-      "112:120:message-112:message-119",
+      "100:message-100",
+      "104:message-104",
+      "112:message-112",
     ]);
     expect(advancedPages.map((page) => page.key)).toEqual([
-      "101:104:message-101:message-103",
-      "104:112:message-104:message-111",
-      "112:120:message-112:message-119",
-      "120:121:message-120:message-120",
+      "101:message-101",
+      "104:message-104",
+      "112:message-112",
+      "120:message-120",
     ]);
   });
 

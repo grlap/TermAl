@@ -31,6 +31,80 @@ afterEach(() => {
 });
 
 describe("MeasuredPageBand", () => {
+  it("remeasures changed text before a frame without reconnecting stable observers", () => {
+    const requestFrame = vi.fn(() => 1);
+    vi.stubGlobal("requestAnimationFrame", requestFrame);
+    const cancelFrame = vi.fn();
+    vi.stubGlobal("cancelAnimationFrame", cancelFrame);
+    const observe = vi.fn();
+    const disconnect = vi.fn();
+    let notifyResize: ResizeObserverCallback | undefined;
+    vi.stubGlobal("ResizeObserver", class {
+      constructor(callback: ResizeObserverCallback) {
+        notifyResize = callback;
+      }
+      observe = observe;
+      disconnect = disconnect;
+    });
+    let height = 40;
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(
+      () => ({ height }) as DOMRect,
+    );
+    const onHeightChange = vi.fn();
+    const renderPage = (currentPage: MessagePage) => (
+      <MeasuredPageBand
+        isActive
+        page={currentPage}
+        preferImmediateHeavyRender
+        deferMeasurementUntilNextFrame={false}
+        allowDeferredHeavyActivation
+        renderMessageCard={(item) => <article>{item.id}</article>}
+        conversationSearchMatchedItemKeys={new Set()}
+        onSearchItemMount={() => {}}
+        onApprovalDecision={() => {}}
+        onUserInputSubmit={async () => {}}
+        onMcpElicitationSubmit={() => {}}
+        onCodexAppRequestSubmit={() => {}}
+        onHeightChange={onHeightChange}
+      />
+    );
+    const { rerender, unmount } = render(renderPage(page));
+    const observationCount = observe.mock.calls.length;
+    onHeightChange.mockClear();
+
+    // An unrelated render may rebuild the page array without changing content.
+    rerender(renderPage({ ...page, messages: [...page.messages] }));
+    expect(onHeightChange).not.toHaveBeenCalled();
+    height = 140;
+    rerender(renderPage({
+      ...page,
+      messages: [{ ...message, text: "New streamed text occupies more lines" }],
+    }));
+
+    expect(onHeightChange).toHaveBeenCalledWith(
+      page.key, page.pageIndex, 140, expect.any(HTMLElement), false,
+    );
+    expect(requestFrame).not.toHaveBeenCalled();
+    expect(observe).toHaveBeenCalledTimes(observationCount);
+    expect(disconnect).not.toHaveBeenCalled();
+
+    act(() => notifyResize!([], {} as ResizeObserver));
+    expect(requestFrame).toHaveBeenCalledTimes(1);
+    onHeightChange.mockClear();
+    height = 60;
+    rerender(renderPage({
+      ...page,
+      messages: [{ ...message, text: "Shorter replacement" }],
+    }));
+    expect(onHeightChange).toHaveBeenCalledExactlyOnceWith(
+      page.key, page.pageIndex, 60, expect.any(HTMLElement), false,
+    );
+    expect(cancelFrame).toHaveBeenCalledWith(1);
+    unmount();
+    act(() => notifyResize!([], {} as ResizeObserver));
+    expect(requestFrame).toHaveBeenCalledTimes(1);
+  });
+
   it("lets the estimated cold viewport paint before measuring page geometry", () => {
     const frameCallbacks: FrameRequestCallback[] = [];
     vi.stubGlobal(

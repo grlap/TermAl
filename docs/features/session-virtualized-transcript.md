@@ -585,12 +585,19 @@ Those estimates affect:
 That is acceptable for unseen content, but it is still the main approximation
 in the system.
 
-### Page identity is index-based
+### Stable band identity still depends on the start index
 
-Page keys still include page start/end indices plus message ids.
+Page keys combine the global start index with the first message id. Appending
+inside a band preserves its DOM and cache identity; a resident-window shift
+still replaces a partial first band.
 
-That is workable, but insertions ahead of a page can still invalidate
-downstream page identity more aggressively than a purely stable boundary key.
+The key alone does not make a cached measurement valid. `pageMatchesMeasurement`
+checks the measured content snapshot, while `pagePreservesMountedMeasurement`
+allows a mounted same-id/same-type prefix continuation to retain its last real
+height until the updated content is remeasured before paint.
+
+The remaining approximation is start-index sensitivity: insertions ahead of a
+band can still shift its global start index and invalidate downstream identity.
 
 ## Cleanup Candidates
 
@@ -607,10 +614,9 @@ These are the parts worth simplifying next.
    are the right three concepts, but deserve short inline comments near the
    declarations because they are easy to conflate when editing the file
 
-3. **Page identity**
-   - current page keys are pragmatic, not ideal
-   - a more stable page identity would make measurement retention easier to
-     reason about
+3. **Start-index sensitivity**
+   - insertions ahead of a band can still shift its global start index
+   - reducing that sensitivity could preserve more downstream band identities
 
 4. **`SessionPaneView` transcript scroll policy**
    - page jumps, prompt-send follow, sticky-bottom, and settled bottom restore

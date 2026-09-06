@@ -45,7 +45,7 @@ import {
   estimatePageHeight,
   findMountedMessageSlotById,
   getMountedSlotViewportOffsetPx,
-  pageExtendsMountedMeasurement,
+  pagePreservesMountedMeasurement,
   pageMatchesMeasurement,
   resolvePageCoverageHeight,
   resolveRenderedPageCoverageHeight,
@@ -741,42 +741,16 @@ export function VirtualizedConversationMessageList({
               ".virtualized-message-page[data-page-key]",
             ) ?? [],
           ).some((pageNode) => pageNode.dataset.pageKey === page.key);
-          const preservesMountedAppend = pageExtendsMountedMeasurement(
+          const preservesMountedContent = pagePreservesMountedMeasurement(
             page,
             measuredIdentity,
           );
-          const preservesSingleCommandUpdate = (() => {
-            if (measuredIdentity.messages.length !== page.messages.length) {
-              return false;
-            }
-            let replacementCount = 0;
-            for (let index = 0; index < page.messages.length; index += 1) {
-              const previousMessage = measuredIdentity.messages[index];
-              const currentMessage = page.messages[index];
-              if (previousMessage === currentMessage) {
-                continue;
-              }
-              if (
-                previousMessage?.id !== currentMessage?.id ||
-                previousMessage?.type !== "command" ||
-                currentMessage?.type !== "command"
-              ) {
-                return false;
-              }
-              replacementCount += 1;
-            }
-            return replacementCount === 1;
-          })();
-          if (
-            pageIsMounted &&
-            (preservesMountedAppend || preservesSingleCommandUpdate)
-          ) {
-            // Mounted DOM already contains an appended message or the updated
-            // command card. Keep the last real page measurement until the page's
-            // layout effect/ResizeObserver publishes its new real height. Swapping
-            // the whole mounted page to estimates moves every existing card, then
-            // moves it back one frame later. Other replacements still invalidate
-            // immediately instead of retaining an unrelated tall measurement.
+          if (pageIsMounted && preservesMountedContent) {
+            // This mounted band's existing cards survive the commit. Preserve
+            // its measured geometry until the page layout effect measures the
+            // updated DOM before paint, rather than selecting a provisional
+            // viewport from estimates during streaming. Evicted or different
+            // message identities still invalidate immediately.
             return measuredHeight;
           }
         }

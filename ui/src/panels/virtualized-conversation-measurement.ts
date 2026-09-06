@@ -65,14 +65,13 @@ export function pageMatchesMeasurement(
   );
 }
 
-export function pageExtendsMountedMeasurement(
+export function pagePreservesMountedMeasurement(
   page: MessagePage,
   identity: PageMeasurementIdentity | undefined,
 ) {
   return (
     identity !== undefined &&
-    page.hasTrailingGap === identity.hasTrailingGap &&
-    identity.messages.length < page.messages.length &&
+    identity.messages.length <= page.messages.length &&
     identity.messages.every(
       (message, index) =>
         message.id === page.messages[index]?.id &&
@@ -95,13 +94,13 @@ export function buildMessagePages(
       startIndex + remainingInGlobalPage,
       messages.length,
     );
-    const globalEndIndex = messageStartIndex + endIndex;
     const pageMessages = messages.slice(startIndex, endIndex);
     const firstMessageId = pageMessages[0]?.id ?? `page-${startIndex}`;
-    const lastMessageId =
-      pageMessages[pageMessages.length - 1]?.id ?? firstMessageId;
     pages.push({
-      key: `${globalStartIndex}:${globalEndIndex}:${firstMessageId}:${lastMessageId}`,
+      // Appending within a band must not remount its existing cards. Window
+      // shifts still replace a partial first band; message identity checks,
+      // not this DOM key, decide whether an old measurement remains usable.
+      key: `${globalStartIndex}:${firstMessageId}`,
       pageIndex: pages.length,
       startIndex,
       endIndex,

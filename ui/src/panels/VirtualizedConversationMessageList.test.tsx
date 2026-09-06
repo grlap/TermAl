@@ -6,7 +6,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import type { RefObject } from "react";
+import { useLayoutEffect, type RefObject } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -277,11 +277,11 @@ function renderVirtualizedHarness({
         return makeDomRect({ height: clientHeight, width: clientWidth });
       }
       if (element.classList.contains("virtualized-message-page")) {
-        const [startRaw, endRaw] = (element.dataset.pageKey ?? "").split(":");
-        const startIndex =
-          Number.parseInt(startRaw ?? "", 10) - currentMessageStartIndex;
-        const endIndex =
-          Number.parseInt(endRaw ?? "", 10) - currentMessageStartIndex;
+        const slots = element.querySelectorAll<HTMLElement>(".virtualized-message-slot");
+        const startIndex = currentMessages.findIndex(
+          (message) => message.id === slots[0]?.dataset.messageId,
+        );
+        const endIndex = startIndex + slots.length;
         if (
           Number.isFinite(startIndex) &&
           Number.isFinite(endIndex) &&
@@ -1228,6 +1228,87 @@ describe("VirtualizedConversationMessageList foundation", () => {
       expect(harness.scrollTop).toBe(realBottom);
       expect(new Set(harness.scrollWrites)).toEqual(new Set([realBottom]));
     } finally {
+      harness.restore();
+    }
+  });
+
+  it.each([46, 47, 48])("retains existing tail DOM when appending to %i messages", (count) => {
+    const messages = makeTextMessages(count + 1);
+    const initialMessages = messages.slice(0, count);
+    const harness = renderVirtualizedHarness({
+      clientHeight: 10_000,
+      messages: initialMessages,
+      scrollHeight: () => 10_000,
+    });
+
+    try {
+      const visibleTail = initialMessages.slice(-6).map((message) => ({
+        id: message.id,
+        node: screen.getByText(message.id),
+      }));
+      harness.rerenderWithMessages(messages);
+      for (const { id, node } of visibleTail) {
+        expect(screen.getByText(id), `existing card ${id} must not remount`).toBe(node);
+        expect(node.isConnected).toBe(true);
+      }
+      expect(screen.getByText(`message-${count + 1}`)).toBeInTheDocument();
+    } finally {
+      harness.unmount();
+      harness.restore();
+    }
+  });
+
+  it("keeps real mounted heights through a same-height text update before observer delivery", () => {
+    const messages = makeTextMessages(24);
+    const virtualizerHandleRef: VirtualizedConversationMessageListHandleRef = {
+      current: null,
+    };
+    const heightsBeforePageMeasurement: Array<number | null> = [];
+    let recordMeasurements = false;
+    function ObservedCard({ message }: { message: Message }) {
+      useLayoutEffect(() => {
+        if (recordMeasurements && message.id === "message-24") {
+          // Descendant layout runs before the containing band's measurement.
+          // Inspect the actual cache through the handle, not a final settled
+          // snapshot that could hide a provisional estimate in between.
+          heightsBeforePageMeasurement.push(
+            virtualizerHandleRef.current!.getLayoutSnapshot()
+              .messages.find((item) => item.messageId === message.id)!
+              .measuredPageHeightPx,
+          );
+        }
+      }, [message]);
+      return <article className="message-card">{message.id}</article>;
+    }
+    const harness = renderVirtualizedHarness({
+      clientHeight: 10_000,
+      messages,
+      scrollHeight: () => 10_000,
+      slotHeight: () => 80,
+      renderMessageCard: (message) => <ObservedCard message={message} />,
+      virtualizerHandleRef,
+    });
+
+    try {
+      const before = virtualizerHandleRef.current!.getLayoutSnapshot();
+      expect(before.messages.every((message) => message.measuredPageHeightPx !== null)).toBe(true);
+      recordMeasurements = true;
+      harness.rerenderWithMessages(messages.map((message, index) =>
+        index === 23 && message.type === "text"
+          ? { ...message, text: `${message.text} another streamed word` }
+          : message,
+      ));
+      // No ResizeObserver callback or animation frame has been delivered.
+      // A content update must not replace this real band with an estimate.
+      const after = virtualizerHandleRef.current!.getLayoutSnapshot();
+      expect(heightsBeforePageMeasurement).toEqual([724]);
+      expect(after.messages.map((message) => message.measuredPageHeightPx)).toEqual(
+        before.messages.map((message) => message.measuredPageHeightPx),
+      );
+      expect(after.estimatedTotalHeightPx).toBe(before.estimatedTotalHeightPx);
+      expect(harness.scrollTop).toBe(0);
+    } finally {
+      harness.unmount();
       harness.restore();
     }
   });
@@ -2217,19 +2298,9 @@ describe("VirtualizedConversationMessageList foundation", () => {
           );
           const hasMountedTargetPage = Array.from(
             harness.container.querySelectorAll<HTMLElement>(
-              ".virtualized-message-page",
+              ".virtualized-message-slot",
             ),
-          ).some((page) => {
-            const [startRaw, endRaw] = (page.dataset.pageKey ?? "").split(":");
-            const startIndex = Number.parseInt(startRaw ?? "", 10);
-            const endIndex = Number.parseInt(endRaw ?? "", 10);
-            return (
-              Number.isFinite(startIndex) &&
-              Number.isFinite(endIndex) &&
-              targetMessage.messageIndex >= startIndex &&
-              targetMessage.messageIndex < endIndex
-            );
-          });
+          ).some((slot) => slot.dataset.messageId === targetMessage.messageId);
           expect(hasMountedTargetPage).toBe(true);
         });
       }

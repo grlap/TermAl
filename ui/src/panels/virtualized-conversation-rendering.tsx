@@ -7,7 +7,12 @@ import { DeferredHeavyContentActivationProvider } from "../deferred-heavy-conten
 import type { ApprovalDecision, JsonValue, McpElicitationAction } from "../types";
 import { VIRTUALIZED_MESSAGE_GAP_PX } from "./conversation-virtualization";
 import { MessageSlot } from "./session-message-leaves";
-import type { MessagePage } from "./virtualized-conversation-measurement";
+import {
+  pageMatchesMeasurement,
+  type MessagePage,
+  type PageMeasurementIdentity,
+} from "./virtualized-conversation-measurement";
+import { useCommittedRef } from "./use-committed-ref";
 import type {
   BoundCodexAppRequestSubmitHandler,
   BoundMcpElicitationSubmitHandler,
@@ -57,6 +62,9 @@ export const MeasuredPageBand = memo(function MeasuredPageBand({
   ) => void;
 }) {
   const pageRef = useRef<HTMLDivElement | null>(null);
+  const committedPageRef = useCommittedRef(page);
+  const lastMeasurementRef = useRef<PageMeasurementIdentity | undefined>(undefined);
+  const measureNowRef = useRef<(() => void) | null>(null);
 
   useLayoutEffect(() => {
     if (!isActive) {
@@ -70,8 +78,13 @@ export const MeasuredPageBand = memo(function MeasuredPageBand({
 
     let frameId = 0;
     let pendingFlushLayout = false;
+    let disposed = false;
     const measure = (flushLayout = false) => {
+      if (disposed) {
+        return;
+      }
       frameId = 0;
+      const currentPage = committedPageRef.current;
       const slotNodes = Array.from(
         node.querySelectorAll<HTMLElement>(".virtualized-message-slot"),
       );
@@ -87,7 +100,7 @@ export const MeasuredPageBand = memo(function MeasuredPageBand({
           totalHeight += VIRTUALIZED_MESSAGE_GAP_PX;
         }
       });
-      if (page.hasTrailingGap) {
+      if (currentPage.hasTrailingGap) {
         totalHeight += VIRTUALIZED_MESSAGE_GAP_PX;
       }
       // Detached / not-yet-laid-out test environments can report zero-height
@@ -97,25 +110,43 @@ export const MeasuredPageBand = memo(function MeasuredPageBand({
       if (measuredSlotCount === 0) {
         return;
       }
+      lastMeasurementRef.current = {
+        hasTrailingGap: currentPage.hasTrailingGap,
+        messages: currentPage.messages,
+      };
       onHeightChange(
-        page.key,
-        page.pageIndex,
+        currentPage.key,
+        currentPage.pageIndex,
         totalHeight,
         node,
         flushLayout,
       );
+    };
+    measureNowRef.current = () => {
+      if (frameId !== 0) {
+        window.cancelAnimationFrame(frameId);
+        frameId = 0;
+      }
+      pendingFlushLayout = false;
+      measure();
     };
 
     const scheduleMeasure = (
       flushLayout = false,
       waitForPriorPaint = false,
     ) => {
+      if (disposed) {
+        return;
+      }
       pendingFlushLayout ||= flushLayout;
       if (frameId !== 0) {
         return;
       }
       frameId = window.requestAnimationFrame(() => {
         frameId = 0;
+        if (disposed) {
+          return;
+        }
         if (waitForPriorPaint) {
           // A callback registered from a layout effect runs before the next
           // paint. Queueing the actual measure from that callback guarantees
@@ -159,6 +190,9 @@ export const MeasuredPageBand = memo(function MeasuredPageBand({
     });
 
     return () => {
+      disposed = true;
+      measureNowRef.current = null;
+      lastMeasurementRef.current = undefined;
       resizeObserver?.disconnect();
       if (frameId !== 0) {
         window.cancelAnimationFrame(frameId);
@@ -170,8 +204,23 @@ export const MeasuredPageBand = memo(function MeasuredPageBand({
     page.hasTrailingGap,
     page.key,
     page.pageIndex,
+    page.messages.length,
     deferMeasurementUntilNextFrame,
   ]);
+
+  useLayoutEffect(() => {
+    if (
+      isActive &&
+      !deferMeasurementUntilNextFrame &&
+      !pageMatchesMeasurement(page, lastMeasurementRef.current)
+    ) {
+      // Content changes keep their DOM/last real height during render. Measure
+      // that committed content before paint, even when wrapping did not change
+      // enough to trigger ResizeObserver. Unchanged pages neither remeasure nor
+      // reconnect their observers for another page's streamed update.
+      measureNowRef.current?.();
+    }
+  }, [isActive, deferMeasurementUntilNextFrame, page]);
 
   return (
     <div ref={pageRef} className="virtualized-message-page" data-page-key={page.key}>
