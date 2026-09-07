@@ -1171,11 +1171,17 @@ describe("applyDeltaToSessions", () => {
     expect(createResult.sessions[0].messagesLoaded).toBe(false);
   });
 
-  it("replaces a disjoint retained suffix with the newest created message", () => {
+  it.each([undefined, 40])("preserves a visible window across a created-message gap (origin %s)", (messageStartIndex) => {
+    // The old expectation required replacing the entire window with one new
+    // message. That made an already visible conversation disappear on append.
+    // Keep the real resident window and request repair instead: appending
+    // across the missing positions would also invent false continuity.
+    const startIndex = messageStartIndex ?? 0;
     const sessions = [
       makeSession("session-a", {
         messagesLoaded: false,
-        messageCount: 1,
+        messageStartIndex,
+        messageCount: startIndex + 1,
         sessionMutationStamp: 100,
         messages: [
           {
@@ -1193,8 +1199,8 @@ describe("applyDeltaToSessions", () => {
       revision: 2,
       sessionId: "session-a",
       messageId: "message-late-prompt",
-      messageIndex: 3,
-      messageCount: 4,
+      messageIndex: startIndex + 3,
+      messageCount: startIndex + 4,
       message: {
         id: "message-late-prompt",
         type: "text",
@@ -1209,22 +1215,38 @@ describe("applyDeltaToSessions", () => {
 
     const result = applyDeltaToSessions(sessions, delta);
 
-    expect(result.kind).toBe("applied");
-    if (result.kind !== "applied") {
-      throw new Error("expected prompt delta to apply");
+    expect(result.kind).toBe("appliedNeedsResync");
+    if (result.kind !== "appliedNeedsResync") {
+      throw new Error("expected the retained window to request repair");
     }
 
     expect(result.sessions[0].messagesLoaded).toBe(false);
+    expect(result.sessions[0].messages).toBe(sessions[0].messages);
     expect(result.sessions[0].messages.map((message) => message.id)).toEqual([
-      "message-late-prompt",
+      "message-previous",
     ]);
-    expect(result.sessions[0].messages[0]).toMatchObject({
-      author: "you",
-      text: "Prompt after missing messages",
-    });
-    expect(result.sessions[0].messageCount).toBe(4);
+    expect(result.sessions[0].messageStartIndex).toBe(startIndex);
+    expect(result.sessions[0].hasNewerHistory).not.toBe(true);
+    expect(result.sessions[0].messageCount).toBe(startIndex + 4);
     expect(result.sessions[0].preview).toBe("Prompt after missing messages");
     expect(result.sessions[0].sessionMutationStamp).toBe(101);
+
+    const nextResult = applyDeltaToSessions(result.sessions, {
+      ...delta,
+      revision: 3,
+      messageId: "message-after-gap",
+      messageIndex: startIndex + 4,
+      messageCount: startIndex + 5,
+      message: { ...delta.message, id: "message-after-gap" },
+      sessionMutationStamp: 102,
+    });
+    expect(nextResult.kind).toBe("appliedNeedsResync");
+    if (nextResult.kind !== "appliedNeedsResync") {
+      throw new Error("expected another gap to retain the original window");
+    }
+    expect(nextResult.sessions[0].messages).toBe(sessions[0].messages);
+    expect(nextResult.sessions[0].messageStartIndex).toBe(startIndex);
+    expect(nextResult.sessions[0].messageCount).toBe(startIndex + 5);
   });
 
   it("requests a resync when an unhydrated retained transcript receives a mismatched created message id", () => {

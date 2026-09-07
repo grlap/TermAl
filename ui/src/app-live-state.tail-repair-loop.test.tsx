@@ -431,6 +431,94 @@ async function runComposite({
 }
 
 describe("streaming tail-repair hypothesis schedules", () => {
+  it("keeps the visible window on a gapped append and fills the gap through bounded repair", async () => {
+    const h = setup();
+    await h.visible(true);
+    await h.resolveTail(0, 101, "a");
+    expect(h.current().messages).toHaveLength(20);
+
+    const coherentMessage = message("Coherent append", "coherent-append");
+    h.emit("delta", {
+      type: "messageCreated", revision: 102, sessionId: SESSION_ID,
+      messageId: coherentMessage.id, messageIndex: TOTAL, messageCount: TOTAL + 1,
+      sessionMutationStamp: 102, message: coherentMessage, preview: "", status: "active",
+    });
+    await flush(16);
+    expect(h.current().messages).toHaveLength(21);
+    h.expectTailCount(1);
+    expect(h.recoveryCalls).toEqual([]);
+
+    const visibleMessages = h.current().messages;
+    const newest = message("After two missing messages", "gapped-append");
+    h.emit("delta", {
+      type: "messageCreated", revision: 103, sessionId: SESSION_ID,
+      messageId: newest.id, messageIndex: TOTAL + 3, messageCount: TOTAL + 4,
+      sessionMutationStamp: 103, message: newest, preview: newest.text, status: "active",
+    });
+    expect(h.current().messages).toBe(visibleMessages);
+    expect(h.current().messageStartIndex).toBe(TOTAL - 20);
+    expect(h.current().hasNewerHistory).toBe(false);
+    expect(h.reducer.mock.results[h.reducer.mock.results.length - 1].value.kind)
+      .toBe("appliedNeedsResync");
+    await flush(16);
+    expect(getSessionRecordSnapshotForTesting(SESSION_ID)?.messages)
+      .toEqual(visibleMessages);
+    h.expectTailCount(2);
+
+    const repairedMessages = [
+      ...visibleMessages,
+      message("Missing one", "gap-one"),
+      message("Missing two", "gap-two"),
+      newest,
+    ];
+    // The real endpoint returns only twenty tail messages. Reconciliation
+    // must keep the overlapping resident head, not replace it with that tail.
+    await act(async () => h.tailRequests[1].resolve({
+      revision: 103, serverInstanceId: INSTANCE,
+      session: { ...h.current(), messages: repairedMessages.slice(-20) },
+    }));
+    await flush(1000);
+    expect(h.current().messages).toEqual(repairedMessages);
+    expect(h.current().messageStartIndex).toBe(TOTAL - 20);
+    expect(getSessionRecordSnapshotForTesting(SESSION_ID)?.messages)
+      .toEqual(repairedMessages);
+    h.expectTailCount(2);
+    expect(h.historyRequests).toHaveLength(0);
+  });
+
+  it("preserves visible history while a gap stays unresolved and coalesces further appends", async () => {
+    const h = setup();
+    await h.visible(true);
+    await h.resolveTail(0, 101, "a");
+    const visibleMessages = h.current().messages;
+    expect(visibleMessages).toHaveLength(20);
+
+    for (let index = 0; index < 8; index += 1) {
+      const newest = message(`New ${index}`, `gapped-${index}`);
+      h.emit("delta", {
+        type: "messageCreated", revision: 102 + index, sessionId: SESSION_ID,
+        messageId: newest.id, messageIndex: TOTAL + 2 + index,
+        messageCount: TOTAL + 3 + index, sessionMutationStamp: 102 + index,
+        message: newest, preview: newest.text, status: "active",
+      });
+      await flush(16);
+      expect(h.current().messages).toBe(visibleMessages);
+      expect(h.current().messageStartIndex).toBe(TOTAL - 20);
+      expect(getSessionRecordSnapshotForTesting(SESSION_ID)?.messages)
+        .toEqual(visibleMessages);
+      // One warm-up and one pending repair. Further events can queue a
+      // coalesced follow-up, never launch one HTTP request per message.
+      h.expectTailCount(2);
+    }
+    // Deliberately never resolve the repair: preserving the old cards is
+    // required even when no successful response arrives to hide the defect.
+    await flush(1000);
+    expect(h.current().messages).toBe(visibleMessages);
+    expect(h.current().hasNewerHistory).toBe(false);
+    h.expectTailCount(2);
+    expect(h.historyRequests).toHaveLength(0);
+  });
+
   it.each(["absent", "throws"] as const)("keeps the observation fence when the proof predicate %s", async (mode) => {
     const h = setup("normal", mode);
     const counts = countObservationScans();

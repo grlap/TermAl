@@ -526,12 +526,14 @@ function applyMessageCreatedDeltaToRetainedTranscript(
   ) {
     if (
       session.messagesLoaded === false &&
+      session.messages.length === 0 &&
       delta.messageIndex + 1 === delta.messageCount
     ) {
-      // The delta is the new transcript tail but the retained suffix is
-      // disjoint (or empty). Keep one truthful contiguous suffix rather than
-      // pretending the missing positions exist between unrelated messages.
-      updatedMessages.splice(0, updatedMessages.length, delta.message);
+      // An empty transcript can materialize its first live message. A
+      // nonempty window must survive a gap: replacing it with this one card
+      // makes the visible conversation disappear until hydration catches up.
+      // Let the caller request repair without inventing a contiguous append.
+      updatedMessages.push(delta.message);
       session = {
         ...session,
         messageStartIndex: delta.messageIndex,
@@ -697,11 +699,17 @@ export function applyDeltaToSessions(
         }
 
         return {
-          kind: "applied",
+          kind: "appliedNeedsResync",
           sessions: replaceSession(
             sessions,
             sessionIndex,
-            applyMetadataOnlySessionDelta(session, delta),
+            {
+              ...applyMetadataOnlySessionDelta(session, delta),
+              // Advancing messageCount must not shift the retained window's
+              // inferred origin. Until repair arrives these are still the
+              // same messages at their original global positions.
+              messageStartIndex: retainedTranscriptStartIndex(session),
+            },
           ),
         };
       }
