@@ -6,7 +6,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { useLayoutEffect, type RefObject } from "react";
+import { useLayoutEffect, type ReactNode, type RefObject } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -142,6 +142,9 @@ type VirtualizedHarnessOptions = {
   ) => { height: number; top: number } | null;
   slotHeight?: (message: Message) => number;
   tailFollowIntent?: boolean;
+  committedDomGeometry?: boolean;
+  manualAnimationFrames?: boolean;
+  modelPaneActivation?: boolean;
   virtualizerHandleRef?: VirtualizedConversationMessageListHandleRef;
 };
 
@@ -169,6 +172,9 @@ function renderVirtualizedHarness({
   slotRect,
   slotHeight = () => 80,
   tailFollowIntent = false,
+  committedDomGeometry = false,
+  manualAnimationFrames = false,
+  modelPaneActivation = false,
   virtualizerHandleRef,
 }: VirtualizedHarnessOptions) {
   let clientHeight = initialClientHeight;
@@ -179,6 +185,7 @@ function renderVirtualizedHarness({
   const resizeCallbacks = new Map<Element, ResizeObserverCallback>();
   let nextFrameId = 1;
   const cancelledFrameIds = new Set<number>();
+  const pendingFrames = new Map<number, FrameRequestCallback>();
   let resizeObserveCount = 0;
   let scrollTop = initialScrollTop;
   const scrollWrites: number[] = [];
@@ -192,9 +199,59 @@ function renderVirtualizedHarness({
   );
   let currentMessages = messages;
   let currentMessageStartIndex = messageStartIndex;
+  let currentSessionId = "session-a";
+  let isActive = true;
   let estimatedLayout = buildEstimatedLayout(currentMessages);
-  const resolvedScrollHeight =
-    scrollHeight ?? (() => estimatedLayout.totalHeight);
+  const nativeClamps: { before: number; after: number; height: number; keys: string[] }[] = [];
+  // Read the committed spacer styles and mounted cards, not the virtualizer's
+  // estimates. A real browser clamps scrollTop when this extent contracts,
+  // even if application code never writes an upward position.
+  const committedGeometry = () => {
+    const list = scrollNode.querySelector<HTMLElement>(".virtualized-message-list");
+    const slots = new Map<HTMLElement, { top: number; height: number }>();
+    const bands = new Map<HTMLElement, { top: number; height: number }>();
+    const keys: string[] = [];
+    const spacers: number[] = [];
+    let height = 0;
+    for (const child of Array.from(list?.children ?? [])) {
+      const element = child as HTMLElement;
+      if (element.classList.contains("virtualized-message-spacer")) {
+        const spacer = Number.parseFloat(element.style.height) || 0;
+        height += spacer;
+        spacers.push(spacer);
+      } else if (element.classList.contains("virtualized-message-page")) {
+        const top = height;
+        keys.push(element.dataset.pageKey ?? "");
+        const pageSlots = Array.from(element.querySelectorAll<HTMLElement>(".virtualized-message-slot"));
+        pageSlots.forEach((slot, index) => {
+          const card = slot.querySelector<HTMLElement>("[data-fixture-height]");
+          const slotExtent = Number.parseFloat(card?.dataset.fixtureHeight ?? "0") || 0;
+          slots.set(slot, { top: height, height: slotExtent });
+          height += slotExtent;
+          if (index + 1 < pageSlots.length) height += VIRTUALIZED_MESSAGE_GAP_PX;
+        });
+        const gap = element.querySelector<HTMLElement>(".virtualized-message-page-gap");
+        height += Number.parseFloat(gap?.style.height ?? "0") || 0;
+        bands.set(element, { top, height: height - top });
+      }
+    }
+    if (list?.children.length === 0) {
+      height = Number.parseFloat(list.style.height) || 0;
+    }
+    return { height: Math.max(clientHeight, height), slots, bands, keys, spacers };
+  };
+  const readCommittedGeometry = () => {
+    const geometry = committedGeometry();
+    const clamped = Math.min(Math.max(scrollTop, 0), geometry.height - clientHeight);
+    if (clamped !== scrollTop) {
+      nativeClamps.push({ before: scrollTop, after: clamped, height: geometry.height, keys: geometry.keys });
+      scrollTop = clamped;
+    }
+    return geometry;
+  };
+  const resolvedScrollHeight = committedDomGeometry
+    ? () => readCommittedGeometry().height
+    : scrollHeight ?? (() => estimatedLayout.totalHeight);
 
   const setCurrentMessages = (nextMessages: Message[]) => {
     currentMessages = nextMessages;
@@ -224,12 +281,19 @@ function renderVirtualizedHarness({
   };
 
   class ResizeObserverMock {
+    private readonly targets = new Set<Element>();
     constructor(private readonly callback: ResizeObserverCallback) {}
     observe(target: Element) {
       resizeObserveCount += 1;
       resizeCallbacks.set(target, this.callback);
+      this.targets.add(target);
     }
-    disconnect() {}
+    disconnect() {
+      if (committedDomGeometry) {
+        for (const target of this.targets) resizeCallbacks.delete(target);
+      }
+      this.targets.clear();
+    }
   }
 
   const scrollNode = document.createElement("div");
@@ -247,9 +311,14 @@ function renderVirtualizedHarness({
   });
   Object.defineProperty(scrollNode, "scrollTop", {
     configurable: true,
-    get: () => scrollTop,
+    get: () => {
+      if (committedDomGeometry) readCommittedGeometry();
+      return scrollTop;
+    },
     set: (nextValue: number) => {
-      scrollTop = nextValue;
+      scrollTop = committedDomGeometry
+        ? Math.min(Math.max(nextValue, 0), committedGeometry().height - clientHeight)
+        : nextValue;
       scrollWrites.push(nextValue);
     },
   });
@@ -259,7 +328,9 @@ function renderVirtualizedHarness({
   window.requestAnimationFrame = ((callback: FrameRequestCallback) => {
     const frameId = nextFrameId;
     nextFrameId += 1;
-    queueMicrotask(() => {
+    if (manualAnimationFrames) {
+      pendingFrames.set(frameId, callback);
+    } else queueMicrotask(() => {
       if (!cancelledFrameIds.has(frameId)) {
         callback(performance.now());
       }
@@ -272,6 +343,13 @@ function renderVirtualizedHarness({
   Element.prototype.getBoundingClientRect =
     function getBoundingClientRectMock() {
       const element = this as HTMLElement;
+      if (committedDomGeometry) {
+        const geometry = readCommittedGeometry();
+        const rect = geometry.slots.get(element) ?? geometry.bands.get(element);
+        if (rect) {
+          return makeDomRect({ ...rect, top: rect.top - scrollTop, width: clientWidth });
+        }
+      }
       if (element === scrollNode) {
         return makeDomRect({ height: clientHeight, width: clientWidth });
       }
@@ -320,9 +398,16 @@ function renderVirtualizedHarness({
 
   const renderList = (searchOptions: VirtualizedSearchOptions = {}) => (
     <VirtualizedConversationMessageList
-      isActive
-      renderMessageCard={renderMessageCard}
-      sessionId="session-a"
+      key={currentSessionId}
+      isActive={isActive}
+      renderMessageCard={committedDomGeometry
+        ? (message, preferImmediateHeavyRender) => (
+          <div data-fixture-height={slotHeight(message)}>
+            {renderMessageCard(message, preferImmediateHeavyRender)}
+          </div>
+        )
+        : renderMessageCard}
+      sessionId={currentSessionId}
       messageStartIndex={currentMessageStartIndex}
       messages={currentMessages}
       scrollContainerRef={scrollContainerRef}
@@ -349,12 +434,38 @@ function renderVirtualizedHarness({
       virtualizerHandleRef={virtualizerHandleRef}
     />
   );
-  const result = render(renderList());
+  function ActivationRestore({ children, sessionId, active }: {
+    children: ReactNode;
+    sessionId: string;
+    active: boolean;
+  }) {
+    useLayoutEffect(() => {
+      if (!modelPaneActivation || !active) return;
+      // The pane restores a saved FOLLOW tab after its child layout effects,
+      // then requests the virtualized bottom again from its first frame.
+      const pin = () => {
+        scrollNode.scrollTop = Math.max(scrollNode.scrollHeight - clientHeight, 0);
+        notifyMessageStackScrollWrite(scrollNode, { scrollKind: "bottom_pin" });
+      };
+      pin();
+      const frame = window.requestAnimationFrame(pin);
+      return () => window.cancelAnimationFrame(frame);
+    }, [active, sessionId]);
+    return children;
+  }
+  const renderView = (searchOptions: VirtualizedSearchOptions = {}) => (
+    <ActivationRestore sessionId={currentSessionId} active={isActive}>
+      {renderList(searchOptions)}
+    </ActivationRestore>
+  );
+  if (committedDomGeometry) document.body.append(scrollNode);
+  const result = render(renderView(), committedDomGeometry ? { container: scrollNode } : undefined);
   const restore = () => {
     window.ResizeObserver = OriginalResizeObserver;
     window.requestAnimationFrame = originalRequestAnimationFrame;
     window.cancelAnimationFrame = originalCancelAnimationFrame;
     Element.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+    if (committedDomGeometry) scrollNode.remove();
   };
 
   return {
@@ -372,20 +483,55 @@ function renderVirtualizedHarness({
     restore,
     scrollNode,
     scrollWrites,
+    nativeClamps,
+    capturePaint() {
+      const geometry = readCommittedGeometry();
+      return {
+        scrollTop,
+        height: geometry.height,
+        bottomGap: geometry.height - clientHeight - scrollTop,
+        keys: geometry.keys,
+        spacers: geometry.spacers,
+        visible: Array.from(geometry.slots, ([node, rect]) => ({
+          node,
+          id: node.dataset.messageId,
+          top: rect.top - scrollTop,
+          bottom: rect.top + rect.height - scrollTop,
+        })).filter((slot) => slot.bottom > 0 && slot.top < clientHeight),
+      };
+    },
+    advanceAnimationFrame() {
+      const callbacks = Array.from(pendingFrames);
+      pendingFrames.clear();
+      act(() => {
+        for (const [frameId, callback] of callbacks) {
+          if (!cancelledFrameIds.has(frameId)) callback(performance.now());
+        }
+      });
+    },
+    rerenderWithSession(nextSessionId: string, nextMessages: Message[]) {
+      currentSessionId = nextSessionId;
+      setCurrentMessages(nextMessages);
+      result.rerender(renderView());
+    },
+    rerenderActive(nextIsActive: boolean) {
+      isActive = nextIsActive;
+      result.rerender(renderView());
+    },
     rerenderWithMessages(
       nextMessages: Message[],
       nextSearchOptions: VirtualizedSearchOptions = {},
     ) {
       setCurrentMessages(nextMessages);
-      result.rerender(renderList(nextSearchOptions));
+      result.rerender(renderView(nextSearchOptions));
     },
     rerenderWithWindow(nextMessages: Message[], nextMessageStartIndex: number) {
       setCurrentMessages(nextMessages);
       currentMessageStartIndex = nextMessageStartIndex;
-      result.rerender(renderList());
+      result.rerender(renderView());
     },
     rerenderWithSearch(nextSearchOptions: VirtualizedSearchOptions) {
-      result.rerender(renderList(nextSearchOptions));
+      result.rerender(renderView(nextSearchOptions));
     },
     setClientHeight(nextValue: number) {
       clientHeight = nextValue;
@@ -408,6 +554,126 @@ async function advanceIdleMountedRangeCompaction() {
     );
   });
 }
+
+describe("committed transcript activation frames", () => {
+  it("does not expose a clamp when a bottom pin replaces a resized reserve band with its old spacer", () => {
+    vi.useFakeTimers();
+    const messages = makeTextMessages(307);
+    const heights = new Map<string, number>();
+    const harness = renderVirtualizedHarness({
+      messages,
+      clientHeight: 729,
+      slotHeight: (message) => heights.get(message.id) ?? 97,
+      tailFollowIntent: true,
+      preferInitialEstimatedBottomViewport: true,
+      committedDomGeometry: true,
+      manualAnimationFrames: true,
+      modelPaneActivation: true,
+    });
+    try {
+      for (let frame = 0; frame < 6; frame += 1) harness.advanceAnimationFrame();
+      const before = harness.capturePaint();
+      const reserveSlot = harness.container.querySelector<HTMLElement>(".virtualized-message-slot")!;
+      expect(reserveSlot.getBoundingClientRect().bottom).toBeLessThan(0);
+      const anchor = before.visible[0]!;
+      // An image/expanded child can grow without changing message identity.
+      // The committed card grows before its ResizeObserver measurement arrives.
+      heights.set(reserveSlot.dataset.messageId!, 178);
+      act(() => {
+        // Commit the new card extent before the pane reads the DOM bottom.
+        // An outer act alone batches the rerender until after that read.
+        flushSync(() => harness.rerenderWithMessages(messages));
+        harness.scrollNode.scrollTop = harness.scrollNode.scrollHeight - 729;
+        notifyMessageStackScrollWrite(harness.scrollNode, { scrollKind: "bottom_pin" });
+      });
+      for (let frame = 0; frame < 6; frame += 1) {
+        const paint = harness.capturePaint();
+        expect(paint.visible.find((slot) => slot.id === anchor.id)?.top).toBeCloseTo(anchor.top, 5);
+        expect(paint.bottomGap).toBeLessThan(1);
+        harness.advanceAnimationFrame();
+      }
+    } finally {
+      harness.unmount();
+      harness.restore();
+    }
+  });
+
+  it.each([0, 28461])("keeps the incoming resident tail in its first painted position after a keyed tab switch (start %i)", (messageStartIndex) => {
+    vi.useFakeTimers();
+    const messages = makeTextMessages(307);
+    const harness = renderVirtualizedHarness({
+      messages,
+      messageStartIndex,
+      clientHeight: 729,
+      slotHeight: () => 125.0625,
+      tailFollowIntent: true,
+      preferInitialEstimatedBottomViewport: true,
+      committedDomGeometry: true,
+      manualAnimationFrames: true,
+      modelPaneActivation: true,
+    });
+    try {
+      for (let frame = 0; frame < 6; frame += 1) harness.advanceAnimationFrame();
+      harness.rerenderWithSession("session-b", messages);
+      const firstPaint = harness.capturePaint();
+      expect(firstPaint.visible[firstPaint.visible.length - 1]?.id).toBe("message-307");
+      expect(firstPaint.bottomGap).toBeLessThan(1);
+      const anchor = firstPaint.visible[0]!;
+      for (let frame = 0; frame < 6; frame += 1) {
+        harness.advanceAnimationFrame();
+        const paint = harness.capturePaint();
+        expect(paint.visible.map((slot) => slot.id), JSON.stringify({
+          frame,
+          first: { top: firstPaint.scrollTop, height: firstPaint.height, keys: firstPaint.keys },
+          next: { top: paint.scrollTop, height: paint.height, gap: paint.bottomGap, keys: paint.keys },
+          clamps: harness.nativeClamps,
+        })).toEqual(firstPaint.visible.map((slot) => slot.id));
+        expect(paint.bottomGap).toBeLessThan(1);
+        expect(paint.visible.find((slot) => slot.id === anchor.id)?.top).toBeCloseTo(anchor.top, 5);
+      }
+    } finally {
+      harness.unmount();
+      harness.restore();
+    }
+  });
+
+  it.each([307, 312])("keeps existing cards and only advances by appended extent in the same active tab (%i residents)", (count) => {
+    vi.useFakeTimers();
+    const messages = makeTextMessages(count + 1);
+    const addedExtent = 97 + VIRTUALIZED_MESSAGE_GAP_PX;
+    const harness = renderVirtualizedHarness({
+      messages: messages.slice(0, count),
+      clientHeight: 729,
+      slotHeight: () => 97,
+      tailFollowIntent: true,
+      preferInitialEstimatedBottomViewport: true,
+      committedDomGeometry: true,
+      manualAnimationFrames: true,
+      modelPaneActivation: true,
+    });
+    try {
+      for (let frame = 0; frame < 6; frame += 1) harness.advanceAnimationFrame();
+      const before = harness.capturePaint();
+      expect(before.bottomGap).toBeLessThan(1);
+      harness.rerenderWithMessages(messages);
+      for (let frame = 0; frame < 6; frame += 1) {
+        const paint = harness.capturePaint();
+        expect(paint.visible.length).toBeGreaterThan(0);
+        for (const previous of before.visible) {
+          const current = paint.visible.find((slot) => slot.id === previous.id);
+          if (previous.bottom - addedExtent <= 0) continue;
+          expect(current?.node).toBe(previous.node);
+          expect(current?.top).toBeCloseTo(previous.top - addedExtent, 5);
+        }
+        expect(paint.bottomGap).toBeLessThan(1);
+        harness.advanceAnimationFrame();
+      }
+    } finally {
+      harness.unmount();
+      harness.restore();
+    }
+  });
+});
 
 describe("VirtualizedConversationMessageList foundation", () => {
   it("preserves a pointer lease across listener rerenders and clears it on unmount", () => {

@@ -293,6 +293,7 @@ export function VirtualizedConversationMessageList({
   const [isMeasuringPostActivation, setIsMeasuringPostActivation] = useState(
     () => isActive && messages.length > 0,
   );
+  const isMeasuringPostActivationRef = useCommittedRef(isMeasuringPostActivation);
   const [isBottomBoundaryRevealPending, setIsBottomBoundaryRevealPending] =
     useState(false);
   const [bottomBoundaryRevealToken, setBottomBoundaryRevealToken] = useState(0);
@@ -939,9 +940,20 @@ export function VirtualizedConversationMessageList({
       options: { flush?: boolean; preserveCoveringRange?: boolean } = {},
     ) => {
       const currentRange = mountedPageRangeRef.current;
+      // During activation, a pane bottom-pin can request a narrower range
+      // before the reserve pages have published their real heights. Replacing
+      // those mounted pages with estimated spacers briefly lowers the native
+      // scroll maximum, even if the covering range returns before paint.
+      // Keep this incoming band until measurement hands it over; reader-owned
+      // navigation and ordinary post-activation compaction remain unchanged.
+      const preserveActivationCoverage =
+        isMeasuringPostActivationRef.current &&
+        shouldKeepBottomAfterLayoutRef.current &&
+        !isDetachedFromBottomRef.current &&
+        !hasUserScrollInteractionRef.current;
       if (
         rangesEqual(currentRange, nextRange) ||
-        (options.preserveCoveringRange === true &&
+        ((options.preserveCoveringRange === true || preserveActivationCoverage) &&
           currentRange.startIndex <= nextRange.startIndex &&
           currentRange.endIndex >= nextRange.endIndex)
       ) {
