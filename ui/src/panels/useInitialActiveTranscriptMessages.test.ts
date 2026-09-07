@@ -244,6 +244,43 @@ describe("useInitialActiveTranscriptMessages", () => {
     cleanup();
   });
 
+  it.each(["up", "down"] as const)("ignores pending-only focus but honors proven %s focus movement", async (direction) => {
+    const { cleanup, node, ref } = makeScrollNodeRef();
+    Object.defineProperties(node, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 1_000 },
+    });
+    node.scrollTop = direction === "up" ? 0 : 800;
+    const listener = vi.fn();
+    const removeListener = addSessionHistoryPageDemandListener(listener);
+    const hook = renderTranscriptDemandHook({
+      hasOlderHistory: direction === "up",
+      hasNewerHistory: direction === "down",
+      scrollContainerRef: ref,
+    });
+    try {
+      await act(async () => {
+        notifyMessageStackUserScrollIntent(node, {
+          direction, scrollKind: "page_jump", viewportCanMove: true,
+          pendingNativeMovement: true,
+        });
+        await Promise.resolve();
+        node.dispatchEvent(new Event("scroll"));
+      });
+      expect(listener).not.toHaveBeenCalled();
+      await act(async () => {
+        notifyMessageStackUserScrollIntent(node, {
+          direction, scrollKind: "page_jump", viewportCanMove: true,
+        });
+        await Promise.resolve();
+      });
+      expect(listener).toHaveBeenCalledTimes(1);
+      expect(listener).toHaveBeenCalledWith(expect.objectContaining({
+        sessionId: "session-a", direction: direction === "up" ? "older" : "newer",
+      }));
+    } finally { hook.unmount(); removeListener(); cleanup(); }
+  });
+
   it("requests exactly one older page from the normalized owner", async () => {
     const { cleanup, node, ref } = makeScrollNodeRef();
     node.scrollTop = 0;

@@ -30,7 +30,7 @@ import {
 } from "./session-live-tail-follow";
 import {
   MESSAGE_STACK_BOTTOM_FOLLOW_SCROLL_MS,
-  MESSAGE_STACK_POINTER_OWNERSHIP_MS,
+  claimMessageStackPointerScrollOwnership,
   MESSAGE_STACK_SCROLL_WRITE_EVENT,
   MESSAGE_STACK_USER_SCROLL_INTENT_EVENT,
   claimMessageStackNativeScrollOwnership,
@@ -1877,11 +1877,13 @@ describe("session pane historical-window tail state", () => {
   });
 
   it.each([
-    ["a real recorded bottom", false],
-    ["the pinned-bottom sentinel", true],
+    ["a real recorded bottom", false, false],
+    ["the pinned-bottom sentinel", true, false],
+    ["a real recorded bottom", false, true],
+    ["the pinned-bottom sentinel", true, true],
   ])(
-    "detaches an unannounced upward native scroll from %s before a repin",
-    (_recordedPosition, usePinnedBottomSentinel) => {
+    "classifies upward native scroll from %s (sentinel=%s, owned=%s) before a repin",
+    (_recordedPosition, usePinnedBottomSentinel, owned) => {
       vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
       vi.stubGlobal("cancelAnimationFrame", vi.fn());
       const activeSession = session(false);
@@ -1931,9 +1933,8 @@ describe("session pane historical-window tail state", () => {
       });
 
       act(() => {
-        // Prime the attached geometry exactly as a wheel-to-bottom scroll
-        // frame does in production. The upward frame below deliberately has
-        // no keydown, wheel, pointer, or normalized-intent predecessor.
+        // Prime attached geometry, then distinguish a real pointer owner from
+        // an unowned native frame with identical final geometry.
         hook.result.current.handleMessageStackScroll({
           currentTarget: scrollNode,
         } as ReactUIEvent<HTMLElement>);
@@ -1943,6 +1944,11 @@ describe("session pane historical-window tail state", () => {
       }
 
       act(() => {
+        if (owned) {
+          claimMessageStackNativeScrollOwnership(
+            scrollNode, { owner: "pointer", direction: null }, 5_000,
+          );
+        }
         scrollNode.scrollTop = 760;
         hook.result.current.handleMessageStackScroll({
           currentTarget: scrollNode,
@@ -1951,18 +1957,18 @@ describe("session pane historical-window tail state", () => {
 
       expect(paneScrollPositions[scrollStateKey]).toEqual({
         top: 760,
-        shouldStick: false,
+        shouldStick: !owned,
       });
-      expect(paneShouldStickToBottomRef.current[scrollStateKey]).toBe(false);
-      expect(hook.result.current.liveTailPinned).toBe(false);
-      expect(userScrollIntents).toEqual([
+      expect(paneShouldStickToBottomRef.current[scrollStateKey]).toBe(!owned);
+      expect(hook.result.current.liveTailPinned).toBe(!owned);
+      expect(userScrollIntents).toEqual(owned ? [
         {
           detachFromBottomAtBoundary: false,
           direction: "up",
           scrollKind: "incremental",
           viewportCanMove: true,
         },
-      ]);
+      ] : []);
 
       act(() => {
         expect(
@@ -2215,8 +2221,9 @@ describe("session pane historical-window tail state", () => {
   });
 
   it.each([
-    ["upward", 1_040, 800, 810, false],
-    ["downward", 1_080, 850, 880, true],
+    ["owned upward", 1_040, 800, 810, false],
+    ["unowned upward", 1_040, 800, 840, true],
+    ["unowned downward", 1_080, 850, 880, true],
   ] as const)(
     "%s native motion during a programmatic bottom-follow window yields only to reader movement",
     (_direction, nextScrollHeight, nextScrollTop, expectedTop, expectedPinned) => {
@@ -2273,6 +2280,11 @@ describe("session pane historical-window tail state", () => {
 
       scrollHeight = nextScrollHeight;
       act(() => {
+        if (!expectedPinned) {
+          claimMessageStackNativeScrollOwnership(
+            scrollNode, { owner: "pointer", direction: null }, 5_000,
+          );
+        }
         scrollNode.scrollTop = nextScrollTop;
         hook.result.current.handleMessageStackScroll({
           currentTarget: scrollNode,
@@ -3356,11 +3368,7 @@ describe("session pane historical-window tail state", () => {
 
     now += MESSAGE_STACK_BOTTOM_FOLLOW_SCROLL_MS + 1;
     act(() => {
-      claimMessageStackNativeScrollOwnership(
-        scrollNode,
-        { direction: null, owner: "pointer" },
-        MESSAGE_STACK_POINTER_OWNERSHIP_MS,
-      );
+      claimMessageStackPointerScrollOwnership(scrollNode);
       scrollNode.scrollTop = 880;
       hook.result.current.handleMessageStackScroll({
         currentTarget: scrollNode,
@@ -3452,11 +3460,7 @@ describe("session pane historical-window tail state", () => {
       // must not manufacture reader authority merely because it lands at the
       // reachable bottom.
       scrollHeight = 960.125;
-      claimMessageStackNativeScrollOwnership(
-        scrollNode,
-        { direction: null, owner: "pointer" },
-        MESSAGE_STACK_POINTER_OWNERSHIP_MS,
-      );
+      claimMessageStackPointerScrollOwnership(scrollNode);
       scrollNode.scrollTop = 760.125;
       hook.result.current.handleMessageStackScroll({
         currentTarget: scrollNode,
@@ -3472,11 +3476,7 @@ describe("session pane historical-window tail state", () => {
       hook.result.current.handleMessageStackScroll({
         currentTarget: scrollNode,
       } as ReactUIEvent<HTMLElement>);
-      claimMessageStackNativeScrollOwnership(
-        scrollNode,
-        { direction: null, owner: "pointer" },
-        MESSAGE_STACK_POINTER_OWNERSHIP_MS,
-      );
+      claimMessageStackPointerScrollOwnership(scrollNode);
       scrollNode.scrollTop = 760.5;
       hook.result.current.handleMessageStackScroll({
         currentTarget: scrollNode,
@@ -3658,7 +3658,7 @@ describe("session pane historical-window tail state", () => {
 
   it.each(["touch inertia", "focus scrollIntoView", "browser Space"] as const)(
     "reattaches a detached pane when %s reaches the physical bottom",
-    (ownerKind) => {
+    async (ownerKind) => {
       vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
       vi.stubGlobal("cancelAnimationFrame", vi.fn());
       let now = 1_000;
@@ -3678,6 +3678,7 @@ describe("session pane historical-window tail state", () => {
       const scrollNode = document.createElement("section");
       const focusedButton = document.createElement("button");
       scrollNode.append(focusedButton);
+      document.body.append(scrollNode);
       scrollNode.getBoundingClientRect = () =>
         ({ top: 0, bottom: 200 } as DOMRect);
       focusedButton.getBoundingClientRect = () =>
@@ -3708,58 +3709,81 @@ describe("session pane historical-window tail state", () => {
         return state;
       });
 
-      act(() => {
-        hook.result.current.scrollMessageStackToBoundary("top");
-        if (ownerKind === "touch inertia") {
-          hook.result.current.handleMessageStackTouchStart({
+      try {
+        act(() => {
+          hook.result.current.scrollMessageStackToBoundary("top");
+          if (ownerKind === "touch inertia") {
+            hook.result.current.handleMessageStackTouchStart({
+              currentTarget: scrollNode,
+              touches: [{ clientY: 100 }],
+            } as unknown as ReactTouchEvent<HTMLElement>);
+            hook.result.current.handleMessageStackUserScrollIntent({
+              currentTarget: scrollNode,
+              target: scrollNode,
+              touches: [{ clientY: 80 }],
+              type: "touchmove",
+            } as unknown as ReactTouchEvent<HTMLElement>);
+          } else if (ownerKind === "focus scrollIntoView") {
+            hook.result.current.handleMessageStackFocusCapture({
+              currentTarget: scrollNode,
+              target: focusedButton,
+            } as unknown as ReactFocusEvent<HTMLElement>);
+            focusedButton.focus();
+          } else {
+            hook.result.current.handleMessageStackUserScrollIntent({
+              altKey: false,
+              ctrlKey: false,
+              currentTarget: scrollNode,
+              defaultPrevented: false,
+              key: " ",
+              metaKey: false,
+              preventDefault: vi.fn(),
+              shiftKey: false,
+              target: scrollNode,
+              type: "keydown",
+            } as unknown as ReactKeyboardEvent<HTMLElement>);
+            now += 500;
+          }
+          scrollNode.scrollTop = 770;
+        });
+        await act(async () => { await Promise.resolve(); });
+        act(() => {
+          hook.result.current.handleMessageStackScroll({
             currentTarget: scrollNode,
-            touches: [{ clientY: 100 }],
-          } as unknown as ReactTouchEvent<HTMLElement>);
-          hook.result.current.handleMessageStackUserScrollIntent({
-            currentTarget: scrollNode,
-            target: scrollNode,
-            touches: [{ clientY: 80 }],
-            type: "touchmove",
-          } as unknown as ReactTouchEvent<HTMLElement>);
-        } else if (ownerKind === "focus scrollIntoView") {
-          hook.result.current.handleMessageStackFocusCapture({
-            currentTarget: scrollNode,
-            target: focusedButton,
-          } as unknown as ReactFocusEvent<HTMLElement>);
-        } else {
-          hook.result.current.handleMessageStackUserScrollIntent({
-            altKey: false,
-            ctrlKey: false,
-            currentTarget: scrollNode,
-            defaultPrevented: false,
-            key: " ",
-            metaKey: false,
-            preventDefault: vi.fn(),
-            shiftKey: false,
-            target: scrollNode,
-            type: "keydown",
-          } as unknown as ReactKeyboardEvent<HTMLElement>);
-          now += 500;
-        }
-        scrollNode.scrollTop = 770;
-        hook.result.current.handleMessageStackScroll({
-          currentTarget: scrollNode,
-        } as ReactUIEvent<HTMLElement>);
-      });
+            nativeEvent: new Event("scroll"),
+          } as ReactUIEvent<HTMLElement>);
+        });
 
-      expect(paneScrollPositions[scrollStateKey]?.shouldStick).toBe(false);
-      expect(hook.result.current.liveTailPinned).toBe(false);
+        expect(paneScrollPositions[scrollStateKey]?.shouldStick).toBe(false);
+        expect(hook.result.current.liveTailPinned).toBe(false);
 
-      act(() => {
-        scrollNode.scrollTop = 800;
-        hook.result.current.handleMessageStackScroll({
-          currentTarget: scrollNode,
-        } as ReactUIEvent<HTMLElement>);
-      });
+        act(() => {
+          if (ownerKind === "focus scrollIntoView") {
+            // A focus proof owns one landing, not arbitrary later native ticks.
+            // A second deliberate focus operation reaches the actual bottom.
+            focusedButton.blur();
+            hook.result.current.handleMessageStackFocusCapture({
+              currentTarget: scrollNode,
+              target: focusedButton,
+            } as unknown as ReactFocusEvent<HTMLElement>);
+            focusedButton.focus();
+          }
+          scrollNode.scrollTop = 800;
+        });
+        await act(async () => { await Promise.resolve(); });
+        act(() => {
+          hook.result.current.handleMessageStackScroll({
+            currentTarget: scrollNode,
+            nativeEvent: new Event("scroll"),
+          } as ReactUIEvent<HTMLElement>);
+        });
 
-      expect(paneScrollPositions[scrollStateKey]?.shouldStick).toBe(true);
-      expect(hook.result.current.liveTailPinned).toBe(true);
-      hook.unmount();
+        expect(paneScrollPositions[scrollStateKey]?.shouldStick).toBe(true);
+        expect(hook.result.current.liveTailPinned).toBe(true);
+      } finally {
+        hook.unmount();
+        scrollNode.remove();
+      }
     },
   );
 
@@ -4884,7 +4908,7 @@ describe("session pane historical-window tail state", () => {
     hook.unmount();
   });
 
-  it("does not let a retained restore frame revert focus navigation", () => {
+  it("does not let a retained restore frame revert focus navigation", async () => {
     let nextAnimationFrameId = 1;
     const animationFrames = new Map<number, FrameRequestCallback>();
     vi.stubGlobal(
@@ -4908,6 +4932,7 @@ describe("session pane historical-window tail state", () => {
     const scrollNode = document.createElement("section");
     const focusedButton = document.createElement("button");
     scrollNode.append(focusedButton);
+    document.body.append(scrollNode);
     scrollNode.getBoundingClientRect = () =>
       ({ top: 0, bottom: 200 } as DOMRect);
     focusedButton.getBoundingClientRect = () =>
@@ -4936,35 +4961,46 @@ describe("session pane historical-window tail state", () => {
         },
       },
     );
-    hook.result.current.messageStackRef.current = scrollNode;
-    hook.rerender({
-      isSessionTabActive: true,
-      scrollStateKey: detachedKey,
-    });
-    const retainedRestoreFrame = animationFrames.values().next().value;
-    if (!retainedRestoreFrame) {
-      throw new Error("Detached restore verification frame was not scheduled");
+    try {
+      hook.result.current.messageStackRef.current = scrollNode;
+      hook.rerender({
+        isSessionTabActive: true,
+        scrollStateKey: detachedKey,
+      });
+      const retainedRestoreFrame = animationFrames.values().next().value;
+      if (!retainedRestoreFrame) {
+        throw new Error("Detached restore verification frame was not scheduled");
+      }
+
+      act(() => {
+        hook.result.current.handleMessageStackFocusCapture({
+          currentTarget: scrollNode,
+          target: focusedButton,
+        } as unknown as ReactFocusEvent<HTMLElement>);
+        focusedButton.focus();
+        scrollNode.scrollTop = 350;
+      });
+      await act(async () => { await Promise.resolve(); });
+
+      // Browser focus may call scrollIntoView without a wheel/key precursor. It
+      // still transfers authority away from the pending detached restoration.
+      act(() => retainedRestoreFrame(1000 / 60));
+      expect(scrollNode.scrollTop).toBe(350);
+      expect(paneScrollPositions[detachedKey]).toEqual({
+        top: 350,
+        shouldStick: false,
+      });
+      act(() => {
+        hook.result.current.handleMessageStackScroll({
+          currentTarget: scrollNode,
+          nativeEvent: new Event("scroll"),
+        } as ReactUIEvent<HTMLElement>);
+      });
+      expect(scrollNode.scrollTop).toBe(350);
+    } finally {
+      hook.unmount();
+      scrollNode.remove();
     }
-
-    act(() => {
-      hook.result.current.handleMessageStackFocusCapture({
-        currentTarget: scrollNode,
-        target: focusedButton,
-      } as unknown as ReactFocusEvent<HTMLElement>);
-      scrollNode.scrollTop = 350;
-      hook.result.current.handleMessageStackScroll({
-        currentTarget: scrollNode,
-      } as ReactUIEvent<HTMLElement>);
-    });
-
-    // Browser focus may call scrollIntoView without a wheel/key precursor. It
-    // still transfers authority away from the pending detached restoration.
-    act(() => retainedRestoreFrame(1000 / 60));
-    expect(scrollNode.scrollTop).toBe(350);
-    expect(paneScrollPositions[detachedKey]).toEqual({
-      top: 350,
-      shouldStick: false,
-    });
   });
 
   it("rechecks a zero-write detached restore after the virtualized range commit", () => {

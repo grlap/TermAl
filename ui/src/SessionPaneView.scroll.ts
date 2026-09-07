@@ -42,11 +42,11 @@ import { useStableEvent } from "./panels/use-stable-event";
 import {
   MESSAGE_STACK_BOTTOM_REPIN_REQUEST_EVENT,
   MESSAGE_STACK_BOTTOM_FOLLOW_SCROLL_MS,
-  MESSAGE_STACK_FOCUS_OWNERSHIP_MS,
   MESSAGE_STACK_KEYBOARD_OWNERSHIP_MS,
-  MESSAGE_STACK_POINTER_OWNERSHIP_MS,
   MESSAGE_STACK_WHEEL_OWNERSHIP_MS,
+  armMessageStackFocusScrollOwnership,
   claimMessageStackNativeScrollOwnership,
+  claimMessageStackPointerScrollOwnership,
   clearMessageStackVirtualizerPositionCorrection,
   clearMessageStackNativeScrollOwnership,
   consumeMessageStackVirtualizerPositionCorrection,
@@ -56,7 +56,9 @@ import {
   notifyMessageStackScrollWrite,
   notifyMessageStackUserScrollIntent,
   observeMessageStackPointerOwnershipRelease,
+  nativeScrollPreservesFollowAuthority,
   peekMessageStackNativeScrollOwnership,
+  readMessageStackNativeScrollOwnershipForEvent,
   isMessageStackSelectionExtensionKey,
   resolveMessageStackKeyboardScrollIntent,
   resolveMessageStackWheelRouting,
@@ -420,6 +422,14 @@ export function useSessionPaneScrollState({
     }
     return observeMessageStackPointerOwnershipRelease(node);
   }, [messageStackRef]);
+  useLayoutEffect(() => {
+    const node = messageStackRef.current;
+    return () => {
+      if (node) {
+        clearMessageStackNativeScrollOwnership(node);
+      }
+    };
+  }, [scrollStateKey, isSessionTabActive, paneViewMode]);
   const canHydrateOlderHistory = Boolean(
     activeSession &&
       resolveHasOlderSessionHistory({
@@ -2517,13 +2527,12 @@ export function useSessionPaneScrollState({
 
     const ownsPointerScroll =
       event.type === "mousedown" && event.target === event.currentTarget;
-    if (ownsPointerScroll) {
+    if (event.type === "mousedown") {
+      if ("button" in event && event.button !== 0) {
+        return false;
+      }
       clearPendingKeyboardWheelGuard();
-      claimMessageStackNativeScrollOwnership(
-        event.currentTarget,
-        { direction: null, owner: "pointer" },
-        MESSAGE_STACK_POINTER_OWNERSHIP_MS,
-      );
+      claimMessageStackPointerScrollOwnership(event.currentTarget);
     }
     return ownsPointerScroll;
   }
@@ -2643,6 +2652,7 @@ export function useSessionPaneScrollState({
   }
 
   function handleMessageStackFocusCapture(event: ReactFocusEvent<HTMLElement>) {
+    clearMessageStackNativeScrollOwnership(event.currentTarget, "focus");
     if (event.target === event.currentTarget) {
       return;
     }
@@ -2658,23 +2668,56 @@ export function useSessionPaneScrollState({
     if (!focusMayMoveViewport) {
       return;
     }
-    // Keyboard focus inside the transcript can make the browser call
-    // scrollIntoView without a wheel/key scroll event. That navigation owns
-    // the viewport and must not be reverted by a pending detached restore.
-    beginMessageStackManualNavigation();
-    claimMessageStackNativeScrollOwnership(
-      event.currentTarget,
-      {
-        direction: targetRect.bottom > nodeRect.bottom + 1 ? "down" : "up",
-        owner: "focus",
+    // Focus can scroll without wheel/key input, but preventScroll focus is
+    // equally common in transcript controls. Arm evidence, not detachment.
+    const direction = targetRect.bottom > nodeRect.bottom + 1 ? "down" : "up";
+    const node = event.currentTarget;
+    armMessageStackFocusScrollOwnership(
+      node,
+      target,
+      (provenDirection) => {
+        beginMessageStackManualNavigation();
+        takeMessageStackUserScrollAuthority(node, provenDirection);
+        paneScrollPositions[scrollStateKey] =
+          captureRecordedDetachedPaneScrollPosition(node);
+        notifyMessageStackUserScrollIntent(node, {
+          direction: provenDirection,
+          scrollKind: "page_jump",
+          viewportCanMove: true,
+        });
+        if (
+          provenDirection === "down" &&
+          !hasUnloadedNewerHistory &&
+          isMessageStackAtPhysicalBottom(
+            node.scrollTop,
+            node.scrollHeight,
+            node.clientHeight,
+          )
+        ) {
+          // The proven focus operation, not a later geometry-only event,
+          // brought the reader back to the actual tail.
+          paneScrollPositions[scrollStateKey] = recordPaneScrollGeometry(node, {
+            top: node.scrollTop,
+            shouldStick: true,
+          });
+          setTailFollowIntent(true);
+          setNewResponseIndicator(scrollStateKey, false);
+        }
       },
-      MESSAGE_STACK_FOCUS_OWNERSHIP_MS,
     );
-    cancelDetachedMessageStackRestore(scrollStateKey);
+    notifyMessageStackUserScrollIntent(event.currentTarget, {
+      pendingNativeMovement: true,
+      detachFromBottomAtBoundary: false,
+      direction,
+      scrollKind: "page_jump",
+      viewportCanMove: true,
+    });
   }
 
   function handleMessageStackScroll(event: ReactUIEvent<HTMLElement>) {
     const node = event.currentTarget;
+    const nativeScrollOwnership =
+      readMessageStackNativeScrollOwnershipForEvent(node, event.nativeEvent);
     if (
       detachedScrollRestoreController.consumeNativeScroll({
         key: scrollStateKey,
@@ -2716,18 +2759,14 @@ export function useSessionPaneScrollState({
               )
             : undefined
           : previousTop;
-    const nativeScrollOwnership =
-      peekMessageStackNativeScrollOwnership(node);
-    // A bottom-boundary reveal owns the viewport until its mounted pages
-    // settle. Chromium can clamp scrollTop during a temporary spacer shrink,
-    // then deliver the scroll event after the height has grown back. Comparing
-    // only the two final geometries would invent upward reader input and
-    // cancel that reveal. Preserve its existing FOLLOW intent; newer real
-    // input still wins through detachment or a native-input ownership lease.
-    const isBottomBoundaryReveal =
-      node.dataset.virtualizedBottomBoundaryReveal === "true" &&
-      nativeScrollOwnership === null &&
-      getTailFollowIntent();
+    const hasDetachedTailFollow = hasDetachedTailFollowAuthority();
+    const preservesFollowAuthority = nativeScrollPreservesFollowAuthority({
+      tailFollowIntent: getTailFollowIntent(),
+      isDetachedFromBottom: hasDetachedTailFollow,
+      ownership: nativeScrollOwnership,
+      scrollDelta:
+        typeof recordedTop === "number" ? node.scrollTop - recordedTop : 0,
+    });
     const contentDidNotShrink =
       previousGeometry !== undefined &&
       node.scrollHeight >= previousGeometry.scrollHeight;
@@ -2757,7 +2796,7 @@ export function useSessionPaneScrollState({
     // height by one pixel between two frames), which the recorded geometry
     // cannot always witness; such a frame must not detach tail-follow.
     const movedUpFromRecordedPosition =
-      !isBottomBoundaryReveal &&
+      !preservesFollowAuthority &&
       contentDidNotShrink &&
       !isViewportGrowthClamp &&
       !isAtPhysicalBottom &&
@@ -2769,7 +2808,6 @@ export function useSessionPaneScrollState({
       ) &&
       typeof recordedTop === "number" &&
       node.scrollTop > recordedTop + SESSION_INPUT_MOVEMENT_EPSILON_PX;
-    const hasDetachedTailFollow = hasDetachedTailFollowAuthority();
     const tailFollowIsDetached =
       hasDetachedTailFollow || !getTailFollowIntent();
     const movedUpAfterUserEscape =
@@ -2841,9 +2879,7 @@ export function useSessionPaneScrollState({
       return;
     }
     if (paneProgrammaticBottomFollowIsActive) {
-      // Bottom-follow writes only move toward the tail. An upward frame with
-      // non-shrinking content is therefore reader movement, even while the
-      // short programmatic ownership window is active.
+      // An owned upward frame interrupts even an active bottom-follow write.
       cancelPaneProgrammaticBottomFollow({ rejectLateFrame: true });
     }
     if (hasDetachedTailFollow && isVirtualizerPositionCorrection) {
@@ -2859,11 +2895,8 @@ export function useSessionPaneScrollState({
       return;
     }
     if (movedUpAfterUserEscape || movedUpFromRecordedPosition) {
-      // Intent listeners normally transfer ownership before Blink's first
-      // animated frame. If an input path is missed, a genuine upward frame
-      // still detaches even inside the wider sticky-bottom band. Requiring
-      // non-shrinking content excludes browser clamps caused by a card/layout
-      // collapse.
+      // Persist an existing escape, or transfer authority from a matching
+      // native-input owner. Geometry alone cannot manufacture reader intent.
       if (
         movedUpFromRecordedPosition &&
         (!hasDetachedTailFollow || getTailFollowIntent())

@@ -199,8 +199,9 @@ describe("session pane scroll boundaries", () => {
         } as ReactUIEvent<HTMLElement>);
       });
 
-      expect(paneShouldStickToBottomRef.current[key]).toBe(cause === "layout");
-      if (cause === "layout") {
+      const preservesFollow = cause === "layout" || cause === "finished";
+      expect(paneShouldStickToBottomRef.current[key]).toBe(preservesFollow);
+      if (preservesFollow) {
         expect(userIntent).not.toHaveBeenCalled();
         expect(hook.result.current.liveTailPinned).toBe(true);
       }

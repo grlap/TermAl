@@ -8,16 +8,18 @@ import { useLayoutEffect, type MutableRefObject, type RefObject } from "react";
 import { SESSION_STICKY_BOTTOM_BAND_PX } from "../scroll-position";
 import {
   MESSAGE_STACK_BOTTOM_FOLLOW_SCROLL_MS,
-  MESSAGE_STACK_POINTER_OWNERSHIP_MS,
   MESSAGE_STACK_SCROLL_WRITE_EVENT,
   MESSAGE_STACK_USER_SCROLL_INTENT_EVENT,
   MESSAGE_STACK_WHEEL_OWNERSHIP_MS,
   claimMessageStackNativeScrollOwnership,
+  claimMessageStackPointerScrollOwnership,
   clearMessageStackNativeScrollOwnership,
   isMessageStackWheelEventSuppressed,
   messageStackNativeScrollOwnershipMovesTowardBottom,
+  nativeScrollPreservesFollowAuthority,
   observeMessageStackPointerOwnershipRelease,
   peekMessageStackNativeScrollOwnership,
+  readMessageStackNativeScrollOwnershipForEvent,
   resolveMessageStackWheelRouting,
   revokeMessageStackNativeScrollOwnershipOnConflict,
   type MessageStackScrollWriteDetail,
@@ -105,6 +107,7 @@ export function nativeScrollKeepsPassiveTailFollow({
   scrollDelta,
   scrollHeightDelta,
   tailFollowIntent,
+  preservesFollowAuthority = false,
 }: {
   hadUserScrollInteraction: boolean;
   // A scrollTop drop that still lands at the physical bottom with
@@ -118,7 +121,11 @@ export function nativeScrollKeepsPassiveTailFollow({
   scrollDelta: number;
   scrollHeightDelta: number;
   tailFollowIntent: boolean;
+  preservesFollowAuthority?: boolean;
 }) {
+  if (preservesFollowAuthority) {
+    return true;
+  }
   if (
     isBottomLandingClamp &&
     tailFollowIntent &&
@@ -371,7 +378,10 @@ export function useVirtualizedConversationScrollEvents({
       pendingBottomBoundarySeekRef.current = false;
       cancelPostActivationBottomRestore();
     };
-    const syncViewport = (options: { isNativeScrollEvent?: boolean } = {}) => {
+    const syncViewport = (options: {
+      isNativeScrollEvent?: boolean;
+      nativeEvent?: Event;
+    } = {}) => {
       const isBottomBoundaryRevealScroll =
         pendingBottomBoundaryRevealNodeRef.current === node;
       const isProgrammaticBottomFollowScroll =
@@ -407,23 +417,32 @@ export function useVirtualizedConversationScrollEvents({
           enterBottomFollowMode();
         } else {
           const hadUserScrollInteraction = hasUserScrollInteractionRef.current;
-          if (isMeasuringPostActivation) {
-            cancelPostActivationBottomRestore();
-          }
-          // This is the shared generic layout timer used by prepend, anchor,
-          // and range restoration, so real native movement invalidates it. The
-          // page-measurement bottom retry has a dedicated timer and remains
-          // separately governed by bottom authority.
-          clearPendingDeferredLayoutTimer();
-          pendingDeferredLayoutAnchorRef.current = null;
           const previousNativeScrollTop = lastNativeScrollTopRef.current;
           const scrollDelta = node.scrollTop - previousNativeScrollTop;
           const scrollHeightDelta =
             node.scrollHeight - previousNativeScrollHeight;
           lastNativeScrollTopRef.current = node.scrollTop;
-          revokeMessageStackNativeScrollOwnershipOnConflict(node, scrollDelta);
-          const nativeScrollOwnership =
-            peekMessageStackNativeScrollOwnership(node);
+          const ownershipConflicts = revokeMessageStackNativeScrollOwnershipOnConflict(
+            node, scrollDelta, options.nativeEvent,
+          );
+          const nativeScrollOwnership = ownershipConflicts
+            ? null
+            : readMessageStackNativeScrollOwnershipForEvent(node, options.nativeEvent);
+          const preservesFollowAuthority = nativeScrollPreservesFollowAuthority({
+            tailFollowIntent,
+            isDetachedFromBottom: isDetachedFromBottomRef.current,
+            ownership: nativeScrollOwnership,
+            scrollDelta,
+          });
+          if (!preservesFollowAuthority) {
+            if (isMeasuringPostActivation) {
+              cancelPostActivationBottomRestore();
+            }
+            // Genuine navigation invalidates layout restoration; a passive
+            // clamp must not cancel the work that still owns the viewport.
+            clearPendingDeferredLayoutTimer();
+            pendingDeferredLayoutAnchorRef.current = null;
+          }
           const isProgrammaticNavigation =
             pendingProgrammaticNavigationUntilRef.current >= performance.now();
           const isStableHeightNativeUserMovement =
@@ -454,11 +473,10 @@ export function useVirtualizedConversationScrollEvents({
             isViewportGrowthClamp,
             scrollDelta,
           });
-          // A deferred mount or remeasurement can increase content height
-          // between native scroll events. An upward scrollTop delta across
-          // non-shrinking content is still reader movement; prepend/compaction
-          // restores move with their height delta and shrink clamps are below.
+          // Geometry classifies movement only after input/attachment authority
+          // permits it. Two equal heights can hide an intermediate clamp.
           const isNativeUserMovement =
+            !preservesFollowAuthority &&
             !isBottomLandingClamp &&
             (isStableHeightNativeUserMovement ||
               (scrollDelta < 0 && scrollHeightDelta >= 0));
@@ -469,12 +487,15 @@ export function useVirtualizedConversationScrollEvents({
               isProgrammaticNavigation,
             })
           ) {
-            // Scrollbar drags, touch inertia, and browser navigation can arrive
-            // without an input prelude. Only the exact one-shot prepend reflow
-            // token may preserve the generation across such a native frame.
+            // Recorded gestures and detached inertia advance reader history;
+            // unowned attached geometry and the exact prepend reflow do not.
             advanceUserScrollGeneration();
           }
-          if (!isBottomLandingClamp && Math.abs(scrollDelta) >= 0.5) {
+          if (
+            !preservesFollowAuthority &&
+            !isBottomLandingClamp &&
+            Math.abs(scrollDelta) >= 0.5
+          ) {
             pendingPrependedBottomGapRef.current = null;
           }
           const isPassiveTailFollowScroll = nativeScrollKeepsPassiveTailFollow({
@@ -486,8 +507,10 @@ export function useVirtualizedConversationScrollEvents({
             scrollDelta,
             scrollHeightDelta,
             tailFollowIntent,
+            preservesFollowAuthority,
           });
           if (
+            !preservesFollowAuthority &&
             !isBottomLandingClamp &&
             lastUserScrollKindRef.current === null
           ) {
@@ -505,9 +528,7 @@ export function useVirtualizedConversationScrollEvents({
               isNativeUserMovement &&
               !isProgrammaticNavigation
             ) {
-              // Scrollbar-thumb drags and touch inertia can move upward with no
-              // wheel/key/touch prelude. Transfer authority immediately even
-              // while the viewport remains inside the near-bottom band.
+              // Owned upward movement wins even inside the near-bottom band.
               shouldKeepBottomAfterLayoutRef.current = false;
               isDetachedFromBottomRef.current = true;
               clearPendingDeferredBottomRestore();
@@ -775,6 +796,9 @@ export function useVirtualizedConversationScrollEvents({
       if (!detail) {
         return;
       }
+      if (detail.pendingNativeMovement) {
+        return;
+      }
       if (!detail.viewportCanMove && !detail.detachFromBottomAtBoundary) {
         // An ordinary boundary-only intent belongs to history demand and must
         // not create virtualizer movement authority. The producer opts into the
@@ -1029,16 +1053,15 @@ export function useVirtualizedConversationScrollEvents({
     // content costs nothing (no native scroll fires), and a click on the
     // scrollbar correctly hands control back to the user.
     const cancelBottomFollowOnMouseDown = (event: MouseEvent) => {
+      if (event.button !== 0) {
+        return;
+      }
+      claimMessageStackPointerScrollOwnership(node);
       pendingPrependNativeReflowRef.current = null;
       pendingProgrammaticBottomFollowUntilRef.current =
         Number.NEGATIVE_INFINITY;
       pendingProgrammaticNavigationUntilRef.current = Number.NEGATIVE_INFINITY;
       if (event.target === node) {
-        claimMessageStackNativeScrollOwnership(
-          node,
-          { direction: null, owner: "pointer" },
-          MESSAGE_STACK_POINTER_OWNERSHIP_MS,
-        );
         advanceUserScrollGeneration();
         pendingProgrammaticScrollTopRef.current = null;
         shouldKeepBottomAfterLayoutRef.current = false;
@@ -1072,8 +1095,8 @@ export function useVirtualizedConversationScrollEvents({
     lastNativeScrollTopRef.current = node.scrollTop;
     lastNativeScrollHeightRef.current = node.scrollHeight;
     lastNativeClientHeightRef.current = node.clientHeight;
-    const onNativeScroll = () => {
-      syncViewport({ isNativeScrollEvent: true });
+    const onNativeScroll = (event: Event) => {
+      syncViewport({ isNativeScrollEvent: true, nativeEvent: event });
     };
     node.addEventListener("scroll", onNativeScroll, { passive: true });
     node.addEventListener(

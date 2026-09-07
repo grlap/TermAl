@@ -3534,7 +3534,7 @@ describe("App scroll behaviour", () => {
     });
   });
 
-  it("detaches live-turn bottom follow on explicit transcript navigation", async () => {
+  it.each([false, true])("detaches live-turn bottom follow only on owned transcript navigation (owned=%s)", async (owned) => {
     await withVerifiedNoReactActWarnings(async () => {
       let scrollHeight = 1000;
       const restoreScrollGeometry = stubElementScrollGeometry({
@@ -3602,11 +3602,19 @@ describe("App scroll behaviour", () => {
         });
         expect(messageStack).toHaveClass("is-tail-following");
 
+        if (owned) fireEvent.mouseDown(messageStack);
         messageStack.scrollTop = 640;
         await act(async () => {
           fireEvent.scroll(messageStack);
+          if (owned) fireEvent.mouseUp(document);
           await flushUiWork();
         });
+        if (!owned) {
+          // An unowned native frame is layout, not explicit reader navigation.
+          expect(messageStack).toHaveClass("is-tail-following");
+          expect(screen.queryByRole("button", { name: /New response|New activity/ })).toBeNull();
+          return;
+        }
         expect(messageStack).not.toHaveClass("is-tail-following");
 
         const spaceDownEvent = new KeyboardEvent("keydown", {
@@ -3894,7 +3902,7 @@ describe("App scroll behaviour", () => {
     expect(resolveSettledScrollMinimumAttempts(0)).toBe(0);
   });
 
-  it("jumps the new-response button to the virtualized bottom without settled-scroll spam", async () => {
+  it.each([false, true])("jumps the new-response button without settled-scroll spam only after owned escape (owned=%s)", async (owned) => {
     await withVerifiedNoReactActWarnings(async () => {
       const restoreScrollGeometry = stubElementScrollGeometry({
         clientHeight: 200,
@@ -3917,9 +3925,11 @@ describe("App scroll behaviour", () => {
           }
 
           scrollToMock.mockClear();
+          if (owned) fireEvent.mouseDown(messageStack);
           messageStack.scrollTop = 0;
           await act(async () => {
             fireEvent.scroll(messageStack);
+            if (owned) fireEvent.mouseUp(document);
             await flushUiWork();
           });
 
@@ -3949,6 +3959,12 @@ describe("App scroll behaviour", () => {
             ],
           });
 
+          if (!owned) {
+            expect(messageStack).toHaveClass("is-tail-following");
+            expect(screen.queryByRole("button", { name: /New response|New activity/ })).toBeNull();
+            expect(messageStack.scrollTop).toBe(800);
+            return;
+          }
           const scrollToLatestButton = await screen.findByRole("button", {
             name: "New response",
           });
@@ -3974,7 +3990,7 @@ describe("App scroll behaviour", () => {
     });
   });
 
-  it("keeps following the live tail after the new-response button jumps to the bottom of a growing turn", async () => {
+  it.each([false, true])("keeps following a growing turn after the new-response jump only needed for owned escape (owned=%s)", async (owned) => {
     await withVerifiedNoReactActWarnings(async () => {
       let scrollHeight = 1000;
       const restoreScrollGeometry = stubElementScrollGeometry({
@@ -4023,11 +4039,13 @@ describe("App scroll behaviour", () => {
             throw new Error("Message stack not found");
           }
 
-          // The reader scrolled away from the tail before the turn produced
-          // more output, so the first indicator is legitimate.
+          // Only the owned case models a reader leaving the tail. The same
+          // geometry without a gesture must not manufacture an indicator.
+          if (owned) fireEvent.mouseDown(messageStack);
           messageStack.scrollTop = 0;
           await act(async () => {
             fireEvent.scroll(messageStack);
+            if (owned) fireEvent.mouseUp(document);
             await flushUiWork();
           });
 
@@ -4038,6 +4056,12 @@ describe("App scroll behaviour", () => {
           });
           for (let iteration = 0; iteration < 10; iteration += 1) {
             await settleAsyncUi();
+          }
+          if (!owned) {
+            expect(messageStack).toHaveClass("is-tail-following");
+            expect(queryTailIndicator()).toBeNull();
+            expect(messageStack.scrollTop).toBe(800);
+            return;
           }
           const scrollToLatestButton = await screen.findByRole("button", {
             name: "New response",

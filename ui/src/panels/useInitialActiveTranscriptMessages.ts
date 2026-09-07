@@ -315,7 +315,7 @@ export function useInitialActiveTranscriptMessages({
         event instanceof CustomEvent
           ? (event.detail as MessageStackUserScrollIntentDetail | undefined)
           : undefined;
-      if (detail?.direction !== "up") {
+      if (detail?.direction !== "up" || detail.pendingNativeMovement) {
         return;
       }
       if (
@@ -487,7 +487,7 @@ export function useInitialActiveTranscriptMessages({
         event instanceof CustomEvent
           ? (event.detail as MessageStackUserScrollIntentDetail | undefined)
           : undefined;
-      if (detail?.direction !== "down") {
+      if (detail?.direction !== "down" || detail.pendingNativeMovement) {
         return;
       }
       if (

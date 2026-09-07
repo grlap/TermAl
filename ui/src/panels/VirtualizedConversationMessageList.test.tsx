@@ -38,7 +38,6 @@ import {
 } from "../deferred-render";
 import {
   MESSAGE_STACK_BOTTOM_FOLLOW_SCROLL_MS,
-  MESSAGE_STACK_FOCUS_OWNERSHIP_MS,
   MESSAGE_STACK_KEYBOARD_OWNERSHIP_MS,
   MESSAGE_STACK_SCROLL_WRITE_EVENT,
   MESSAGE_STACK_USER_SCROLL_INTENT_EVENT,
@@ -2998,7 +2997,7 @@ describe("VirtualizedConversationMessageList foundation", () => {
 
   it.each([
     {
-      durationMs: MESSAGE_STACK_FOCUS_OWNERSHIP_MS,
+      durationMs: 400, // Synthetic timed lease; real focus uses movement evidence.
       owner: "focus" as const,
     },
     {

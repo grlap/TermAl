@@ -4,12 +4,19 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  armMessageStackFocusScrollOwnership,
+  clearMessageStackNativeScrollOwnership,
+  claimMessageStackPointerScrollOwnership,
   claimMessageStackNativeScrollOwnership,
   consumeMessageStackVirtualizerPositionCorrection,
   isMessageStackSelectionExtensionKey,
   peekMessageStackNativeScrollOwnership,
   markMessageStackVirtualizerPositionCorrection,
   messageStackOwnsBodyKeyboardScroll,
+  nativeScrollPreservesFollowAuthority,
+  notifyMessageStackScrollWrite,
+  observeMessageStackPointerOwnershipRelease,
+  readMessageStackNativeScrollOwnershipForEvent,
   resolveMessageStackKeyboardScrollIntent,
   resolveMessageStackWheelRouting,
   revokeMessageStackNativeScrollOwnershipOnConflict,
@@ -18,6 +25,187 @@ import {
 
 afterEach(() => {
   vi.restoreAllMocks();
+});
+
+describe("native scroll follow authority", () => {
+  it("does not treat an owned zero-movement frame as a new escape", () => {
+    expect(nativeScrollPreservesFollowAuthority({
+      tailFollowIntent: true, isDetachedFromBottom: false,
+      ownership: { owner: "pointer", direction: null }, scrollDelta: 0,
+    })).toBe(true);
+  });
+  it.each(["focus", "keyboard", "pointer", "touch", "wheel"] as const)(
+    "requires a matching %s owner to create an escape", (owner) => {
+      const attached = { tailFollowIntent: true, isDetachedFromBottom: false, scrollDelta: -40 };
+      expect(nativeScrollPreservesFollowAuthority({ ...attached, ownership: null })).toBe(true);
+      expect(nativeScrollPreservesFollowAuthority({
+        ...attached, ownership: { owner, direction: "up" },
+      })).toBe(false);
+      expect(nativeScrollPreservesFollowAuthority({
+        ...attached, ownership: { owner, direction: "down" },
+      })).toBe(true);
+    },
+  );
+
+  it.each(["pointer", "touch"] as const)("accepts undirected %s ownership", (owner) => {
+    expect(nativeScrollPreservesFollowAuthority({
+      tailFollowIntent: true, isDetachedFromBottom: false,
+      ownership: { owner, direction: null }, scrollDelta: -40,
+    })).toBe(false);
+  });
+
+  it.each([[false, false], [false, true], [true, true]])(
+    "never grants FOLLOW to a detached reader (follow=%s, detached=%s)", (tailFollowIntent, isDetachedFromBottom) => {
+      expect(nativeScrollPreservesFollowAuthority({
+        tailFollowIntent, isDetachedFromBottom, ownership: null, scrollDelta: -40,
+      })).toBe(false);
+    },
+  );
+});
+
+describe("focus movement evidence", () => {
+  function focusFixture() {
+    const node = document.createElement("section");
+    const target = document.createElement("button");
+    node.append(target);
+    document.body.append(node);
+    target.focus({ preventScroll: true });
+    node.scrollTop = 800;
+    const releaseObserver = observeMessageStackPointerOwnershipRelease(node);
+    return { node, target, cleanup() { releaseObserver(); node.remove(); } };
+  }
+
+  it("consumes one proven landing across both listeners, not a second event", async () => {
+    const view = focusFixture();
+    try {
+      armMessageStackFocusScrollOwnership(view.node, view.target);
+      view.node.scrollTop = 600;
+      await Promise.resolve();
+      vi.spyOn(performance, "now").mockReturnValue(performance.now() + 10_000);
+      const event = new Event("scroll");
+      const expected = { owner: "focus", direction: "up" };
+      expect(readMessageStackNativeScrollOwnershipForEvent(view.node, event)).toEqual(expected);
+      expect(peekMessageStackNativeScrollOwnership(view.node)).toBeNull();
+      expect(readMessageStackNativeScrollOwnershipForEvent(view.node, event)).toEqual(expected);
+      expect(readMessageStackNativeScrollOwnershipForEvent(view.node, new Event("scroll"))).toBeNull();
+    } finally { view.cleanup(); }
+  });
+
+  it.each(["write", "window blur", "different landing", "target removed"] as const)("invalidates a proven landing after %s", async (change) => {
+    const view = focusFixture();
+    try {
+      armMessageStackFocusScrollOwnership(view.node, view.target);
+      view.node.scrollTop = 600;
+      await Promise.resolve();
+      if (change === "write") notifyMessageStackScrollWrite(view.node, { scrollKind: "bottom_pin" });
+      if (change === "window blur") window.dispatchEvent(new Event("blur"));
+      if (change === "different landing") view.node.scrollTop = 400;
+      if (change === "target removed") view.target.remove();
+      expect(readMessageStackNativeScrollOwnershipForEvent(view.node, new Event("scroll"))).toBeNull();
+    } finally { view.cleanup(); }
+  });
+
+  it("does not let a stale focus microtask overwrite a newer input", async () => {
+    const view = focusFixture();
+    try {
+      armMessageStackFocusScrollOwnership(view.node, view.target);
+      view.node.scrollTop = 600;
+      claimMessageStackNativeScrollOwnership(view.node, { owner: "wheel", direction: "down" }, 120);
+      await Promise.resolve();
+      expect(peekMessageStackNativeScrollOwnership(view.node)).toEqual({ owner: "wheel", direction: "down" });
+    } finally { view.cleanup(); }
+  });
+
+  it.each(["wheel", "keyboard", "touch"] as const)("preserves prior %s authority across no-movement focus", async (owner) => {
+    const view = focusFixture();
+    try {
+      const ownership = { owner, direction: "down" as const };
+      claimMessageStackNativeScrollOwnership(view.node, ownership, 1_200);
+      armMessageStackFocusScrollOwnership(view.node, view.target);
+      expect(peekMessageStackNativeScrollOwnership(view.node)).toEqual(ownership);
+      await Promise.resolve();
+      expect(peekMessageStackNativeScrollOwnership(view.node)).toEqual(ownership);
+      view.node.scrollTop = 820;
+      expect(readMessageStackNativeScrollOwnershipForEvent(view.node, new Event("scroll"))).toEqual(ownership);
+    } finally { view.cleanup(); }
+  });
+
+  it("does not extend the expiry of prior input when focus did not move", async () => {
+    const view = focusFixture();
+    let now = 0;
+    vi.spyOn(performance, "now").mockImplementation(() => now);
+    try {
+      claimMessageStackNativeScrollOwnership(view.node, { owner: "wheel", direction: "down" }, 120);
+      now = 119;
+      armMessageStackFocusScrollOwnership(view.node, view.target);
+      await Promise.resolve();
+      now = 121;
+      expect(peekMessageStackNativeScrollOwnership(view.node)).toBeNull();
+    } finally { view.cleanup(); }
+  });
+
+  it.each(["wheel", "keyboard", "touch"] as const)("replaces prior %s authority only after focus movement is proven", async (owner) => {
+    const view = focusFixture();
+    const onMovement = vi.fn();
+    try {
+      claimMessageStackNativeScrollOwnership(view.node, { owner, direction: "down" }, 1_200);
+      armMessageStackFocusScrollOwnership(view.node, view.target, onMovement);
+      view.node.scrollTop = 600;
+      expect(onMovement).not.toHaveBeenCalled();
+      await Promise.resolve();
+      expect(onMovement).toHaveBeenCalledExactlyOnceWith("up");
+      const event = new Event("scroll");
+      expect(readMessageStackNativeScrollOwnershipForEvent(view.node, event)).toEqual({ owner: "focus", direction: "up" });
+      readMessageStackNativeScrollOwnershipForEvent(view.node, event);
+      expect(onMovement).toHaveBeenCalledTimes(1);
+    } finally { view.cleanup(); }
+  });
+
+  it.each(["write", "window blur", "new input", "scope teardown"] as const)("does not publish pending focus after %s", async (change) => {
+    const view = focusFixture();
+    const onMovement = vi.fn();
+    try {
+      armMessageStackFocusScrollOwnership(view.node, view.target, onMovement);
+      view.node.scrollTop = 600;
+      if (change === "write") notifyMessageStackScrollWrite(view.node);
+      if (change === "window blur") window.dispatchEvent(new Event("blur"));
+      if (change === "new input") claimMessageStackNativeScrollOwnership(view.node, { owner: "wheel", direction: "down" }, 120);
+      if (change === "scope teardown") clearMessageStackNativeScrollOwnership(view.node);
+      await Promise.resolve();
+      expect(onMovement).not.toHaveBeenCalled();
+      expect(peekMessageStackNativeScrollOwnership(view.node)?.owner).not.toBe("focus");
+    } finally { view.cleanup(); }
+  });
+
+  it("revokes the consumed focus snapshot for every later observer of the same event", async () => {
+    const view = focusFixture();
+    try {
+      armMessageStackFocusScrollOwnership(view.node, view.target);
+      view.node.scrollTop = 600;
+      await Promise.resolve();
+      const event = new Event("scroll");
+      expect(readMessageStackNativeScrollOwnershipForEvent(view.node, event)).toEqual({ owner: "focus", direction: "up" });
+      expect(revokeMessageStackNativeScrollOwnershipOnConflict(view.node, 40, event)).toBe(true);
+      expect(readMessageStackNativeScrollOwnershipForEvent(view.node, event)).toBeNull();
+      expect(readMessageStackNativeScrollOwnershipForEvent(view.node, new Event("scroll"))).toBeNull();
+    } finally { view.cleanup(); }
+  });
+
+  it.each(["mouseup", "pointerup", "pointercancel", "lostpointercapture", "contextmenu", "dragend", "blur", "cleanup"] as const)("retains a focused descendant drag until %s", async (release) => {
+    const view = focusFixture();
+    try {
+      claimMessageStackPointerScrollOwnership(view.node);
+      armMessageStackFocusScrollOwnership(view.node, view.target);
+      await Promise.resolve();
+      vi.spyOn(performance, "now").mockReturnValue(performance.now() + 10_000);
+      expect(peekMessageStackNativeScrollOwnership(view.node)).toEqual({ owner: "pointer", direction: null });
+      if (release === "cleanup") view.cleanup();
+      else if (release === "blur") window.dispatchEvent(new Event(release));
+      else if (release === "lostpointercapture") view.node.dispatchEvent(new Event(release));
+      else document.dispatchEvent(new Event(release));
+      expect(peekMessageStackNativeScrollOwnership(view.node)).toBeNull();
+    } finally { view.cleanup(); }
+  });
 });
 
 describe("message-stack keyboard ownership", () => {

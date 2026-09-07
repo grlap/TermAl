@@ -36,7 +36,6 @@ import {
 } from "./session-live-tail-follow";
 import {
   MESSAGE_STACK_BOTTOM_FOLLOW_SCROLL_MS,
-  MESSAGE_STACK_POINTER_OWNERSHIP_MS,
   MESSAGE_STACK_SCROLL_WRITE_EVENT,
   MESSAGE_STACK_USER_SCROLL_INTENT_EVENT,
   claimMessageStackNativeScrollOwnership,

@@ -12,6 +12,7 @@ import {
 } from "./virtualized-conversation-mounted-range";
 import type { PendingVisibleMessageAnchor } from "./virtualized-conversation-measurement";
 import { useVirtualizedConversationPrependEffects } from "./virtualized-conversation-prepend";
+import { nativeScrollPreservesFollowAuthority } from "../message-stack-scroll-sync";
 import {
   nativeScrollAdvancesUserScrollGeneration,
   nativeScrollKeepsPassiveTailFollow,
@@ -335,7 +336,7 @@ describe("mounted prepend restore generation", () => {
     ).toBe(true);
   });
 
-  it("transfers tail-follow authority for stable-height upward native movement", () => {
+  it.each([false, true])("classifies stable-height upward movement by input authority (owned=%s)", (owned) => {
     const isNativeUserMovement = resolveStableHeightNativeUserMovement({
       currentScrollHeight: 12_000,
       previousScrollHeight: 12_000,
@@ -353,11 +354,15 @@ describe("mounted prepend restore generation", () => {
         scrollDelta: -2,
         scrollHeightDelta: 0,
         tailFollowIntent: true,
+        preservesFollowAuthority: nativeScrollPreservesFollowAuthority({
+          tailFollowIntent: true, isDetachedFromBottom: false, scrollDelta: -2,
+          ownership: owned ? { owner: "pointer", direction: null } : null,
+        }),
       }),
-    ).toBe(false);
+    ).toBe(!owned);
   });
 
-  it("transfers tail-follow authority when an upward frame follows content growth", () => {
+  it.each([false, true])("classifies upward movement after content growth by input authority (owned=%s)", (owned) => {
     const isNativeUserMovement = resolveStableHeightNativeUserMovement({
       currentScrollHeight: 12_040,
       previousScrollHeight: 12_000,
@@ -375,8 +380,12 @@ describe("mounted prepend restore generation", () => {
         scrollDelta: -40,
         scrollHeightDelta: 40,
         tailFollowIntent: true,
+        preservesFollowAuthority: nativeScrollPreservesFollowAuthority({
+          tailFollowIntent: true, isDetachedFromBottom: false, scrollDelta: -40,
+          ownership: owned ? { owner: "pointer", direction: null } : null,
+        }),
       }),
-    ).toBe(false);
+    ).toBe(!owned);
   });
 
   it("keeps an attached search jump passive during smooth upward native frames", () => {

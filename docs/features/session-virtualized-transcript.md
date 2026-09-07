@@ -376,25 +376,43 @@ the live scroll position during ordinary reading.
 
 ### Native-scroll ownership lease
 
-The pane and virtualizer classify each native scroll frame through one
-node-scoped lease in `message-stack-scroll-sync.ts`. Its owners and lifetimes
-are deliberately bounded:
+The pane and virtualizer classify each native scroll frame through shared
+node-scoped input evidence in `message-stack-scroll-sync.ts`. Time-bounded
+momentum and lifecycle-bound gestures have different lifetimes:
 
 - wheel: 120 ms
 - touch: the 1200 ms bottom-follow window, including post-`touchend` inertia
-- pointer/scrollbar thumb: 5 s, released earlier by pointer up/cancel,
-  `lostpointercapture`, or window blur
-- focus: 400 ms, and only when focus enters a control outside the visible band
+- primary pointer/scrollbar thumb: held until mouse/pointer up, pointer cancel,
+  `lostpointercapture`, context menu, drag end, window blur, or node teardown;
+  there is no arbitrary drag timeout. A press on message content records
+  selection-drag ownership without detaching until movement; a primary press
+  on the stack itself immediately takes scrollbar authority. Other mouse
+  buttons do not claim this held-primary-drag lifecycle. Context-menu and
+  drag-end release are observed in capture phase even if a control stops bubbling.
+- focus: a focus entering an offscreen control first arms a microtask that
+  observes the focus operation's actual movement. `preventScroll` or a
+  no-movement focus does not detach, demand history, or erase prior wheel/key/
+  touch ownership. A held pointer remains the owner when a click also focuses
+  a descendant. A proven focus landing cancels stale restoration, persists the
+  new position, and publishes genuine navigation before the next frame. A
+  downward landing at the actual tail reattaches FOLLOW. Its landing proof
+  survives delayed native delivery without a timer, but belongs to one native
+  event only and is invalidated by new input, a programmatic write, a different
+  landing, focus loss/target removal, window blur, or scroll-scope teardown.
 - browser-owned keyboard motion (currently Space): the 1200 ms bottom-follow
   window, so a long page-sized native animation keeps its landing authority
 
-A movement-capable input claims or replaces the lease. A same-burst boundary
-tick that cannot move the viewport does not clear a valid landing lease.
-Every consumer may peek at the same lease without mutating it. Only the
-virtualizer's native listener, which owns the per-frame native delta, may revoke
-a lease whose declared direction conflicts with that delta. Ordinary React
-listener re-registration never clears the lease; true node detach or unmount
-does.
+A movement-capable input claims or replaces the lease; pending focus evidence
+stays separate until movement is proven. A same-burst boundary tick that cannot
+move the viewport does not clear a valid landing lease. Consumers may peek at
+the lease without consuming it. A native-event read consumes a proven focus
+lease and shares that snapshot with the other listener on the same event, never
+with a second event. The virtualizer's native listener owns the per-frame delta
+and may revoke a direction-conflicting lease; revocation also tombstones the
+same-event snapshot so a later observer cannot revive it. Focus navigation is
+published once at proof time, not republished at native delivery, in either
+listener order. Ordinary React listener re-registration does not clear held
+input ownership; true scroll-scope teardown does.
 
 The capture-phase wheel arbiter records rejected residual `WheelEvent` objects
 in a `WeakSet`, so the later node and React listeners make the same no-authority
@@ -410,10 +428,17 @@ later reader movement. Listener order is therefore: pane capture arbitration,
 native node observers, then React root-delegated handlers and normalized user
 intent.
 
-Prelude-less native reader movement (for example a thumb drag, touch inertia,
-or browser navigation) advances the shared user-scroll generation. A prepend
-restore may suppress exactly one matching geometry tick using a generation- and
-geometry-bound token; the token expires on the next input or native tick.
+An unowned native geometry change must never create an escape from FOLLOW.
+Content shrink/regrow, resize clamps, hydration, tab changes, and delayed native
+delivery can produce the same final snapshots as user movement. Both pane and
+virtualizer use `nativeScrollPreservesFollowAuthority`: a first escape needs
+matching input ownership and actual movement, while an already detached reader
+keeps STAY authority through subsequent native inertia after the lease expires.
+Only genuine navigation advances the reader generation or cancels its competing
+restores; passive geometry still updates viewport and mounted-range bookkeeping.
+A prepend restore may suppress exactly one matching geometry tick using a
+generation- and geometry-bound token; the token expires on the next input or
+native tick.
 Finally, a detached viewport is rewound from the physical bottom only when a
 still-live canceled bottom-follow or superseded wheel token identifies that
 late frame. Mere absence of a native owner is not enough. Both pane and
@@ -422,6 +447,18 @@ at the exact physical bottom; entering the wider sticky-bottom band never
 manufactures bottom authority. A viewport-immobile downward boundary input
 also preserves any pending prepend generation/token because it did not move the
 reader.
+
+Tests deliberately split identical geometry into no-input layout cases
+(FOLLOW retained, no synthetic navigation or history demand) and owned-gesture
+controls (real wheel/key/touch/primary drag or proven focus wins). The coupled
+pane/virtualizer suite checks both listener orders, a queued restore between
+focus movement and native delivery, lost pointer releases, long held selection,
+and browser-owned keyboard movement while content grows. A genuinely
+prelude-free platform input cannot safely be distinguished from a layout clamp
+using geometry alone. This is an accepted limitation: inputs without any wheel,
+key, touch, pointer, or focus prelude keep FOLLOW until the next owned gesture.
+Capturing them requires independent evidence; do not restore the geometry-only
+first-escape fallback or invent a timeout/height heuristic to hide it.
 
 ### Keyboard `PgUp` / `PgDown`
 

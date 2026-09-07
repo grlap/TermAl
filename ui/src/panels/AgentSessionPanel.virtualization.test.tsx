@@ -2740,7 +2740,7 @@ describe("AgentSessionPanel virtualization", () => {
     }
   });
 
-  it("does not repin after a height-changing first upward native frame", async () => {
+  it.each([false, true])("classifies a height-changing upward native frame by input authority (owned=%s)", async (owned) => {
     const OriginalResizeObserver = window.ResizeObserver;
     const originalRequestAnimationFrame = window.requestAnimationFrame;
     const originalCancelAnimationFrame = window.cancelAnimationFrame;
@@ -2831,26 +2831,26 @@ describe("AgentSessionPanel virtualization", () => {
       });
 
       scrollWrites.length = 0;
-      // Simulate a deferred page mount between the last bottom scroll frame
-      // and the reader's ArrowUp frame. There is deliberately no keydown,
-      // wheel, pointer, or normalized-intent prelude; the native frame is the
-      // virtualizer's final authority fallback.
+      // A deferred mount and a real gesture may have identical final geometry.
+      // Only the owned pointer case supplies evidence of reader navigation.
       measuredSlotHeight = 220;
       act(() => {
+        if (owned) fireEvent.mouseDown(scrollNode);
         scrollTop = 360;
         fireEvent.scroll(scrollNode);
       });
 
-      // A later measurement commit must not use the stale attached authority
-      // to write the physical bottom over the reader's new position.
+      // Measurement preserves STAY for the gesture, but still follows growth
+      // after an unowned layout frame.
       measuredSlotHeight = 340;
       await act(async () => {
         resizeCallbacks.get(slot)?.([] as unknown as ResizeObserverEntry[], {} as ResizeObserver);
         await Promise.resolve();
       });
 
-      expect(scrollWrites).toEqual([]);
-      expect(scrollTop).toBe(360);
+      if (owned) expect(scrollWrites).toEqual([]);
+      else expect(scrollWrites).toContain(560);
+      expect(scrollTop).toBe(owned ? 360 : 560);
     } finally {
       window.ResizeObserver = OriginalResizeObserver;
       window.requestAnimationFrame = originalRequestAnimationFrame;

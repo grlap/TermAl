@@ -11,6 +11,7 @@ const SERIALIZED_REACT_TESTS = [
   "src/SessionPaneView.delegation-composer.test.tsx",
   "src/SessionPaneView.retry-display.test.tsx",
   "src/SessionPaneView.scroll-idle-measurement.test.tsx",
+  "src/SessionPaneView.scroll-native-authority.test.tsx",
 ];
 
 function monacoEsmCssStub() {

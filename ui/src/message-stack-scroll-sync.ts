@@ -17,10 +17,8 @@ export const MESSAGE_STACK_USER_SCROLL_INTENT_EVENT =
   "termal:message-stack-user-scroll-intent";
 
 export const MESSAGE_STACK_BOTTOM_FOLLOW_SCROLL_MS = 1200;
-export const MESSAGE_STACK_FOCUS_OWNERSHIP_MS = 400;
 export const MESSAGE_STACK_KEYBOARD_OWNERSHIP_MS =
   MESSAGE_STACK_BOTTOM_FOLLOW_SCROLL_MS;
-export const MESSAGE_STACK_POINTER_OWNERSHIP_MS = 5_000;
 export const MESSAGE_STACK_WHEEL_OWNERSHIP_MS = 120;
 
 // Some browsers make later WheelEvents in one gesture non-cancelable. The
@@ -86,12 +84,20 @@ export type MessageStackNativeScrollOwnership = {
 type MessageStackNativeScrollOwnershipLease =
   MessageStackNativeScrollOwnership & {
     expiresAt: number;
+    focusNavigation?: {
+      target: HTMLElement;
+      targetTop: number;
+    };
   };
 
 const messageStackNativeScrollOwnership = new WeakMap<
   HTMLElement,
   MessageStackNativeScrollOwnershipLease
 >();
+
+// Pending focus evidence must not replace a real wheel/key/touch lease. It
+// becomes an owner only after the focus operation proves viewport movement.
+const pendingMessageStackFocusNavigation = new WeakMap<HTMLElement, object>();
 
 type MessageStackPointerReleaseObserver = {
   cleanup: () => void;
@@ -112,9 +118,64 @@ export function claimMessageStackNativeScrollOwnership(
   ownership: MessageStackNativeScrollOwnership,
   durationMs: number,
 ) {
+  pendingMessageStackFocusNavigation.delete(node);
   messageStackNativeScrollOwnership.set(node, {
     ...ownership,
     expiresAt: messageStackScrollNow() + Math.max(durationMs, 0),
+  });
+}
+
+// A held selection/scrollbar drag is a lifecycle, not a momentum timeout.
+// Both consumers install the shared release observer before claiming it.
+export function claimMessageStackPointerScrollOwnership(node: HTMLElement) {
+  claimMessageStackNativeScrollOwnership(
+    node,
+    { direction: null, owner: "pointer" },
+    Number.POSITIVE_INFINITY,
+  );
+}
+
+export function armMessageStackFocusScrollOwnership(
+  node: HTMLElement,
+  target: HTMLElement,
+  onMovement?: (direction: "down" | "up") => void,
+) {
+  // A click can also focus an editable descendant before selection dragging.
+  // Preserve the held pointer's direction-agnostic lifetime in that case.
+  if (peekMessageStackNativeScrollOwnership(node)?.owner === "pointer") {
+    return;
+  }
+  const previousLease = messageStackNativeScrollOwnership.get(node);
+  const pending = {};
+  const startTop = node.scrollTop;
+  pendingMessageStackFocusNavigation.set(node, pending);
+  // focus() completes its default auto scroll after focusing steps. Observe
+  // that operation before later tasks/frames, not a later layout snapshot.
+  // preventScroll leaves no evidence and must not own a future browser clamp.
+  queueMicrotask(() => {
+    if (pendingMessageStackFocusNavigation.get(node) !== pending) {
+      return;
+    }
+    pendingMessageStackFocusNavigation.delete(node);
+    const delta = node.scrollTop - startTop;
+    if (
+      messageStackNativeScrollOwnership.get(node) !== previousLease ||
+      !node.contains(target) ||
+      node.ownerDocument.activeElement !== target ||
+      Math.abs(delta) <= 0.25
+    ) {
+      return;
+    }
+    const provenDirection = delta < 0 ? "up" : "down";
+    messageStackNativeScrollOwnership.set(node, {
+      direction: provenDirection,
+      owner: "focus",
+      expiresAt: Number.POSITIVE_INFINITY,
+      focusNavigation: { target, targetTop: node.scrollTop },
+    });
+    // Publish before any queued restore or paint, not at delayed native
+    // delivery. The eventual native event only consumes this landing proof.
+    onMovement?.(provenDirection);
   });
 }
 
@@ -122,6 +183,9 @@ export function clearMessageStackNativeScrollOwnership(
   node: HTMLElement,
   owner?: MessageStackNativeScrollOwner,
 ) {
+  if (owner === undefined || owner === "focus") {
+    pendingMessageStackFocusNavigation.delete(node);
+  }
   const current = messageStackNativeScrollOwnership.get(node);
   if (!current || (owner !== undefined && current.owner !== owner)) {
     return;
@@ -142,18 +206,26 @@ export function observeMessageStackPointerOwnershipRelease(
     const release = () => {
       clearMessageStackNativeScrollOwnership(node, "pointer");
     };
+    const releaseOnWindowBlur = () => {
+      release();
+      clearMessageStackNativeScrollOwnership(node, "focus");
+    };
     node.addEventListener("lostpointercapture", release);
     ownerDocument.addEventListener("mouseup", release);
     ownerDocument.addEventListener("pointerup", release);
     ownerDocument.addEventListener("pointercancel", release);
-    ownerWindow?.addEventListener("blur", release);
+    ownerDocument.addEventListener("contextmenu", release, true);
+    ownerDocument.addEventListener("dragend", release, true);
+    ownerWindow?.addEventListener("blur", releaseOnWindowBlur);
     observer = {
       cleanup: () => {
         node.removeEventListener("lostpointercapture", release);
         ownerDocument.removeEventListener("mouseup", release);
         ownerDocument.removeEventListener("pointerup", release);
         ownerDocument.removeEventListener("pointercancel", release);
-        ownerWindow?.removeEventListener("blur", release);
+        ownerDocument.removeEventListener("contextmenu", release, true);
+        ownerDocument.removeEventListener("dragend", release, true);
+        ownerWindow?.removeEventListener("blur", releaseOnWindowBlur);
       },
       subscribers: 0,
     };
@@ -174,6 +246,7 @@ export function observeMessageStackPointerOwnershipRelease(
     current.subscribers -= 1;
     if (current.subscribers <= 0) {
       current.cleanup();
+      clearMessageStackNativeScrollOwnership(node, "pointer");
       messageStackPointerReleaseObservers.delete(node);
     }
   };
@@ -186,6 +259,17 @@ export function peekMessageStackNativeScrollOwnership(
   if (!current) {
     return null;
   }
+  const focus = current.focusNavigation;
+  if (focus) {
+    if (
+      !node.contains(focus.target) ||
+      node.ownerDocument.activeElement !== focus.target ||
+      Math.abs(node.scrollTop - focus.targetTop) > 0.25
+    ) {
+      messageStackNativeScrollOwnership.delete(node);
+      return null;
+    }
+  }
   if (current.expiresAt < messageStackScrollNow()) {
     messageStackNativeScrollOwnership.delete(node);
     return null;
@@ -196,14 +280,39 @@ export function peekMessageStackNativeScrollOwnership(
   };
 }
 
+const focusOwnershipByNativeEvent = new WeakMap<Event, {
+  node: HTMLElement;
+  ownership: MessageStackNativeScrollOwnership | null;
+}>();
+
+// A proven focus landing owns one native event, shared by both listener
+// orders. Consuming the lease cannot hide it from the second listener, and a
+// different event cannot reuse it even if both events arrive in one task.
+export function readMessageStackNativeScrollOwnershipForEvent(
+  node: HTMLElement,
+  event?: Event,
+) {
+  const cached = event ? focusOwnershipByNativeEvent.get(event) : undefined;
+  if (cached?.node === node) {
+    return cached.ownership;
+  }
+  const ownership = peekMessageStackNativeScrollOwnership(node);
+  if (ownership?.owner === "focus" && event) {
+    focusOwnershipByNativeEvent.set(event, { node, ownership });
+    clearMessageStackNativeScrollOwnership(node, "focus");
+  }
+  return ownership;
+}
+
 // The virtualizer native listener owns the true per-tick delta. It is the only
 // consumer allowed to revoke a lease for directional conflict; pane and input
 // observers only peek, so listener order cannot make them delete shared state.
 export function revokeMessageStackNativeScrollOwnershipOnConflict(
   node: HTMLElement,
   scrollDelta: number,
+  event?: Event,
 ) {
-  const current = peekMessageStackNativeScrollOwnership(node);
+  const current = readMessageStackNativeScrollOwnershipForEvent(node, event);
   if (!current) {
     return false;
   }
@@ -215,6 +324,11 @@ export function revokeMessageStackNativeScrollOwnershipOnConflict(
     current.direction !== observedDirection
   ) {
     messageStackNativeScrollOwnership.delete(node);
+    if (event) {
+      // A consumed focus lease can already live only on this event. Keep a
+      // null verdict so later listeners cannot resurrect the revoked owner.
+      focusOwnershipByNativeEvent.set(event, { node, ownership: null });
+    }
     return true;
   }
   return false;
@@ -229,6 +343,30 @@ export function messageStackNativeScrollOwnershipMovesTowardBottom(
         ownership.owner === "pointer" ||
         ownership.owner === "touch"),
   );
+}
+
+// A native event reports geometry, not its cause. A transient content shrink
+// can clamp the viewport before regrowth hides that shrink from both listeners.
+// Only a matching input owner may create a new escape from FOLLOW; an already
+// detached reader keeps authority even after the input lease expires.
+export function nativeScrollPreservesFollowAuthority({
+  tailFollowIntent,
+  isDetachedFromBottom,
+  ownership,
+  scrollDelta,
+}: {
+  tailFollowIntent: boolean;
+  isDetachedFromBottom: boolean;
+  ownership: MessageStackNativeScrollOwnership | null;
+  scrollDelta: number;
+}) {
+  const inputOwnsMovement =
+    ownership !== null &&
+    Math.abs(scrollDelta) > 0.25 &&
+    (ownership.direction === null ||
+      (scrollDelta < 0 && ownership.direction === "up") ||
+      (scrollDelta > 0 && ownership.direction === "down"));
+  return tailFollowIntent && !isDetachedFromBottom && !inputOwnsMovement;
 }
 
 export type MessageStackScrollWriteKind =
@@ -300,6 +438,9 @@ export type MessageStackBottomRepinRequestOptions = {
 };
 
 export type MessageStackUserScrollIntentDetail = {
+  // A focus prelude does not grant navigation or history-demand authority.
+  // Its input owner must first prove that focus actually moved the viewport.
+  pendingNativeMovement?: boolean;
   detachFromBottomAtBoundary?: boolean;
   direction: "up" | "down";
   scrollKind: Extract<
@@ -690,6 +831,7 @@ export function notifyMessageStackScrollWrite(
   node: HTMLElement,
   detail?: MessageStackScrollWriteDetail,
 ) {
+  clearMessageStackNativeScrollOwnership(node, "focus");
   node.dispatchEvent(
     new CustomEvent<MessageStackScrollWriteDetail>(
       MESSAGE_STACK_SCROLL_WRITE_EVENT,
