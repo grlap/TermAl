@@ -917,7 +917,7 @@ fn stop_session_rolls_back_queued_successor_when_persist_fails() {
         sync_pending_prompts(&mut inner.sessions[index]);
     }
 
-    let failing_persistence_path = std::env::temp_dir().join(format!(
+    let failing_persistence_path = test_temp_dir().join(format!(
         "termal-stop-queued-successor-rollback-{}",
         Uuid::new_v4()
     ));
@@ -1015,7 +1015,7 @@ fn stop_session_rolls_back_queued_successor_when_persist_fails() {
     successor_process
         .wait()
         .expect("uncommitted successor runtime should be stopped");
-    let _ = fs::remove_dir_all(failing_persistence_path);
+    remove_test_directory(failing_persistence_path);
 }
 
 // A failed Stop commit must not silently consume the parent's pending
@@ -1075,7 +1075,7 @@ fn stop_session_restores_parent_delegation_wait_when_persist_fails() {
     }
 
     let failing_persistence_path =
-        std::env::temp_dir().join(format!("termal-stop-wait-rollback-{}", Uuid::new_v4()));
+        test_temp_dir().join(format!("termal-stop-wait-rollback-{}", Uuid::new_v4()));
     fs::create_dir_all(&failing_persistence_path)
         .expect("failing persistence directory should exist");
     state.shutdown_persist_blocking();
@@ -1114,7 +1114,7 @@ fn stop_session_restores_parent_delegation_wait_when_persist_fails() {
     process
         .wait()
         .expect("original Cursor runtime should be stopped");
-    let _ = fs::remove_dir_all(failing_persistence_path);
+    remove_test_directory(failing_persistence_path);
 }
 
 // Pins the failure half of the atomic stop-plus-queue transition. If the
@@ -1841,7 +1841,7 @@ fn fail_turn_if_runtime_matches_publishes_error_state_when_persist_fails() {
     let session_id = test_session_id(&state, Agent::Claude);
     let (runtime, _input_rx) = test_claude_runtime_handle("claude-fail-turn-persist-fallback");
     let runtime_token = RuntimeToken::Claude(runtime.runtime_id.clone());
-    let failing_persistence_path = std::env::temp_dir().join(format!(
+    let failing_persistence_path = test_temp_dir().join(format!(
         "termal-fail-turn-persist-fallback-{}",
         Uuid::new_v4()
     ));
@@ -1898,7 +1898,7 @@ fn fail_turn_if_runtime_matches_publishes_error_state_when_persist_fails() {
     assert_eq!(published_session.preview, "persist fallback failure");
     assert_eq!(published_session.message_count, session.message_count);
 
-    let _ = fs::remove_dir_all(failing_persistence_path);
+    remove_test_directory(failing_persistence_path);
 }
 
 #[test]
@@ -1908,7 +1908,7 @@ fn runtime_exit_clears_active_turn_file_tracking_when_persist_fails() {
     let (runtime, _input_rx) =
         test_claude_runtime_handle("claude-runtime-exit-active-turn-rollback");
     let runtime_token = RuntimeToken::Claude(runtime.runtime_id.clone());
-    let failing_persistence_path = std::env::temp_dir().join(format!(
+    let failing_persistence_path = test_temp_dir().join(format!(
         "termal-runtime-exit-active-turn-rollback-{}",
         Uuid::new_v4()
     ));
@@ -1958,7 +1958,7 @@ fn runtime_exit_clears_active_turn_file_tracking_when_persist_fails() {
     assert!(record.active_turn_file_change_grace_deadline.is_none());
     drop(inner);
 
-    let _ = fs::remove_dir_all(failing_persistence_path);
+    remove_test_directory(failing_persistence_path);
 }
 
 #[test]
@@ -1967,7 +1967,7 @@ fn engram_mcp_revocation_publishes_terminal_state_when_persist_fails() {
     let session_id = test_session_id(&state, Agent::Claude);
     let (runtime, _input_rx) =
         test_claude_runtime_handle("claude-engram-revocation-persist-failure");
-    let failing_persistence_path = std::env::temp_dir().join(format!(
+    let failing_persistence_path = test_temp_dir().join(format!(
         "termal-engram-revocation-persist-failure-{}",
         Uuid::new_v4()
     ));
@@ -2040,7 +2040,7 @@ fn engram_mcp_revocation_publishes_terminal_state_when_persist_fails() {
     assert!(record.orchestrator_auto_dispatch_blocked);
     drop(inner);
 
-    let _ = fs::remove_dir_all(failing_persistence_path);
+    remove_test_directory(failing_persistence_path);
 }
 
 #[test]

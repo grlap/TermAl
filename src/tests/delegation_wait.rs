@@ -555,13 +555,14 @@ fn boot_reconciliation_drops_unsatisfied_wait_with_missing_parent_and_running_ta
     assert_eq!(delegation.status, DelegationStatus::Running);
     drop(inner);
     restarted.shutdown_persist_blocking();
+    drop(restarted);
 
     let state_root = persistence_path
         .parent()
         .expect("persistence path should have a parent")
         .to_path_buf();
-    let _ = fs::remove_dir_all(project_root);
-    let _ = fs::remove_dir_all(state_root);
+    remove_test_directory(project_root);
+    remove_test_directory(state_root);
 }
 
 #[test]
@@ -1339,13 +1340,14 @@ fn delegation_wait_reconciles_after_restart_recovery() {
         );
     }
     restarted.shutdown_persist_blocking();
+    drop(restarted);
 
     let state_root = persistence_path
         .parent()
         .expect("persistence path should have a parent")
         .to_path_buf();
-    let _ = fs::remove_dir_all(project_root);
-    let _ = fs::remove_dir_all(state_root);
+    remove_test_directory(project_root);
+    remove_test_directory(state_root);
 }
 
 #[test]
@@ -1391,13 +1393,14 @@ fn delegation_wait_reconciles_missing_parent_after_restart() {
     );
     drop(inner);
     restarted.shutdown_persist_blocking();
+    drop(restarted);
 
     let state_root = persistence_path
         .parent()
         .expect("persistence path should have a parent")
         .to_path_buf();
-    let _ = fs::remove_dir_all(project_root);
-    let _ = fs::remove_dir_all(state_root);
+    remove_test_directory(project_root);
+    remove_test_directory(state_root);
 }
 
 #[test]

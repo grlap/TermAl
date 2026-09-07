@@ -35,7 +35,7 @@ fn cache_agent_commands_for_test(state: &AppState, session_id: &str, commands: V
 // siblings, or scrambling the ordering the palette relies on.
 #[test]
 fn reads_claude_agent_commands_from_markdown_files() {
-    let root = std::env::temp_dir().join(format!("termal-agent-commands-{}", Uuid::new_v4()));
+    let root = test_temp_dir().join(format!("termal-agent-commands-{}", Uuid::new_v4()));
     let _cleanup = TempDirCleanup::new(root.clone());
     let commands_dir = root.join(".claude").join("commands");
 
@@ -102,7 +102,7 @@ Inspect diffs.
 
 #[test]
 fn read_claude_agent_commands_rejects_oversized_command_file() {
-    let root = std::env::temp_dir().join(format!(
+    let root = test_temp_dir().join(format!(
         "termal-agent-commands-oversized-{}",
         Uuid::new_v4()
     ));
@@ -131,7 +131,7 @@ fn read_claude_agent_commands_rejects_oversized_command_file() {
 fn read_agent_command_file_rejects_symlink_open() {
     use std::os::unix::fs::symlink;
 
-    let root = std::env::temp_dir().join(format!(
+    let root = test_temp_dir().join(format!(
         "termal-agent-commands-symlink-open-{}",
         Uuid::new_v4()
     ));
@@ -156,7 +156,7 @@ fn read_agent_command_file_rejects_symlink_open() {
 
 #[test]
 fn reads_claude_agent_commands_strip_yaml_frontmatter() {
-    let root = std::env::temp_dir().join(format!(
+    let root = test_temp_dir().join(format!(
         "termal-agent-commands-frontmatter-{}",
         Uuid::new_v4()
     ));
@@ -325,7 +325,7 @@ Large body.
 
 #[test]
 fn reads_claude_agent_commands_fallback_description_for_blank_frontmatter_description() {
-    let root = std::env::temp_dir().join(format!(
+    let root = test_temp_dir().join(format!(
         "termal-agent-commands-blank-description-{}",
         Uuid::new_v4()
     ));
@@ -354,7 +354,7 @@ Run a targeted tool check.
 
 #[test]
 fn reads_claude_agent_commands_strip_claude_only_frontmatter() {
-    let root = std::env::temp_dir().join(format!(
+    let root = test_temp_dir().join(format!(
         "termal-agent-commands-claude-frontmatter-{}",
         Uuid::new_v4()
     ));
@@ -384,7 +384,7 @@ Run a targeted tool check.
 
 #[test]
 fn reads_claude_agent_commands_strip_crlf_frontmatter() {
-    let root = std::env::temp_dir().join(format!(
+    let root = test_temp_dir().join(format!(
         "termal-agent-commands-crlf-frontmatter-{}",
         Uuid::new_v4()
     ));
@@ -409,7 +409,7 @@ fn reads_claude_agent_commands_strip_crlf_frontmatter() {
 
 #[test]
 fn reads_claude_agent_commands_strip_model_only_frontmatter() {
-    let root = std::env::temp_dir().join(format!(
+    let root = test_temp_dir().join(format!(
         "termal-agent-commands-model-frontmatter-{}",
         Uuid::new_v4()
     ));
@@ -443,7 +443,7 @@ Run with the command model preference.
 
 #[test]
 fn reads_claude_agent_commands_strip_tools_and_disable_model_frontmatter() {
-    let root = std::env::temp_dir().join(format!(
+    let root = test_temp_dir().join(format!(
         "termal-agent-commands-tools-frontmatter-{}",
         Uuid::new_v4()
     ));
@@ -487,7 +487,7 @@ Run with declared tools.
 
 #[test]
 fn reads_claude_agent_commands_preserve_thematic_breaks() {
-    let root = std::env::temp_dir().join(format!(
+    let root = test_temp_dir().join(format!(
         "termal-agent-commands-thematic-break-{}",
         Uuid::new_v4()
     ));
@@ -521,7 +521,7 @@ Run the check.
 
 #[test]
 fn reads_claude_agent_commands_ignore_nested_frontmatter_description() {
-    let root = std::env::temp_dir().join(format!(
+    let root = test_temp_dir().join(format!(
         "termal-agent-commands-nested-description-{}",
         Uuid::new_v4()
     ));
@@ -555,8 +555,7 @@ Body description wins.
 // the command palette for every project without template commands.
 #[test]
 fn returns_empty_agent_commands_when_commands_directory_is_missing() {
-    let root =
-        std::env::temp_dir().join(format!("termal-agent-commands-missing-{}", Uuid::new_v4()));
+    let root = test_temp_dir().join(format!("termal-agent-commands-missing-{}", Uuid::new_v4()));
     let _cleanup = TempDirCleanup::new(root.clone());
     fs::create_dir_all(&root).unwrap();
 
@@ -570,7 +569,7 @@ fn returns_empty_agent_commands_when_commands_directory_is_missing() {
 // Guards against hiding project prompt templates behind an agent-kind gate.
 #[test]
 fn returns_agent_commands_for_non_claude_sessions() {
-    let root = std::env::temp_dir().join(format!("termal-agent-commands-codex-{}", Uuid::new_v4()));
+    let root = test_temp_dir().join(format!("termal-agent-commands-codex-{}", Uuid::new_v4()));
     let _cleanup = TempDirCleanup::new(root.clone());
     let commands_dir = root.join(".claude").join("commands");
     fs::create_dir_all(&commands_dir).unwrap();
@@ -729,7 +728,7 @@ fn extracts_claude_native_agent_commands_returns_none_for_empty_command_list() {
 // the same name appears in both sources.
 #[test]
 fn returns_cached_claude_native_commands_alongside_template_fallbacks() {
-    let root = std::env::temp_dir().join(format!(
+    let root = test_temp_dir().join(format!(
         "termal-agent-commands-claude-native-{}",
         Uuid::new_v4()
     ));
@@ -879,7 +878,7 @@ fn sync_session_agent_commands_bumps_visible_session_command_revision() {
 // be cached where they could impersonate trusted filesystem templates.
 #[test]
 fn sync_session_agent_commands_filters_runtime_prompt_templates() {
-    let root = std::env::temp_dir().join(format!(
+    let root = test_temp_dir().join(format!(
         "termal-agent-command-runtime-filter-{}",
         Uuid::new_v4()
     ));
@@ -1008,8 +1007,7 @@ async fn agent_command_resolve_route_json_rejection_uses_endpoint_label() {
 // expansion.
 #[test]
 fn resolves_prompt_template_arguments_and_note() {
-    let root =
-        std::env::temp_dir().join(format!("termal-agent-command-resolve-{}", Uuid::new_v4()));
+    let root = test_temp_dir().join(format!("termal-agent-command-resolve-{}", Uuid::new_v4()));
     let _cleanup = TempDirCleanup::new(root.clone());
     let commands_dir = root.join(".claude").join("commands");
     fs::create_dir_all(&commands_dir).unwrap();
@@ -1096,7 +1094,7 @@ fn rejects_oversized_agent_command_arguments_and_note() {
     ];
 
     for (case_name, arguments, note, expected_message) in cases {
-        let root = std::env::temp_dir().join(format!(
+        let root = test_temp_dir().join(format!(
             "termal-agent-command-oversized-{case_name}-{}",
             Uuid::new_v4()
         ));
@@ -1150,7 +1148,7 @@ fn rejects_oversized_agent_command_arguments_and_note() {
 // frontmatter must not grant trusted delegation defaults by itself.
 #[test]
 fn project_local_review_code_metadata_does_not_grant_delegation_defaults() {
-    let root = std::env::temp_dir().join(format!(
+    let root = test_temp_dir().join(format!(
         "termal-agent-command-resolve-review-code-{}",
         Uuid::new_v4()
     ));
@@ -1223,12 +1221,12 @@ Review staged and unstaged changes.
 
 #[test]
 fn delegation_command_resolution_uses_requested_cwd() {
-    let parent_root = std::env::temp_dir().join(format!(
+    let parent_root = test_temp_dir().join(format!(
         "termal-agent-command-parent-cwd-{}",
         Uuid::new_v4()
     ));
     let child_root =
-        std::env::temp_dir().join(format!("termal-agent-command-child-cwd-{}", Uuid::new_v4()));
+        test_temp_dir().join(format!("termal-agent-command-child-cwd-{}", Uuid::new_v4()));
     let _parent_cleanup = TempDirCleanup::new(parent_root.clone());
     let _child_cleanup = TempDirCleanup::new(child_root.clone());
     let child_commands_dir = child_root.join(".claude").join("commands");
@@ -1280,11 +1278,11 @@ fn delegation_command_resolution_uses_requested_cwd() {
 
 #[test]
 fn claude_delegation_command_resolution_cwd_ignores_parent_cached_commands() {
-    let parent_root = std::env::temp_dir().join(format!(
+    let parent_root = test_temp_dir().join(format!(
         "termal-agent-command-claude-parent-cwd-{}",
         Uuid::new_v4()
     ));
-    let child_root = std::env::temp_dir().join(format!(
+    let child_root = test_temp_dir().join(format!(
         "termal-agent-command-claude-child-cwd-{}",
         Uuid::new_v4()
     ));
@@ -1354,7 +1352,7 @@ fn claude_delegation_command_resolution_cwd_ignores_parent_cached_commands() {
 
 #[test]
 fn claude_delegation_command_resolution_cwd_keeps_cache_for_session_workdir() {
-    let root = std::env::temp_dir().join(format!(
+    let root = test_temp_dir().join(format!(
         "termal-agent-command-claude-same-cwd-{}",
         Uuid::new_v4()
     ));
@@ -1413,11 +1411,11 @@ fn claude_delegation_command_resolution_cwd_keeps_cache_for_session_workdir() {
 
 #[test]
 fn claude_delegation_command_resolution_cwd_keeps_global_cached_commands() {
-    let parent_root = std::env::temp_dir().join(format!(
+    let parent_root = test_temp_dir().join(format!(
         "termal-agent-command-claude-global-parent-cwd-{}",
         Uuid::new_v4()
     ));
-    let child_root = std::env::temp_dir().join(format!(
+    let child_root = test_temp_dir().join(format!(
         "termal-agent-command-claude-global-child-cwd-{}",
         Uuid::new_v4()
     ));
@@ -1526,7 +1524,7 @@ fn claude_delegation_command_resolution_cwd_keeps_global_cached_commands() {
 
 #[test]
 fn delegation_command_resolution_cwd_allows_child_directory_inside_project() {
-    let project_root = std::env::temp_dir().join(format!(
+    let project_root = test_temp_dir().join(format!(
         "termal-agent-command-project-cwd-{}",
         Uuid::new_v4()
     ));
@@ -1565,11 +1563,11 @@ fn delegation_command_resolution_cwd_allows_child_directory_inside_project() {
 
 #[test]
 fn rejects_delegation_command_resolution_cwd_outside_project() {
-    let project_root = std::env::temp_dir().join(format!(
+    let project_root = test_temp_dir().join(format!(
         "termal-agent-command-project-root-{}",
         Uuid::new_v4()
     ));
-    let outside_root = std::env::temp_dir().join(format!(
+    let outside_root = test_temp_dir().join(format!(
         "termal-agent-command-outside-project-{}",
         Uuid::new_v4()
     ));
@@ -1601,7 +1599,7 @@ fn rejects_delegation_command_resolution_cwd_outside_project() {
 
 #[test]
 fn rejects_delegation_command_resolution_cwd_for_remote_project() {
-    let cwd = std::env::temp_dir().join(format!(
+    let cwd = test_temp_dir().join(format!(
         "termal-agent-command-remote-project-cwd-{}",
         Uuid::new_v4()
     ));
@@ -1650,8 +1648,7 @@ fn rejects_delegation_command_resolution_cwd_for_remote_project() {
 
 #[test]
 fn rejects_cwd_override_for_non_delegation_command_resolution() {
-    let root =
-        std::env::temp_dir().join(format!("termal-agent-command-send-cwd-{}", Uuid::new_v4()));
+    let root = test_temp_dir().join(format!("termal-agent-command-send-cwd-{}", Uuid::new_v4()));
     let _cleanup = TempDirCleanup::new(root.clone());
     let commands_dir = root.join(".claude").join("commands");
     fs::create_dir_all(&commands_dir).unwrap();
@@ -1697,8 +1694,7 @@ fn rejects_cwd_override_for_non_delegation_command_resolution() {
 
 #[test]
 fn rejects_oversized_delegation_command_resolution_cwd() {
-    let root =
-        std::env::temp_dir().join(format!("termal-agent-command-long-cwd-{}", Uuid::new_v4()));
+    let root = test_temp_dir().join(format!("termal-agent-command-long-cwd-{}", Uuid::new_v4()));
     let _cleanup = TempDirCleanup::new(root.clone());
     fs::create_dir_all(&root).unwrap();
 
@@ -1876,7 +1872,7 @@ fn project_local_invalid_delegation_metadata_does_not_block_resolution() {
     ];
 
     for (case_name, frontmatter) in cases {
-        let root = std::env::temp_dir().join(format!(
+        let root = test_temp_dir().join(format!(
             "termal-agent-command-untrusted-invalid-metadata-{case_name}-{}",
             Uuid::new_v4()
         ));
@@ -2023,7 +2019,7 @@ fn rejects_partial_agent_command_termal_metadata() {
 
 #[test]
 fn resolves_claude_only_tab_indented_frontmatter_without_termal_metadata() {
-    let root = std::env::temp_dir().join(format!(
+    let root = test_temp_dir().join(format!(
         "termal-agent-command-claude-tab-frontmatter-{}",
         Uuid::new_v4()
     ));
@@ -2084,7 +2080,7 @@ Run tool check for $ARGUMENTS.
 
 #[test]
 fn resolves_claude_only_large_frontmatter_without_termal_metadata() {
-    let root = std::env::temp_dir().join(format!(
+    let root = test_temp_dir().join(format!(
         "termal-agent-command-large-claude-frontmatter-{}",
         Uuid::new_v4()
     ));
@@ -2145,7 +2141,7 @@ Run tool check for $ARGUMENTS.
 
 #[test]
 fn resolves_termal_metadata_while_ignoring_unrelated_frontmatter_errors() {
-    let root = std::env::temp_dir().join(format!(
+    let root = test_temp_dir().join(format!(
         "termal-agent-command-mixed-frontmatter-{}",
         Uuid::new_v4()
     ));
@@ -2213,7 +2209,7 @@ Review staged and unstaged changes.
 
 #[test]
 fn resolves_dotted_termal_metadata_frontmatter() {
-    let root = std::env::temp_dir().join(format!(
+    let root = test_temp_dir().join(format!(
         "termal-agent-command-dotted-frontmatter-{}",
         Uuid::new_v4()
     ));
@@ -2440,7 +2436,7 @@ fn prompt_template_delegate_resolution_does_not_use_metadata_when_source_path_mi
 
 #[test]
 fn resolver_metadata_and_prompt_content_refresh_together_after_file_edit() {
-    let root = std::env::temp_dir().join(format!(
+    let root = test_temp_dir().join(format!(
         "termal-agent-command-frontmatter-freshness-{}",
         Uuid::new_v4()
     ));
@@ -2540,7 +2536,7 @@ Second prompt $ARGUMENTS.
 
 #[test]
 fn cached_prompt_template_missing_metadata_file_resolves_without_defaults() {
-    let root = std::env::temp_dir().join(format!(
+    let root = test_temp_dir().join(format!(
         "termal-agent-command-missing-metadata-{}",
         Uuid::new_v4()
     ));

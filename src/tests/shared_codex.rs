@@ -1865,7 +1865,7 @@ fn shared_codex_thread_setup_persist_failure_does_not_tear_down_runtime() {
     let session_id = test_session_id(&state, Agent::Codex);
     let (runtime, _runtime_input_rx, process) =
         test_shared_codex_runtime("shared-codex-thread-setup-persist-failure");
-    let failing_persistence_path = std::env::temp_dir().join(format!(
+    let failing_persistence_path = test_temp_dir().join(format!(
         "termal-shared-codex-thread-setup-persist-failure-{}",
         Uuid::new_v4()
     ));
@@ -2016,7 +2016,7 @@ fn shared_codex_thread_setup_persist_failure_does_not_tear_down_runtime() {
         );
     }
 
-    let _ = fs::remove_dir_all(failing_persistence_path);
+    remove_test_directory(failing_persistence_path);
 }
 
 // Pins that handle_shared_codex_start_turn with a runtime_id that no
@@ -2234,7 +2234,7 @@ fn set_external_session_id_if_runtime_matches_reports_persist_failure() {
     let mut state = test_app_state();
     let session_id = test_session_id(&state, Agent::Codex);
     let (runtime, _input_rx) = test_codex_runtime_handle("persist-thread-id-runtime");
-    let failing_persistence_path = std::env::temp_dir().join(format!(
+    let failing_persistence_path = test_temp_dir().join(format!(
         "termal-codex-thread-id-persist-failure-{}",
         Uuid::new_v4()
     ));
@@ -2261,7 +2261,7 @@ fn set_external_session_id_if_runtime_matches_reports_persist_failure() {
         result.is_err(),
         "commit failures should not collapse into stale-session misses"
     );
-    let _ = fs::remove_dir_all(failing_persistence_path);
+    remove_test_directory(failing_persistence_path);
 }
 
 // Pins that record_codex_runtime_config_if_runtime_matches propagates
@@ -2273,7 +2273,7 @@ fn record_codex_runtime_config_if_runtime_matches_reports_persist_failure() {
     let mut state = test_app_state();
     let session_id = test_session_id(&state, Agent::Codex);
     let (runtime, _input_rx) = test_codex_runtime_handle("persist-runtime-config-runtime");
-    let failing_persistence_path = std::env::temp_dir().join(format!(
+    let failing_persistence_path = test_temp_dir().join(format!(
         "termal-codex-runtime-config-persist-failure-{}",
         Uuid::new_v4()
     ));
@@ -2303,7 +2303,7 @@ fn record_codex_runtime_config_if_runtime_matches_reports_persist_failure() {
         result.is_err(),
         "persistence failures should remain fatal to the caller"
     );
-    let _ = fs::remove_dir_all(failing_persistence_path);
+    remove_test_directory(failing_persistence_path);
 }
 
 // Pins that a persistence failure during handle_shared_codex_start_turn's
@@ -2317,7 +2317,7 @@ fn shared_codex_start_turn_persist_failure_does_not_tear_down_runtime() {
     let session_id = test_session_id(&state, Agent::Codex);
     let (runtime, _runtime_input_rx, process) =
         test_shared_codex_runtime("shared-codex-start-turn-persist-failure");
-    let failing_persistence_path = std::env::temp_dir().join(format!(
+    let failing_persistence_path = test_temp_dir().join(format!(
         "termal-shared-codex-start-turn-persist-failure-{}",
         Uuid::new_v4()
     ));
@@ -2397,7 +2397,7 @@ fn shared_codex_start_turn_persist_failure_does_not_tear_down_runtime() {
             if text.contains("Turn failed: Failed to save session state")
     ));
 
-    let _ = fs::remove_dir_all(failing_persistence_path);
+    remove_test_directory(failing_persistence_path);
 }
 
 // Pins the shared_codex_event_matches_visible_turn predicate: it accepts

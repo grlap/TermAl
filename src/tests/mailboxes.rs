@@ -1458,7 +1458,7 @@ fn rejected_delivery_persistence_failure_still_requeues_the_mailbox_wake() {
         record.session.preview = "MAILBOX TURN".to_owned();
     }
 
-    let failing_persistence_path = std::env::temp_dir().join(format!(
+    let failing_persistence_path = test_temp_dir().join(format!(
         "termal-mailbox-rejected-persist-failure-{}",
         uuid::Uuid::new_v4()
     ));
@@ -1509,7 +1509,7 @@ fn rejected_delivery_persistence_failure_still_requeues_the_mailbox_wake() {
         "deliveredToIdleSession"
     );
 
-    let _ = fs::remove_dir_all(failing_persistence_path);
+    remove_test_directory(failing_persistence_path);
 }
 
 // Engram settings rotation owns runtime teardown outside the ordinary turn

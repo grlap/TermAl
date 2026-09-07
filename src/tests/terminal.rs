@@ -603,8 +603,8 @@ fn terminal_output_buffer_supports_concurrent_writer_and_snapshotter() {
 #[tokio::test]
 async fn terminal_run_route_rejects_invalid_requests() {
     let state = test_app_state();
-    let root = std::env::temp_dir().join(format!("termal-terminal-validation-{}", Uuid::new_v4()));
-    let outside_root = std::env::temp_dir().join(format!(
+    let root = test_temp_dir().join(format!("termal-terminal-validation-{}", Uuid::new_v4()));
+    let outside_root = test_temp_dir().join(format!(
         "termal-terminal-validation-outside-{}",
         Uuid::new_v4()
     ));
@@ -998,7 +998,7 @@ fn terminal_exact_stdout_command(text: &str) -> String {
 #[tokio::test]
 async fn terminal_run_stream_route_emits_output_before_complete() {
     let state = test_app_state();
-    let root = std::env::temp_dir().join(format!("termal-terminal-stream-{}", Uuid::new_v4()));
+    let root = test_temp_dir().join(format!("termal-terminal-stream-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let command = terminal_exact_stdout_command("stream-ok");
     let project = state
@@ -1076,7 +1076,7 @@ async fn terminal_run_stream_route_emits_output_before_complete() {
 #[tokio::test]
 async fn terminal_run_stream_route_returns_http_error_for_bad_workdir() {
     let state = test_app_state();
-    let root = std::env::temp_dir().join(format!("termal-terminal-stream-bad-{}", Uuid::new_v4()));
+    let root = test_temp_dir().join(format!("termal-terminal-stream-bad-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let outside = root
         .parent()
@@ -1129,8 +1129,7 @@ async fn terminal_run_stream_route_returns_http_error_for_bad_workdir() {
 #[tokio::test]
 async fn terminal_run_stream_route_limits_local_and_remote_concurrent_commands() {
     let state = test_app_state();
-    let root =
-        std::env::temp_dir().join(format!("termal-terminal-stream-limit-{}", Uuid::new_v4()));
+    let root = test_temp_dir().join(format!("termal-terminal-stream-limit-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let project = state
         .create_project(CreateProjectRequest {
@@ -1239,8 +1238,7 @@ async fn terminal_run_stream_route_limits_local_and_remote_concurrent_commands()
 #[tokio::test]
 async fn terminal_run_stream_route_emits_error_without_complete_when_spawn_fails() {
     let state = test_app_state();
-    let root =
-        std::env::temp_dir().join(format!("termal-terminal-stream-error-{}", Uuid::new_v4()));
+    let root = test_temp_dir().join(format!("termal-terminal-stream-error-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let not_a_directory = root.join("not-a-directory.txt");
     fs::write(&not_a_directory, "not a directory").unwrap();
@@ -1308,7 +1306,7 @@ async fn terminal_run_stream_route_emits_error_without_complete_when_spawn_fails
 #[tokio::test]
 async fn terminal_run_route_limits_concurrent_commands() {
     let state = test_app_state();
-    let root = std::env::temp_dir().join(format!("termal-terminal-limit-{}", Uuid::new_v4()));
+    let root = test_temp_dir().join(format!("termal-terminal-limit-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let project = state
         .create_project(CreateProjectRequest {
@@ -1639,7 +1637,7 @@ async fn terminal_run_route_limits_concurrent_commands() {
 // string that preserves the raw input without a Windows `\\?\` prefix.
 #[test]
 fn run_terminal_shell_command_runs_trivial_local_command() {
-    let root = std::env::temp_dir().join(format!("termal-terminal-runner-{}", Uuid::new_v4()));
+    let root = test_temp_dir().join(format!("termal-terminal-runner-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
 
     let response =
@@ -1688,7 +1686,7 @@ fn run_terminal_shell_command_timeout_kills_process_tree() {
     // case. The `assert_path_absent_throughout` window (2500ms) then
     // continuously asserts the marker stays absent for the rest of the
     // grandchild's scheduled sleep + a safety margin.
-    let root = std::env::temp_dir().join(format!("termal-terminal-timeout-{}", Uuid::new_v4()));
+    let root = test_temp_dir().join(format!("termal-terminal-timeout-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let marker = root.join("orphan-marker.txt");
     let command = terminal_timeout_process_tree_command(&marker);
@@ -1716,7 +1714,7 @@ fn run_terminal_shell_command_timeout_kills_process_tree() {
 #[cfg(windows)]
 #[test]
 fn run_terminal_shell_command_cleans_up_background_children_after_shell_exit() {
-    let root = std::env::temp_dir().join(format!("termal-terminal-background-{}", Uuid::new_v4()));
+    let root = test_temp_dir().join(format!("termal-terminal-background-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let marker = root.join("background-marker.txt");
     let command = terminal_background_process_tree_command(&marker);
@@ -1755,7 +1753,7 @@ fn run_terminal_shell_command_cleans_up_background_children_after_shell_exit() {
 #[cfg(not(windows))]
 #[test]
 fn run_terminal_shell_command_succeeds_with_live_unix_grandchild() {
-    let root = std::env::temp_dir().join(format!(
+    let root = test_temp_dir().join(format!(
         "termal-terminal-live-grandchild-{}",
         Uuid::new_v4()
     ));

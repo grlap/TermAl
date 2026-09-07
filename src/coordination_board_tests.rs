@@ -11,7 +11,7 @@ struct CoordinationBoardTestRoot(PathBuf);
 
 impl CoordinationBoardTestRoot {
     fn new() -> Self {
-        let path = std::env::temp_dir().join(format!("termal-board-test-{}", Uuid::new_v4()));
+        let path = test_temp_dir().join(format!("termal-board-test-{}", Uuid::new_v4()));
         fs::create_dir_all(&path).expect("coordination board test root should exist");
         Self(path)
     }
@@ -23,7 +23,7 @@ impl CoordinationBoardTestRoot {
 
 impl Drop for CoordinationBoardTestRoot {
     fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
+        remove_test_directory(&self.0);
     }
 }
 

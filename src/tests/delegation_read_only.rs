@@ -349,7 +349,7 @@ async fn read_only_delegation_expired_child_link_uses_fallback_error_wording() {
 fn read_only_delegation_missing_child_session_still_blocks_scope_writes() {
     let state = test_app_state();
     let project_root =
-        std::env::temp_dir().join(format!("termal-read-only-missing-child-{}", Uuid::new_v4()));
+        test_temp_dir().join(format!("termal-read-only-missing-child-{}", Uuid::new_v4()));
     fs::create_dir_all(&project_root).expect("project root should exist");
     let project_id = create_test_project(&state, &project_root, "Missing Child Scope");
     let parent_session_id =
@@ -392,14 +392,13 @@ fn read_only_delegation_missing_child_session_still_blocks_scope_writes() {
     );
 
     let _ = fs::remove_file(state.persistence_path.as_path());
-    let _ = fs::remove_dir_all(project_root);
+    remove_test_directory(project_root);
 }
 
 #[tokio::test]
 async fn read_only_delegation_blocks_project_writes_without_session_id() {
     let state = test_app_state();
-    let project_root =
-        std::env::temp_dir().join(format!("termal-read-only-project-{}", Uuid::new_v4()));
+    let project_root = test_temp_dir().join(format!("termal-read-only-project-{}", Uuid::new_v4()));
     fs::create_dir_all(&project_root).expect("project root should exist");
     let project_id = create_test_project(&state, &project_root, "Read-only Project");
     let parent_session_id =
@@ -524,14 +523,14 @@ async fn read_only_delegation_blocks_project_writes_without_session_id() {
     }
 
     let _ = fs::remove_file(state.persistence_path.as_path());
-    let _ = fs::remove_dir_all(project_root);
+    remove_test_directory(project_root);
 }
 
 #[test]
 fn read_only_delegation_blocks_bidirectional_workdir_containment() {
     let state = test_app_state();
     let project_root =
-        std::env::temp_dir().join(format!("termal-read-only-workdir-scope-{}", Uuid::new_v4()));
+        test_temp_dir().join(format!("termal-read-only-workdir-scope-{}", Uuid::new_v4()));
     let delegated_dir = project_root.join("delegated");
     let nested_write_dir = delegated_dir.join("nested");
     fs::create_dir_all(&nested_write_dir).expect("nested workdir should exist");
@@ -602,7 +601,7 @@ fn read_only_delegation_blocks_bidirectional_workdir_containment() {
     );
 
     let _ = fs::remove_file(state.persistence_path.as_path());
-    let _ = fs::remove_dir_all(project_root);
+    remove_test_directory(project_root);
 }
 
 #[test]
@@ -625,8 +624,7 @@ fn delegation_write_scope_does_not_match_empty_workdir() {
 #[tokio::test]
 async fn read_only_delegation_blocks_git_repo_root_writes_from_sibling_workdir() {
     let state = test_app_state();
-    let repo_root =
-        std::env::temp_dir().join(format!("termal-read-only-git-root-{}", Uuid::new_v4()));
+    let repo_root = test_temp_dir().join(format!("termal-read-only-git-root-{}", Uuid::new_v4()));
     let delegated_dir = repo_root.join("delegated");
     let sibling_dir = repo_root.join("sibling");
     fs::create_dir_all(&delegated_dir).expect("delegated workdir should exist");
@@ -682,15 +680,15 @@ async fn read_only_delegation_blocks_git_repo_root_writes_from_sibling_workdir()
     assert_read_only_delegation_error(&body, "Read-only Git Root");
 
     let _ = fs::remove_file(state.persistence_path.as_path());
-    let _ = fs::remove_dir_all(repo_root);
+    remove_test_directory(repo_root);
 }
 
 #[tokio::test]
 async fn read_only_delegation_blocks_project_and_workdir_writes_with_parent_session_id() {
     let state = test_app_state();
     let project_root =
-        std::env::temp_dir().join(format!("termal-read-only-parent-scope-{}", Uuid::new_v4()));
-    let unrelated_root = std::env::temp_dir().join(format!(
+        test_temp_dir().join(format!("termal-read-only-parent-scope-{}", Uuid::new_v4()));
+    let unrelated_root = test_temp_dir().join(format!(
         "termal-read-only-unrelated-scope-{}",
         Uuid::new_v4()
     ));
@@ -850,19 +848,18 @@ async fn read_only_delegation_blocks_project_and_workdir_writes_with_parent_sess
     assert!(!unrelated_file.exists());
 
     let _ = fs::remove_file(state.persistence_path.as_path());
-    let _ = fs::remove_dir_all(project_root);
-    let _ = fs::remove_dir_all(unrelated_root);
+    remove_test_directory(project_root);
+    remove_test_directory(unrelated_root);
 }
 
 #[tokio::test]
 async fn read_only_delegation_blocks_overlapping_project_id_only_writes() {
     let state = test_app_state();
-    let outer_root =
-        std::env::temp_dir().join(format!("termal-read-only-outer-{}", Uuid::new_v4()));
+    let outer_root = test_temp_dir().join(format!("termal-read-only-outer-{}", Uuid::new_v4()));
     let inner_root = outer_root.join("inner");
     let outer_sibling_root = outer_root.join("sibling");
     let unrelated_root =
-        std::env::temp_dir().join(format!("termal-read-only-disjoint-{}", Uuid::new_v4()));
+        test_temp_dir().join(format!("termal-read-only-disjoint-{}", Uuid::new_v4()));
     fs::create_dir_all(&inner_root).expect("inner project should exist");
     fs::create_dir_all(&outer_sibling_root).expect("outer sibling project should exist");
     fs::create_dir_all(&unrelated_root).expect("unrelated project should exist");
@@ -966,8 +963,8 @@ async fn read_only_delegation_blocks_overlapping_project_id_only_writes() {
     );
 
     let _ = fs::remove_file(state.persistence_path.as_path());
-    let _ = fs::remove_dir_all(outer_root);
-    let _ = fs::remove_dir_all(unrelated_root);
+    remove_test_directory(outer_root);
+    remove_test_directory(unrelated_root);
 }
 
 #[test]

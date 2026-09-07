@@ -181,7 +181,7 @@ fn assert_streaming_delta_persist_failure_replays_durably<F>(
     state.shutdown_persist_blocking();
 
     let original_persistence_path = state.persistence_path.as_path().to_path_buf();
-    let failing_persistence_path = std::env::temp_dir().join(format!(
+    let failing_persistence_path = test_temp_dir().join(format!(
         "termal-streaming-delta-persist-failure-{}",
         Uuid::new_v4()
     ));

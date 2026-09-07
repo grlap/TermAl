@@ -74,7 +74,7 @@ fn codex_orchestrator_auto_approve_uses_termal_managed_policy() {
 async fn create_orchestrator_instance_route_uses_template_project_when_request_project_id_is_empty()
 {
     let state = test_app_state();
-    let project_root = std::env::temp_dir().join(format!(
+    let project_root = test_temp_dir().join(format!(
         "termal-orchestrator-route-empty-project-id-{}",
         Uuid::new_v4()
     ));
@@ -123,7 +123,7 @@ async fn create_orchestrator_instance_route_uses_template_project_when_request_p
         response.orchestrator.session_instances.len(),
         template_session_count
     );
-    let _ = fs::remove_dir_all(project_root);
+    remove_test_directory(project_root);
 }
 
 // Pins launch validation as a pre-mutation phase: if any distinct template
@@ -134,7 +134,7 @@ async fn create_orchestrator_instance_route_uses_template_project_when_request_p
 #[test]
 fn orchestrator_agent_setup_failure_is_side_effect_free() {
     let state = test_app_state();
-    let project_root = std::env::temp_dir().join(format!(
+    let project_root = test_temp_dir().join(format!(
         "termal-orchestrator-agent-setup-failure-{}",
         Uuid::new_v4()
     ));
@@ -176,7 +176,7 @@ fn orchestrator_agent_setup_failure_is_side_effect_free() {
     );
     drop(inner);
 
-    let _ = fs::remove_dir_all(project_root);
+    remove_test_directory(project_root);
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
@@ -189,7 +189,7 @@ fn orchestrator_agent_setup_failure_is_side_effect_free() {
 #[test]
 fn project_deleted_during_orchestrator_preflight_is_not_recreated() {
     let state = test_app_state();
-    let project_root = std::env::temp_dir().join(format!(
+    let project_root = test_temp_dir().join(format!(
         "termal-orchestrator-project-delete-preflight-{}",
         Uuid::new_v4()
     ));
@@ -240,7 +240,7 @@ fn project_deleted_during_orchestrator_preflight_is_not_recreated() {
     );
     drop(inner);
 
-    let _ = fs::remove_dir_all(project_root);
+    remove_test_directory(project_root);
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
@@ -248,10 +248,9 @@ fn project_deleted_during_orchestrator_preflight_is_not_recreated() {
 fn project_authority_drift_during_orchestrator_preflight_is_rejected() {
     let state = test_app_state();
     let unique = Uuid::new_v4();
-    let original_root =
-        std::env::temp_dir().join(format!("termal-orchestrator-original-root-{unique}"));
+    let original_root = test_temp_dir().join(format!("termal-orchestrator-original-root-{unique}"));
     let replacement_root =
-        std::env::temp_dir().join(format!("termal-orchestrator-replacement-root-{unique}"));
+        test_temp_dir().join(format!("termal-orchestrator-replacement-root-{unique}"));
     fs::create_dir_all(&original_root).expect("original project root should exist");
     fs::create_dir_all(&replacement_root).expect("replacement project root should exist");
     let project_id = create_test_project(&state, &original_root, "Changed During Preflight");
@@ -306,8 +305,8 @@ fn project_authority_drift_during_orchestrator_preflight_is_rejected() {
     );
     drop(inner);
 
-    let _ = fs::remove_dir_all(original_root);
-    let _ = fs::remove_dir_all(replacement_root);
+    remove_test_directory(original_root);
+    remove_test_directory(replacement_root);
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
@@ -320,7 +319,7 @@ fn project_authority_drift_during_orchestrator_preflight_is_rejected() {
 #[tokio::test]
 async fn orchestrator_lifecycle_routes_update_state_and_stop_active_sessions() {
     let state = test_app_state();
-    let project_root = std::env::temp_dir().join(format!(
+    let project_root = test_temp_dir().join(format!(
         "termal-orchestrator-lifecycle-route-{}",
         Uuid::new_v4()
     ));
@@ -456,7 +455,7 @@ async fn orchestrator_lifecycle_routes_update_state_and_stop_active_sessions() {
             ))
     );
     drop(inner);
-    let _ = fs::remove_dir_all(project_root);
+    remove_test_directory(project_root);
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 // Pins the stop-route rollback: when one child's kill fails mid-stop the
@@ -468,7 +467,7 @@ async fn orchestrator_lifecycle_routes_update_state_and_stop_active_sessions() {
 #[tokio::test]
 async fn orchestrator_stop_route_preserves_running_state_when_a_child_stop_fails() {
     let state = test_app_state();
-    let project_root = std::env::temp_dir().join(format!(
+    let project_root = test_temp_dir().join(format!(
         "termal-orchestrator-stop-failure-route-{}",
         Uuid::new_v4()
     ));
@@ -606,7 +605,7 @@ async fn orchestrator_stop_route_preserves_running_state_when_a_child_stop_fails
 
     let _ = failing_process.kill();
     let _ = failing_process.wait();
-    let _ = fs::remove_dir_all(project_root);
+    remove_test_directory(project_root);
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
@@ -619,11 +618,11 @@ async fn orchestrator_stop_route_preserves_running_state_when_a_child_stop_fails
 // or leaving stale stopped-id entries after the persist failure.
 #[test]
 fn aborted_stop_cleanup_preserves_child_work_when_child_stop_persist_fails() {
-    let project_root = std::env::temp_dir().join(format!(
+    let project_root = test_temp_dir().join(format!(
         "termal-orchestrator-stop-persist-failure-cleanup-{}",
         Uuid::new_v4()
     ));
-    let failing_persistence_path = std::env::temp_dir().join(format!(
+    let failing_persistence_path = test_temp_dir().join(format!(
         "termal-orchestrator-stop-persist-failure-cleanup-state-{}",
         Uuid::new_v4()
     ));
@@ -806,9 +805,9 @@ fn aborted_stop_cleanup_preserves_child_work_when_child_stop_persist_fails() {
     assert_eq!(reloaded_builder.queued_prompts.len(), 1);
     assert_eq!(reloaded_builder.session.pending_prompts.len(), 1);
 
-    let _ = fs::remove_dir_all(project_root);
+    remove_test_directory(project_root);
     let _ = fs::remove_file(original_persistence_path.as_path());
-    let _ = fs::remove_dir_all(failing_persistence_path);
+    remove_test_directory(failing_persistence_path);
 }
 
 // Pins aborted-stop resume within the same process: after cleanup,
@@ -819,11 +818,11 @@ fn aborted_stop_cleanup_preserves_child_work_when_child_stop_persist_fails() {
 // session that was left blocked by a failed stop.
 #[test]
 fn aborted_stop_resume_does_not_redispatch_child_after_child_stop_persist_fails() {
-    let project_root = std::env::temp_dir().join(format!(
+    let project_root = test_temp_dir().join(format!(
         "termal-orchestrator-stop-persist-failure-resume-{}",
         Uuid::new_v4()
     ));
-    let failing_persistence_path = std::env::temp_dir().join(format!(
+    let failing_persistence_path = test_temp_dir().join(format!(
         "termal-orchestrator-stop-persist-failure-resume-state-{}",
         Uuid::new_v4()
     ));
@@ -974,9 +973,9 @@ fn aborted_stop_resume_does_not_redispatch_child_after_child_stop_persist_fails(
         .expect("persisted builder session should still exist");
     assert!(reloaded_builder.orchestrator_auto_dispatch_blocked);
 
-    let _ = fs::remove_dir_all(project_root);
+    remove_test_directory(project_root);
     let _ = fs::remove_file(original_persistence_path.as_path());
-    let _ = fs::remove_dir_all(failing_persistence_path);
+    remove_test_directory(failing_persistence_path);
 }
 
 // Pins aborted-stop resume across a full process restart: after a new
@@ -987,11 +986,11 @@ fn aborted_stop_resume_does_not_redispatch_child_after_child_stop_persist_fails(
 // blocked, load_state must not re-arm its pending transition.
 #[test]
 fn aborted_stop_restart_does_not_redispatch_child_after_child_stop_persist_fails() {
-    let project_root = std::env::temp_dir().join(format!(
+    let project_root = test_temp_dir().join(format!(
         "termal-orchestrator-stop-persist-failure-restart-{}",
         Uuid::new_v4()
     ));
-    let state_root = std::env::temp_dir().join(format!(
+    let state_root = test_temp_dir().join(format!(
         "termal-orchestrator-stop-persist-failure-restart-state-{}",
         Uuid::new_v4()
     ));
@@ -1142,8 +1141,8 @@ fn aborted_stop_restart_does_not_redispatch_child_after_child_stop_persist_fails
     restarted.shutdown_persist_blocking();
     drop(restarted);
 
-    let _ = fs::remove_dir_all(project_root);
-    let _ = fs::remove_dir_all(state_root);
+    remove_test_directory(project_root);
+    remove_test_directory(state_root);
 }
 
 // Pins the orphaned-queue variant: when the child had an orchestrator
@@ -1154,11 +1153,11 @@ fn aborted_stop_restart_does_not_redispatch_child_after_child_stop_persist_fails
 // prompt that should be gated on manual recovery.
 #[test]
 fn aborted_stop_restart_does_not_dispatch_orphaned_child_queue_after_child_stop_persist_fails() {
-    let project_root = std::env::temp_dir().join(format!(
+    let project_root = test_temp_dir().join(format!(
         "termal-orchestrator-stop-persist-failure-restart-queued-{}",
         Uuid::new_v4()
     ));
-    let state_root = std::env::temp_dir().join(format!(
+    let state_root = test_temp_dir().join(format!(
         "termal-orchestrator-stop-persist-failure-restart-queued-state-{}",
         Uuid::new_v4()
     ));
@@ -1299,8 +1298,8 @@ fn aborted_stop_restart_does_not_dispatch_orphaned_child_queue_after_child_stop_
     restarted.shutdown_persist_blocking();
     drop(restarted);
 
-    let _ = fs::remove_dir_all(state_root);
-    let _ = fs::remove_dir_all(project_root);
+    remove_test_directory(state_root);
+    remove_test_directory(project_root);
 }
 
 // Pins manual recovery on a blocked orchestrator child: a wrong-agent
@@ -1312,11 +1311,11 @@ fn aborted_stop_restart_does_not_dispatch_orphaned_child_queue_after_child_stop_
 // prompt or the first failed attempt silently unblocking the session.
 #[test]
 fn blocked_session_manual_recovery_dispatch_prioritizes_user_prompt_after_restart() {
-    let project_root = std::env::temp_dir().join(format!(
+    let project_root = test_temp_dir().join(format!(
         "termal-orchestrator-stop-persist-failure-manual-recovery-{}",
         Uuid::new_v4()
     ));
-    let state_root = std::env::temp_dir().join(format!(
+    let state_root = test_temp_dir().join(format!(
         "termal-orchestrator-stop-persist-failure-manual-recovery-state-{}",
         Uuid::new_v4()
     ));
@@ -1540,8 +1539,8 @@ fn blocked_session_manual_recovery_dispatch_prioritizes_user_prompt_after_restar
     restarted.shutdown_persist_blocking();
     drop(restarted);
 
-    let _ = fs::remove_dir_all(state_root);
-    let _ = fs::remove_dir_all(project_root);
+    remove_test_directory(state_root);
+    remove_test_directory(project_root);
 }
 
 // Pins FIFO for queued user prompts on a plain blocked session: after
@@ -1555,7 +1554,7 @@ fn blocked_session_manual_recovery_dispatch_prioritizes_user_prompt_after_restar
 fn blocked_session_manual_recovery_preserves_user_prompt_fifo_after_plain_stop_persist_failure() {
     let mut state = test_app_state();
     let original_persistence_path = state.persistence_path.clone();
-    let failing_persistence_path = std::env::temp_dir().join(format!(
+    let failing_persistence_path = test_temp_dir().join(format!(
         "termal-stop-persist-failure-user-queue-state-{}",
         Uuid::new_v4()
     ));
@@ -1706,7 +1705,7 @@ fn blocked_session_manual_recovery_preserves_user_prompt_fifo_after_plain_stop_p
     }
 
     let _ = fs::remove_file(original_persistence_path.as_path());
-    let _ = fs::remove_dir_all(failing_persistence_path);
+    remove_test_directory(failing_persistence_path);
 }
 
 // Pins user Stop recovery ordering: stale automatic orchestrator work is
@@ -1716,7 +1715,7 @@ fn blocked_session_manual_recovery_preserves_user_prompt_fifo_after_plain_stop_p
 fn blocked_session_manual_recovery_drops_stale_orchestrator_and_preserves_user_fifo() {
     let mut state = test_app_state();
     let original_persistence_path = state.persistence_path.clone();
-    let failing_persistence_path = std::env::temp_dir().join(format!(
+    let failing_persistence_path = test_temp_dir().join(format!(
         "termal-stop-persist-failure-mixed-queue-state-{}",
         Uuid::new_v4()
     ));
@@ -1865,7 +1864,7 @@ fn blocked_session_manual_recovery_drops_stale_orchestrator_and_preserves_user_f
     }
 
     let _ = fs::remove_file(original_persistence_path.as_path());
-    let _ = fs::remove_dir_all(failing_persistence_path);
+    remove_test_directory(failing_persistence_path);
 }
 
 // Pins the completion-during-stop guard: the planner completes its
@@ -1880,7 +1879,7 @@ fn blocked_session_manual_recovery_drops_stale_orchestrator_and_preserves_user_f
 fn aborted_stop_does_not_relaunch_child_work_completed_during_stop() {
     let state = test_app_state();
     let project_root =
-        std::env::temp_dir().join(format!("termal-orchestrator-stop-guard-{}", Uuid::new_v4()));
+        test_temp_dir().join(format!("termal-orchestrator-stop-guard-{}", Uuid::new_v4()));
     fs::create_dir_all(&project_root).expect("stop guard project root should exist");
     let project_id = create_test_project(&state, &project_root, "Stop Guard Project");
     let mut draft = sample_orchestrator_template_draft();
@@ -2124,7 +2123,7 @@ fn aborted_stop_does_not_relaunch_child_work_completed_during_stop() {
             .contains("Implement the panel dragging changes.")
     );
 
-    let _ = fs::remove_dir_all(project_root);
+    remove_test_directory(project_root);
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
@@ -2158,7 +2157,7 @@ fn begin_orchestrator_stop_cleans_up_guards_on_missing_and_stopped_errors() {
             .contains_key(missing_instance_id)
     );
 
-    let project_root = std::env::temp_dir().join(format!(
+    let project_root = test_temp_dir().join(format!(
         "termal-orchestrator-stop-begin-errors-{}",
         Uuid::new_v4()
     ));
@@ -2219,7 +2218,7 @@ fn begin_orchestrator_stop_cleans_up_guards_on_missing_and_stopped_errors() {
     assert!(instance.active_session_ids_during_stop.is_none());
     drop(inner);
 
-    let _ = fs::remove_dir_all(project_root);
+    remove_test_directory(project_root);
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
@@ -2234,11 +2233,11 @@ fn begin_orchestrator_stop_cleans_up_guards_on_missing_and_stopped_errors() {
 fn begin_orchestrator_stop_rolls_back_stop_in_progress_after_persist_failure() {
     let mut state = test_app_state();
     let original_persistence_path = state.persistence_path.clone();
-    let project_root = std::env::temp_dir().join(format!(
+    let project_root = test_temp_dir().join(format!(
         "termal-orchestrator-stop-begin-persist-failure-{}",
         Uuid::new_v4()
     ));
-    let failing_persistence_path = std::env::temp_dir().join(format!(
+    let failing_persistence_path = test_temp_dir().join(format!(
         "termal-orchestrator-stop-begin-persist-failure-state-{}",
         Uuid::new_v4()
     ));
@@ -2296,9 +2295,9 @@ fn begin_orchestrator_stop_rolls_back_stop_in_progress_after_persist_failure() {
     assert!(instance.active_session_ids_during_stop.is_none());
     drop(inner);
 
-    let _ = fs::remove_dir_all(project_root);
+    remove_test_directory(project_root);
     let _ = fs::remove_file(original_persistence_path.as_path());
-    let _ = fs::remove_dir_all(failing_persistence_path);
+    remove_test_directory(failing_persistence_path);
 }
 
 // Pins load_state recovery when a StopInProgress had not stopped any
@@ -2310,11 +2309,11 @@ fn begin_orchestrator_stop_rolls_back_stop_in_progress_after_persist_failure() {
 // pending transitions while unwinding.
 #[test]
 fn load_state_preserves_pending_transitions_when_stop_in_progress_has_no_stopped_children() {
-    let project_root = std::env::temp_dir().join(format!(
+    let project_root = test_temp_dir().join(format!(
         "termal-orchestrator-stop-restart-{}",
         Uuid::new_v4()
     ));
-    let state_root = std::env::temp_dir().join(format!(
+    let state_root = test_temp_dir().join(format!(
         "termal-orchestrator-stop-restart-state-{}",
         Uuid::new_v4()
     ));
@@ -2437,8 +2436,8 @@ fn load_state_preserves_pending_transitions_when_stop_in_progress_has_no_stopped
     assert_eq!(recovered_builder.session.status, SessionStatus::Error);
     let _ = fs::remove_file(persistence_path);
     let _ = fs::remove_file(orchestrator_templates_path);
-    let _ = fs::remove_dir_all(state_root);
-    let _ = fs::remove_dir_all(project_root);
+    remove_test_directory(state_root);
+    remove_test_directory(project_root);
 }
 
 // Pins load_state recovery when the last active child completed its
@@ -2450,11 +2449,11 @@ fn load_state_preserves_pending_transitions_when_stop_in_progress_has_no_stopped
 // the only remaining work finished in flight.
 #[test]
 fn load_state_recovers_completed_stop_when_active_children_finished_during_stop() {
-    let project_root = std::env::temp_dir().join(format!(
+    let project_root = test_temp_dir().join(format!(
         "termal-orchestrator-stop-restart-finished-{}",
         Uuid::new_v4()
     ));
-    let state_root = std::env::temp_dir().join(format!(
+    let state_root = test_temp_dir().join(format!(
         "termal-orchestrator-stop-restart-finished-state-{}",
         Uuid::new_v4()
     ));
@@ -2609,8 +2608,8 @@ fn load_state_recovers_completed_stop_when_active_children_finished_during_stop(
     assert!(recovered_builder.session.pending_prompts.is_empty());
     let _ = fs::remove_file(persistence_path);
     let _ = fs::remove_file(orchestrator_templates_path);
-    let _ = fs::remove_dir_all(state_root);
-    let _ = fs::remove_dir_all(project_root);
+    remove_test_directory(state_root);
+    remove_test_directory(project_root);
 }
 
 // Pins the targeted prune in load_state recovery: with one active
@@ -2622,11 +2621,11 @@ fn load_state_recovers_completed_stop_when_active_children_finished_during_stop(
 // active peer's queued work or surviving transitions.
 #[test]
 fn load_state_prunes_only_stopped_child_work_when_recovering_stop_in_progress() {
-    let project_root = std::env::temp_dir().join(format!(
+    let project_root = test_temp_dir().join(format!(
         "termal-orchestrator-stop-recovery-queued-{}",
         Uuid::new_v4()
     ));
-    let state_root = std::env::temp_dir().join(format!(
+    let state_root = test_temp_dir().join(format!(
         "termal-orchestrator-stop-recovery-queued-state-{}",
         Uuid::new_v4()
     ));
@@ -2783,8 +2782,8 @@ fn load_state_prunes_only_stopped_child_work_when_recovering_stop_in_progress() 
     assert!(recovered_builder.session.pending_prompts.is_empty());
     let _ = fs::remove_file(persistence_path);
     let _ = fs::remove_file(orchestrator_templates_path);
-    let _ = fs::remove_dir_all(state_root);
-    let _ = fs::remove_dir_all(project_root);
+    remove_test_directory(state_root);
+    remove_test_directory(project_root);
 }
 
 // Pins load_state recovery when every recorded active child stopped
@@ -2795,11 +2794,11 @@ fn load_state_prunes_only_stopped_child_work_when_recovering_stop_in_progress() 
 // were already stopped or leaving phantom queued work on idle peers.
 #[test]
 fn load_state_recovers_completed_stop_when_all_active_children_were_stopped() {
-    let project_root = std::env::temp_dir().join(format!(
+    let project_root = test_temp_dir().join(format!(
         "termal-orchestrator-stop-recovery-complete-{}",
         Uuid::new_v4()
     ));
-    let state_root = std::env::temp_dir().join(format!(
+    let state_root = test_temp_dir().join(format!(
         "termal-orchestrator-stop-recovery-complete-state-{}",
         Uuid::new_v4()
     ));
@@ -2929,8 +2928,8 @@ fn load_state_recovers_completed_stop_when_all_active_children_were_stopped() {
     assert!(recovered_reviewer.session.pending_prompts.is_empty());
     let _ = fs::remove_file(persistence_path);
     let _ = fs::remove_file(orchestrator_templates_path);
-    let _ = fs::remove_dir_all(state_root);
-    let _ = fs::remove_dir_all(project_root);
+    remove_test_directory(state_root);
+    remove_test_directory(project_root);
 }
 
 // Pins the draft round-trip: a sample draft fed through

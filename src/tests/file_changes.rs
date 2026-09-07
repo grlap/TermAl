@@ -55,12 +55,12 @@ use super::*;
 #[test]
 fn active_turn_file_changes_are_summarized_on_record() {
     let state = test_app_state();
-    let root = std::env::temp_dir().join(format!(
+    let root = test_temp_dir().join(format!(
         "termal-active-turn-file-changes-{}",
         Uuid::new_v4()
     ));
     let changed_file = root.join("src").join("main.rs");
-    let ignored_file = std::env::temp_dir().join(format!(
+    let ignored_file = test_temp_dir().join(format!(
         "termal-active-turn-file-changes-outside-{}.rs",
         Uuid::new_v4()
     ));
@@ -165,8 +165,7 @@ fn workspace_watcher_ignores_internal_beads_and_collaboration_metadata() {
 #[test]
 fn active_turn_file_changes_prefer_session_scoped_watcher_hints() {
     let state = test_app_state();
-    let root =
-        std::env::temp_dir().join(format!("termal-active-turn-file-scope-{}", Uuid::new_v4()));
+    let root = test_temp_dir().join(format!("termal-active-turn-file-scope-{}", Uuid::new_v4()));
     let changed_file = root.join("src").join("main.rs");
     fs::create_dir_all(changed_file.parent().unwrap()).unwrap();
     fs::write(&changed_file, "fn main() {}\n").unwrap();
@@ -246,7 +245,7 @@ fn active_turn_file_changes_prefer_session_scoped_watcher_hints() {
 #[test]
 fn late_turn_file_changes_are_summarized_during_grace_window() {
     let state = test_app_state();
-    let root = std::env::temp_dir().join(format!("termal-late-file-change-{}", Uuid::new_v4()));
+    let root = test_temp_dir().join(format!("termal-late-file-change-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let changed_file = root.join("generated.rs");
     fs::write(&changed_file, "fn generated() {}\n").unwrap();
@@ -311,7 +310,7 @@ fn late_turn_file_changes_are_summarized_during_grace_window() {
 #[test]
 fn expired_late_turn_file_change_grace_window_does_not_emit_summary() {
     let state = test_app_state();
-    let root = std::env::temp_dir().join(format!(
+    let root = test_temp_dir().join(format!(
         "termal-expired-late-file-change-{}",
         Uuid::new_v4()
     ));
@@ -405,8 +404,7 @@ fn idle_finish_active_turn_file_change_tracking_does_not_open_grace_window() {
 #[test]
 fn late_turn_file_change_grace_window_emits_only_once() {
     let state = test_app_state();
-    let root =
-        std::env::temp_dir().join(format!("termal-late-file-change-once-{}", Uuid::new_v4()));
+    let root = test_temp_dir().join(format!("termal-late-file-change-once-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let first_file = root.join("first.rs");
     let second_file = root.join("second.rs");

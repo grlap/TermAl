@@ -64,7 +64,7 @@ fn exact_bounded_tail_replay_retries_dirty_persistence() {
     state.shutdown_persist_blocking();
 
     let failing_persistence_path =
-        std::env::temp_dir().join(format!("termal-tail-dirty-retry-{}", Uuid::new_v4()));
+        test_temp_dir().join(format!("termal-tail-dirty-retry-{}", Uuid::new_v4()));
     fs::create_dir_all(&failing_persistence_path)
         .expect("a directory at the persistence path should force failure");
     state.persistence_path = Arc::new(failing_persistence_path.clone());
@@ -158,7 +158,7 @@ fn exact_bounded_tail_replay_retries_dirty_persistence() {
         "Dirty bounded-tail preview."
     );
 
-    let hydration_failure_path = std::env::temp_dir().join(format!(
+    let hydration_failure_path = test_temp_dir().join(format!(
         "termal-hydration-skip-dirty-retry-{}",
         Uuid::new_v4()
     ));

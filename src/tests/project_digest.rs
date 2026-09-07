@@ -24,7 +24,7 @@ use super::*;
 #[test]
 fn project_digest_surfaces_pending_approval_actions() {
     let state = test_app_state();
-    let root = std::env::temp_dir().join(format!("termal-project-digest-{}", Uuid::new_v4()));
+    let root = test_temp_dir().join(format!("termal-project-digest-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
 
     let project_id = create_test_project(&state, &root, "Digest Project");
@@ -100,7 +100,7 @@ fn project_digest_surfaces_pending_approval_actions() {
 #[test]
 fn project_digest_inputs_project_large_transcripts_to_bounded_metadata() {
     let state = test_app_state();
-    let root = std::env::temp_dir().join(format!(
+    let root = test_temp_dir().join(format!(
         "termal-project-digest-large-transcript-{}",
         Uuid::new_v4()
     ));
@@ -152,7 +152,7 @@ fn project_digest_inputs_project_large_transcripts_to_bounded_metadata() {
 #[test]
 fn project_digest_inputs_bound_worst_case_transcript_scan() {
     let state = test_app_state();
-    let root = std::env::temp_dir().join(format!(
+    let root = test_temp_dir().join(format!(
         "termal-project-digest-bounded-scan-{}",
         Uuid::new_v4()
     ));
@@ -206,7 +206,7 @@ fn project_digest_inputs_bound_worst_case_transcript_scan() {
 #[test]
 fn project_digest_inputs_keep_deep_live_requests_from_routing_registries() {
     let state = test_app_state();
-    let root = std::env::temp_dir().join(format!(
+    let root = test_temp_dir().join(format!(
         "termal-project-digest-deep-live-requests-{}",
         Uuid::new_v4()
     ));
@@ -292,7 +292,7 @@ fn project_digest_inputs_keep_deep_live_requests_from_routing_registries() {
 #[test]
 fn project_digest_inputs_surface_pending_claude_user_questions() {
     let state = test_app_state();
-    let root = std::env::temp_dir().join(format!(
+    let root = test_temp_dir().join(format!(
         "termal-project-digest-claude-input-{}",
         Uuid::new_v4()
     ));
@@ -347,7 +347,7 @@ fn project_digest_inputs_surface_pending_claude_user_questions() {
 #[test]
 fn project_digest_orders_mixed_protocol_approvals_and_skips_trimmed_acp_head() {
     let state = test_app_state();
-    let root = std::env::temp_dir().join(format!(
+    let root = test_temp_dir().join(format!(
         "termal-project-digest-mixed-approvals-{}",
         Uuid::new_v4()
     ));
@@ -440,7 +440,7 @@ fn project_digest_orders_mixed_protocol_approvals_and_skips_trimmed_acp_head() {
 #[test]
 fn project_digest_prefers_review_actions_for_dirty_idle_project() {
     let state = test_app_state();
-    let repo_root = std::env::temp_dir().join(format!("termal-project-review-{}", Uuid::new_v4()));
+    let repo_root = test_temp_dir().join(format!("termal-project-review-{}", Uuid::new_v4()));
     fs::create_dir_all(repo_root.join("src")).unwrap();
     fs::write(
         repo_root.join("src/lib.rs"),
@@ -487,7 +487,7 @@ fn project_digest_prefers_review_actions_for_dirty_idle_project() {
 #[test]
 fn project_digest_routes_dirty_project_prompts_to_non_delegation_session() {
     let state = test_app_state();
-    let repo_root = std::env::temp_dir().join(format!(
+    let repo_root = test_temp_dir().join(format!(
         "termal-project-delegation-target-{}",
         Uuid::new_v4()
     ));
@@ -590,7 +590,7 @@ fn project_digest_routes_dirty_project_prompts_to_non_delegation_session() {
 #[test]
 fn project_digest_routes_clean_continue_to_non_delegation_session() {
     let state = test_app_state();
-    let root = std::env::temp_dir().join(format!(
+    let root = test_temp_dir().join(format!(
         "termal-project-clean-delegation-target-{}",
         Uuid::new_v4()
     ));
@@ -671,7 +671,7 @@ fn project_digest_routes_clean_continue_to_non_delegation_session() {
 #[test]
 fn project_digest_routes_error_fix_it_to_non_delegation_session() {
     let state = test_app_state();
-    let root = std::env::temp_dir().join(format!(
+    let root = test_temp_dir().join(format!(
         "termal-project-error-delegation-target-{}",
         Uuid::new_v4()
     ));
@@ -757,7 +757,7 @@ fn project_digest_routes_error_fix_it_to_non_delegation_session() {
 #[test]
 fn project_digest_prompt_target_skips_errored_parent_sessions() {
     let state = test_app_state();
-    let root = std::env::temp_dir().join(format!(
+    let root = test_temp_dir().join(format!(
         "termal-project-error-target-skip-{}",
         Uuid::new_v4()
     ));
@@ -792,7 +792,7 @@ fn project_digest_prompt_target_skips_errored_parent_sessions() {
 #[test]
 fn project_digest_error_actions_skip_latest_errored_parent_target() {
     let state = test_app_state();
-    let root = std::env::temp_dir().join(format!(
+    let root = test_temp_dir().join(format!(
         "termal-project-error-action-target-skip-{}",
         Uuid::new_v4()
     ));
@@ -864,7 +864,7 @@ fn project_digest_error_actions_skip_latest_errored_parent_target() {
 #[test]
 fn project_action_approve_routes_to_the_live_project_approval() {
     let state = test_app_state();
-    let root = std::env::temp_dir().join(format!("termal-project-approve-{}", Uuid::new_v4()));
+    let root = test_temp_dir().join(format!("termal-project-approve-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
 
     let project_id = create_test_project(&state, &root, "Approval Project");
@@ -945,7 +945,7 @@ fn project_action_approve_routes_to_the_live_project_approval() {
 #[test]
 fn project_action_keep_iterating_dispatches_a_follow_up_prompt() {
     let state = test_app_state();
-    let repo_root = std::env::temp_dir().join(format!("termal-project-iterate-{}", Uuid::new_v4()));
+    let repo_root = test_temp_dir().join(format!("termal-project-iterate-{}", Uuid::new_v4()));
     fs::create_dir_all(repo_root.join("src")).unwrap();
     fs::write(
         repo_root.join("src/lib.rs"),

@@ -186,7 +186,7 @@ fn clear_remote_project_binding(state: &AppState, project_id: &str) {
 #[test]
 fn local_session_rejects_project_deleted_during_readiness_preflight() {
     let state = test_app_state();
-    let project_root = std::env::temp_dir().join(format!(
+    let project_root = test_temp_dir().join(format!(
         "termal-session-project-delete-preflight-{}",
         Uuid::new_v4()
     ));
@@ -236,7 +236,7 @@ fn local_session_rejects_project_deleted_during_readiness_preflight() {
     assert_eq!(inner.sessions.len(), session_count_before);
     drop(inner);
 
-    let _ = fs::remove_dir_all(project_root);
+    remove_test_directory(project_root);
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
@@ -244,9 +244,9 @@ fn local_session_rejects_project_deleted_during_readiness_preflight() {
 fn local_session_rejects_project_root_changed_during_readiness_preflight() {
     let state = test_app_state();
     let unique = Uuid::new_v4();
-    let original_root = std::env::temp_dir().join(format!("termal-session-original-root-{unique}"));
+    let original_root = test_temp_dir().join(format!("termal-session-original-root-{unique}"));
     let replacement_root =
-        std::env::temp_dir().join(format!("termal-session-replacement-root-{unique}"));
+        test_temp_dir().join(format!("termal-session-replacement-root-{unique}"));
     fs::create_dir_all(&original_root).expect("original project root should exist");
     fs::create_dir_all(&replacement_root).expect("replacement project root should exist");
     let project_id = create_test_project(&state, &original_root, "Changed During Preflight");
@@ -303,8 +303,8 @@ fn local_session_rejects_project_root_changed_during_readiness_preflight() {
         session_count_before
     );
 
-    let _ = fs::remove_dir_all(original_root);
-    let _ = fs::remove_dir_all(replacement_root);
+    remove_test_directory(original_root);
+    remove_test_directory(replacement_root);
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
@@ -312,8 +312,8 @@ fn local_session_rejects_project_root_changed_during_readiness_preflight() {
 fn projectless_session_survives_unrelated_project_deletion_during_preflight() {
     let state = test_app_state();
     let unique = Uuid::new_v4();
-    let workdir = std::env::temp_dir().join(format!("termal-projectless-session-{unique}"));
-    let unrelated_root = std::env::temp_dir().join(format!("termal-unrelated-project-{unique}"));
+    let workdir = test_temp_dir().join(format!("termal-projectless-session-{unique}"));
+    let unrelated_root = test_temp_dir().join(format!("termal-unrelated-project-{unique}"));
     fs::create_dir_all(&workdir).expect("projectless workdir should exist");
     fs::create_dir_all(&unrelated_root).expect("unrelated project root should exist");
     let unrelated_project_id = create_test_project(&state, &unrelated_root, "Unrelated Project");
@@ -348,8 +348,8 @@ fn projectless_session_survives_unrelated_project_deletion_during_preflight() {
         .expect("projectless session creation should not revalidate an unrelated project");
 
     assert_eq!(response.session.project_id, None);
-    let _ = fs::remove_dir_all(workdir);
-    let _ = fs::remove_dir_all(unrelated_root);
+    remove_test_directory(workdir);
+    remove_test_directory(unrelated_root);
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
@@ -406,9 +406,9 @@ fn inferred_project_deletion_during_preflight_falls_back_to_projectless() {
 fn inferred_project_root_drift_during_preflight_falls_back_to_projectless() {
     let state = test_app_state();
     let unique = Uuid::new_v4();
-    let project_root = std::env::temp_dir().join(format!("termal-inferred-project-drift-{unique}"));
+    let project_root = test_temp_dir().join(format!("termal-inferred-project-drift-{unique}"));
     let replacement_root =
-        std::env::temp_dir().join(format!("termal-inferred-project-replacement-{unique}"));
+        test_temp_dir().join(format!("termal-inferred-project-replacement-{unique}"));
     let workdir = project_root.join("nested");
     fs::create_dir_all(&workdir).expect("nested workdir should exist");
     fs::create_dir_all(&replacement_root).expect("replacement root should exist");
@@ -462,8 +462,8 @@ fn inferred_project_root_drift_during_preflight_falls_back_to_projectless() {
         replacement_root.to_string_lossy()
     );
 
-    let _ = fs::remove_dir_all(project_root);
-    let _ = fs::remove_dir_all(replacement_root);
+    remove_test_directory(project_root);
+    remove_test_directory(replacement_root);
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
@@ -580,7 +580,7 @@ fn remote_session_persist_failure_still_claims_the_current_event_bridge() {
         .cloned()
         .expect("test connection should exist");
 
-    let failing_persistence_path = std::env::temp_dir().join(format!(
+    let failing_persistence_path = test_temp_dir().join(format!(
         "termal-remote-session-persist-failure-{}",
         Uuid::new_v4()
     ));
@@ -819,7 +819,7 @@ fn remote_orchestrator_persist_failure_still_claims_the_current_event_bridge() {
         .cloned()
         .expect("test connection should exist");
 
-    let failing_persistence_path = std::env::temp_dir().join(format!(
+    let failing_persistence_path = test_temp_dir().join(format!(
         "termal-remote-orchestrator-persist-failure-{}",
         Uuid::new_v4()
     ));
@@ -1724,7 +1724,7 @@ fn remote_project_idempotent_retry_persists_failed_localization_and_publishes_sn
         TestRemoteBridgeOwnership::RequestOnly,
     );
 
-    let failing_persistence_path = std::env::temp_dir().join(format!(
+    let failing_persistence_path = test_temp_dir().join(format!(
         "termal-remote-project-persist-retry-{}",
         Uuid::new_v4()
     ));

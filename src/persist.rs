@@ -659,7 +659,7 @@ mod state_permission_hardening_tests {
         std::sync::LazyLock::new(|| std::sync::Mutex::new(()));
 
     fn temp_permission_root() -> PathBuf {
-        let root = std::env::temp_dir().join(format!(
+        let root = test_temp_dir().join(format!(
             "termal-state-permissions-{}",
             Uuid::new_v4()
         ));
@@ -690,7 +690,7 @@ mod state_permission_hardening_tests {
         harden_local_state_file_permissions(&file).expect("harden state file");
 
         assert_eq!(mode(&file), 0o600);
-        let _ = fs::remove_dir_all(root);
+        remove_test_directory(root);
     }
 
     #[test]
@@ -703,7 +703,7 @@ mod state_permission_hardening_tests {
         harden_local_state_directory_permissions(&dir).expect("harden state dir");
 
         assert_eq!(mode(&dir), 0o700);
-        let _ = fs::remove_dir_all(root);
+        remove_test_directory(root);
     }
 
     #[test]
@@ -720,7 +720,7 @@ mod state_permission_hardening_tests {
 
         assert!(format!("{error:#}").contains("symlinked state directory"));
         assert_eq!(mode(&target), 0o777);
-        let _ = fs::remove_dir_all(root);
+        remove_test_directory(root);
     }
 
     #[test]
@@ -743,7 +743,7 @@ mod state_permission_hardening_tests {
         for path in &paths {
             assert_eq!(mode(path), 0o600, "{}", path.display());
         }
-        let _ = fs::remove_dir_all(root);
+        remove_test_directory(root);
     }
 
     #[test]
@@ -760,7 +760,7 @@ mod state_permission_hardening_tests {
 
         assert!(format!("{error:#}").contains("symlinked state path"));
         assert_eq!(mode(&target), 0o644);
-        let _ = fs::remove_dir_all(root);
+        remove_test_directory(root);
     }
 
     #[test]
@@ -789,7 +789,7 @@ mod state_permission_hardening_tests {
         assert!(format!("{sidecar_error:#}").contains("symlinked state path"));
         assert_eq!(mode(&main_target), 0o644);
         assert_eq!(mode(&sidecar_target), 0o644);
-        let _ = fs::remove_dir_all(root);
+        remove_test_directory(root);
     }
 
     #[test]
@@ -812,7 +812,7 @@ mod state_permission_hardening_tests {
         for path in &paths {
             assert_eq!(mode(path), 0o600, "{}", path.display());
         }
-        let _ = fs::remove_dir_all(root);
+        remove_test_directory(root);
     }
 
     #[test]
@@ -830,7 +830,7 @@ mod state_permission_hardening_tests {
 
         assert!(format!("{error:#}").contains("post-commit redirection check failed"));
         assert!(format!("{error:#}").contains("symlinked state path"));
-        let _ = fs::remove_dir_all(root);
+        remove_test_directory(root);
     }
 
     #[test]
@@ -852,7 +852,7 @@ mod state_permission_hardening_tests {
             .expect_err("symlink refusal should ignore insecure-permission override");
 
         assert!(format!("{error:#}").contains("symlinked state path"));
-        let _ = fs::remove_dir_all(root);
+        remove_test_directory(root);
         unsafe {
             if let Some(value) = original {
                 std::env::set_var("TERMAL_ALLOW_INSECURE_STATE_PERMISSIONS", value);

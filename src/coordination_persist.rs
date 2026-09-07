@@ -827,7 +827,7 @@ mod sqlite_coordination_tests {
 
     #[test]
     fn coordination_bootstrap_creates_and_reopens_only_the_current_database() {
-        let root = std::env::temp_dir().join(format!(
+        let root = test_temp_dir().join(format!(
             "termal-current-coordination-bootstrap-{}",
             Uuid::new_v4()
         ));
@@ -848,7 +848,7 @@ mod sqlite_coordination_tests {
 
     #[test]
     fn coordination_bootstrap_schema_error_names_the_actual_database_path() {
-        let root = std::env::temp_dir().join(format!(
+        let root = test_temp_dir().join(format!(
             "termal-current-coordination-path-error-{}",
             Uuid::new_v4()
         ));

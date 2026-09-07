@@ -24,7 +24,7 @@ use super::*;
 #[test]
 fn persist_review_document_replaces_target_without_leaving_temp_files() {
     let review_root =
-        std::env::temp_dir().join(format!("termal-review-atomic-write-{}", Uuid::new_v4()));
+        test_temp_dir().join(format!("termal-review-atomic-write-{}", Uuid::new_v4()));
     fs::create_dir_all(&review_root).expect("review root should exist");
     let change_set_id = "change-set-atomic-write";
     let review_path = resolve_review_document_path(&review_root, change_set_id)
@@ -58,7 +58,7 @@ fn persist_review_document_replaces_target_without_leaving_temp_files() {
     entry_names.sort();
     assert_eq!(entry_names, vec!["change-set-atomic-write.json".to_owned()]);
 
-    let _ = fs::remove_dir_all(&review_root);
+    remove_test_directory(&review_root);
 }
 
 // Pins the Windows replace fallback: `MoveFileEx` with
@@ -70,7 +70,7 @@ fn persist_review_document_replaces_target_without_leaving_temp_files() {
 #[test]
 fn replace_review_document_file_replaces_existing_target_on_windows() {
     let review_root =
-        std::env::temp_dir().join(format!("termal-review-windows-replace-{}", Uuid::new_v4()));
+        test_temp_dir().join(format!("termal-review-windows-replace-{}", Uuid::new_v4()));
     fs::create_dir_all(&review_root).expect("review root should exist");
     let review_path = review_root.join("review.json");
     let temp_path = review_root.join("review.tmp");
@@ -90,7 +90,7 @@ fn replace_review_document_file_replaces_existing_target_on_windows() {
         "replacement temp file should be moved away"
     );
 
-    let _ = fs::remove_dir_all(&review_root);
+    remove_test_directory(&review_root);
 }
 
 // Pins that a fsync failure on the parent directory after a successful
@@ -100,7 +100,7 @@ fn replace_review_document_file_replaces_existing_target_on_windows() {
 // persist error.
 #[test]
 fn persist_review_document_succeeds_when_directory_sync_fails_after_replace() {
-    let review_root = std::env::temp_dir().join(format!(
+    let review_root = test_temp_dir().join(format!(
         "termal-review-directory-sync-failure-{}",
         Uuid::new_v4()
     ));
@@ -145,7 +145,7 @@ fn persist_review_document_succeeds_when_directory_sync_fails_after_replace() {
         vec!["change-set-directory-sync.json".to_owned()]
     );
 
-    let _ = fs::remove_dir_all(&review_root);
+    remove_test_directory(&review_root);
 }
 
 // Pins the empty-id rejection branch of `validate_review_change_set_id`:
@@ -154,8 +154,7 @@ fn persist_review_document_succeeds_when_directory_sync_fails_after_replace() {
 // `.termal/reviews/.json` for any caller that forgets the id.
 #[test]
 fn resolve_review_document_path_rejects_empty_change_set_ids() {
-    let review_root =
-        std::env::temp_dir().join(format!("termal-review-empty-id-{}", Uuid::new_v4()));
+    let review_root = test_temp_dir().join(format!("termal-review-empty-id-{}", Uuid::new_v4()));
     fs::create_dir_all(&review_root).expect("review root should exist");
 
     let error = match resolve_review_document_path(&review_root, "") {
@@ -166,7 +165,7 @@ fn resolve_review_document_path_rejects_empty_change_set_ids() {
     assert_eq!(error.status, StatusCode::BAD_REQUEST);
     assert_eq!(error.message, "changeSetId cannot be empty");
 
-    let _ = fs::remove_dir_all(&review_root);
+    remove_test_directory(&review_root);
 }
 
 // Pins the whitespace-id rejection branch: leading or trailing spaces
@@ -176,7 +175,7 @@ fn resolve_review_document_path_rejects_empty_change_set_ids() {
 #[test]
 fn resolve_review_document_path_rejects_change_set_ids_with_surrounding_whitespace() {
     let review_root =
-        std::env::temp_dir().join(format!("termal-review-whitespace-id-{}", Uuid::new_v4()));
+        test_temp_dir().join(format!("termal-review-whitespace-id-{}", Uuid::new_v4()));
     fs::create_dir_all(&review_root).expect("review root should exist");
 
     let error = match resolve_review_document_path(&review_root, " change-set-whitespace ") {
@@ -190,7 +189,7 @@ fn resolve_review_document_path_rejects_change_set_ids_with_surrounding_whitespa
         "changeSetId may not have leading or trailing whitespace"
     );
 
-    let _ = fs::remove_dir_all(&review_root);
+    remove_test_directory(&review_root);
 }
 
 // Pins the length cap enforced by `MAX_REVIEW_CHANGE_SET_ID_LEN`: one
@@ -199,8 +198,7 @@ fn resolve_review_document_path_rejects_change_set_ids_with_surrounding_whitespa
 // would otherwise surface as an opaque OS error at rename time.
 #[test]
 fn resolve_review_document_path_rejects_overlong_change_set_ids() {
-    let review_root =
-        std::env::temp_dir().join(format!("termal-review-long-id-{}", Uuid::new_v4()));
+    let review_root = test_temp_dir().join(format!("termal-review-long-id-{}", Uuid::new_v4()));
     fs::create_dir_all(&review_root).expect("review root should exist");
     let too_long_change_set_id = "a".repeat(MAX_REVIEW_CHANGE_SET_ID_LEN + 1);
 
@@ -215,7 +213,7 @@ fn resolve_review_document_path_rejects_overlong_change_set_ids() {
         format!("changeSetId is too long (max {MAX_REVIEW_CHANGE_SET_ID_LEN} bytes)")
     );
 
-    let _ = fs::remove_dir_all(&review_root);
+    remove_test_directory(&review_root);
 }
 
 // Pins that `get_review` runs change-set-id validation BEFORE any
@@ -266,8 +264,7 @@ async fn review_handlers_validate_change_set_ids_before_remote_proxying() {
 // from introducing its own path separator.
 #[test]
 fn resolve_review_document_path_rejects_change_set_ids_with_invalid_characters() {
-    let review_root =
-        std::env::temp_dir().join(format!("termal-review-invalid-id-{}", Uuid::new_v4()));
+    let review_root = test_temp_dir().join(format!("termal-review-invalid-id-{}", Uuid::new_v4()));
     fs::create_dir_all(&review_root).expect("review root should exist");
 
     let error = match resolve_review_document_path(&review_root, "change/set-invalid") {
@@ -281,7 +278,7 @@ fn resolve_review_document_path_rejects_change_set_ids_with_invalid_characters()
         "changeSetId may only contain letters, numbers, '.', '-', and '_'"
     );
 
-    let _ = fs::remove_dir_all(&review_root);
+    remove_test_directory(&review_root);
 }
 
 // Pins the dots-only rejection branch: `.`, `..`, and similar strings
@@ -290,7 +287,7 @@ fn resolve_review_document_path_rejects_change_set_ids_with_invalid_characters()
 // parent directories.
 #[test]
 fn resolve_review_document_path_rejects_change_set_ids_consisting_entirely_of_dots() {
-    let review_root = std::env::temp_dir().join(format!("termal-review-dot-id-{}", Uuid::new_v4()));
+    let review_root = test_temp_dir().join(format!("termal-review-dot-id-{}", Uuid::new_v4()));
     fs::create_dir_all(&review_root).expect("review root should exist");
 
     let error = match resolve_review_document_path(&review_root, "..") {
@@ -304,7 +301,7 @@ fn resolve_review_document_path_rejects_change_set_ids_consisting_entirely_of_do
         "changeSetId must not consist entirely of dots"
     );
 
-    let _ = fs::remove_dir_all(&review_root);
+    remove_test_directory(&review_root);
 }
 
 // Pins that both `GET /api/reviews/{id}` and
@@ -315,8 +312,7 @@ fn resolve_review_document_path_rejects_change_set_ids_consisting_entirely_of_do
 #[tokio::test]
 async fn review_read_routes_wait_for_review_document_lock() {
     let state = test_app_state();
-    let project_root =
-        std::env::temp_dir().join(format!("termal-review-lock-test-{}", Uuid::new_v4()));
+    let project_root = test_temp_dir().join(format!("termal-review-lock-test-{}", Uuid::new_v4()));
     fs::create_dir_all(&project_root).expect("review lock project root should exist");
     let project = state
         .create_project(CreateProjectRequest {
@@ -392,5 +388,5 @@ async fn review_read_routes_wait_for_review_document_lock() {
             .ends_with("change-set-locked-read.json")
     );
     let _ = fs::remove_file(state.persistence_path.as_path());
-    let _ = fs::remove_dir_all(&project_root);
+    remove_test_directory(&project_root);
 }

@@ -777,7 +777,7 @@ fn durable_review_recovery_propagates_primary_state_persistence_failures() {
         "Reviewer prose is not authoritative.",
     );
 
-    let failing_persistence_path = std::env::temp_dir().join(format!(
+    let failing_persistence_path = test_temp_dir().join(format!(
         "termal-review-recovery-persist-failure-{}",
         Uuid::new_v4()
     ));
@@ -808,7 +808,7 @@ fn durable_review_recovery_propagates_primary_state_persistence_failures() {
         "the accepted envelope may stay provisional, but fan-in must not advance"
     );
     drop(inner);
-    let _ = fs::remove_dir_all(failing_persistence_path);
+    remove_test_directory(failing_persistence_path);
 }
 
 #[tokio::test]

@@ -85,45 +85,80 @@ function removalFailure(label, path, error) {
   return new Error(`${label} ${path}: ${error.message}; code=${error.code ?? "unknown"}; errno=${error.errno ?? "unknown"}; surviving entries: ${survivors}`, { cause: error });
 }
 
-export function sweepStaleTestRuns(root) {
-  directoryWithoutLinks(root);
-  const removed = [];
-  for (const entry of readdirSync(root, { withFileTypes: true })) {
-    if (removed.length === maxSweepRemovals) break;
-    if (!entry.name.startsWith("run-") || !entry.isDirectory() || entry.isSymbolicLink()) continue;
-    const path = join(root, entry.name);
-    const marker = join(path, markerName);
-    let metadata;
-    try {
-      metadata = lstatSync(marker);
-    } catch (error) {
-      if (error.code === "ENOENT") continue;
-      throw error;
-    }
-    if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size > 1024) continue;
-    if (Date.now() - metadata.mtimeMs < staleAgeMs) continue;
+function lstatIfPresent(path) {
+  try {
+    return lstatSync(path);
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+    return undefined; // A concurrent owner already removed this entry.
+  }
+}
+
+function existingPlainDirectory(path) {
+  const metadata = lstatIfPresent(path);
+  if (!metadata) return false;
+  if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
+    throw new Error(`Test temporary directory is not a plain directory (link?): ${path}`);
+  }
+  return true;
+}
+
+function staleEntry(path, recognizeRuns) {
+  const fixture = lstatIfPresent(path);
+  if (!fixture || fixture.isSymbolicLink() ||
+      (!fixture.isDirectory() && !fixture.isFile())) return undefined;
+  const marker = join(path, markerName);
+  const metadata = recognizeRuns && fixture.isDirectory() ? lstatIfPresent(marker) : undefined;
+  if (metadata) {
+    if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size > 1024) return undefined;
+    if (Date.now() - metadata.mtimeMs < staleAgeMs) return undefined;
     let owner;
     try {
       owner = JSON.parse(readFileSync(marker, "utf8"));
     } catch {
-      continue; // Unrecognized data is not ours to remove.
+      return undefined; // An unreadable marker cannot prove the run is dead.
     }
     if (!owner || typeof owner !== "object" || Array.isArray(owner) ||
         owner.version !== 1 || !validProcessId(owner.pid) ||
-        ("childPid" in owner && !validProcessId(owner.childPid))) continue;
-    if (processMayBeAlive(owner.pid)) continue;
-    if (owner.childPid !== undefined && processMayBeAlive(owner.childPid)) continue;
-    // Revalidate the exact target and parent immediately before deletion.
-    directoryWithoutLinks(root);
-    directoryWithoutLinks(path);
+        ("childPid" in owner && !validProcessId(owner.childPid))) return undefined;
+    if (processMayBeAlive(owner.pid)) return undefined;
+    if (owner.childPid !== undefined && processMayBeAlive(owner.childPid)) return undefined;
+  } else if (Date.now() - fixture.mtimeMs < staleAgeMs) {
+    return undefined;
+  }
+  return fixture;
+}
+
+function sweepStaleEntries(root, recognizeRuns) {
+  if (!existingPlainDirectory(root)) return [];
+  const removed = [];
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    if (removed.length === maxSweepRemovals) break;
+    if (entry.isSymbolicLink() || (!entry.isDirectory() && !entry.isFile())) continue;
+    const path = join(root, entry.name);
+    const fixture = staleEntry(path, recognizeRuns);
+    if (!fixture) continue;
+    // Read-only revalidation: never recreate a concurrently removed target.
+    // Recheck age/marker/owner as well as type, and skip replaced entries.
+    if (!existingPlainDirectory(root)) break;
+    const current = staleEntry(path, recognizeRuns);
+    if (!current || current.dev !== fixture.dev || current.ino !== fixture.ino ||
+        current.isDirectory() !== fixture.isDirectory()) continue;
     try {
-      rmSync(path, { recursive: true, maxRetries: 0 });
+      rmSync(path, { recursive: current.isDirectory(), maxRetries: 0 });
     } catch (error) {
-      throw removalFailure("Failed to remove stale test run", path, error);
+      if (error.code === "ENOENT") continue;
+      throw removalFailure("Failed to remove stale temporary entry", path, error);
     }
     removed.push(path);
   }
   return removed;
+}
+
+export function sweepStaleTestRuns(root) {
+  // Direct fixtures belong to the product by location, not spelling. Files and
+  // directories share one cap; never select nested fixtures inside a recent run.
+  return sweepStaleEntries(root, true);
 }
 
 function outsideEntries(userTemp, prefixes = ownedOutsidePrefixes) {
@@ -136,6 +171,11 @@ export async function runInTestTemp(command, args, {
 } = {}) {
   const root = productRoot(userTemp);
   userTemp = dirname(dirname(root));
+  const compileCache = directoryWithoutLinks(join(dirname(root), "node-compile-cache"));
+  // Persist recent cache data across launches; evict up to 64 direct entries
+  // older than 48 h per launch, without following links or deleting the root.
+  const cacheSwept = sweepStaleEntries(compileCache, false);
+  if (cacheSwept.length) report(`Removed ${cacheSwept.length} stale Node cache entries under ${compileCache}`);
   const before = outsideEntries(userTemp);
   const otherBefore = outsideEntries(userTemp, ["codenav-"]);
   const swept = sweepStaleTestRuns(root);
@@ -155,6 +195,7 @@ export async function runInTestTemp(command, args, {
           ...process.env,
           TERMAL_TEST_USER_TEMP: userTemp,
           TERMAL_TEST_RUN_ROOT: runRoot,
+          NODE_COMPILE_CACHE: compileCache,
           TEMP: runRoot,
           TMP: runRoot,
           TMPDIR: runRoot,
@@ -182,7 +223,8 @@ export async function runInTestTemp(command, args, {
   if (exitCode === 0) {
     productRoot(userTemp);
     directoryWithoutLinks(runRoot);
-    report(`Test temp cleanup: ${readdirSync(runRoot).filter((name) => name !== markerName).length} remaining entries in ${runRoot}`);
+    const residual = readdirSync(runRoot).filter((name) => name !== markerName);
+    report(`Test temp cleanup: ${residual.length} remaining entries in ${runRoot}: ${residual.map((name) => JSON.stringify(name)).join(", ") || "(empty)"}`);
     try {
       rmSync(runRoot, { recursive: true, maxRetries: 0 });
     } catch (error) {

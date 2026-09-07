@@ -1520,7 +1520,7 @@ fn equal_remote_orchestrator_action_snapshot_retries_dirty_persistence() {
     );
     state.shutdown_persist_blocking();
 
-    let failing_persistence_path = std::env::temp_dir().join(format!(
+    let failing_persistence_path = test_temp_dir().join(format!(
         "termal-orchestrator-dirty-retry-{}",
         Uuid::new_v4()
     ));
@@ -1650,7 +1650,7 @@ fn focused_remote_state_sync_stale_revision_retries_dirty_persistence() {
     state.shutdown_persist_blocking();
 
     let failing_persistence_path =
-        std::env::temp_dir().join(format!("termal-focused-dirty-retry-{}", Uuid::new_v4()));
+        test_temp_dir().join(format!("termal-focused-dirty-retry-{}", Uuid::new_v4()));
     fs::create_dir_all(&failing_persistence_path)
         .expect("a directory at the persistence path should force failure");
     state.persistence_path = Arc::new(failing_persistence_path.clone());

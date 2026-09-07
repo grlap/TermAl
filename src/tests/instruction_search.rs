@@ -31,7 +31,7 @@ use super::*;
 // collapse the graph to a single arbitrary entry point.
 #[test]
 fn instruction_search_returns_all_roots_for_a_phrase() {
-    let root = std::env::temp_dir().join(format!("termal-instruction-search-{}", Uuid::new_v4()));
+    let root = test_temp_dir().join(format!("termal-instruction-search-{}", Uuid::new_v4()));
     let docs_dir = root.join("docs");
     fs::create_dir_all(&docs_dir).unwrap();
     fs::write(
@@ -95,7 +95,7 @@ fn instruction_search_returns_all_roots_for_a_phrase() {
 // be discovered via shell globs embedded in command prose.
 #[test]
 fn instruction_search_expands_directory_discovery_edges() {
-    let root = std::env::temp_dir().join(format!(
+    let root = test_temp_dir().join(format!(
         "termal-instruction-directory-search-{}",
         Uuid::new_v4()
     ));
@@ -152,7 +152,7 @@ fn instruction_search_expands_directory_discovery_edges() {
 // follow ReferencedInstruction docs, which would pull the whole repo in.
 #[test]
 fn instruction_search_stops_at_generic_referenced_docs() {
-    let root = std::env::temp_dir().join(format!(
+    let root = test_temp_dir().join(format!(
         "termal-instruction-generic-docs-{}",
         Uuid::new_v4()
     ));
@@ -194,8 +194,7 @@ fn instruction_search_stops_at_generic_referenced_docs() {
 // against regressing the transitive branch for non-root instruction docs.
 #[test]
 fn instruction_search_walks_instructionish_docs_transitively() {
-    let root =
-        std::env::temp_dir().join(format!("termal-instruction-transitive-{}", Uuid::new_v4()));
+    let root = test_temp_dir().join(format!("termal-instruction-transitive-{}", Uuid::new_v4()));
     let instructions_dir = root.join("docs").join("instructions");
     fs::create_dir_all(&instructions_dir).unwrap();
     fs::write(
@@ -254,7 +253,7 @@ fn instruction_search_walks_instructionish_docs_transitively() {
 // TermAl's own scaffolding as user-visible instruction context.
 #[test]
 fn instruction_search_ignores_internal_termal_roots_for_claude_reviewers() {
-    let root = std::env::temp_dir().join(format!(
+    let root = test_temp_dir().join(format!(
         "termal-instruction-realtime-search-{}",
         Uuid::new_v4()
     ));
@@ -361,8 +360,7 @@ fn instruction_search_returns_not_found_for_missing_session() {
 // not-found branch used when the frontend opens a stale instruction path.
 #[test]
 fn read_instruction_document_returns_not_found_for_missing_file() {
-    let workdir =
-        std::env::temp_dir().join(format!("termal-instruction-missing-{}", Uuid::new_v4()));
+    let workdir = test_temp_dir().join(format!("termal-instruction-missing-{}", Uuid::new_v4()));
     let missing_file = workdir.join("AGENTS.md");
 
     fs::create_dir_all(&workdir).unwrap();

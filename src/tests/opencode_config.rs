@@ -772,7 +772,7 @@ fn opencode_structured_missing_session_error_preserves_continuity_after_failure(
 #[test]
 fn opencode_prompt_dispatch_does_not_inject_repository_instruction_files() {
     let state = test_app_state();
-    let root = std::env::temp_dir().join(format!("termal-opencode-prompt-{}", Uuid::new_v4()));
+    let root = test_temp_dir().join(format!("termal-opencode-prompt-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).expect("OpenCode prompt test root should be created");
     fs::write(
         root.join("AGENTS.md"),

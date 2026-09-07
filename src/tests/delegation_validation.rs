@@ -80,10 +80,10 @@ fn delegation_whitespace_prompt_is_rejected() {
 fn delegation_rejects_traversal_cwd_outside_project() {
     let state = test_app_state();
     let project_root =
-        std::env::temp_dir().join(format!("termal-delegation-cwd-root-{}", Uuid::new_v4()));
+        test_temp_dir().join(format!("termal-delegation-cwd-root-{}", Uuid::new_v4()));
     let inside_dir = project_root.join("inside");
     let outside_root =
-        std::env::temp_dir().join(format!("termal-delegation-cwd-outside-{}", Uuid::new_v4()));
+        test_temp_dir().join(format!("termal-delegation-cwd-outside-{}", Uuid::new_v4()));
     fs::create_dir_all(&inside_dir).expect("project workdir should exist");
     fs::create_dir_all(&outside_root).expect("outside directory should exist");
     let project_id = create_test_project(&state, &project_root, "Delegation Cwd Root");
@@ -104,8 +104,8 @@ fn delegation_rejects_traversal_cwd_outside_project() {
     assert!(err.message.contains("must stay inside project"));
 
     let _ = fs::remove_file(state.persistence_path.as_path());
-    let _ = fs::remove_dir_all(project_root);
-    let _ = fs::remove_dir_all(outside_root);
+    remove_test_directory(project_root);
+    remove_test_directory(outside_root);
 }
 
 #[cfg(windows)]
@@ -219,11 +219,11 @@ fn delegation_rejects_windows_verbatim_drive_relative_cwd() {
 #[test]
 fn delegation_rejects_symlinked_cwd_escape_from_project() {
     let state = test_app_state();
-    let project_root = std::env::temp_dir().join(format!(
+    let project_root = test_temp_dir().join(format!(
         "termal-delegation-cwd-link-root-{}",
         Uuid::new_v4()
     ));
-    let outside_root = std::env::temp_dir().join(format!(
+    let outside_root = test_temp_dir().join(format!(
         "termal-delegation-cwd-link-outside-{}",
         Uuid::new_v4()
     ));
@@ -246,19 +246,19 @@ fn delegation_rejects_symlinked_cwd_escape_from_project() {
     let _ = fs::remove_dir(&link_path);
     let _ = fs::remove_file(&link_path);
     let _ = fs::remove_file(state.persistence_path.as_path());
-    let _ = fs::remove_dir_all(project_root);
-    let _ = fs::remove_dir_all(outside_root);
+    remove_test_directory(project_root);
+    remove_test_directory(outside_root);
 }
 
 #[cfg(windows)]
 #[test]
 fn delegation_rejects_windows_symlinked_cwd_escape_from_project() {
     let state = test_app_state();
-    let project_root = std::env::temp_dir().join(format!(
+    let project_root = test_temp_dir().join(format!(
         "termal-delegation-cwd-link-root-{}",
         Uuid::new_v4()
     ));
-    let outside_root = std::env::temp_dir().join(format!(
+    let outside_root = test_temp_dir().join(format!(
         "termal-delegation-cwd-link-outside-{}",
         Uuid::new_v4()
     ));
@@ -270,8 +270,8 @@ fn delegation_rejects_windows_symlinked_cwd_escape_from_project() {
     let link_path = project_root.join("outside-link");
     if let Err(err) = create_test_dir_symlink(&outside_root, &link_path) {
         let _ = fs::remove_file(state.persistence_path.as_path());
-        let _ = fs::remove_dir_all(project_root);
-        let _ = fs::remove_dir_all(outside_root);
+        remove_test_directory(project_root);
+        remove_test_directory(outside_root);
         if windows_symlink_privilege_unavailable(&err) {
             eprintln!("skipping Windows symlink cwd escape test: {err}");
             return;
@@ -290,8 +290,8 @@ fn delegation_rejects_windows_symlinked_cwd_escape_from_project() {
     let _ = fs::remove_dir(&link_path);
     let _ = fs::remove_file(&link_path);
     let _ = fs::remove_file(state.persistence_path.as_path());
-    let _ = fs::remove_dir_all(project_root);
-    let _ = fs::remove_dir_all(outside_root);
+    remove_test_directory(project_root);
+    remove_test_directory(outside_root);
 }
 
 #[tokio::test]

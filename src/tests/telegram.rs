@@ -2939,8 +2939,7 @@ fn telegram_connection_test_error_classifies_transport_and_server_failures_as_ba
 
 #[test]
 fn telegram_state_persist_rejects_malformed_existing_file_without_overwriting() {
-    let path =
-        std::env::temp_dir().join(format!("termal-telegram-bad-state-{}.json", Uuid::new_v4()));
+    let path = test_temp_dir().join(format!("termal-telegram-bad-state-{}.json", Uuid::new_v4()));
     fs::write(&path, b"{").expect("fixture should write");
     #[cfg(unix)]
     {
@@ -2973,7 +2972,7 @@ fn telegram_state_persist_rejects_malformed_existing_file_without_overwriting() 
 
 #[test]
 fn telegram_state_corrupt_backup_falls_back_to_copy_when_rename_fails() {
-    let path = std::env::temp_dir().join(format!(
+    let path = test_temp_dir().join(format!(
         "termal-telegram-copy-backup-state-{}.json",
         Uuid::new_v4()
     ));
@@ -3015,7 +3014,7 @@ fn telegram_state_corrupt_backup_falls_back_to_copy_when_rename_fails() {
 
 #[test]
 fn telegram_state_load_quarantines_corrupt_file_with_hardened_backup() {
-    let root = std::env::temp_dir().join(format!(
+    let root = test_temp_dir().join(format!(
         "termal-telegram-corrupt-backup-home-{}",
         Uuid::new_v4()
     ));
@@ -3068,7 +3067,7 @@ fn telegram_state_load_quarantines_corrupt_file_with_hardened_backup() {
 
 #[test]
 fn telegram_poll_error_dirty_persist_failure_is_nonfatal() {
-    let path = std::env::temp_dir().join(format!(
+    let path = test_temp_dir().join(format!(
         "termal-telegram-poll-error-state-dir-{}",
         Uuid::new_v4()
     ));
@@ -3091,7 +3090,7 @@ fn telegram_poll_error_dirty_persist_failure_is_nonfatal() {
 
 #[test]
 fn telegram_state_load_defaults_missing_file() {
-    let path = std::env::temp_dir().join(format!(
+    let path = test_temp_dir().join(format!(
         "termal-telegram-missing-state-{}.json",
         Uuid::new_v4()
     ));
@@ -3105,7 +3104,7 @@ fn telegram_state_load_defaults_missing_file() {
 
 #[test]
 fn telegram_state_load_reports_unreadable_paths() {
-    let path = std::env::temp_dir().join(format!("termal-telegram-state-dir-{}", Uuid::new_v4()));
+    let path = test_temp_dir().join(format!("termal-telegram-state-dir-{}", Uuid::new_v4()));
     fs::create_dir(&path).expect("fixture directory should create");
 
     let err = load_telegram_bot_state(&path)
@@ -3121,7 +3120,7 @@ fn telegram_state_load_reports_unreadable_paths() {
 fn telegram_bot_file_write_sets_mode_600() {
     use std::os::unix::fs::PermissionsExt as _;
 
-    let path = std::env::temp_dir().join(format!("termal-telegram-mode-{}.json", Uuid::new_v4()));
+    let path = test_temp_dir().join(format!("termal-telegram-mode-{}.json", Uuid::new_v4()));
 
     write_telegram_bot_file(&path, b"{}").expect("telegram bot file should write");
 
@@ -3137,8 +3136,7 @@ fn telegram_bot_file_write_sets_mode_600() {
 
 #[test]
 fn telegram_bot_file_write_removes_temp_after_write_failure() {
-    let root =
-        std::env::temp_dir().join(format!("termal-telegram-write-cleanup-{}", Uuid::new_v4()));
+    let root = test_temp_dir().join(format!("termal-telegram-write-cleanup-{}", Uuid::new_v4()));
     fs::create_dir(&root).expect("fixture directory should create");
     let path = root.join("telegram-bot.json");
 
@@ -3172,13 +3170,13 @@ fn telegram_bot_file_write_removes_temp_after_write_failure() {
         .collect();
     assert!(leaked_temps.is_empty());
 
-    fs::remove_dir_all(&root).ok();
+    remove_test_directory(&root);
 }
 
 #[cfg(windows)]
 #[test]
 fn telegram_bot_file_replace_overwrites_existing_file_on_windows() {
-    let root = std::env::temp_dir().join(format!(
+    let root = test_temp_dir().join(format!(
         "termal-telegram-windows-replace-{}",
         Uuid::new_v4()
     ));
@@ -3196,7 +3194,7 @@ fn telegram_bot_file_replace_overwrites_existing_file_on_windows() {
     );
     assert!(!temp_path.exists());
 
-    fs::remove_dir_all(&root).ok();
+    remove_test_directory(&root);
 }
 
 #[test]

@@ -84,7 +84,7 @@ fn test_app_state() -> AppState {
 #[test]
 fn claude_read_only_reviewer_delegation_child_uses_read_only_auto_approve_and_keeps_effort() {
     let state = test_app_state();
-    let workdir = std::env::temp_dir().to_string_lossy().into_owned();
+    let workdir = test_temp_dir().to_string_lossy().into_owned();
     let child_session_id = {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
         inner.preferences.default_claude_approval_mode = ClaudeApprovalMode::Ask;
@@ -128,7 +128,7 @@ fn claude_read_only_reviewer_delegation_child_uses_read_only_auto_approve_and_ke
 #[test]
 fn claude_non_read_only_delegation_child_keeps_app_default_approval_mode_and_effort() {
     let state = test_app_state();
-    let workdir = std::env::temp_dir().to_string_lossy().into_owned();
+    let workdir = test_temp_dir().to_string_lossy().into_owned();
     let write_policies = [
         DelegationWritePolicy::SharedWorktree {
             owned_paths: vec!["src".to_owned()],
@@ -136,7 +136,7 @@ fn claude_non_read_only_delegation_child_keeps_app_default_approval_mode_and_eff
         DelegationWritePolicy::IsolatedWorktree {
             owned_paths: vec!["src".to_owned()],
             worktree_path: Some(
-                std::env::temp_dir()
+                test_temp_dir()
                     .join(format!("termal-claude-write-delegation-{}", Uuid::new_v4()))
                     .to_string_lossy()
                     .into_owned(),
@@ -189,7 +189,7 @@ fn claude_non_read_only_delegation_child_keeps_app_default_approval_mode_and_eff
 #[test]
 fn claude_read_only_explorer_delegation_child_keeps_app_default_approval_mode() {
     let state = test_app_state();
-    let workdir = std::env::temp_dir().to_string_lossy().into_owned();
+    let workdir = test_temp_dir().to_string_lossy().into_owned();
     let child_session_id = {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
         inner.preferences.default_claude_approval_mode = ClaudeApprovalMode::Ask;
@@ -1135,13 +1135,14 @@ fn delegation_records_persist_and_reload_with_child_link() {
     );
     drop(inner);
     restarted.shutdown_persist_blocking();
+    drop(restarted);
 
     let state_root = persistence_path
         .parent()
         .expect("persistence path should have a parent")
         .to_path_buf();
-    let _ = fs::remove_dir_all(project_root);
-    let _ = fs::remove_dir_all(state_root);
+    remove_test_directory(project_root);
+    remove_test_directory(state_root);
 }
 
 #[test]
@@ -1214,13 +1215,14 @@ fn delegation_full_output_pages_survive_restart_via_child_transcript() {
     }
     assert_eq!(reconstructed, output);
     restarted.shutdown_persist_blocking();
+    drop(restarted);
 
     let state_root = persistence_path
         .parent()
         .expect("persistence path should have a parent")
         .to_path_buf();
-    let _ = fs::remove_dir_all(project_root);
-    let _ = fs::remove_dir_all(state_root);
+    remove_test_directory(project_root);
+    remove_test_directory(state_root);
 }
 
 #[test]
@@ -1284,13 +1286,14 @@ fn persisted_delegation_records_repair_missing_child_parent_link_on_reload() {
     );
     drop(inner);
     restarted.shutdown_persist_blocking();
+    drop(restarted);
 
     let state_root = persistence_path
         .parent()
         .expect("persistence path should have a parent")
         .to_path_buf();
-    let _ = fs::remove_dir_all(project_root);
-    let _ = fs::remove_dir_all(state_root);
+    remove_test_directory(project_root);
+    remove_test_directory(state_root);
 }
 
 #[tokio::test]
@@ -1595,7 +1598,7 @@ async fn opencode_delegation_normalizes_a_valid_model_on_the_child_record() {
     let (state, _input_rx) =
         test_app_state_with_delegation_codex_runtime("opencode-model-normalization-runtime");
     let unique = Uuid::new_v4();
-    let repo_root = std::env::temp_dir().join(format!("termal-opencode-model-{unique}"));
+    let repo_root = test_temp_dir().join(format!("termal-opencode-model-{unique}"));
     fs::create_dir_all(&repo_root).expect("source repo root should be created");
     fs::write(repo_root.join("README.md"), "base\n").expect("base file should write");
     run_git_test_command(&repo_root, &["init"]);
@@ -1644,7 +1647,7 @@ async fn opencode_delegation_normalizes_a_valid_model_on_the_child_record() {
         "the delegation path must persist the normalized model"
     );
 
-    let _ = fs::remove_dir_all(&repo_root);
+    remove_test_directory(&repo_root);
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
@@ -2038,8 +2041,8 @@ fn isolated_worktree_delegation_materializes_dirty_state_and_uses_workspace_writ
     let (state, input_rx) =
         test_app_state_with_delegation_codex_runtime("isolated-delegation-runtime");
     let unique = Uuid::new_v4();
-    let repo_root = std::env::temp_dir().join(format!("termal-isolated-source-{unique}"));
-    let worktree_root = std::env::temp_dir().join(format!("termal-isolated-child-{unique}"));
+    let repo_root = test_temp_dir().join(format!("termal-isolated-source-{unique}"));
+    let worktree_root = test_temp_dir().join(format!("termal-isolated-child-{unique}"));
     fs::create_dir_all(&repo_root).expect("source repo root should be created");
     fs::write(repo_root.join("README.md"), "base\n").expect("base file should write");
     run_git_test_command(&repo_root, &["init"]);
@@ -2128,8 +2131,8 @@ fn isolated_worktree_delegation_materializes_dirty_state_and_uses_workspace_writ
         .args(["worktree", "remove", "--force"])
         .arg(&worktree_root)
         .output();
-    let _ = fs::remove_dir_all(&repo_root);
-    let _ = fs::remove_dir_all(&worktree_root);
+    remove_test_directory(&repo_root);
+    remove_test_directory(&worktree_root);
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
@@ -2138,7 +2141,7 @@ async fn isolated_worktree_delegation_route_generates_termal_owned_path_when_omi
     let (state, input_rx) =
         test_app_state_with_delegation_codex_runtime("generated-isolated-delegation-runtime");
     let unique = Uuid::new_v4();
-    let repo_root = std::env::temp_dir().join(format!("termal-isolated-auto-source-{unique}"));
+    let repo_root = test_temp_dir().join(format!("termal-isolated-auto-source-{unique}"));
     fs::create_dir_all(&repo_root).expect("source repo root should be created");
     fs::write(repo_root.join("README.md"), "base\n").expect("base file should write");
     run_git_test_command(&repo_root, &["init"]);
@@ -2213,8 +2216,8 @@ async fn isolated_worktree_delegation_route_generates_termal_owned_path_when_omi
         .args(["worktree", "remove", "--force"])
         .arg(worktree_path)
         .output();
-    let _ = fs::remove_dir_all(&repo_root);
-    let _ = fs::remove_dir_all(
+    remove_test_directory(&repo_root);
+    remove_test_directory(
         FsPath::new(worktree_path)
             .parent()
             .unwrap_or_else(|| FsPath::new(worktree_path)),
@@ -2234,8 +2237,8 @@ fn isolated_worktree_setup_failure_does_not_leave_worktree() {
             "forced Cursor setup failure before isolated worktree".to_owned(),
         ));
     let unique = Uuid::new_v4();
-    let repo_root = std::env::temp_dir().join(format!("termal-isolated-setup-source-{unique}"));
-    let worktree_root = std::env::temp_dir().join(format!("termal-isolated-setup-child-{unique}"));
+    let repo_root = test_temp_dir().join(format!("termal-isolated-setup-source-{unique}"));
+    let worktree_root = test_temp_dir().join(format!("termal-isolated-setup-child-{unique}"));
     fs::create_dir_all(&repo_root).expect("source repo root should be created");
     fs::write(repo_root.join("README.md"), "base\n").expect("base file should write");
     run_git_test_command(&repo_root, &["init"]);
@@ -2288,8 +2291,8 @@ fn isolated_worktree_setup_failure_does_not_leave_worktree() {
         "setup failure must not leave a worktree"
     );
 
-    let _ = fs::remove_dir_all(&repo_root);
-    let _ = fs::remove_dir_all(&worktree_root);
+    remove_test_directory(&repo_root);
+    remove_test_directory(&worktree_root);
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
@@ -2298,8 +2301,8 @@ fn isolated_worktree_max_fanout_rejection_does_not_leave_worktree() {
     let (state, input_rx) =
         test_app_state_with_delegation_codex_runtime("isolated-fanout-rollback-runtime");
     let unique = Uuid::new_v4();
-    let repo_root = std::env::temp_dir().join(format!("termal-isolated-fanout-source-{unique}"));
-    let worktree_root = std::env::temp_dir().join(format!("termal-isolated-fanout-child-{unique}"));
+    let repo_root = test_temp_dir().join(format!("termal-isolated-fanout-source-{unique}"));
+    let worktree_root = test_temp_dir().join(format!("termal-isolated-fanout-child-{unique}"));
     fs::create_dir_all(&repo_root).expect("source repo root should be created");
     fs::write(repo_root.join("README.md"), "base\n").expect("base file should write");
     run_git_test_command(&repo_root, &["init"]);
@@ -2381,8 +2384,8 @@ fn isolated_worktree_max_fanout_rejection_does_not_leave_worktree() {
         "rejected isolated delegation must not leave a worktree"
     );
 
-    let _ = fs::remove_dir_all(&repo_root);
-    let _ = fs::remove_dir_all(&worktree_root);
+    remove_test_directory(&repo_root);
+    remove_test_directory(&worktree_root);
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
@@ -2391,9 +2394,8 @@ fn isolated_worktree_rejects_untracked_files_without_leaving_worktree() {
     let (state, _input_rx) =
         test_app_state_with_delegation_codex_runtime("isolated-untracked-rollback-runtime");
     let unique = Uuid::new_v4();
-    let repo_root = std::env::temp_dir().join(format!("termal-isolated-untracked-source-{unique}"));
-    let worktree_root =
-        std::env::temp_dir().join(format!("termal-isolated-untracked-child-{unique}"));
+    let repo_root = test_temp_dir().join(format!("termal-isolated-untracked-source-{unique}"));
+    let worktree_root = test_temp_dir().join(format!("termal-isolated-untracked-child-{unique}"));
     fs::create_dir_all(&repo_root).expect("source repo root should be created");
     fs::write(repo_root.join("README.md"), "base\n").expect("base file should write");
     run_git_test_command(&repo_root, &["init"]);
@@ -2452,8 +2454,8 @@ fn isolated_worktree_rejects_untracked_files_without_leaving_worktree() {
         "untracked-file rejection must not leave a worktree"
     );
 
-    let _ = fs::remove_dir_all(&repo_root);
-    let _ = fs::remove_dir_all(&worktree_root);
+    remove_test_directory(&repo_root);
+    remove_test_directory(&worktree_root);
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 

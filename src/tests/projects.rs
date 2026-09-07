@@ -193,7 +193,7 @@ fn creates_projects_and_assigns_sessions_to_them() {
 #[test]
 fn deletes_projects_and_unassigns_existing_sessions() {
     let state = test_app_state();
-    let root = std::env::temp_dir().join(format!("termal-delete-project-{}", Uuid::new_v4()));
+    let root = test_temp_dir().join(format!("termal-delete-project-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
 
     let project = state
@@ -352,11 +352,11 @@ fn rejects_empty_project_roots() {
 #[test]
 fn resolves_requested_paths_inside_the_session_project_root() {
     let state = test_app_state();
-    let root = std::env::temp_dir().join(format!("termal-project-scope-{}", Uuid::new_v4()));
+    let root = test_temp_dir().join(format!("termal-project-scope-{}", Uuid::new_v4()));
     let inside_dir = root.join("src");
     let inside_file = inside_dir.join("main.rs");
     let outside_root =
-        std::env::temp_dir().join(format!("termal-project-scope-outside-{}", Uuid::new_v4()));
+        test_temp_dir().join(format!("termal-project-scope-outside-{}", Uuid::new_v4()));
     let outside_file = outside_root.join("main.rs");
 
     fs::create_dir_all(&inside_dir).unwrap();
@@ -421,11 +421,11 @@ fn resolves_requested_paths_inside_the_session_project_root() {
 #[test]
 fn allows_new_file_paths_inside_the_session_project_root() {
     let state = test_app_state();
-    let root = std::env::temp_dir().join(format!("termal-project-write-scope-{}", Uuid::new_v4()));
+    let root = test_temp_dir().join(format!("termal-project-write-scope-{}", Uuid::new_v4()));
     let inside_dir = root.join("src");
     let new_file = root.join("generated").join("output.rs");
     let outside_root =
-        std::env::temp_dir().join(format!("termal-project-write-outside-{}", Uuid::new_v4()));
+        test_temp_dir().join(format!("termal-project-write-outside-{}", Uuid::new_v4()));
     let outside_file = outside_root.join("escape.rs");
 
     fs::create_dir_all(&inside_dir).unwrap();
@@ -485,10 +485,10 @@ fn allows_new_file_paths_inside_the_session_project_root() {
 #[test]
 fn resolves_project_scoped_paths_without_a_session() {
     let state = test_app_state();
-    let root = std::env::temp_dir().join(format!("termal-project-scope-only-{}", Uuid::new_v4()));
+    let root = test_temp_dir().join(format!("termal-project-scope-only-{}", Uuid::new_v4()));
     let inside_dir = root.join("src");
     let inside_file = inside_dir.join("main.rs");
-    let outside_root = std::env::temp_dir().join(format!(
+    let outside_root = test_temp_dir().join(format!(
         "termal-project-scope-only-outside-{}",
         Uuid::new_v4()
     ));

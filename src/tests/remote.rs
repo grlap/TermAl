@@ -1556,7 +1556,7 @@ fn remote_mirrored_orchestrators_do_not_enqueue_local_pending_prompts_on_resume(
 #[test]
 fn remote_mirrored_orchestrators_skip_pending_transition_dispatch() {
     let state = test_app_state();
-    let project_root = std::env::temp_dir().join(format!(
+    let project_root = test_temp_dir().join(format!(
         "termal-remote-orchestrator-next-action-{}",
         Uuid::new_v4()
     ));
@@ -1623,7 +1623,7 @@ fn remote_mirrored_orchestrators_skip_pending_transition_dispatch() {
 
     let _ = fs::remove_file(state.persistence_path.as_path());
     let _ = fs::remove_file(state.orchestrator_templates_path.as_path());
-    let _ = fs::remove_dir_all(project_root);
+    remove_test_directory(project_root);
 }
 
 // Pins that detect_deadlocked_consolidate_session_ids still reports the
@@ -1634,7 +1634,7 @@ fn remote_mirrored_orchestrators_skip_pending_transition_dispatch() {
 #[test]
 fn remote_mirrored_orchestrators_skip_deadlock_detection() {
     let state = test_app_state();
-    let project_root = std::env::temp_dir().join(format!(
+    let project_root = test_temp_dir().join(format!(
         "termal-remote-orchestrator-deadlock-{}",
         Uuid::new_v4()
     ));
@@ -1743,7 +1743,7 @@ fn remote_mirrored_orchestrators_skip_deadlock_detection() {
 
     let _ = fs::remove_file(state.persistence_path.as_path());
     let _ = fs::remove_file(state.orchestrator_templates_path.as_path());
-    let _ = fs::remove_dir_all(project_root);
+    remove_test_directory(project_root);
 }
 
 // Pins that applying a remote OrchestratorsUpdated delta rewrites

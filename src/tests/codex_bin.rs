@@ -12,7 +12,7 @@ struct TempCodexPackage {
 
 impl TempCodexPackage {
     fn create() -> Self {
-        let root = std::env::temp_dir().join(format!("termal-codex-package-{}", Uuid::new_v4()));
+        let root = test_temp_dir().join(format!("termal-codex-package-{}", Uuid::new_v4()));
         fs::create_dir_all(&root).expect("temporary Codex package root should exist");
         Self { root }
     }
@@ -20,7 +20,7 @@ impl TempCodexPackage {
 
 impl Drop for TempCodexPackage {
     fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.root);
+        remove_test_directory(&self.root);
     }
 }
 

@@ -650,7 +650,7 @@ fn canonical_test_watch_path(path: &FsPath) -> PathBuf {
 #[test]
 fn workspace_file_watch_scopes_include_project_and_session_roots() {
     let state = test_app_state();
-    let root = std::env::temp_dir().join(format!("termal-watch-scopes-{}", Uuid::new_v4()));
+    let root = test_temp_dir().join(format!("termal-watch-scopes-{}", Uuid::new_v4()));
     let project_root = root.join("project");
     let session_root = root.join("session");
     fs::create_dir_all(&project_root).unwrap();
@@ -686,7 +686,7 @@ fn workspace_file_watch_scopes_include_project_and_session_roots() {
 // overlapping trees, which would double-emit every change event.
 #[test]
 fn workspace_file_watch_roots_prune_nested_roots() {
-    let root = std::env::temp_dir().join(format!("termal-watch-nested-{}", Uuid::new_v4()));
+    let root = test_temp_dir().join(format!("termal-watch-nested-{}", Uuid::new_v4()));
     let nested = root.join("packages").join("app");
     fs::create_dir_all(&nested).unwrap();
     let root = canonical_test_watch_path(&root);
@@ -710,7 +710,7 @@ fn workspace_file_watch_roots_prune_nested_roots() {
 // session-scoped change to the wrong session transcript.
 #[test]
 fn workspace_file_changes_from_path_uses_specific_unique_scopes() {
-    let root = std::env::temp_dir().join(format!("termal-watch-change-{}", Uuid::new_v4()));
+    let root = test_temp_dir().join(format!("termal-watch-change-{}", Uuid::new_v4()));
     let nested = root.join("packages").join("app");
     let changed_file = nested.join("src").join("main.rs");
     fs::create_dir_all(changed_file.parent().unwrap()).unwrap();
@@ -768,7 +768,7 @@ fn workspace_file_changes_from_path_uses_specific_unique_scopes() {
 // outside known roots (e.g. generated files, mid-reconcile scopes).
 #[test]
 fn workspace_file_changes_from_path_emits_unscoped_fallback() {
-    let root = std::env::temp_dir().join(format!("termal-watch-fallback-{}", Uuid::new_v4()));
+    let root = test_temp_dir().join(format!("termal-watch-fallback-{}", Uuid::new_v4()));
     let changed_file = root.join("generated.rs");
     fs::create_dir_all(&root).unwrap();
     fs::write(&changed_file, "fn generated() {}\n").unwrap();

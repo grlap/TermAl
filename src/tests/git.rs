@@ -59,7 +59,7 @@ fn parses_quoted_git_status_paths() {
 // pathspec quoting was dropped on the way back out.
 #[test]
 fn git_status_file_actions_support_paths_with_spaces() {
-    let repo_root = std::env::temp_dir().join(format!("termal-git-status-{}", Uuid::new_v4()));
+    let repo_root = test_temp_dir().join(format!("termal-git-status-{}", Uuid::new_v4()));
     let nested_dir = repo_root.join("folder");
     let tracked_file = repo_root.join("README.md");
     let spaced_file = nested_dir.join("file with spaces.txt");
@@ -130,7 +130,7 @@ fn git_status_file_actions_support_paths_with_spaces() {
 // the caller to refresh instead of returning an opaque "no diff" failure.
 #[test]
 fn git_diff_explains_when_an_external_commit_makes_a_cached_entry_stale() {
-    let repo_root = std::env::temp_dir().join(format!("termal-git-stale-diff-{}", Uuid::new_v4()));
+    let repo_root = test_temp_dir().join(format!("termal-git-stale-diff-{}", Uuid::new_v4()));
     let tracked_file = repo_root.join("nested").join("long-file-name.txt");
 
     fs::create_dir_all(tracked_file.parent().unwrap()).unwrap();
@@ -174,7 +174,7 @@ fn git_diff_explains_when_an_external_commit_makes_a_cached_entry_stale() {
 #[test]
 fn git_diff_explains_when_only_the_cached_staged_side_disappears() {
     let repo_root =
-        std::env::temp_dir().join(format!("termal-git-stale-staged-diff-{}", Uuid::new_v4()));
+        test_temp_dir().join(format!("termal-git-stale-staged-diff-{}", Uuid::new_v4()));
     let tracked_file = repo_root.join("mixed.txt");
 
     fs::create_dir_all(&repo_root).unwrap();
@@ -261,8 +261,7 @@ fn empty_git_diff_auxiliary_probe_failure_keeps_the_generic_bad_request_reason()
 // matcher instead of the selected file.
 #[test]
 fn git_status_file_actions_treat_bracket_pathspecs_as_literals() {
-    let repo_root =
-        std::env::temp_dir().join(format!("termal-git-literal-pathspec-{}", Uuid::new_v4()));
+    let repo_root = test_temp_dir().join(format!("termal-git-literal-pathspec-{}", Uuid::new_v4()));
     let docs_dir = repo_root.join("docs");
     let tracked_match = docs_dir.join("a.txt");
     let literal_file = docs_dir.join("[ab].txt");
@@ -313,8 +312,7 @@ fn git_status_file_actions_treat_bracket_pathspecs_as_literals() {
 // path for the unstaged modification; the old path no longer matches.
 #[test]
 fn git_stage_action_supports_unstaged_edit_on_staged_rename() {
-    let repo_root =
-        std::env::temp_dir().join(format!("termal-git-stage-rename-{}", Uuid::new_v4()));
+    let repo_root = test_temp_dir().join(format!("termal-git-stage-rename-{}", Uuid::new_v4()));
     let status_dir = repo_root.join("docs").join("status");
     let old_file = status_dir.join("gdpr.md");
     let new_file = status_dir.join("legal.md");
@@ -409,8 +407,7 @@ fn git_diff_skips_submodule_probe_for_untracked_worktree_files() {
 
 #[test]
 fn git_diff_expands_unstaged_and_staged_submodule_changes() {
-    let test_root =
-        std::env::temp_dir().join(format!("termal-git-submodule-diff-{}", Uuid::new_v4()));
+    let test_root = test_temp_dir().join(format!("termal-git-submodule-diff-{}", Uuid::new_v4()));
     let source_repo = test_root.join("source");
     let parent_repo = test_root.join("parent");
     let checked_out_submodule = parent_repo.join("modules").join("demo");
@@ -526,7 +523,7 @@ fn git_diff_expands_unstaged_and_staged_submodule_changes() {
 // conflating the two sides.
 #[test]
 fn git_diff_document_content_uses_selected_git_side_for_markdown() {
-    let repo_root = std::env::temp_dir().join(format!("termal-git-diff-doc-{}", Uuid::new_v4()));
+    let repo_root = test_temp_dir().join(format!("termal-git-diff-doc-{}", Uuid::new_v4()));
     let markdown_file = repo_root.join("README.md");
 
     fs::create_dir_all(&repo_root).unwrap();
@@ -642,8 +639,7 @@ fn git_diff_document_content_uses_selected_git_side_for_markdown() {
 // content on an added file) and against silently enriching `.txt`.
 #[test]
 fn git_diff_document_content_covers_added_deleted_untracked_and_non_markdown() {
-    let repo_root =
-        std::env::temp_dir().join(format!("termal-git-diff-doc-status-{}", Uuid::new_v4()));
+    let repo_root = test_temp_dir().join(format!("termal-git-diff-doc-status-{}", Uuid::new_v4()));
     let tracked_file = repo_root.join("tracked.md");
     let deleted_staged_file = repo_root.join("deleted-staged.md");
     let deleted_unstaged_file = repo_root.join("deleted-unstaged.md");
@@ -790,8 +786,7 @@ fn git_diff_document_content_covers_added_deleted_untracked_and_non_markdown() {
 // lookup and surface stale HEAD text as the "before" side.
 #[test]
 fn git_diff_document_content_uses_current_index_path_for_unstaged_staged_rename() {
-    let repo_root =
-        std::env::temp_dir().join(format!("termal-git-diff-doc-rename-{}", Uuid::new_v4()));
+    let repo_root = test_temp_dir().join(format!("termal-git-diff-doc-rename-{}", Uuid::new_v4()));
     let old_file = repo_root.join("old.md");
     let new_file = repo_root.join("new.md");
 
@@ -841,7 +836,7 @@ fn git_diff_document_content_uses_current_index_path_for_unstaged_staged_rename(
 #[test]
 fn git_diff_document_content_skips_non_utf8_markdown() {
     let repo_root =
-        std::env::temp_dir().join(format!("termal-git-diff-doc-non-utf8-{}", Uuid::new_v4()));
+        test_temp_dir().join(format!("termal-git-diff-doc-non-utf8-{}", Uuid::new_v4()));
     let markdown_file = repo_root.join("README.md");
 
     fs::create_dir_all(&repo_root).unwrap();
@@ -885,8 +880,7 @@ fn git_diff_document_content_skips_non_utf8_markdown() {
 // is surfaced verbatim to the UI.
 #[test]
 fn git_diff_document_readers_reject_oversized_worktree_files() {
-    let repo_root =
-        std::env::temp_dir().join(format!("termal-git-diff-doc-large-{}", Uuid::new_v4()));
+    let repo_root = test_temp_dir().join(format!("termal-git-diff-doc-large-{}", Uuid::new_v4()));
     let markdown_file = repo_root.join("README.md");
 
     fs::create_dir_all(&repo_root).unwrap();
@@ -973,7 +967,7 @@ fn git_diff_degraded_untagged_statuses_always_produce_a_note() {
 // content.
 #[test]
 fn git_diff_response_reports_oversized_markdown_enrichment_note() {
-    let repo_root = std::env::temp_dir().join(format!(
+    let repo_root = test_temp_dir().join(format!(
         "termal-git-diff-doc-large-response-{}",
         Uuid::new_v4()
     ));
@@ -1022,7 +1016,7 @@ fn git_diff_response_reports_oversized_markdown_enrichment_note() {
 // user.
 #[test]
 fn git_diff_response_degrades_internal_markdown_enrichment_errors_to_raw_diff() {
-    let repo_root = std::env::temp_dir().join(format!(
+    let repo_root = test_temp_dir().join(format!(
         "termal-git-diff-doc-internal-response-{}",
         Uuid::new_v4()
     ));
@@ -1072,7 +1066,7 @@ fn git_diff_response_degrades_internal_markdown_enrichment_errors_to_raw_diff() 
 // stable.
 #[test]
 fn git_diff_response_reports_expected_document_enrichment_notes() {
-    let repo_root = std::env::temp_dir().join(format!(
+    let repo_root = test_temp_dir().join(format!(
         "termal-git-diff-doc-notes-response-{}",
         Uuid::new_v4()
     ));
@@ -1174,8 +1168,7 @@ fn git_diff_response_degraded_markdown_serializes_frontend_contract() {
 // side fails to load.
 #[test]
 fn git_diff_document_reader_errors_are_non_empty() {
-    let repo_root =
-        std::env::temp_dir().join(format!("termal-git-diff-doc-errors-{}", Uuid::new_v4()));
+    let repo_root = test_temp_dir().join(format!("termal-git-diff-doc-errors-{}", Uuid::new_v4()));
 
     fs::create_dir_all(&repo_root).unwrap();
     run_git_test_command(&repo_root, &["init"]);
@@ -1202,7 +1195,7 @@ fn git_diff_document_reader_errors_are_non_empty() {
 // 500 or a bad-request.
 #[test]
 fn git_diff_document_reader_reports_missing_git_objects_as_not_found() {
-    let repo_root = std::env::temp_dir().join(format!(
+    let repo_root = test_temp_dir().join(format!(
         "termal-git-diff-doc-missing-object-{}",
         Uuid::new_v4()
     ));
@@ -1235,7 +1228,7 @@ fn git_diff_document_reader_reports_missing_git_objects_as_not_found() {
 // diagnostics when diffing in a repo that has no commits yet.
 #[test]
 fn git_diff_document_reader_reports_unborn_head_objects_as_not_found() {
-    let repo_root = std::env::temp_dir().join(format!(
+    let repo_root = test_temp_dir().join(format!(
         "termal-git-diff-doc-unborn-head-{}",
         Uuid::new_v4()
     ));
@@ -1263,7 +1256,7 @@ fn git_diff_document_reader_reports_unborn_head_objects_as_not_found() {
 // worktree oversize.
 #[test]
 fn git_diff_document_reader_rejects_oversized_git_objects() {
-    let repo_root = std::env::temp_dir().join(format!(
+    let repo_root = test_temp_dir().join(format!(
         "termal-git-diff-doc-large-object-{}",
         Uuid::new_v4()
     ));
@@ -1293,7 +1286,7 @@ fn git_diff_document_reader_rejects_oversized_git_objects() {
 #[test]
 fn git_diff_worktree_reader_reports_directories_as_not_found() {
     let repo_root =
-        std::env::temp_dir().join(format!("termal-git-diff-doc-directory-{}", Uuid::new_v4()));
+        test_temp_dir().join(format!("termal-git-diff-doc-directory-{}", Uuid::new_v4()));
     let docs_dir = repo_root.join("docs");
 
     fs::create_dir_all(&docs_dir).unwrap();
@@ -1317,7 +1310,7 @@ fn git_diff_worktree_reader_reports_directories_as_not_found() {
 // enrichment note stable at "could not be found".
 #[test]
 fn git_diff_worktree_reader_reports_missing_files_as_not_found() {
-    let repo_root = std::env::temp_dir().join(format!(
+    let repo_root = test_temp_dir().join(format!(
         "termal-git-diff-doc-missing-worktree-{}",
         Uuid::new_v4()
     ));
@@ -1353,7 +1346,7 @@ fn git_diff_worktree_reader_reports_missing_files_as_not_found() {
 // wording consistent with the other readers.
 #[test]
 fn git_diff_untracked_reader_rejects_oversized_files() {
-    let repo_root = std::env::temp_dir().join(format!(
+    let repo_root = test_temp_dir().join(format!(
         "termal-git-diff-untracked-large-{}",
         Uuid::new_v4()
     ));
@@ -1385,8 +1378,7 @@ fn git_diff_untracked_reader_rejects_oversized_files() {
 #[cfg(unix)]
 #[test]
 fn git_diff_worktree_reader_returns_symlink_target_file_contents() {
-    let repo_root =
-        std::env::temp_dir().join(format!("termal-git-diff-doc-symlink-{}", Uuid::new_v4()));
+    let repo_root = test_temp_dir().join(format!("termal-git-diff-doc-symlink-{}", Uuid::new_v4()));
     let target_file = repo_root.join("target.md");
     let symlink_path = repo_root.join("link.md");
 
@@ -1408,11 +1400,11 @@ fn git_diff_worktree_reader_returns_symlink_target_file_contents() {
 #[cfg(unix)]
 #[test]
 fn git_diff_worktree_reader_rejects_symlink_target_escape() {
-    let repo_root = std::env::temp_dir().join(format!(
+    let repo_root = test_temp_dir().join(format!(
         "termal-git-diff-doc-symlink-escape-{}",
         Uuid::new_v4()
     ));
-    let outside_root = std::env::temp_dir().join(format!(
+    let outside_root = test_temp_dir().join(format!(
         "termal-git-diff-doc-symlink-outside-{}",
         Uuid::new_v4()
     ));
@@ -1446,11 +1438,11 @@ fn git_diff_worktree_reader_rejects_symlink_target_escape() {
 #[cfg(unix)]
 #[test]
 fn git_diff_worktree_reader_rejects_symlinked_parent_escape() {
-    let repo_root = std::env::temp_dir().join(format!(
+    let repo_root = test_temp_dir().join(format!(
         "termal-git-diff-doc-parent-symlink-{}",
         Uuid::new_v4()
     ));
-    let outside_root = std::env::temp_dir().join(format!(
+    let outside_root = test_temp_dir().join(format!(
         "termal-git-diff-doc-parent-target-{}",
         Uuid::new_v4()
     ));
@@ -1480,11 +1472,11 @@ fn git_diff_worktree_reader_rejects_symlinked_parent_escape() {
 #[cfg(unix)]
 #[test]
 fn git_diff_worktree_reader_rejects_symlinked_parent_symlink_leaf_escape() {
-    let repo_root = std::env::temp_dir().join(format!(
+    let repo_root = test_temp_dir().join(format!(
         "termal-git-diff-doc-parent-leaf-symlink-{}",
         Uuid::new_v4()
     ));
-    let outside_root = std::env::temp_dir().join(format!(
+    let outside_root = test_temp_dir().join(format!(
         "termal-git-diff-doc-parent-leaf-target-{}",
         Uuid::new_v4()
     ));
@@ -1517,7 +1509,7 @@ fn git_diff_worktree_reader_rejects_symlinked_parent_symlink_leaf_escape() {
 fn git_diff_worktree_reader_allows_non_utf8_symlink_targets() {
     use std::os::unix::ffi::OsStringExt as _;
 
-    let repo_root = std::env::temp_dir().join(format!(
+    let repo_root = test_temp_dir().join(format!(
         "termal-git-diff-doc-non-utf8-symlink-{}",
         Uuid::new_v4()
     ));
@@ -1553,7 +1545,7 @@ fn git_diff_worktree_reader_allows_non_utf8_symlink_targets() {
 // success while the remote is still behind.
 #[test]
 fn push_git_repo_updates_tracking_branch() {
-    let root = std::env::temp_dir().join(format!("termal-git-push-{}", Uuid::new_v4()));
+    let root = test_temp_dir().join(format!("termal-git-push-{}", Uuid::new_v4()));
     let remote_root = root.join("remote.git");
     let repo_root = root.join("local");
     let remote_root_string = remote_root.to_string_lossy().into_owned();
@@ -1601,7 +1593,7 @@ fn push_git_repo_updates_tracking_branch() {
 // unchanged.
 #[test]
 fn sync_git_repo_pulls_remote_changes() {
-    let root = std::env::temp_dir().join(format!("termal-git-sync-{}", Uuid::new_v4()));
+    let root = test_temp_dir().join(format!("termal-git-sync-{}", Uuid::new_v4()));
     let remote_root = root.join("remote.git");
     let repo_root = root.join("local");
     let peer_root = root.join("peer");

@@ -628,7 +628,7 @@ fn resume_persist_failure_rolls_back_the_promotion_and_keeps_the_queue_paused() 
 
     // Point persistence at a directory so the promotion's commit fails.
     let failing_persistence_path =
-        std::env::temp_dir().join(format!("termal-resume-persist-failure-{}", Uuid::new_v4()));
+        test_temp_dir().join(format!("termal-resume-persist-failure-{}", Uuid::new_v4()));
     fs::create_dir_all(&failing_persistence_path)
         .expect("failing persistence directory should exist");
     state.shutdown_persist_blocking();
@@ -717,7 +717,7 @@ fn resume_persist_failure_rolls_back_the_promotion_and_keeps_the_queue_paused() 
         assert_eq!(record.session.message_count, projected_count_before + 1);
     }
 
-    let _ = fs::remove_dir_all(&failing_persistence_path);
+    remove_test_directory(&failing_persistence_path);
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
@@ -1189,7 +1189,7 @@ fn stop_session_clears_active_turn_file_tracking_when_persist_fails() {
         input_tx,
         process: process.clone(),
     };
-    let failing_persistence_path = std::env::temp_dir().join(format!(
+    let failing_persistence_path = test_temp_dir().join(format!(
         "termal-stop-active-turn-rollback-{}",
         Uuid::new_v4()
     ));
@@ -1242,7 +1242,7 @@ fn stop_session_clears_active_turn_file_tracking_when_persist_fails() {
     drop(inner);
 
     process.wait().unwrap();
-    let _ = fs::remove_dir_all(failing_persistence_path);
+    remove_test_directory(failing_persistence_path);
 }
 
 #[test]

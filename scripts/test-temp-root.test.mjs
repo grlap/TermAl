@@ -25,6 +25,181 @@ function child(userTemp, source) {
   });
 }
 
+for (const phase of ["initial", "revalidation"]) {
+  test(`sweep tolerates a fixture disappearing during ${phase}`, async (t) => {
+    const userTemp = sandbox(t);
+    const root = join(userTemp, "termal", "tests");
+    const fixture = join(root, "vanishing");
+    mkdirSync(fixture, { recursive: true });
+    utimesSync(fixture, new Date(0), new Date(0));
+    const original = fs.lstatSync;
+    let reads = 0;
+    const mock = t.mock.method(fs, "lstatSync", (path, ...args) => {
+      if (path === fixture && ++reads === (phase === "initial" ? 1 : 2)) {
+        rmSync(fixture, { recursive: true });
+      }
+      return original(path, ...args);
+    });
+    syncBuiltinESMExports();
+    try {
+      assert.equal((await child(userTemp, "")).exitCode, 0);
+      assert(!existsSync(fixture), "sweep must not recreate a vanished fixture");
+      assert(reads > 0);
+    } finally {
+      mock.mock.restore();
+      syncBuiltinESMExports();
+    }
+  });
+}
+
+test("stale plain fixture files share the removal cap and recent-file protection", (t) => {
+  const root = sandbox(t);
+  for (let index = 0; index < 65; index++) {
+    const path = join(root, `file-${index}`);
+    writeFileSync(path, "stale");
+    utimesSync(path, new Date(0), new Date(0));
+  }
+  writeFileSync(join(root, "recent"), "keep");
+  assert.equal(sweepStaleTestRuns(root).length, 64);
+  assert.equal(readdirSync(root).length, 2);
+  assert(existsSync(join(root, "recent")));
+});
+
+for (const phase of ["initial", "revalidation"]) {
+  test(`sweep preserves non-ENOENT errors during ${phase}`, (t) => {
+    const root = sandbox(t);
+    const fixture = join(root, "denied");
+    mkdirSync(fixture);
+    utimesSync(fixture, new Date(0), new Date(0));
+    const original = fs.lstatSync;
+    const failure = Object.assign(new Error("injected permission failure"), { code: "EACCES" });
+    let reads = 0;
+    const mock = t.mock.method(fs, "lstatSync", (path, ...args) => {
+      if (path === fixture && ++reads === (phase === "initial" ? 1 : 2)) throw failure;
+      return original(path, ...args);
+    });
+    syncBuiltinESMExports();
+    try {
+      assert.throws(() => sweepStaleTestRuns(root), (error) => error === failure);
+      assert(existsSync(fixture));
+    } finally {
+      mock.mock.restore();
+      syncBuiltinESMExports();
+    }
+  });
+}
+
+test("wrapper evicts at most 64 stale cache entries without following links", async (t) => {
+  const userTemp = sandbox(t);
+  const cache = join(userTemp, "termal", "node-compile-cache");
+  mkdirSync(cache, { recursive: true });
+  for (let index = 0; index < 65; index++) {
+    const path = join(cache, `stale-${index}`);
+    if (index % 2) mkdirSync(path);
+    else writeFileSync(path, "stale");
+    utimesSync(path, new Date(0), new Date(0));
+  }
+  const outside = join(userTemp, "outside-cache");
+  mkdirSync(outside);
+  writeFileSync(join(outside, "evidence"), "keep");
+  utimesSync(outside, new Date(0), new Date(0));
+  symlinkSync(outside, join(cache, "linked"), process.platform === "win32" ? "junction" : "dir");
+  writeFileSync(join(cache, "recent"), "keep");
+  assert.equal((await child(userTemp, "")).exitCode, 0);
+  assert.equal(readdirSync(cache).filter((name) => name.startsWith("stale-")).length, 1);
+  assert(existsSync(join(cache, "recent")));
+  assert(existsSync(join(outside, "evidence")));
+});
+
+test("wrapper sweeps stale unmarked fixture roots by location, preserving recent roots", async (t) => {
+  const userTemp = sandbox(t);
+  const root = join(userTemp, "termal", "tests");
+  mkdirSync(root, { recursive: true });
+  for (const name of ["legacy-fixture", "run-unmarked", "recent-fixture"]) {
+    mkdirSync(join(root, name));
+    writeFileSync(join(root, name, "evidence"), name);
+  }
+  for (const name of ["legacy-fixture", "run-unmarked"]) {
+    utimesSync(join(root, name), new Date(0), new Date(0));
+  }
+  const result = await child(userTemp, "");
+  assert.equal(result.exitCode, 0);
+  assert.deepEqual(readdirSync(root), ["recent-fixture"]);
+});
+
+test("unmarked fixture sweeping shares the 64-removal bound and rejects links", (t) => {
+  const userTemp = sandbox(t);
+  const root = join(userTemp, "termal", "tests");
+  const outside = join(userTemp, "outside");
+  mkdirSync(root, { recursive: true });
+  mkdirSync(outside);
+  writeFileSync(join(outside, "evidence"), "keep");
+  utimesSync(outside, new Date(0), new Date(0));
+  symlinkSync(outside, join(root, "linked-fixture"), process.platform === "win32" ? "junction" : "dir");
+  for (let index = 0; index < 65; index++) {
+    const path = join(root, `fixture-${index}`);
+    mkdirSync(path);
+    utimesSync(path, new Date(0), new Date(0));
+  }
+  assert.equal(sweepStaleTestRuns(root).length, 64);
+  assert.equal(readdirSync(root).length, 2);
+  assert(existsSync(join(outside, "evidence")));
+});
+
+test("compile cache is product-contained, persistent and reused across child runs", async (t) => {
+  const userTemp = sandbox(t);
+  const cache = join(userTemp, "termal", "node-compile-cache");
+  const first = await child(userTemp, `
+    const assert = require('node:assert/strict');
+    const fs = require('node:fs');
+    const path = require('node:path');
+    assert.equal(process.env.NODE_COMPILE_CACHE, ${JSON.stringify(cache)});
+    fs.writeFileSync(path.join(process.env.NODE_COMPILE_CACHE, 'reuse-proof'), 'cache');
+  `);
+  assert.equal(first.exitCode, 0);
+  const second = await child(userTemp, `
+    const assert = require('node:assert/strict');
+    const fs = require('node:fs');
+    const path = require('node:path');
+    assert.equal(process.env.NODE_COMPILE_CACHE, ${JSON.stringify(cache)});
+    assert.equal(fs.readFileSync(path.join(process.env.NODE_COMPILE_CACHE, 'reuse-proof'), 'utf8'), 'cache');
+  `);
+  assert.equal(second.exitCode, 0);
+  assert(existsSync(cache));
+  assert(!existsSync(first.runRoot));
+  assert(!existsSync(second.runRoot));
+});
+
+test("linked persistent compile cache is rejected before a child starts", async (t) => {
+  const userTemp = sandbox(t);
+  const product = join(userTemp, "termal");
+  const outside = join(userTemp, "outside-cache");
+  mkdirSync(product);
+  mkdirSync(outside);
+  symlinkSync(outside, join(product, "node-compile-cache"), process.platform === "win32" ? "junction" : "dir");
+  await assert.rejects(child(userTemp, ""), /not a plain directory/);
+  assert.deepEqual(readdirSync(outside), []);
+});
+
+test("green cleanup reports residual names while their evidence still exists", async (t) => {
+  const userTemp = sandbox(t);
+  let reported = false;
+  const result = await runInTestTemp(process.execPath, ["-e", `
+    const fs = require('node:fs');
+    const path = require('node:path');
+    fs.writeFileSync(path.join(process.env.TEMP, 'leftover.sqlite'), 'evidence');
+  `], { userTemp, report: (message) => {
+    if (message.startsWith("Test temp cleanup:")) {
+      assert.match(message, /leftover\.sqlite/);
+      const root = join(userTemp, "termal", "tests");
+      assert(existsSync(join(root, readdirSync(root)[0], "leftover.sqlite")));
+      reported = true;
+    }
+  } });
+  assert.equal(result.exitCode, 0);
+  assert(reported);
+});
+
 test("green children receive one contained root which is removed after exit", async (t) => {
   const userTemp = sandbox(t);
   const result = await child(userTemp, `
@@ -186,7 +361,7 @@ test("another product's new entries are informational, not TermAl failures", asy
   assert.equal(existsSync(join(userTemp, "codenav-concurrent")), true);
 });
 
-test("sweep removes only stale marked runs, leaving recent and unowned directories", (t) => {
+test("sweep removes stale dead marked runs, leaving recent directories", (t) => {
   const userTemp = sandbox(t);
   const root = join(userTemp, "termal", "tests");
   mkdirSync(root, { recursive: true });
@@ -224,6 +399,7 @@ test("sweep preserves old runs whose owner is still alive", (t) => {
   const marker = join(active, ".termal-test-run");
   writeFileSync(marker, JSON.stringify({ version: 1, pid: process.pid }));
   utimesSync(marker, new Date(0), new Date(0));
+  utimesSync(active, new Date(0), new Date(0));
   assert.deepEqual(sweepStaleTestRuns(root), []);
   assert.equal(existsSync(active), true);
 });

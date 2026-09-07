@@ -1536,7 +1536,7 @@ fn remote_marker_delete_persist_failure_does_not_advance_revision_watermark() {
         )
         .expect("remote marker create delta should apply");
 
-    let failing_persistence_path = std::env::temp_dir().join(format!(
+    let failing_persistence_path = test_temp_dir().join(format!(
         "termal-marker-delete-persist-failure-{}",
         Uuid::new_v4()
     ));
@@ -1576,7 +1576,7 @@ fn remote_marker_delete_persist_failure_does_not_advance_revision_watermark() {
     );
     drop(inner);
 
-    let _ = fs::remove_dir_all(failing_persistence_path);
+    remove_test_directory(failing_persistence_path);
     state.persistence_path = Arc::new(original_persistence_path.clone());
     state
         .apply_remote_delta_event(
@@ -1671,7 +1671,7 @@ fn equal_remote_snapshot_retries_dirty_delta_persistence_after_failed_recovery()
         snapshot
     };
 
-    let failing_persistence_path = std::env::temp_dir().join(format!(
+    let failing_persistence_path = test_temp_dir().join(format!(
         "termal-equal-snapshot-persist-failure-{}",
         Uuid::new_v4()
     ));
@@ -1761,7 +1761,7 @@ fn ephemeral_remote_delta_retries_dirty_persistence_before_mutation() {
         )
         .expect("remote marker create delta should apply");
 
-    let failing_persistence_path = std::env::temp_dir().join(format!(
+    let failing_persistence_path = test_temp_dir().join(format!(
         "termal-ephemeral-delta-dirty-retry-{}",
         Uuid::new_v4()
     ));

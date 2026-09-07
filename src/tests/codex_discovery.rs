@@ -13,7 +13,7 @@ use super::*;
 // A nonempty state.db must not shadow the current state_5.sqlite.
 #[test]
 fn discover_codex_threads_from_home_reads_pinned_database() {
-    let codex_home = std::env::temp_dir().join(format!("termal-codex-home-{}", Uuid::new_v4()));
+    let codex_home = test_temp_dir().join(format!("termal-codex-home-{}", Uuid::new_v4()));
     let _temp_root = TestTempRoot::own(codex_home.clone());
     fs::create_dir_all(&codex_home).unwrap();
     fs::write(codex_home.join("state.db"), b"not the supported database").unwrap();
@@ -55,8 +55,7 @@ fn discover_codex_threads_from_home_reads_pinned_database() {
 #[test]
 fn discover_codex_threads_from_home_rejects_missing_current_columns() {
     for column in ["model", "reasoning_effort", "source", "thread_source"] {
-        let codex_home =
-            std::env::temp_dir().join(format!("termal-codex-columns-{}", Uuid::new_v4()));
+        let codex_home = test_temp_dir().join(format!("termal-codex-columns-{}", Uuid::new_v4()));
         let _temp_root = TestTempRoot::own(codex_home.clone());
         write_test_codex_threads_db(&codex_home, &[]);
         let path = codex_home.join("state_5.sqlite");
@@ -79,8 +78,7 @@ fn discover_codex_threads_from_home_rejects_missing_current_columns() {
 
 #[test]
 fn resolve_codex_threads_database_path_uses_only_the_pinned_filename() {
-    let codex_home =
-        std::env::temp_dir().join(format!("termal-codex-home-scan-{}", Uuid::new_v4()));
+    let codex_home = test_temp_dir().join(format!("termal-codex-home-scan-{}", Uuid::new_v4()));
     let _temp_root = TestTempRoot::own(codex_home.clone());
     fs::create_dir_all(&codex_home).unwrap();
     for name in [
@@ -120,7 +118,7 @@ fn missing_pinned_codex_database_is_diagnosed_once_per_home() {
         eprintln!("pinned-codex-discovery-probe-ran");
         return;
     }
-    let home = std::env::temp_dir().join(format!("termal-codex-missing-db-{}", Uuid::new_v4()));
+    let home = test_temp_dir().join(format!("termal-codex-missing-db-{}", Uuid::new_v4()));
     let _temp_root = TestTempRoot::own(home.clone());
     fs::create_dir_all(&home).unwrap();
     fs::write(home.join("state.db"), b"obsolete").unwrap();
@@ -156,7 +154,7 @@ fn missing_pinned_codex_database_is_diagnosed_once_per_home() {
 // the active Codex backend.
 #[test]
 fn discover_codex_threads_from_sources_skips_repl_home_and_uses_shared_runtime_home() {
-    let root = std::env::temp_dir().join(format!("termal-codex-discovery-{}", Uuid::new_v4()));
+    let root = test_temp_dir().join(format!("termal-codex-discovery-{}", Uuid::new_v4()));
     let _temp_root = TestTempRoot::own(root.clone());
     let source_home = root.join(".codex");
     let termal_root = root.join(".termal").join("codex-home");
@@ -252,7 +250,7 @@ fn discover_codex_threads_from_sources_skips_repl_home_and_uses_shared_runtime_h
 // from any home must win after deduplication so the stale copy is not imported.
 #[test]
 fn discover_codex_threads_from_homes_retains_delegation_classification_across_duplicates() {
-    let root = std::env::temp_dir().join(format!(
+    let root = test_temp_dir().join(format!(
         "termal-codex-cross-home-delegation-{}",
         Uuid::new_v4()
     ));
@@ -315,8 +313,7 @@ fn discover_codex_threads_from_homes_retains_delegation_classification_across_du
 // a Codex DB has accumulated many out-of-scope conversations.
 #[test]
 fn discover_codex_threads_from_home_filters_scopes_before_limiting_results() {
-    let codex_home =
-        std::env::temp_dir().join(format!("termal-codex-home-large-{}", Uuid::new_v4()));
+    let codex_home = test_temp_dir().join(format!("termal-codex-home-large-{}", Uuid::new_v4()));
     let _temp_root = TestTempRoot::own(codex_home.clone());
     fs::create_dir_all(&codex_home).expect("test Codex home should be created");
     let connection =
@@ -392,8 +389,7 @@ fn discover_codex_threads_from_home_filters_scopes_before_limiting_results() {
 // threads in a single workdir.
 #[test]
 fn discover_codex_threads_from_home_limits_in_scope_results_per_home() {
-    let codex_home =
-        std::env::temp_dir().join(format!("termal-codex-home-limited-{}", Uuid::new_v4()));
+    let codex_home = test_temp_dir().join(format!("termal-codex-home-limited-{}", Uuid::new_v4()));
     let _temp_root = TestTempRoot::own(codex_home.clone());
     fs::create_dir_all(&codex_home).expect("test Codex home should be created");
     let connection =
@@ -466,7 +462,7 @@ fn discover_codex_threads_from_home_limits_in_scope_results_per_home() {
 #[test]
 fn discover_codex_threads_from_home_excludes_subagents_before_limit_and_reports_ids() {
     let codex_home =
-        std::env::temp_dir().join(format!("termal-codex-home-subagents-{}", Uuid::new_v4()));
+        test_temp_dir().join(format!("termal-codex-home-subagents-{}", Uuid::new_v4()));
     let _temp_root = TestTempRoot::own(codex_home.clone());
     fs::create_dir_all(&codex_home).expect("test Codex home should be created");
     let connection =
@@ -624,7 +620,7 @@ fn discover_codex_threads_from_home_excludes_subagents_before_limit_and_reports_
 // top-level threads while a structurally valid bootstrap is classified.
 #[test]
 fn discover_codex_threads_from_home_retains_invalid_delegation_prefixes_and_null_titles() {
-    let codex_home = std::env::temp_dir().join(format!(
+    let codex_home = test_temp_dir().join(format!(
         "termal-codex-home-delegation-marker-{}",
         Uuid::new_v4()
     ));
@@ -734,7 +730,7 @@ fn discover_codex_threads_from_home_retains_invalid_delegation_prefixes_and_null
 // imported.
 #[test]
 fn discover_codex_threads_from_home_rejects_delegation_marker_outside_normalized_scope() {
-    let root = std::env::temp_dir().join(format!(
+    let root = test_temp_dir().join(format!(
         "termal-codex-home-delegation-outside-scope-{}",
         Uuid::new_v4()
     ));
@@ -816,7 +812,7 @@ fn codex_discovery_like_prefix_pattern_escapes_sql_wildcards() {
 #[test]
 fn discover_codex_threads_from_home_retains_null_source_without_thread_source_column() {
     let codex_home =
-        std::env::temp_dir().join(format!("termal-codex-home-null-source-{}", Uuid::new_v4()));
+        test_temp_dir().join(format!("termal-codex-home-null-source-{}", Uuid::new_v4()));
     let _temp_root = TestTempRoot::own(codex_home.clone());
     fs::create_dir_all(&codex_home).expect("test Codex home should be created");
     let connection =
@@ -909,7 +905,7 @@ fn app_state_boot_imports_a_top_level_codex_thread_without_materializing_its_chi
     let _env_lock = TEST_HOME_ENV_MUTEX
         .lock()
         .expect("test home env mutex poisoned");
-    let root = std::env::temp_dir().join(format!("termal-codex-child-boot-{}", Uuid::new_v4()));
+    let root = test_temp_dir().join(format!("termal-codex-child-boot-{}", Uuid::new_v4()));
     let _temp_root = TestTempRoot::own(root.clone());
     let project_root = root.join("project");
     let test_home = root.join("home");
@@ -1292,7 +1288,7 @@ fn import_discovered_codex_threads_adds_project_scoped_sessions_without_duplicat
 #[cfg(windows)]
 #[test]
 fn import_discovered_codex_threads_normalizes_legacy_local_verbatim_paths() {
-    let project_root = std::env::temp_dir().join(format!(
+    let project_root = test_temp_dir().join(format!(
         "termal-discovered-verbatim-path-{}",
         Uuid::new_v4()
     ));

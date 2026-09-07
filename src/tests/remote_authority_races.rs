@@ -810,7 +810,7 @@ fn settings_persist_failure_still_finishes_retired_connection_teardown() {
         .event_bridge_started
         .store(false, Ordering::SeqCst);
 
-    let failing_persistence_path = std::env::temp_dir().join(format!(
+    let failing_persistence_path = test_temp_dir().join(format!(
         "termal-settings-persist-failure-{}",
         Uuid::new_v4()
     ));
@@ -1008,7 +1008,7 @@ fn registry_refuses_unknown_remote_without_inserting_connection() {
 #[test]
 fn app_boot_seeds_registry_authority_from_persisted_remote_settings() {
     let unique = Uuid::new_v4();
-    let state_root = std::env::temp_dir().join(format!("termal-registry-boot-{unique}"));
+    let state_root = test_temp_dir().join(format!("termal-registry-boot-{unique}"));
     let _state_temp_root = TestTempRoot::own(state_root.clone());
     let persistence_path = state_root.join("termal.sqlite");
     let templates_path = state_root.join("orchestrators.json");
@@ -1031,5 +1031,6 @@ fn app_boot_seeds_registry_authority_from_persisted_remote_settings() {
     assert_eq!(lease.connection.config(), remote);
 
     state.shutdown_persist_blocking();
-    let _ = fs::remove_dir_all(state_root);
+    drop(state);
+    remove_test_directory(state_root);
 }
