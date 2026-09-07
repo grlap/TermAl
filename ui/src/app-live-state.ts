@@ -984,17 +984,38 @@ export function useAppLiveState(
     }
     const currentSession = latestSessions[latestExistingIndex];
 
+    const preserveHistoricalWindow =
+      currentSession.hasNewerHistory === true &&
+      currentSession.messages.length > 0;
+    const incomingMessagesById = preserveHistoricalWindow
+      ? new Map(session.messages.map((message) => [message.id, message]))
+      : null;
     const hydratedSession = {
       ...session,
-      messagesLoaded: adoptOutcome === "adopted",
-      hasOlderHistory: adoptOutcome === "partial",
-      hasNewerHistory: false,
+      // Hydration repairs content; it is not an explicit navigation request.
+      // A late tail response must not evict a historical window opened before
+      // or during the request. Repair shared message ids and session metadata,
+      // but leave window replacement to the history-demand navigation path.
+      messages: incomingMessagesById
+        ? currentSession.messages.map(
+            (message) => incomingMessagesById.get(message.id) ?? message,
+          )
+        : session.messages,
+      messagesLoaded: !preserveHistoricalWindow && adoptOutcome === "adopted",
+      messageStartIndex: preserveHistoricalWindow
+        ? currentSession.messageStartIndex
+        : session.messageStartIndex,
+      hasOlderHistory: preserveHistoricalWindow
+        ? currentSession.hasOlderHistory
+        : adoptOutcome === "partial",
+      hasNewerHistory: preserveHistoricalWindow,
     };
     const reconciledHydratedSession = reconcileSingleSession(
       currentSession,
       hydratedSession,
       {
-        adoptPartialMessages: adoptOutcome === "partial",
+        adoptPartialMessages:
+          preserveHistoricalWindow || adoptOutcome === "partial",
         disableMutationStampFastPath: true,
       },
     );

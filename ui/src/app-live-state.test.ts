@@ -3552,6 +3552,131 @@ describe("hydration adoption side effects", () => {
     expect(observed).toHaveLength(1);
   });
 
+  it.each([
+    ["start", "before"],
+    ["start", "after"],
+    ["around", "before"],
+    ["around", "after"],
+  ] as const)("preserves %s history when passive tail repair starts %s navigation", async (direction, repairTiming) => {
+    vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
+    vi.spyOn(api, "fetchState").mockImplementation(
+      () => new Promise<StateResponse>(() => {}),
+    );
+    const messages = makeHydrationMessages(1_000);
+    const initial = makeSession({
+      messages: messages.slice(-SESSION_TAIL_WINDOW_MESSAGE_COUNT),
+      messagesLoaded: false,
+      messageCount: messages.length,
+      messageStartIndex: messages.length - SESSION_TAIL_WINDOW_MESSAGE_COUNT,
+      hasOlderHistory: true,
+      hasNewerHistory: false,
+      sessionMutationStamp: 8,
+    });
+    let resolveTail!: (response: Awaited<ReturnType<typeof api.fetchSessionTail>>) => void;
+    const fetchTail = vi.spyOn(api, "fetchSessionTail").mockImplementation(
+      () => new Promise((resolve) => { resolveTail = resolve; }),
+    );
+    const start = direction === "start" ? 0 : 468;
+    const historicalMessages = messages.slice(start, start + SESSION_HISTORY_PAGE_MESSAGE_COUNT);
+    vi.spyOn(api, "fetchSessionHistory").mockResolvedValue({
+      messages: historicalMessages,
+      messageStartIndex: start,
+      messageCount: messages.length,
+      hasMore: start > 0,
+      hasNewer: true,
+      nextBefore: start > 0 ? historicalMessages[0]!.id : null,
+      nextAfter: historicalMessages[historicalMessages.length - 1]!.id,
+      revision: 5,
+      sessionMutationStamp: 8,
+      serverInstanceId: "server-a",
+    });
+    const params = makeLiveStateParams(initial);
+    params.activeSession = null;
+    params.visibleSessionHydrationTargets = [];
+    params.adoptionRefs.latestStateRevisionRef.current = 5;
+    let isVisible = false;
+    const harness = renderLiveStateHarness(params, () => {}, () =>
+      isVisible ? [{ id: initial.id, messagesLoaded: false }] : [],
+    );
+    const beginPassiveHydration = () => {
+      isVisible = true;
+      harness.rerenderLiveState();
+    };
+    if (repairTiming === "before") {
+      beginPassiveHydration();
+    }
+    await act(async () => {
+      const applied = direction === "start"
+        ? await requestSessionHistoryStartPage(initial.id)
+        : await requestSessionHistoryAroundPage(initial.id, 500);
+      expect(applied).toBe(true);
+    });
+    const historical = getSessionRecordSnapshotForTesting(initial.id)!;
+    expect(historical.messages).toEqual(historicalMessages);
+    expect(historical.hasNewerHistory).toBe(true);
+    if (repairTiming === "after") {
+      beginPassiveHydration();
+    }
+    expect(fetchTail).toHaveBeenCalledOnce();
+    await act(async () => {
+      resolveTail({ revision: 5, serverInstanceId: "server-a", session: initial });
+      await flushHydrationMicrotasks();
+    });
+    const retained = getSessionRecordSnapshotForTesting(initial.id)!;
+    expect(retained.messages).toBe(historical.messages);
+    expect(retained.messageStartIndex).toBe(start);
+    expect(retained.hasOlderHistory).toBe(start > 0);
+    expect(retained.hasNewerHistory).toBe(true);
+    expect(params.adoptionRefs.sessionsRef.current[0]).toBe(retained);
+  });
+
+  it.each([false, true])("repairs overlapping content and metadata without moving history, full response=%s", async (fullResponse) => {
+    vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
+    vi.spyOn(api, "fetchState").mockImplementation(() => new Promise<StateResponse>(() => {}));
+    const messages = makeHydrationMessages(1000);
+    const historical = makeSession({
+      messages: messages.slice(960, 984),
+      messageStartIndex: 960,
+      messageCount: 1000,
+      messagesLoaded: false,
+      hasOlderHistory: true,
+      hasNewerHistory: true,
+      sessionMutationStamp: 8,
+      pendingPrompts: [{ id: "old-queue", timestamp: "10:00", text: "Completed prompt" }],
+    });
+    const repairedMessage = { ...messages[982]!, text: "Canonical repaired content" } as Message;
+    const incomingMessages = messages.map((message) =>
+      message.id === repairedMessage.id ? repairedMessage : message,
+    );
+    const repaired = makeSession({
+      ...historical,
+      status: "active",
+      preview: "Current live preview",
+      messagesLoaded: fullResponse,
+      messages: fullResponse ? incomingMessages : incomingMessages.slice(-20),
+      pendingPrompts: [],
+    });
+    vi.spyOn(api, "fetchSessionTail").mockResolvedValue({
+      revision: 5,
+      serverInstanceId: "server-a",
+      session: repaired,
+    });
+    const params = makeLiveStateParams(historical);
+    params.adoptionRefs.latestStateRevisionRef.current = 5;
+    renderLiveStateHarness(params, () => {});
+    await waitFor(() => expect(getSessionRecordSnapshotForTesting(historical.id)?.preview).toBe(repaired.preview));
+    const retained = getSessionRecordSnapshotForTesting(historical.id)!;
+    expect(retained.messages.map((message) => message.id)).toEqual(historical.messages.map((message) => message.id));
+    expect(retained.messages[0]).toBe(historical.messages[0]);
+    expect(retained.messages.find((message) => message.id === repairedMessage.id)).toEqual(repairedMessage);
+    expect(retained.messageStartIndex).toBe(960);
+    expect(retained.hasOlderHistory).toBe(true);
+    expect(retained.hasNewerHistory).toBe(true);
+    expect(retained.messagesLoaded).toBe(false);
+    expect(retained.status).toBe("active");
+    expect(retained.pendingPrompts ?? []).toEqual([]);
+  });
+
   it("replaces a historical window with one bounded live-tail demand", async () => {
     vi.stubGlobal(
       "EventSource",

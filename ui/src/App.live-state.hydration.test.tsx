@@ -37,6 +37,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "./api";
 import { ACTIVE_PROMPT_POLL_INTERVAL_MS } from "./active-prompt-poll";
 import App from "./App";
+import { requestSessionHistoryAroundPage } from "./session-history-demand";
+import { getSessionRecordSnapshotForTesting } from "./session-store";
 import { ThemedCombobox } from "./preferences/themed-combobox";
 import {
   describeCodexModelAdjustmentNotice,
@@ -351,6 +353,108 @@ describe("App live state - delta-gap core", () => {
     "278,043",
     "9.55 MiB",
   ];
+
+  it("keeps a detached historical anchor when passive tail repair arrives", async () => {
+    await withVerifiedNoReactActWarnings(async () => {
+      const restoreGeometry = stubElementScrollGeometry({
+        clientHeight: 200,
+        scrollHeight: 1000,
+      });
+      const scrollTo = mockScrollToAndApplyTop();
+      const context = await renderAppWithProjectAndSession();
+      try {
+        const initial = getSessionRecordSnapshotForTesting("session-1")!;
+        const summary = {
+          ...initial,
+          queuePaused: initial.queuePaused ?? false,
+          messageCount: 1000,
+          sessionMutationStamp: 8,
+        };
+        const pendingTail = createDeferred<Awaited<ReturnType<typeof api.fetchSessionTail>>>();
+        const fetchTail = vi.spyOn(api, "fetchSessionTail").mockImplementation(
+          () => pendingTail.promise,
+        );
+        const historicalMessage = {
+          id: "historical-anchor",
+          type: "text" as const,
+          author: "assistant" as const,
+          timestamp: "10:00",
+          text: "Keep this historical response in view",
+        };
+        vi.spyOn(api, "fetchSessionHistory").mockResolvedValue({
+          messages: [historicalMessage],
+          messageStartIndex: 500,
+          messageCount: 1000,
+          hasMore: true,
+          hasNewer: true,
+          nextBefore: historicalMessage.id,
+          nextAfter: historicalMessage.id,
+          revision: 2,
+          sessionMutationStamp: 8,
+          serverInstanceId: "test-instance",
+        });
+        await dispatchStateEvent(latestEventSource(), makeStateResponse({
+          revision: 2,
+          serverInstanceId: "test-instance",
+          projects: [],
+          orchestrators: [],
+          workspaces: [],
+          sessions: [summary],
+        }));
+        await waitFor(() => expect(fetchTail).toHaveBeenCalled());
+        const stack = document.querySelector<HTMLElement>(
+          ".workspace-pane.active .message-stack",
+        )!;
+        act(() => {
+          fireEvent.wheel(stack, { deltaY: -400 });
+          fireEvent.scroll(stack);
+        });
+        await act(async () => {
+          expect(await requestSessionHistoryAroundPage(initial.id, 500)).toBe(true);
+          await flushUiWork();
+        });
+        await settleAsyncUi();
+        act(() => {
+          fireEvent.wheel(stack, { deltaY: 80 });
+          fireEvent.scroll(stack);
+        });
+        const historical = getSessionRecordSnapshotForTesting(initial.id)!;
+        const anchor = stack.querySelector('[data-message-id="historical-anchor"]');
+        expect(anchor).not.toBeNull();
+        expect(stack).not.toHaveClass("is-tail-following");
+        const topBeforeRepair = stack.scrollTop;
+        expect(topBeforeRepair).toBeGreaterThan(0);
+        scrollTo.mockClear();
+        await act(async () => {
+          pendingTail.resolve({
+            revision: 2,
+            serverInstanceId: "test-instance",
+            session: {
+              ...summary,
+              messagesLoaded: false,
+              hasOlderHistory: true,
+              hasNewerHistory: false,
+              messages: [{ ...historicalMessage, id: "recent-tail", text: "Recent response" }],
+            },
+          });
+          await flushUiWork();
+        });
+        await settleAsyncUi();
+        expect(getSessionRecordSnapshotForTesting(initial.id)?.messages).toBe(historical.messages);
+        expect(getSessionRecordSnapshotForTesting(initial.id)?.messageStartIndex).toBe(500);
+        expect(getSessionRecordSnapshotForTesting(initial.id)?.hasNewerHistory).toBe(true);
+        expect(stack.querySelector('[data-message-id="historical-anchor"]')).toBe(anchor);
+        expect(anchor).toBeInTheDocument();
+        expect(stack).not.toHaveClass("is-tail-following");
+        expect(stack.scrollTop).toBe(topBeforeRepair);
+        expect(stack).not.toHaveTextContent("Recent response");
+        expect(scrollTo).not.toHaveBeenCalled();
+      } finally {
+        context.cleanup();
+        restoreGeometry();
+      }
+    });
+  });
 
   it("rehydrates an active transcript when a summary snapshot overtakes a delayed delta", async () => {
     await withVerifiedNoReactActWarnings(async () => {
