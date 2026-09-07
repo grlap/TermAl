@@ -18,6 +18,7 @@ import {
   applyDeltaToSessions,
   pruneLiveTransportActivitySessions,
   sessionDeltaAdvancesCurrentMutationStamp,
+  type DeltaApplyResult,
 } from "./live-updates";
 import {
   decideDeltaRevisionAction,
@@ -52,8 +53,10 @@ import type { AdoptStateOptions } from "./app-live-state-types";
 import type { RequestStateResyncOptions } from "./app-live-state-resync-options";
 import type { ReconnectRecoveryStateSnapshot } from "./app-live-state-reconnect-state";
 import type { SessionHydrationOptions } from "./app-live-state-hydration";
+import type { HydrationDeltaObservation } from "./session-hydration-adoption";
 
 type AppLiveStateTransportEventHandlersContext = {
+  observeHydrationDelta?: (observation: HydrationDeltaObservation) => void;
   adoptState: (state: StateResponse, options?: AdoptStateOptions) => boolean;
   applyDelegationWaitDeltaLocally: (delta: DeltaEvent) => void;
   beginBadLiveEventRecovery: () => void;
@@ -127,6 +130,36 @@ type AppLiveStateTransportEventHandlersContext = {
 export function createAppLiveStateTransportEventHandlers(
   context: AppLiveStateTransportEventHandlersContext,
 ) {
+  // Observation is optional and cannot change transport recovery or publication.
+  // Called before refs are published, so both reducer inputs and outputs exist.
+  function observeDelta(
+    delta: DeltaEvent | null,
+    revisionAction: HydrationDeltaObservation["revisionAction"],
+    result?: DeltaApplyResult,
+  ) {
+    if (!context.observeHydrationDelta) return;
+    try {
+      const sessionId = delta && "sessionId" in delta ? delta.sessionId : null;
+      const previousSession = context.sessionsRef.current.find(
+        (entry) => entry.id === sessionId,
+      ) ?? null;
+      const nextSession = result && "sessions" in result
+        ? result.sessions.find((entry) => entry.id === sessionId) ?? null : null;
+      context.observeHydrationDelta({
+        delta,
+        revisionAction,
+        resultKind: result?.kind ?? null,
+        previousSession,
+        nextSession,
+        targetPresent: Boolean(
+          delta && "messageId" in delta &&
+          previousSession?.messages.some((message) => message.id === delta.messageId),
+        ),
+      });
+    } catch {
+      // A subscriber failure must never interrupt the event's original path.
+    }
+  }
   const {
     adoptState,
     applyDelegationWaitDeltaLocally,
@@ -234,6 +267,7 @@ export function createAppLiveStateTransportEventHandlers(
       profiledRevision = state.revision;
       profiledSessionCount = state.sessions?.length;
       if (state._sseFallback) {
+        observeDelta(null, "resync");
         // Marked fallback payloads only signal that the client should refetch
         // the authoritative snapshot from /api/state.
         clearForceAdoptNextStateEvent();
@@ -289,6 +323,7 @@ export function createAppLiveStateTransportEventHandlers(
       clearRecoveredBackendRequestError();
       profiler?.mark("clearErrors");
     } catch (error) {
+      observeDelta(null, "resync");
       clearForceAdoptNextStateEvent();
       if (!isCancelled()) {
         setBackendConnectionIssueDetail(
@@ -325,6 +360,9 @@ export function createAppLiveStateTransportEventHandlers(
       const delta = JSON.parse(event.data) as DeltaEvent;
       const currentRevision = latestStateRevisionRef.current;
       if (isDelegationDeltaEvent(delta)) {
+        if (currentRevision === null || delta.revision > currentRevision) {
+          observeDelta(delta, "resync");
+        }
         applyDelegationWaitDeltaLocally(delta);
         if (currentRevision === null || delta.revision >= currentRevision) {
           if (transportState.delegationRepairAdoptedSinceLastReconnectError) {
@@ -359,6 +397,7 @@ export function createAppLiveStateTransportEventHandlers(
           isSameRevisionReplayableSessionDelta(delta)
         ) {
           const result = applyDeltaToSessions(sessionsRef.current, delta);
+          observeDelta(delta, revisionAction, result);
           const replayableMaterialApply =
             result.kind === "applied" ||
             result.kind === "appliedNeedsResync";
@@ -446,6 +485,7 @@ export function createAppLiveStateTransportEventHandlers(
         return;
       }
       if (revisionAction === "resync") {
+        observeDelta(delta, revisionAction);
         cancelStaleSendResponseRecoveryPollForSessions(
           staleSendRecoveryPollSessionIdsForDelta(delta),
         );
@@ -457,6 +497,7 @@ export function createAppLiveStateTransportEventHandlers(
           )
         ) {
           const result = applyDeltaToSessions(sessionsRef.current, delta);
+          observeDelta(delta, revisionAction, result);
           if (
             result.kind === "applied" ||
             result.kind === "appliedNeedsResync"
@@ -529,6 +570,7 @@ export function createAppLiveStateTransportEventHandlers(
       }
 
       if (delta.type === "orchestratorsUpdated") {
+        if (delta.sessions?.length) observeDelta(delta, "apply");
         // Global orchestrator updates prove the SSE stream is healthy enough to
         // clear reconnect fallback state. When the delta also carries session
         // snapshots, treat those specific ids as live data for watchdog baselines.
@@ -566,6 +608,7 @@ export function createAppLiveStateTransportEventHandlers(
       // Non-session deltas such as codexUpdated/orchestratorsUpdated are handled above; the
       // session reducer only accepts deltas that carry a concrete sessionId.
       const result = applyDeltaToSessions(sessionsRef.current, delta);
+      observeDelta(delta, revisionAction, result);
       if (result.kind === "appliedNoOp") {
         void confirmReconnectRecoveryFromDeltaEvent();
         cancelStaleSendResponseRecoveryPollForSessions([delta.sessionId]);
@@ -637,6 +680,7 @@ export function createAppLiveStateTransportEventHandlers(
         hydrationOptions: { forceTailRepair: true },
       });
     } catch {
+      observeDelta(null, "resync");
       // Parse or reducer failure — restore reconnecting state so the retry
       // affordance stays available, and re-arm polling.
       if (transportState.sawReconnectOpenSinceLastError) {
@@ -673,6 +717,7 @@ export function createAppLiveStateTransportEventHandlers(
     if (isCancelled()) {
       return;
     }
+    observeDelta(null, "resync");
     // The backend emits this when an SSE broadcast receiver fell past the
     // channel capacity and dropped events. A recovery state snapshot follows
     // immediately, but its revision may equal `latestStateRevisionRef.current`

@@ -98,10 +98,15 @@ import {
   setContainsOnlyValuesFrom,
 } from "./app-live-state-model-confirmations";
 import {
+  advancePartialTailAppendProof,
   classifyFetchedSessionAdoption,
   getHydrationMessageCount,
   getHydrationMutationStamp,
+  mergeAppendOnlyPartialTailCoverage,
+  samePartialTailProjection,
   type AdoptFetchedSessionOutcome,
+  type HydrationDeltaObservation,
+  type PartialTailAppendProof,
   type SessionHydrationRequestContext,
 } from "./session-hydration-adoption";
 import {
@@ -272,6 +277,9 @@ export function useAppLiveState(
   } = preferenceSetters;
 
   const hydratingSessionIdsRef = useRef<Set<string>>(new Set());
+  const partialTailAppendProofsRef = useRef(
+    new Map<string, PartialTailAppendProof>(),
+  );
   const activeSessionIdRef = useRef(activeSession?.id ?? null);
   activeSessionIdRef.current = activeSession?.id ?? null;
   const activeTranscriptSessionIdRef = useRef(activeTranscriptSessionId);
@@ -407,6 +415,31 @@ export function useAppLiveState(
     hydrationCappedRetryAttemptsRef.current.clear();
   }
 
+  function invalidatePartialTailProof(sessionId?: string) {
+    if (sessionId !== undefined) {
+      const proof = partialTailAppendProofsRef.current.get(sessionId);
+      if (proof) proof.valid = false;
+      return;
+    }
+    for (const proof of partialTailAppendProofsRef.current.values()) {
+      proof.valid = false;
+    }
+  }
+
+  function observeHydrationDelta(observation: HydrationDeltaObservation) {
+    const { delta } = observation;
+    if (!delta || observation.revisionAction === "resync") {
+      invalidatePartialTailProof();
+    } else if ("sessionId" in delta) {
+      const proof = partialTailAppendProofsRef.current.get(delta.sessionId);
+      if (proof) advancePartialTailAppendProof(proof, observation);
+    } else if (delta.type === "orchestratorsUpdated") {
+      for (const session of delta.sessions ?? []) {
+        invalidatePartialTailProof(session.id);
+      }
+    }
+  }
+
   function clearHydrationMismatchSessionIds(sessionIds: Iterable<string>) {
     for (const sessionId of sessionIds) {
       hydrationMismatchSessionIdsRef.current.delete(sessionId);
@@ -480,6 +513,8 @@ export function useAppLiveState(
   useEffect(() => {
     return () => {
       cancelHydrationRetries();
+      invalidatePartialTailProof();
+      partialTailAppendProofsRef.current.clear();
       olderHistoryLoadsRef.current.clear();
     };
   }, []);
@@ -488,6 +523,7 @@ export function useAppLiveState(
     () =>
       addSessionHistoryPageDemandListener((demand) => {
         const { sessionId } = demand;
+        invalidatePartialTailProof(sessionId);
         if (
           demand.direction !== "older" ||
           demand.requestId !== undefined
@@ -567,6 +603,14 @@ export function useAppLiveState(
         forceMessagesUnloaded: options?.forceMessagesUnloaded,
       },
     );
+    // Summary metadata cannot prove what happened to transcript content.
+    // Only observed reducer applications may advance an append proof.
+    for (const [sessionId, proof] of partialTailAppendProofsRef.current) {
+      const merged = mergedSessions.find((entry) => entry.id === sessionId);
+      if (!merged || !samePartialTailProjection(proof.latest, merged)) {
+        proof.valid = false;
+      }
+    }
     const pendingOpenSessionId =
       options?.openSessionId ?? pendingRecoveryOpenSessionIdRef.current;
     const pendingPaneId =
@@ -977,7 +1021,8 @@ export function useAppLiveState(
       seenServerInstanceIds: seenServerInstanceIdsRef.current,
     });
     if (
-      (adoptOutcome !== "adopted" && adoptOutcome !== "partial") ||
+      (adoptOutcome !== "adopted" && adoptOutcome !== "partial" &&
+        adoptOutcome !== "partialCoverage") ||
       latestExistingIndex === -1
     ) {
       return adoptOutcome;
@@ -1010,7 +1055,11 @@ export function useAppLiveState(
         : adoptOutcome === "partial",
       hasNewerHistory: preserveHistoricalWindow,
     };
-    const reconciledHydratedSession = reconcileSingleSession(
+    const coverageSession = adoptOutcome === "partialCoverage"
+      ? mergeAppendOnlyPartialTailCoverage(session, currentSession, requestContext)
+      : null;
+    if (adoptOutcome === "partialCoverage" && !coverageSession) return "stale";
+    const reconciledHydratedSession = coverageSession ?? reconcileSingleSession(
       currentSession,
       hydratedSession,
       {
@@ -1053,6 +1102,7 @@ export function useAppLiveState(
   }
 
   function publishHistorySession(session: Session) {
+    invalidatePartialTailProof(session.id);
     const latestSessions = sessionsRef.current;
     const sessionIndex = latestSessions.findIndex(
       (entry) => entry.id === session.id,
@@ -1090,6 +1140,11 @@ export function useAppLiveState(
     sessionId: string,
     options?: SessionHydrationOptions,
   ) {
+    if (
+      options?.forceTailRepair || options?.allowDivergentTextRepairAfterNewerRevision
+    ) {
+      invalidatePartialTailProof(sessionId);
+    }
     if (options?.forceTailRepair === true) {
       // Keep the invalidation across a failed request so the ordinary retry
       // path still performs a tail repair instead of falling into history
@@ -1125,6 +1180,12 @@ export function useAppLiveState(
         let attemptedTailHydration = false;
         if (shouldStartTailLoad(sessionId, options)) {
           attemptedTailHydration = true;
+          const baseline = sessionsRef.current.find((entry) => entry.id === sessionId);
+          if (baseline) {
+            const proof = { baseline, latest: baseline, valid: true };
+            requestContext.partialTailAppendProof = proof;
+            partialTailAppendProofsRef.current.set(sessionId, proof);
+          }
           const tailResponse = await fetchSessionTail(
             sessionId,
             SESSION_TAIL_WINDOW_MESSAGE_COUNT,
@@ -1162,7 +1223,13 @@ export function useAppLiveState(
             },
           );
           switch (tailAdoptOutcome) {
+            case "partialCoverage":
+              clearHydrationRetry(sessionId);
+              tailLoadedSessionIdsRef.current.add(sessionId);
+              queuedHydrationSessionIdsRef.current.delete(sessionId);
+              return;
             case "partial":
+              clearHydrationRetry(sessionId);
               tailLoadedSessionIdsRef.current.add(sessionId);
               queuedHydrationSessionIdsRef.current.delete(sessionId);
               if (!sessionStillNeedsHydration(sessionId)) {
@@ -1318,6 +1385,9 @@ export function useAppLiveState(
         shouldRetryHydration = true;
         retryHydrationWithCap = true;
       } finally {
+        if (partialTailAppendProofsRef.current.get(sessionId) === requestContext.partialTailAppendProof) {
+          partialTailAppendProofsRef.current.delete(sessionId);
+        }
         hydratingSessionIdsRef.current.delete(sessionId);
         if (
           queuedTextRepairHydrationSessionIdsRef.current.delete(sessionId) &&
@@ -1369,7 +1439,10 @@ export function useAppLiveState(
       );
       return (
         session?.messagesLoaded === false &&
-        !tailLoadedSessionIdsRef.current.has(sessionId)
+        !tailLoadedSessionIdsRef.current.has(sessionId) &&
+        // A declined response already owns a retry deadline. Passive renders
+        // must not race it; explicit demand and forced repair call directly.
+        !hydrationRetryTimersRef.current.has(sessionId)
       );
     });
     if (sessionIdsToHydrate.length === 0) {
@@ -1465,6 +1538,10 @@ export function useAppLiveState(
         pendingSseRecreateOnInstanceChange.requestId;
 
     if (fullStateServerInstanceChanged) {
+      // Retry deadlines belong to the old authority, not restart recovery.
+      cancelHydrationRetries();
+      invalidatePartialTailProof();
+      partialTailAppendProofsRef.current.clear();
       hydratingSessionIdsRef.current.clear();
       hydratedSessionIdsRef.current.clear();
       queuedHydrationSessionIdsRef.current.clear();
@@ -1617,6 +1694,7 @@ export function useAppLiveState(
   }
 
   useAppLiveStateTransport({
+    observeHydrationDelta,
     adoptState,
     applyDelegationWaitDeltaLocally,
     cancelStaleSendResponseRecoveryPollForSessions,

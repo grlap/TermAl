@@ -71,8 +71,10 @@ import type { AdoptStateOptions } from "./app-live-state-types";
 import { createAppLiveStateTransportEventHandlers } from "./app-live-state-transport-events";
 import { ReconnectStateMachine } from "./app-live-state-reconnect-state";
 import type { SessionHydrationOptions } from "./app-live-state-hydration";
+import type { HydrationDeltaObservation } from "./session-hydration-adoption";
 
 type UseAppLiveStateTransportParams = {
+  observeHydrationDelta?: (observation: HydrationDeltaObservation) => void;
   adoptState: (state: StateResponse, options?: AdoptStateOptions) => boolean;
   applyDelegationWaitDeltaLocally: (delta: DeltaEvent) => void;
   cancelStaleSendResponseRecoveryPollForSessions: (
@@ -147,6 +149,7 @@ export function useAppLiveStateTransport(
   params: UseAppLiveStateTransportParams,
 ) {
   const {
+    observeHydrationDelta,
     adoptState,
     applyDelegationWaitDeltaLocally,
     cancelStaleSendResponseRecoveryPollForSessions,
@@ -1131,6 +1134,7 @@ export function useAppLiveStateTransport(
       handleWorkspaceFilesChangedEvent,
       handleLaggedEvent,
     } = createAppLiveStateTransportEventHandlers({
+      observeHydrationDelta,
       adoptState,
       applyDelegationWaitDeltaLocally,
       beginBadLiveEventRecovery,
