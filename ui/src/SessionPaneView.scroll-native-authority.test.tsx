@@ -8,6 +8,8 @@ import { useSessionPaneScrollState } from "./SessionPaneView.scroll";
 import { installAnimationFrameHarness, params, session } from "./SessionPaneView.scroll.fixtures";
 import { MESSAGE_STACK_USER_SCROLL_INTENT_EVENT, peekMessageStackNativeScrollOwnership } from "./message-stack-scroll-sync";
 import { VirtualizedConversationMessageList } from "./panels/VirtualizedConversationMessageList";
+import type { PaneScrollPosition } from "./pane-scroll-position-migration";
+import type { Message } from "./types";
 
 afterEach(() => {
   cleanup();
@@ -16,7 +18,11 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function renderNativeConversation(paneFirst: boolean, detachedRestoreTop?: number) {
+function renderNativeConversation(
+  paneFirst: boolean,
+  detachedRestoreTop?: number,
+  reader?: { anchor: NonNullable<PaneScrollPosition["anchor"]>; ordinary?: boolean },
+) {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   const frames = installAnimationFrameHarness(1_000 / 60);
   const observers = new Map<ResizeObserverCallback, Set<Element>>();
@@ -31,6 +37,7 @@ function renderNativeConversation(paneFirst: boolean, detachedRestoreTop?: numbe
   let height = 1_000;
   let top = 800;
   const writes: number[] = [];
+  const slotTops = new Map<string, number>();
   let node!: HTMLElement;
   let page!: HTMLDivElement;
   const bindNode = (mounted: HTMLElement | null) => {
@@ -55,7 +62,8 @@ function renderNativeConversation(paneFirst: boolean, detachedRestoreTop?: numbe
   };
   vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
     const measuredHeight = this === node ? 200 : height;
-    const measuredTop = this === node ? 0 : -top;
+    const messageId = (this as HTMLElement).dataset?.messageId;
+    const measuredTop = this === node ? 0 : (slotTops.get(messageId ?? "") ?? 0) - top;
     return {
       height: measuredHeight, width: 1_000, top: measuredTop,
       bottom: measuredTop + measuredHeight, left: 0, right: 1_000,
@@ -66,16 +74,25 @@ function renderNativeConversation(paneFirst: boolean, detachedRestoreTop?: numbe
     ...session(false), hasOlderHistory: false, messagesLoaded: true, messageCount: 1,
   };
   const key = "pane-1:session-history";
+  let childMessages = activeSession.messages;
   const shared = {
     ...params(activeSession),
-    paneScrollPositions: { [key]: { top: detachedRestoreTop ?? top, shouldStick: detachedRestoreTop === undefined } },
+    paneScrollPositions: { [key]: {
+      top: detachedRestoreTop ?? top,
+      shouldStick: detachedRestoreTop === undefined,
+      ...(reader ? { anchor: reader.anchor } : {}),
+    } } as Record<string, PaneScrollPosition>,
     paneShouldStickToBottomRef: { current: { [key]: detachedRestoreTop === undefined } },
   };
   let state!: ReturnType<typeof useSessionPaneScrollState>;
-  let props = { visible: false, waiting: false, revision: 0 };
-  function Conversation({ visible, waiting, revision }: typeof props) {
+  let props = { visible: false, waiting: false, revision: 0, searching: false };
+  function Conversation({ visible, waiting, revision, searching }: typeof props) {
     state = useSessionPaneScrollState({
       ...shared, activeSession, isActive: true, isSessionTabActive: visible,
+      hasSessionFindQuery: searching,
+      activeSessionSearchMatch: searching ? {
+        itemId: "search-message", itemKey: "search-message", itemKind: "message", snippet: "match",
+      } : null,
       showWaitingIndicator: waiting,
       visibleContentSignature: `content-${revision}`,
       visibleMessageContentSignature: `message-${revision}`,
@@ -97,12 +114,15 @@ function renderNativeConversation(paneFirst: boolean, detachedRestoreTop?: numbe
       onKeyDown={state.handleMessageStackUserScrollIntent}
       onMouseDown={state.handleMessageStackUserScrollIntent}
       onFocusCapture={state.handleMessageStackFocusCapture}
-    ><div ref={bindPage} className="session-conversation-page">{visible ?
+    ><div ref={bindPage} className="session-conversation-page">{visible ? reader?.ordinary ?
+      childMessages.map((message) => <div key={message.id} className="message-slot" data-message-id={message.id}>
+        <article className="message-card">{message.id}</article>
+      </div>) :
       <VirtualizedConversationMessageList
         isActive
         tailFollowIntentIsAuthoritative
         sessionId={activeSession.id}
-        messages={activeSession.messages}
+        messages={childMessages}
         scrollContainerRef={state.messageStackRef}
         virtualizerHandleRef={state.virtualizerHandleRef}
         tailFollowIntent={state.liveTailPinned}
@@ -141,6 +161,16 @@ function renderNativeConversation(paneFirst: boolean, detachedRestoreTop?: numbe
     node, page, writes, userIntents, update, frames,
     get savedPosition() { return shared.paneScrollPositions[key]; },
     get state() { return state; },
+    hydrate(messages: Message[], positions: Record<string, number>, deferChild = false) {
+      for (const [id, value] of Object.entries(positions)) slotTops.set(id, value);
+      activeSession = { ...activeSession, messages };
+      if (!deferChild) childMessages = messages;
+      update({ revision: props.revision + 1 });
+    },
+    commitChild() {
+      childMessages = activeSession.messages;
+      update({});
+    },
     browserHeight(next: number) {
       height = next;
       top = Math.min(top, Math.max(0, height - 200));
@@ -163,6 +193,7 @@ function renderNativeConversation(paneFirst: boolean, detachedRestoreTop?: numbe
           timestamp: "12:01", text: `New output ${props.revision + 1}`,
         }],
       };
+      childMessages = activeSession.messages;
       update({ revision: props.revision + 1 });
       frames.drainAnimationFrames();
     },
@@ -171,6 +202,97 @@ function renderNativeConversation(paneFirst: boolean, detachedRestoreTop?: numbe
 }
 
 describe("native scroll attachment authority", () => {
+  it.each([false, true])("restores the original signed fractional anchor after numeric fallback finishes (ordinary=%s)", (ordinary) => {
+    const anchor = { messageId: "returning-reader-message", viewportOffsetPx: -12.25 };
+    const view = renderNativeConversation(false, 400, { anchor, ordinary });
+    view.frames.drainAnimationFrames();
+    expect(view.node.scrollTop).toBe(400);
+    view.nativeScroll();
+    act(() => view.state.captureDetachedMessageStackPosition());
+    expect(view.savedPosition.anchor).toEqual(anchor);
+
+    const messages: Message[] = [{
+      id: anchor.messageId, type: "text", author: "assistant", timestamp: "12:01",
+      text: "The same reading point, after history and estimates above it changed",
+    }];
+    view.hydrate(messages, { [anchor.messageId]: 735.5 }, true);
+    expect(view.node.querySelector(`[data-message-id="${anchor.messageId}"]`)).toBeNull();
+    view.commitChild();
+    view.frames.drainAnimationFrames();
+    const slot = view.node.querySelector(`[data-message-id="${anchor.messageId}"]`);
+    expect(slot).not.toBeNull();
+    expect(slot!.getBoundingClientRect().top - view.node.getBoundingClientRect().top).toBe(-12.25);
+    expect(view.node.scrollTop).toBe(747.75);
+    expect(view.savedPosition.anchor).toEqual(anchor);
+    expect(view.state.liveTailPinned).toBe(false);
+    const restoredTop = view.node.scrollTop;
+    view.update({ revision: 10 });
+    expect(view.node.scrollTop).toBe(restoredTop);
+  });
+
+  it.each(["wheel", "follow", "tab", "handle"] as const)("lets %s navigation replace a missing reader restore", (navigation) => {
+    const anchor = { messageId: "returning-reader-message", viewportOffsetPx: -12.25 };
+    const view = renderNativeConversation(false, 400, { anchor });
+    view.frames.drainAnimationFrames();
+    if (navigation === "wheel") fireEvent.wheel(view.node, { deltaY: -60 });
+    if (navigation === "follow") act(() => view.state.scrollMessageStackToBoundary("bottom"));
+    if (navigation === "tab") view.update({ visible: false });
+    if (navigation === "handle") act(() => { view.state.virtualizerHandleRef.current!.beginUserScrollNavigation(); });
+    const topBeforeHydration = view.node.scrollTop;
+    view.hydrate([{
+      id: anchor.messageId, type: "text", author: "assistant", timestamp: "12:01", text: "Late history",
+    }], { [anchor.messageId]: 735.5 });
+    view.frames.drainAnimationFrames();
+    expect(view.node.scrollTop).not.toBe(747.75);
+    if (navigation !== "follow") expect(view.node.scrollTop).toBe(topBeforeHydration);
+  });
+
+  it("keeps the original reader anchor through rapid hide/show and rejects the old activation callback", () => {
+    const anchor = { messageId: "returning-reader-message", viewportOffsetPx: -12.25 };
+    const view = renderNativeConversation(false, 400, { anchor });
+    view.frames.drainAnimationFrames();
+    const oldHandle = view.state.virtualizerHandleRef.current!;
+    const oldRestore = vi.spyOn(oldHandle, "restoreViewportAnchor");
+    view.update({ revision: 1 });
+    const oldOptions = oldRestore.mock.calls[0]?.[1];
+    expect(oldOptions).toBeDefined();
+    act(() => view.state.captureDetachedMessageStackPosition());
+    view.update({ visible: false });
+    view.update({ visible: true });
+    expect(oldOptions!.isCurrent()).toBe(false);
+    expect(view.savedPosition.anchor).toEqual(anchor);
+    view.hydrate([{
+      id: anchor.messageId, type: "text", author: "assistant", timestamp: "12:01", text: "Returned history",
+    }], { [anchor.messageId]: 735.5 });
+    view.frames.drainAnimationFrames();
+    const slot = view.node.querySelector(`[data-message-id="${anchor.messageId}"]`)!;
+    expect(slot.getBoundingClientRect().top).toBe(-12.25);
+    const restored = view.savedPosition;
+    act(() => oldOptions!.onRestored());
+    expect(view.savedPosition).toBe(restored);
+  });
+
+  it("lets a search selection replace the newly persistent missing reader request", () => {
+    const anchor = { messageId: "returning-reader-message", viewportOffsetPx: -12.25 };
+    const view = renderNativeConversation(false, 400, { anchor, ordinary: true });
+    view.frames.drainAnimationFrames();
+    const target = view.node.querySelector<HTMLElement>(".message-slot")!;
+    target.scrollIntoView = vi.fn(() => { view.node.scrollTop = 200; });
+    act(() => view.state.handleConversationSearchItemMount("search-message", target));
+    // Persistent reader restoration is new. Search is explicit navigation,
+    // not the passive STAY recapture that now deliberately preserves it.
+    view.update({ searching: true });
+    expect(target.scrollIntoView).toHaveBeenCalled();
+    expect(view.node.scrollTop).toBe(200);
+    view.update({ searching: false });
+    view.hydrate([{
+      id: anchor.messageId, type: "text", author: "assistant", timestamp: "12:01", text: "Late history",
+    }], { [anchor.messageId]: 735.5 });
+    view.frames.drainAnimationFrames();
+    expect(view.node.scrollTop).toBe(200);
+    expect(view.node.scrollTop).not.toBe(747.75);
+  });
+
   it.each(["wheel", "keyboard", "touch", "pointer"] as const)(
     "preserves real %s escape and its late native momentum", (input) => {
       const view = renderNativeConversation(false);

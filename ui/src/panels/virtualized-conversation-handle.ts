@@ -20,6 +20,7 @@ import {
   estimateMessageOffsetWithinPage,
   findPageIndexContainingMessage,
   findMountedMessageSlotById,
+  getMountedSlotViewportOffsetPx,
   type MessageLocation,
   type MessagePage,
   type VirtualizedRange,
@@ -34,17 +35,14 @@ import type {
   VirtualizedConversationMessageListHandleRef,
   VirtualizedConversationViewportSnapshot,
   UserScrollKind,
+  DeferredViewportAnchor,
+  ViewportAnchorRestoreOptions,
 } from "./virtualized-conversation-types";
 import type { Message } from "../types";
 
 type PageLayout = {
   tops: readonly number[];
   totalHeight: number;
-};
-
-type DeferredLayoutAnchor = {
-  messageId: string;
-  viewportOffsetPx: number;
 };
 
 type VirtualizerHandleState = {
@@ -57,7 +55,7 @@ type VirtualizerHandleState = {
   messageLocationById: Map<string, MessageLocation>;
   messagesLength: number;
   pages: MessagePage[];
-  restoreViewportAnchor: (anchor: VisibleMessageAnchor) => boolean;
+  restoreViewportAnchor: VirtualizedConversationMessageListHandle["restoreViewportAnchor"];
 };
 
 export function useVirtualizedConversationHandle({
@@ -119,7 +117,7 @@ export function useVirtualizedConversationHandle({
   pageLayout: PageLayout;
   pages: MessagePage[];
   pendingAggressiveIdleCompactionRef: MutableRefObject<boolean>;
-  pendingDeferredLayoutAnchorRef: MutableRefObject<DeferredLayoutAnchor | null>;
+  pendingDeferredLayoutAnchorRef: MutableRefObject<DeferredViewportAnchor | null>;
   pendingMountedPrependRestoreRef: MutableRefObject<MountedPrependRestore | null>;
   pendingProgrammaticBottomFollowUntilRef: MutableRefObject<number>;
   pendingProgrammaticScrollTopRef: MutableRefObject<number | null>;
@@ -138,6 +136,8 @@ export function useVirtualizedConversationHandle({
   writeScrollTopAndSyncViewport: (node: HTMLElement, nextScrollTop: number) => void;
   getUserScrollGeneration: () => number;
 }) {
+  const committedLayoutListenersRef = useRef(new Set<() => void>());
+  const scopedAnchorRef = useRef<DeferredViewportAnchor | null>(null);
   const resolveScrollTopForMessageLocation = useCallback(
     (
       location: MessageLocation,
@@ -378,24 +378,27 @@ export function useVirtualizedConversationHandle({
     ]);
 
   const restoreViewportAnchor = useCallback(
-    (anchor: VisibleMessageAnchor) => {
+    (anchor: VisibleMessageAnchor, options?: ViewportAnchorRestoreOptions) => {
       const location = messageLocationById.get(anchor.messageId);
       if (!location) {
         return false;
       }
       const node = isActive ? scrollContainerRef.current : null;
-      if (!node) {
+      if (!node || (options && !options.isCurrent())) {
         return false;
       }
 
-      if (
-        !jumpToMessageLocation(location, {
-          preserveDetachedAuthority: true,
-          viewportOffsetPx: anchor.viewportOffsetPx,
-        })
-      ) {
+      const jumpOptions = {
+        preserveDetachedAuthority: true,
+        viewportOffsetPx: anchor.viewportOffsetPx,
+      };
+      const target = resolveScrollTopForMessageLocation(location, jumpOptions);
+      if (target === null) {
         return false;
       }
+      // Release the numeric fallback before a resolved identity takes the node.
+      options?.beforeRestore();
+      commitResolvedMessageLocationJump(node, target, jumpOptions);
 
       // Announce only after the jump succeeds. The synchronous listener needs
       // the pre-jump lastNativeScrollTopRef to observe the final scroll delta,
@@ -408,14 +411,34 @@ export function useVirtualizedConversationHandle({
 
       // The initial write already honors the offset when the slot is mounted;
       // this deferred copy refines estimated geometry after its page mounts.
-      pendingDeferredLayoutAnchorRef.current = anchor;
+      const generation = getUserScrollGeneration();
+      const deferredAnchor: DeferredViewportAnchor = {
+        ...anchor,
+        isCurrent: () =>
+          getUserScrollGeneration() === generation &&
+          (options?.isCurrent() ?? true),
+        ...(options ? { onRestored: () => {
+          scopedAnchorRef.current = null;
+          options.onRestored();
+        } } : {}),
+      };
+      scopedAnchorRef.current = options ? deferredAnchor : null;
+      pendingDeferredLayoutAnchorRef.current = deferredAnchor;
       latestVisibleMessageAnchorRef.current = anchor;
+      const slot = findMountedMessageSlotById(renderedListRef.current, anchor.messageId);
+      if (slot && Math.abs(getMountedSlotViewportOffsetPx(node, slot) -
+          anchor.viewportOffsetPx) <= 0.5) {
+        pendingDeferredLayoutAnchorRef.current = null;
+        deferredAnchor.onRestored?.();
+      }
       return true;
     },
     [
       isActive,
-      jumpToMessageLocation,
+      commitResolvedMessageLocationJump,
+      getUserScrollGeneration,
       messageLocationById,
+      resolveScrollTopForMessageLocation,
       scrollContainerRef,
     ],
   );
@@ -448,6 +471,23 @@ export function useVirtualizedConversationHandle({
     pages,
     restoreViewportAnchor,
   ]);
+
+  useLayoutEffect(() => {
+    const pending = scopedAnchorRef.current;
+    if (pending) {
+      if (!isActive || !pending.isCurrent?.()) {
+        if (pendingDeferredLayoutAnchorRef.current === pending) {
+          pendingDeferredLayoutAnchorRef.current = null;
+        }
+        scopedAnchorRef.current = null;
+      } else {
+        // Passive range reconciliation may clear its generic anchor. Retain
+        // this scoped request until measurement succeeds or navigation wins.
+        pendingDeferredLayoutAnchorRef.current = pending;
+      }
+    }
+    for (const listener of committedLayoutListenersRef.current) listener();
+  });
 
   const readVirtualizerHandleState = useCallback(() => {
     return virtualizerHandleStateRef.current;
@@ -500,8 +540,12 @@ export function useVirtualizedConversationHandle({
           options,
         );
       },
-      restoreViewportAnchor: (anchor) =>
-        readVirtualizerHandleState().restoreViewportAnchor(anchor),
+      restoreViewportAnchor: (anchor, options) =>
+        readVirtualizerHandleState().restoreViewportAnchor(anchor, options),
+      subscribeToCommittedLayout: (listener) => {
+        committedLayoutListenersRef.current.add(listener);
+        return () => { committedLayoutListenersRef.current.delete(listener); };
+      },
     }),
     [
       beginUserScrollNavigation,

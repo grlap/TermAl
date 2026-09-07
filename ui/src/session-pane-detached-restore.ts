@@ -53,8 +53,11 @@ function clampScrollTop(targetTop: number, maxScrollTop: number) {
 export function captureDetachedPaneScrollPosition(
   node: HTMLElement,
   top = node.scrollTop,
+  pendingAnchor?: PaneScrollPosition["anchor"],
 ): PaneScrollPosition {
-  const anchor = captureFirstVisibleMountedMessageAnchor(node, node);
+  // While restoration is provisional, the mounted card is not necessarily
+  // the card the reader left. Recapture must not replace that known identity.
+  const anchor = pendingAnchor ?? captureFirstVisibleMountedMessageAnchor(node, node);
   return {
     ...(anchor ? { anchor } : {}),
     shouldStick: false,

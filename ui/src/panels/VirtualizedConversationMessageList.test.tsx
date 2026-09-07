@@ -156,6 +156,31 @@ type VirtualizedSearchOptions = Pick<
   | "conversationSearchQuery"
 >;
 
+function createConversationFrameScheduler(manual: boolean) {
+  let nextFrameId = 1;
+  const cancelledFrameIds = new Set<number>();
+  const pendingFrames = new Map<number, FrameRequestCallback>();
+  return {
+    cancelledFrameIds,
+    pendingFrames,
+    requestAnimationFrame: (callback: FrameRequestCallback) => {
+      const frameId = nextFrameId++;
+      if (manual) {
+        pendingFrames.set(frameId, callback);
+      } else {
+        queueMicrotask(() => {
+          if (!cancelledFrameIds.has(frameId)) callback(performance.now());
+        });
+      }
+      return frameId;
+    },
+    cancelAnimationFrame: vi.fn((frameId: number) => {
+      cancelledFrameIds.add(frameId);
+      pendingFrames.delete(frameId);
+    }),
+  };
+}
+
 function renderVirtualizedHarness({
   clientHeight: initialClientHeight = 500,
   clientWidth = 1000,
@@ -185,9 +210,8 @@ function renderVirtualizedHarness({
   const originalCancelAnimationFrame = window.cancelAnimationFrame;
   const originalGetBoundingClientRect = Element.prototype.getBoundingClientRect;
   const resizeCallbacks = new Map<Element, ResizeObserverCallback>();
-  let nextFrameId = 1;
-  const cancelledFrameIds = new Set<number>();
-  const pendingFrames = new Map<number, FrameRequestCallback>();
+  const frameScheduler = createConversationFrameScheduler(manualAnimationFrames);
+  const { cancelledFrameIds, pendingFrames } = frameScheduler;
   let resizeObserveCount = 0;
   let scrollTop = initialScrollTop;
   const scrollWrites: number[] = [];
@@ -327,21 +351,8 @@ function renderVirtualizedHarness({
 
   window.ResizeObserver =
     ResizeObserverMock as unknown as typeof ResizeObserver;
-  window.requestAnimationFrame = ((callback: FrameRequestCallback) => {
-    const frameId = nextFrameId;
-    nextFrameId += 1;
-    if (manualAnimationFrames) {
-      pendingFrames.set(frameId, callback);
-    } else queueMicrotask(() => {
-      if (!cancelledFrameIds.has(frameId)) {
-        callback(performance.now());
-      }
-    });
-    return frameId;
-  }) as typeof requestAnimationFrame;
-  window.cancelAnimationFrame = vi.fn((frameId: number) => {
-    cancelledFrameIds.add(frameId);
-  }) as unknown as typeof cancelAnimationFrame;
+  window.requestAnimationFrame = frameScheduler.requestAnimationFrame;
+  window.cancelAnimationFrame = frameScheduler.cancelAnimationFrame;
   Element.prototype.getBoundingClientRect =
     function getBoundingClientRectMock() {
       const element = this as HTMLElement;
@@ -465,6 +476,9 @@ function renderVirtualizedHarness({
   if (committedDomGeometry) document.body.append(scrollNode);
   const result = render(renderView(), committedDomGeometry ? { container: scrollNode } : undefined);
   const restore = () => {
+    // Effects must release their frames/observers while the owning harness is
+    // still installed. Restoring jsdom globals first breaks manual-frame cleanup.
+    result.unmount();
     window.ResizeObserver = OriginalResizeObserver;
     window.requestAnimationFrame = originalRequestAnimationFrame;
     window.cancelAnimationFrame = originalCancelAnimationFrame;
@@ -573,6 +587,18 @@ async function advanceIdleMountedRangeCompaction() {
 }
 
 describe("committed transcript activation frames", () => {
+  it("honors cancellation before a queued frame can outlive its fixture", async () => {
+    const scheduler = createConversationFrameScheduler(false);
+    const cancelled = vi.fn();
+    const live = vi.fn();
+    const id = scheduler.requestAnimationFrame(cancelled);
+    scheduler.cancelAnimationFrame(id);
+    scheduler.requestAnimationFrame(live);
+    await Promise.resolve();
+    expect(cancelled).not.toHaveBeenCalled();
+    expect(live).toHaveBeenCalledTimes(1);
+  });
+
   it("releases the activation reserve at its deadline without waiting for a measuring callback", () => {
     vi.useFakeTimers();
     const clock = vi.spyOn(performance, "now").mockReturnValue(0);
@@ -983,7 +1009,6 @@ describe("VirtualizedConversationMessageList foundation", () => {
 
       expect(harness.scrollWrites).toContain(960);
     } finally {
-      vi.useRealTimers();
       harness.unmount();
       harness.restore();
     }
@@ -1520,6 +1545,118 @@ describe("VirtualizedConversationMessageList foundation", () => {
     }
   });
 
+  it.each([false, true])("confirms a scoped restore only after the real slot reaches its offset (cancel=%s)", (cancel) => {
+    const messages = makeTextMessages(48);
+    const virtualizerHandleRef: VirtualizedConversationMessageListHandleRef = { current: null };
+    let extent = 1_000;
+    let anchorTop = 1_480.5;
+    const restored = vi.fn();
+    const harness = renderVirtualizedHarness({
+      messages, virtualizerHandleRef, manualAnimationFrames: true,
+      scrollHeight: () => extent,
+      slotRect: (message, _index, top) => message.id === "message-32"
+        ? { top: anchorTop - top, height: 80 } : null,
+    });
+    const descriptor = Object.getOwnPropertyDescriptor(harness.scrollNode, "scrollTop")!;
+    Object.defineProperty(harness.scrollNode, "scrollTop", {
+      ...descriptor,
+      set: (value: number) => descriptor.set!.call(harness.scrollNode, Math.min(Math.max(value, 0), extent - 500)),
+    });
+    try {
+      harness.scrollWrites.length = 0;
+      act(() => {
+        expect(virtualizerHandleRef.current!.restoreViewportAnchor(
+          { messageId: "message-32", viewportOffsetPx: -12.25 },
+          { isCurrent: () => true, beforeRestore: () => {}, onRestored: restored },
+        )).toBe(true);
+      });
+      expect(restored).not.toHaveBeenCalled();
+      // The first request really ran and reached the native limit. Token-only
+      // commits cannot keep asking for the same unreachable reading offset.
+      expect(harness.scrollTop).toBe(500);
+      expect(harness.scrollWrites).toHaveLength(1);
+      harness.rerenderWithMessages(messages.map((message) => ({ ...message })));
+      harness.rerenderWithMessages(messages.map((message) => ({ ...message })));
+      expect(harness.scrollWrites).toHaveLength(1);
+      expect(restored).not.toHaveBeenCalled();
+      if (cancel) act(() => { virtualizerHandleRef.current!.beginUserScrollNavigation(); });
+      extent = 3_000;
+      anchorTop = 1_735.5;
+      harness.rerenderWithMessages(messages.map((message) => ({ ...message })));
+      if (cancel) {
+        expect(restored).not.toHaveBeenCalled();
+        expect(harness.scrollTop).not.toBe(1_747.75);
+      } else {
+        const slot = harness.container.querySelector('[data-message-id="message-32"]');
+        expect(slot).not.toBeNull();
+        expect(slot!.getBoundingClientRect().top).toBe(-12.25);
+        expect(restored).toHaveBeenCalledTimes(1);
+        harness.rerenderWithMessages(messages.map((message) => ({ ...message })));
+        expect(restored).toHaveBeenCalledTimes(1);
+      }
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it("publishes committed anchor availability to a subscriber without a parent retry", () => {
+    const messages = makeTextMessages(48);
+    const virtualizerHandleRef: VirtualizedConversationMessageListHandleRef = { current: null };
+    const harness = renderVirtualizedHarness({
+      messages: messages.slice(0, 8), virtualizerHandleRef, manualAnimationFrames: true,
+    });
+    const committedCounts: number[] = [];
+    const unsubscribe = virtualizerHandleRef.current!.subscribeToCommittedLayout!(() => {
+      committedCounts.push(virtualizerHandleRef.current!.getLayoutSnapshot().messageCount);
+    });
+    try {
+      harness.rerenderWithMessages(messages);
+      expect(committedCounts).toContain(48);
+      unsubscribe();
+      committedCounts.length = 0;
+      harness.rerenderWithMessages(messages.slice(0, 16));
+      expect(committedCounts).toEqual([]);
+    } finally {
+      unsubscribe();
+      harness.restore();
+    }
+  });
+
+  it("retains an accepted identity when its mounted slot is unavailable in the first layout pass", () => {
+    const messages = makeTextMessages(48);
+    const virtualizerHandleRef: VirtualizedConversationMessageListHandleRef = { current: null };
+    const harness = renderVirtualizedHarness({
+      messages, virtualizerHandleRef, manualAnimationFrames: true,
+      slotRect: (message, _index, top) => message.id === "message-32"
+        ? { height: 80, top: 2_245.25 - top } : null,
+    });
+    const restored = vi.fn();
+    try {
+      act(() => {
+        virtualizerHandleRef.current!.jumpToMessageId("message-32", { align: "start", flush: true });
+      });
+      const slot = harness.container.querySelector<HTMLElement>('[data-message-id="message-32"]')!;
+      expect(slot).not.toBeNull();
+      // Simulate the committed map leading the DOM slot. No matching slot may
+      // satisfy completion, even when the estimate happens to be reachable.
+      slot.removeAttribute("data-message-id");
+      act(() => {
+        expect(virtualizerHandleRef.current!.restoreViewportAnchor(
+          { messageId: "message-32", viewportOffsetPx: 18.375 },
+          { isCurrent: () => true, beforeRestore: () => {}, onRestored: restored },
+        )).toBe(true);
+      });
+      expect(restored).not.toHaveBeenCalled();
+      slot.dataset.messageId = "message-32";
+      harness.rerenderWithMessages(messages.map((message) => ({ ...message })));
+      expect(slot.isConnected).toBe(true);
+      expect(slot.getBoundingClientRect().top).toBe(18.375);
+      expect(restored).toHaveBeenCalledTimes(1);
+    } finally {
+      harness.restore();
+    }
+  });
+
   it("does not announce a position restore when the anchor jump fails", async () => {
     const virtualizerHandleRef: VirtualizedConversationMessageListHandleRef = {
       current: null,
@@ -2024,7 +2161,6 @@ describe("VirtualizedConversationMessageList foundation", () => {
         message600OffsetBeforeIdleCompaction,
       );
     } finally {
-      vi.useRealTimers();
       harness.restore();
     }
   });
@@ -2240,7 +2376,6 @@ describe("VirtualizedConversationMessageList foundation", () => {
           .estimatedTotalHeightPx,
       ).toBe(measuredPageHeight);
     } finally {
-      vi.useRealTimers();
       harness.restore();
     }
   });
@@ -2396,7 +2531,6 @@ describe("VirtualizedConversationMessageList foundation", () => {
         measuredFirstPageHeight + measuredSecondPageHeight,
       );
     } finally {
-      vi.useRealTimers();
       harness.restore();
     }
   });
@@ -2509,7 +2643,6 @@ describe("VirtualizedConversationMessageList foundation", () => {
       });
       expectViewportCoverage();
     } finally {
-      vi.useRealTimers();
       harness.restore();
     }
   });
@@ -2624,12 +2757,9 @@ describe("VirtualizedConversationMessageList foundation", () => {
 
     window.ResizeObserver =
       ResizeObserverMock as unknown as typeof ResizeObserver;
-    window.requestAnimationFrame = ((callback: FrameRequestCallback) => {
-      queueMicrotask(() => callback(performance.now()));
-      return 1;
-    }) as typeof requestAnimationFrame;
-    window.cancelAnimationFrame =
-      vi.fn() as unknown as typeof cancelAnimationFrame;
+    const frameScheduler = createConversationFrameScheduler(false);
+    window.requestAnimationFrame = frameScheduler.requestAnimationFrame;
+    window.cancelAnimationFrame = frameScheduler.cancelAnimationFrame;
     Element.prototype.getBoundingClientRect =
       function getBoundingClientRectMock() {
         const element = this as HTMLElement;
@@ -3432,7 +3562,6 @@ describe("VirtualizedConversationMessageList foundation", () => {
 
       expect(harness.scrollWrites).toContain(490);
     } finally {
-      vi.useRealTimers();
       harness.restore();
     }
   });
@@ -3505,7 +3634,6 @@ describe("VirtualizedConversationMessageList foundation", () => {
 
         expect(harness.scrollWrites).toContain(490);
       } finally {
-        vi.useRealTimers();
         harness.unmount();
         harness.restore();
       }
@@ -3767,7 +3895,6 @@ describe("VirtualizedConversationMessageList foundation", () => {
       await advanceIdleMountedRangeCompaction();
       expect(screen.getByText("message-140")).toBeInTheDocument();
     } finally {
-      vi.useRealTimers();
       harness.restore();
     }
   });

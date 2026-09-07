@@ -110,6 +110,17 @@ export type VirtualizedConversationViewportSnapshot = Omit<
   windowEndMessageId?: string | null;
 };
 
+export type ViewportAnchorRestoreOptions = {
+  isCurrent: () => boolean;
+  beforeRestore: () => void;
+  onRestored: () => void;
+};
+
+export type DeferredViewportAnchor = VisibleMessageAnchor & {
+  isCurrent?: () => boolean;
+  onRestored?: () => void;
+};
+
 export type VirtualizedConversationMessageListHandle = {
   // Stable for the lifetime of the mount. Methods read the latest layout
   // state internally, so consumers can keep the handle as an effect dependency
@@ -134,7 +145,15 @@ export type VirtualizedConversationMessageListHandle = {
   // Restores reader-owned identity rather than an absolute pixel. The first
   // write mounts the anchor's page; a layout-phase correction then preserves
   // the message's exact viewport offset against fresh measurements.
-  restoreViewportAnchor: (anchor: VisibleMessageAnchor) => boolean;
+  // True means accepted, not measured completion. Scoped callers retain their
+  // original identity until onRestored confirms the actual mounted slot.
+  restoreViewportAnchor: (
+    anchor: VisibleMessageAnchor,
+    options?: ViewportAnchorRestoreOptions,
+  ) => boolean;
+  // Publication happens after the child commits its map/geometry, including
+  // deferred commits that do not rerender the parent pane.
+  subscribeToCommittedLayout?: (listener: () => void) => () => void;
 };
 
 export type VirtualizedConversationMessageListHandleRef = {

@@ -158,16 +158,6 @@ function recordPaneScrollGeometry(
   return position;
 }
 
-function captureRecordedDetachedPaneScrollPosition(
-  node: HTMLElement,
-  top = node.scrollTop,
-) {
-  return recordPaneScrollGeometry(
-    node,
-    captureDetachedPaneScrollPosition(node, top),
-  );
-}
-
 export function resolveSessionPageScrollDistance(clientHeight: number) {
   return Math.max(
     Math.round(Math.max(0, clientHeight) * SESSION_PAGE_SCROLL_VIEWPORT_FACTOR),
@@ -373,6 +363,14 @@ export function useSessionPaneScrollState({
   }
   const detachedScrollRestoreController =
     detachedScrollRestoreControllerRef.current;
+  const pendingReaderRestoreRef = useRef<{
+    anchor: NonNullable<PaneScrollPosition["anchor"]>;
+    key: string;
+    handle: VirtualizedConversationMessageListHandle | null;
+    accepted: boolean;
+    navigationGeneration?: number;
+    unsubscribe?: () => void;
+  } | null>(null);
   const currentScrollStateKeyRef = useCommittedRef(scrollStateKey);
   const pendingStartHistoryDemandRef = useRef<{ key: string } | null>(null);
   const pendingTailHistoryDemandRef = useRef<{
@@ -481,6 +479,7 @@ export function useSessionPaneScrollState({
   }
 
   function beginMessageStackManualNavigation() {
+    cancelDetachedMessageStackRestore();
     // Boundary page adoption is asynchronous. Every newer navigation owns the
     // viewport immediately, so clear the local dedupe latches and advance the
     // token that guards both promise completion and its follow-up frame.
@@ -615,7 +614,9 @@ export function useSessionPaneScrollState({
       delete paneTailFollowDetachedByKeyRef.current[scrollStateKey];
     } else {
       if (!options.preserveDetachedRestore) {
-        cancelDetachedMessageStackRestore(scrollStateKey);
+        // A passive native recapture releases only the bounded numeric writer.
+        // Actual navigation cancels the separate reader-identity request.
+        detachedScrollRestoreController.cancel(scrollStateKey);
       }
       paneTailFollowDetachedByKeyRef.current[scrollStateKey] = true;
     }
@@ -652,6 +653,7 @@ export function useSessionPaneScrollState({
   }
 
   function markTailFollowDetachedByUser() {
+    cancelDetachedMessageStackRestore();
     // Detached authority wins over temporary near-bottom geometry until the
     // user reaches the real bottom or explicitly returns to the live tail.
     paneTailFollowDetachedByKeyRef.current[scrollStateKey] = true;
@@ -690,6 +692,16 @@ export function useSessionPaneScrollState({
     // have reused the node for the incoming tab, losing the outgoing anchor.
     paneScrollPositions[scrollStateKey] =
       captureRecordedDetachedPaneScrollPosition(node);
+  }
+
+  function captureRecordedDetachedPaneScrollPosition(
+    node: HTMLElement,
+    top = node.scrollTop,
+  ) {
+    const pending = pendingReaderRestoreRef.current;
+    return recordPaneScrollGeometry(node, captureDetachedPaneScrollPosition(
+      node, top, pending?.key === scrollStateKey ? pending.anchor : undefined,
+    ));
   }
 
   function clearLateBottomTickRejections() {
@@ -747,6 +759,11 @@ export function useSessionPaneScrollState({
 
   function cancelDetachedMessageStackRestore(key = scrollStateKey) {
     detachedScrollRestoreController.cancel(key);
+    const pending = pendingReaderRestoreRef.current;
+    if (pending?.key === key) {
+      pendingReaderRestoreRef.current = null;
+      pending.unsubscribe?.();
+    }
   }
 
   useEffect(() => {
@@ -2989,6 +3006,11 @@ export function useSessionPaneScrollState({
           notifyMessageStackScrollWrite(node, {
             scrollKind: "position_restore",
           });
+          const pending = pendingReaderRestoreRef.current;
+          if (pending?.key === restoreKey && !pending.accepted) {
+            // This request's own numeric fallback is not newer user input.
+            pending.navigationGeneration = pending.handle?.getUserScrollGeneration();
+          }
         },
         publishReachablePosition: (top) => {
           setTailFollowIntent(false, { preserveDetachedRestore: true });
@@ -3034,13 +3056,14 @@ export function useSessionPaneScrollState({
     if (!slot) {
       return false;
     }
-    const targetTop = Math.max(
-      node.scrollTop +
-        getMountedSlotViewportOffsetPx(node, slot) -
-        saved.anchor.viewportOffsetPx,
-      0,
+    const targetTop = Math.min(
+      Math.max(node.scrollHeight - node.clientHeight, 0),
+      Math.max(node.scrollTop + getMountedSlotViewportOffsetPx(node, slot) -
+        saved.anchor.viewportOffsetPx, 0),
     );
-    writeMessageStackScrollTopImmediately(node, targetTop);
+    if (Math.abs(node.scrollTop - targetTop) > 0.5) {
+      writeMessageStackScrollTopImmediately(node, targetTop);
+    }
     notifyMessageStackScrollWrite(node, {
       scrollKind: "position_restore",
     });
@@ -3050,6 +3073,74 @@ export function useSessionPaneScrollState({
       shouldStick: false,
       top: node.scrollTop,
     });
+    const restored = Math.abs(getMountedSlotViewportOffsetPx(node, slot) -
+      saved.anchor.viewportOffsetPx) <= 0.5;
+    const pending = pendingReaderRestoreRef.current;
+    if (restored && pending?.key === scrollStateKey && pending.anchor === saved.anchor) {
+      completeDetachedReaderRestore(pending);
+    }
+    return restored;
+  }
+
+  function completeDetachedReaderRestore(
+    pending: NonNullable<typeof pendingReaderRestoreRef.current>,
+  ) {
+    if (pendingReaderRestoreRef.current !== pending) return;
+    pendingReaderRestoreRef.current = null;
+    pending.unsubscribe?.();
+    const node = messageStackRef.current;
+    if (node) {
+      paneScrollPositions[pending.key] = recordPaneScrollGeometry(node, {
+        anchor: pending.anchor, shouldStick: false, top: node.scrollTop,
+      });
+    }
+  }
+
+  function retryDetachedReaderRestore(
+    pending = pendingReaderRestoreRef.current,
+  ): boolean {
+    const isCurrent = () => pending !== null &&
+      pendingReaderRestoreRef.current === pending &&
+      currentScrollStateKeyRef.current === pending.key;
+    const node = messageStackRef.current;
+    if (!pending || !isCurrent() || !node) return false;
+
+    const handle = virtualizerHandleRef.current;
+    if (handle !== pending.handle) {
+      pending.unsubscribe?.();
+      pending.handle = handle;
+      pending.accepted = false;
+      pending.navigationGeneration = handle?.getUserScrollGeneration();
+      pending.unsubscribe = handle?.subscribeToCommittedLayout?.(() => {
+        retryDetachedReaderRestore(pending);
+      });
+    }
+    if (handle && pending.navigationGeneration !== undefined &&
+        handle.getUserScrollGeneration() !== pending.navigationGeneration) {
+      cancelDetachedMessageStackRestore(pending.key);
+      return false;
+    }
+    if (pending.accepted && handle) {
+      return true;
+    }
+    if (handle) {
+      const accepted = handle.restoreViewportAnchor(pending.anchor, {
+        isCurrent,
+        beforeRestore: () => detachedScrollRestoreController.cancel(pending.key),
+        onRestored: () => completeDetachedReaderRestore(pending),
+      });
+      pending.accepted = accepted;
+      // position_restore advances the virtualizer generation synchronously.
+      // Only later navigation may invalidate this accepted correction.
+      pending.navigationGeneration = handle.getUserScrollGeneration();
+      return accepted;
+    }
+    if (!findMountedMessageSlotById(node, pending.anchor.messageId)) return false;
+    detachedScrollRestoreController.cancel(pending.key);
+    restoreMountedDetachedMessageAnchor(node, {
+      anchor: pending.anchor, shouldStick: false, top: node.scrollTop,
+    });
+    // A mounted but clamped slot remains unresolved, not a numeric success.
     return true;
   }
 
@@ -3103,21 +3194,12 @@ export function useSessionPaneScrollState({
         cancelPaneProgrammaticBottomFollow();
         cancelSettledScrollToBottom();
         setTailFollowIntent(false, { preserveDetachedRestore: true });
-        const restoredAnchor =
-          saved.anchor !== undefined &&
-          virtualizerHandleRef.current?.restoreViewportAnchor(saved.anchor) ===
-            true;
-        if (restoredAnchor) {
-          paneScrollPositions[scrollStateKey] = recordPaneScrollGeometry(node, {
-            anchor: saved.anchor,
-            shouldStick: false,
-            top: node.scrollTop,
-          });
-        } else if (restoreMountedDetachedMessageAnchor(node, saved)) {
-          // Short conversations do not mount the virtualizer. Their ordinary
-          // message slots still preserve the exact reading point inside a
-          // long response instead of relying on a reflow-sensitive scrollTop.
-        } else {
+        if (saved.anchor) {
+          pendingReaderRestoreRef.current = {
+            anchor: saved.anchor, key: restoreKey, handle: null, accepted: false,
+          };
+        }
+        if (!retryDetachedReaderRestore()) {
           restoreCleanup = scheduleDetachedMessageStackRestore(saved.top);
         }
       }
@@ -3149,10 +3231,19 @@ export function useSessionPaneScrollState({
     scrollStateKey,
   ]);
 
+  // Parent history publication may precede the deferred child commit. Observe
+  // both; neither raw scroll convergence nor session identity proves that the
+  // requested message has mounted at its saved viewport offset.
+  useLayoutEffect(() => {
+    retryDetachedReaderRestore();
+  });
+
   useLayoutEffect(() => {
     if (!hasSessionFindQuery || !activeSessionSearchMatch) {
       return;
     }
+
+    cancelDetachedMessageStackRestore();
 
     const node =
       sessionSearchItemRefsRef.current[activeSessionSearchMatch.itemKey];

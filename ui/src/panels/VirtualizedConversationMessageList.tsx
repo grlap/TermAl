@@ -99,6 +99,7 @@ import type {
   MessageWindowSnapshot,
   RenderMessageCard,
   UserScrollKind,
+  DeferredViewportAnchor,
   VirtualizedConversationJumpOptions,
   VirtualizedConversationLayoutMessage,
   VirtualizedConversationLayoutSnapshot,
@@ -231,10 +232,7 @@ export function VirtualizedConversationMessageList({
   const pendingProgrammaticScrollTopRef = useRef<number | null>(null);
   const pendingMountedPrependRestoreRef =
     useRef<MountedPrependRestore | null>(null);
-  const pendingDeferredLayoutAnchorRef = useRef<{
-    messageId: string;
-    viewportOffsetPx: number;
-  } | null>(null);
+  const pendingDeferredLayoutAnchorRef = useRef<DeferredViewportAnchor | null>(null);
   const pendingDeferredLayoutTimerRef = useRef<number | null>(null);
   const pendingIdleCompactionTimerRef = useRef<number | null>(null);
   const pendingBottomBoundaryRevealFrameRef = useRef<number | null>(null);
@@ -1745,10 +1743,12 @@ export function VirtualizedConversationMessageList({
     if (!pendingAnchor) {
       return;
     }
-    pendingDeferredLayoutAnchorRef.current = null;
-
     const node = scrollContainerRef.current;
-    if (!isActive || !node) {
+    if (!isActive || pendingAnchor.isCurrent?.() === false) {
+      pendingDeferredLayoutAnchorRef.current = null;
+      return;
+    }
+    if (!node) {
       return;
     }
 
@@ -1760,16 +1760,26 @@ export function VirtualizedConversationMessageList({
       return;
     }
 
-    const targetScrollTop = Math.max(
-      node.scrollTop +
-        getMountedSlotViewportOffsetPx(node, anchorSlot) -
-        pendingAnchor.viewportOffsetPx,
-      0,
+    const targetScrollTop = Math.min(
+      Math.max(node.scrollHeight - node.clientHeight, 0),
+      Math.max(node.scrollTop + getMountedSlotViewportOffsetPx(node, anchorSlot) -
+        pendingAnchor.viewportOffsetPx, 0),
     );
-    writeScrollTopAndSyncViewport(node, targetScrollTop);
+    if (Math.abs(node.scrollTop - targetScrollTop) > 0.5) {
+      writeScrollTopAndSyncViewport(node, targetScrollTop);
+    }
+    // Estimated geometry and a clamped scrollTop are not a restored reader
+    // position. Keep the identity through missing slots or insufficient extent.
+    if (Math.abs(getMountedSlotViewportOffsetPx(node, anchorSlot) -
+        pendingAnchor.viewportOffsetPx) <= 0.5) {
+      pendingDeferredLayoutAnchorRef.current = null;
+      pendingAnchor.onRestored?.();
+    }
   }, [
     isActive,
     layoutVersion,
+    messages,
+    pageLayout,
     mountedPageRange,
     scrollContainerRef,
     writeScrollTopAndSyncViewport,

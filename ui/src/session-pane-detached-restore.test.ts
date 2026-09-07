@@ -57,6 +57,25 @@ afterEach(() => {
 });
 
 describe("detached message-stack restore controller", () => {
+  it("uses the already saved identity during provisional recapture, even with no mounted cards", () => {
+    const { node } = createScrollNode({ scrollTop: 400 });
+    const anchor = { messageId: "reader-message", viewportOffsetPx: -12.25 };
+    // The information was captured before activation. A numeric fallback can
+    // neither validate it nor substitute a different visible card for it.
+    expect(captureDetachedPaneScrollPosition(node, 400, anchor)).toEqual({
+      anchor, shouldStick: false, top: 400,
+    });
+    const slot = document.createElement("div");
+    slot.className = "message-slot";
+    slot.dataset.messageId = "provisional-message";
+    node.append(slot);
+    node.getBoundingClientRect = () => ({ top: 0, bottom: 200 } as DOMRect);
+    slot.getBoundingClientRect = () => ({ top: 0, bottom: 100 } as DOMRect);
+    expect(captureDetachedPaneScrollPosition(node, 410, anchor).anchor).toBe(anchor);
+    // Once the pending request is gone, actual user navigation captures afresh.
+    expect(captureDetachedPaneScrollPosition(node, 410).anchor?.messageId).toBe("provisional-message");
+  });
+
   it("captures the first visible virtualized message as the detached anchor", () => {
     const { node } = createScrollNode({ scrollTop: 320 });
     const virtualizedList = document.createElement("div");
