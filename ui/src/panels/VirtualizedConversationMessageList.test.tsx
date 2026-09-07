@@ -142,6 +142,7 @@ type VirtualizedHarnessOptions = {
   ) => { height: number; top: number } | null;
   slotHeight?: (message: Message) => number;
   tailFollowIntent?: boolean;
+  tailFollowIntentIsAuthoritative?: boolean;
   committedDomGeometry?: boolean;
   manualAnimationFrames?: boolean;
   modelPaneActivation?: boolean;
@@ -172,6 +173,7 @@ function renderVirtualizedHarness({
   slotRect,
   slotHeight = () => 80,
   tailFollowIntent = false,
+  tailFollowIntentIsAuthoritative = false,
   committedDomGeometry = false,
   manualAnimationFrames = false,
   modelPaneActivation = false,
@@ -412,6 +414,7 @@ function renderVirtualizedHarness({
       messages={currentMessages}
       scrollContainerRef={scrollContainerRef}
       tailFollowIntent={tailFollowIntent}
+      tailFollowIntentIsAuthoritative={tailFollowIntentIsAuthoritative}
       onApprovalDecision={() => {}}
       onUserInputSubmit={async () => {}}
       onMcpElicitationSubmit={() => {}}
@@ -444,6 +447,7 @@ function renderVirtualizedHarness({
       // The pane restores a saved FOLLOW tab after its child layout effects,
       // then requests the virtualized bottom again from its first frame.
       const pin = () => {
+        if (!tailFollowIntent) return;
         scrollNode.scrollTop = Math.max(scrollNode.scrollHeight - clientHeight, 0);
         notifyMessageStackScrollWrite(scrollNode, { scrollKind: "bottom_pin" });
       };
@@ -509,6 +513,12 @@ function renderVirtualizedHarness({
         }
       });
     },
+    takeLatestAnimationFrame() {
+      const frames = Array.from(pendingFrames);
+      const [frameId, callback] = frames[frames.length - 1]!;
+      pendingFrames.delete(frameId);
+      return () => act(() => callback(performance.now()));
+    },
     rerenderWithSession(nextSessionId: string, nextMessages: Message[]) {
       currentSessionId = nextSessionId;
       setCurrentMessages(nextMessages);
@@ -516,6 +526,13 @@ function renderVirtualizedHarness({
     },
     rerenderActive(nextIsActive: boolean) {
       isActive = nextIsActive;
+      result.rerender(renderView());
+    },
+    setScrollContainer(nextNode: HTMLElement) {
+      Object.assign(scrollContainerRef, { current: nextNode });
+    },
+    rerenderWithFollowIntent(nextFollowIntent: boolean) {
+      tailFollowIntent = nextFollowIntent;
       result.rerender(renderView());
     },
     rerenderWithMessages(
@@ -556,6 +573,165 @@ async function advanceIdleMountedRangeCompaction() {
 }
 
 describe("committed transcript activation frames", () => {
+  it("releases the activation reserve at its deadline without waiting for a measuring callback", () => {
+    vi.useFakeTimers();
+    const clock = vi.spyOn(performance, "now").mockReturnValue(0);
+    const messages = makeTextMessages(307);
+    const harness = renderVirtualizedHarness({
+      messages,
+      clientHeight: 729,
+      slotHeight: () => 125.0625,
+      tailFollowIntent: true,
+      tailFollowIntentIsAuthoritative: true,
+      preferInitialEstimatedBottomViewport: true,
+      committedDomGeometry: true,
+      manualAnimationFrames: true,
+      modelPaneActivation: true,
+    });
+    const pin = () => act(() => {
+      notifyMessageStackScrollWrite(harness.scrollNode, { scrollKind: "bottom_pin" });
+    });
+    try {
+      const reserve = harness.container.querySelector(".virtualized-message-slot")!;
+      expect(harness.container.querySelector(".is-measuring-post-activation")).not.toBeNull();
+      clock.mockReturnValue(219);
+      pin();
+      expect(reserve.isConnected).toBe(true);
+      clock.mockReturnValue(220);
+      pin();
+      expect(reserve.isConnected).toBe(false);
+
+      // Returning to a tab starts a new lease instead of reusing the expired one.
+      clock.mockReturnValue(1000);
+      harness.rerenderWithSession("session-b", messages);
+      const incomingReserve = harness.container.querySelector(".virtualized-message-slot")!;
+      clock.mockReturnValue(1219);
+      pin();
+      expect(incomingReserve.isConnected).toBe(true);
+      clock.mockReturnValue(1220);
+      pin();
+      expect(incomingReserve.isConnected).toBe(false);
+    } finally {
+      harness.unmount();
+      harness.restore();
+      clock.mockRestore();
+    }
+  });
+
+  it("does not let activation coverage outlive an authoritative switch to STAY", () => {
+    vi.useFakeTimers();
+    const harness = renderVirtualizedHarness({
+      messages: makeTextMessages(307),
+      clientHeight: 729,
+      slotHeight: () => 125.0625,
+      tailFollowIntent: true,
+      tailFollowIntentIsAuthoritative: true,
+      preferInitialEstimatedBottomViewport: true,
+      committedDomGeometry: true,
+      manualAnimationFrames: true,
+      modelPaneActivation: true,
+    });
+    try {
+      const reserve = harness.container.querySelector(".virtualized-message-slot")!;
+      harness.rerenderWithFollowIntent(false);
+      // Even a stale bottom-pin notification must not retain a FOLLOW-only
+      // reservation after the pane's explicit intent has become STAY.
+      act(() => notifyMessageStackScrollWrite(harness.scrollNode, { scrollKind: "bottom_pin" }));
+      expect(reserve.isConnected).toBe(false);
+    } finally {
+      harness.unmount();
+      harness.restore();
+    }
+  });
+
+  it("preserves the reader's anchor when an activation is interrupted and output continues", () => {
+    vi.useFakeTimers();
+    const messages = makeTextMessages(325);
+    const harness = renderVirtualizedHarness({
+      messages: messages.slice(0, 307),
+      clientHeight: 729,
+      slotHeight: () => 97,
+      tailFollowIntent: true,
+      tailFollowIntentIsAuthoritative: true,
+      preferInitialEstimatedBottomViewport: true,
+      committedDomGeometry: true,
+      manualAnimationFrames: true,
+      modelPaneActivation: true,
+    });
+    try {
+      act(() => {
+        notifyMessageStackUserScrollIntent(harness.scrollNode, {
+          direction: "up", scrollKind: "incremental", viewportCanMove: true,
+        });
+        harness.setScrollTop(harness.scrollNode.scrollTop - 200);
+        notifyMessageStackScrollWrite(harness.scrollNode, {
+          scrollKind: "incremental", scrollSource: "user",
+        });
+      });
+      harness.rerenderWithFollowIntent(false);
+      const anchor = harness.capturePaint().visible[0]!;
+      expect(anchor).toBeDefined();
+      for (let count = 308; count <= messages.length; count += 1) {
+        harness.rerenderWithMessages(messages.slice(0, count));
+        harness.advanceAnimationFrame();
+        const current = harness.capturePaint().visible.find((slot) => slot.id === anchor.id);
+        expect(current?.node).toBe(anchor.node);
+        expect(current?.top).toBeCloseTo(anchor.top, 5);
+      }
+    } finally {
+      harness.unmount();
+      harness.restore();
+    }
+  });
+
+  it("bounds coverage after a reveal aborts on a swapped container while appends continue", () => {
+    vi.useFakeTimers();
+    const clock = vi.spyOn(performance, "now").mockReturnValue(0);
+    const messages = makeTextMessages(600);
+    const harness = renderVirtualizedHarness({
+      messages: messages.slice(0, 307),
+      clientHeight: 729,
+      slotHeight: () => 125.0625,
+      tailFollowIntent: true,
+      tailFollowIntentIsAuthoritative: true,
+      preferInitialEstimatedBottomViewport: true,
+      committedDomGeometry: true,
+      manualAnimationFrames: true,
+      modelPaneActivation: true,
+    });
+    try {
+      act(() => {
+        notifyMessageStackScrollWrite(harness.scrollNode, { scrollKind: "bottom_boundary" });
+      });
+      const revealFrame = harness.takeLatestAnimationFrame();
+      // The measurement watchdog runs while a reveal frame is still pending.
+      act(() => vi.advanceTimersByTime(150));
+      expect(harness.container.querySelector(".is-measuring-post-activation")).not.toBeNull();
+      harness.setScrollContainer(document.createElement("div"));
+      revealFrame();
+      harness.setScrollContainer(harness.scrollNode);
+      expect(harness.container.querySelector(".is-measuring-post-activation")).not.toBeNull();
+
+      // The old reveal's frame bailed. Delay its remaining timer as a busy or
+      // background browser may do; elapsed time must bound coverage even when
+      // that callback cannot clear the measuring flag for us.
+      clock.mockReturnValue(221);
+      const initialBandCount = harness.capturePaint().keys.length;
+      for (let count = 315; count < messages.length; count += 8) {
+        harness.rerenderWithMessages(messages.slice(0, count));
+        act(() => {
+          harness.scrollNode.scrollTop = harness.scrollNode.scrollHeight - 729;
+          notifyMessageStackScrollWrite(harness.scrollNode, { scrollKind: "bottom_pin" });
+        });
+        expect(harness.capturePaint().keys.length).toBeLessThanOrEqual(initialBandCount + 2);
+      }
+    } finally {
+      harness.unmount();
+      harness.restore();
+      clock.mockRestore();
+    }
+  });
+
   it("does not expose a clamp when a bottom pin replaces a resized reserve band with its old spacer", () => {
     vi.useFakeTimers();
     const messages = makeTextMessages(307);

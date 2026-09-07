@@ -9,6 +9,7 @@
 import {
   useCallback,
   useEffect,
+  useInsertionEffect,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -294,6 +295,18 @@ export function VirtualizedConversationMessageList({
     () => isActive && messages.length > 0,
   );
   const isMeasuringPostActivationRef = useCommittedRef(isMeasuringPostActivation);
+  const activationCoverageUntilRef = useRef(Number.NEGATIVE_INFINITY);
+  useInsertionEffect(() => {
+    // Bound the reservation independently of reveal/measurement callbacks:
+    // those can be delayed or abandoned when their scroll container changes.
+    // Only a new activation starts a lease, never another output append.
+    activationCoverageUntilRef.current = isActive
+      ? performance.now() + BOTTOM_BOUNDARY_REVEAL_DELAY_MS
+      : Number.NEGATIVE_INFINITY;
+    return () => {
+      activationCoverageUntilRef.current = Number.NEGATIVE_INFINITY;
+    };
+  }, [isActive, sessionId]);
   const [isBottomBoundaryRevealPending, setIsBottomBoundaryRevealPending] =
     useState(false);
   const [bottomBoundaryRevealToken, setBottomBoundaryRevealToken] = useState(0);
@@ -944,10 +957,13 @@ export function VirtualizedConversationMessageList({
       // before the reserve pages have published their real heights. Replacing
       // those mounted pages with estimated spacers briefly lowers the native
       // scroll maximum, even if the covering range returns before paint.
-      // Keep this incoming band until measurement hands it over; reader-owned
-      // navigation and ordinary post-activation compaction remain unchanged.
+      // Keep this incoming band until measurement hands it over or its
+      // activation lease expires; reader-owned navigation and ordinary
+      // post-activation compaction remain unchanged.
       const preserveActivationCoverage =
         isMeasuringPostActivationRef.current &&
+        performance.now() < activationCoverageUntilRef.current &&
+        (!tailFollowIntentIsAuthoritativeRef.current || tailFollowIntentRef.current) &&
         shouldKeepBottomAfterLayoutRef.current &&
         !isDetachedFromBottomRef.current &&
         !hasUserScrollInteractionRef.current;
