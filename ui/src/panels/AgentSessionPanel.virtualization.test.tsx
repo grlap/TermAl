@@ -780,6 +780,52 @@ describe("AgentSessionPanel virtualization", () => {
     ).not.toBeNull();
   });
 
+  it.each([
+    { name: "one delta before hydration", count: 1, start: 999, older: true, newer: false, loaded: false, aligned: true },
+    { name: "three deltas before hydration", count: 3, start: 997, older: true, newer: false, loaded: false, aligned: true },
+    { name: "hydrated partial tail", count: 20, start: 980, older: true, newer: false, loaded: false, aligned: true },
+    { name: "complete short conversation", count: 1, start: 0, older: false, newer: false, loaded: true, aligned: false },
+    { name: "navigated historical window", count: 1, start: 500, older: true, newer: true, loaded: false, aligned: false },
+  ])("uses bounded bottom alignment for $name", async ({ count, start, older, newer, loaded, aligned }) => {
+    const nodeFsModule = "node:fs";
+    const { readFileSync } = await import(nodeFsModule) as {
+      readFileSync: (path: string, encoding: "utf8") => string;
+    };
+    const runtimeProcess = (globalThis as typeof globalThis & {
+      process: { cwd: () => string };
+    }).process;
+    const productionStyles = document.createElement("style");
+    productionStyles.textContent = readFileSync(`${runtimeProcess.cwd()}/src/styles.css`, "utf8");
+    document.head.append(productionStyles);
+    stubConversationOverview("partial-session", 1000);
+    try {
+      const { container } = renderSessionPanelWithDefaults({
+        activeSession: makeSession("partial-session", {
+          messages: makeTextMessages(count),
+          messageStartIndex: start,
+          // Metadata can advance independently of the retained window. Do not
+          // infer its position from messageCount minus the resident length.
+          messageCount: older ? 1007 : count,
+          messagesLoaded: loaded,
+          hasOlderHistory: older,
+          hasNewerHistory: newer,
+        }),
+        liveTailPinned: !newer,
+      });
+      container.classList.add("message-stack");
+      await act(async () => {});
+      const page = container.querySelector(".session-conversation-page");
+      expect(page).not.toBeNull();
+      expect(page?.classList.contains("has-incomplete-live-tail")).toBe(aligned);
+      // jsdom verifies the production selector/value contract, not pixel layout.
+      // Real-browser frame coverage checks the leading free space it creates.
+      expect(getComputedStyle(container).alignContent).toBe(aligned ? "safe end" : "start");
+      expect(container.querySelector(".message-card")).toBeInTheDocument();
+    } finally {
+      productionStyles.remove();
+    }
+  });
+
   it("keeps the production rail wrapper from widening the transcript pane", async () => {
     const nodeFsModule = "node:fs";
     const { readFileSync } = (await import(nodeFsModule)) as {

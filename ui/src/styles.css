@@ -4718,6 +4718,15 @@ textarea {
 }
 
 .message-stack:has(
+  .session-conversation-page.is-active.has-incomplete-live-tail
+) {
+  /* A sparse live suffix is already the end of a longer conversation. Fill
+     only the viewport deficit above it until older messages arrive; safe end
+     falls back to start when the resident transcript overflows. */
+  align-content: safe end;
+}
+
+.message-stack:has(
   .session-conversation-page.has-conversation-overview-scroll
 ) {
   scrollbar-width: none;

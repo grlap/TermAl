@@ -1281,7 +1281,9 @@ const SessionConversationPage = memo(
     // Overview eligibility, rather than async response readiness, owns the
     // scrollbar replacement. The rail renders a visible pending state until
     // data is ready, preserving both the layout width and a scroll affordance.
-    const conversationPageClassName = `session-conversation-page${isActive ? " is-active" : ""}${conversationOverview.shouldRequestOverview ? " has-conversation-overview-scroll" : ""}`;
+    const hasIncompleteLiveTail =
+      hasOlderHistory && !hasNewerHistory && visibleMessages.length > 0;
+    const conversationPageClassName = `session-conversation-page${isActive ? " is-active" : ""}${conversationOverview.shouldRequestOverview ? " has-conversation-overview-scroll" : ""}${hasIncompleteLiveTail ? " has-incomplete-live-tail" : ""}`;
 
     return (
       <MessageNavigationProvider value={messageNavigationContextValue}>
