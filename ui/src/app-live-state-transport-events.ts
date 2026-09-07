@@ -57,6 +57,7 @@ import type { HydrationDeltaObservation } from "./session-hydration-adoption";
 
 type AppLiveStateTransportEventHandlersContext = {
   observeHydrationDelta?: (observation: HydrationDeltaObservation) => void;
+  hasPartialTailAppendProof?: (sessionId?: string) => boolean;
   adoptState: (state: StateResponse, options?: AdoptStateOptions) => boolean;
   applyDelegationWaitDeltaLocally: (delta: DeltaEvent) => void;
   beginBadLiveEventRecovery: () => void;
@@ -140,6 +141,16 @@ export function createAppLiveStateTransportEventHandlers(
     if (!context.observeHydrationDelta) return;
     try {
       const sessionId = delta && "sessionId" in delta ? delta.sessionId : null;
+      // Global invalidation (including a gap on another session) must reach
+      // every tracked proof. Ordinary session deltas only need their own proof.
+      const proofSessionId = revisionAction === "resync" ? undefined : sessionId ?? undefined;
+      let hasProof: boolean | undefined;
+      try {
+        hasProof = context.hasPartialTailAppendProof?.(proofSessionId);
+      } catch {
+        // An unavailable/uncertain predicate must retain the observation fence.
+      }
+      if (hasProof === false) return;
       const previousSession = context.sessionsRef.current.find(
         (entry) => entry.id === sessionId,
       ) ?? null;

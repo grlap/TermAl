@@ -75,6 +75,7 @@ import type { HydrationDeltaObservation } from "./session-hydration-adoption";
 
 type UseAppLiveStateTransportParams = {
   observeHydrationDelta?: (observation: HydrationDeltaObservation) => void;
+  hasPartialTailAppendProof?: (sessionId?: string) => boolean;
   adoptState: (state: StateResponse, options?: AdoptStateOptions) => boolean;
   applyDelegationWaitDeltaLocally: (delta: DeltaEvent) => void;
   cancelStaleSendResponseRecoveryPollForSessions: (
@@ -150,6 +151,7 @@ export function useAppLiveStateTransport(
 ) {
   const {
     observeHydrationDelta,
+    hasPartialTailAppendProof,
     adoptState,
     applyDelegationWaitDeltaLocally,
     cancelStaleSendResponseRecoveryPollForSessions,
@@ -1135,6 +1137,7 @@ export function useAppLiveStateTransport(
       handleLaggedEvent,
     } = createAppLiveStateTransportEventHandlers({
       observeHydrationDelta,
+      hasPartialTailAppendProof,
       adoptState,
       applyDelegationWaitDeltaLocally,
       beginBadLiveEventRecovery,

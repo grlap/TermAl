@@ -426,6 +426,14 @@ export function useAppLiveState(
     }
   }
 
+  function hasPartialTailAppendProof(sessionId?: string) {
+    // Read the live map synchronously, never a render-time snapshot. Transport
+    // checks and observes in the same call stack; absent ids mean global fences.
+    return sessionId === undefined
+      ? partialTailAppendProofsRef.current.size > 0
+      : partialTailAppendProofsRef.current.has(sessionId);
+  }
+
   function observeHydrationDelta(observation: HydrationDeltaObservation) {
     const { delta } = observation;
     if (!delta || observation.revisionAction === "resync") {
@@ -1695,6 +1703,7 @@ export function useAppLiveState(
 
   useAppLiveStateTransport({
     observeHydrationDelta,
+    hasPartialTailAppendProof,
     adoptState,
     applyDelegationWaitDeltaLocally,
     cancelStaleSendResponseRecoveryPollForSessions,

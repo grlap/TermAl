@@ -141,7 +141,28 @@ async function flush(ms = 0) {
   await act(async () => { await vi.advanceTimersByTimeAsync(ms); });
 }
 
-function setup(observerMode: "normal" | "absent" | "throws" = "normal") {
+function countObservationScans() {
+  const counts = { sessionScans: 0, messageScans: 0 };
+  const find = Array.prototype.find;
+  const some = Array.prototype.some;
+  // Attribute only the extra observation work, not legitimate reducer/render
+  // scans. The in-flight control below proves these probes see the real path.
+  const inObservation = () => /\bat observeDelta\b/.test(new Error().stack ?? "");
+  vi.spyOn(Array.prototype, "find").mockImplementation(function (this: unknown[], predicate, thisArg) {
+    if (inObservation()) counts.sessionScans += 1;
+    return find.call(this, predicate, thisArg);
+  });
+  vi.spyOn(Array.prototype, "some").mockImplementation(function (this: unknown[], predicate, thisArg) {
+    if (inObservation()) counts.messageScans += 1;
+    return some.call(this, predicate, thisArg);
+  });
+  return counts;
+}
+
+function setup(
+  observerMode: "normal" | "absent" | "throws" = "normal",
+  predicateMode: "normal" | "absent" | "throws" = "normal",
+) {
   const params = makeParams();
   const tailRequests: Array<ReturnType<typeof deferred<Awaited<ReturnType<typeof api.fetchSessionTail>>>> & {
     stack: string; at: number;
@@ -168,6 +189,9 @@ function setup(observerMode: "normal" | "absent" | "throws" = "normal") {
   const realTransport = transport.useAppLiveStateTransport;
   vi.spyOn(transport, "useAppLiveStateTransport").mockImplementation((args) =>
     realTransport({ ...args,
+      hasPartialTailAppendProof: predicateMode === "absent" ? undefined
+        : predicateMode === "throws" ? () => { throw new Error("Predicate failure"); }
+          : args.hasPartialTailAppendProof,
       observeHydrationDelta: observerMode === "absent" ? undefined
         : observerMode === "throws" ? () => { throw new Error("Observer failure"); }
           : args.observeHydrationDelta,
@@ -407,6 +431,76 @@ async function runComposite({
 }
 
 describe("streaming tail-repair hypothesis schedules", () => {
+  it.each(["absent", "throws"] as const)("keeps the observation fence when the proof predicate %s", async (mode) => {
+    const h = setup("normal", mode);
+    const counts = countObservationScans();
+    h.emit("delta", textDelta(102, 1));
+    expect(counts).toEqual({ sessionScans: 2, messageScans: 1 });
+    await h.visible(true);
+    h.emit("delta", textDelta(103, 2));
+    expect(counts).toEqual({ sessionScans: 4, messageScans: 2 });
+    await h.resolveTail(0, 102, "ax");
+    expect(h.classify.mock.results[0].value).toBe("partialCoverage");
+    expect(h.current().messages).toHaveLength(20);
+    expect(h.current().messages[19]).toEqual(message("axx"));
+  });
+
+  it.each([false, true])("scopes observation admission by session without losing cross-session gap invalidation (gap %s)", async (gap) => {
+    const h = setup();
+    const state = summary(101);
+    state.sessions.push({ ...state.sessions[0], id: "other-session", messageCount: 0 });
+    // Install the second session explicitly: ordinary SSE correctly ignores
+    // an equal-revision snapshot and would leave its following delta unknown.
+    act(() => { expect(h.result.current.adoptState(state, { force: true })).toBe(true); });
+    expect(h.params.adoptionRefs.sessionsRef.current.some((entry) => entry.id === "other-session")).toBe(true);
+    await h.visible(true);
+    const counts = countObservationScans();
+    const revision = gap ? 103 : 102;
+    h.emit("delta", {
+      type: "messageCreated", revision, sessionId: "other-session", messageId: "other-message",
+      messageIndex: 0, messageCount: 1, sessionMutationStamp: revision,
+      message: message("other", "other-message"), preview: "", status: "active",
+    });
+    if (!gap) expect(counts).toEqual({ sessionScans: 0, messageScans: 0 });
+    h.emit("delta", textDelta(revision + 1, 1));
+    await h.resolveTail(0, 101, "a");
+    expect(h.classify.mock.results[0].value).toBe(gap ? "stale" : "partialCoverage");
+    expect(h.current().messages).toHaveLength(gap ? 1 : 20);
+    expect(h.current().messages[h.current().messages.length - 1]).toEqual(message("ax"));
+  });
+
+  it("does no observation scans per delta without an in-flight tail proof", async () => {
+    const h = setup();
+    const counts = countObservationScans();
+    for (let index = 0; index < 4; index += 1) {
+      h.emit("delta", textDelta(102 + index, 1 + index));
+      expect(counts).toEqual({ sessionScans: 0, messageScans: 0 });
+    }
+    expect(h.current().messages).toEqual([message("axxxx")]);
+    h.expectTailCount(0);
+  });
+
+  it("constructs observations while a proof is tracked and stops after coverage settles", async () => {
+    const h = setup();
+    await h.visible(true);
+    const counts = countObservationScans();
+    for (let index = 0; index < 4; index += 1) {
+      h.emit("delta", textDelta(102 + index, 1 + index));
+      expect(counts).toEqual({ sessionScans: 2 * (index + 1), messageScans: index + 1 });
+    }
+    await h.resolveTail(0, 101, "a");
+    expect(h.classify.mock.results[0].value).toBe("partialCoverage");
+    counts.sessionScans = 0;
+    counts.messageScans = 0;
+    for (let index = 0; index < 4; index += 1) {
+      h.emit("delta", textDelta(106 + index, 5 + index));
+      expect(counts).toEqual({ sessionScans: 0, messageScans: 0 });
+    }
+    expect(h.current().messages).toHaveLength(20);
+    expect(h.current().messages[19]).toEqual(message("axxxxxxxx"));
+    h.expectTailCount(1);
+  });
+
   it("does not bypass the retry deadline through a delta render after declining gapped coverage", async () => {
     const h = setup();
     await h.visible(true);
