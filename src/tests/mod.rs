@@ -90,6 +90,7 @@ mod telegram_support;
 mod terminal;
 mod turns;
 mod workspace;
+mod workspace_labels;
 
 #[derive(Default)]
 struct TestRecorder {

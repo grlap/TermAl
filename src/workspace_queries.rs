@@ -69,6 +69,9 @@ impl AppState {
             .unwrap_or(1);
         let layout = WorkspaceLayoutDocument {
             id: workspace_id.clone(),
+            // Label edits have their own endpoint. A stale layout autosave
+            // must preserve the current label instead of overwriting it.
+            label: existing_layout.and_then(|layout| layout.label),
             revision: next_revision,
             updated_at: Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
             control_panel_side: request.control_panel_side,
@@ -86,6 +89,34 @@ impl AppState {
             ApiError::internal(format!(
                 "failed to persist workspace layout update: {err:#}"
             ))
+        })?;
+        Ok(WorkspaceLayoutResponse { layout })
+    }
+
+    fn patch_workspace_label(
+        &self,
+        workspace_id: &str,
+        request: PatchWorkspaceLabelRequest,
+    ) -> Result<WorkspaceLayoutResponse, ApiError> {
+        let workspace_id = normalize_optional_identifier(Some(workspace_id))
+            .ok_or_else(|| ApiError::bad_request("workspace id is required"))?;
+        let label = request.label.trim();
+        if label.chars().count() > 80 || label.chars().any(char::is_control) {
+            return Err(ApiError::bad_request(
+                "workspace label must be at most 80 characters and contain no control characters",
+            ));
+        }
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let layout = inner
+            .workspace_layouts
+            .get_mut(workspace_id)
+            .ok_or_else(|| ApiError::not_found("workspace layout not found"))?;
+        layout.label = (!label.is_empty()).then(|| label.to_owned());
+        layout.revision = layout.revision.saturating_add(1);
+        layout.updated_at = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+        let layout = layout.clone();
+        self.commit_locked(&mut inner).map_err(|err| {
+            ApiError::internal(format!("failed to persist workspace label: {err:#}"))
         })?;
         Ok(WorkspaceLayoutResponse { layout })
     }

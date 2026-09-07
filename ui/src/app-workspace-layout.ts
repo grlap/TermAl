@@ -41,6 +41,7 @@ import {
   deleteWorkspaceLayout,
   fetchWorkspaceLayout,
   fetchWorkspaceLayouts,
+  renameWorkspaceLayout,
   saveWorkspaceLayout,
   type WorkspaceLayoutSummary,
 } from "./api";
@@ -180,6 +181,7 @@ export type UseAppWorkspaceLayoutReturn = {
   handleOpenNewWorkspaceHere: () => void;
   handleOpenNewWorkspaceWindow: () => void;
   handleDeleteWorkspace: (workspaceId: string) => Promise<void>;
+  handleRenameWorkspace: (workspaceId: string, label: string) => Promise<void>;
 };
 
 function workspaceHasSessionReferences(workspace: WorkspaceState) {
@@ -505,6 +507,22 @@ export function useAppWorkspaceLayout(
     url.searchParams.set(WORKSPACE_VIEW_QUERY_PARAM, nextWorkspaceViewId);
     window.open(url.toString(), "_blank", "noopener");
     setIsWorkspaceSwitcherOpen(false);
+  }
+
+  async function handleRenameWorkspace(workspaceId: string, label: string) {
+    const { layout } = await renameWorkspaceLayout(workspaceId, label);
+    if (!isMountedRef.current) {
+      return;
+    }
+    // Merge only this label response, preserving a newer SSE revision and
+    // never restoring a workspace concurrently removed from the list.
+    const next = workspaceSummariesRef.current.map((summary) =>
+      summary.id === workspaceId && summary.revision <= layout.revision
+        ? { ...summary, label: layout.label, revision: layout.revision, updatedAt: layout.updatedAt }
+        : summary,
+    );
+    workspaceSummariesRef.current = next;
+    setWorkspaceSummaries(next);
   }
 
   async function handleDeleteWorkspace(workspaceId: string) {
@@ -927,5 +945,6 @@ export function useAppWorkspaceLayout(
     handleOpenNewWorkspaceHere,
     handleOpenNewWorkspaceWindow,
     handleDeleteWorkspace,
+    handleRenameWorkspace,
   };
 }

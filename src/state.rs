@@ -1198,6 +1198,7 @@ fn collect_workspace_layout_summaries<'a>(
     let mut workspaces = layouts
         .map(|layout| WorkspaceLayoutSummary {
             id: layout.id.clone(),
+            label: layout.label.clone(),
             revision: layout.revision,
             updated_at: layout.updated_at.clone(),
             control_panel_side: layout.control_panel_side,

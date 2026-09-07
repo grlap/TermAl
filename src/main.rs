@@ -289,6 +289,7 @@ fn app_router(state: AppState) -> Router {
         )
         .route("/api/state", get(get_state))
         .route("/api/workspaces", get(list_workspace_layouts))
+        .route("/api/workspaces/{id}/label", patch(patch_workspace_label))
         .route(
             "/api/workspaces/{id}",
             get(get_workspace_layout)

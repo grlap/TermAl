@@ -619,6 +619,16 @@ async fn put_workspace_layout(
     Ok(Json(response))
 }
 
+async fn patch_workspace_label(
+    State(state): State<AppState>,
+    AxumPath(workspace_id): AxumPath<String>,
+    Json(request): Json<PatchWorkspaceLabelRequest>,
+) -> Result<Json<WorkspaceLayoutResponse>, ApiError> {
+    let response =
+        run_blocking_api(move || state.patch_workspace_label(&workspace_id, request)).await?;
+    Ok(Json(response))
+}
+
 /// Deletes a workspace layout.
 ///
 /// Intentionally returns the remaining workspace summaries, while PUT on the

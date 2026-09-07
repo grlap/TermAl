@@ -632,7 +632,6 @@ export default function App() {
     activeWorkspaceTab?.kind === "session"
       ? (sessionLookup.get(activeWorkspaceTab.sessionId) ?? null)
       : null;
-  useLastActiveSessionDocumentTitle(activeBrowserTitleSession?.name);
   const activeTranscriptSessionId =
     activePane?.viewMode === "session" ? (activeSession?.id ?? null) : null;
   const visibleSessionHydrationTargets = useMemo<
@@ -817,6 +816,7 @@ export default function App() {
     handleOpenNewWorkspaceHere,
     handleOpenNewWorkspaceWindow,
     handleDeleteWorkspace,
+    handleRenameWorkspace,
   } = useAppWorkspaceLayout({
     workspaceViewId,
     workspace,
@@ -863,6 +863,11 @@ export default function App() {
     reportRequestError,
     applyControlPanelLayout,
   });
+
+  useLastActiveSessionDocumentTitle(
+    activeBrowserTitleSession?.name,
+    workspaceSummaries.find((summary) => summary.id === workspaceViewId)?.label,
+  );
 
   const {
     adoptState,
@@ -2083,6 +2088,7 @@ export default function App() {
           summaries={workspaceSummaries}
           switcherRef={workspaceSwitcherRef}
           onDeleteWorkspace={handleDeleteWorkspace}
+          onRenameWorkspace={handleRenameWorkspace}
           onOpenNewWorkspaceHere={handleOpenNewWorkspaceHere}
           onOpenNewWorkspaceWindow={handleOpenNewWorkspaceWindow}
           onOpenWorkspace={handleOpenWorkspaceHere}

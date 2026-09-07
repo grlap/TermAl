@@ -480,6 +480,58 @@ describe("App workspace layout", () => {
     });
   });
 
+  it("saves the current workspace label and updates the switcher and browser title", async () => {
+    await withVerifiedNoReactActWarnings(async () => {
+      const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      window.history.replaceState(null, "", "?workspace=workspace-label-test");
+      vi.mocked(api.fetchWorkspaceLayouts).mockResolvedValue({
+        workspaces: [{
+          id: "workspace-label-test",
+          revision: 1,
+          updatedAt: "2026-09-06 12:00:00",
+          controlPanelSide: "left",
+        }],
+      });
+      const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(String(input), "http://localhost");
+        if (url.pathname === "/api/state") {
+          return jsonResponse({ revision: 1, projects: [], sessions: [] });
+        }
+        if (url.pathname === "/api/workspaces/workspace-label-test/label") {
+          expect(init?.method).toBe("PATCH");
+          expect(JSON.parse(String(init?.body))).toEqual({ label: "Backend" });
+          return jsonResponse({
+            layout: {
+              ...makeWorkspaceLayoutResponse({ id: "workspace-label-test", revision: 2 }).layout,
+              label: "Backend",
+            },
+          });
+        }
+        throw new Error(`Unexpected fetch: ${url.pathname}`);
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal("EventSource", EventSourceMock);
+      vi.stubGlobal("ResizeObserver", ResizeObserverMock);
+      try {
+        await renderApp();
+        await clickAndSettle(await screen.findByRole("button", { name: /workspace /i }));
+        await clickAndSettle(await screen.findByRole("button", {
+          name: "Edit label for workspace workspace-label-test",
+        }));
+        fireEvent.change(screen.getByRole("textbox", { name: "Workspace label" }), {
+          target: { value: "  Backend  " },
+        });
+        await clickAndSettle(screen.getByRole("button", { name: "Save label" }));
+        expect(await screen.findByRole("button", { name: "Workspace Backend" })).toBeInTheDocument();
+        expect(document.title).toBe("Backend · TermAl");
+        expect(screen.queryByRole("textbox", { name: "Workspace label" })).not.toBeInTheDocument();
+        expect(window.location.search).toBe("?workspace=workspace-label-test");
+      } finally {
+        window.history.replaceState(null, "", originalUrl);
+      }
+    });
+  });
+
   it("deletes a saved workspace from the workspace switcher", async () => {
     await withVerifiedNoReactActWarnings(async () => {
       const originalFetch = globalThis.fetch;

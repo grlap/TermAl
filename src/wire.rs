@@ -2244,6 +2244,8 @@ enum WorkspaceThemeMode {
 #[serde(rename_all = "camelCase")]
 struct WorkspaceLayoutDocument {
     id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    label: Option<String>,
     revision: u64,
     updated_at: String,
     control_panel_side: WorkspaceControlPanelSide,
@@ -2276,6 +2278,8 @@ struct WorkspaceLayoutResponse {
 #[serde(rename_all = "camelCase")]
 struct WorkspaceLayoutSummary {
     id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    label: Option<String>,
     revision: u64,
     updated_at: String,
     control_panel_side: WorkspaceControlPanelSide,
@@ -2300,6 +2304,11 @@ struct WorkspaceLayoutSummary {
 #[serde(rename_all = "camelCase")]
 struct WorkspaceLayoutsResponse {
     workspaces: Vec<WorkspaceLayoutSummary>,
+}
+
+#[derive(Deserialize)]
+struct PatchWorkspaceLabelRequest {
+    label: String,
 }
 
 /// Represents the put workspace layout request payload.

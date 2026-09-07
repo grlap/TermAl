@@ -62,6 +62,25 @@ This supports:
 - one browser on the right monitor with `?workspace=review`
 - an intentionally shared layout by opening the same URL in another browser
 
+### Workspace labels
+
+Open **Workspace → Add current label** (or **Edit current label**) to name
+the workspace in the current browser tab. The editor stays above the saved
+list and only edits the current workspace. Labels appear in the switcher,
+its current-workspace button, and the browser tab title. Workspace IDs and
+URLs stay unchanged; an empty label restores the ID-based display.
+
+The saved list pins the current workspace first, then sorts by label or ID,
+with the ID as a tie-breaker. Live updates and layout autosaves do not reorder
+the list by activity time.
+
+Labels are optional server-persisted metadata, limited to 80 characters.
+`PATCH /api/workspaces/{id}/label` accepts `{ "label": "Reviews" }` and returns
+the saved layout document. The separate endpoint changes only the label:
+ordinary layout PUTs preserve it even when sent by an older browser tab.
+Workspace GET, list, and state-event summaries expose the label when set.
+Existing saved workspaces without labels remain valid.
+
 ### Local cache
 
 The browser still keeps a per-workspace local cache as a warm-start fallback,

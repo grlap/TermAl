@@ -246,6 +246,7 @@ export type UpdateConversationMarkerRequest = {
 
 export type WorkspaceLayoutDocument = {
   id: string;
+  label?: string;
   revision: number;
   updatedAt: string;
   controlPanelSide: "left" | "right";
@@ -270,6 +271,7 @@ export type WorkspaceLayoutResponse = {
 
 export type WorkspaceLayoutSummary = {
   id: string;
+  label?: string;
   revision: number;
   updatedAt: string;
   controlPanelSide: "left" | "right";
@@ -779,6 +781,14 @@ export function saveWorkspaceLayout(
       body: JSON.stringify(payload),
       keepalive: options?.keepalive,
     },
+  );
+}
+
+/** Updates only the label; layout autosaves retain server-owned labels. */
+export function renameWorkspaceLayout(workspaceId: string, label: string) {
+  return request<WorkspaceLayoutResponse>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/label`,
+    { method: "PATCH", body: JSON.stringify({ label }) },
   );
 }
 

@@ -44,6 +44,7 @@ export function WorkspaceSwitcher({
   summaries,
   switcherRef,
   onDeleteWorkspace,
+  onRenameWorkspace,
   onOpenNewWorkspaceHere,
   onOpenNewWorkspaceWindow,
   onOpenWorkspace,
@@ -57,6 +58,7 @@ export function WorkspaceSwitcher({
   summaries: readonly WorkspaceLayoutSummary[];
   switcherRef: RefObject<HTMLDivElement>;
   onDeleteWorkspace: (workspaceId: string) => void;
+  onRenameWorkspace: (workspaceId: string, label: string) => Promise<void>;
   onOpenNewWorkspaceHere: () => void;
   onOpenNewWorkspaceWindow: () => void;
   onOpenWorkspace: (workspaceId: string) => void;
@@ -73,12 +75,40 @@ export function WorkspaceSwitcher({
       });
     }
 
-    return [...byId.values()];
+    return [...byId.values()].sort((left, right) => {
+      if (left.id === right.id) return 0;
+      if (left.id === currentWorkspaceId) return -1;
+      if (right.id === currentWorkspaceId) return 1;
+      return (left.label || left.id).localeCompare(right.label || right.id)
+        || left.id.localeCompare(right.id);
+    });
   }, [currentWorkspaceId, summaries]);
   const deletingWorkspaceIdSet = useMemo(
     () => new Set(deletingWorkspaceIds),
     [deletingWorkspaceIds],
   );
+  const currentSummary = visibleSummaries.find((summary) => summary.id === currentWorkspaceId);
+  const currentLabel = currentSummary?.label;
+  const [editingWorkspaceId, setEditingWorkspaceId] = useState<string | null>(null);
+  const [labelDraft, setLabelDraft] = useState("");
+  const [isSavingLabel, setIsSavingLabel] = useState(false);
+  const [labelError, setLabelError] = useState<string | null>(null);
+
+  async function saveLabel() {
+    if (!editingWorkspaceId || isSavingLabel) {
+      return;
+    }
+    setIsSavingLabel(true);
+    setLabelError(null);
+    try {
+      await onRenameWorkspace(editingWorkspaceId, labelDraft.trim());
+      setEditingWorkspaceId(null);
+    } catch (error) {
+      setLabelError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setIsSavingLabel(false);
+    }
+  }
 
   return (
     <div ref={switcherRef} className="workspace-switcher">
@@ -87,13 +117,13 @@ export function WorkspaceSwitcher({
         type="button"
         aria-expanded={isOpen}
         aria-haspopup="dialog"
-        aria-label={`Workspace ${currentWorkspaceId}`}
+        aria-label={`Workspace ${currentLabel || currentWorkspaceId}`}
         onClick={onToggle}
       >
         <span className="workspace-switcher-trigger-copy">
           <span className="workspace-switcher-trigger-label">Workspace</span>
           <span className="workspace-switcher-trigger-value">
-            {formatWorkspaceSwitcherLabel(currentWorkspaceId)}
+            {currentLabel || formatWorkspaceSwitcherLabel(currentWorkspaceId)}
           </span>
         </span>
         <span className={`combo-trigger-caret ${isOpen ? "open" : ""}`} aria-hidden="true">
@@ -113,7 +143,61 @@ export function WorkspaceSwitcher({
             </span>
           </div>
 
+          {editingWorkspaceId === currentWorkspaceId ? (
+            <form
+              className="workspace-label-form"
+              aria-label={`Label workspace ${currentWorkspaceId}`}
+              onSubmit={(event) => {
+                event.preventDefault();
+                void saveLabel();
+              }}
+            >
+              <label>
+                Workspace label
+                <input
+                  autoFocus
+                  maxLength={80}
+                  value={labelDraft}
+                  disabled={isSavingLabel}
+                  placeholder="For example: Backend, Reviews, Planning"
+                  onChange={(event) => setLabelDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      if (!isSavingLabel) setEditingWorkspaceId(null);
+                    }
+                  }}
+                />
+              </label>
+              <div className="workspace-switcher-actions">
+                <button className="ghost-button" type="submit" disabled={isSavingLabel}>
+                  {isSavingLabel ? "Saving…" : "Save label"}
+                </button>
+                <button className="ghost-button" type="button" disabled={isSavingLabel}
+                  onClick={() => setEditingWorkspaceId(null)}>
+                  Cancel
+                </button>
+              </div>
+              <p className="workspace-switcher-status">Leave empty to remove the label.</p>
+              {labelError ? <p className="workspace-switcher-error" role="alert">{labelError}</p> : null}
+            </form>
+          ) : null}
+
           <div className="workspace-switcher-actions">
+            <button
+              className="ghost-button"
+              type="button"
+              disabled={isSavingLabel || !currentSummary?.revision}
+              aria-label={`Edit label for workspace ${currentWorkspaceId}`}
+              onClick={() => {
+                setEditingWorkspaceId(currentWorkspaceId);
+                setLabelDraft(currentLabel ?? "");
+                setLabelError(null);
+              }}
+            >
+              {currentLabel ? "Edit current label" : "Add current label"}
+            </button>
             <button className="ghost-button" type="button" onClick={onOpenNewWorkspaceHere}>
               New here
             </button>
@@ -140,7 +224,7 @@ export function WorkspaceSwitcher({
                     <span className="workspace-switcher-item-copy">
                       <span className="workspace-switcher-item-title-row">
                         <span className="workspace-switcher-item-title">
-                          {formatWorkspaceSwitcherLabel(summary.id)}
+                          {summary.label || formatWorkspaceSwitcherLabel(summary.id)}
                         </span>
                         {isCurrent ? (
                           <span className="workspace-switcher-item-status">Current</span>

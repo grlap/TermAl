@@ -922,6 +922,7 @@ fn persisted_state_normalizes_legacy_workspace_layout_paths() {
         "workspace-1".to_owned(),
         WorkspaceLayoutDocument {
             id: "workspace-1".to_owned(),
+            label: None,
             revision: 1,
             updated_at: "2026-04-01 12:00:00".to_owned(),
             control_panel_side: WorkspaceControlPanelSide::Left,

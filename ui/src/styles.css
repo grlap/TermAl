@@ -1511,6 +1511,25 @@ textarea {
   text-align: left;
 }
 
+.workspace-label-form {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+}
+
+.workspace-label-form label {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.workspace-label-form input {
+  min-width: 0;
+  width: 100%;
+}
+
 .workspace-switcher-item:hover,
 .workspace-switcher-item.selected {
   border-color: var(--accent-blue-border);
