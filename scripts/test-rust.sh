@@ -107,6 +107,21 @@ else
     fd_limit_note=
 fi
 
+# Keep the launcher alive to inspect and remove the run's temporary artifacts.
+# Native Node supplies Windows paths to Windows Cargo, including under WSL;
+# this avoids exporting a Linux /tmp path to a Win32 child.
+temp_launcher="$repo_root/scripts/test-temp-root.mjs"
+node_bin=node
+if [ "$uses_windows_interop" = true ]; then
+    node_bin=node.exe
+fi
+if ! command -v "$node_bin" >/dev/null 2>&1; then
+    echo "$node_bin is required by scripts/test-rust.sh for test-temp containment; install Node.js (version in .nvmrc) and add it to PATH. See docs/test.md for wrapper and direct Cargo requirements." >&2
+    exit 127
+fi
+if [ "$uses_windows_interop" = true ]; then
+    temp_launcher=$(wslpath -w "$temp_launcher")
+    cargo_bin=$(wslpath -w "$cargo_bin")
+fi
 echo "Rust test gate: cargo=$cargo_bin, fd soft limit=$effective_soft_limit$fd_limit_note, test threads=$test_threads"
-
-exec "$cargo_bin" test "$@"
+exec "$node_bin" "$temp_launcher" "$cargo_bin" test "$@"

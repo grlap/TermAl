@@ -2789,7 +2789,37 @@ fn shared_codex_server_request_missing_thread_id_returns_json_rpc_error() {
 // concurrent approval/response traffic on the shared Codex process.
 #[test]
 fn shared_codex_prompt_command_keeps_writer_loop_responsive_while_turn_start_is_pending() {
+    assert_prompt_writer_fixture_cleanup(None);
+}
+
+#[test]
+fn shared_codex_prompt_writer_fixture_releases_waiters_on_unwind() {
+    assert_prompt_writer_fixture_cleanup(Some("watchdog"));
+}
+
+#[test]
+fn shared_codex_prompt_writer_fixture_joins_writer_on_early_unwind() {
+    assert_prompt_writer_fixture_cleanup(Some("writer"));
+}
+
+#[test]
+fn shared_codex_prompt_writer_fixture_reports_writer_failure_after_cleanup() {
+    assert_prompt_writer_fixture_cleanup(Some("writer-failure"));
+}
+
+#[test]
+fn shared_codex_prompt_writer_fixture_survives_writer_failure_during_outer_unwind() {
+    assert_prompt_writer_fixture_cleanup(Some("writer-failure-unwind"));
+}
+
+#[test]
+fn shared_codex_prompt_writer_fixture_cleans_poisoned_pending_requests_during_unwind() {
+    assert_prompt_writer_fixture_cleanup(Some("pending-poison-unwind"));
+}
+
+fn assert_prompt_writer_fixture_cleanup(panic_phase: Option<&'static str>) {
     let state = test_app_state();
+    let temp_path = state.test_temp_root_path().unwrap().to_owned();
     let session_id = test_session_id(&state, Agent::Codex);
     let (runtime, _runtime_input_rx, process) =
         test_shared_codex_runtime("shared-codex-prompt-writer-responsive");
@@ -2832,179 +2862,301 @@ fn shared_codex_prompt_command_keeps_writer_loop_responsive_while_turn_start_is_
     let writer = SharedBufferWriter::default();
     let thread_writer = writer.clone();
     let thread_pending_requests = pending_requests.clone();
-    let thread_state = state.clone();
-    let thread_runtime = runtime.clone();
-    let (input_tx, input_rx) = mpsc::channel();
-    let thread_input_tx = input_tx.clone();
-
-    let writer_thread = std::thread::spawn(move || {
-        let mut stdin = thread_writer;
-        let runtime_token = RuntimeToken::Codex(thread_runtime.runtime_id.clone());
-        // This bound-thread fixture publishes a prompt and an approval reply.
-        // Return the receiver after those events, not scheduler idleness.
-        // The join handle retains it until the response continuation settles.
-        for _ in 0..2 {
-            let command = phase_sync::receive(&input_rx, "Codex prompt-loop command");
-            match command {
-                CodexRuntimeCommand::Prompt {
-                    session_id,
-                    command,
-                } => {
-                    let active_turn_generation = command.active_turn_generation;
-                    handle_shared_codex_prompt_command_result(
-                        &thread_state,
-                        &session_id,
-                        &runtime_token,
-                        active_turn_generation,
-                        handle_shared_codex_prompt_command(
-                            &mut stdin,
-                            &thread_pending_requests,
-                            &thread_state,
-                            &thread_runtime.runtime_id,
-                            &test_missing_shared_codex_home(),
-                            &thread_runtime.sessions,
-                            &thread_runtime.thread_sessions,
-                            &thread_input_tx,
-                            None,
-                            &session_id,
-                            command,
-                        ),
-                    )
-                    .unwrap();
+    let cleanup_pending = pending_requests.clone();
+    let cleanup_session = SharedCodexSessionHandle {
+        runtime: runtime.clone(),
+        session_id: session_id.clone(),
+    };
+    let (input_tx, input_rx) = mpsc::channel::<Option<CodexRuntimeCommand>>();
+    let cleanup_input = input_tx.clone();
+    type FixtureWriter = std::thread::JoinHandle<mpsc::Receiver<Option<CodexRuntimeCommand>>>;
+    let writer_owner = Arc::new(Mutex::new(None::<FixtureWriter>));
+    let cleanup_writer = writer_owner.clone();
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let state = TestAppStateCleanup::new(
+            state,
+            "shared Codex turn/start response/watchdog",
+            move || {
+                // Stop and join the fixture writer even if an assertion unwinds
+                // before the second command. Only then release its continuations.
+                let _ = cleanup_input.send(None);
+                let mut failures = Vec::new();
+                // Do not hold the owner lock through join: a failing child must
+                // not poison it or prevent the remaining cancellation steps.
+                let writer = cleanup_writer
+                    .lock()
+                    .unwrap_or_else(|poisoned| {
+                        failures.push("fixture writer owner mutex poisoned".to_owned());
+                        poisoned.into_inner()
+                    })
+                    .take();
+                if let Some(writer) = writer {
+                    if writer.join().is_err() {
+                        failures.push("fixture writer teardown: writer panicked".to_owned());
+                    }
                 }
-                CodexRuntimeCommand::StartTurnAfterSetup {
-                    session_id,
-                    thread_id,
-                    command,
-                } => {
-                    let active_turn_generation = command.active_turn_generation;
-                    handle_shared_codex_prompt_command_result(
-                        &thread_state,
-                        &session_id,
-                        &runtime_token,
-                        active_turn_generation,
-                        handle_shared_codex_start_turn(
-                            &mut stdin,
-                            &thread_pending_requests,
-                            &thread_state,
-                            &thread_runtime.runtime_id,
-                            &thread_runtime.sessions,
-                            &thread_runtime.thread_sessions,
-                            None,
-                            &session_id,
-                            &thread_id,
-                            None,
-                            command,
-                        ),
-                    )
-                    .unwrap();
+                cleanup_pending
+                    .lock()
+                    .unwrap_or_else(|poisoned| {
+                        failures.push("pending requests mutex poisoned".to_owned());
+                        poisoned.into_inner()
+                    })
+                    .clear();
+                cleanup_session.detach();
+                if failures.is_empty() {
+                    Ok(())
+                } else {
+                    Err(failures.join("; "))
                 }
-                CodexRuntimeCommand::JsonRpcResponse { response } => {
-                    write_codex_json_rpc_message(
-                        &mut stdin,
-                        &codex_json_rpc_response_message(&response),
-                    )
-                    .unwrap();
-                }
-                _ => panic!("unexpected shared Codex runtime command"),
-            }
-        }
-        input_rx
-    });
-
-    input_tx
-        .send(CodexRuntimeCommand::Prompt {
-            session_id: session_id.clone(),
-            command: CodexPromptCommand {
-                active_turn_generation: 0,
-                approval_policy: CodexApprovalPolicy::Never,
-                attachments: Vec::new(),
-                cwd: "/tmp".to_owned(),
-                model: "gpt-5.4".to_owned(),
-                prompt: "check the repo".to_owned(),
-                reasoning_effort: CodexReasoningEffort::Medium,
-                service_tier: None,
-                resume_thread_id: None,
-                sandbox_mode: CodexSandboxMode::WorkspaceWrite,
             },
-        })
-        .unwrap();
+        );
+        let thread_state = (*state).clone();
+        let thread_runtime = runtime.clone();
+        let thread_input_tx = runtime.input_tx.clone();
 
-    let deadline = phase_sync::PollGuard::new();
-    loop {
-        let written = writer.contents();
-        let pending_count = pending_requests
+        let writer_thread = std::thread::spawn(move || {
+            let mut stdin = thread_writer;
+            let runtime_token = RuntimeToken::Codex(thread_runtime.runtime_id.clone());
+            // This bound-thread fixture publishes a prompt and an approval reply.
+            // Return the receiver after those events, not scheduler idleness.
+            // The join handle retains it until the response continuation settles.
+            for _ in 0..2 {
+                let Some(command) = phase_sync::receive(&input_rx, "Codex prompt-loop command")
+                else {
+                    return input_rx;
+                };
+                match command {
+                    CodexRuntimeCommand::Prompt {
+                        session_id,
+                        command,
+                    } => {
+                        let active_turn_generation = command.active_turn_generation;
+                        handle_shared_codex_prompt_command_result(
+                            &thread_state,
+                            &session_id,
+                            &runtime_token,
+                            active_turn_generation,
+                            handle_shared_codex_prompt_command(
+                                &mut stdin,
+                                &thread_pending_requests,
+                                &thread_state,
+                                &thread_runtime.runtime_id,
+                                &test_missing_shared_codex_home(),
+                                &thread_runtime.sessions,
+                                &thread_runtime.thread_sessions,
+                                &thread_input_tx,
+                                None,
+                                &session_id,
+                                command,
+                            ),
+                        )
+                        .unwrap();
+                    }
+                    CodexRuntimeCommand::StartTurnAfterSetup {
+                        session_id,
+                        thread_id,
+                        command,
+                    } => {
+                        let active_turn_generation = command.active_turn_generation;
+                        handle_shared_codex_prompt_command_result(
+                            &thread_state,
+                            &session_id,
+                            &runtime_token,
+                            active_turn_generation,
+                            handle_shared_codex_start_turn(
+                                &mut stdin,
+                                &thread_pending_requests,
+                                &thread_state,
+                                &thread_runtime.runtime_id,
+                                &thread_runtime.sessions,
+                                &thread_runtime.thread_sessions,
+                                None,
+                                &session_id,
+                                &thread_id,
+                                None,
+                                command,
+                            ),
+                        )
+                        .unwrap();
+                    }
+                    CodexRuntimeCommand::JsonRpcResponse { response } => {
+                        write_codex_json_rpc_message(
+                            &mut stdin,
+                            &codex_json_rpc_response_message(&response),
+                        )
+                        .unwrap();
+                    }
+                    _ => panic!("unexpected shared Codex runtime command"),
+                }
+                if matches!(
+                    panic_phase,
+                    Some("writer-failure" | "writer-failure-unwind")
+                ) {
+                    panic!("injected fixture writer failure with pending response");
+                }
+            }
+            input_rx
+        });
+        *writer_owner
             .lock()
-            .expect("Codex pending requests mutex poisoned")
-            .len();
-        if written.contains("\"method\":\"turn/start\"") && pending_count == 1 {
-            break;
+            .expect("fixture writer owner mutex poisoned") = Some(writer_thread);
+
+        input_tx
+            .send(Some(CodexRuntimeCommand::Prompt {
+                session_id: session_id.clone(),
+                command: CodexPromptCommand {
+                    active_turn_generation: 0,
+                    approval_policy: CodexApprovalPolicy::Never,
+                    attachments: Vec::new(),
+                    cwd: "/tmp".to_owned(),
+                    model: "gpt-5.4".to_owned(),
+                    prompt: "check the repo".to_owned(),
+                    reasoning_effort: CodexReasoningEffort::Medium,
+                    service_tier: None,
+                    resume_thread_id: None,
+                    sandbox_mode: CodexSandboxMode::WorkspaceWrite,
+                },
+            }))
+            .unwrap();
+        if panic_phase == Some("writer") {
+            panic!("injected fixture failure while writer is active");
         }
-        deadline.wait(format_args!(
-            "turn/start request should stay pending while the writer loop remains active"
-        ));
-    }
-
-    input_tx
-        .send(CodexRuntimeCommand::JsonRpcResponse {
-            response: CodexJsonRpcResponseCommand {
-                request_id: json!("approval-1"),
-                payload: CodexJsonRpcResponsePayload::Result(json!({
-                    "outcome": "approved",
-                })),
-            },
-        })
-        .unwrap();
-
-    let deadline = phase_sync::PollGuard::new();
-    loop {
-        let written = writer.contents();
-        if written.contains("\"id\":\"approval-1\"") {
-            break;
-        }
-        deadline.wait(format_args!(
-            "writer loop should still write JSON-RPC responses while turn/start is pending"
-        ));
-    }
-
-    let (_request_id, sender) = take_pending_codex_request(&pending_requests);
-    sender
-        .send(Ok(json!({
-            "turn": {
-                "id": "turn-1"
-            }
-        })))
-        .unwrap();
-
-    let deadline = phase_sync::PollGuard::new();
-    loop {
-        let (turn_id, pending_turn_start) = {
-            let sessions = runtime
-                .sessions
+        if matches!(
+            panic_phase,
+            Some("writer-failure" | "writer-failure-unwind")
+        ) {
+            let deadline = phase_sync::PollGuard::new();
+            while !writer_owner
                 .lock()
-                .expect("shared Codex session mutex poisoned");
-            let session_state = sessions
-                .get(&session_id)
-                .expect("shared Codex session state should exist");
-            (
-                session_state.turn_id.clone(),
-                session_state.pending_turn_start_request_id.clone(),
-            )
-        };
-        if turn_id.as_deref() == Some("turn-1") && pending_turn_start.is_some() {
-            break;
+                .expect("fixture writer owner mutex poisoned")
+                .as_ref()
+                .expect("fixture writer installed")
+                .is_finished()
+            {
+                deadline.wait("injected writer failure must precede fixture cleanup");
+            }
+            if panic_phase == Some("writer-failure-unwind") {
+                panic!("injected outer unwind after writer failure");
+            }
+            state.finish();
+            return;
         }
-        deadline.wait(format_args!("turn/start waiter should record the turn id and retain its watchdog marker until turn/started arrives"));
-    }
 
-    let input_rx = writer_thread
-        .join()
-        .expect("shared Codex writer thread should join cleanly");
-    assert!(
-        matches!(input_rx.try_recv(), Err(mpsc::TryRecvError::Empty)),
-        "Codex prompt-loop fixture received an extra command after prompt and approval reply"
-    );
-    drop(input_tx);
+        let deadline = phase_sync::PollGuard::new();
+        loop {
+            let written = writer.contents();
+            let pending_count = pending_requests
+                .lock()
+                .expect("Codex pending requests mutex poisoned")
+                .len();
+            if written.contains("\"method\":\"turn/start\"") && pending_count == 1 {
+                break;
+            }
+            deadline.wait(format_args!(
+                "turn/start request should stay pending while the writer loop remains active"
+            ));
+        }
+
+        input_tx
+            .send(Some(CodexRuntimeCommand::JsonRpcResponse {
+                response: CodexJsonRpcResponseCommand {
+                    request_id: json!("approval-1"),
+                    payload: CodexJsonRpcResponsePayload::Result(json!({
+                        "outcome": "approved",
+                    })),
+                },
+            }))
+            .unwrap();
+
+        let deadline = phase_sync::PollGuard::new();
+        loop {
+            let written = writer.contents();
+            if written.contains("\"id\":\"approval-1\"") {
+                break;
+            }
+            deadline.wait(format_args!(
+                "writer loop should still write JSON-RPC responses while turn/start is pending"
+            ));
+        }
+
+        let (_request_id, sender) = take_pending_codex_request(&pending_requests);
+        sender
+            .send(Ok(json!({
+                "turn": {
+                    "id": "turn-1"
+                }
+            })))
+            .unwrap();
+
+        let deadline = phase_sync::PollGuard::new();
+        loop {
+            let (turn_id, pending_turn_start) = {
+                let sessions = runtime
+                    .sessions
+                    .lock()
+                    .expect("shared Codex session mutex poisoned");
+                let session_state = sessions
+                    .get(&session_id)
+                    .expect("shared Codex session state should exist");
+                (
+                    session_state.turn_id.clone(),
+                    session_state.pending_turn_start_request_id.clone(),
+                )
+            };
+            if turn_id.as_deref() == Some("turn-1") && pending_turn_start.is_some() {
+                break;
+            }
+            deadline.wait(format_args!("turn/start waiter should record the turn id and retain its watchdog marker until turn/started arrives"));
+        }
+
+        let input_rx = writer_owner
+            .lock()
+            .expect("fixture writer owner mutex poisoned")
+            .take()
+            .expect("fixture writer installed")
+            .join()
+            .expect("shared Codex writer thread should join cleanly");
+        assert!(
+            matches!(input_rx.try_recv(), Err(mpsc::TryRecvError::Empty)),
+            "Codex prompt-loop fixture received an extra command after prompt and approval reply"
+        );
+        drop(input_tx);
+        if panic_phase == Some("pending-poison-unwind") {
+            let poison = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _pending = pending_requests.lock().expect("pending requests mutex");
+                panic!("injected pending requests poison");
+            }));
+            assert!(poison.is_err());
+            panic!("injected outer unwind after pending requests poison");
+        }
+        if panic_phase == Some("watchdog") {
+            panic!("injected fixture failure after watchdog arm");
+        }
+        state.finish();
+    }));
+    assert_eq!(result.is_err(), panic_phase.is_some());
+    if let Err(payload) = result {
+        let detail = payload
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| payload.downcast_ref::<&str>().copied())
+            .unwrap_or("");
+        if panic_phase == Some("writer-failure") {
+            assert!(
+                detail.contains("fixture writer teardown"),
+                "cleanup failure must be reported: {detail}"
+            );
+        } else if matches!(
+            panic_phase,
+            Some("writer-failure-unwind" | "pending-poison-unwind")
+        ) {
+            assert!(
+                detail.contains("injected outer unwind"),
+                "cleanup must preserve the original panic: {detail}"
+            );
+        }
+    }
+    assert!(!temp_path.exists(), "fixture must remove its database root");
 }
 
 // Pins that a CodexResponseError::JsonRpc from turn/start is recorded as

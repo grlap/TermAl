@@ -71,6 +71,23 @@ toolchain. Extra arguments are passed through to `cargo test`, for example:
 scripts/test-rust.sh mailbox_store_tests
 ```
 
+The wrapper requires Node.js (the version in `.nvmrc`) on `PATH`, including
+`node.exe` when WSL launches Windows Cargo. Node owns the temporary run directory,
+redirects `TMP`/`TEMP`/`TMPDIR` into the product's `termal/tests/run-*` folder,
+reports newly escaped artifacts, and removes successful runs without retries.
+A failed run is retained for diagnosis; removal failures name the path, OS error
+and surviving entries. Stale marked runs are swept only after the recorded
+processes have exited and the age threshold has passed.
+
+Direct `cargo test` and `cargo check` do not require Node. Direct tests use the
+Rust product-temp helper where adopted, but bypass the wrapper's environment
+containment, end-of-run audit and marked-run sweep; use the wrapper for the full
+gate while raw temp call sites are still being converted. Both Node and Rust
+helpers require absolute paths without `..` components. A manually supplied
+`TERMAL_TEST_RUN_ROOT` must be a direct `run-*` child of the product tests folder.
+Paths are normalized lexically, not canonicalized through filesystem aliases;
+product and run directory components must not be symlinks or junctions.
+
 The review-integrity helper tests run on Linux, macOS, and Windows in CI. The
 Vitest resource preflight itself uses three fixed CPU samples and the median,
 so one scheduler spike does not reject a gate while sustained starvation still

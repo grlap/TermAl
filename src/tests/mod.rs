@@ -53,6 +53,7 @@ mod mailboxes;
 mod opencode_config;
 mod orchestrator;
 mod phase_sync;
+mod test_temp_paths;
 pub use orchestrator::{
     sample_deadlocked_orchestrator_template_draft, sample_orchestrator_template_draft,
 };
@@ -764,7 +765,7 @@ static TEST_HOME_ENV_MUTEX: std::sync::LazyLock<std::sync::Mutex<()>> =
     std::sync::LazyLock::new(|| std::sync::Mutex::new(()));
 
 fn test_missing_shared_codex_home() -> PathBuf {
-    std::env::temp_dir().join(format!(
+    test_temp_dir().join(format!(
         "termal-missing-shared-codex-home-{}",
         Uuid::new_v4()
     ))

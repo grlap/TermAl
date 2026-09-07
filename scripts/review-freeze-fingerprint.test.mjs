@@ -7,12 +7,13 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { devNull, tmpdir } from "node:os";
+import { devNull } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { hashUntrackedFiles } from "./review-freeze-fingerprint.mjs";
+import { testTempDirectory } from "./test-temp-root.mjs";
 
 const helper = fileURLToPath(
   new URL("./review-freeze-fingerprint.mjs", import.meta.url),
@@ -49,7 +50,7 @@ function run(command, args, cwd) {
 }
 
 function createRepository() {
-  const root = mkdtempSync(join(tmpdir(), "termal-freeze-fingerprint-"));
+  const root = mkdtempSync(join(testTempDirectory(), "termal-freeze-fingerprint-"));
   run("git", ["init", "--quiet", "--template="], root);
   run("git", ["config", "user.email", "termal-test@example.invalid"], root);
   run("git", ["config", "user.name", "TermAl Test"], root);
@@ -236,7 +237,7 @@ test(
 );
 
 test("test repositories ignore hostile inherited Git configuration", async () => {
-  const hostileRoot = mkdtempSync(join(tmpdir(), "termal-hostile-git-config-"));
+  const hostileRoot = mkdtempSync(join(testTempDirectory(), "termal-hostile-git-config-"));
   const hostileConfig = join(hostileRoot, "gitconfig");
   const previousGlobalConfig = process.env.GIT_CONFIG_GLOBAL;
   try {

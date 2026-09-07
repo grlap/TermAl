@@ -666,6 +666,8 @@ include!("remote_codex_proxies.rs");
 include!("remote_session_proxies.rs");
 include!("remote_sync.rs");
 #[cfg(test)]
+include!("test_temp_paths.rs");
+#[cfg(test)]
 include!("test_temp_root.rs");
 include!("state.rs");
 include!("engram_host_adapter.rs");
