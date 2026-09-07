@@ -516,15 +516,25 @@ impl AppState {
             return;
         }
 
+        let preparation_started = std::time::Instant::now();
         let session_scoped_change_paths = changes
             .iter()
             .filter(|change| change.session_id.as_deref().is_some_and(|value| !value.trim().is_empty()))
             .map(|change| change.path.trim().to_owned())
             .collect::<HashSet<_>>();
+        let mut diagnostic = FileChangeTrackingDiagnostic {
+            preparation: preparation_started.elapsed(),
+            input_changes: changes.len(),
+            ..Default::default()
+        };
         let mut inner = self.inner.lock().expect("state mutex poisoned");
+        diagnostic.waited = inner.waited;
+        let held_started = inner.acquired_at;
         let now = std::time::Instant::now();
         let mut late_summary_session_indexes = Vec::<usize>::new();
+        let scan_started = std::time::Instant::now();
         for index in 0..inner.sessions.len() {
+            diagnostic.visited_sessions += 1;
             let record = inner
             .session_mut_by_index(index)
             .expect("session index should be valid");
@@ -540,6 +550,7 @@ impl AppState {
                 record.active_turn_file_change_grace_deadline = None;
                 continue;
             }
+            diagnostic.eligible_sessions += 1;
 
             for change in changes {
                 let path = change.path.trim();
@@ -554,9 +565,19 @@ impl AppState {
                     continue;
                 }
 
-                if path.is_empty() || !path_contains(&record.session.workdir, FsPath::new(path)) {
+                if path.is_empty() {
                     continue;
                 }
+                let path_check_started = std::time::Instant::now();
+                let matches = path_contains(&record.session.workdir, FsPath::new(path));
+                let path_check_elapsed = path_check_started.elapsed();
+                diagnostic.path_checks += 1;
+                diagnostic.path_checks_subset += path_check_elapsed;
+                diagnostic.path_check_max = diagnostic.path_check_max.max(path_check_elapsed);
+                if !matches {
+                    continue;
+                }
+                diagnostic.path_matches += 1;
 
                 record
                     .active_turn_file_changes
@@ -570,19 +591,32 @@ impl AppState {
             }
         }
 
-        if late_summary_session_indexes.is_empty() {
-            return;
+        diagnostic.scan_inclusive = scan_started.elapsed();
+        let mut commit_error = None;
+        if !late_summary_session_indexes.is_empty() {
+            let summaries_started = std::time::Instant::now();
+            for index in late_summary_session_indexes {
+                let message_id = inner.next_message_id();
+                let record = inner
+                    .session_mut_by_index(index)
+                    .expect("session index should be valid");
+                if push_active_turn_file_changes_on_record(record, message_id) {
+                    diagnostic.late_summary_count += 1;
+                }
+                record.active_turn_file_change_grace_deadline = None;
+            }
+            diagnostic.late_summaries = summaries_started.elapsed();
+            diagnostic.commit_attempted = true;
+            let commit_started = std::time::Instant::now();
+            commit_error = self.commit_locked(&mut inner).err();
+            diagnostic.commit = commit_started.elapsed();
+            diagnostic.commit_failed = commit_error.is_some();
         }
-
-        for index in late_summary_session_indexes {
-            let message_id = inner.next_message_id();
-            let record = inner
-                .session_mut_by_index(index)
-                .expect("session index should be valid");
-            push_active_turn_file_changes_on_record(record, message_id);
-            record.active_turn_file_change_grace_deadline = None;
-        }
-        if let Err(err) = self.commit_locked(&mut inner) {
+        let held_work = held_started.elapsed();
+        drop(inner);
+        diagnostic.finish_held_work(held_work);
+        self.inner.report_file_change_tracking(diagnostic);
+        if let Some(err) = commit_error {
             eprintln!(
                 "state warning> failed to persist late turn file-change summary: {err:#}"
             );

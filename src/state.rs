@@ -62,8 +62,78 @@ const STATE_MUTEX_WARN_AFTER: Duration = Duration::from_millis(250);
 
 const STATE_MUTEX_DIAGNOSTIC_QUEUE_CAPACITY: usize = 64;
 
+/// Aggregate timings only: no workspace paths or transcript content. Path
+/// checks are a subset of the inclusive scan, not another additive stage.
+#[derive(Clone, Debug, Default)]
+struct FileChangeTrackingDiagnostic {
+    preparation: Duration,
+    waited: Duration,
+    held_work: Duration,
+    scan_inclusive: Duration,
+    path_checks_subset: Duration,
+    path_check_max: Duration,
+    late_summaries: Duration,
+    commit: Duration,
+    remainder: Duration,
+    input_changes: usize,
+    visited_sessions: usize,
+    eligible_sessions: usize,
+    path_checks: usize,
+    path_matches: usize,
+    late_summary_count: usize,
+    commit_attempted: bool,
+    commit_failed: bool,
+}
+
+impl FileChangeTrackingDiagnostic {
+    fn elapsed(&self) -> Duration {
+        self.preparation + self.waited + self.held_work
+    }
+
+    fn finish_held_work(&mut self, held_work: Duration) {
+        self.held_work = held_work;
+        // Do not subtract path_checks_subset again: it is already in scan.
+        self.remainder = held_work
+            .saturating_sub(self.scan_inclusive + self.late_summaries + self.commit);
+    }
+}
+
+impl std::fmt::Display for FileChangeTrackingDiagnostic {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let milliseconds = |duration: Duration| duration.as_secs_f64() * 1_000.0;
+        write!(
+            formatter,
+            concat!(
+                "preparation_ms={:.3} waited_ms={:.3} held_work_ms={:.3} ",
+                "scan_inclusive_ms={:.3} path_checks_subset_ms={:.3} path_check_max_ms={:.3} ",
+                "late_summaries_ms={:.3} commit_ms={:.3} remainder_ms={:.3} ",
+                "input_changes={} visited_sessions={} eligible_sessions={} path_checks={} ",
+                "path_matches={} late_summary_count={} commit_attempted={} commit_failed={}"
+            ),
+            milliseconds(self.preparation),
+            milliseconds(self.waited),
+            milliseconds(self.held_work),
+            milliseconds(self.scan_inclusive),
+            milliseconds(self.path_checks_subset),
+            milliseconds(self.path_check_max),
+            milliseconds(self.late_summaries),
+            milliseconds(self.commit),
+            milliseconds(self.remainder),
+            self.input_changes,
+            self.visited_sessions,
+            self.eligible_sessions,
+            self.path_checks,
+            self.path_matches,
+            self.late_summary_count,
+            self.commit_attempted,
+            self.commit_failed,
+        )
+    }
+}
+
 #[derive(Clone, Debug)]
 enum StateMutexDiagnostic {
+    FileChangeTracking(FileChangeTrackingDiagnostic),
     Waited {
         waited: Duration,
         file: &'static str,
@@ -90,6 +160,9 @@ fn state_mutex_diagnostic_sender() -> &'static mpsc::SyncSender<StateMutexDiagno
             .spawn(move || {
                 while let Ok(diagnostic) = receiver.recv() {
                     match diagnostic {
+                        StateMutexDiagnostic::FileChangeTracking(timings) => eprintln!(
+                            "state lock> file-change tracking {timings}"
+                        ),
                         StateMutexDiagnostic::Waited {
                             waited,
                             file,
@@ -158,6 +231,15 @@ struct StateMutex<T> {
 }
 
 impl<T> StateMutex<T> {
+    /// Call only after releasing the guard. The production reporter queues
+    /// without waiting and formats on its own thread, including on slow scans
+    /// which did not produce a late summary or commit.
+    fn report_file_change_tracking(&self, diagnostic: FileChangeTrackingDiagnostic) {
+        if diagnostic.elapsed() >= self.warn_after {
+            (self.diagnostic_reporter)(StateMutexDiagnostic::FileChangeTracking(diagnostic));
+        }
+    }
+
     fn new(value: T) -> Self {
         Self {
             inner: Mutex::new(value),

@@ -42,6 +42,245 @@
 
 use super::*;
 
+#[test]
+fn file_change_diagnostic_threshold_includes_preparation_wait_and_held_work() {
+    let (sender, receiver) = mpsc::channel();
+    let mutex = StateMutex::new_with_diagnostic_reporter(
+        (),
+        STATE_MUTEX_WARN_AFTER,
+        Arc::new(move |diagnostic| sender.send(diagnostic).unwrap()),
+    );
+    for milliseconds in [249, 250, 251] {
+        for stage in 0..3 {
+            let mut diagnostic = FileChangeTrackingDiagnostic::default();
+            let elapsed = Duration::from_millis(milliseconds);
+            match stage {
+                0 => diagnostic.preparation = elapsed,
+                1 => diagnostic.waited = elapsed,
+                _ => diagnostic.finish_held_work(elapsed),
+            }
+            mutex.report_file_change_tracking(diagnostic);
+            assert_eq!(receiver.try_recv().is_ok(), milliseconds >= 250);
+        }
+    }
+    mutex.report_file_change_tracking(FileChangeTrackingDiagnostic {
+        preparation: Duration::from_millis(100),
+        waited: Duration::from_millis(100),
+        held_work: Duration::from_millis(50),
+        ..Default::default()
+    });
+    assert!(matches!(
+        receiver.try_recv().unwrap(),
+        StateMutexDiagnostic::FileChangeTracking(_)
+    ));
+}
+
+#[test]
+fn file_change_diagnostic_remainder_does_not_double_count_path_checks() {
+    let mut diagnostic = FileChangeTrackingDiagnostic {
+        scan_inclusive: Duration::from_millis(100),
+        path_checks_subset: Duration::from_millis(10),
+        late_summaries: Duration::from_millis(20),
+        commit: Duration::from_millis(30),
+        ..Default::default()
+    };
+    diagnostic.finish_held_work(Duration::from_millis(1_000));
+    assert_eq!(diagnostic.remainder, Duration::from_millis(850));
+    // The data must expose time outside the suspect even when path work is tiny.
+    assert_eq!(diagnostic.path_checks_subset, Duration::from_millis(10));
+    diagnostic.finish_held_work(Duration::from_millis(1));
+    assert_eq!(diagnostic.remainder, Duration::ZERO);
+}
+
+#[test]
+fn file_change_diagnostic_log_labels_all_timings_and_counters() {
+    let mut diagnostic = FileChangeTrackingDiagnostic {
+        preparation: Duration::from_millis(1),
+        waited: Duration::from_millis(2),
+        scan_inclusive: Duration::from_millis(100),
+        path_checks_subset: Duration::from_millis(10),
+        path_check_max: Duration::from_millis(6),
+        late_summaries: Duration::from_millis(20),
+        commit: Duration::from_millis(30),
+        input_changes: 4,
+        visited_sessions: 5,
+        eligible_sessions: 2,
+        path_checks: 3,
+        path_matches: 1,
+        late_summary_count: 1,
+        commit_attempted: true,
+        commit_failed: false,
+        ..Default::default()
+    };
+    diagnostic.finish_held_work(Duration::from_millis(1_000));
+    assert_eq!(
+        diagnostic.to_string(),
+        concat!(
+            "preparation_ms=1.000 waited_ms=2.000 held_work_ms=1000.000 ",
+            "scan_inclusive_ms=100.000 path_checks_subset_ms=10.000 path_check_max_ms=6.000 ",
+            "late_summaries_ms=20.000 commit_ms=30.000 remainder_ms=850.000 ",
+            "input_changes=4 visited_sessions=5 eligible_sessions=2 path_checks=3 ",
+            "path_matches=1 late_summary_count=1 commit_attempted=true commit_failed=false"
+        )
+    );
+}
+
+#[test]
+fn file_change_diagnostic_queue_drops_full_and_disconnected_reports() {
+    let (sender, receiver) = mpsc::sync_channel(STATE_MUTEX_DIAGNOSTIC_QUEUE_CAPACITY);
+    let diagnostic =
+        || StateMutexDiagnostic::FileChangeTracking(FileChangeTrackingDiagnostic::default());
+    for _ in 0..STATE_MUTEX_DIAGNOSTIC_QUEUE_CAPACITY {
+        assert!(try_queue_state_mutex_diagnostic(&sender, diagnostic()));
+    }
+    assert!(!try_queue_state_mutex_diagnostic(&sender, diagnostic()));
+    drop(receiver);
+    assert!(!try_queue_state_mutex_diagnostic(&sender, diagnostic()));
+}
+
+#[test]
+fn file_change_diagnostics_report_active_scan_after_unlock_without_commit() {
+    assert_file_change_diagnostics_after_unlock(false, false);
+}
+
+#[test]
+fn file_change_diagnostics_report_grace_summary_and_commit_after_unlock() {
+    assert_file_change_diagnostics_after_unlock(true, false);
+}
+
+#[test]
+fn file_change_diagnostics_report_failed_commit_after_unlock() {
+    assert_file_change_diagnostics_after_unlock(true, true);
+}
+
+fn assert_file_change_diagnostics_after_unlock(grace: bool, fail_commit: bool) {
+    let mut state = test_app_state();
+    let state_slot = Arc::new(Mutex::new(None::<std::sync::Weak<StateMutex<StateInner>>>));
+    let reporter_slot = Arc::clone(&state_slot);
+    let (sender, receiver) = mpsc::channel();
+    state.inner = Arc::new(StateMutex::new_with_diagnostic_reporter(
+        StateInner::new(),
+        Duration::ZERO,
+        Arc::new(move |diagnostic| {
+            if let StateMutexDiagnostic::FileChangeTracking(diagnostic) = diagnostic {
+                let mutex = reporter_slot
+                    .lock()
+                    .unwrap()
+                    .as_ref()
+                    .unwrap()
+                    .upgrade()
+                    .unwrap();
+                assert!(mutex.is_not_held_by_current_thread_for_test());
+                sender.send(diagnostic).unwrap();
+            }
+        }),
+    ));
+    *state_slot.lock().unwrap() = Some(Arc::downgrade(&state.inner));
+    // Own every artifact through the AppState fixture's RAII root, including
+    // the deliberately invalid persistence destination in the failure case.
+    let fixture_root = state.test_temp_root.as_ref().unwrap().path().to_path_buf();
+    let root = fixture_root.join("workspace");
+    fs::create_dir(&root).unwrap();
+    let (persist_sender, persist_receiver) = mpsc::channel();
+    state.persist_tx = persist_sender;
+    let _persist_receiver = if fail_commit {
+        drop(persist_receiver);
+        let blocker = fixture_root.join("not-a-directory");
+        fs::write(&blocker, "block directory creation").unwrap();
+        state.persistence_path = Arc::new(blocker.join("state.sqlite"));
+        None
+    } else {
+        Some(persist_receiver)
+    };
+    let session_id = {
+        let mut inner = state.inner.lock().unwrap();
+        let mut first_id = String::new();
+        for index in 0..4 {
+            let created = inner.create_session(
+                Agent::Codex,
+                None,
+                root.to_string_lossy().into_owned(),
+                None,
+                None,
+            );
+            if index == 0 {
+                first_id = created.session.id.clone();
+            }
+            let record = inner.session_mut(&created.session.id).unwrap();
+            if index == 0 && grace {
+                record.active_turn_file_change_grace_deadline =
+                    Some(std::time::Instant::now() + Duration::from_secs(3_600));
+            } else if index != 2 {
+                record.active_turn_start_message_count = Some(record.session.messages.len());
+            }
+            record.hidden = index == 3;
+        }
+        first_id
+    };
+    state.record_active_turn_file_changes(&[]);
+    assert!(receiver.try_recv().is_err(), "empty input remains a no-op");
+    let path = root.join("changed.rs").to_string_lossy().into_owned();
+    let event = |path: String, session_id| WorkspaceFileChangeEvent {
+        path,
+        session_id,
+        kind: WorkspaceFileChangeKind::Modified,
+        root_path: None,
+        mtime_ms: None,
+        size_bytes: None,
+    };
+    state.record_active_turn_file_changes(&[
+        event(path.clone(), Some(session_id.clone())),
+        event(path.clone(), None),
+        event(
+            fixture_root
+                .join("outside.rs")
+                .to_string_lossy()
+                .into_owned(),
+            None,
+        ),
+        event("  ".to_owned(), None),
+    ]);
+    let diagnostic = receiver
+        .try_recv()
+        .expect("one report even without a commit");
+    assert!(receiver.try_recv().is_err());
+    assert_eq!(diagnostic.input_changes, 4);
+    assert_eq!(diagnostic.visited_sessions, 4);
+    assert_eq!(diagnostic.eligible_sessions, 2);
+    assert_eq!(diagnostic.path_checks, 3);
+    assert_eq!(diagnostic.path_matches, 1);
+    assert_eq!(diagnostic.late_summary_count, usize::from(grace));
+    assert_eq!(diagnostic.commit_attempted, grace);
+    assert_eq!(diagnostic.commit_failed, fail_commit);
+    assert!(diagnostic.path_check_max <= diagnostic.path_checks_subset);
+    assert!(diagnostic.path_checks_subset <= diagnostic.scan_inclusive);
+    assert_eq!(
+        diagnostic.held_work,
+        diagnostic.scan_inclusive
+            + diagnostic.late_summaries
+            + diagnostic.commit
+            + diagnostic.remainder,
+    );
+    if !grace {
+        assert_eq!(diagnostic.late_summaries, Duration::ZERO);
+        assert_eq!(diagnostic.commit, Duration::ZERO);
+    }
+    let inner = state.inner.lock().unwrap();
+    let index = inner.find_session_index(&session_id).unwrap();
+    let record = &inner.sessions[index];
+    if grace {
+        assert!(record.active_turn_file_changes.is_empty());
+        assert!(record.active_turn_file_change_grace_deadline.is_none());
+        assert!(
+            matches!(record.session.messages.last(), Some(Message::FileChanges { files, .. }) if files.len() == 1 && files[0].path == path)
+        );
+    } else {
+        assert_eq!(record.active_turn_file_changes.len(), 1);
+        assert!(record.active_turn_file_changes.contains_key(&path));
+    }
+    assert!(inner.sessions[1].active_turn_file_changes.is_empty());
+}
+
 // pins: watcher events are aggregated into `active_turn_file_changes` for the
 // currently active turn, but only for paths inside the session's workdir.
 // a path outside the workdir must be dropped. once
