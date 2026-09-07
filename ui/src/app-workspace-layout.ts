@@ -65,7 +65,7 @@ import {
   persistWorkspaceLayout,
   type StoredWorkspaceLayout,
   type ControlPanelSide,
-  WORKSPACE_VIEW_QUERY_PARAM,
+  getWorkspaceViewHref,
 } from "./workspace-storage";
 import { getStoredThemePreferences } from "./themes";
 import type {
@@ -475,9 +475,10 @@ export function useAppWorkspaceLayout(
     }
 
     flushPendingWorkspaceLayoutSave({ keepalive: true });
-    const url = new URL(window.location.href);
-    url.searchParams.set(WORKSPACE_VIEW_QUERY_PARAM, nextWorkspaceViewId);
-    window.location.assign(url.toString());
+    const href = getWorkspaceViewHref(nextWorkspaceViewId);
+    if (href !== undefined) {
+      window.location.assign(href);
+    }
   }
 
   function handleWorkspaceSwitcherToggle() {
@@ -503,9 +504,10 @@ export function useAppWorkspaceLayout(
 
     const nextWorkspaceViewId = createWorkspaceViewId();
     flushPendingWorkspaceLayoutSave({ keepalive: true });
-    const url = new URL(window.location.href);
-    url.searchParams.set(WORKSPACE_VIEW_QUERY_PARAM, nextWorkspaceViewId);
-    window.open(url.toString(), "_blank", "noopener");
+    const href = getWorkspaceViewHref(nextWorkspaceViewId);
+    if (href !== undefined) {
+      window.open(href, "_blank", "noopener");
+    }
     setIsWorkspaceSwitcherOpen(false);
   }
 

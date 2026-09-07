@@ -7,6 +7,7 @@ import {
   deleteStoredWorkspaceLayout,
   ensureWorkspaceViewId,
   getStoredWorkspaceLayout,
+  getWorkspaceViewHref,
   parseStoredWorkspaceLayout,
   persistWorkspaceLayout,
   type StoredWorkspaceLayout,
@@ -231,6 +232,42 @@ describe("workspace storage", () => {
     expect(parsed?.workspace.lastContentPaneId).toBeNull();
     expect(parsed?.workspace.lastViewerPaneId).toBeNull();
     expect(parsed?.workspace.panes).toHaveLength(1);
+  });
+
+  it("builds a workspace href preserving URL context without navigating", () => {
+    window.history.replaceState(null, "", "/nested/termal/?workspace=old&mode=review#details");
+    const source = window.location.href;
+    const destination = new URL(getWorkspaceViewHref("workspace-saved")!);
+
+    expect(destination.origin).toBe(window.location.origin);
+    expect(destination.pathname).toBe("/nested/termal/");
+    expect([...destination.searchParams.entries()]).toEqual([
+      [WORKSPACE_VIEW_QUERY_PARAM, "workspace-saved"], ["mode", "review"],
+    ]);
+    expect(destination.hash).toBe("#details");
+    expect(window.location.href).toBe(source);
+  });
+
+  it("adds an absent workspace parameter and encodes the ID as data", () => {
+    window.history.replaceState(null, "", "/nested/?mode=review#details");
+    const id = "javascript:alert(1)&mode=other# /?";
+    const destination = new URL(getWorkspaceViewHref(id)!);
+
+    expect(destination.origin).toBe(window.location.origin);
+    expect(destination.pathname).toBe("/nested/");
+    expect([...destination.searchParams.entries()]).toEqual([
+      ["mode", "review"], [WORKSPACE_VIEW_QUERY_PARAM, id],
+    ]);
+    expect(destination.hash).toBe("#details");
+  });
+
+  it("does not construct a browser href without window", () => {
+    vi.stubGlobal("window", undefined);
+    try {
+      expect(getWorkspaceViewHref("workspace-saved")).toBeUndefined();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("ignores layouts missing either required pane-routing field", () => {

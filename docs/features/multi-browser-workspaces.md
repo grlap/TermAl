@@ -62,6 +62,16 @@ This supports:
 - one browser on the right monitor with `?workspace=review`
 - an intentionally shared layout by opening the same URL in another browser
 
+In the Workspace switcher, choose **Open in new tab** beside another saved
+workspace to open its existing layout while keeping this tab in place. This
+is a native link: middle-click, Ctrl/Cmd-click, and the browser's link context
+menu work too. Clicking the main row still switches this tab. No workspace
+is copied or created by the new-tab action.
+
+The current row has no new-tab action: two tabs saving the same workspace ID
+would overwrite the same saved layout. This does not detect whether another
+saved workspace is already open elsewhere; same-ID writes remain last-write-wins.
+
 ### Workspace labels
 
 Open **Workspace → Add current label** (or **Edit current label**) to name

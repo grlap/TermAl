@@ -1536,6 +1536,21 @@ textarea {
   background: var(--surface-white);
 }
 
+.workspace-switcher-item-actions {
+  display: grid;
+  gap: 0.4rem;
+  width: 4.7rem;
+}
+
+.workspace-switcher-item-open {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  text-decoration: none;
+}
+
+.workspace-switcher-item-open,
 .workspace-switcher-item-delete {
   align-self: stretch;
   min-width: 4.7rem;

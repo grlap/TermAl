@@ -37,6 +37,16 @@ import {
 export const WORKSPACE_LAYOUT_STORAGE_KEY = "termal-workspace-layout";
 export const WORKSPACE_VIEW_QUERY_PARAM = "workspace";
 
+export function getWorkspaceViewHref(workspaceViewId: string): string | undefined {
+  if (typeof window === "undefined") {
+    return undefined;
+  }
+
+  const url = new URL(window.location.href);
+  url.searchParams.set(WORKSPACE_VIEW_QUERY_PARAM, workspaceViewId);
+  return url.toString();
+}
+
 export type ControlPanelSide = "left" | "right";
 
 export type StoredWorkspaceLayout = {

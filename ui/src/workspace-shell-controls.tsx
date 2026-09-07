@@ -3,6 +3,7 @@ import { useId, useMemo, useState, type RefObject } from "react";
 import type { WorkspaceLayoutSummary } from "./api";
 import { primaryModifierLabel } from "./app-utils";
 import type { ThemeKind } from "./themes";
+import { getWorkspaceViewHref } from "./workspace-storage";
 
 export function ThemeModeToggle({
   effectiveThemeKind,
@@ -238,19 +239,31 @@ export function WorkspaceSwitcher({
                       </span>
                     </span>
                   </button>
+                  {/* No new-tab link for the current workspace: two tabs autosaving its ID would overwrite one saved layout. */}
                   {isCurrent ? null : (
-                    <button
-                      className="ghost-button workspace-switcher-item-delete"
-                      type="button"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        onDeleteWorkspace(summary.id);
-                      }}
-                      disabled={isDeleting}
-                      aria-label={`Delete workspace ${summary.id}`}
-                    >
-                      {isDeleting ? "Deleting" : "Delete"}
-                    </button>
+                    <div className="workspace-switcher-item-actions">
+                      <a
+                        className="ghost-button workspace-switcher-item-open"
+                        href={getWorkspaceViewHref(summary.id)}
+                        target="_blank"
+                        rel="noopener"
+                        aria-label={`Open in new tab: workspace ${summary.label || summary.id}`}
+                      >
+                        Open in new tab
+                      </a>
+                      <button
+                        className="ghost-button workspace-switcher-item-delete"
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onDeleteWorkspace(summary.id);
+                        }}
+                        disabled={isDeleting}
+                        aria-label={`Delete workspace ${summary.id}`}
+                      >
+                        {isDeleting ? "Deleting" : "Delete"}
+                      </button>
+                    </div>
                   )}
                 </div>
               );
