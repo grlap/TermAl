@@ -489,6 +489,23 @@ problem; after restart, the browser must treat SQLite as authoritative.
 
 #### EventSource recovery on the client
 
+With SharedWorker support, `ui/src/live-event-source.ts` subscribes each tab to
+one worker-owned `/api/events` connection per origin. `sseEpoch` recreates a
+tab's subscription; it does not replace an OPEN shared upstream. The hub may
+replace a CLOSED source or a CONNECTING attempt that has remained stalled for
+10 seconds. Concurrent recovery requests reuse the replacement. New subscribers
+receive the current connection status, and an OPEN stream requests a fresh HTTP
+snapshot through the existing revision/hydration guards. No stale snapshot is
+cached in the worker. Unsupported workers, constructor denial, asynchronous
+worker/channel errors, or an unacknowledged startup fall back to native SSE on
+the same facade. That fallback retains the per-tab HTTP connection limit.
+
+Worker ports acknowledge a heartbeat every 15 seconds and expire after 90
+seconds without an acknowledgment. The last departing port closes the upstream.
+A cached page releases its port on persisted `pagehide` and resubscribes on
+`pageshow`; a frozen tab whose lease may have expired rejoins on resume. See
+[Shared live events](features/shared-live-events.md) for the lifecycle contract.
+
 Per the WHATWG spec an `EventSource` whose response ends with a non-200 status transitions to `readyState === CLOSED` permanently and stops auto-reconnecting. In dev that happens routinely: Vite's proxy (`ui/vite.config.ts:configureBackendUnavailableProxy`) returns `502 Bad Gateway` during the brief gap between the old backend exiting and the new one binding the port, and that 502 reaches the browser as a non-200 SSE response. Production rarely hits this (no proxy in the way) but some browsers also close on certain clean stream ends. The transport `useEffect` in `ui/src/app-live-state.ts::useAppLiveState` defends against it: when `onerror` fires with `eventSource.readyState === 2`, a recovery timer (exponential backoff, 500 ms → 5 s cap) bumps an `sseEpoch` state, the effect re-runs, the dead `EventSource` is closed, and a fresh one is constructed. `onopen` resets the recovery counter and clears any pending timer. The numeric literal `2` is used instead of `EventSource.CLOSED` because tests stub the global `EventSource` with a mock whose `CLOSED` is `undefined`; the production code is robust by checking `typeof readyState === "number"` first.
 
 #### Live-state reconnect and watchdog recovery
@@ -1177,7 +1194,8 @@ No external state library. State lives in `App.tsx` via `useState` and `useRef`:
 
 ### Real-time Updates
 
-On mount, the frontend opens an `EventSource` to `/api/events`:
+On mount, the frontend subscribes through `createLiveEventSource` to the shared
+`/api/events` stream (or native SSE when SharedWorker is unavailable):
 
 1. **`state` events** — metadata-first state snapshot. Accepted only if `revision > latestRevision` (via `shouldAdoptStateRevision`), OR if the carried `serverInstanceId` differs from the last-seen id (via `isServerInstanceMismatch`) — the restart branch accepts a revision downgrade because the monotonic check is meaningless across a counter rewind.
 2. **`delta` events** — incremental updates. Accepted only if `revision === latestRevision + 1` (via `decideDeltaRevisionAction`). Session-scoped deltas use the session reducer; `orchestratorsUpdated` is handled separately because it carries orchestrator state without a `sessionId`, and remote forwarding must translate the embedded server-scoped IDs before re-publishing it locally. If a gap is detected, triggers a full state resync.

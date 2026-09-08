@@ -11,7 +11,8 @@ and the per-transaction write helpers used by the background persist thread
 (`persist_state_parts_via_connection`, `persist_delta_via_cache`,
 `persist_created_session`, `persist_state_from_persisted`, `persist_state`).
 Overview-specific schema upgrades and backfill live in
-`persist_sqlite_overview.rs`.
+`persist_sqlite_overview.rs`. Physical transcript layout, rowid conversion and
+differential message writes live in `persist_sqlite_messages.rs`.
 
 Extracted from `api.rs` so HTTP handler code and SQLite persistence live
 in separate files. The crate still compiles as one `include!()`-assembled
@@ -1077,7 +1078,7 @@ const SQLITE_STATE_CORE_SCHEMA_SQL: &str = "
       PRIMARY KEY(session_id, position),
       UNIQUE(session_id, message_id),
       FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
-    ) WITHOUT ROWID;
+    );
 
     CREATE TABLE session_overviews (
       session_id TEXT PRIMARY KEY,
@@ -1396,6 +1397,7 @@ fn ensure_sqlite_state_schema(connection: &rusqlite::Connection) -> Result<()> {
 fn finish_existing_sqlite_state_schema_setup(connection: &rusqlite::Connection) -> Result<()> {
     configure_sqlite_state_connection(connection)?;
     ensure_sqlite_message_overview_columns(connection)?;
+    ensure_sqlite_message_rowid_storage(connection)?;
     ensure_sqlite_response_board_schema(connection)?;
     backfill_missing_sqlite_session_overviews(connection)?;
     validate_sqlite_state_table_columns(connection, CURRENT_SQLITE_STATE_TABLE_COLUMNS, false)?;
@@ -1473,10 +1475,13 @@ fn seed_current_state_metadata(connection: &rusqlite::Connection) {
 }
 
 include!("persist_sqlite_overview.rs");
+include!("persist_sqlite_messages.rs");
 #[cfg(test)]
 include!("persist_sqlite_overview_tests.rs");
 #[cfg(test)]
 include!("persist_sqlite_maintenance_tests.rs");
+#[cfg(test)]
+include!("persist_sqlite_messages_tests.rs");
 
 fn ensure_sqlite_state_schema_for_path(
     connection: &rusqlite::Connection,
@@ -2364,12 +2369,17 @@ mod sqlite_schema_tests {
         assert!(
             range_plan
                 .iter()
-                .any(|detail| detail.contains("SEARCH messages USING PRIMARY KEY")),
-            "range query must use the (session_id, position) primary key: {range_plan:?}"
+                .any(|detail| {
+                    detail.contains("SEARCH messages USING INDEX")
+                        && detail.contains("session_id=? AND position>? AND position<?")
+                }),
+            "range query must search the (session_id, position) index: {range_plan:?}"
         );
         assert!(
-            range_plan.iter().all(|detail| !detail.contains("SCAN messages")),
-            "range query must not scan messages: {range_plan:?}"
+            range_plan.iter().all(|detail| {
+                !detail.contains("SCAN messages") && !detail.contains("USE TEMP B-TREE")
+            }),
+            "range query must use indexed ordering without a scan or sort: {range_plan:?}"
         );
 
         let cursor_plan: Vec<String> = connection
@@ -3128,52 +3138,7 @@ fn write_serialized_persisted_session(
             )
         })?;
     }
-    tx.execute(
-        "DELETE FROM messages WHERE session_id = ?1 AND position >= ?2",
-        rusqlite::params![
-            session.session_id,
-            i64::try_from(session.message_start_index)
-                .context("persisted transcript position exceeds SQLite integer range")?
-        ],
-    )
-    .with_context(|| {
-        format!(
-            "failed to replace persisted transcript tail for `{}`",
-            session.session_id
-        )
-    })?;
-    let mut insert = tx
-        .prepare_cached(
-            "INSERT INTO messages(
-                 session_id,
-                 position,
-                 message_id,
-                 value_json,
-                 overview_kind,
-                 is_user
-             )
-             VALUES(?1, ?2, ?3, ?4, ?5, ?6)",
-        )
-        .context("failed to prepare persisted transcript write")?;
-    for message in &session.messages {
-        insert
-            .execute(rusqlite::params![
-                session.session_id,
-                i64::try_from(message.position)
-                    .context("persisted transcript position exceeds SQLite integer range")?,
-                message.message_id,
-                message.value_json,
-                i64::try_from(conversation_overview_kind_index(message.overview_kind))
-                    .context("overview kind exceeds SQLite integer range")?,
-                i64::from(message.is_user),
-            ])
-            .with_context(|| {
-                format!(
-                    "failed to write transcript position {} for `{}`",
-                    message.position, session.session_id
-                )
-            })?;
-    }
+    write_serialized_persisted_messages(tx, session)?;
     if !session.write_overview {
         tx.execute(
             "DELETE FROM session_overviews WHERE session_id = ?1",
@@ -3266,7 +3231,8 @@ fn write_serialized_persisted_session(
     tx.execute(
         "INSERT INTO session_overviews(session_id, value_blob)
          VALUES(?1, ?2)
-         ON CONFLICT(session_id) DO UPDATE SET value_blob = excluded.value_blob",
+         ON CONFLICT(session_id) DO UPDATE SET value_blob = excluded.value_blob
+         WHERE session_overviews.value_blob IS NOT excluded.value_blob",
         rusqlite::params![session.session_id, overview_blob],
     )
     .with_context(|| {

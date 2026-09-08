@@ -179,6 +179,154 @@ describe("Backend connection state", () => {
     HTMLElement.prototype.scrollTo = originalScrollTo;
   });
 
+  it("hydrates a tab joining a shared live stream immediately", async () => {
+    vi.useFakeTimers();
+    const state = makeBackendStateResponse({
+      revision: 5,
+      serverInstanceId: "server-a",
+      sessionName: "Shared stream session",
+      preview: "Current snapshot",
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const target = String(input);
+      if (target === "/api/state") return jsonResponse(state);
+      if (target.startsWith("/api/workspaces/")) return new Response("", { status: 404 });
+      if (target.includes("/api/sessions/")) {
+        return jsonResponse({
+          revision: state.revision,
+          serverInstanceId: state.serverInstanceId,
+          session: state.sessions[0],
+        });
+      }
+      return jsonResponse({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("EventSource", EventSourceMock);
+    vi.stubGlobal("SharedWorker", undefined);
+    vi.stubGlobal("ResizeObserver", ResizeObserverMock);
+    const view = render(<App />);
+    await act(async () => {
+      latestEventSource().dispatchOpen();
+      latestEventSource().dispatchNamedEvent("snapshotRequired", null);
+    });
+    // No fallback timer has elapsed, and no SSE state event was replayed.
+    expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/state")).toBe(true);
+    expect(screen.getAllByText("Shared stream session").length).toBeGreaterThan(0);
+    expectNoControlPanelConnectionIssue();
+    view.unmount();
+  });
+
+  it.each([
+    { label: "equal revision repair", revision: 5, instance: "server-a", expected: "Shared repaired", intervening: null },
+    { label: "lower same-instance rejection", revision: 4, instance: "server-a", expected: "Shared original", intervening: null },
+    { label: "replacement-instance rollback", revision: 1, instance: "server-b", expected: "Shared repaired", intervening: null },
+    { label: "newer same-instance snapshot", revision: 6, instance: "server-a", expected: "Shared repaired", intervening: null },
+    { label: "live progress overtaking HTTP", revision: 5, instance: "server-a", expected: "Shared live", intervening: { revision: 6, instance: "server-a" } },
+    { label: "late response from a superseded instance", revision: 9, instance: "server-a", expected: "Shared live", intervening: { revision: 1, instance: "server-b" } },
+  ])("keeps shared snapshot revision guards: $label", async ({ revision, instance, expected, intervening }) => {
+    vi.useFakeTimers();
+    const response = createDeferred<Response>();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const target = String(input);
+      if (target === "/api/state") return response.promise;
+      if (target.startsWith("/api/workspaces/")) return new Response("", { status: 404 });
+      return jsonResponse({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("EventSource", EventSourceMock);
+    vi.stubGlobal("SharedWorker", undefined);
+    vi.stubGlobal("ResizeObserver", ResizeObserverMock);
+    const view = render(<App />);
+    try {
+      const source = Object.assign(latestEventSource(), { readyState: 1 });
+      await act(async () => {
+        source.dispatchOpen();
+        source.dispatchState(makeBackendStateResponse({
+          revision: 5,
+          serverInstanceId: "server-a",
+          sessionName: "Shared original",
+          preview: "Original summary",
+        }));
+      });
+      await act(async () => source.dispatchNamedEvent("snapshotRequired", null));
+      expect(fetchMock.mock.calls.filter(([input]) => String(input) === "/api/state")).toHaveLength(1);
+      if (intervening) {
+        await act(async () => {
+          if (intervening.instance !== "server-a") {
+            source.readyState = 0;
+            source.dispatchError();
+            source.readyState = 1;
+            source.dispatchOpen();
+          }
+          source.dispatchState(makeBackendStateResponse({
+            revision: intervening.revision,
+            serverInstanceId: intervening.instance,
+            sessionName: "Shared live",
+            preview: "Live summary",
+          }));
+        });
+      }
+      await act(async () => response.resolve(jsonResponse(makeBackendStateResponse({
+        revision,
+        serverInstanceId: instance,
+        sessionName: "Shared repaired",
+        preview: "HTTP summary",
+      }))));
+
+      expect(screen.getAllByText(expected).length).toBeGreaterThan(0);
+      for (const other of ["Shared original", "Shared live", "Shared repaired"]) {
+        if (other !== expected) expect(screen.queryByText(other)).toBeNull();
+      }
+    } finally {
+      view.unmount();
+    }
+  });
+
+  it("loads the transcript separately from a shared snapshot summary", async () => {
+    const state = makeBackendStateResponse({
+      revision: 5,
+      serverInstanceId: "server-a",
+      sessionName: "Shared transcript session",
+      preview: "Summary only",
+      session: { messageCount: 1, sessionMutationStamp: 5 },
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const target = String(input);
+      if (target === "/api/state") return jsonResponse(state);
+      if (target.startsWith("/api/workspaces/")) return new Response("", { status: 404 });
+      if (target.startsWith("/api/sessions/session-1?")) return jsonResponse({
+        revision: 5,
+        serverInstanceId: "server-a",
+        session: {
+          ...state.sessions[0],
+          messagesLoaded: true,
+          messages: [{ id: "shared-message", type: "text", author: "you", text: "Hydrated shared body", timestamp: "10:00" }],
+        },
+      });
+      return jsonResponse({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("EventSource", EventSourceMock);
+    vi.stubGlobal("SharedWorker", undefined);
+    vi.stubGlobal("ResizeObserver", ResizeObserverMock);
+    const view = render(<App />);
+    try {
+      await act(async () => {
+        latestEventSource().dispatchOpen();
+        latestEventSource().dispatchNamedEvent("snapshotRequired", null);
+      });
+      expect(screen.queryByText("Hydrated shared body")).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "Sessions" }));
+      const row = screen.getByText("Shared transcript session").closest("button");
+      if (!row) throw new Error("Shared session row missing");
+      fireEvent.click(row);
+      expect(await screen.findByText("Hydrated shared body")).toBeInTheDocument();
+      expect(fetchMock.mock.calls.some(([input]) => String(input).startsWith("/api/sessions/session-1?"))).toBe(true);
+    } finally {
+      view.unmount();
+    }
+  });
+
   it("updates workspace switcher summaries from live SSE state", async () => {
     const originalFetch = globalThis.fetch;
     const originalEventSource = globalThis.EventSource;

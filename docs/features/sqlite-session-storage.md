@@ -78,7 +78,7 @@ CREATE TABLE messages (
   PRIMARY KEY(session_id, position),
   UNIQUE(session_id, message_id),
   FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
-) WITHOUT ROWID;
+);
 
 CREATE TABLE session_overviews (
   session_id TEXT PRIMARY KEY,
@@ -303,9 +303,19 @@ The normalized transcript schema and bounded HTTP reads are implemented:
 - The current v2 schema stores transcript messages in indexed `messages` rows.
   Version 1 databases are rejected with `termal.sqlite` reset guidance rather
   than migrated or read through a compatibility path.
-- `messages` is a `WITHOUT ROWID` table with
+- `messages` is an ordinary rowid table with
   `PRIMARY KEY(session_id, position)` for ordered range pages and
   `UNIQUE(session_id, message_id)` for stable cursor resolution.
+  Its small key indexes stay separate from large message bodies. Existing
+  current-schema databases using `WITHOUT ROWID` are converted once, after
+  startup authority validation, by an atomic copy/rebuild that preserves rows,
+  constraints, indexes, triggers, views, and foreign-key relationships. The
+  logical schema version remains 2; unsupported logical schemas still reject.
+- Saving a changed session upserts only new or changed message contents and
+  deletes only truncated or replaced identities. Unchanged retained messages
+  and the cold transcript prefix keep their rows, including during metadata-only
+  saves. Reordering releases replaced identities before inserting their new
+  positions, within the same transaction.
 - Creating or forking a session persists only global counters plus the created
   session row.
 - Create/fork responses return the created session directly and publish a small

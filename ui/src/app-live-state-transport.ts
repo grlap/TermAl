@@ -22,6 +22,7 @@ import {
   type StateResponse,
 } from "./api";
 import { isBackendUnavailableError } from "./api-request";
+import { createLiveEventSource } from "./live-event-source";
 import {
   LIVE_SESSION_RESUME_WATCHDOG_DRIFT_MS,
   LIVE_SESSION_WATCHDOG_RESYNC_RETRY_COOLDOWN_MS,
@@ -226,7 +227,7 @@ export function useAppLiveStateTransport(
       number
     >();
     let lastWatchdogResyncAttemptAt: number | null = null;
-    const eventSource = new EventSource("/api/events");
+    const eventSource = createLiveEventSource(sseEpoch > 0);
 
     function clearInitialStateResyncRetryTimeout() {
       if (initialStateResyncRetryTimeoutId === null) {
@@ -1183,6 +1184,21 @@ export function useAppLiveStateTransport(
       triggerRecoveryForDelta,
     });
 
+    function handleSharedSnapshotRequired() {
+      // A tab joining an already-open shared stream missed its initial state.
+      // Fetch an authoritative snapshot using the existing revision and
+      // hydration recovery rules instead of replaying an outdated summary.
+      // The hub emits this only for an OPEN upstream: the socket establishes
+      // live connectivity, while this HTTP fetch fills the missing snapshot.
+      requestStateResync({
+        allowAuthoritativeRollback: true,
+        allowUnknownServerInstance: true,
+        confirmReconnectRecoveryOnAdoption: true,
+        rearmOnFailure: true,
+      });
+    }
+
+    eventSource.addEventListener("snapshotRequired", handleSharedSnapshotRequired);
     eventSource.addEventListener("state", handleStateEvent as EventListener);
     eventSource.addEventListener("delta", handleDeltaEvent as EventListener);
     eventSource.addEventListener("lagged", handleLaggedEvent as EventListener);
@@ -1369,6 +1385,7 @@ export function useAppLiveStateTransport(
       window.removeEventListener("pagehide", handlePageHide);
       window.removeEventListener("pageshow", handlePageShow);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
+      eventSource.removeEventListener("snapshotRequired", handleSharedSnapshotRequired);
       eventSource.removeEventListener(
         "state",
         handleStateEvent as EventListener,

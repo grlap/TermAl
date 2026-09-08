@@ -129,6 +129,7 @@ export function getStoredWorkspaceLayout(
 export function persistWorkspaceLayout(
   workspaceViewId: string,
   layout: StoredWorkspaceLayout,
+  pendingSaveId?: string,
 ) {
   if (typeof window === "undefined") {
     return;
@@ -136,6 +137,7 @@ export function persistWorkspaceLayout(
 
   const persistedLayout = {
     ...currentLayoutFields(layout),
+    ...(pendingSaveId ? { pendingSaveId } : {}),
     workspace: stripDiffPreviewDocumentContentFromWorkspaceState(
       stripLoadingGitDiffPreviewTabsFromWorkspaceState(layout.workspace),
     ),
@@ -268,6 +270,29 @@ function normalizeStoredDiagramLook(value: unknown): unknown {
   // Drop it generically so the current preference/default can supply the look.
   const { diagramLook: _ignored, ...layout } = value;
   return layout;
+}
+
+// The pending identity and layout occupy ONE localStorage entry: a reload
+// must never observe the new layout without its unsaved authority marker.
+export function hasPendingWorkspaceLayout(workspaceViewId: string): boolean {
+  if (typeof window === "undefined") return false;
+  const raw = window.localStorage.getItem(getWorkspaceLayoutStorageKey(workspaceViewId));
+  if (!parseStoredWorkspaceLayout(raw)) return false;
+  const stored = JSON.parse(raw!);
+  return typeof stored.pendingSaveId === "string" && stored.pendingSaveId.length > 0;
+}
+
+export function acknowledgeWorkspaceLayoutSave(workspaceViewId: string, saveId: string) {
+  if (typeof window === "undefined") return;
+  const key = getWorkspaceLayoutStorageKey(workspaceViewId);
+  const raw = window.localStorage.getItem(key);
+  if (!raw) return;
+  const stored = JSON.parse(raw);
+  if (stored.pendingSaveId !== saveId) return;
+  // A late completion must not clear a newer edit (including another tab's
+  // latest stored edit). Explicit workspace deletion removes the whole entry.
+  delete stored.pendingSaveId;
+  window.localStorage.setItem(key, JSON.stringify(stored));
 }
 
 function isStoredWorkspaceLayout(

@@ -95,6 +95,7 @@ export type WorkspaceLayoutPersistencePayload = {
 export type PendingWorkspaceLayoutSave = {
   layout: WorkspaceLayoutPersistencePayload;
   workspaceId: string;
+  localSaveId: string;
 };
 export type OrchestratorRuntimeAction = RuntimeAction;
 export type PendingSessionRename = {

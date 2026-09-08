@@ -67,7 +67,16 @@ export async function request<T>(
   const response = await performRequest(path, init);
 
   const contentType = response.headers.get("content-type") ?? "";
-  const raw = await response.text();
+  let raw: string;
+  try {
+    raw = await response.text();
+  } catch (cause) {
+    // Headers can arrive before the transport fails. Keep their status so a
+    // permanent HTTP rejection stays permanent; JSON parsing below is separate.
+    throw new ApiRequestError("backend-unavailable", "The API response was interrupted.", {
+      status: response.status, cause,
+    });
+  }
   if (looksLikeHtmlResponse(raw, contentType)) {
     throw createBackendUnavailableError(
       formatUnavailableApiMessage(path, response.status),

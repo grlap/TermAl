@@ -30,6 +30,7 @@ design decisions, and future plans.
 - [Agent Integration Comparison](./agent-integration-comparison.md)
 - [Orchestration](./orchestration.md)
 - [Multi-Browser Workspaces](./multi-browser-workspaces.md)
+- [Shared Live Events](./shared-live-events.md)
 - [Workspace Terminal](./workspace-terminal.md)
 - [Session Virtualized Transcript](./session-virtualized-transcript.md)
 

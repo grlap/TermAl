@@ -43,6 +43,170 @@
 use super::*;
 
 #[test]
+fn watcher_noise_does_not_defer_idle_session_snapshots() {
+    let state = test_app_state();
+    let root = state.test_temp_root.as_ref().unwrap().path().to_path_buf();
+    let (plan, watermark) = {
+        let mut inner = state.inner.lock().unwrap();
+        for _ in 0..1378 {
+            inner.create_session(
+                Agent::Codex,
+                None,
+                root.to_string_lossy().into_owned(),
+                None,
+                None,
+            );
+        }
+        inner.sessions[0].active_turn_file_change_grace_deadline =
+            Some(std::time::Instant::now() - Duration::from_secs(1));
+        let plan = inner.collect_persist_delta_plan(0);
+        let watermark = plan.watermark;
+        (plan, watermark)
+    };
+
+    state.record_active_turn_file_changes(&[WorkspaceFileChangeEvent {
+        path: root.join("changed.rs").to_string_lossy().into_owned(),
+        kind: WorkspaceFileChangeKind::Modified,
+        root_path: None,
+        session_id: None,
+        mtime_ms: None,
+        size_bytes: None,
+    }]);
+
+    let mut inner = state.inner.lock().unwrap();
+    let delta = inner.materialize_persist_delta(plan);
+    assert_eq!(
+        delta.changed_sessions.len(),
+        1378,
+        "every selected idle session must still materialize after a file event"
+    );
+    assert!(delta.deferred_session_ids.is_empty());
+    assert_eq!(inner.last_mutation_stamp, watermark);
+    assert!(
+        inner.sessions[0]
+            .active_turn_file_change_grace_deadline
+            .is_none()
+    );
+    assert!(
+        inner
+            .collect_persist_delta(watermark)
+            .changed_sessions
+            .is_empty()
+    );
+}
+
+#[test]
+fn watcher_active_file_tracking_preserves_persisted_session_snapshots() {
+    let state = test_app_state();
+    let root = state.test_temp_root.as_ref().unwrap().path().to_path_buf();
+    let (owner, before, watermark) = {
+        let mut inner = state.inner.lock().unwrap();
+        for _ in 0..2 {
+            inner.create_session(
+                Agent::Codex,
+                None,
+                root.to_string_lossy().into_owned(),
+                None,
+                None,
+            );
+        }
+        for record in &mut inner.sessions {
+            record.active_turn_start_message_count = Some(record.session.messages.len());
+        }
+        (
+            inner.sessions[0].session.id.clone(),
+            inner
+                .sessions
+                .iter()
+                .map(|record| {
+                    serde_json::to_value(PersistedSessionRecord::from_record(record)).unwrap()
+                })
+                .collect::<Vec<_>>(),
+            inner.last_mutation_stamp,
+        )
+    };
+    let path = root.join("changed.rs").to_string_lossy().into_owned();
+    let event = WorkspaceFileChangeEvent {
+        path: path.clone(),
+        kind: WorkspaceFileChangeKind::Created,
+        root_path: None,
+        session_id: Some(owner),
+        mtime_ms: None,
+        size_bytes: None,
+    };
+    state.record_active_turn_file_changes(&[event.clone()]);
+    state.record_active_turn_file_changes(&[event]);
+
+    let mut inner = state.inner.lock().unwrap();
+    assert_eq!(
+        inner.sessions[0].active_turn_file_changes.get(&path),
+        Some(&WorkspaceFileChangeKind::Created)
+    );
+    assert!(inner.sessions[1].active_turn_file_changes.is_empty());
+    let after = inner
+        .sessions
+        .iter()
+        .map(|record| serde_json::to_value(PersistedSessionRecord::from_record(record)).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        after, before,
+        "collecting runtime file hints leaves persisted content intact"
+    );
+    assert!(
+        inner
+            .collect_persist_delta(watermark)
+            .changed_sessions
+            .is_empty(),
+        "runtime-only tracking must not enqueue transcript rewrites"
+    );
+}
+
+#[test]
+fn watcher_late_summary_persists_only_the_owning_session() {
+    let mut state = test_app_state();
+    let root = state.test_temp_root.as_ref().unwrap().path().to_path_buf();
+    let (sender, _receiver) = mpsc::channel();
+    state.persist_tx = sender;
+    let (owner, watermark) = {
+        let mut inner = state.inner.lock().unwrap();
+        for _ in 0..3 {
+            inner.create_session(
+                Agent::Codex,
+                None,
+                root.to_string_lossy().into_owned(),
+                None,
+                None,
+            );
+        }
+        inner.sessions[0].active_turn_file_change_grace_deadline =
+            Some(std::time::Instant::now() + Duration::from_secs(3600));
+        (
+            inner.sessions[0].session.id.clone(),
+            inner.last_mutation_stamp,
+        )
+    };
+    let path = root.join("changed.rs").to_string_lossy().into_owned();
+    state.record_active_turn_file_changes(&[WorkspaceFileChangeEvent {
+        path: path.clone(),
+        kind: WorkspaceFileChangeKind::Created,
+        root_path: None,
+        session_id: Some(owner.clone()),
+        mtime_ms: None,
+        size_bytes: None,
+    }]);
+
+    let delta = state.inner.lock().unwrap().collect_persist_delta(watermark);
+    assert_eq!(
+        delta.changed_sessions.len(),
+        1,
+        "the actual transcript summary must persist without rewriting idle sessions"
+    );
+    assert_eq!(delta.changed_sessions[0].session.id, owner);
+    assert!(matches!(delta.changed_sessions[0].session.messages.last(),
+        Some(Message::FileChanges { files, .. }) if files.len() == 1 && files[0].path == path));
+}
+
+#[test]
 fn file_change_diagnostic_threshold_includes_preparation_wait_and_held_work() {
     let (sender, receiver) = mpsc::channel();
     let mutex = StateMutex::new_with_diagnostic_reporter(

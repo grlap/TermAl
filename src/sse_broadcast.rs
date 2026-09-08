@@ -535,9 +535,11 @@ impl AppState {
         let scan_started = std::time::Instant::now();
         for index in 0..inner.sessions.len() {
             diagnostic.visited_sessions += 1;
-            let record = inner
-            .session_mut_by_index(index)
-            .expect("session index should be valid");
+            // File hints and their grace deadline are runtime-only fields,
+            // absent from PersistedSessionRecord. Scanning or accumulating them
+            // must not invalidate an in-flight persistence snapshot. The late
+            // transcript summary below obtains stamped access when it is added.
+            let record = &mut inner.sessions[index];
             if !record.is_local_session() || record.hidden {
                 continue;
             }

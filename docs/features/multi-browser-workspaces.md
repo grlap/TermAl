@@ -4,6 +4,13 @@
 
 Implemented.
 
+Browser tabs share live updates through the [shared live event transport](./shared-live-events.md).
+Layout autosave retries transient network/HTTP failures with backoff. Permanent
+HTTP rejection stops automatic retries and displays an error; the layout remains
+in browser storage with a pending-save identity. A subsequent layout edit tries
+again. On reload, an unsaved local layout takes precedence over the server copy
+and is submitted again; only a matching successful save clears its pending mark.
+
 ## Problem
 
 Browser-local layout storage is not enough for a control room that may run in
@@ -50,6 +57,19 @@ When the user opens TermAl without a `workspace` query parameter:
 
 That means a fresh browser window naturally gets its own layout instead of
 fighting over a shared browser-global key.
+
+A JSON `404` for the workspace layout keeps the local fallback and enables its
+first server save. Autosave watches the serialized layout content: session
+updates that rebuild an equivalent pane tree neither reset the save delay nor
+send another layout write. Actual layout and preference edits still autosave.
+Transient failures retain the latest local layout and retry with backoff, starting
+at one second and capped at 30 seconds. A newer edit replaces the pending retry.
+Permanent rejections and malformed JSON stop automatic retries and show an error.
+An interrupted response body is a transport failure, not malformed JSON; a known
+permanent HTTP status still stops retries. The layout and pending identity are
+stored atomically before sending, so an interrupted or rejected save survives
+reload without an older server layout replacing it. This is local recovery, not
+a multi-writer merge protocol; intentional same-workspace writers remain last-write-wins.
 
 ### Reopen existing workspace
 
