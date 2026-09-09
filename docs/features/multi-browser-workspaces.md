@@ -71,6 +71,32 @@ stored atomically before sending, so an interrupted or rejected save survives
 reload without an older server layout replacing it. This is local recovery, not
 a multi-writer merge protocol; intentional same-workspace writers remain last-write-wins.
 
+If reading the pending recovery state during hydration fails, workspace-tree
+adoption and autosave pause with a dedicated, persistent storage notice. Server
+tree adoption publishes its appearance preferences only after the browser write
+succeeds, including initial and deferred hydration. An unreadable marker is unknown, not proof that no
+unsaved work exists: the failed hydration must not overwrite its storage entry.
+After restoring storage access, choose **Retry workspace save** without reloading.
+Retry checks storage again and preserves edits made while paused as a local
+pending save before re-fetching. The same check runs before immediate or deferred
+adoption, so edits made while the retry is waiting are protected too. Retry does
+not classify locally retained delegated-child tabs or canvas cards as restored tabs.
+References actually adopted from the server during retry do enter the restore
+scope, including when parent-delegation metadata arrives later. Server preferences
+are deferred with the tree, and a storage write must succeed before either is
+published. A pending local layout still wins as a whole; this does not introduce
+a preference merge into pending local work. The notice remains during recovery
+and is not cleared by unrelated actions. Another read/write failure or a failed
+retry GET keeps saving paused and enables another Retry; restored browser storage
+alone never authorizes saving the older bootstrap tree. Once a workspace has
+hydrated, a storage pause or retry does not undo
+that readiness: Git-diff document restoration and restore-only child pruning
+continue, while autosave and pagehide flushing remain paused. Initial hydration
+that has not completed stays unready. A retry has a 15-second deadline covering both its fetch and any wait for
+session metadata: expiry cancels that attempt, ignores late results, and enables
+Retry again without claiming that anything was saved. Unmount cancels the attempt.
+This does not change conflict precedence or add blocked-storage cold-start support.
+
 ### Reopen existing workspace
 
 If the URL already contains `?workspace=review-monitor`, the frontend loads and

@@ -43,6 +43,7 @@ import {
   formatUnavailableApiMessage,
   looksLikeHtmlResponse,
   performRequest,
+  readResponseBody,
   request,
   requestJsonFirst,
 } from "./api-request";
@@ -716,12 +717,12 @@ export function fetchSessionOverview(sessionId: string, buckets = 200) {
   );
 }
 
-export async function fetchWorkspaceLayout(workspaceId: string) {
+export async function fetchWorkspaceLayout(workspaceId: string, options?: { signal?: AbortSignal }) {
   const endpoint = `/api/workspaces/${encodeURIComponent(workspaceId)}`;
-  const response = await performRequest(endpoint);
+  const response = await performRequest(endpoint, options);
 
   const contentType = response.headers.get("content-type") ?? "";
-  const raw = await response.text();
+  const raw = await readResponseBody(response, () => response.text(), options?.signal);
   if (looksLikeHtmlResponse(raw, contentType)) {
     throw createBackendUnavailableError(
       formatUnavailableApiMessage(endpoint, response.status),

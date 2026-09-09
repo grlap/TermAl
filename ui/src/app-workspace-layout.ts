@@ -15,6 +15,9 @@
 // recovery notice via `workspaceLayoutRestartErrorMessageRef`),
 // the persist-layout effect, and the single `pagehide` listener
 // that keeps the pending layout save alive across unloads.
+// Storage pause/retry is independent of completed hydration: it gates saves,
+// not read-only consumers of an already restored workspace. Server adoption
+// stores before publishing either its tree or its appearance preferences.
 //
 // Does not own: the switcher open/closed UI state
 // (`isWorkspaceSwitcherOpen` / `setIsWorkspaceSwitcherOpen` stay
@@ -66,6 +69,7 @@ import {
   persistWorkspaceLayout,
   acknowledgeWorkspaceLayoutSave,
   hasPendingWorkspaceLayout,
+  WorkspaceLayoutStorageReadError,
   type StoredWorkspaceLayout,
   type ControlPanelSide,
   getWorkspaceViewHref,
@@ -147,6 +151,26 @@ type FetchedWorkspaceThemeFields = Pick<
   "lightThemeId" | "darkThemeId" | "themeMode"
 >;
 
+const WORKSPACE_STORAGE_RETRY_TIMEOUT_MS = 15_000;
+
+// Only failures at the browser write boundary enter storage recovery; parser
+// or reconciliation exceptions must not be disguised as storage failures.
+class WorkspaceLayoutStorageWriteError extends Error {}
+
+function storeWorkspaceLayout(
+  workspaceId: string,
+  layout: StoredWorkspaceLayout,
+  pendingSaveId?: string,
+) {
+  try {
+    persistWorkspaceLayout(workspaceId, layout, pendingSaveId);
+  } catch (error) {
+    throw new WorkspaceLayoutStorageWriteError(
+      `Workspace save is paused. Could not preserve the workspace layout in this browser: ${getErrorMessage(error)} Keep this tab open and retry after restoring storage access.`,
+    );
+  }
+}
+
 export function resolveFetchedWorkspaceThemePreferences(
   layout: FetchedWorkspaceThemeFields,
 ): ThemePreferences | null {
@@ -164,6 +188,9 @@ export function resolveFetchedWorkspaceThemePreferences(
 
 export type UseAppWorkspaceLayoutReturn = {
   isWorkspaceLayoutReady: boolean;
+  workspaceLayoutStorageError: string | null;
+  isWorkspaceLayoutRetrying: boolean;
+  retryWorkspaceLayoutStorage: () => void;
   workspaceSummaries: WorkspaceLayoutSummary[];
   workspaceSummariesRef: MutableRefObject<WorkspaceLayoutSummary[]>;
   setWorkspaceSummaries: Dispatch<SetStateAction<WorkspaceLayoutSummary[]>>;
@@ -267,6 +294,14 @@ export function useAppWorkspaceLayout(
   } = setPreferences;
 
   const [isWorkspaceLayoutReady, setIsWorkspaceLayoutReady] = useState(false);
+  const [workspaceLayoutStorageError, setWorkspaceLayoutStorageError] = useState<string | null>(null);
+  const [isWorkspaceLayoutRetrying, setIsWorkspaceLayoutRetrying] = useState(false);
+  const [workspaceLayoutRetryEpoch, setWorkspaceLayoutRetryEpoch] = useState(0);
+  const storagePauseRef = useRef<{ workspaceId: string; serialized: string; preserveLocal: boolean } | null>(null);
+  const currentLayoutRef = useRef<{ serialized: string; layout: WorkspaceLayoutPersistencePayload } | null>(null);
+  const storageRetryInFlightRef = useRef(false);
+  const cancelStorageRetryRef = useRef<(() => void) | null>(null);
+  const initialPruneWorkspaceIdRef = useRef<string | null>(null);
   const [workspaceSummaries, setWorkspaceSummaries] = useState<
     WorkspaceLayoutSummary[]
   >([]);
@@ -314,29 +349,64 @@ export function useAppWorkspaceLayout(
     workspaceSummariesRef.current = workspaceSummaries;
   }, [workspaceSummaries]);
 
-  const applyFetchedWorkspaceLayout = useCallback(
-    (nextLayout: StoredWorkspaceLayout) => {
-      // Unsaved local work must not silently lose to a server copy, including
-      // a response deferred until sessions load. The local pending layout wins.
-      if (hasPendingWorkspaceLayout(workspaceViewId)) return;
-      const restoredWorkspace = reconcileWorkspaceState(
-        nextLayout.workspace,
-        sessionsRef.current,
-        { pruneDelegatedChildSessionTabs: true },
-      );
-      setWorkspace(
-        hydrateControlPanelLayout(
-          restoredWorkspace,
-          nextLayout.controlPanelSide,
-        ),
-      );
-      persistWorkspaceLayout(workspaceViewId, {
-        ...nextLayout,
-        workspace: restoredWorkspace,
-      });
-    },
-    [sessionsRef, setWorkspace, workspaceViewId],
-  );
+  // Preserve the first paused content baseline across failed retry attempts.
+  // Unlike requestError, this notice cannot be cleared by unrelated actions.
+  function pauseWorkspaceLayoutStorage(message: string, preserveLocal = false) {
+    cancelStorageRetryRef.current?.();
+    const current = currentLayoutRef.current!;
+    storagePauseRef.current ??= {
+      workspaceId: workspaceViewId,
+      serialized: current.serialized,
+      preserveLocal: preserveLocal || ignoreFetchedWorkspaceLayoutRef.current,
+    };
+    if (preserveLocal) storagePauseRef.current.preserveLocal = true;
+    clearPendingWorkspaceLayoutSaveTimeout();
+    pendingWorkspaceLayoutSaveRef.current = null;
+    latestWorkspaceLayoutSaveRef.current = null;
+    storageRetryInFlightRef.current = false;
+    setIsWorkspaceLayoutRetrying(false);
+    setWorkspaceLayoutStorageError(message);
+    workspaceLayoutLoadPendingRef.current = false;
+  }
+
+  function finishWorkspaceLayoutStorageRecovery() {
+    cancelStorageRetryRef.current?.();
+    storagePauseRef.current = null;
+    storageRetryInFlightRef.current = false;
+    setIsWorkspaceLayoutRetrying(false);
+    setWorkspaceLayoutStorageError(null);
+  }
+
+  // One authority check spans the whole pause/retry lifetime, not just the
+  // click. Both immediate and deferred adoption must check the latest content.
+  const preservePausedWorkspaceLayout = useCallback(() => {
+    const pending = hasPendingWorkspaceLayout(workspaceViewId);
+    const paused = storagePauseRef.current;
+    const current = currentLayoutRef.current!;
+    if (paused?.workspaceId === workspaceViewId &&
+        (paused.preserveLocal || paused.serialized !== current.serialized)) {
+      paused.preserveLocal = true;
+      storeWorkspaceLayout(workspaceViewId, current.layout, crypto.randomUUID());
+      return true;
+    }
+    return pending;
+  }, [workspaceViewId]);
+
+  function retryWorkspaceLayoutStorage() {
+    const paused = storagePauseRef.current;
+    if (!paused || paused.workspaceId !== workspaceViewId || storageRetryInFlightRef.current) return;
+    try {
+      // Unknown is not absent. Probe before writing or allowing server adoption.
+      preservePausedWorkspaceLayout();
+      storageRetryInFlightRef.current = true;
+      setIsWorkspaceLayoutRetrying(true);
+      setWorkspaceLayoutRetryEpoch((value) => value + 1);
+    } catch (error) {
+      pauseWorkspaceLayoutStorage(error instanceof WorkspaceLayoutStorageWriteError
+        ? error.message
+        : `Workspace save is paused. ${getErrorMessage(error)} Keep this tab open and retry after restoring storage access.`);
+    }
+  }
 
   const resetInitialDelegatedChildWorkspacePruneScope = useCallback(
     (nextWorkspace: WorkspaceState) => {
@@ -346,6 +416,61 @@ export function useAppWorkspaceLayout(
       hasPrunedInitialDelegatedChildWorkspaceTabsRef.current = false;
     },
     [],
+  );
+
+  const applyFetchedPreferences = useCallback((nextLayout: StoredWorkspaceLayout, applySide = true) => {
+    if (applySide) setControlPanelSide(nextLayout.controlPanelSide);
+    const theme = resolveFetchedWorkspaceThemePreferences(nextLayout);
+    if (theme) {
+      setLightThemeId(theme.lightThemeId);
+      setDarkThemeId(theme.darkThemeId);
+      setThemeMode(theme.themeMode);
+    }
+    if (nextLayout.styleId) setStyleId(nextLayout.styleId);
+    if (nextLayout.markdownThemeId) setMarkdownThemeId(nextLayout.markdownThemeId);
+    if (nextLayout.markdownStyleId) setMarkdownStyleId(nextLayout.markdownStyleId);
+    if (nextLayout.diagramThemeOverrideMode) setDiagramThemeOverrideMode(nextLayout.diagramThemeOverrideMode);
+    if (nextLayout.diagramLook) setDiagramLook(nextLayout.diagramLook);
+    if (nextLayout.diagramPalette) setDiagramPalette(nextLayout.diagramPalette);
+    if (nextLayout.fontSizePx !== undefined) setFontSizePx(nextLayout.fontSizePx);
+    if (nextLayout.editorFontSizePx !== undefined) setEditorFontSizePx(nextLayout.editorFontSizePx);
+    if (nextLayout.densityPercent !== undefined) setDensityPercent(nextLayout.densityPercent);
+  }, [setControlPanelSide, setLightThemeId, setDarkThemeId, setThemeMode, setStyleId,
+    setMarkdownThemeId, setMarkdownStyleId, setDiagramThemeOverrideMode, setDiagramLook,
+    setDiagramPalette, setFontSizePx, setEditorFontSizePx, setDensityPercent]);
+
+  const applyFetchedWorkspaceLayout = useCallback(
+    (nextLayout: StoredWorkspaceLayout) => {
+      // Unsaved local work must not silently lose to a server copy, including
+      // a response deferred until sessions load. The local pending layout wins.
+      if (preservePausedWorkspaceLayout()) return false;
+      const restoredWorkspace = reconcileWorkspaceState(
+        nextLayout.workspace,
+        sessionsRef.current,
+        { pruneDelegatedChildSessionTabs: true },
+      );
+      // Store before publishing ANY server state. Publishing preferences first
+      // can mix server appearance with a local tree after a failed write, and
+      // makes content comparisons unable to distinguish server/user changes.
+      storeWorkspaceLayout(workspaceViewId, {
+        ...nextLayout,
+        workspace: restoredWorkspace,
+      });
+      // Only a successful adoption establishes restored provenance. A retry
+      // that keeps pending local work never reaches this reset, so live child
+      // tabs remain protected; server-only refs still catch late parent metadata.
+      resetInitialDelegatedChildWorkspacePruneScope(nextLayout.workspace);
+      setWorkspace(
+        hydrateControlPanelLayout(
+          restoredWorkspace,
+          nextLayout.controlPanelSide,
+        ),
+      );
+      applyFetchedPreferences(nextLayout);
+      return true;
+    },
+    [applyFetchedPreferences, preservePausedWorkspaceLayout,
+      resetInitialDelegatedChildWorkspacePruneScope, sessionsRef, setWorkspace, workspaceViewId],
   );
 
   const initialDelegatedChildPruneMetadataSignature = useCallback(
@@ -650,13 +775,45 @@ export function useAppWorkspaceLayout(
 
   useEffect(() => {
     let cancelled = false;
+    const isStorageRetry = storagePauseRef.current?.workspaceId === workspaceViewId;
+    const controller = new AbortController();
+    let retryDeadline: number | undefined;
+    const cancelRetry = () => {
+      cancelled = true;
+      controller.abort();
+      window.clearTimeout(retryDeadline);
+      pendingFetchedWorkspaceLayoutRef.current = null;
+      if (cancelStorageRetryRef.current === cancelRetry) cancelStorageRetryRef.current = null;
+    };
+    if (storagePauseRef.current?.workspaceId !== workspaceViewId) {
+      finishWorkspaceLayoutStorageRecovery();
+    }
     workspaceLayoutLoadPendingRef.current = true;
     ignoreFetchedWorkspaceLayoutRef.current = false;
     pendingFetchedWorkspaceLayoutRef.current = null;
-    resetInitialDelegatedChildWorkspacePruneScope(workspaceRef.current);
-    setIsWorkspaceLayoutReady(false);
+    // Retry is not a new restore scope: tabs opened in this UI session must
+    // remain outside the restore-only delegated-child pruning set.
+    if (initialPruneWorkspaceIdRef.current !== workspaceViewId) {
+      initialPruneWorkspaceIdRef.current = workspaceViewId;
+      resetInitialDelegatedChildWorkspacePruneScope(workspaceRef.current);
+    }
+    // A storage retry does not un-hydrate the current workspace. Independent
+    // consumers (Git diff content, restored-child pruning) must keep running.
+    if (!isStorageRetry) setIsWorkspaceLayoutReady(false);
 
-    void fetchWorkspaceLayout(workspaceViewId)
+    if (isStorageRetry) {
+      cancelStorageRetryRef.current = cancelRetry;
+      // The deadline covers the GET and any wait for session metadata. On
+      // expiry abandon this attempt, fence late results and allow another try.
+      retryDeadline = window.setTimeout(() => {
+        pauseWorkspaceLayoutStorage("Workspace recovery timed out. Keep this tab open and choose Retry workspace save to try again.");
+      }, WORKSPACE_STORAGE_RETRY_TIMEOUT_MS);
+    }
+
+    const layoutRequest = isStorageRetry
+      ? fetchWorkspaceLayout(workspaceViewId, { signal: controller.signal })
+      : fetchWorkspaceLayout(workspaceViewId);
+    void layoutRequest
       .then(async (response) => {
         if (import.meta.env.MODE === "test") {
           await waitForWorkspaceLayoutLoadCommitTestBarrier();
@@ -670,7 +827,8 @@ export function useAppWorkspaceLayout(
         // modes, and other hand-edited/stale values never reach DOM setters.
         // A pending local layout survives both failed and in-flight saves
         // across reload. Do not merge older server preferences into it either.
-        const nextLayout = response && !hasPendingWorkspaceLayout(workspaceViewId)
+        const pendingLocalLayout = preservePausedWorkspaceLayout();
+        const nextLayout = response && !pendingLocalLayout
           ? parseStoredWorkspaceLayout(
               JSON.stringify({
                 controlPanelSide: response.layout.controlPanelSide,
@@ -696,48 +854,13 @@ export function useAppWorkspaceLayout(
         if (nextLayout) {
           const shouldApplyFetchedWorkspaceLayout =
             !ignoreFetchedWorkspaceLayoutRef.current;
-          if (shouldApplyFetchedWorkspaceLayout) {
-            resetInitialDelegatedChildWorkspacePruneScope(nextLayout.workspace);
-          }
           // A manual layout change during hydration claims the workspace tree
           // and dock side locally, but still allows the server-stored visual
           // preferences to merge in once the fetch resolves.
-          if (shouldApplyFetchedWorkspaceLayout) {
-            setControlPanelSide(nextLayout.controlPanelSide);
-          }
-          const fetchedThemePreferences =
-            resolveFetchedWorkspaceThemePreferences(nextLayout);
-          if (fetchedThemePreferences) {
-            setLightThemeId(fetchedThemePreferences.lightThemeId);
-            setDarkThemeId(fetchedThemePreferences.darkThemeId);
-            setThemeMode(fetchedThemePreferences.themeMode);
-          }
-          if (nextLayout.styleId) {
-            setStyleId(nextLayout.styleId);
-          }
-          if (nextLayout.markdownThemeId) {
-            setMarkdownThemeId(nextLayout.markdownThemeId);
-          }
-          if (nextLayout.markdownStyleId) {
-            setMarkdownStyleId(nextLayout.markdownStyleId);
-          }
-          if (nextLayout.diagramThemeOverrideMode) {
-            setDiagramThemeOverrideMode(nextLayout.diagramThemeOverrideMode);
-          }
-          if (nextLayout.diagramLook) {
-            setDiagramLook(nextLayout.diagramLook);
-          }
-          if (nextLayout.diagramPalette) {
-            setDiagramPalette(nextLayout.diagramPalette);
-          }
-          if (nextLayout.fontSizePx !== undefined) {
-            setFontSizePx(nextLayout.fontSizePx);
-          }
-          if (nextLayout.editorFontSizePx !== undefined) {
-            setEditorFontSizePx(nextLayout.editorFontSizePx);
-          }
-          if (nextLayout.densityPercent !== undefined) {
-            setDensityPercent(nextLayout.densityPercent);
+          // This initial manual-claim policy is distinct from pending local
+          // recovery, which rejects the whole server payload above.
+          if (!shouldApplyFetchedWorkspaceLayout && !isStorageRetry) {
+            applyFetchedPreferences(nextLayout, false);
           }
           if (shouldApplyFetchedWorkspaceLayout) {
             if (
@@ -770,7 +893,8 @@ export function useAppWorkspaceLayout(
         }
         workspaceLayoutLoadPendingRef.current =
           isFetchedWorkspaceLayoutWaitingForSessions;
-        setIsWorkspaceLayoutReady(!isFetchedWorkspaceLayoutWaitingForSessions);
+        setIsWorkspaceLayoutReady((ready) => ready || !isFetchedWorkspaceLayoutWaitingForSessions);
+        if (!isFetchedWorkspaceLayoutWaitingForSessions) finishWorkspaceLayoutStorageRecovery();
       })
       .catch(async (error) => {
         if (import.meta.env.MODE === "test") {
@@ -781,6 +905,10 @@ export function useAppWorkspaceLayout(
           error,
         );
         if (!cancelled) {
+          if (error instanceof WorkspaceLayoutStorageReadError || error instanceof WorkspaceLayoutStorageWriteError) {
+            pauseWorkspaceLayoutStorage(error.message);
+            return;
+          }
           // Restart-required errors indicate an incompatible backend; surface
           // the restart instruction to the user instead of silently degrading.
           if (isBackendUnavailableError(error) && error.restartRequired) {
@@ -788,21 +916,34 @@ export function useAppWorkspaceLayout(
             workspaceLayoutRestartErrorMessageRef.current = message;
             reportRequestError(error);
           }
+          if (isStorageRetry) {
+            // Working browser storage does not prove server recovery succeeded.
+            // Keep both the save pause and the previous hydration readiness:
+            // otherwise autosave can publish the older bootstrap layout.
+            pauseWorkspaceLayoutStorage(
+              `Workspace recovery failed: ${getErrorMessage(error)} Workspace save remains paused. Keep this tab open and choose Retry workspace save to try again.`,
+            );
+            return;
+          }
           workspaceLayoutLoadPendingRef.current = false;
           setIsWorkspaceLayoutReady(true);
+          finishWorkspaceLayoutStorageRecovery();
         }
       });
 
     return () => {
-      cancelled = true;
+      cancelRetry();
       workspaceLayoutLoadPendingRef.current = false;
       pendingFetchedWorkspaceLayoutRef.current = null;
     };
   }, [
+    applyFetchedPreferences,
     applyFetchedWorkspaceLayout,
+    preservePausedWorkspaceLayout,
     resetInitialDelegatedChildWorkspacePruneScope,
     sessionsRef,
     workspaceViewId,
+    workspaceLayoutRetryEpoch,
   ]);
 
   useEffect(() => {
@@ -817,15 +958,24 @@ export function useAppWorkspaceLayout(
 
     pendingFetchedWorkspaceLayoutRef.current = null;
     if (ignoreFetchedWorkspaceLayoutRef.current) {
+      if (!storagePauseRef.current) applyFetchedPreferences(pendingFetchedWorkspaceLayout, false);
       workspaceLayoutLoadPendingRef.current = false;
       setIsWorkspaceLayoutReady(true);
+      finishWorkspaceLayoutStorageRecovery();
       return;
     }
 
-    applyFetchedWorkspaceLayout(pendingFetchedWorkspaceLayout);
+    try {
+      applyFetchedWorkspaceLayout(pendingFetchedWorkspaceLayout);
+    } catch (error) {
+      if (!(error instanceof WorkspaceLayoutStorageReadError) && !(error instanceof WorkspaceLayoutStorageWriteError)) throw error;
+      pauseWorkspaceLayoutStorage(error.message);
+      return;
+    }
     workspaceLayoutLoadPendingRef.current = false;
     setIsWorkspaceLayoutReady(true);
-  }, [applyFetchedWorkspaceLayout, hasSessions, isSessionStateReady]);
+    finishWorkspaceLayoutStorageRecovery();
+  }, [applyFetchedPreferences, applyFetchedWorkspaceLayout, hasSessions, isSessionStateReady]);
 
   useEffect(() => {
     if (!isWorkspaceLayoutReady || !isSessionStateReady) {
@@ -913,10 +1063,7 @@ export function useAppWorkspaceLayout(
     workspace,
   ]);
 
-  const serializedWorkspaceLayout = useMemo(() => {
-    if (!isWorkspaceLayoutReady) {
-      return null;
-    }
+  const currentWorkspaceLayout = useMemo(() => {
     const persistedWorkspace =
       stripDiffPreviewDocumentContentFromWorkspaceState(
         stripLoadingGitDiffPreviewTabsFromWorkspaceState(
@@ -939,7 +1086,7 @@ export function useAppWorkspaceLayout(
       densityPercent,
       workspace: persistedWorkspace,
     };
-    return JSON.stringify(layout);
+    return { serialized: JSON.stringify(layout), layout };
   }, [
     applyControlPanelLayout,
     controlPanelSide,
@@ -949,7 +1096,6 @@ export function useAppWorkspaceLayout(
     diagramThemeOverrideMode,
     editorFontSizePx,
     fontSizePx,
-    isWorkspaceLayoutReady,
     markdownStyleId,
     markdownThemeId,
     styleId,
@@ -958,23 +1104,23 @@ export function useAppWorkspaceLayout(
     themeMode,
     workspace,
   ]);
+  currentLayoutRef.current = currentWorkspaceLayout;
+  const serializedWorkspaceLayout = currentWorkspaceLayout.serialized;
 
   useEffect(() => {
-    if (!isWorkspaceLayoutReady || serializedWorkspaceLayout === null) {
+    if (!isWorkspaceLayoutReady || workspaceLayoutStorageError !== null || storagePauseRef.current) {
       return;
     }
 
     // Session reconciliation can produce a new workspace object without a
     // layout edit. Debounce changes to the persisted content so those renders
     // neither postpone an initial save forever nor trigger a save/SSE loop.
-    const layout = JSON.parse(
-      serializedWorkspaceLayout,
-    ) as WorkspaceLayoutPersistencePayload;
+    const layout = currentLayoutRef.current!.layout;
     const localSaveId = crypto.randomUUID();
     try {
       persistWorkspaceLayout(workspaceViewId, layout, localSaveId);
     } catch (error) {
-      setRequestError(`Could not preserve the workspace layout in this browser: ${getErrorMessage(error)} Keep this tab open to avoid losing unsaved changes.`);
+      pauseWorkspaceLayoutStorage(`Workspace save is paused. Could not preserve the workspace layout in this browser: ${getErrorMessage(error)} Keep this tab open and retry after restoring storage access.`, true);
       return;
     }
     pendingWorkspaceLayoutSaveRef.current = {
@@ -998,7 +1144,7 @@ export function useAppWorkspaceLayout(
     };
     // clearPendingWorkspaceLayoutSaveTimeout only accesses refs; the flush ref
     // supplies the current save/error callbacks without restarting the debounce.
-  }, [isWorkspaceLayoutReady, serializedWorkspaceLayout, workspaceViewId]);
+  }, [isWorkspaceLayoutReady, workspaceLayoutStorageError, serializedWorkspaceLayout, workspaceViewId]);
 
   useEffect(() => {
     workspaceLayoutPersistenceMountedRef.current = true;
@@ -1016,6 +1162,9 @@ export function useAppWorkspaceLayout(
 
   return {
     isWorkspaceLayoutReady,
+    workspaceLayoutStorageError,
+    isWorkspaceLayoutRetrying,
+    retryWorkspaceLayoutStorage,
     workspaceSummaries,
     workspaceSummariesRef,
     setWorkspaceSummaries,

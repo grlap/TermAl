@@ -67,16 +67,7 @@ export async function request<T>(
   const response = await performRequest(path, init);
 
   const contentType = response.headers.get("content-type") ?? "";
-  let raw: string;
-  try {
-    raw = await response.text();
-  } catch (cause) {
-    // Headers can arrive before the transport fails. Keep their status so a
-    // permanent HTTP rejection stays permanent; JSON parsing below is separate.
-    throw new ApiRequestError("backend-unavailable", "The API response was interrupted.", {
-      status: response.status, cause,
-    });
-  }
+  const raw = await readResponseBody(response, () => response.text(), init?.signal);
   if (looksLikeHtmlResponse(raw, contentType)) {
     throw createBackendUnavailableError(
       formatUnavailableApiMessage(path, response.status),
@@ -116,7 +107,7 @@ export async function requestJsonFirst<T>(
   }
 
   if (!response.ok) {
-    const raw = await response.text();
+    const raw = await readResponseBody(response, () => response.text(), init?.signal);
     if (looksLikeHtmlResponse(raw, contentType)) {
       throw createBackendUnavailableError(
         formatUnavailableApiMessage(path, response.status),
@@ -130,8 +121,11 @@ export async function requestJsonFirst<T>(
   if (contentType.toLowerCase().includes("application/json")) {
     const textFallback = cloneSmallJsonResponseForFallback(response);
     try {
-      return (await response.json()) as T;
+      return await readResponseBody(response, () => response.json(), init?.signal) as T;
     } catch (error) {
+      // Only parsing failures can benefit from HTML/text fallback. A broken
+      // stream or deliberate cancellation must retain its original category.
+      if (!(error instanceof SyntaxError)) throw error;
       let raw = "";
       if (textFallback) {
         try {
@@ -167,7 +161,7 @@ export async function requestJsonFirst<T>(
     }
   }
 
-  const raw = await response.text();
+  const raw = await readResponseBody(response, () => response.text(), init?.signal);
   if (looksLikeHtmlResponse(raw, contentType)) {
     throw createBackendUnavailableError(
       formatUnavailableApiMessage(path, response.status),
@@ -176,6 +170,26 @@ export async function requestJsonFirst<T>(
     );
   }
   return raw ? (JSON.parse(raw) as T) : ({} as T);
+}
+
+export async function readResponseBody<T>(
+  response: Response,
+  read: () => Promise<T>,
+  signal?: AbortSignal | null,
+): Promise<T> {
+  try {
+    return await read();
+  } catch (cause) {
+    // Parsing and intentional aborts are not evidence of an unavailable
+    // backend. Keep the status after headers so permanent HTTP errors also
+    // remain distinguishable from retryable transport failures.
+    // Only the caller's signal proves cancellation intent. Error names alone
+    // do not, and SyntaxError belongs to the JSON reader, not the transport.
+    if (signal?.aborted || cause instanceof SyntaxError) throw cause;
+    throw new ApiRequestError("backend-unavailable", "The API response was interrupted.", {
+      status: response.status, cause,
+    });
+  }
 }
 
 function cloneSmallJsonResponseForFallback(response: Response) {
@@ -219,6 +233,7 @@ export async function performRequest(path: string, init?: RequestInit) {
       ...init,
     });
   } catch (error) {
+    if (init?.signal?.aborted) throw error;
     throw createBackendUnavailableError(
       "The TermAl backend is unavailable.",
       undefined,

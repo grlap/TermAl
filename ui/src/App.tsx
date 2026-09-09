@@ -799,6 +799,9 @@ export default function App() {
 
   const {
     isWorkspaceLayoutReady,
+    workspaceLayoutStorageError,
+    isWorkspaceLayoutRetrying,
+    retryWorkspaceLayoutStorage,
     workspaceSummaries,
     workspaceSummariesRef,
     setWorkspaceSummaries,
@@ -2119,6 +2122,15 @@ export default function App() {
       <div className="background-orbit background-orbit-right" />
 
       <main className="workspace-shell">
+        {workspaceLayoutStorageError ? (
+          <article className="thread-notice workspace-notice" role="alert">
+            <div className="card-label">Workspace save paused</div>
+            <p>{workspaceLayoutStorageError}</p>
+            <button type="button" disabled={isWorkspaceLayoutRetrying} onClick={retryWorkspaceLayoutStorage}>
+              {isWorkspaceLayoutRetrying ? "Retrying workspace save…" : "Retry workspace save"}
+            </button>
+          </article>
+        ) : null}
         {requestError && !requestErrorShownInline ? (
           <article className="thread-notice workspace-notice">
             <div className="card-label">Backend</div>

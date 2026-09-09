@@ -13,14 +13,36 @@ const ENGRAM_DEFAULT_CALL_TIMEOUT_MS: u64 = 250;
 /// one additional second for the owning callback to publish its terminal state.
 const ENGRAM_CONTROL_SETTLE_TIMEOUT: Duration = Duration::from_secs(11);
 const ENGRAM_DISPATCH_BUDGET_MS: u64 = 600;
+// Enablement and Verify both run `engram doctor --json`, and that audit is the
+// only consumer of this bound — it is not an ordinary Engram call timeout and
+// must not be confused with one. The value comes from measurement, not taste.
+// Runs reported on Engram build 304edbce2b18 (2026-09-09): 122.441 s and
+// 113.674 s auditing a migrated store's preserved history, against 4.946 s and
+// 5.325 s for a small one. Those are exact samples, not a proven upper bound.
+// The previous 5-second bound rejected the healthy migrated store outright.
+// Five minutes is about two and a half times the largest measured run; being
+// wrong high costs a longer wait before failure. Expiry attempts process-tree
+// termination; failed cleanup does not block the response.
+// THIS BOUND EXPIRES AS EVIDENCE, and the moment it expires is predictable
+// rather than random. The audit's cost has a FROZEN part (re-reading the
+// archive preserved at the last migration, which does not grow by a byte until
+// the next one) and a GROWING part (verifying current objects). So the bound
+// holds until THE NEXT MIGRATION, when the frozen part steps up by the size of
+// whatever is migrated then - possibly containing today's archive whole, since
+// the export is generic over persistent tables. Someone meeting a refusal after
+// a future migration is looking at a foreseen step, not a new defect.
+// Re-measure then, and raise this from a measurement rather than a guess.
+// (Scaling with preserved history rests on the four labelled samples above,
+// not on the frozen/growing split, which is measured in BYTES; how the audit's
+// TIME divides between the two parts has never been measured.)
 #[cfg(not(test))]
-const ENGRAM_ENABLEMENT_COMMAND_TIMEOUT: Duration = Duration::from_secs(5);
+const ENGRAM_ENABLEMENT_DOCTOR_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 // The Windows fixture launches through powershell.exe, and the full Rust suite
-// starts several process-heavy tests concurrently. Keep the production
-// enablement boundary unchanged while allowing fixture process scheduling the
-// same test-only headroom as the work-binding command below.
+// starts several process-heavy tests concurrently. Fixtures answer immediately,
+// so tests keep a much shorter bound: a hung fixture must fail the suite
+// quickly instead of holding it for the production window.
 #[cfg(test)]
-const ENGRAM_ENABLEMENT_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
+const ENGRAM_ENABLEMENT_DOCTOR_TIMEOUT: Duration = Duration::from_secs(30);
 // Engram's current store-open path may wait up to five seconds on SQLite's
 // writer lock. Bound each command in the two-command focus read above that
 // healthy contention window; a timeout or lock error remains an error, never
@@ -35,6 +57,9 @@ const ENGRAM_WORK_BINDING_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 const ENGRAM_WORK_BINDING_LOCK_RETRY_DELAY: Duration = Duration::from_millis(250);
 const ENGRAM_BOOT_RECOVERY_CONCURRENCY: usize = 8;
 const ENGRAM_CONTROL_MAX_FRAME_BYTES: usize = 256 * 1_024;
+// Resource policy, not a measured upper bound on reports. Doctor reports
+// are independent of control frames; cap each of stdout/stderr at 8 MiB.
+const ENGRAM_DOCTOR_MAX_OUTPUT_BYTES: usize = 8 * 1024 * 1024;
 const ENGRAM_CIRCUIT_BREAKER_FAILURES: u8 = 3;
 const ENGRAM_CONTROL_IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 const ENGRAM_WAIVER_IDENTITY_MAX_BYTES: usize = 256;
@@ -250,7 +275,36 @@ fn run_engram_doctor_result(
     home: &FsPath,
     project_root: &FsPath,
 ) -> std::result::Result<EngramDoctorResult, ApiError> {
+    run_engram_doctor_result_within(
+        binary_path,
+        project_file,
+        home,
+        project_root,
+        ENGRAM_ENABLEMENT_DOCTOR_TIMEOUT,
+    )
+}
+
+/// The deadline is a parameter so the expiry branch is reachable in a test
+/// without waiting out the production window. Callers outside tests always pass
+/// [`ENGRAM_ENABLEMENT_DOCTOR_TIMEOUT`].
+fn run_engram_doctor_result_within(
+    binary_path: &FsPath,
+    project_file: &FsPath,
+    home: &FsPath,
+    project_root: &FsPath,
+    doctor_timeout: Duration,
+) -> std::result::Result<EngramDoctorResult, ApiError> {
+    // Drain both streams on their own threads and terminate the whole process
+    // tree, exactly as the authority-revocation path below does. Neither is
+    // optional here. Waiting for exit before reading DEADLOCKS a doctor whose
+    // report outgrows the pipe buffer, and the deadline then reports it as a
+    // slow audit — indistinguishable from the case this bound exists for, so a
+    // reader would raise the bound again and never find the cause. And a bare
+    // kill would reach only the direct child: engram_command deliberately wraps
+    // `.cmd`/`.bat` and `.ps1` shims in an interpreter, leaving the real doctor
+    // a grandchild that keeps auditing and holding the store after we returned.
     let mut command = engram_command(binary_path);
+    configure_terminal_process_tree(&mut command);
     let mut child = command
         .arg("--project-file")
         .arg(project_file)
@@ -264,49 +318,84 @@ fn run_engram_doctor_result(
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|err| ApiError::bad_request(format!("Engram doctor failed to start: {err}")))?;
-    let deadline = std::time::Instant::now() + ENGRAM_ENABLEMENT_COMMAND_TIMEOUT;
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                let output = child.wait_with_output().map_err(|err| {
-                    ApiError::bad_request(format!("failed collecting Engram doctor output: {err}"))
-                })?;
-                if status.success() {
-                    return serde_json::from_slice::<EngramDoctorResult>(&output.stdout).map_err(
-                        |error| {
-                            ApiError::bad_request(format!(
-                                "cannot enable Engram: doctor returned invalid JSON: {error}"
-                            ))
-                        },
-                    );
-                }
-                let detail = String::from_utf8_lossy(&output.stderr).trim().to_owned();
-                return Err(ApiError::bad_request(if detail.is_empty() {
-                    format!("Engram doctor exited with {status}")
-                } else {
-                    format!("Engram doctor failed: {detail}")
-                }));
-            }
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| ApiError::bad_request("Engram doctor stdout is unavailable"))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| ApiError::bad_request("Engram doctor stderr is unavailable"))?;
+    let process = Arc::new(SharedChild::new(child).map_err(|err| {
+        ApiError::bad_request(format!("failed sharing the Engram doctor process: {err}"))
+    })?);
+    let process_tree = EngramProcessTree::attach(&process).map_err(|err| {
+        if let Err(error) = kill_child_process(&process, "Engram doctor") {
+            eprintln!("engram warning> failed terminating unattached doctor: {error:#}");
+        }
+        reap_engram_doctor_in_background(&process);
+        ApiError::bad_request(format!(
+            "failed preparing the Engram doctor process tree: {err:#}"
+        ))
+    })?;
+    process_tree.resume_after_attach(&process).map_err(|err| {
+        stop_engram_doctor_before_reap(&process_tree, &process);
+        ApiError::bad_request(format!("failed resuming the Engram doctor: {err:#}"))
+    })?;
+    let stdout_reader = start_engram_doctor_reader(stdout, "stdout");
+    let stderr_reader = start_engram_doctor_reader(stderr, "stderr");
+    let deadline = std::time::Instant::now() + doctor_timeout;
+    let status = loop {
+        match process.try_wait() {
+            Ok(Some(status)) => break status,
             Ok(None) if std::time::Instant::now() < deadline => {
                 std::thread::sleep(Duration::from_millis(10));
             }
-            Ok(None) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(ApiError::bad_request(format!(
-                    "Engram doctor exceeded the {} second enablement deadline",
-                    ENGRAM_ENABLEMENT_COMMAND_TIMEOUT.as_secs()
-                )));
-            }
-            Err(err) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(ApiError::bad_request(format!(
-                    "failed waiting for Engram doctor: {err}"
-                )));
+            outcome => {
+                // No waiter has reaped this process. Signal before starting the
+                // detached reap so a Unix group ID cannot have been recycled.
+                stop_engram_doctor_before_reap(&process_tree, &process);
+                return Err(ApiError::bad_request(match outcome {
+                    Ok(None) => format!(
+                        "Engram doctor exceeded the {} second enablement deadline",
+                        doctor_timeout.as_secs()
+                    ),
+                    Err(error) => format!("failed waiting for Engram doctor: {error}"),
+                    Ok(Some(_)) => unreachable!(),
+                }));
             }
         }
+    };
+    // A direct child exit is NOT EOF: descendants can still own either pipe.
+    // Like terminal's bounded reader collection, receive against a deadline,
+    // never join a blocking reader. Unlike terminal output, partial doctor
+    // JSON is not useful: timeout/oversize are errors, never healthy reports.
+    let output = (|| {
+        let stdout = collect_engram_doctor_output(stdout_reader, "stdout", deadline)?;
+        let stderr = collect_engram_doctor_output(stderr_reader, "stderr", deadline)?;
+        Ok::<_, ApiError>((stdout, stderr))
+    })();
+    // Post-reap cleanup uses a stable Windows job handle, and deliberately
+    // does not signal a recycled process-group ID on Unix. Cleanup failure
+    // must not make collection unbounded. Unix escaped/remaining descendants
+    // may keep detached readers alive until they close their pipes.
+    if let Err(error) = process_tree.inner.cleanup_after_shell_exit(&process, "Engram doctor") {
+        eprintln!("engram warning> doctor post-exit cleanup failed: {error:#}");
     }
+    let (collected_stdout, collected_stderr) = output?;
+    if status.success() {
+        return serde_json::from_slice::<EngramDoctorResult>(&collected_stdout).map_err(|error| {
+            ApiError::bad_request(format!(
+                "cannot enable Engram: doctor returned invalid JSON: {error}"
+            ))
+        });
+    }
+    let detail = String::from_utf8_lossy(&collected_stderr).trim().to_owned();
+    Err(ApiError::bad_request(if detail.is_empty() {
+        format!("Engram doctor exited with {status}")
+    } else {
+        format!("Engram doctor failed: {detail}")
+    }))
 }
 
 #[derive(Clone, Deserialize)]
@@ -1896,6 +1985,65 @@ fn apply_engram_connection_environment(
         command.env(ENGRAM_ACTOR_CONTEXT_ENV, actor_context);
     } else {
         command.env_remove(ENGRAM_ACTOR_CONTEXT_ENV);
+    }
+}
+
+fn stop_engram_doctor_before_reap(tree: &EngramProcessTree, process: &Arc<SharedChild>) {
+    if let Err(error) = tree.terminate(process) {
+        eprintln!("engram warning> failed terminating doctor process tree: {error:#}");
+    }
+    reap_engram_doctor_in_background(process);
+}
+
+fn reap_engram_doctor_in_background(process: &Arc<SharedChild>) {
+    // Reaping is necessary, but a failed termination must not turn a bounded
+    // API call into an unbounded wait. The waiter owns the handle until exit.
+    let process = Arc::clone(process);
+    std::thread::spawn(move || {
+        if let Err(error) = process.wait() {
+            eprintln!("engram warning> failed reaping doctor process: {error}");
+        }
+    });
+}
+
+fn read_engram_doctor_output(reader: impl std::io::Read) -> std::io::Result<Vec<u8>> {
+    let mut output = Vec::new();
+    std::io::Read::take(reader, (ENGRAM_DOCTOR_MAX_OUTPUT_BYTES + 1) as u64)
+        .read_to_end(&mut output)?;
+    if output.len() > ENGRAM_DOCTOR_MAX_OUTPUT_BYTES {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData,
+            format!("Engram doctor output exceeds TermAl's {} byte per-stream capture budget; a larger valid report is not supported", ENGRAM_DOCTOR_MAX_OUTPUT_BYTES)));
+    }
+    Ok(output)
+}
+
+fn start_engram_doctor_reader(
+    reader: impl std::io::Read + Send + 'static,
+    stream: &'static str,
+) -> mpsc::Receiver<std::io::Result<Vec<u8>>> {
+    let (sender, receiver) = mpsc::channel();
+    std::thread::spawn(move || {
+        let result = read_engram_doctor_output(reader);
+        if let Err(error) = &result {
+            eprintln!("engram warning> failed reading doctor {stream}: {error}");
+        }
+        let _ = sender.send(result);
+    });
+    receiver
+}
+
+fn collect_engram_doctor_output(
+    receiver: mpsc::Receiver<std::io::Result<Vec<u8>>>,
+    stream: &str,
+    deadline: std::time::Instant,
+) -> std::result::Result<Vec<u8>, ApiError> {
+    match receiver.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now())) {
+        Ok(result) => result.map_err(|error|
+            ApiError::bad_request(format!("failed reading Engram doctor {stream}: {error}"))),
+        Err(mpsc::RecvTimeoutError::Timeout) => Err(ApiError::bad_request(format!(
+            "Engram doctor {stream} output collection exceeded the enablement deadline"))),
+        Err(mpsc::RecvTimeoutError::Disconnected) => Err(ApiError::bad_request(format!(
+            "Engram doctor {stream} reader stopped without returning output"))),
     }
 }
 

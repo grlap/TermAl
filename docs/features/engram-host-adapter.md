@@ -58,6 +58,20 @@ grant environment variable, or grant-installing verification step; obsolete
 persisted grant fields from development builds are ignored and are not written
 again.
 
+Doctor execution and stdout/stderr collection share one five-minute deadline
+after process setup. A direct child exiting does not end output collection:
+descendants may retain its pipes. Missing EOF at the deadline is an explicit
+collection failure, not malformed JSON or a healthy result. Cleanup is
+best-effort and reaping does not block the response. Windows uses the owned job
+handle; after reaping on Unix, TermAl does not signal a potentially reused
+process-group ID. Surviving descendants can retain detached reader threads
+until their pipes close.
+
+Each doctor stream has a separate 8 MiB host capture budget, independent of
+control-protocol frame limits. This is a resource policy, not a measured maximum
+valid report size: a valid larger report is refused with a budget diagnostic.
+Partial reports are never parsed or accepted.
+
 ## Base MCP composition
 
 Every eligible local session receives an `engram` MCP stdio descriptor. TermAl

@@ -21,7 +21,7 @@ afterEach(() => {
 function renderNativeConversation(
   paneFirst: boolean,
   detachedRestoreTop?: number,
-  reader?: { anchor: NonNullable<PaneScrollPosition["anchor"]>; ordinary?: boolean },
+  reader?: { anchor: NonNullable<PaneScrollPosition["anchor"]>; ordinary?: boolean; clampWrites?: boolean },
 ) {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   const frames = installAnimationFrameHarness(1_000 / 60);
@@ -50,7 +50,10 @@ function renderNativeConversation(
       scrollHeight: { get: () => height },
       scrollTop: {
         get: () => top,
-        set: (value: number) => { top = value; writes.push(value); },
+        set: (value: number) => {
+          top = reader?.clampWrites ? Math.min(Math.max(value, 0), Math.max(height - 200, 0)) : value;
+          writes.push(top);
+        },
       },
       scrollTo: { value: ({ top: value }: ScrollToOptions) => {
         if (typeof value === "number") node.scrollTop = value;
@@ -202,6 +205,29 @@ function renderNativeConversation(
 }
 
 describe("native scroll attachment authority", () => {
+  it("retains a returning reader while the remounted list initially clamps its offset", () => {
+    const anchor = { messageId: "returning-reader-message", viewportOffsetPx: -12.25 };
+    const view = renderNativeConversation(false, 400, { anchor, clampWrites: true });
+    view.hydrate([{
+      id: anchor.messageId, type: "text", author: "assistant", timestamp: "12:01", text: "Reader",
+    }], { [anchor.messageId]: 400 });
+    view.frames.drainAnimationFrames();
+    expect(view.node.scrollTop).toBe(412.25);
+    act(() => view.state.captureDetachedMessageStackPosition());
+    view.update({ visible: false });
+    view.browserHeight(200);
+    view.update({ visible: true });
+    expect(view.node.scrollTop).toBe(0);
+    view.nativeScroll();
+    expect(view.savedPosition.anchor).toEqual(anchor);
+    expect(view.state.liveTailPinned).toBe(false);
+    view.browserHeight(1000);
+    view.measure();
+    expect(view.node.scrollTop).toBe(412.25);
+    expect(view.savedPosition.anchor).toEqual(anchor);
+    expect(view.state.liveTailPinned).toBe(false);
+  });
+
   it.each([false, true])("restores the original signed fractional anchor after numeric fallback finishes (ordinary=%s)", (ordinary) => {
     const anchor = { messageId: "returning-reader-message", viewportOffsetPx: -12.25 };
     const view = renderNativeConversation(false, 400, { anchor, ordinary });

@@ -5,8 +5,9 @@ import * as api from "./api";
 import { ApiRequestError, createBackendUnavailableError } from "./api-request";
 import { useAppWorkspaceLayout, type UseAppWorkspaceLayoutParams } from "./app-workspace-layout";
 import { createInitialWorkspaceBootstrap } from "./initial-workspace-bootstrap";
-import { persistWorkspaceLayout } from "./workspace-storage";
+import { hasPendingWorkspaceLayout, persistWorkspaceLayout, WorkspaceLayoutStorageReadError } from "./workspace-storage";
 import type { WorkspaceState } from "./workspace-types";
+import type { ControlPanelSide } from "./workspace-storage";
 import { makeSession } from "./app-test-harness";
 
 const workspace: WorkspaceState = {
@@ -286,4 +287,551 @@ it("retains rejected local tabs across remount instead of replacing them with th
   await act(async () => { await vi.advanceTimersByTimeAsync(200); });
   expect(api.saveWorkspaceLayout).toHaveBeenLastCalledWith(params.workspaceViewId,
     expect.objectContaining({ workspace: second.result.current.current }), undefined);
+});
+
+it.each([false, true])("pauses adoption and saves when recovery storage is unreadable (deferred=%s)", async (deferred) => {
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  const params = paramsForLocalWorkspace();
+  vi.mocked(api.saveWorkspaceLayout).mockClear();
+  vi.spyOn(api, "fetchWorkspaceLayout").mockResolvedValue({ layout: {
+    id: params.workspaceViewId, revision: 1, controlPanelSide: "right", workspace,
+  } } as api.WorkspaceLayoutResponse);
+  const originalGetItem = window.localStorage.getItem.bind(window.localStorage);
+  const denyStorage = () => vi.spyOn(window.localStorage, "getItem").mockImplementation((key) => {
+    if (key.endsWith(`:${params.workspaceViewId}`)) {
+      throw new DOMException("Storage blocked", "SecurityError");
+    }
+    return originalGetItem(key);
+  });
+  if (!deferred) denyStorage();
+  const hook = renderHook(useAppWorkspaceLayout, { initialProps: params });
+  await act(async () => {});
+  if (deferred) {
+    expect(hook.result.current.isWorkspaceLayoutReady).toBe(false);
+    denyStorage();
+    hook.rerender({ ...params, isSessionStateReady: true });
+  }
+  await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+  expect(hook.result.current.isWorkspaceLayoutReady).toBe(false);
+  expect(params.setWorkspace).not.toHaveBeenCalled();
+  expect(api.saveWorkspaceLayout).not.toHaveBeenCalled();
+  expect(hook.result.current.workspaceLayoutStorageError).toBe(new WorkspaceLayoutStorageReadError(null).message);
+});
+
+it("keeps a newer pending layout after an older success, including remount", async () => {
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  const params = paramsForLocalWorkspace();
+  let resolveOld!: (response: api.WorkspaceLayoutResponse) => void;
+  vi.mocked(api.saveWorkspaceLayout).mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve; }));
+  const first = renderHook(useAppWorkspaceLayout, { initialProps: params });
+  await act(async () => {});
+  await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+  const newer = structuredClone(params.workspace);
+  newer.panes[0].tabs.push({ id: "newer-tab", kind: "session", sessionId: "session-2" });
+  vi.mocked(api.saveWorkspaceLayout).mockRejectedValue(new ApiRequestError("request-failed", "Too large", { status: 413 }));
+  first.rerender({ ...params, workspace: newer });
+  await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+  await act(async () => resolveOld({} as api.WorkspaceLayoutResponse));
+  expect(hasPendingWorkspaceLayout(params.workspaceViewId)).toBe(true);
+  first.unmount();
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ layout: {
+    id: params.workspaceViewId, revision: 1, controlPanelSide: "left", workspace: params.workspace,
+  } }))));
+  vi.mocked(api.saveWorkspaceLayout).mockResolvedValue({} as api.WorkspaceLayoutResponse);
+  const restoredSessionsRef = { current: [makeSession("session-1"), makeSession("session-2")] };
+  function useRestoredLayout() {
+    const [current, setWorkspace] = useState(() => createInitialWorkspaceBootstrap(params.workspaceViewId).workspace);
+    useAppWorkspaceLayout({ ...params, workspace: current, setWorkspace, isSessionStateReady: true,
+      sessionsRef: restoredSessionsRef });
+    return current;
+  }
+  const second = renderHook(useRestoredLayout);
+  await act(async () => {});
+  expect(second.result.current.panes.flatMap((pane) => pane.tabs)).toContainEqual({
+    id: "newer-tab", kind: "session", sessionId: "session-2",
+  });
+  await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+  expect(hasPendingWorkspaceLayout(params.workspaceViewId)).toBe(false);
+});
+
+it.each([false, true])("resumes storage-paused persistence without losing edits (deferred=%s)", async (deferred) => {
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  const params = paramsForLocalWorkspace();
+  const sessions = [makeSession("session-1"), makeSession("session-2")];
+  params.sessionsRef.current = sessions;
+  if (deferred) params.sessionsRef.current = [];
+  vi.spyOn(api, "fetchWorkspaceLayout").mockResolvedValue({ layout: {
+    id: params.workspaceViewId, revision: 1, controlPanelSide: "right", workspace,
+  } } as api.WorkspaceLayoutResponse);
+  const read = window.localStorage.getItem.bind(window.localStorage);
+  let blocked = !deferred;
+  vi.spyOn(window.localStorage, "getItem").mockImplementation((key) => {
+    if (blocked && key.endsWith(`:${params.workspaceViewId}`)) throw new DOMException("Blocked", "SecurityError");
+    return read(key);
+  });
+  const hook = renderHook(useAppWorkspaceLayout, { initialProps: params });
+  await act(async () => {});
+  blocked = true;
+  params.sessionsRef.current = sessions;
+  hook.rerender({ ...params, sessions, isSessionStateReady: true });
+  await act(async () => {});
+  expect(hook.result.current.workspaceLayoutStorageError).toContain("paused");
+  act(() => hook.result.current.retryWorkspaceLayoutStorage());
+  expect(hook.result.current.isWorkspaceLayoutReady).toBe(false);
+  const edited = structuredClone(params.workspace);
+  edited.panes[0].tabs.push({ id: "paused-edit", kind: "session", sessionId: "session-2" });
+  hook.rerender({ ...params, workspace: edited, sessions, isSessionStateReady: true });
+  params.setRequestError(null);
+  expect(hook.result.current.workspaceLayoutStorageError).toContain("paused");
+  blocked = false;
+  const denyWrite = vi.spyOn(window.localStorage, "setItem").mockImplementation(() => {
+    throw new DOMException("Storage quota exceeded", "QuotaExceededError");
+  });
+  const fetchesBeforeRetry = vi.mocked(api.fetchWorkspaceLayout).mock.calls.length;
+  act(() => hook.result.current.retryWorkspaceLayoutStorage());
+  expect(hook.result.current.isWorkspaceLayoutReady).toBe(false);
+  // jsdom's cross-realm DOMException uses getErrorMessage's safe fallback.
+  expect(hook.result.current.workspaceLayoutStorageError).toBe(
+    "Workspace save is paused. Could not preserve the workspace layout in this browser: The request failed. Keep this tab open and retry after restoring storage access.",
+  );
+  expect(api.fetchWorkspaceLayout).toHaveBeenCalledTimes(fetchesBeforeRetry);
+  denyWrite.mockRestore();
+  act(() => hook.result.current.retryWorkspaceLayoutStorage());
+  await act(async () => {});
+  await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+  expect(hook.result.current.workspaceLayoutStorageError).toBeNull();
+  expect(hook.result.current.isWorkspaceLayoutReady).toBe(true);
+  expect(params.setWorkspace).not.toHaveBeenCalled();
+  expect(api.saveWorkspaceLayout).toHaveBeenLastCalledWith(params.workspaceViewId,
+    expect.objectContaining({ workspace: edited }), undefined);
+  expect(hasPendingWorkspaceLayout(params.workspaceViewId)).toBe(false);
+});
+
+it("retries unchanged storage-paused hydration and still restores the server layout", async () => {
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  const params = paramsForLocalWorkspace();
+  params.sessionsRef.current = [makeSession("session-1")];
+  vi.spyOn(api, "fetchWorkspaceLayout").mockResolvedValue({ layout: {
+    id: params.workspaceViewId, revision: 1, controlPanelSide: "right", workspace,
+  } } as api.WorkspaceLayoutResponse);
+  const blocked = vi.spyOn(window.localStorage, "getItem").mockImplementation(() => { throw new Error("Blocked"); });
+  const hook = renderHook(useAppWorkspaceLayout, { initialProps: params });
+  await act(async () => {});
+  expect(hook.result.current.workspaceLayoutStorageError).toContain("paused");
+  blocked.mockRestore();
+  act(() => hook.result.current.retryWorkspaceLayoutStorage());
+  await act(async () => {});
+  expect(params.setWorkspace).toHaveBeenCalledOnce();
+  expect(hook.result.current.isWorkspaceLayoutReady).toBe(true);
+  expect(hook.result.current.workspaceLayoutStorageError).toBeNull();
+});
+
+// Stateful recovery fixtures exercise both the rendered tree and the eventual
+// PUT. Merely checking that an adoption setter was skipped misses prune effects.
+function recoveryFixture(sessionReady = true) {
+  const params = paramsForLocalWorkspace();
+  const available = [makeSession("session-1"), makeSession("session-2")];
+  params.sessionsRef.current = sessionReady ? available : [];
+  const response = { layout: {
+    id: params.workspaceViewId, revision: 1, controlPanelSide: "left", workspace,
+  } } as api.WorkspaceLayoutResponse;
+  const fetchLayout = vi.spyOn(api, "fetchWorkspaceLayout").mockResolvedValue(response);
+  const read = window.localStorage.getItem.bind(window.localStorage);
+  let blocked = true;
+  vi.spyOn(window.localStorage, "getItem").mockImplementation((key) => {
+    if (blocked && key.endsWith(`:${params.workspaceViewId}`)) throw new Error("Blocked recovery read");
+    return read(key);
+  });
+  const hook = renderHook(({ ready }) => {
+    const [current, setCurrent] = useState(params.workspace);
+    const state = useAppWorkspaceLayout({ ...params, workspace: current, setWorkspace: setCurrent,
+      sessions: ready ? available : [], isSessionStateReady: ready });
+    return { ...state, current, setCurrent };
+  }, { initialProps: { ready: sessionReady } });
+  return { params, available, response, fetchLayout, hook, unblock: () => { blocked = false; } };
+}
+
+function addRecoveryTab(current: WorkspaceState) {
+  const edited = structuredClone(current);
+  edited.panes.find((pane) => pane.id === "pane-session")!.tabs.push({
+    id: "during-retry", kind: "session", sessionId: "session-2",
+  });
+  return edited;
+}
+
+it.each([false, true])("preserves edits throughout a retry including deferred adoption (deferred=%s)", async (deferred) => {
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  const f = recoveryFixture(!deferred);
+  await act(async () => {});
+  expect(f.hook.result.current.workspaceLayoutStorageError).not.toBeNull();
+  f.unblock();
+  let resolve!: (value: api.WorkspaceLayoutResponse) => void;
+  f.fetchLayout.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+  act(() => f.hook.result.current.retryWorkspaceLayoutStorage());
+  if (deferred) await act(async () => resolve(f.response));
+  act(() => f.hook.result.current.setCurrent(addRecoveryTab));
+  const edited = f.hook.result.current.current;
+  if (!deferred) await act(async () => resolve(f.response));
+  else {
+    f.params.sessionsRef.current = f.available;
+    f.hook.rerender({ ready: true });
+  }
+  await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+  expect(f.hook.result.current.current).toEqual(edited);
+  expect(api.saveWorkspaceLayout).toHaveBeenLastCalledWith(f.params.workspaceViewId,
+    expect.objectContaining({ workspace: edited }), undefined);
+  expect(f.hook.result.current.workspaceLayoutStorageError).toBeNull();
+});
+
+it.each([false, true])("keeps failed adoption writes paused and can recover (deferred=%s)", async (deferred) => {
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  const f = recoveryFixture(!deferred);
+  await act(async () => {});
+  f.unblock();
+  const before = f.hook.result.current.current;
+  const denyWrite = vi.spyOn(window.localStorage, "setItem").mockImplementation(() => {
+    throw new DOMException("No storage space", "QuotaExceededError");
+  });
+  act(() => f.hook.result.current.retryWorkspaceLayoutStorage());
+  await act(async () => {});
+  if (deferred) {
+    f.params.sessionsRef.current = f.available;
+    f.hook.rerender({ ready: true });
+  }
+  expect(f.hook.result.current.current).toEqual(before);
+  expect(f.hook.result.current.isWorkspaceLayoutReady).toBe(false);
+  expect(f.hook.result.current.workspaceLayoutStorageError).not.toBeNull();
+  expect(f.hook.result.current.isWorkspaceLayoutRetrying).toBe(false);
+  expect(api.saveWorkspaceLayout).not.toHaveBeenCalled();
+  denyWrite.mockRestore();
+  act(() => f.hook.result.current.retryWorkspaceLayoutStorage());
+  await act(async () => {});
+  await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+  expect(f.hook.result.current.isWorkspaceLayoutReady).toBe(true);
+  expect(f.hook.result.current.workspaceLayoutStorageError).toBeNull();
+  expect(api.saveWorkspaceLayout).toHaveBeenCalledOnce();
+});
+
+it.each([false, true])("bounds retry waits and fences abandoned results (deferred=%s)", async (deferred) => {
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  const f = recoveryFixture(!deferred);
+  await act(async () => {});
+  f.unblock();
+  let resolve!: (value: api.WorkspaceLayoutResponse) => void;
+  if (!deferred) f.fetchLayout.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+  act(() => f.hook.result.current.retryWorkspaceLayoutStorage());
+  await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+  expect(f.fetchLayout.mock.lastCall![1]!.signal!.aborted).toBe(true);
+  expect(f.hook.result.current.isWorkspaceLayoutRetrying).toBe(false);
+  expect(f.hook.result.current.isWorkspaceLayoutReady).toBe(false);
+  expect(f.hook.result.current.workspaceLayoutStorageError).toContain("timed out");
+  act(() => f.hook.result.current.setCurrent(addRecoveryTab));
+  const edited = f.hook.result.current.current;
+  if (!deferred) await act(async () => resolve(f.response));
+  else {
+    f.params.sessionsRef.current = f.available;
+    f.hook.rerender({ ready: true });
+  }
+  expect(f.hook.result.current.current).toEqual(edited);
+  expect(api.saveWorkspaceLayout).not.toHaveBeenCalled();
+  act(() => f.hook.result.current.retryWorkspaceLayoutStorage());
+  await act(async () => {});
+  await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+  expect(api.saveWorkspaceLayout).toHaveBeenLastCalledWith(f.params.workspaceViewId,
+    expect.objectContaining({ workspace: edited }), undefined);
+  expect(f.hook.result.current.workspaceLayoutStorageError).toBeNull();
+  f.hook.unmount();
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it("does not reclassify current-session child tabs as restored tabs on storage retry", async () => {
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  const params = paramsForLocalWorkspace();
+  const sessions = [makeSession("session-1"), makeSession("session-2", { parentDelegationId: "delegation-live" })];
+  params.sessionsRef.current = sessions;
+  vi.spyOn(api, "fetchWorkspaceLayout").mockResolvedValue(null);
+  const hook = renderHook(() => {
+    const [current, setCurrent] = useState(params.workspace);
+    const state = useAppWorkspaceLayout({ ...params, workspace: current, setWorkspace: setCurrent,
+      sessions, isSessionStateReady: true });
+    return { ...state, current, setCurrent };
+  });
+  await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+  vi.mocked(api.saveWorkspaceLayout).mockClear();
+  const denyWrite = vi.spyOn(window.localStorage, "setItem").mockImplementation(() => { throw new Error("Blocked"); });
+  act(() => hook.result.current.setCurrent(addRecoveryTab));
+  act(() => hook.result.current.setCurrent((current) => {
+    const edited = structuredClone(current);
+    edited.panes.find((pane) => pane.id === "pane-session")!.tabs.push({
+      id: "live-canvas", kind: "canvas", originSessionId: null,
+      cards: [{ sessionId: "session-2", x: 20, y: 40 }],
+    });
+    return edited;
+  }));
+  const edited = hook.result.current.current;
+  expect(hook.result.current.workspaceLayoutStorageError).not.toBeNull();
+  denyWrite.mockRestore();
+  act(() => hook.result.current.retryWorkspaceLayoutStorage());
+  await act(async () => {});
+  await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+  expect(hook.result.current.current).toEqual(edited);
+  expect(api.saveWorkspaceLayout).toHaveBeenLastCalledWith(params.workspaceViewId,
+    expect.objectContaining({ workspace: edited }), undefined);
+});
+
+it("does not mistake deferred server preference changes for user edits during retry", async () => {
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  const f = recoveryFixture(false);
+  f.response.layout.controlPanelSide = "right";
+  await act(async () => {});
+  f.unblock();
+  act(() => f.hook.result.current.retryWorkspaceLayoutStorage());
+  await act(async () => {});
+  expect(f.params.setControlPanelSide).not.toHaveBeenCalled();
+  f.params.sessionsRef.current = f.available;
+  f.hook.rerender({ ready: true });
+  expect(f.params.setControlPanelSide).toHaveBeenLastCalledWith("right");
+  expect(f.hook.result.current.isWorkspaceLayoutReady).toBe(true);
+  expect(f.hook.result.current.workspaceLayoutStorageError).toBeNull();
+});
+
+it("aborts a retry on unmount and ignores a late result", async () => {
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  const f = recoveryFixture();
+  await act(async () => {});
+  f.unblock();
+  let resolve!: (value: api.WorkspaceLayoutResponse) => void;
+  f.fetchLayout.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+  act(() => f.hook.result.current.retryWorkspaceLayoutStorage());
+  const signal = f.fetchLayout.mock.lastCall![1]!.signal!;
+  expect(signal.aborted).toBe(false);
+  f.hook.unmount();
+  expect(signal.aborted).toBe(true);
+  expect(vi.getTimerCount()).toBe(0);
+  await act(async () => resolve(f.response));
+  expect(api.saveWorkspaceLayout).not.toHaveBeenCalled();
+});
+
+it("cancels an outstanding retry through the real workspace GET API", async () => {
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  const f = recoveryFixture();
+  await act(async () => {});
+  f.unblock();
+  f.fetchLayout.mockRestore();
+  let requestSignal: AbortSignal | undefined;
+  let cancelled = false;
+  vi.stubGlobal("fetch", vi.fn((_url, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+    requestSignal = init?.signal ?? undefined;
+    requestSignal?.addEventListener("abort", () => {
+      cancelled = true;
+      reject(requestSignal!.reason);
+    }, { once: true });
+  })));
+  act(() => f.hook.result.current.retryWorkspaceLayoutStorage());
+  expect(requestSignal).toBeDefined();
+  await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+  expect(cancelled).toBe(true);
+  expect(f.hook.result.current.isWorkspaceLayoutReady).toBe(false);
+  expect(f.hook.result.current.isWorkspaceLayoutRetrying).toBe(false);
+  expect(f.hook.result.current.workspaceLayoutStorageError).toContain("timed out");
+  expect(api.saveWorkspaceLayout).not.toHaveBeenCalled();
+});
+
+it.each([false, true])("restores the server after an initial write failure without inventing user edits (deferred=%s)", async (deferred) => {
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  const params = paramsForLocalWorkspace();
+  const available = [makeSession("session-1"), makeSession("session-2")];
+  const serverWorkspace = addRecoveryTab(workspace);
+  vi.spyOn(api, "fetchWorkspaceLayout").mockResolvedValue({ layout: {
+    id: params.workspaceViewId, revision: 1, workspace: serverWorkspace,
+    controlPanelSide: "right", fontSizePx: 18, densityPercent: 120,
+  } } as api.WorkspaceLayoutResponse);
+  const write = window.localStorage.setItem.bind(window.localStorage);
+  let blocked = true;
+  vi.spyOn(window.localStorage, "setItem").mockImplementation((key, value) => {
+    if (blocked && key.endsWith(`:${params.workspaceViewId}`)) throw new Error("Quota exceeded");
+    write(key, value);
+  });
+  const hook = renderHook(({ ready }) => {
+    const [current, setCurrent] = useState(params.workspace);
+    const [side, setSide] = useState<ControlPanelSide>("left");
+    const [font, setFont] = useState(params.preferences.fontSizePx);
+    const [density, setDensity] = useState(params.preferences.densityPercent);
+    params.sessionsRef.current = ready ? available : [];
+    const state = useAppWorkspaceLayout({ ...params, workspace: current, setWorkspace: setCurrent,
+      sessions: params.sessionsRef.current, isSessionStateReady: ready,
+      controlPanelSide: side, setControlPanelSide: setSide,
+      preferences: { ...params.preferences, fontSizePx: font, densityPercent: density },
+      setPreferences: { ...params.setPreferences, setFontSizePx: setFont, setDensityPercent: setDensity },
+    });
+    return { ...state, current, side, font, density };
+  }, { initialProps: { ready: !deferred } });
+  await act(async () => {});
+  if (deferred) hook.rerender({ ready: true });
+  await act(async () => {});
+  expect(hook.result.current.workspaceLayoutStorageError).not.toBeNull();
+  expect(api.saveWorkspaceLayout).not.toHaveBeenCalled();
+  // The failed adoption must not publish half of the server layout. This
+  // checks real committed React state, not whether a setter was called.
+  expect(hook.result.current.side).toBe("left");
+  expect(hook.result.current.font).toBe(params.preferences.fontSizePx);
+  expect(hook.result.current.density).toBe(params.preferences.densityPercent);
+  blocked = false;
+  act(() => hook.result.current.retryWorkspaceLayoutStorage());
+  await act(async () => {});
+  await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+  expect(hook.result.current.workspaceLayoutStorageError).toBeNull();
+  expect(hook.result.current.current.panes.flatMap((pane) => pane.tabs))
+    .toContainEqual({ id: "during-retry", kind: "session", sessionId: "session-2" });
+  expect(api.saveWorkspaceLayout).toHaveBeenLastCalledWith(params.workspaceViewId,
+    expect.objectContaining({ workspace: hook.result.current.current,
+      controlPanelSide: "right", fontSizePx: 18, densityPercent: 120 }), undefined);
+});
+
+it.each([false, true])("prunes server references adopted on retry when child metadata arrives later (deferred=%s)", async (deferred) => {
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  const params = paramsForLocalWorkspace();
+  const serverWorkspace = addRecoveryTab(workspace);
+  serverWorkspace.panes[0].tabs.push({ id: "restored-canvas", kind: "canvas",
+    originSessionId: null, cards: [{ sessionId: "session-2", x: 20, y: 40 }] });
+  vi.spyOn(api, "fetchWorkspaceLayout").mockResolvedValue({ layout: {
+    id: params.workspaceViewId, revision: 1, controlPanelSide: "left", workspace: serverWorkspace,
+  } } as api.WorkspaceLayoutResponse);
+  const read = window.localStorage.getItem.bind(window.localStorage);
+  let blocked = true;
+  vi.spyOn(window.localStorage, "getItem").mockImplementation((key) => {
+    if (blocked && key.endsWith(`:${params.workspaceViewId}`)) throw new Error("Blocked read");
+    return read(key);
+  });
+  const hook = renderHook(({ ready }) => {
+    const [current, setCurrent] = useState(params.workspace);
+    const [available, setAvailable] = useState([makeSession("session-1"), makeSession("session-2")]);
+    params.sessionsRef.current = ready ? available : [];
+    const state = useAppWorkspaceLayout({ ...params, workspace: current, setWorkspace: setCurrent,
+      sessions: params.sessionsRef.current, isSessionStateReady: ready });
+    return { ...state, current, setAvailable };
+  }, { initialProps: { ready: !deferred } });
+  await act(async () => {});
+  blocked = false;
+  act(() => hook.result.current.retryWorkspaceLayoutStorage());
+  await act(async () => {});
+  if (deferred) hook.rerender({ ready: true });
+  expect(hook.result.current.current.panes.flatMap((pane) => pane.tabs))
+    .toContainEqual({ id: "during-retry", kind: "session", sessionId: "session-2" });
+  act(() => hook.result.current.setAvailable([
+    makeSession("session-1"), makeSession("session-2", { parentDelegationId: "late-parent" }),
+  ]));
+  await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+  const tabs = hook.result.current.current.panes.flatMap((pane) => pane.tabs);
+  expect(tabs.some((tab) => tab.kind === "session" && tab.sessionId === "session-2")).toBe(false);
+  expect(tabs.flatMap((tab) => tab.kind === "canvas" ? tab.cards : [])).toEqual([]);
+  expect(api.saveWorkspaceLayout).toHaveBeenLastCalledWith(params.workspaceViewId,
+    expect.objectContaining({ workspace: hook.result.current.current }), undefined);
+});
+
+it.each([false, true])("keeps failed recovery paused until a later server adoption (deferred=%s)", async (deferred) => {
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  const params = paramsForLocalWorkspace();
+  const available = [makeSession("session-1"), makeSession("session-2")];
+  const serverWorkspace = addRecoveryTab(workspace);
+  const response = { layout: { id: params.workspaceViewId, revision: 1,
+    workspace: serverWorkspace, controlPanelSide: "right" } } as api.WorkspaceLayoutResponse;
+  const fetchLayout = vi.spyOn(api, "fetchWorkspaceLayout").mockResolvedValue(response);
+  const write = window.localStorage.setItem.bind(window.localStorage);
+  let blocked = true;
+  vi.spyOn(window.localStorage, "setItem").mockImplementation((key, value) => {
+    if (blocked && key.endsWith(`:${params.workspaceViewId}`)) throw new Error("Quota exceeded");
+    write(key, value);
+  });
+  const hook = renderHook(({ ready }) => {
+    const [current, setCurrent] = useState(params.workspace);
+    const [side, setSide] = useState<ControlPanelSide>("left");
+    params.sessionsRef.current = ready ? available : [];
+    const state = useAppWorkspaceLayout({ ...params, workspace: current, setWorkspace: setCurrent,
+      sessions: params.sessionsRef.current, isSessionStateReady: ready,
+      controlPanelSide: side, setControlPanelSide: setSide });
+    return { ...state, current, side };
+  }, { initialProps: { ready: !deferred } });
+  await act(async () => {});
+  if (deferred) hook.rerender({ ready: true });
+  await act(async () => {});
+  expect(hook.result.current.workspaceLayoutStorageError).not.toBeNull();
+  expect(hook.result.current.isWorkspaceLayoutReady).toBe(false);
+  expect(hasPendingWorkspaceLayout(params.workspaceViewId)).toBe(false);
+  blocked = false;
+  fetchLayout.mockRejectedValueOnce(new ApiRequestError("backend-unavailable", "Service unavailable", { status: 503 }));
+  act(() => hook.result.current.retryWorkspaceLayoutStorage());
+  await act(async () => {});
+  act(() => window.dispatchEvent(new Event("pagehide")));
+  await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+  // No user edit occurred. A recovered browser store cannot authorize the
+  // older bootstrap tree to replace the server tree after a failed GET.
+  expect(api.saveWorkspaceLayout).not.toHaveBeenCalled();
+  expect(hook.result.current.isWorkspaceLayoutReady).toBe(false);
+  expect(hook.result.current.isWorkspaceLayoutRetrying).toBe(false);
+  expect(hook.result.current.workspaceLayoutStorageError).toContain("Workspace recovery failed");
+  expect(hasPendingWorkspaceLayout(params.workspaceViewId)).toBe(false);
+  expect(hook.result.current.current).toEqual(params.workspace);
+  act(() => hook.result.current.retryWorkspaceLayoutStorage());
+  await act(async () => {});
+  await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+  expect(fetchLayout).toHaveBeenCalledTimes(3);
+  expect(hook.result.current.workspaceLayoutStorageError).toBeNull();
+  expect(hook.result.current.isWorkspaceLayoutReady).toBe(true);
+  expect(hook.result.current.current.panes.find((pane) => pane.id === "pane-session"))
+    .toEqual(serverWorkspace.panes[0]);
+  expect(hook.result.current.side).toBe("right");
+  expect(api.saveWorkspaceLayout).toHaveBeenLastCalledWith(params.workspaceViewId,
+    expect.objectContaining({ workspace: hook.result.current.current, controlPanelSide: "right" }), undefined);
+  hook.unmount();
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it("keeps hydrated workspace consumers active while storage is paused and retry is pending", async () => {
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  const params = paramsForLocalWorkspace();
+  const fetchLayout = vi.spyOn(api, "fetchWorkspaceLayout").mockResolvedValue(null);
+  const hook = renderHook(() => {
+    const [current, setCurrent] = useState(params.workspace);
+    const [sessions, setSessions] = useState([makeSession("session-1"), makeSession("session-2")]);
+    params.sessionsRef.current = sessions;
+    const state = useAppWorkspaceLayout({ ...params, workspace: current, setWorkspace: setCurrent,
+      sessions, isSessionStateReady: true });
+    return { ...state, current, setCurrent, setSessions };
+  });
+  await act(async () => {});
+  await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+  vi.mocked(api.saveWorkspaceLayout).mockClear();
+  const denyWrite = vi.spyOn(window.localStorage, "setItem").mockImplementation(() => { throw new Error("Quota exceeded"); });
+  act(() => hook.result.current.setCurrent(addRecoveryTab));
+  expect(hook.result.current.workspaceLayoutStorageError).not.toBeNull();
+  expect(hook.result.current.isWorkspaceLayoutReady).toBe(true);
+  // Initial session-1 was restored, session-2 was opened in this UI session.
+  act(() => hook.result.current.setSessions([
+    makeSession("session-1", { parentDelegationId: "restored-parent" }), makeSession("session-2"),
+  ]));
+  expect(hook.result.current.current.panes.flatMap((pane) => pane.tabs))
+    .not.toContainEqual({ id: "tab-session", kind: "session", sessionId: "session-1" });
+  denyWrite.mockRestore();
+  fetchLayout.mockRejectedValueOnce(new ApiRequestError("backend-unavailable", "Service unavailable", { status: 503 }));
+  act(() => hook.result.current.retryWorkspaceLayoutStorage());
+  await act(async () => {});
+  expect(hook.result.current.isWorkspaceLayoutReady).toBe(true);
+  expect(hook.result.current.isWorkspaceLayoutRetrying).toBe(false);
+  expect(hook.result.current.workspaceLayoutStorageError).toContain("Workspace recovery failed");
+  act(() => window.dispatchEvent(new Event("pagehide")));
+  await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+  expect(api.saveWorkspaceLayout).not.toHaveBeenCalled();
+  let resolve!: (value: null) => void;
+  fetchLayout.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+  act(() => hook.result.current.retryWorkspaceLayoutStorage());
+  expect(hook.result.current.isWorkspaceLayoutReady).toBe(true);
+  act(() => window.dispatchEvent(new Event("pagehide")));
+  await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+  expect(api.saveWorkspaceLayout).not.toHaveBeenCalled();
+  await act(async () => resolve(null));
+  await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+  expect(hook.result.current.workspaceLayoutStorageError).toBeNull();
+  expect(api.saveWorkspaceLayout).toHaveBeenLastCalledWith(params.workspaceViewId,
+    expect.objectContaining({ workspace: hook.result.current.current }), undefined);
 });

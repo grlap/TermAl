@@ -274,6 +274,38 @@ describe("App workspace layout", () => {
     expect(resolveFetchedWorkspaceThemePreferences(current)).toEqual(current);
   });
 
+  it("keeps the storage pause visible through unrelated actions and retries from its notice", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const response = createDeferred<Awaited<ReturnType<typeof api.fetchWorkspaceLayout>>>();
+    vi.mocked(api.fetchWorkspaceLayout).mockImplementationOnce(() => response.promise);
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(makeStateResponse({
+      revision: 1, projects: [], orchestrators: [], workspaces: [], sessions: [],
+    }))));
+    vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
+    await renderApp({ waitForWorkspaceLayout: false });
+    const originalRead = window.localStorage.getItem.bind(window.localStorage);
+    let blocked = true;
+    vi.spyOn(window.localStorage, "getItem").mockImplementation((key) => {
+      if (blocked && key.startsWith(`${WORKSPACE_LAYOUT_STORAGE_KEY}:`)) throw new DOMException("Storage blocked", "SecurityError");
+      return originalRead(key);
+    });
+    await act(async () => { response.resolve(makeWorkspaceLayoutResponse()); });
+    const notice = await screen.findByRole("alert");
+    expect(within(notice).getByText("Workspace save paused")).toBeVisible();
+    // Closing session creation clears the generic request error. This notice
+    // must remain independent of that unrelated action's error lifecycle.
+    await openCreateSessionDialog();
+    await clickAndSettle(screen.getByRole("button", { name: "Cancel" }));
+    expect(within(notice).getByText("Workspace save paused")).toBeVisible();
+    fireEvent.click(within(notice).getByRole("button", { name: "Retry workspace save" }));
+    expect(screen.getByRole("alert")).toBeVisible();
+    blocked = false;
+    vi.mocked(api.saveWorkspaceLayout).mockClear();
+    await clickAndSettle(within(notice).getByRole("button", { name: "Retry workspace save" }));
+    await waitFor(() => expect(screen.queryByText("Workspace save paused")).not.toBeInTheDocument());
+    await waitFor(() => expect(api.saveWorkspaceLayout).toHaveBeenCalled());
+  });
+
   afterEach(async () => {
     await act(async () => {
       cleanup();

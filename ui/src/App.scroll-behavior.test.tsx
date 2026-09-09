@@ -1637,6 +1637,23 @@ describe("App scroll behaviour", () => {
           expect(restoredAnchor?.getBoundingClientRect().top).toBe(
             detachedAnchorOffset,
           );
+          // Returning before paint is only half the contract: queued range
+          // reconciliation and native scroll delivery must keep that point.
+          for (let frame = 0; frame < 65; frame += 1) {
+            const callbacks = Array.from(pendingFrames.values());
+            pendingFrames.clear();
+            await act(async () => {
+              for (const callback of callbacks) {
+                callback(performance.now() + (frame + 1) * 1000 / 60);
+              }
+              fireEvent.scroll(messageStack);
+              await flushUiWork();
+            });
+          }
+          expect(messageStack.scrollTop).toBe(detachedScrollTop + 400);
+          expect(messageStack.querySelector(
+            `[data-message-id="${detachedAnchorId}"]`,
+          )?.getBoundingClientRect().top).toBe(detachedAnchorOffset);
         } finally {
           messageStack.removeEventListener(
             MESSAGE_STACK_SCROLL_WRITE_EVENT,

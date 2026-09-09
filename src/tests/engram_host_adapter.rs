@@ -17411,3 +17411,207 @@ fn start_turn_failure_arms_rebind_for_the_unowned_evaluated_grant() {
     assert_eq!(child.session.status, SessionStatus::Idle);
     assert!(matches!(child.runtime, SessionRuntime::Claude(_)));
 }
+
+fn slow_doctor_fixture_path() -> PathBuf {
+    if cfg!(windows) {
+        FsPath::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/tests/fixtures/engram-doctor-slow-fixture.ps1")
+    } else {
+        FsPath::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/tests/fixtures/engram-doctor-slow-fixture.sh")
+    }
+}
+
+/// The expiry branch was unreachable from tests while the deadline was a
+/// constant, so a five-second wall shipped unexercised and a real migrated
+/// store found it first. This drives the branch directly.
+///
+/// WHAT THIS ASSERTS: that the expiry branch runs and reports the deadline it
+/// actually enforced. The fixture outlasts the deadline and then succeeds with
+/// a payload that DOES deserialize as EngramDoctorResult, so a regressed
+/// deadline returns Ok and fails this test rather than merely returning late.
+///
+/// WHAT THIS DOES NOT ASSERT: that the child was killed or reaped. The expiry
+/// branch returns the same error whether or not `kill` succeeded, so deleting
+/// that call would leave this test green. The name says only what is checked.
+#[test]
+fn enablement_doctor_expiry_names_the_deadline_it_enforced() {
+    let root = TestTempRoot::create("termal-engram-doctor-deadline");
+    let project_file = root.path().join(".engram-project");
+    fs::write(&project_file, "fixture-slow-doctor\n")
+        .expect("fixture project declaration should be written");
+    let home = root.path().join("home");
+    fs::create_dir_all(&home).expect("fixture Engram home should exist");
+
+    // Matched rather than `expect_err` so the doctor result needs no `Debug`:
+    // the production type stays untouched by this test's convenience.
+    let error = match run_engram_doctor_result_within(
+        &slow_doctor_fixture_path(),
+        &project_file,
+        &home,
+        root.path(),
+        Duration::ZERO,
+    ) {
+        Ok(_) => panic!("an already expired deadline must fail instead of awaiting the doctor"),
+        Err(error) => error,
+    };
+
+    assert!(
+        error.message.contains("exceeded the 0 second enablement deadline"),
+        "the failure must name the deadline it actually enforced, not a constant: {}",
+        error.message
+    );
+}
+
+/// Makes the sibling test's discriminator a TESTED FACT rather than a comment:
+/// the slow fixture's payload really does deserialize, so a regressed deadline
+/// would return Ok there instead of the timeout error. Both reviewers of this
+/// change pointed out that the earlier fixture emitted `{"healthy":true}`,
+/// which cannot deserialize into EngramDoctorResult, so the claimed property
+/// did not exist. Asserting it here is cheaper than trusting the comment.
+#[test]
+fn slow_doctor_fixture_payload_deserializes_when_the_deadline_is_generous() {
+    let root = TestTempRoot::create("termal-engram-doctor-payload");
+    let project_file = root.path().join(".engram-project");
+    fs::write(&project_file, "fixture-slow-doctor\n")
+        .expect("fixture project declaration should be written");
+    let home = root.path().join("home");
+    fs::create_dir_all(&home).expect("fixture Engram home should exist");
+
+    let result = run_engram_doctor_result_within(
+        &slow_doctor_fixture_path(),
+        &project_file,
+        &home,
+        root.path(),
+        DEADLOCK_GUARD,
+    )
+    .unwrap_or_else(|error| {
+        panic!("the fixture payload must parse as a doctor result: {}", error.message)
+    });
+
+    assert!(result.healthy, "the fixture reports a healthy store");
+    assert_eq!(result.project_id, "termal-doctor-fixture");
+    assert!(
+        result.database.is_absolute(),
+        "an enablement caller requires an absolute database path: {}",
+        result.database.display()
+    );
+}
+
+#[test]
+fn doctor_output_has_an_independent_limit_and_diagnostic() {
+    let above_control = vec![b'x'; ENGRAM_CONTROL_MAX_FRAME_BYTES + 1];
+    assert_eq!(read_engram_doctor_output(above_control.as_slice()).unwrap(), above_control);
+    let at_limit = vec![b'x'; ENGRAM_DOCTOR_MAX_OUTPUT_BYTES];
+    assert_eq!(read_engram_doctor_output(at_limit.as_slice()).unwrap().len(), at_limit.len());
+    let oversized = vec![b'x'; ENGRAM_DOCTOR_MAX_OUTPUT_BYTES + 1];
+    let error = read_engram_doctor_output(oversized.as_slice()).unwrap_err();
+    assert!(error.to_string().contains("Engram doctor output exceeds"));
+    assert!(!error.to_string().contains("control frame"));
+}
+
+#[test]
+fn doctor_output_collection_deadline_does_not_require_eof() {
+    let (_sender, receiver) = mpsc::channel();
+    let started = std::time::Instant::now();
+    let error = collect_engram_doctor_output(receiver, "stderr", started).unwrap_err();
+    assert!(error.message.contains("output collection exceeded"));
+    assert!(started.elapsed() < DEADLOCK_GUARD);
+}
+
+fn check_doctor_descendant_deadline(mode: &str) {
+    let root = TestTempRoot::create("termal-doctor-descendant");
+    let (project_file, ready) = prepare_engram_control_process_tree_fixture(&root, mode);
+    let fixture = FsPath::new(env!("CARGO_MANIFEST_DIR")).join(if cfg!(windows) {
+        "src/tests/fixtures/engram-doctor-pipe-fixture.ps1"
+    } else {
+        "src/tests/fixtures/engram-doctor-pipe-fixture.sh"
+    });
+    let home = root.path().to_path_buf();
+    let (sender, receiver) = mpsc::channel();
+    let started = std::time::Instant::now();
+    let worker = std::thread::spawn(move || {
+        let result = run_engram_doctor_result_within(
+            &fixture, &project_file, &home, &home, Duration::from_secs(5));
+        let _ = sender.send(result.map(|report| report.healthy));
+    });
+    // Acquires a process handle while the descendant is alive and keeps its
+    // lifetime socket open. Dropping it releases an escaped Unix descendant.
+    let descendant = ready.wait();
+    let result = receiver.recv_timeout(DEADLOCK_GUARD);
+    if result.is_err() {
+        drop(descendant);
+        let _ = worker.join();
+        panic!("doctor did not return while its descendant held the pipe");
+    }
+    let error = result.unwrap().expect_err("an incomplete doctor must not report success");
+    assert!(started.elapsed() < DEADLOCK_GUARD);
+    if mode == "doctor-tree-exit" {
+        assert!(error.message.contains("output collection exceeded"), "{}", error.message);
+        #[cfg(windows)]
+        assert_engram_control_descendant_was_terminated(&descendant, "doctor output deadline");
+        // Unix cleanup after reap deliberately does not signal a reused PGID.
+    } else {
+        assert!(error.message.contains("enablement deadline"), "{}", error.message);
+        assert_engram_control_descendant_was_terminated(&descendant, "doctor process deadline");
+    }
+    drop(descendant);
+    worker.join().expect("doctor worker should finish");
+}
+
+#[test]
+fn doctor_deadline_covers_a_pipe_held_after_direct_child_exit() {
+    check_doctor_descendant_deadline("doctor-tree-exit");
+}
+
+#[test]
+fn doctor_deadline_terminates_a_live_process_tree() {
+    check_doctor_descendant_deadline("doctor-tree-hang");
+}
+
+fn large_doctor_fixture_path() -> PathBuf {
+    if cfg!(windows) {
+        FsPath::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/tests/fixtures/engram-doctor-large-fixture.ps1")
+    } else {
+        FsPath::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/tests/fixtures/engram-doctor-large-fixture.sh")
+    }
+}
+
+/// Distinguishes the old doctor transport from the corrected one, which is the
+/// whole point: the fixture writes about 120 KB — far above the pipe buffer
+/// measured on this platform, where a child writing 65,536 bytes exits and one
+/// writing 100,000 does not — and then exits successfully.
+///
+/// Under the previous shape (poll for exit, read only afterwards) this child
+/// blocked on its own write, never exited, and the call ended at the deadline
+/// reporting a slow audit. With both streams drained on their own threads it
+/// completes and parses. So a regression to the old ordering turns this Ok back
+/// into the timeout error, which no size-independent test would catch.
+#[test]
+fn doctor_transport_drains_a_report_larger_than_the_pipe_buffer() {
+    let root = TestTempRoot::create("termal-engram-doctor-large");
+    let project_file = root.path().join(".engram-project");
+    fs::write(&project_file, "fixture-large-doctor\n")
+        .expect("fixture project declaration should be written");
+    let home = root.path().join("home");
+    fs::create_dir_all(&home).expect("fixture Engram home should exist");
+
+    let result = run_engram_doctor_result_within(
+        &large_doctor_fixture_path(),
+        &project_file,
+        &home,
+        root.path(),
+        DEADLOCK_GUARD,
+    )
+    .unwrap_or_else(|error| {
+        panic!(
+            "a report larger than the pipe buffer must still be collected: {}",
+            error.message
+        )
+    });
+
+    assert!(result.healthy);
+    assert_eq!(result.project_id, "termal-doctor-large");
+}

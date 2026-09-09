@@ -160,6 +160,10 @@ export function deleteStoredWorkspaceLayout(workspaceViewId: string) {
 export function parseStoredWorkspaceLayout(
   raw: string | null | undefined,
 ): StoredWorkspaceLayout | null {
+  return parseStoredWorkspaceLayoutRecord(raw)?.layout ?? null;
+}
+
+function parseStoredWorkspaceLayoutRecord(raw: string | null | undefined) {
   if (!raw) {
     return null;
   }
@@ -170,15 +174,20 @@ export function parseStoredWorkspaceLayout(
         normalizeStoredDiagramLook(JSON.parse(raw)),
       ),
     );
+    const pendingSaveId = isRecord(parsed) && typeof parsed.pendingSaveId === "string"
+      ? parsed.pendingSaveId : null;
     if (!isStoredWorkspaceLayout(parsed)) {
       return null;
     }
 
     return {
-      ...currentLayoutFields(parsed),
-      workspace: stripDiffPreviewDocumentContentFromWorkspaceState(
-        normalizeWorkspaceStatePaths(parsed.workspace),
-      ),
+      layout: {
+        ...currentLayoutFields(parsed),
+        workspace: stripDiffPreviewDocumentContentFromWorkspaceState(
+          normalizeWorkspaceStatePaths(parsed.workspace),
+        ),
+      },
+      pendingSaveId,
     };
   } catch {
     return null;
@@ -272,14 +281,25 @@ function normalizeStoredDiagramLook(value: unknown): unknown {
   return layout;
 }
 
+export class WorkspaceLayoutStorageReadError extends Error {
+  constructor(readonly cause: unknown) {
+    super("Could not read workspace recovery storage. Restore and autosave are paused. Keep this tab open, restore browser storage access, then choose Retry workspace save.");
+    this.name = "WorkspaceLayoutStorageReadError";
+  }
+}
+
 // The pending identity and layout occupy ONE localStorage entry: a reload
 // must never observe the new layout without its unsaved authority marker.
 export function hasPendingWorkspaceLayout(workspaceViewId: string): boolean {
   if (typeof window === "undefined") return false;
-  const raw = window.localStorage.getItem(getWorkspaceLayoutStorageKey(workspaceViewId));
-  if (!parseStoredWorkspaceLayout(raw)) return false;
-  const stored = JSON.parse(raw!);
-  return typeof stored.pendingSaveId === "string" && stored.pendingSaveId.length > 0;
+  let raw: string | null;
+  try {
+    raw = window.localStorage.getItem(getWorkspaceLayoutStorageKey(workspaceViewId));
+  } catch (cause) {
+    // Unknown recovery authority is not proof that no pending work exists.
+    throw new WorkspaceLayoutStorageReadError(cause);
+  }
+  return !!parseStoredWorkspaceLayoutRecord(raw)?.pendingSaveId;
 }
 
 export function acknowledgeWorkspaceLayoutSave(workspaceViewId: string, saveId: string) {
