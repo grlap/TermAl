@@ -528,6 +528,10 @@ fn validate_persisted_session_fields(
         ));
     }
 
+    if !session.agent.supports_opencode_settings() && session.opencode_approval_mode.is_some() {
+        return Err(anyhow!("opencodeApprovalMode is only valid for OpenCode sessions"));
+    }
+
     if session.agent.supports_codex_prompt_settings() {
         if session.approval_policy.is_none() {
             return Err(anyhow!(

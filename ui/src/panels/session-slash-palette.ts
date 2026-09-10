@@ -67,6 +67,7 @@ export type SlashPaletteSession = Pick<
   | "codexFastMode"
   | "cursorMode"
   | "geminiApprovalMode"
+  | "opencodeApprovalMode"
   | "opencodeCurrentEffort"
   | "opencodeCurrentMode"
   | "opencodeEffort"
@@ -79,6 +80,7 @@ export type SlashPaletteSession = Pick<
   | "modelOptions"
   | "reasoningEffort"
   | "sandboxMode"
+  | "status"
   | "workdir"
 >;
 
@@ -175,10 +177,10 @@ export const SLASH_COMMANDS: ReadonlyArray<{
   },
   {
     command: "/approvals",
-    detail: "Change Codex approval policy for the next prompt",
+    detail: "Change the session tool approval policy",
     id: "approvals",
     label: "/approvals",
-    supports: ["Codex"],
+    supports: ["Codex", "OpenCode"],
   },
   {
     command: "/effort",
@@ -710,6 +712,26 @@ export function codexApprovalSlashState(query: string, currentValue: ApprovalPol
   };
 }
 
+export function opencodeApprovalSlashState(session: SlashPaletteSession, query: string): SlashChoiceState {
+  if (["active", "approval", "stopping"].includes(session.status)) {
+    return {
+      emptyMessage: "Stop the current turn before changing OpenCode approvals.",
+      hint: "Human questions remain interactive.",
+      items: [],
+      title: "OpenCode approvals",
+    };
+  }
+  return {
+    emptyMessage: `No OpenCode approval policies match "${query}".`,
+    hint: "Stop the current turn before changing approvals. Human questions stay interactive.",
+    items: makeSlashChoices([
+      { label: "Ask", value: "ask", detail: "Show tool permission requests" },
+      { label: "Auto-approve", value: "auto-approve", detail: "Approve each tool request once" },
+    ], "opencodeApprovalMode", session.opencodeApprovalMode ?? "ask", query),
+    title: "OpenCode approvals",
+  };
+}
+
 export function codexReasoningEffortSlashState(session: SlashPaletteSession, query: string): SlashChoiceState {
   const currentValue = session.reasoningEffort ?? defaultCodexReasoningEffort(session);
   const currentModel = currentSessionModelCapabilities(session);
@@ -1100,7 +1122,9 @@ export function buildSlashPaletteState(
           : activeCommand.id === "approvals"
             ? session.agent === "Codex"
               ? codexApprovalSlashState(rawOptionQuery, session.approvalPolicy ?? "never")
-              : null
+              : session.agent === "OpenCode"
+                ? opencodeApprovalSlashState(session, rawOptionQuery)
+                : null
             : activeCommand.id === "effort"
               ? session.agent === "Codex"
                 ? codexReasoningEffortSlashState(session, rawOptionQuery)

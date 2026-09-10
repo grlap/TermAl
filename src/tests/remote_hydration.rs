@@ -2456,6 +2456,7 @@ fn remote_session_create_forwards_configured_default_model() {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("test listener should bind");
     let port = listener.local_addr().expect("listener addr").port();
     let remote_session = Session {
+        opencode_approval_mode: None,
         id: "remote-session-default-model".to_owned(),
         name: "Remote Default Model".to_owned(),
         emoji: Agent::Codex.avatar().to_owned(),
@@ -2517,6 +2518,7 @@ fn remote_session_create_forwards_configured_default_model() {
     };
     state
         .update_app_settings(UpdateAppSettingsRequest {
+            default_opencode_approval_mode: None,
             default_codex_model: Some("gpt-5.5".to_owned()),
             default_claude_model: None,
             default_cursor_model: None,
@@ -2572,6 +2574,7 @@ fn remote_session_create_forwards_configured_default_model() {
 
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Codex),
             name: Some("Remote Default Model".to_owned()),
             workdir: None,

@@ -193,6 +193,8 @@ impl StateInner {
                     .supports_gemini_approval_mode()
                     .then_some(default_gemini_approval_mode()),
                 opencode_model,
+                opencode_approval_mode: agent.supports_opencode_settings()
+                    .then_some(self.preferences.default_opencode_approval_mode),
                 opencode_effort: agent
                     .supports_opencode_settings()
                     .then(|| OPENCODE_CONFIG_AUTO.to_owned()),

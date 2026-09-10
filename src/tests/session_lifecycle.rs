@@ -173,6 +173,7 @@ fn creates_claude_sessions_with_requested_plan_mode() {
 
     let response = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Claude),
             name: Some("Plan Claude".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -970,6 +971,7 @@ fn killing_shared_codex_session_does_not_reset_other_shared_sessions_when_interr
     let first_session_id = test_session_id(&state, Agent::Codex);
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Codex),
             name: Some("Codex Two".to_owned()),
             workdir: Some("/tmp".to_owned()),

@@ -239,6 +239,8 @@ function renderOpenCodePanel({
     ...render(
       <OpenCodePreferencesPanel
         defaultOpenCodeModel={defaultModel}
+        defaultOpenCodeApprovalMode="ask"
+        onSelectApprovalMode={vi.fn()}
         onSelectModel={onSelectModel}
         sessions={sessions}
       />,

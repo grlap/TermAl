@@ -125,6 +125,7 @@ function makeParams(): UseAppLiveStateParams {
       setDefaultCodexModel: set, setDefaultCodexSandboxMode: set,
       setDefaultCodexApprovalPolicy: set, setDefaultClaudeModel: set,
       setDefaultCursorModel: set, setDefaultGeminiModel: set, setDefaultOpenCodeModel: set,
+      setDefaultOpenCodeApprovalMode: set,
       setDefaultCodexReasoningEffort: set,
       setDefaultClaudeApprovalMode: set, setDefaultClaudeEffort: set,
       setRemoteConfigs: set, setTelegramConfig: set, setEngramHostSettings: set,

@@ -5690,6 +5690,7 @@ fn terminal_read_only_delegations_do_not_keep_child_session_write_blocked() {
             .update_session_settings(
                 child_session_id,
                 UpdateSessionSettingsRequest {
+                    opencode_approval_mode: None,
                     name: Some(name.to_owned()),
                     model: None,
                     approval_policy: None,

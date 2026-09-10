@@ -540,8 +540,6 @@ export function OrchestratorTemplatesPanel({
               ...session,
               agent: nextAgent,
               model: session.agent === nextAgent ? session.model : "",
-              autoApprove:
-                nextAgent === "OpenCode" ? false : session.autoApprove,
             }
           : session,
       ),
@@ -1692,7 +1690,6 @@ export function OrchestratorTemplatesPanel({
                               id={`session-auto-approve-${session.id}`}
                               type="checkbox"
                               checked={session.autoApprove}
-                              disabled={session.agent === "OpenCode"}
                               onChange={(event) =>
                                 setSessionField(
                                   session.id,
@@ -1702,9 +1699,7 @@ export function OrchestratorTemplatesPanel({
                               }
                             />
                             <span>
-                              {session.agent === "OpenCode"
-                                ? "OpenCode always shows approval cards"
-                                : "Auto-approve this session's tool calls"}
+                              Auto-approve this session's tool calls
                             </span>
                           </label>
                         </div>

@@ -61,6 +61,7 @@ export type CreateConversationMarkerHandlerResult =
   | Promise<boolean | void>;
 
 export type SessionSettingsField =
+  | "opencodeApprovalMode"
   | "model"
   | "sandboxMode"
   | "approvalPolicy"

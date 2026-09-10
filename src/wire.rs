@@ -562,6 +562,8 @@ struct DeleteConversationMarkerResponse {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Session {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    opencode_approval_mode: Option<OpenCodeApprovalMode>,
     id: String,
     name: String,
     emoji: String,
@@ -672,6 +674,8 @@ struct Session {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct StateSessionSummary {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    opencode_approval_mode: Option<OpenCodeApprovalMode>,
     id: String,
     name: String,
     emoji: String,
@@ -918,6 +922,15 @@ impl CursorMode {
     }
 }
 
+/// TermAl-owned OpenCode permission policy, independent of dynamic ACP modes.
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum OpenCodeApprovalMode {
+    #[default]
+    Ask,
+    AutoApprove,
+}
+
 /// Enumerates Gemini approval modes.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -1039,6 +1052,7 @@ struct CodexAppRequestSubmissionRequest {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CreateSessionRequest {
+    opencode_approval_mode: Option<OpenCodeApprovalMode>,
     agent: Option<Agent>,
     name: Option<String>,
     workdir: Option<String>,
@@ -1599,6 +1613,8 @@ impl UpdateProjectEngramSettingsRequest {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct UpdateAppSettingsRequest {
+    #[serde(rename = "defaultOpenCodeApprovalMode")]
+    default_opencode_approval_mode: Option<OpenCodeApprovalMode>,
     default_codex_model: Option<String>,
     default_codex_sandbox_mode: Option<CodexSandboxMode>,
     default_codex_approval_policy: Option<CodexApprovalPolicy>,
@@ -1905,6 +1921,7 @@ struct FollowupDelegationRequest {
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct UpdateSessionSettingsRequest {
+    opencode_approval_mode: Option<OpenCodeApprovalMode>,
     name: Option<String>,
     model: Option<String>,
     approval_policy: Option<CodexApprovalPolicy>,

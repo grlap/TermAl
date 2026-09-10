@@ -118,6 +118,7 @@ fn lightweight_state_agent_setup_failure_seam_rejects_session_creation() {
         ));
 
     let error = match state.create_session(CreateSessionRequest {
+        opencode_approval_mode: None,
         agent: Some(Agent::OpenCode),
         name: Some("Rejected OpenCode".to_owned()),
         workdir: Some("/tmp".to_owned()),
@@ -143,6 +144,7 @@ fn lightweight_state_session_setup_does_not_require_the_optional_cli() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::OpenCode),
             name: Some("Hermetic OpenCode".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -265,6 +267,7 @@ fn update_app_settings_refreshes_invalidated_agent_readiness_cache() {
 
     let updated = state
         .update_app_settings(UpdateAppSettingsRequest {
+            default_opencode_approval_mode: None,
             default_codex_model: None,
             default_claude_model: None,
             default_cursor_model: None,
@@ -383,6 +386,7 @@ fn update_app_settings_sse_matches_api_response() {
     };
     let api_response = state
         .update_app_settings(UpdateAppSettingsRequest {
+            default_opencode_approval_mode: None,
             default_codex_model: None,
             default_claude_model: None,
             default_cursor_model: None,
@@ -436,6 +440,7 @@ fn create_session_refreshes_agent_readiness_cache() {
     let mut delta_events = state.subscribe_delta_events();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Codex),
             name: Some("Cache Test".to_owned()),
             workdir: Some("/tmp".to_owned()),

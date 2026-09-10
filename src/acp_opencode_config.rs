@@ -175,7 +175,7 @@ fn reconcile_opencode_config_option(
                 .unwrap_or_else(|| OPENCODE_CONFIG_AUTO.to_owned());
             let fallback_display = current_value.as_deref().unwrap_or(OPENCODE_CONFIG_AUTO);
             notices.push(format!(
-                "OpenCode rejected {option_id} `{requested_selection}`: {err}. \
+                "OpenCode rejected {option_id} `{requested_selection}`: {err:#}. \
                  The session continues on `{fallback_display}`."
             ));
             return Ok((fallback_selection, current_value));
@@ -662,7 +662,7 @@ fn apply_opencode_dependent_selection(
                 requested_selection,
                 current_value,
                 options,
-                &format!("rejected the selection: {err}"),
+                &format!("rejected the selection: {err:#}"),
                 None,
                 execution_deadline,
             )

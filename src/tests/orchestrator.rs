@@ -1563,6 +1563,7 @@ fn blocked_session_manual_recovery_preserves_user_prompt_fifo_after_plain_stop_p
 
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Claude),
             name: Some("Blocked FIFO".to_owned()),
             workdir: Some(state.default_workdir.clone()),
@@ -1724,6 +1725,7 @@ fn blocked_session_manual_recovery_drops_stale_orchestrator_and_preserves_user_f
 
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Claude),
             name: Some("Blocked Mixed Queue".to_owned()),
             workdir: Some(state.default_workdir.clone()),
@@ -2948,7 +2950,7 @@ fn orchestrator_template_draft_round_trips_through_template_helpers() {
 }
 
 #[test]
-fn opencode_orchestrator_nodes_reject_misleading_automation_and_unsafe_models() {
+fn opencode_orchestrator_nodes_support_automation_and_reject_unsafe_models() {
     let base = OrchestratorSessionTemplate {
         id: "opencode".to_owned(),
         name: "OpenCode".to_owned(),
@@ -2959,13 +2961,8 @@ fn opencode_orchestrator_nodes_reject_misleading_automation_and_unsafe_models() 
         input_mode: OrchestratorSessionInputMode::Queue,
         position: OrchestratorNodePosition { x: 0.0, y: 0.0 },
     };
-    let automation_error = normalize_orchestrator_session_template(base.clone())
-        .expect_err("OpenCode auto-approve should be rejected");
-    assert!(
-        automation_error
-            .message
-            .contains("cannot auto-approve tool calls")
-    );
+    let normalized = normalize_orchestrator_session_template(base.clone()).unwrap();
+    assert!(normalized.auto_approve);
 
     let model_error = normalize_orchestrator_session_template(OrchestratorSessionTemplate {
         auto_approve: false,

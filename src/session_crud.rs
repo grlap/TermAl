@@ -3591,6 +3591,9 @@ impl AppState {
         mut validate_agent_session_setup: impl FnMut(Agent, &str) -> Result<(), String>,
     ) -> Result<CreateSessionResponse, ApiError> {
         let agent = request.agent.unwrap_or(Agent::Codex);
+        if request.opencode_approval_mode.is_some() && agent != Agent::OpenCode {
+            return Err(ApiError::bad_request("opencodeApprovalMode is only supported by OpenCode"));
+        }
         let has_explicit_project = request.project_id.is_some();
         let requested_workdir = request
             .workdir
@@ -3668,7 +3671,7 @@ impl AppState {
                     || request.gemini_approval_mode.is_some()
                 {
                     return Err(ApiError::bad_request(
-                        "OpenCode sessions only support model settings at creation; choose the dynamic mode after OpenCode reports its live options",
+                        "OpenCode sessions only support model and OpenCode approval settings at creation; choose the dynamic mode after OpenCode reports its live options",
                     ));
                 }
             }
@@ -3759,6 +3762,11 @@ impl AppState {
         };
         let mut record =
             inner.create_session(agent, requested_name, workdir, project_id, requested_model);
+        if agent == Agent::OpenCode {
+            if let Some(mode) = request.opencode_approval_mode {
+                record.session.opencode_approval_mode = Some(mode);
+            }
+        }
         if record.session.agent.supports_codex_prompt_settings() {
             if let Some(sandbox_mode) = request.sandbox_mode {
                 record.codex_sandbox_mode = sandbox_mode;
@@ -3906,6 +3914,13 @@ impl AppState {
             Agent::OpenCode,
             |preferences| &mut preferences.default_opencode_model,
         )?;
+
+        if let Some(mode) = request.default_opencode_approval_mode {
+            if inner.preferences.default_opencode_approval_mode != mode {
+                inner.preferences.default_opencode_approval_mode = mode;
+                changed = true;
+            }
+        }
 
         if let Some(default_codex_reasoning_effort) = request.default_codex_reasoning_effort {
             if inner.preferences.default_codex_reasoning_effort != default_codex_reasoning_effort {

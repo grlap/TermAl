@@ -42,6 +42,8 @@ export type ComposerDraftAttachment = Readonly<{
 }>;
 
 export type ComposerSessionSnapshot = Readonly<{
+  status: Session["status"];
+  opencodeApprovalMode?: Session["opencodeApprovalMode"];
   approvalPolicy?: ApprovalPolicy | null;
   agent: AgentType;
   agentCommandsRevision?: number;
@@ -71,6 +73,7 @@ export type ComposerSessionSnapshot = Readonly<{
 }>;
 
 export type SessionSummarySnapshot = Readonly<{
+  opencodeApprovalMode?: Session["opencodeApprovalMode"];
   approvalPolicy?: ApprovalPolicy | null;
   agent: AgentType;
   agentCommandsRevision?: number;
@@ -494,6 +497,7 @@ function buildComposerSessionSnapshot(
     previous.claudeApprovalMode === session.claudeApprovalMode &&
     previous.geminiApprovalMode === session.geminiApprovalMode &&
     previous.opencodeModel === session.opencodeModel &&
+    previous.opencodeApprovalMode === session.opencodeApprovalMode &&
     previous.opencodeEffort === session.opencodeEffort &&
     previous.opencodeCurrentEffort === session.opencodeCurrentEffort &&
     previous.opencodeEffortOptions === nextOpenCodeEffortOptions &&
@@ -503,7 +507,8 @@ function buildComposerSessionSnapshot(
     previous.agentCommandsRevision === session.agentCommandsRevision &&
     previous.committedDraft === committedDraft &&
     previous.draftAttachments === nextDraftAttachments &&
-    previous.promptHistory === promptHistory
+    previous.promptHistory === promptHistory &&
+    previous.status === session.status
   ) {
     return previous;
   }
@@ -521,6 +526,7 @@ function buildComposerSessionSnapshot(
     draftAttachments: nextDraftAttachments,
     geminiApprovalMode: session.geminiApprovalMode,
     opencodeModel: session.opencodeModel,
+    opencodeApprovalMode: session.opencodeApprovalMode,
     opencodeEffort: session.opencodeEffort,
     opencodeCurrentEffort: session.opencodeCurrentEffort,
     opencodeEffortOptions: nextOpenCodeEffortOptions,
@@ -532,6 +538,7 @@ function buildComposerSessionSnapshot(
     modelOptions: nextModelOptions,
     name: session.name,
     promptHistory,
+    status: session.status,
     reasoningEffort: session.reasoningEffort,
     sandboxMode: session.sandboxMode,
     workdir: session.workdir,
@@ -668,6 +675,7 @@ function buildSessionSummarySnapshot(
     previous.claudeApprovalMode === session.claudeApprovalMode &&
     previous.geminiApprovalMode === session.geminiApprovalMode &&
     previous.opencodeModel === session.opencodeModel &&
+    previous.opencodeApprovalMode === session.opencodeApprovalMode &&
     previous.opencodeEffort === session.opencodeEffort &&
     previous.opencodeCurrentEffort === session.opencodeCurrentEffort &&
     previous.opencodeEffortOptions === nextOpenCodeEffortOptions &&
@@ -695,6 +703,7 @@ function buildSessionSummarySnapshot(
     externalSessionId: session.externalSessionId,
     geminiApprovalMode: session.geminiApprovalMode,
     opencodeModel: session.opencodeModel,
+    opencodeApprovalMode: session.opencodeApprovalMode,
     opencodeEffort: session.opencodeEffort,
     opencodeCurrentEffort: session.opencodeCurrentEffort,
     opencodeEffortOptions: nextOpenCodeEffortOptions,

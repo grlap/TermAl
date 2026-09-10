@@ -1,3 +1,4 @@
+import type { OpenCodeApprovalMode } from "./types";
 // app-preferences-state.ts
 //
 // Owns: the React state + apply/persist side-effect orchestration
@@ -117,6 +118,8 @@ export function useAppPreferencesState(
   const [defaultCursorModel, setDefaultCursorModel] = useState("default");
   const [defaultGeminiModel, setDefaultGeminiModel] = useState("default");
   const [defaultOpenCodeModel, setDefaultOpenCodeModel] = useState("default");
+  const [defaultOpenCodeApprovalMode, setDefaultOpenCodeApprovalMode] =
+    useState<OpenCodeApprovalMode>("ask");
   const [defaultCodexReasoningEffort, setDefaultCodexReasoningEffort] =
     useState<CodexReasoningEffort>(DEFAULT_CODEX_REASONING_EFFORT);
   const [defaultClaudeApprovalMode, setDefaultClaudeApprovalMode] =
@@ -213,6 +216,8 @@ export function useAppPreferencesState(
     defaultGeminiModel,
     setDefaultGeminiModel,
     defaultOpenCodeModel,
+    defaultOpenCodeApprovalMode,
+    setDefaultOpenCodeApprovalMode,
     setDefaultOpenCodeModel,
     defaultCodexReasoningEffort,
     setDefaultCodexReasoningEffort,

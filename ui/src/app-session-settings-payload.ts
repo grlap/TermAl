@@ -1,3 +1,4 @@
+import type { OpenCodeApprovalMode } from "./types";
 // Owns client-side construction of session-settings API payloads.
 // Does not own optimistic UI projection, rollback, or action-state adoption;
 // see app-session-settings-optimism.ts for the sibling local projection path.
@@ -33,6 +34,7 @@ export type SessionSettingsPayload = {
   geminiApprovalMode?: GeminiApprovalMode;
   opencodeEffort?: string;
   opencodeMode?: string;
+  opencodeApprovalMode?: OpenCodeApprovalMode;
 };
 
 export function buildSessionSettingsPayload(
@@ -106,6 +108,9 @@ export function buildSessionSettingsPayload(
       }
       return null;
     case "OpenCode":
+      if (field === "opencodeApprovalMode") {
+        return { opencodeApprovalMode: value as OpenCodeApprovalMode };
+      }
       if (field === "model") {
         return { model: normalizedModelValue ?? (value as string) };
       }

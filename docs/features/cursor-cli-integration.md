@@ -16,6 +16,31 @@ Cursor sessions now support live model discovery, session-scoped `/model` and
 `/mode` controls, Prompt-tab settings, and standard approval handling through
 the same ACP runtime plumbing that also serves Gemini.
 
+### Model discovery and session continuity
+
+Verified with Cursor `2026.09.08-6caf4ff`: a session allocated only for model
+discovery cannot be loaded after the ACP process exits (`-32602`, with
+`data.message` reporting that the session was not found). A control session
+that completed a prompt could be loaded by a new process.
+
+TermAl therefore does not retain a fresh model-discovery session as a
+conversation or persist its ID. The first prompt creates its own session with
+the selected settings. Refreshing an existing conversation preserves its ID.
+If an older TermAl version has already saved an unavailable Cursor ID, create
+a new Cursor session; continuation failures preserve the old transcript and ID.
+
+After configuration succeeds, TermAl persists the model confirmed by the setter
+(or its canonical requested value when the acknowledgement has no config data).
+It does not restore the earlier `session/new` or `session/load` default over that
+value. The chosen model survives a configuration notification received before
+the acknowledgement and is used to set up a restarted runtime.
+When the requested model is absent from the catalog, the runtime's reported
+current model remains authoritative.
+
+Live model and mode changes use `session/set_config_option` with `configId`.
+`optionId` is a permission-response field and is rejected here by Cursor.
+ACP failures include the rejected method and the provider's error data.
+
 ## Problem
 
 Cursor CLI is now wired through session creation, runtime spawning, message

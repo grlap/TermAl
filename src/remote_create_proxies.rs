@@ -241,6 +241,7 @@ impl AppState {
                 "claudeApprovalMode": request.claude_approval_mode,
                 "claudeEffort": request.claude_effort,
                 "geminiApprovalMode": request.gemini_approval_mode,
+                "opencodeApprovalMode": request.opencode_approval_mode,
             })),
         )
         .map_err(remote_create_authority_error)?;

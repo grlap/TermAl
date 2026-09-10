@@ -47,6 +47,7 @@ function makeStateResponse(revision: number): StateResponse {
       defaultCursorModel: "default",
       defaultGeminiModel: "default",
       defaultOpenCodeModel: "default",
+      defaultOpenCodeApprovalMode: "ask",
       defaultCodexReasoningEffort: "medium",
       defaultClaudeApprovalMode: "ask",
       defaultClaudeEffort: "default",
@@ -154,6 +155,7 @@ function makeSessionActionsParams(
       defaultGeminiApprovalMode: "default",
       defaultGeminiModel: "default",
       defaultOpenCodeModel: "default",
+      defaultOpenCodeApprovalMode: "ask",
     },
     refs,
     setters: {
@@ -252,6 +254,21 @@ const MODEL_PICKER_AGENT_CASES = [
 }>;
 
 describe("useAppSessionActions", () => {
+  it("applies a creation override only to that session and retains the app default for later creates", async () => {
+    const createSessionSpy = vi.spyOn(api, "createSession").mockResolvedValue({
+      revision: 6,
+      serverInstanceId: "server-a",
+      session: makeSession("session-new", { agent: "OpenCode" }),
+    } as Awaited<ReturnType<typeof api.createSession>>);
+    const params = makeSessionActionsParams();
+    params.defaults.defaultOpenCodeApprovalMode = "ask";
+    const actions = useAppSessionActions(params);
+    await actions.handleNewSession({ agent: "OpenCode", opencodeApprovalMode: "auto-approve" });
+    await actions.handleNewSession({ agent: "OpenCode" });
+    expect(createSessionSpy).toHaveBeenNthCalledWith(1, expect.objectContaining({ opencodeApprovalMode: "auto-approve" }));
+    expect(createSessionSpy).toHaveBeenNthCalledWith(2, expect.objectContaining({ opencodeApprovalMode: "ask" }));
+    expect(params.defaults.defaultOpenCodeApprovalMode).toBe("ask");
+  });
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -387,6 +404,7 @@ describe("useAppSessionActions", () => {
   it("preserves OpenCode authority, reasoning variant, and mode when cloning a session", async () => {
     const source = makeSession("session-opencode-source", {
       agent: "OpenCode",
+      opencodeApprovalMode: "auto-approve",
       model: "openai/gpt-5.6-sol",
       opencodeModel: "auto",
       opencodeEffort: "high",
@@ -428,6 +446,7 @@ describe("useAppSessionActions", () => {
       expect.objectContaining({
         agent: "OpenCode",
         model: "auto",
+        opencodeApprovalMode: "auto-approve",
       }),
     );
     expect(updateSessionSettingsSpy).toHaveBeenCalledWith(clone.id, {

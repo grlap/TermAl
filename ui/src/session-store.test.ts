@@ -58,8 +58,34 @@ function createDraftAttachment(
 }
 
 describe("session-store composer snapshots", () => {
+  it("updates the OpenCode slash composer when the session becomes busy", () => {
+    const initial = createSession({ agent: "OpenCode", status: "idle" });
+    const sync = (session: Session) => syncComposerSessionsStore({
+      sessions: [session], draftsBySessionId: {}, draftAttachmentsBySessionId: {},
+    });
+    sync(initial);
+    const composer = getComposerSessionSnapshotForTesting(initial.id);
+    sync({ ...initial, status: "active" });
+    expect(getComposerSessionSnapshotForTesting(initial.id)).not.toBe(composer);
+    expect(getComposerSessionSnapshotForTesting(initial.id)?.status).toBe("active");
+  });
   beforeEach(() => {
     resetSessionStoreForTesting();
+  });
+
+  it("publishes OpenCode approval changes to composer and summary subscribers", () => {
+    const initial = createSession({agent: "OpenCode", opencodeApprovalMode: "ask"});
+    const sync = (session: Session) => syncComposerSessionsStore({
+      draftAttachmentsBySessionId: {}, draftsBySessionId: {}, sessions: [session],
+    });
+    sync(initial);
+    const composer = getComposerSessionSnapshotForTesting(initial.id);
+    const summary = getSessionSummarySnapshotForTesting(initial.id);
+    sync({...initial, opencodeApprovalMode: "auto-approve"});
+    expect(getComposerSessionSnapshotForTesting(initial.id)).not.toBe(composer);
+    expect(getSessionSummarySnapshotForTesting(initial.id)).not.toBe(summary);
+    expect(getComposerSessionSnapshotForTesting(initial.id)?.opencodeApprovalMode).toBe("auto-approve");
+    expect(getSessionSummarySnapshotForTesting(initial.id)?.opencodeApprovalMode).toBe("auto-approve");
   });
 
   it("updates composer and summary snapshots when Codex Fast mode changes", () => {

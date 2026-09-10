@@ -1,3 +1,4 @@
+import type { OpenCodeApprovalMode } from "./types";
 // Owns: exported type contracts for the useAppLiveState hook.
 // Does not own: live transport, adoption logic, retry scheduling, or hydration.
 // Split from: ui/src/app-live-state.ts.
@@ -155,6 +156,7 @@ export type UseAppLiveStatePreferenceSetters = {
   setDefaultCursorModel: Dispatch<SetStateAction<string>>;
   setDefaultGeminiModel: Dispatch<SetStateAction<string>>;
   setDefaultOpenCodeModel: Dispatch<SetStateAction<string>>;
+  setDefaultOpenCodeApprovalMode: Dispatch<SetStateAction<OpenCodeApprovalMode>>;
   setDefaultCodexReasoningEffort: Dispatch<
     SetStateAction<CodexReasoningEffort>
   >;

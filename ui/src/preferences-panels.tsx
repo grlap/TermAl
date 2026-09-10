@@ -1,3 +1,4 @@
+import type { OpenCodeApprovalMode } from "./types";
 import {
   useEffect,
   useMemo,
@@ -1541,12 +1542,21 @@ export function GeminiPreferencesPanel({
   );
 }
 
+export const OPENCODE_APPROVAL_OPTIONS = [
+  { label: "Ask", value: "ask", description: "Show tool permission requests" },
+  { label: "Auto-approve", value: "auto-approve", description: "Approve individual tool requests automatically" },
+] satisfies readonly { label: string; value: OpenCodeApprovalMode; description: string }[];
+
 export function OpenCodePreferencesPanel({
   defaultOpenCodeModel,
+  defaultOpenCodeApprovalMode,
+  onSelectApprovalMode,
   onSelectModel,
   sessions = [],
 }: {
   defaultOpenCodeModel: string;
+  defaultOpenCodeApprovalMode: OpenCodeApprovalMode;
+  onSelectApprovalMode: (mode: OpenCodeApprovalMode) => void;
   onSelectModel: (model: string) => void;
   sessions?: readonly Session[];
 }) {
@@ -1576,6 +1586,17 @@ export function OpenCodePreferencesPanel({
             value={defaultOpenCodeModel}
             onChange={onSelectModel}
           />
+          <div className="session-control-group">
+            <label className="session-control-label" htmlFor="default-opencode-approval">Approval mode</label>
+            <ThemedCombobox id="default-opencode-approval"
+              value={defaultOpenCodeApprovalMode}
+              options={OPENCODE_APPROVAL_OPTIONS}
+              onChange={(value) => {
+                const option = OPENCODE_APPROVAL_OPTIONS.find((option) => option.value === value);
+                if (option) onSelectApprovalMode(option.value);
+              }} />
+            <p className="session-control-hint">Default for new sessions, including agent-created OpenCode delegations. Auto-approve allows tool operations, not answers to human questions.</p>
+          </div>
           <p className="session-control-hint">
             OpenCode discovers its available models and modes after the session starts. Explicit
             TermAl selections are re-applied before prompts; unavailable saved values visibly

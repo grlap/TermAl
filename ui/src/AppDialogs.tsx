@@ -21,6 +21,7 @@ import {
   remoteConnectionLabel,
   remoteDisplayName,
 } from "./remotes";
+import type { OpenCodeApprovalMode } from "./types";
 import {
   ThemePreferencesPanel,
   AppearancePreferencesPanel,
@@ -33,6 +34,7 @@ import {
   OpenCodePreferencesPanel,
   CURSOR_MODE_OPTIONS,
   GEMINI_APPROVAL_OPTIONS,
+  OPENCODE_APPROVAL_OPTIONS,
 } from "./preferences-panels";
 import { TelegramPreferencesPanel } from "./preferences/telegram-preferences-panel";
 import { EngramPreferencesPanel } from "./preferences/engram-preferences-panel";
@@ -102,7 +104,7 @@ type AppDialogsProps = {
   isCreateSessionOpen: boolean;
   isCreating: boolean;
   closeCreateSessionDialog: () => void;
-  handleCreateSessionDialogSubmit: () => Promise<void>;
+  handleCreateSessionDialogSubmit: (approvalMode?: OpenCodeApprovalMode) => Promise<void>;
   newSessionAgent: AgentType;
   onChangeNewSessionAgent: (nextValue: AgentType) => void;
   defaultCodexModel: string;
@@ -122,6 +124,8 @@ type AppDialogsProps = {
   defaultGeminiApprovalMode: GeminiApprovalMode;
   onChangeDefaultGeminiApprovalMode: (nextValue: GeminiApprovalMode) => void;
   defaultOpenCodeModel: string;
+  defaultOpenCodeApprovalMode: OpenCodeApprovalMode;
+  handleDefaultOpenCodeApprovalModeChange: (value: OpenCodeApprovalMode) => void;
   handleDefaultOpenCodeModelChange: (nextValue: string) => void;
   createSessionProjectId: string;
   createSessionProjectOptions: readonly ComboboxOption[];
@@ -406,6 +410,8 @@ export function AppDialogs({
   defaultGeminiApprovalMode,
   onChangeDefaultGeminiApprovalMode,
   defaultOpenCodeModel,
+  defaultOpenCodeApprovalMode,
+  handleDefaultOpenCodeApprovalModeChange,
   handleDefaultOpenCodeModelChange,
   createSessionProjectId,
   createSessionProjectOptions,
@@ -474,6 +480,11 @@ export function AppDialogs({
   defaultClaudeApprovalMode,
   setDefaultClaudeApprovalMode,
 }: AppDialogsProps): JSX.Element {
+  const [createOpenCodeApprovalMode, setCreateOpenCodeApprovalMode] =
+    useState<OpenCodeApprovalMode | null>(null);
+  useLayoutEffect(() => {
+    if (!isCreateSessionOpen) setCreateOpenCodeApprovalMode(null);
+  }, [isCreateSessionOpen]);
   useDialogEscapeDismiss({
     isOpen: isCreateSessionOpen,
     canDismiss: !isCreating,
@@ -705,7 +716,11 @@ export function AppDialogs({
               className="create-session-dialog-body"
               onSubmit={(event) => {
                 event.preventDefault();
-                void handleCreateSessionDialogSubmit();
+                void handleCreateSessionDialogSubmit(
+                  newSessionAgent === "OpenCode"
+                    ? createOpenCodeApprovalMode ?? defaultOpenCodeApprovalMode
+                    : undefined,
+                );
               }}
             >
               {requestError ? (
@@ -739,6 +754,22 @@ export function AppDialogs({
                   {createSessionModelHint(newSessionAgent)}
                 </p>
               </div>
+
+              {newSessionAgent === "OpenCode" ? (
+                <div className="create-session-field">
+                  <label className="session-control-label" htmlFor="create-opencode-approval">OpenCode approvals</label>
+                  <ThemedCombobox id="create-opencode-approval"
+                    value={createOpenCodeApprovalMode ?? defaultOpenCodeApprovalMode}
+                    options={OPENCODE_APPROVAL_OPTIONS}
+                    onChange={(value) => {
+                      if (value === "ask" || value === "auto-approve") {
+                        setCreateOpenCodeApprovalMode(value);
+                      }
+                    }}
+                    disabled={isCreating} />
+                  <p className="create-session-field-hint">Applies only to this new session; your Settings default is unchanged. Auto-approve permits tool operations without approval cards. Human questions remain interactive.</p>
+                </div>
+              ) : null}
 
               {newSessionAgent === "Codex" ? (
                 <div className="create-session-field">
@@ -1187,6 +1218,8 @@ export function AppDialogs({
               ) : settingsTab === "opencode" ? (
                 <OpenCodePreferencesPanel
                   defaultOpenCodeModel={defaultOpenCodeModel}
+                  defaultOpenCodeApprovalMode={defaultOpenCodeApprovalMode}
+                  onSelectApprovalMode={handleDefaultOpenCodeApprovalModeChange}
                   onSelectModel={handleDefaultOpenCodeModelChange}
                   sessions={sessions}
                 />

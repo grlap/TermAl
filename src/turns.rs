@@ -405,6 +405,8 @@ struct AppPreferences {
         rename = "defaultOpenCodeModel"
     )]
     default_opencode_model: String,
+    #[serde(default, rename = "defaultOpenCodeApprovalMode")]
+    default_opencode_approval_mode: OpenCodeApprovalMode,
     #[serde(default = "default_codex_reasoning_effort")]
     default_codex_reasoning_effort: CodexReasoningEffort,
     #[serde(default = "default_claude_approval_mode")]
@@ -484,6 +486,7 @@ impl Default for AppPreferences {
             default_cursor_model: default_model_preference(),
             default_gemini_model: default_model_preference(),
             default_opencode_model: default_model_preference(),
+            default_opencode_approval_mode: OpenCodeApprovalMode::Ask,
             default_codex_reasoning_effort: default_codex_reasoning_effort(),
             default_claude_approval_mode: default_claude_approval_mode(),
             default_claude_effort: default_claude_effort(),

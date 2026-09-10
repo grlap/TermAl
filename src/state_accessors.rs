@@ -221,6 +221,7 @@ mod visible_session_hydration_error_tests {
 
         let local_session_id = state
             .create_session(CreateSessionRequest {
+                opencode_approval_mode: None,
                 name: Some("Local Session".to_owned()),
                 agent: Some(Agent::Codex),
                 workdir: Some(root.path().to_string_lossy().into_owned()),
@@ -259,6 +260,7 @@ mod visible_session_hydration_error_tests {
             opencode_current_effort: None,
             opencode_effort_options: Vec::new(),
             opencode_mode: None,
+            opencode_approval_mode: None,
             opencode_current_mode: None,
             opencode_mode_options: Vec::new(),
             external_session_id: None,
@@ -333,6 +335,7 @@ mod visible_session_hydration_error_tests {
         let _persist_shutdown = PersistWorkerShutdown(&state);
         let session_id = state
             .create_session(CreateSessionRequest {
+                opencode_approval_mode: None,
                 name: Some("Queued Session".to_owned()),
                 agent: Some(Agent::Codex),
                 workdir: Some(root.path().to_string_lossy().into_owned()),
@@ -520,6 +523,7 @@ mod visible_session_hydration_error_tests {
         let _persist_shutdown = PersistWorkerShutdown(&state);
         let session_id = state
             .create_session(CreateSessionRequest {
+                opencode_approval_mode: None,
                 name: Some("Active Session".to_owned()),
                 agent: Some(Agent::Codex),
                 workdir: Some(root.path().to_string_lossy().into_owned()),
@@ -670,6 +674,7 @@ impl AppState {
             opencode_current_effort: session.opencode_current_effort.clone(),
             opencode_effort_options: session.opencode_effort_options.clone(),
             opencode_mode: session.opencode_mode.clone(),
+            opencode_approval_mode: session.opencode_approval_mode,
             opencode_current_mode: session.opencode_current_mode.clone(),
             opencode_mode_options: session.opencode_mode_options.clone(),
             external_session_id: session.external_session_id.clone(),

@@ -7,6 +7,7 @@ import {
   codexFastSlashState,
   codexMcpSlashState,
   opencodeEffortSlashState,
+  opencodeApprovalSlashState,
   sessionModeSlashState,
   sessionModelSlashState,
   slashCommandsForSession,
@@ -30,6 +31,7 @@ describe("Claude effort slash choices", () => {
 describe("Codex Fast slash choices", () => {
   const session = {
     id: "session-codex",
+    status: "idle",
     agent: "Codex",
     agentCommandsRevision: 0,
     model: "gpt-5.5",
@@ -280,6 +282,7 @@ describe("Codex MCP slash status", () => {
 describe("OpenCode slash choices", () => {
   const session = {
     id: "session-opencode",
+    status: "idle",
     agent: "OpenCode",
     agentCommandsRevision: 0,
     model: "openai/gpt-5.6-sol",
@@ -305,7 +308,7 @@ describe("OpenCode slash choices", () => {
   it("exposes model, reasoning-variant, and mode commands", () => {
     expect(
       slashCommandsForSession(session).map((command) => command.id),
-    ).toEqual(expect.arrayContaining(["model", "effort", "mode"]));
+    ).toEqual(expect.arrayContaining(["model", "effort", "mode", "approvals"]));
     expect(sessionModeSlashState(session, "")?.items).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ value: "plan", isCurrent: true }),
@@ -322,6 +325,24 @@ describe("OpenCode slash choices", () => {
       ]),
     );
   });
+
+  it("keeps approvals independent of the dynamic mode and defaults legacy sessions to Ask", () => {
+    expect(opencodeApprovalSlashState(session, "").items).toEqual([
+      expect.objectContaining({field: "opencodeApprovalMode", value: "ask", isCurrent: true}),
+      expect.objectContaining({field: "opencodeApprovalMode", value: "auto-approve", isCurrent: false}),
+    ]);
+    expect(opencodeApprovalSlashState({...session, opencodeApprovalMode: "auto-approve"}, "auto").items)
+      .toEqual([expect.objectContaining({value: "auto-approve", isCurrent: true})]);
+  });
+
+  it.each(["active", "approval", "stopping"] as const)(
+    "offers no approval changes while OpenCode is %s",
+    (status) => {
+      const state = opencodeApprovalSlashState({ ...session, status }, "auto");
+      expect(state.items).toEqual([]);
+      expect(state.emptyMessage).toBe("Stop the current turn before changing OpenCode approvals.");
+    },
+  );
 
   it("marks selected authority and never offers arbitrary manual models", () => {
     const state = sessionModelSlashState(

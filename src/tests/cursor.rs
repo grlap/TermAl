@@ -19,6 +19,467 @@
 use super::*;
 
 #[test]
+fn cursor_model_discovery_does_not_save_an_unresumable_session() {
+    assert_cursor_model_discovery_and_restart(false);
+}
+
+#[test]
+fn cursor_model_discovery_preserves_notification_before_setter_ack() {
+    assert_cursor_model_discovery_and_restart(true);
+}
+
+fn assert_cursor_saved_model(state: &AppState, session_id: &str, expected: &str) {
+    let memory = state
+        .snapshot()
+        .sessions
+        .into_iter()
+        .find(|session| session.id == session_id)
+        .unwrap()
+        .model;
+    let saved = load_state(state.persistence_path.as_path())
+        .unwrap()
+        .unwrap();
+    let disk = &saved.sessions[saved.find_session_index(session_id).unwrap()]
+        .session
+        .model;
+    assert_eq!(
+        (memory.as_str(), disk.as_str()),
+        (expected, expected),
+        "selected model must survive in memory and load_state"
+    );
+}
+
+fn cursor_ack_selected_model(
+    state: &AppState,
+    session_id: &str,
+    pending: &AcpPendingRequestMap,
+    runtime: &Arc<Mutex<AcpRuntimeState>>,
+    notify_before_ack: bool,
+) {
+    let (_, sender) = take_pending_acp_request(pending);
+    if notify_before_ack {
+        let (input_tx, _input_rx) = mpsc::channel();
+        handle_acp_message(
+            &json!({
+                "method": "session/update",
+                "params": {"update": {
+                    "sessionUpdate": "config_options_update",
+                    "configOptions": [{"id":"model", "currentValue":"selected-model",
+                        "options":[{"value":"selected-model", "name":"Selected"}]}]
+                }}
+            }),
+            state,
+            session_id,
+            &RuntimeToken::Acp("cursor-model-test".to_owned()),
+            pending,
+            runtime,
+            &input_tx,
+            &mut AcpTurnState::default(),
+            &mut SessionRecorder::new(state.clone(), session_id.to_owned()),
+            AcpAgent::Cursor,
+        )
+        .unwrap();
+        assert_cursor_saved_model(state, session_id, "selected-model");
+    }
+    // An empty success response still acknowledges the requested model.
+    sender.send(Ok(json!({}))).unwrap();
+}
+
+fn assert_cursor_model_discovery_and_restart(notify_before_ack: bool) {
+    for restart_runtime in [false, true] {
+        let state = test_app_state();
+        let session_id = test_session_id(&state, Agent::Cursor);
+        state
+            .update_session_settings(
+                &session_id,
+                serde_json::from_value(json!({
+                    "model": "selected-model"
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+        let mut pending = Arc::new(Mutex::new(HashMap::new()));
+        let mut runtime = Arc::new(Mutex::new(AcpRuntimeState::default()));
+        let mut writer = SharedBufferWriter::default();
+        let initialize = json!({"protocolVersion":1,"agentCapabilities":{"loadSession":true}});
+        update_acp_runtime_capabilities(&runtime, &initialize);
+        let command = AcpPromptCommand {
+            cwd: "/tmp".to_owned(),
+            cursor_mode: Some(CursorMode::Agent),
+            model: "selected-model".to_owned(),
+            opencode_effort: None,
+            opencode_mode: None,
+            prompt: String::new(),
+            resume_session_id: None,
+        };
+        let worker_state = state.clone();
+        let worker_session = session_id.clone();
+        let worker_pending = pending.clone();
+        let worker_runtime = runtime.clone();
+        let mut worker_writer = writer.clone();
+        let mut prompt_command = command.clone();
+        let worker = std::thread::spawn(move || {
+            handle_acp_session_config_refresh(
+                &mut worker_writer,
+                &worker_pending,
+                &worker_state,
+                &worker_session,
+                &worker_runtime,
+                AcpAgent::Cursor,
+                command,
+            )
+        });
+        let (_, sender) = take_pending_acp_request(&pending);
+        sender
+            .send(Ok(json!({
+                "sessionId": "cursor-discovery-only",
+                "configOptions": [{
+                    "id": "model", "currentValue": "auto",
+                    "options": [{"value": "auto", "name": "Auto"},
+                                {"value": "selected-model", "name": "Selected"}]
+                }]
+            })))
+            .unwrap();
+        cursor_ack_selected_model(&state, &session_id, &pending, &runtime, notify_before_ack);
+        worker.join().unwrap().unwrap();
+        assert_cursor_saved_model(&state, &session_id, "selected-model");
+        let session = state
+            .snapshot()
+            .sessions
+            .into_iter()
+            .find(|session| session.id == session_id)
+            .unwrap();
+        assert!(
+            session.external_session_id.is_none(),
+            "a config-only Cursor id cannot survive a process restart"
+        );
+        assert_eq!(
+            session.model_options.len(),
+            2,
+            "discovery must still populate the picker"
+        );
+        assert!(runtime.lock().unwrap().current_session_id.is_none());
+        if restart_runtime {
+            // Replace all process-owned objects, not just already-empty session state.
+            assert!(runtime.lock().unwrap().capabilities.is_some());
+            pending = Arc::new(Mutex::new(HashMap::new()));
+            runtime = Arc::new(Mutex::new(AcpRuntimeState::default()));
+            writer = SharedBufferWriter::default();
+            assert!(writer.contents().is_empty());
+            update_acp_runtime_capabilities(&runtime, &initialize);
+        }
+
+        // The first real turn must create a conversation using the settings
+        // selected after discovery, on both a reused and a replacement process.
+        prompt_command.prompt = "Read the project".to_owned();
+        let saved = load_state(state.persistence_path.as_path())
+            .unwrap()
+            .unwrap();
+        let saved_record = &saved.sessions[saved.find_session_index(&session_id).unwrap()];
+        prompt_command.model = saved_record.session.model.clone();
+        prompt_command.resume_session_id = saved_record.external_session_id.clone();
+        let worker_state = state.clone();
+        let worker_session = session_id.clone();
+        let worker_pending = pending.clone();
+        let worker_runtime = runtime.clone();
+        let mut worker_writer = writer.clone();
+        let worker = std::thread::spawn(move || {
+            ensure_acp_session_ready(
+                &mut worker_writer,
+                &worker_pending,
+                &worker_state,
+                &worker_session,
+                &worker_runtime,
+                AcpAgent::Cursor,
+                &prompt_command,
+            )
+        });
+        let (_, sender) = take_pending_acp_request(&pending);
+        sender
+            .send(Ok(json!({
+                "sessionId": "cursor-conversation",
+                "configOptions": [{
+                    "id": "model", "currentValue": "auto",
+                    "options": [{"value": "selected-model", "name": "Selected"}]
+                }]
+            })))
+            .unwrap();
+        cursor_ack_selected_model(&state, &session_id, &pending, &runtime, notify_before_ack);
+        assert_eq!(worker.join().unwrap().unwrap(), "cursor-conversation");
+        assert_cursor_saved_model(&state, &session_id, "selected-model");
+        let requests: Vec<Value> = writer
+            .contents()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(
+            requests
+                .iter()
+                .map(|request| request["method"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            if restart_runtime {
+                vec!["session/new", "session/set_config_option"]
+            } else {
+                vec![
+                    "session/new",
+                    "session/set_config_option",
+                    "session/new",
+                    "session/set_config_option",
+                ]
+            }
+        );
+        assert_eq!(
+            requests.last().unwrap()["params"],
+            json!({
+                "sessionId": "cursor-conversation", "configId": "model", "value": "selected-model"
+            })
+        );
+        assert_eq!(
+            state
+                .snapshot()
+                .sessions
+                .into_iter()
+                .find(|s| s.id == session_id)
+                .unwrap()
+                .external_session_id
+                .as_deref(),
+            Some("cursor-conversation")
+        );
+
+        // Restart an established, nondefault conversation and derive the next
+        // command from disk. The new connection must load the saved ID and
+        // restore its chosen model even when load reports a different default.
+        assert_eq!(
+            runtime.lock().unwrap().current_session_id.as_deref(),
+            Some("cursor-conversation")
+        );
+        assert_cursor_model_resume(&state, &session_id, notify_before_ack);
+    }
+}
+
+#[test]
+fn cursor_model_resume_preserves_nondefault_persisted_selection() {
+    for notify_before_ack in [false, true] {
+        let state = test_app_state();
+        let session_id = test_session_id(&state, Agent::Cursor);
+        state
+            .update_session_settings(
+                &session_id,
+                serde_json::from_value(json!({
+                    "model":"selected-model"
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+        state
+            .set_external_session_id(&session_id, "cursor-conversation".to_owned())
+            .unwrap();
+        assert_cursor_model_resume(&state, &session_id, notify_before_ack);
+    }
+}
+
+fn assert_cursor_model_resume(state: &AppState, session_id: &str, notify_before_ack: bool) {
+    assert_cursor_saved_model(state, session_id, "selected-model");
+    let saved = load_state(state.persistence_path.as_path())
+        .unwrap()
+        .unwrap();
+    let saved_record = &saved.sessions[saved.find_session_index(&session_id).unwrap()];
+    let resume_command = AcpPromptCommand {
+        cwd: saved_record.session.workdir.clone(),
+        model: saved_record.session.model.clone(),
+        cursor_mode: saved_record.session.cursor_mode,
+        opencode_effort: None,
+        opencode_mode: None,
+        prompt: "Continue".to_owned(),
+        resume_session_id: saved_record.external_session_id.clone(),
+    };
+    let pending = Arc::new(Mutex::new(HashMap::new()));
+    let runtime = Arc::new(Mutex::new(AcpRuntimeState::default()));
+    let writer = SharedBufferWriter::default();
+    update_acp_runtime_capabilities(
+        &runtime,
+        &json!({"protocolVersion":1,"agentCapabilities":{"loadSession":true}}),
+    );
+    let worker_state = state.clone();
+    let worker_session = session_id.to_owned();
+    let worker_pending = pending.clone();
+    let worker_runtime = runtime.clone();
+    let mut worker_writer = writer.clone();
+    let worker = std::thread::spawn(move || {
+        ensure_acp_session_ready(
+            &mut worker_writer,
+            &worker_pending,
+            &worker_state,
+            &worker_session,
+            &worker_runtime,
+            AcpAgent::Cursor,
+            &resume_command,
+        )
+    });
+    let (_, sender) = take_pending_acp_request(&pending);
+    sender
+        .send(Ok(json!({"configOptions":[{
+            "id":"model", "currentValue":"auto",
+            "options":[{"value":"selected-model","name":"Selected"}]
+        }]})))
+        .unwrap();
+    cursor_ack_selected_model(&state, &session_id, &pending, &runtime, notify_before_ack);
+    assert_eq!(worker.join().unwrap().unwrap(), "cursor-conversation");
+    let requests: Vec<Value> = writer
+        .contents()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[0]["method"], "session/load");
+    assert_eq!(requests[0]["params"]["sessionId"], "cursor-conversation");
+    assert_eq!(requests[1]["params"]["value"], "selected-model");
+    assert_cursor_saved_model(&state, &session_id, "selected-model");
+}
+
+#[test]
+fn cursor_rpc_rejection_reports_method_and_provider_detail() {
+    let pending = Arc::new(Mutex::new(HashMap::new()));
+    let mut writer = SharedBufferWriter::default();
+    let request = start_acp_json_rpc_request(
+        &mut writer,
+        &pending,
+        "session/load",
+        json!({"sessionId": "missing"}),
+        AcpAgent::Cursor,
+    )
+    .unwrap();
+    let (_, sender) = take_pending_acp_request(&pending);
+    sender
+        .send(Err(AcpResponseError::JsonRpc(parse_acp_json_rpc_error(
+            &json!({
+                "code": -32602, "message": "Invalid params",
+                "data": {"message": "Session missing not found"}
+            }),
+        ))))
+        .unwrap();
+    let err =
+        wait_for_acp_json_rpc_response(&pending, request, "session/load", None, AcpAgent::Cursor)
+            .unwrap_err();
+    let detail = format!("{err:#}");
+    assert!(detail.contains("session/load"), "{detail}");
+    assert!(detail.contains("Session missing not found"), "{detail}");
+    assert_eq!(
+        acp_json_rpc_response_error(&err).unwrap().code,
+        Some(-32602)
+    );
+    assert!(!acp_error_is_transport_failure(&err));
+}
+
+#[test]
+fn cursor_model_setup_persists_confirmed_values_and_keeps_unknown_requests_unapplied() {
+    for (requested, acknowledgement, expected) in [
+        ("Selected", Some(json!({})), "selected-model"),
+        ("removed-model", None, "auto"),
+        ("auto", None, "auto"),
+        (
+            "Selected",
+            Some(json!({"configOptions":[{
+                "id":"model", "currentValue":"provider-normalized"
+            }]})),
+            "provider-normalized",
+        ),
+    ] {
+        let state = test_app_state();
+        let session_id = test_session_id(&state, Agent::Cursor);
+        let pending = Arc::new(Mutex::new(HashMap::new()));
+        let runtime = Arc::new(Mutex::new(AcpRuntimeState::default()));
+        let writer = SharedBufferWriter::default();
+        let worker_state = state.clone();
+        let worker_session = session_id.clone();
+        let worker_pending = pending.clone();
+        let mut worker_writer = writer.clone();
+        let worker = std::thread::spawn(move || {
+            ensure_acp_session_ready(
+                &mut worker_writer,
+                &worker_pending,
+                &worker_state,
+                &worker_session,
+                &runtime,
+                AcpAgent::Cursor,
+                &AcpPromptCommand {
+                    cwd: "/tmp".to_owned(),
+                    cursor_mode: Some(CursorMode::Agent),
+                    model: requested.to_owned(),
+                    opencode_effort: None,
+                    opencode_mode: None,
+                    prompt: "Read the project".to_owned(),
+                    resume_session_id: None,
+                },
+            )
+        });
+        let (_, sender) = take_pending_acp_request(&pending);
+        sender
+            .send(Ok(json!({
+                "sessionId":"cursor-model-control",
+                "configOptions":[{"id":"model", "currentValue":"auto", "options":[
+                    {"value":"auto","name":"Auto"},
+                    {"value":"selected-model","name":"Selected"}
+                ]}]
+            })))
+            .unwrap();
+        let requested_change = acknowledgement.is_some();
+        if let Some(acknowledgement) = acknowledgement {
+            let (_, sender) = take_pending_acp_request(&pending);
+            sender.send(Ok(acknowledgement)).unwrap();
+        }
+        worker.join().unwrap().unwrap();
+        assert_cursor_saved_model(&state, &session_id, expected);
+        let requests: Vec<Value> = writer
+            .contents()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(requests.len(), if requested_change { 2 } else { 1 });
+        if requested_change {
+            assert_eq!(
+                requests[1]["params"]["value"], "selected-model",
+                "the setter must send the canonical catalog value, not its display label"
+            );
+        }
+    }
+}
+
+#[test]
+fn cursor_live_model_change_uses_config_id() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Cursor);
+    let (runtime, input_rx) = test_acp_runtime_handle(AcpAgent::Cursor, "cursor-live-model");
+    {
+        let mut inner = state.inner.lock().unwrap();
+        let index = inner.find_session_index(&session_id).unwrap();
+        inner.sessions[index].runtime = SessionRuntime::Acp(runtime);
+        inner.sessions[index].external_session_id = Some("cursor-session".to_owned());
+    }
+    state
+        .update_session_settings(
+            &session_id,
+            serde_json::from_value(json!({
+                "model": "selected-model"
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+    let AcpRuntimeCommand::JsonRpcMessage(message) =
+        recv_within_guard(&input_rx, "Cursor model update").unwrap()
+    else {
+        panic!("expected a config request")
+    };
+    assert_eq!(message["method"], "session/set_config_option");
+    assert_eq!(
+        message["params"],
+        json!({
+            "sessionId": "cursor-session", "configId": "model", "value": "selected-model"
+        })
+    );
+}
+
+#[test]
 fn acp_permission_does_not_infer_control_plane_identity_from_a_tool_name() {
     let state = test_app_state();
     let parent_session_id = test_session_id(&state, Agent::Codex);
@@ -197,6 +658,7 @@ fn syncs_cursor_model_options_from_acp_config() {
 
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Cursor),
             name: Some("Cursor ACP".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -244,6 +706,7 @@ fn cursor_agent_mode_auto_approves_acp_permission_requests() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Cursor),
             name: Some("Cursor Agent".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -304,6 +767,7 @@ fn cursor_ask_mode_queues_acp_permission_requests() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Cursor),
             name: Some("Cursor Ask".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -438,6 +902,7 @@ fn acp_structured_permission_requests_queue_and_resolve_in_arrival_order() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::OpenCode),
             name: Some("Structured ACP permissions".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -657,6 +1122,7 @@ fn cursor_permissions_remain_resolvable_out_of_arrival_order() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Cursor),
             name: Some("Cursor independent permissions".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -789,6 +1255,7 @@ fn cursor_plan_mode_rejects_acp_permission_requests() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Cursor),
             name: Some("Cursor Plan".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -849,6 +1316,7 @@ fn syncs_cursor_mode_from_acp_config_updates() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Cursor),
             name: Some("Cursor Config Sync".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -914,6 +1382,7 @@ fn syncs_cursor_mode_from_mode_updates() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Cursor),
             name: Some("Cursor Mode Sync".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -1045,6 +1514,7 @@ fn updates_live_cursor_mode_on_active_acp_sessions() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Cursor),
             name: Some("Cursor Live Mode".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -1074,6 +1544,7 @@ fn updates_live_cursor_mode_on_active_acp_sessions() {
         .update_session_settings(
             &created.session_id,
             UpdateSessionSettingsRequest {
+                opencode_approval_mode: None,
                 name: None,
                 model: None,
                 sandbox_mode: None,
@@ -1112,7 +1583,8 @@ fn updates_live_cursor_mode_on_active_acp_sessions() {
                 message.pointer("/params/sessionId"),
                 Some(&json!("cursor-session-1"))
             );
-            assert_eq!(message.pointer("/params/optionId"), Some(&json!("mode")));
+            assert_eq!(message.pointer("/params/configId"), Some(&json!("mode")));
+            assert!(message.pointer("/params/optionId").is_none());
             assert_eq!(message.pointer("/params/value"), Some(&json!("ask")));
         }
         _ => panic!("expected live Cursor mode update request"),

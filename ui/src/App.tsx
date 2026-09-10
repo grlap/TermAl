@@ -12,6 +12,7 @@ import {
 } from "react";
 import { isDialogBackdropDismissMouseDown } from "./dialog-backdrop-dismiss";
 import { DialogCloseIcon } from "./message-card-icons";
+import type { OpenCodeApprovalMode } from "./types";
 import {
   deleteProject,
   fetchGitDiff,
@@ -417,6 +418,8 @@ export default function App() {
     defaultGeminiModel,
     setDefaultGeminiModel,
     defaultOpenCodeModel,
+    defaultOpenCodeApprovalMode,
+    setDefaultOpenCodeApprovalMode,
     setDefaultOpenCodeModel,
     defaultCodexReasoningEffort,
     setDefaultCodexReasoningEffort,
@@ -943,6 +946,7 @@ export default function App() {
       setDefaultCursorModel,
       setDefaultGeminiModel,
       setDefaultOpenCodeModel,
+      setDefaultOpenCodeApprovalMode,
       setDefaultCodexReasoningEffort,
       setDefaultClaudeApprovalMode,
       setDefaultClaudeEffort,
@@ -1013,6 +1017,7 @@ export default function App() {
       defaultGeminiApprovalMode,
       defaultGeminiModel,
       defaultOpenCodeModel,
+      defaultOpenCodeApprovalMode,
     },
     refs: {
       isMountedRef,
@@ -1315,6 +1320,7 @@ export default function App() {
     defaultCursorModel?: string;
     defaultGeminiModel?: string;
     defaultOpenCodeModel?: string;
+    defaultOpenCodeApprovalMode?: OpenCodeApprovalMode;
     defaultCodexReasoningEffort?: CodexReasoningEffort;
     defaultClaudeApprovalMode?: ClaudeApprovalMode;
     defaultClaudeEffort?: ClaudeEffortLevel;
@@ -1426,6 +1432,11 @@ export default function App() {
 
     setDefaultOpenCodeModel(nextValue);
     void persistAppPreferences({ defaultOpenCodeModel: nextValue });
+  }
+
+  function handleDefaultOpenCodeApprovalModeChange(nextValue: OpenCodeApprovalMode) {
+    setDefaultOpenCodeApprovalMode(nextValue);
+    void persistAppPreferences({ defaultOpenCodeApprovalMode: nextValue });
   }
 
   function handleDefaultClaudeApprovalModeChange(
@@ -2323,6 +2334,8 @@ export default function App() {
         defaultGeminiApprovalMode={defaultGeminiApprovalMode}
         onChangeDefaultGeminiApprovalMode={setDefaultGeminiApprovalMode}
         defaultOpenCodeModel={defaultOpenCodeModel}
+        defaultOpenCodeApprovalMode={defaultOpenCodeApprovalMode}
+        handleDefaultOpenCodeApprovalModeChange={handleDefaultOpenCodeApprovalModeChange}
         handleDefaultOpenCodeModelChange={handleDefaultOpenCodeModelChange}
         createSessionProjectId={createSessionProjectId}
         createSessionProjectOptions={createSessionProjectOptions}

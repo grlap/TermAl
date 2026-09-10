@@ -116,6 +116,7 @@ fn opencode_session_new_reapplies_explicit_model_effort_then_mode_before_ready()
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::OpenCode),
             name: Some("OpenCode Explicit Config".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -321,6 +322,7 @@ fn opencode_resume_survives_explicit_config_rejection() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::OpenCode),
             name: Some("OpenCode Resume Config Rejection".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -439,6 +441,7 @@ fn opencode_missing_explicit_config_resets_to_auto_with_visible_notice() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::OpenCode),
             name: Some("OpenCode Stale Config".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -558,6 +561,7 @@ fn opencode_generic_resume_error_preserves_continuity_without_fallback() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::OpenCode),
             name: Some("OpenCode Missing Resume".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -664,6 +668,7 @@ fn opencode_structured_missing_session_error_preserves_continuity_after_failure(
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::OpenCode),
             name: Some("OpenCode Structured Missing Resume".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -787,6 +792,7 @@ fn opencode_prompt_dispatch_does_not_inject_repository_instruction_files() {
 
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::OpenCode),
             name: Some("OpenCode Prompt Boundary".to_owned()),
             workdir: Some(root.to_string_lossy().into_owned()),
@@ -866,6 +872,7 @@ fn opencode_config_update_queues_explicit_selection_reconciliation() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::OpenCode),
             name: Some("OpenCode Config Drift".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -884,6 +891,7 @@ fn opencode_config_update_queues_explicit_selection_reconciliation() {
         .update_session_settings(
             &created.session_id,
             UpdateSessionSettingsRequest {
+                opencode_approval_mode: None,
                 name: None,
                 model: None,
                 approval_policy: None,
@@ -953,6 +961,7 @@ fn opencode_model_only_config_payload_preserves_absent_effort_and_mode_state() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::OpenCode),
             name: Some("OpenCode Partial Config".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -1061,6 +1070,7 @@ fn opencode_invalid_agent_current_values_are_not_persisted() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::OpenCode),
             name: Some("OpenCode Invalid Current Config".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -1151,6 +1161,7 @@ fn opencode_config_update_reconciliation_failure_is_visible_and_nonfatal() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::OpenCode),
             name: Some("OpenCode Config Update Failure".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -1269,6 +1280,7 @@ fn opencode_config_rejection_reverts_to_current_without_failing_reconcile() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::OpenCode),
             name: Some("OpenCode Config Rejection".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -1378,6 +1390,7 @@ fn opencode_duplicate_config_update_is_reconciled_once() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::OpenCode),
             name: Some("OpenCode Config Dedupe".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -1516,6 +1529,7 @@ fn opencode_config_transport_failure_remains_runtime_fatal() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::OpenCode),
             name: Some("OpenCode Config Transport Failure".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -1577,6 +1591,7 @@ fn opencode_live_config_commits_only_after_protocol_acknowledgement() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::OpenCode),
             name: Some("OpenCode acknowledged config".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -1707,6 +1722,7 @@ fn opencode_combined_model_and_effort_update_waits_for_model_specific_options() 
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::OpenCode),
             name: Some("OpenCode model-specific effort".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -1814,6 +1830,13 @@ fn opencode_combined_model_and_effort_update_waits_for_model_specific_options() 
     );
 
     let (_effort_request_id, effort_response_tx) = take_pending_acp_request(&pending_requests);
+    effort_response_tx
+        .send(Ok(json!({})))
+        .expect("effort acknowledgement should send");
+    handle
+        .join()
+        .expect("OpenCode config writer should finish")
+        .expect("refreshed combined config should succeed");
     let written = writer.contents();
     let model_offset = written
         .find("\"configId\":\"model\"")
@@ -1823,14 +1846,6 @@ fn opencode_combined_model_and_effort_update_waits_for_model_specific_options() 
         .expect("effort request should be written from refreshed options");
     assert!(model_offset < effort_offset);
     assert!(written.contains("\"value\":\"xhigh\""));
-    effort_response_tx
-        .send(Ok(json!({})))
-        .expect("effort acknowledgement should send");
-
-    handle
-        .join()
-        .expect("OpenCode config writer should finish")
-        .expect("refreshed combined config should succeed");
     assert_eq!(
         recv_within_guard(&response_rx, "API response should arrive")
             .expect("API response should arrive"),
@@ -1866,6 +1881,7 @@ fn opencode_dependent_rejection_after_model_change_resets_only_that_selection() 
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::OpenCode),
             name: Some("OpenCode rejected post-model effort".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -2035,6 +2051,7 @@ fn opencode_model_change_resets_missing_carried_effort_to_auto() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::OpenCode),
             name: Some("OpenCode missing carried effort".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -2182,6 +2199,7 @@ fn opencode_post_model_options_timeout_resets_dependents_without_failing_writer(
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::OpenCode),
             name: Some("OpenCode post-model timeout".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -2303,6 +2321,7 @@ fn opencode_post_model_timeout_preserves_and_applies_reported_dependent() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::OpenCode),
             name: Some("OpenCode partial post-model timeout".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -2594,6 +2613,7 @@ fn opencode_live_config_rejection_preserves_authority_and_runtime() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::OpenCode),
             name: Some("OpenCode rejected config".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -2701,6 +2721,7 @@ fn opencode_config_command_skips_apply_after_scheduling_waiter_expires() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::OpenCode),
             name: Some("Expired OpenCode config".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -2770,6 +2791,7 @@ fn opencode_config_command_rejects_expired_execution_after_start_authorization()
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::OpenCode),
             name: Some("Expired authorized OpenCode config".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -2849,6 +2871,7 @@ fn opencode_config_command_requires_post_start_authorization() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::OpenCode),
             name: Some("Canceled OpenCode config start".to_owned()),
             workdir: Some("/tmp".to_owned()),

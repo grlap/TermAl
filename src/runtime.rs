@@ -704,7 +704,11 @@ impl std::fmt::Display for AcpJsonRpcError {
         match self.code {
             Some(code) => write!(f, "ACP JSON-RPC error {code}: {}", self.message),
             None => f.write_str(&self.message),
+        }?;
+        if let Some(data) = self.data.as_ref().filter(|data| !data.is_null()) {
+            write!(f, " (data: {data})")?;
         }
+        Ok(())
     }
 }
 

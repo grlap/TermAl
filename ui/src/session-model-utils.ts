@@ -159,6 +159,7 @@ export function resolveAppPreferences(preferences?: AppPreferences | null) {
     defaultCursorModel: preferences?.defaultCursorModel ?? DEFAULT_MODEL_PREFERENCE,
     defaultGeminiModel: preferences?.defaultGeminiModel ?? DEFAULT_MODEL_PREFERENCE,
     defaultOpenCodeModel: preferences?.defaultOpenCodeModel ?? DEFAULT_MODEL_PREFERENCE,
+    defaultOpenCodeApprovalMode: preferences?.defaultOpenCodeApprovalMode ?? "ask",
     defaultCodexReasoningEffort:
       preferences?.defaultCodexReasoningEffort ?? DEFAULT_CODEX_REASONING_EFFORT,
     defaultClaudeApprovalMode:

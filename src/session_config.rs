@@ -18,6 +18,10 @@
 // propagate to the live session via `session/set_config_option`
 // JSON-RPC messages (see `src/acp.rs::handle_acp_session_config_refresh`
 // for the writer side); Gemini approval-mode changes require a restart.
+// OpenCode approvals are a TermAl policy, not an ACP config option. Changes
+// require an idle session; legacy missing values resolve to Ask without rewrite.
+// Approval policy and provider config must be separate settings requests so a
+// failed provider acknowledgement cannot leave a policy change committed.
 // An installed Engram MCP descriptor tightens those rules for per-session
 // Claude/ACP processes: model or reasoning changes that alter the process's
 // Engram actor context require rotation so the agent process and MCP child
@@ -83,6 +87,30 @@ impl AppState {
             .find_visible_session_index(session_id)
             .ok_or_else(|| ApiError::not_found("session not found"))?;
         let engram_developer_name = inner.preferences.engram.developer_name.clone();
+        let record = &inner.sessions[index];
+        if request.opencode_approval_mode.is_some() && record.session.agent != Agent::OpenCode {
+            return Err(ApiError::bad_request("opencodeApprovalMode is only supported by OpenCode"));
+        }
+        // This is a payload contract, including repeated/current values and
+        // sessions without a live runtime. Validate before any record mutation;
+        // the TermAl policy cannot share the provider's fallible commit path.
+        if request.opencode_approval_mode.is_some()
+            && (request.model.is_some()
+                || request.opencode_effort.is_some()
+                || request.opencode_mode.is_some())
+        {
+            return Err(ApiError::bad_request(
+                "Change opencodeApprovalMode separately from model, opencodeEffort, and opencodeMode",
+            ));
+        }
+        if request.opencode_approval_mode.is_some_and(|mode|
+            mode != record.session.opencode_approval_mode.unwrap_or_default())
+            && matches!(record.session.status, SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping)
+        {
+            return Err(ApiError::conflict("Stop the OpenCode turn before changing its approval mode"));
+        }
+        // Mutable access advances the session's mutation stamp, so even that
+        // access must follow the approval-policy payload validation above.
         let record = inner
             .session_mut_by_index(index)
             .expect("session index should be valid");
@@ -114,7 +142,7 @@ impl AppState {
                     || request.gemini_approval_mode.is_some()
                 {
                     return Err(ApiError::bad_request(
-                        "OpenCode sessions only support model, reasoning variant, and mode settings",
+                        "OpenCode sessions only support model, reasoning variant, mode, and OpenCode approval settings",
                     ));
                 }
             }
@@ -323,6 +351,9 @@ impl AppState {
                     (SessionRuntime::Acp(handle), Some(_)) => Some(handle.clone()),
                     _ => None,
                 };
+                if let Some(mode) = request.opencode_approval_mode {
+                    record.session.opencode_approval_mode = Some(mode);
+                }
                 let changed_model = requested_opencode_model.filter(|model| {
                     record.session.opencode_model.as_deref() != Some(model.as_str())
                 });
@@ -525,7 +556,7 @@ impl AppState {
                                     "session/set_config_option",
                                     json!({
                                         "sessionId": external_session_id,
-                                        "optionId": "model",
+                                        "configId": "model",
                                         "value": model,
                                     }),
                                 ),
@@ -546,7 +577,7 @@ impl AppState {
                                     "session/set_config_option",
                                     json!({
                                         "sessionId": external_session_id,
-                                        "optionId": "mode",
+                                        "configId": "mode",
                                         "value": cursor_mode.as_acp_value(),
                                     }),
                                 ),

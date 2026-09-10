@@ -581,11 +581,6 @@ fn orchestrator_template_to_draft(template: &OrchestratorTemplate) -> Orchestrat
 fn normalize_orchestrator_session_template(
     template: OrchestratorSessionTemplate,
 ) -> Result<OrchestratorSessionTemplate, ApiError> {
-    if template.agent == Agent::OpenCode && template.auto_approve {
-        return Err(ApiError::bad_request(
-            "OpenCode orchestrator sessions cannot auto-approve tool calls",
-        ));
-    }
     let model = normalize_optional_orchestrator_text(template.model);
     let model = if template.agent.supports_opencode_settings() {
         model

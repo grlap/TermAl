@@ -25,6 +25,33 @@ type NavigatorWithUserAgentData = Navigator & {
   userAgentData?: { platform?: string };
 };
 
+it("keeps OpenCode creation approvals local to the dialog and resets them after cancel", async () => {
+  const props = createBaseProps({ isCreateSessionOpen: true, newSessionAgent: "OpenCode" });
+  const view = render(<AppDialogs {...props} />);
+  fireEvent.click(screen.getByRole("combobox", { name: "OpenCode approvals" }));
+  fireEvent.click(await screen.findByRole("option", { name: /^Auto-approve/ }));
+  expect(props.handleDefaultOpenCodeApprovalModeChange).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(props.closeCreateSessionDialog).toHaveBeenCalledOnce();
+  expect(props.handleCreateSessionDialogSubmit).not.toHaveBeenCalled();
+  view.rerender(<AppDialogs {...props} isCreateSessionOpen={false} />);
+  view.rerender(<AppDialogs {...props} />);
+  expect(screen.getByRole("combobox", { name: "OpenCode approvals" })).toHaveTextContent("Ask");
+  fireEvent.submit(screen.getByRole("combobox", { name: "OpenCode approvals" }).closest("form")!);
+  expect(props.handleCreateSessionDialogSubmit).toHaveBeenCalledWith("ask");
+  expect(props.handleDefaultOpenCodeApprovalModeChange).not.toHaveBeenCalled();
+});
+
+it("submits an OpenCode creation override without persisting the app default", async () => {
+  const props = createBaseProps({ isCreateSessionOpen: true, newSessionAgent: "OpenCode" });
+  render(<AppDialogs {...props} />);
+  fireEvent.click(screen.getByRole("combobox", { name: "OpenCode approvals" }));
+  fireEvent.click(await screen.findByRole("option", { name: /^Auto-approve/ }));
+  fireEvent.submit(screen.getByRole("combobox", { name: "OpenCode approvals" }).closest("form")!);
+  expect(props.handleCreateSessionDialogSubmit).toHaveBeenCalledWith("auto-approve");
+  expect(props.handleDefaultOpenCodeApprovalModeChange).not.toHaveBeenCalled();
+});
+
 function createBaseProps(
   overrides: Partial<ComponentProps<typeof AppDialogs>> = {},
 ): ComponentProps<typeof AppDialogs> {
@@ -81,6 +108,8 @@ function createBaseProps(
     defaultGeminiApprovalMode: GEMINI_APPROVAL_OPTIONS[0].value,
     onChangeDefaultGeminiApprovalMode: vi.fn(),
     defaultOpenCodeModel: "default",
+    defaultOpenCodeApprovalMode: "ask",
+    handleDefaultOpenCodeApprovalModeChange: vi.fn(),
     handleDefaultOpenCodeModelChange: vi.fn(),
     createSessionProjectId: "",
     createSessionProjectOptions: [{ label: "Current workspace", value: "" }],
@@ -217,6 +246,14 @@ function renderSettingsDialog(
 }
 
 describe("AppDialogs session model selection", () => {
+  it("configures OpenCode approvals from the creation dialog", async () => {
+    const change = vi.fn();
+    renderCreateSessionDialog({newSessionAgent: "OpenCode", handleDefaultOpenCodeApprovalModeChange: change});
+    fireEvent.click(screen.getByRole("combobox", {name: "OpenCode approvals"}));
+    fireEvent.click(await screen.findByRole("option", {name: /^Auto-approve/}));
+    expect(change).not.toHaveBeenCalled();
+    expect(screen.getByRole("combobox", {name: "OpenCode approvals"})).toHaveTextContent("Auto-approve");
+  });
   it.each(["Claude", "Codex", "Cursor", "Gemini", "OpenCode"] as const)(
     "keeps %s model selection on the session, not in the create dialog",
     (newSessionAgent) => {

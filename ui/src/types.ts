@@ -214,6 +214,7 @@ export type AppPreferences = {
   defaultCursorModel: string;
   defaultGeminiModel: string;
   defaultOpenCodeModel?: string;
+  defaultOpenCodeApprovalMode?: OpenCodeApprovalMode;
   defaultCodexReasoningEffort: CodexReasoningEffort;
   defaultClaudeApprovalMode: ClaudeApprovalMode;
   defaultClaudeEffort: ClaudeEffortLevel;
@@ -381,6 +382,7 @@ export type Session = {
   claudeApprovalMode?: ClaudeApprovalMode | null;
   geminiApprovalMode?: GeminiApprovalMode | null;
   opencodeModel?: string | null;
+  opencodeApprovalMode?: OpenCodeApprovalMode | null;
   opencodeEffort?: string | null;
   opencodeCurrentEffort?: string | null;
   opencodeEffortOptions?: SessionModelOption[];
@@ -1158,7 +1160,10 @@ export type DeltaEvent =
   | DelegationFailedEvent
   | DelegationCanceledEvent;
 
+export type OpenCodeApprovalMode = "ask" | "auto-approve";
+
 export type SessionSettingsField =
+  | "opencodeApprovalMode"
   | "model"
   | "sandboxMode"
   | "approvalPolicy"

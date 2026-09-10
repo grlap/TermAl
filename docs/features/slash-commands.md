@@ -19,14 +19,16 @@ Supported commands:
 - `/model` for `Claude`, `Codex`, `Cursor`, `Gemini`, and `OpenCode`
 - `/mode` for `Claude`, `Cursor`, `Gemini`, and `OpenCode`
 - `/sandbox` for `Codex`
-- `/approvals` for `Codex`
-- `/effort` for `Claude` and `Codex`
+- `/approvals` for `Codex` and `OpenCode`
+- `/effort` for `Claude`, `Codex`, and `OpenCode`
 - `/fast` for `Codex`
 - `/mcp` and `/mcp verbose` for `Codex`
 
 ## Behavior
 
 - Keyboard navigation works inside the palette.
+- OpenCode `/approvals` offers no policy changes while a turn is active,
+  awaiting approval, or stopping; see [OpenCode ACP Integration](./opencode-acp-integration.md).
 - `Enter` applies the highlighted choice and closes the palette.
 - `Space` applies the highlighted choice and keeps the palette open.
 - The active choice stays aligned with the real selected session setting after

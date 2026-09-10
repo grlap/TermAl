@@ -525,6 +525,12 @@ enum AcpEngramMcpSource<'a> {
     LiveState,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum AcpSessionPurpose {
+    Prompt,
+    ConfigRefresh,
+}
+
 fn handle_acp_prompt_command(
     writer: &mut impl Write,
     pending_requests: &AcpPendingRequestMap,
@@ -782,6 +788,7 @@ fn handle_acp_session_config_refresh_inner(
         engram_mcp_source,
         agent,
         &command,
+        AcpSessionPurpose::ConfigRefresh,
     )?;
     Ok(())
 }
@@ -810,6 +817,7 @@ fn ensure_acp_session_ready_for_runtime(
         },
         agent,
         command,
+        AcpSessionPurpose::Prompt,
     )
 }
 
@@ -832,6 +840,7 @@ fn ensure_acp_session_ready(
         AcpEngramMcpSource::LiveState,
         agent,
         command,
+        AcpSessionPurpose::Prompt,
     )
 }
 
@@ -844,6 +853,7 @@ fn ensure_acp_session_ready_inner(
     engram_mcp_source: AcpEngramMcpSource<'_>,
     agent: AcpAgent,
     command: &AcpPromptCommand,
+    purpose: AcpSessionPurpose,
 ) -> Result<String> {
     let (existing_session_id, session_load_allowed, session_resume_allowed) = {
         let state = runtime_state
@@ -898,7 +908,7 @@ fn ensure_acp_session_ready_inner(
         );
         match result {
             Ok(value) => (resume_session_id.to_owned(), value),
-            Err(err) => return Err(opencode_continuity_error(agent, err)),
+            Err(err) => return Err(acp_continuity_error(agent, err)),
         }
     } else if let Some(resume_session_id) =
         resume_session_id.filter(|_| session_load_allowed)
@@ -929,7 +939,7 @@ fn ensure_acp_session_ready_inner(
         }
         match result {
             Ok(value) => (resume_session_id.to_owned(), value),
-            Err(err) => return Err(opencode_continuity_error(agent, err)),
+            Err(err) => return Err(acp_continuity_error(agent, err)),
         }
     } else {
         start_acp_session(
@@ -946,11 +956,22 @@ fn ensure_acp_session_ready_inner(
     // Configuration reconciliation may block or fail independently; stop
     // must still be able to cancel the live session, and a later runtime must
     // be able to resume the conversation rather than orphaning it.
-    state.set_external_session_id(session_id, external_session_id.clone())?;
-    runtime_state
-        .lock()
-        .expect("ACP runtime state mutex poisoned")
-        .current_session_id = Some(external_session_id.clone());
+    // Cursor 2026.09.08 does not persist a newly allocated session until a
+    // prompt runs. A model-picker probe must not become a saved resume target:
+    // after a runtime restart, loading that id fails with -32602. Leave it
+    // out of the runtime cache too, so the first prompt creates a conversation
+    // with the model/mode selected after discovery. Existing conversations
+    // retain their identity on refresh and on any continuation failure.
+    let discovery_only = agent == AcpAgent::Cursor
+        && purpose == AcpSessionPurpose::ConfigRefresh
+        && resume_session_id.is_none();
+    if !discovery_only {
+        state.set_external_session_id(session_id, external_session_id.clone())?;
+        runtime_state
+            .lock()
+            .expect("ACP runtime state mutex poisoned")
+            .current_session_id = Some(external_session_id.clone());
+    }
     if agent == AcpAgent::OpenCode {
         reconcile_opencode_config(
             writer,
@@ -963,7 +984,7 @@ fn ensure_acp_session_ready_inner(
             &session_config,
         )?;
     } else {
-        configure_acp_session(
+        let configured_model = configure_acp_session(
             writer,
             pending_requests,
             agent,
@@ -974,7 +995,7 @@ fn ensure_acp_session_ready_inner(
         )?;
         state.sync_session_model_options(
             session_id,
-            current_acp_config_option_value(&session_config, "model").or_else(|| {
+            configured_model.or_else(|| {
                 let requested = command.model.trim();
                 (!requested.is_empty()).then(|| requested.to_owned())
             }),
@@ -984,17 +1005,21 @@ fn ensure_acp_session_ready_inner(
     Ok(external_session_id)
 }
 
-/// Keeps OpenCode continuity failures visible and non-destructive.
+/// Keeps ACP continuity failures visible and non-destructive.
 ///
 /// OpenCode 1.18.8 does not expose a typed invalid-session discriminator for
 /// `session/load` or `session/resume`; clearing the stored id from prose or
 /// generic service metadata would silently replace the conversation. The
 /// failed transcript therefore remains an archive and points at the existing
 /// agent-scoped recovery path.
-fn opencode_continuity_error(agent: AcpAgent, err: anyhow::Error) -> anyhow::Error {
+fn acp_continuity_error(agent: AcpAgent, err: anyhow::Error) -> anyhow::Error {
     if agent == AcpAgent::OpenCode {
         err.context(
             "OpenCode could not resume this conversation. Create a new OpenCode session to start fresh",
+        )
+    } else if agent == AcpAgent::Cursor {
+        err.context(
+            "Cursor could not resume this conversation. Create a new Cursor session to start fresh",
         )
     } else {
         err
@@ -1033,7 +1058,9 @@ fn start_acp_session(
     Ok((created_session_id, result))
 }
 
-/// Handles configure ACP session.
+/// Configures ACP settings and returns the acknowledged model. The session
+/// bootstrap snapshot predates these setters and must not overwrite their
+/// result, including a config notification delivered before the setter ACK.
 fn configure_acp_session(
     writer: &mut impl Write,
     pending_requests: &AcpPendingRequestMap,
@@ -1042,13 +1069,13 @@ fn configure_acp_session(
     requested_model: &str,
     requested_cursor_mode: Option<CursorMode>,
     config_result: &Value,
-) -> Result<()> {
+) -> Result<Option<String>> {
+    let mut configured_model = current_acp_config_option_value(config_result, "model");
     if let Some(model_value) =
         matching_acp_config_option_value(config_result, "model", requested_model)
     {
-        let current_value = current_acp_config_option_value(config_result, "model");
-        if current_value.as_deref() != Some(model_value.as_str()) {
-            send_acp_json_rpc_request(
+        if configured_model.as_deref() != Some(model_value.as_str()) {
+            let result = send_acp_json_rpc_request(
                 writer,
                 pending_requests,
                 "session/set_config_option",
@@ -1065,6 +1092,8 @@ fn configure_acp_session(
                 Duration::from_secs(15),
                 agent,
             )?;
+            configured_model = current_acp_config_option_value(&result, "model")
+                .or(Some(model_value));
         }
     }
 
@@ -1091,7 +1120,7 @@ fn configure_acp_session(
             }
         }
     }
-    Ok(())
+    Ok(configured_model)
 }
 
 /// Handles ACP message.
@@ -1134,6 +1163,34 @@ fn handle_acp_message(
     };
 
     if message.get("id").is_some() {
+        if agent == AcpAgent::OpenCode && method == "session/request_permission" {
+            // Admission uses the same lock as Stop ownership and runtime replacement.
+            // This is an unbounded std::mpsc send, not an IO/backpressure wait: keep
+            // validation and enqueue indivisible so Stop cannot intervene between them.
+            let inner = state.inner.lock().expect("state mutex poisoned");
+            let current = inner.find_session_index(session_id).is_some_and(|index| {
+                let record = &inner.sessions[index];
+                record.runtime.matches_runtime_token(runtime_token)
+                    && !record.runtime_stop_in_progress
+                    && !matches!(record.session.status, SessionStatus::Stopping | SessionStatus::Idle)
+            });
+            let outcome = if !current {
+                Some(json!({"outcome": "cancelled"}))
+            } else if opencode_auto_approval_allowed_locked(&inner, session_id) {
+                message.pointer("/params/options").and_then(Value::as_array)
+                    .and_then(|options| find_acp_permission_option(options, &["allow_once"]))
+                    .map(|option_id| json!({"outcome": "selected", "optionId": option_id}))
+            } else {
+                None
+            };
+            if let Some(outcome) = outcome {
+                input_tx.send(AcpRuntimeCommand::JsonRpcMessage(
+                    json_rpc_result_response_message(message["id"].clone(),
+                        json!({"outcome": outcome})),
+                )).map_err(|err| anyhow!("failed delivering OpenCode permission response: {err}"))?;
+                return Ok(());
+            }
+        }
         return handle_acp_request(message, state, session_id, input_tx, recorder, agent);
     }
 
@@ -1197,8 +1254,13 @@ fn handle_acp_request(
                 request_id,
             };
 
-            let automatic_option =
-                acp_permission_response_option_id(agent, state, session_id, &approval)?;
+            // OpenCode automatic replies are admitted only by handle_acp_message,
+            // with its runtime token and Stop fence. A fallback here stays manual.
+            let automatic_option = if agent == AcpAgent::OpenCode {
+                None
+            } else {
+                acp_permission_response_option_id(agent, state, session_id, &approval)?
+            };
             if let Some(option_id) = automatic_option {
                 input_tx
                     .send(AcpRuntimeCommand::JsonRpcMessage(
@@ -1261,8 +1323,28 @@ fn acp_permission_response_option_id(
                 CursorMode::Plan => approval.reject_option_id.clone(),
             })
         }
-        AcpAgent::Gemini | AcpAgent::OpenCode => Ok(None),
+        AcpAgent::OpenCode => {
+            // Policy is session-scoped and cannot change during an active turn.
+            // Never promote a one-operation grant to a persistent allow_always.
+            let inner = state.inner.lock().expect("state mutex poisoned");
+            let allowed = opencode_auto_approval_allowed_locked(&inner, session_id);
+            Ok(if allowed { approval.allow_once_option_id.clone() } else { None })
+        }
+        AcpAgent::Gemini => Ok(None),
     }
+}
+
+fn opencode_auto_approval_allowed_locked(inner: &StateInner, session_id: &str) -> bool {
+    inner.find_session_index(session_id).is_some_and(|index| {
+        let record = &inner.sessions[index];
+        // A pending manual card suspends auto-approval until status returns Active.
+        record.session.agent == Agent::OpenCode
+            && record.session.status == SessionStatus::Active
+            && !record.runtime_stop_in_progress
+            && record.session.opencode_approval_mode.unwrap_or_default()
+                == OpenCodeApprovalMode::AutoApprove
+            && read_only_session_delegation_block_locked(inner, Some(session_id)).is_none()
+    })
 }
 
 /// Handles ACP notification.
@@ -1797,7 +1879,9 @@ fn wait_for_acp_json_rpc_response(
         },
     };
 
-    response.map_err(|err| anyhow!(err))
+    response
+        .map_err(|err| anyhow!(err))
+        .with_context(|| format!("{} ACP request `{method}` failed", agent.label()))
 }
 
 /// Marks pending ACP requests as failed.

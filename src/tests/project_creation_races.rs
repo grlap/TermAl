@@ -20,6 +20,7 @@ pub(super) fn remote_config(id: &str) -> RemoteConfig {
 
 pub(super) fn remote_settings_request(remotes: Vec<RemoteConfig>) -> UpdateAppSettingsRequest {
     UpdateAppSettingsRequest {
+        default_opencode_approval_mode: None,
         default_codex_model: None,
         default_claude_model: None,
         default_cursor_model: None,
@@ -201,6 +202,7 @@ fn local_session_rejects_project_deleted_during_readiness_preflight() {
 
     let error = match state.create_session_with_agent_setup_validator(
         CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Codex),
             name: Some("Rejected Session".to_owned()),
             workdir: None,
@@ -259,6 +261,7 @@ fn local_session_rejects_project_root_changed_during_readiness_preflight() {
 
     let error = match state.create_session_with_agent_setup_validator(
         CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Codex),
             name: Some("Rejected Changed Project Session".to_owned()),
             workdir: Some(original_root.to_string_lossy().into_owned()),
@@ -321,6 +324,7 @@ fn projectless_session_survives_unrelated_project_deletion_during_preflight() {
     let response = state
         .create_session_with_agent_setup_validator(
             CreateSessionRequest {
+                opencode_approval_mode: None,
                 agent: Some(Agent::Codex),
                 name: Some("Projectless Session".to_owned()),
                 workdir: Some(workdir.to_string_lossy().into_owned()),
@@ -369,6 +373,7 @@ fn inferred_project_deletion_during_preflight_falls_back_to_projectless() {
     let response = state
         .create_session_with_agent_setup_validator(
             CreateSessionRequest {
+                opencode_approval_mode: None,
                 agent: Some(Agent::Codex),
                 name: Some("Projectless After Inferred Delete".to_owned()),
                 workdir: Some(workdir.to_string_lossy().into_owned()),
@@ -419,6 +424,7 @@ fn inferred_project_root_drift_during_preflight_falls_back_to_projectless() {
     let response = state
         .create_session_with_agent_setup_validator(
             CreateSessionRequest {
+                opencode_approval_mode: None,
                 agent: Some(Agent::Codex),
                 name: Some("Projectless After Inferred Drift".to_owned()),
                 workdir: Some(workdir.to_string_lossy().into_owned()),
@@ -510,6 +516,7 @@ fn remote_session_rejects_project_deleted_during_create_request() {
         .len();
 
     let error = match state.create_session(CreateSessionRequest {
+        opencode_approval_mode: None,
         agent: Some(Agent::Codex),
         name: Some("Rejected Remote Session".to_owned()),
         workdir: None,
@@ -590,6 +597,7 @@ fn remote_session_persist_failure_still_claims_the_current_event_bridge() {
     state.persistence_path = Arc::new(failing_persistence_path.clone());
 
     let error = match state.create_session(CreateSessionRequest {
+        opencode_approval_mode: None,
         agent: Some(Agent::Codex),
         name: Some("Remote Session With Failed Local Persistence".to_owned()),
         workdir: None,
@@ -693,6 +701,7 @@ fn remote_session_create_publishes_prior_dirty_localization_recovery() {
 
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Codex),
             name: Some("Remote Session After Dirty Localization".to_owned()),
             workdir: None,
@@ -1015,6 +1024,7 @@ fn remote_session_rejects_project_rebound_during_create_request() {
         .len();
 
     let error = match state.create_session(CreateSessionRequest {
+        opencode_approval_mode: None,
         agent: Some(Agent::Codex),
         name: Some("Rejected Rebound Session".to_owned()),
         workdir: None,
@@ -1164,6 +1174,7 @@ fn remote_session_rejects_remote_removed_during_create_request() {
         .len();
 
     let error = match state.create_session(CreateSessionRequest {
+        opencode_approval_mode: None,
         agent: Some(Agent::Codex),
         name: Some("Rejected Removed Remote Session".to_owned()),
         workdir: None,
@@ -1334,6 +1345,7 @@ fn remote_session_rejects_endpoint_replaced_during_create_request() {
         .len();
 
     let error = match state.create_session(CreateSessionRequest {
+        opencode_approval_mode: None,
         agent: Some(Agent::Codex),
         name: Some("Rejected Endpoint Session".to_owned()),
         workdir: None,
@@ -2051,6 +2063,7 @@ fn remote_session_lazy_binding_preserves_bad_request_when_project_is_deleted() {
     );
 
     let error = match state.create_session(CreateSessionRequest {
+        opencode_approval_mode: None,
         agent: Some(Agent::Codex),
         name: Some("Rejected Lazy Binding Session".to_owned()),
         workdir: None,
@@ -2384,6 +2397,7 @@ fn remote_session_create_is_rejected_after_post_decode_a_to_b_to_a_cycle() {
         .len();
 
     let error = match state.create_session(CreateSessionRequest {
+        opencode_approval_mode: None,
         agent: Some(Agent::Codex),
         name: Some("Rejected Post Decode Session".to_owned()),
         workdir: None,
@@ -2488,6 +2502,7 @@ fn remote_session_create_does_not_claim_replacement_bridge_after_json_decode() {
         .len();
 
     let error = match state.create_session(CreateSessionRequest {
+        opencode_approval_mode: None,
         agent: Some(Agent::Codex),
         name: Some("Rejected Post Decode Replacement Session".to_owned()),
         workdir: None,
@@ -2591,6 +2606,7 @@ fn malformed_remote_session_response_prefers_post_decode_cycle_conflict() {
         .len();
 
     let error = match state.create_session(CreateSessionRequest {
+        opencode_approval_mode: None,
         agent: Some(Agent::Codex),
         name: Some("Rejected Malformed Post Decode Session".to_owned()),
         workdir: None,
@@ -2673,6 +2689,7 @@ fn malformed_remote_session_response_prefers_post_decode_removal_error() {
         .len();
 
     let error = match state.create_session(CreateSessionRequest {
+        opencode_approval_mode: None,
         agent: Some(Agent::Codex),
         name: Some("Rejected Malformed Removed Session".to_owned()),
         workdir: None,

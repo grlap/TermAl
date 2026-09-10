@@ -1,3 +1,4 @@
+import type { OpenCodeApprovalMode } from "./types";
 // Owns: public and internal type surface for useAppSessionActions.
 // Does not own: action implementation, API calls, or optimistic state mutation helpers.
 // Split from: ui/src/app-session-actions.ts.
@@ -50,6 +51,7 @@ export type UseAppSessionActionsDefaults = {
   defaultGeminiApprovalMode: GeminiApprovalMode;
   defaultGeminiModel: string;
   defaultOpenCodeModel: string;
+  defaultOpenCodeApprovalMode: OpenCodeApprovalMode;
 };
 
 export type ActionStateClassifierContext = {
@@ -153,6 +155,7 @@ export type UseAppSessionActionsParams = {
 
 export type HandleNewSessionArgs = {
   agent: AgentType;
+  opencodeApprovalMode?: OpenCodeApprovalMode;
   preferredPaneId?: string | null;
   projectSelectionId?: string;
 };

@@ -834,6 +834,7 @@ fn localize_remote_session_summary(
         opencode_current_effort: remote_session.opencode_current_effort.clone(),
         opencode_effort_options: remote_session.opencode_effort_options.clone(),
         opencode_mode: remote_session.opencode_mode.clone(),
+        opencode_approval_mode: remote_session.opencode_approval_mode,
         opencode_current_mode: remote_session.opencode_current_mode.clone(),
         opencode_mode_options: remote_session.opencode_mode_options.clone(),
         external_session_id: remote_session.external_session_id.clone(),

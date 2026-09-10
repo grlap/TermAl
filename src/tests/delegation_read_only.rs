@@ -51,6 +51,7 @@ async fn read_only_delegation_blocks_write_capable_surfaces() {
     let err = match state.update_session_settings(
         &created.delegation.child_session_id,
         UpdateSessionSettingsRequest {
+            opencode_approval_mode: None,
             name: Some("try rename".to_owned()),
             model: None,
             approval_policy: None,
@@ -724,6 +725,7 @@ async fn read_only_delegation_blocks_project_and_workdir_writes_with_parent_sess
             .update_session_settings(
                 session_id,
                 UpdateSessionSettingsRequest {
+                    opencode_approval_mode: None,
                     name: Some(name.to_owned()),
                     model: None,
                     approval_policy: None,
@@ -743,6 +745,7 @@ async fn read_only_delegation_blocks_project_and_workdir_writes_with_parent_sess
     let err = match state.update_session_settings(
         &created.delegation.child_session_id,
         UpdateSessionSettingsRequest {
+            opencode_approval_mode: None,
             name: Some("child rename stays blocked".to_owned()),
             model: None,
             approval_policy: None,

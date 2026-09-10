@@ -214,6 +214,7 @@ export function useAppSessionActions(
       defaultGeminiApprovalMode,
       defaultGeminiModel,
       defaultOpenCodeModel,
+      defaultOpenCodeApprovalMode,
     },
     refs: {
       isMountedRef,
@@ -747,6 +748,7 @@ export function useAppSessionActions(
 
   async function handleNewSession({
     agent,
+    opencodeApprovalMode,
     preferredPaneId = null,
     projectSelectionId = CREATE_SESSION_WORKSPACE_ID,
   }: HandleNewSessionArgs) {
@@ -801,6 +803,9 @@ export function useAppSessionActions(
       const created = await createSession({
         agent,
         model: requestedModel,
+        opencodeApprovalMode: agent === "OpenCode"
+          ? opencodeApprovalMode ?? defaultOpenCodeApprovalMode
+          : undefined,
         cursorMode: agent === "Cursor" ? defaultCursorMode : undefined,
         claudeApprovalMode:
           agent === "Claude" ? defaultClaudeApprovalMode : undefined,
@@ -851,6 +856,7 @@ export function useAppSessionActions(
         workspace.activePaneId;
       const created = await createSession({
         agent: session.agent,
+        opencodeApprovalMode: session.agent === "OpenCode" ? (session.opencodeApprovalMode ?? "ask") : undefined,
         model:
           session.agent === "OpenCode"
             ? (session.opencodeModel ?? "auto")

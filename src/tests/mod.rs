@@ -50,6 +50,7 @@ mod http_routes;
 mod instruction_search;
 mod json_rpc;
 mod mailboxes;
+mod opencode_approvals;
 mod opencode_config;
 mod orchestrator;
 mod phase_sync;
@@ -1130,6 +1131,7 @@ fn sample_remote_orchestrator_state(
         .map(|template_session| {
             let agent = template_session.agent;
             let mut session = Session {
+                opencode_approval_mode: None,
                 id: remote_session_ids_by_template_session_id[&template_session.id].clone(),
                 name: template_session.name.clone(),
                 emoji: agent.avatar().to_owned(),
@@ -1268,6 +1270,7 @@ fn sample_remote_orchestrator_state(
 
 fn test_state_session_summary_from_session(session: &Session) -> StateSessionSummary {
     StateSessionSummary {
+        opencode_approval_mode: session.opencode_approval_mode,
         id: session.id.clone(),
         name: session.name.clone(),
         emoji: session.emoji.clone(),
@@ -2338,6 +2341,7 @@ fn canonicalizes_session_model_updates_from_live_model_labels() {
 
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Codex),
             name: Some("Codex Canonical".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -2365,6 +2369,7 @@ fn canonicalizes_session_model_updates_from_live_model_labels() {
         .update_session_settings(
             &created.session_id,
             UpdateSessionSettingsRequest {
+                opencode_approval_mode: None,
                 name: None,
                 model: Some("GPT-5.4".to_owned()),
                 sandbox_mode: None,
@@ -2396,6 +2401,7 @@ fn revisions_increase_for_visible_state_changes() {
 
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Codex),
             name: Some("Revision Test".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -2416,6 +2422,7 @@ fn revisions_increase_for_visible_state_changes() {
         .update_session_settings(
             &created.session_id,
             UpdateSessionSettingsRequest {
+                opencode_approval_mode: None,
                 name: None,
                 model: None,
                 sandbox_mode: Some(CodexSandboxMode::ReadOnly),
@@ -2437,6 +2444,7 @@ fn revisions_increase_for_visible_state_changes() {
         .update_session_settings(
             &created.session_id,
             UpdateSessionSettingsRequest {
+                opencode_approval_mode: None,
                 name: Some("Revision Test Renamed".to_owned()),
                 model: None,
                 sandbox_mode: None,
@@ -2462,6 +2470,7 @@ fn renames_sessions_via_settings_updates() {
 
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Codex),
             name: Some("Old Name".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -2481,6 +2490,7 @@ fn renames_sessions_via_settings_updates() {
         .update_session_settings(
             &created.session_id,
             UpdateSessionSettingsRequest {
+                opencode_approval_mode: None,
                 name: Some("New Name".to_owned()),
                 model: None,
                 sandbox_mode: None,

@@ -1,3 +1,4 @@
+import type { OpenCodeApprovalMode } from "./types";
 // Owns optimistic session-settings projection and rollback helpers.
 // Does not own API calls, action adoption, or React state setters.
 // Split from ui/src/app-session-actions.ts.
@@ -135,6 +136,9 @@ export function buildOptimisticSessionSettingsUpdate(
       };
     }
     case "OpenCode": {
+      if (field === "opencodeApprovalMode") {
+        return { ...session, opencodeApprovalMode: value as OpenCodeApprovalMode };
+      }
       const nextModelSelection =
         field === "model"
           ? (normalizedModelValue ?? (value as string))
@@ -170,6 +174,11 @@ export function rollbackOptimisticSessionSettingsUpdate(
 ) {
   let changed = false;
   const nextSession = { ...currentSession };
+  if (currentSession.opencodeApprovalMode === optimisticSession.opencodeApprovalMode &&
+      currentSession.opencodeApprovalMode !== previousSession.opencodeApprovalMode) {
+    nextSession.opencodeApprovalMode = previousSession.opencodeApprovalMode;
+    changed = true;
+  }
 
   if (
     currentSession.model === optimisticSession.model &&

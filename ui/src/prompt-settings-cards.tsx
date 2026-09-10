@@ -9,6 +9,7 @@ import {
   CLAUDE_APPROVAL_OPTIONS,
   CURSOR_MODE_OPTIONS,
   GEMINI_APPROVAL_OPTIONS,
+  OPENCODE_APPROVAL_OPTIONS,
 } from "./preferences-panels";
 import { ThemedCombobox } from "./preferences/themed-combobox";
 import {
@@ -1163,11 +1164,19 @@ export function OpenCodePromptSettingsCard({
             Effective mode: <code>{session.opencodeCurrentMode ?? "not reported"}</code>
           </p>
         </div>
+        <div className="session-control-group">
+          <label className="session-control-label" htmlFor={`opencode-approval-${paneId}`}>OpenCode approvals</label>
+          <ThemedCombobox id={`opencode-approval-${paneId}`}
+            value={session.opencodeApprovalMode ?? "ask"}
+            options={OPENCODE_APPROVAL_OPTIONS}
+            disabled={isUpdating || sessionBusy}
+            onChange={(value) => void onSessionSettingsChange(session.id, "opencodeApprovalMode", value)} />
+          <p className="session-control-hint">Ask shows ordered permission cards; Auto-approve grants individual tool requests once. Pending manual cards suspend auto-approval. Stop the current turn before changing approvals. Human questions stay interactive. This is not a sandbox.</p>
+        </div>
         <p className="session-control-hint">
           Auto follows OpenCode. Reasoning variants are model-specific and come from the live
           OpenCode session. Explicit TermAl choices are re-applied after session new, resume, or
-          load before the next prompt. OpenCode permission requests always appear as ordered
-          approval cards.
+          load before the next prompt.
         </p>
       </div>
     </article>

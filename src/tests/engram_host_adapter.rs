@@ -15384,6 +15384,7 @@ fn acp_session_setup_uses_the_engram_snapshot_that_spawned_its_process() {
                 prompt: "Use the frozen Engram identity.".to_owned(),
                 resume_session_id: None,
             },
+            AcpSessionPurpose::Prompt,
         )
     });
 
@@ -17457,7 +17458,9 @@ fn enablement_doctor_expiry_names_the_deadline_it_enforced() {
     };
 
     assert!(
-        error.message.contains("exceeded the 0 second enablement deadline"),
+        error
+            .message
+            .contains("exceeded the 0 second enablement deadline"),
         "the failure must name the deadline it actually enforced, not a constant: {}",
         error.message
     );
@@ -17486,7 +17489,10 @@ fn slow_doctor_fixture_payload_deserializes_when_the_deadline_is_generous() {
         DEADLOCK_GUARD,
     )
     .unwrap_or_else(|error| {
-        panic!("the fixture payload must parse as a doctor result: {}", error.message)
+        panic!(
+            "the fixture payload must parse as a doctor result: {}",
+            error.message
+        )
     });
 
     assert!(result.healthy, "the fixture reports a healthy store");
@@ -17501,9 +17507,17 @@ fn slow_doctor_fixture_payload_deserializes_when_the_deadline_is_generous() {
 #[test]
 fn doctor_output_has_an_independent_limit_and_diagnostic() {
     let above_control = vec![b'x'; ENGRAM_CONTROL_MAX_FRAME_BYTES + 1];
-    assert_eq!(read_engram_doctor_output(above_control.as_slice()).unwrap(), above_control);
+    assert_eq!(
+        read_engram_doctor_output(above_control.as_slice()).unwrap(),
+        above_control
+    );
     let at_limit = vec![b'x'; ENGRAM_DOCTOR_MAX_OUTPUT_BYTES];
-    assert_eq!(read_engram_doctor_output(at_limit.as_slice()).unwrap().len(), at_limit.len());
+    assert_eq!(
+        read_engram_doctor_output(at_limit.as_slice())
+            .unwrap()
+            .len(),
+        at_limit.len()
+    );
     let oversized = vec![b'x'; ENGRAM_DOCTOR_MAX_OUTPUT_BYTES + 1];
     let error = read_engram_doctor_output(oversized.as_slice()).unwrap_err();
     assert!(error.to_string().contains("Engram doctor output exceeds"));
@@ -17532,7 +17546,12 @@ fn check_doctor_descendant_deadline(mode: &str) {
     let started = std::time::Instant::now();
     let worker = std::thread::spawn(move || {
         let result = run_engram_doctor_result_within(
-            &fixture, &project_file, &home, &home, Duration::from_secs(5));
+            &fixture,
+            &project_file,
+            &home,
+            &home,
+            Duration::from_secs(5),
+        );
         let _ = sender.send(result.map(|report| report.healthy));
     });
     // Acquires a process handle while the descendant is alive and keeps its
@@ -17544,15 +17563,25 @@ fn check_doctor_descendant_deadline(mode: &str) {
         let _ = worker.join();
         panic!("doctor did not return while its descendant held the pipe");
     }
-    let error = result.unwrap().expect_err("an incomplete doctor must not report success");
+    let error = result
+        .unwrap()
+        .expect_err("an incomplete doctor must not report success");
     assert!(started.elapsed() < DEADLOCK_GUARD);
     if mode == "doctor-tree-exit" {
-        assert!(error.message.contains("output collection exceeded"), "{}", error.message);
+        assert!(
+            error.message.contains("output collection exceeded"),
+            "{}",
+            error.message
+        );
         #[cfg(windows)]
         assert_engram_control_descendant_was_terminated(&descendant, "doctor output deadline");
         // Unix cleanup after reap deliberately does not signal a reused PGID.
     } else {
-        assert!(error.message.contains("enablement deadline"), "{}", error.message);
+        assert!(
+            error.message.contains("enablement deadline"),
+            "{}",
+            error.message
+        );
         assert_engram_control_descendant_was_terminated(&descendant, "doctor process deadline");
     }
     drop(descendant);

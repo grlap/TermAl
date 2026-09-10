@@ -73,6 +73,7 @@ fn creates_sessions_for_remote_projects_over_ssh() {
 
     state
         .update_app_settings(UpdateAppSettingsRequest {
+            default_opencode_approval_mode: None,
             default_codex_model: None,
             default_claude_model: None,
             default_cursor_model: None,
@@ -115,6 +116,7 @@ fn creates_sessions_for_remote_projects_over_ssh() {
     assert_eq!(stored_project.remote_id, "ssh-lab");
 
     let error = match state.create_session(CreateSessionRequest {
+        opencode_approval_mode: None,
         agent: Some(Agent::Codex),
         name: Some("Remote Session".to_owned()),
         workdir: None,
@@ -163,6 +165,7 @@ fn creates_projects_and_assigns_sessions_to_them() {
 
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Codex),
             name: Some("Project Session".to_owned()),
             workdir: None,
@@ -205,6 +208,7 @@ fn deletes_projects_and_unassigns_existing_sessions() {
         .unwrap();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Codex),
             name: Some("Project Session".to_owned()),
             workdir: None,
@@ -301,6 +305,7 @@ fn rejects_session_workdirs_outside_the_selected_project() {
         .unwrap();
 
     let result = state.create_session(CreateSessionRequest {
+        opencode_approval_mode: None,
         agent: Some(Agent::Codex),
         name: Some("Out of Bounds".to_owned()),
         workdir: Some("/Users".to_owned()),
@@ -373,6 +378,7 @@ fn resolves_requested_paths_inside_the_session_project_root() {
         .unwrap();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Codex),
             name: Some("Scoped Session".to_owned()),
             workdir: Some(inside_dir.to_string_lossy().into_owned()),
@@ -440,6 +446,7 @@ fn allows_new_file_paths_inside_the_session_project_root() {
         .unwrap();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Codex),
             name: Some("Writable Session".to_owned()),
             workdir: Some(inside_dir.to_string_lossy().into_owned()),

@@ -585,6 +585,7 @@ Use the active agent's tools.
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Codex),
             name: Some("Codex Session".to_owned()),
             workdir: Some(root.to_string_lossy().into_owned()),
@@ -749,6 +750,7 @@ fn returns_cached_claude_native_commands_alongside_template_fallbacks() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Claude),
             name: Some("Claude Session".to_owned()),
             workdir: Some(root.to_string_lossy().into_owned()),
@@ -826,6 +828,7 @@ fn sync_session_agent_commands_bumps_visible_session_command_revision() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Claude),
             name: Some("Claude Session".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -888,6 +891,7 @@ fn sync_session_agent_commands_filters_runtime_prompt_templates() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Claude),
             name: Some("Claude Session".to_owned()),
             workdir: Some(root.to_string_lossy().into_owned()),
@@ -1035,6 +1039,7 @@ Verify the fix.
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Codex),
             name: Some("Codex Session".to_owned()),
             workdir: Some(root.to_string_lossy().into_owned()),
@@ -1110,6 +1115,7 @@ fn rejects_oversized_agent_command_arguments_and_note() {
         let state = test_app_state();
         let created = state
             .create_session(CreateSessionRequest {
+                opencode_approval_mode: None,
                 agent: Some(Agent::Codex),
                 name: Some("Codex Session".to_owned()),
                 workdir: Some(root.to_string_lossy().into_owned()),
@@ -1179,6 +1185,7 @@ Review staged and unstaged changes.
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Codex),
             name: Some("Codex Session".to_owned()),
             workdir: Some(root.to_string_lossy().into_owned()),
@@ -1241,6 +1248,7 @@ fn delegation_command_resolution_uses_requested_cwd() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Codex),
             name: Some("Codex Session".to_owned()),
             workdir: Some(parent_root.to_string_lossy().into_owned()),
@@ -1300,6 +1308,7 @@ fn claude_delegation_command_resolution_cwd_ignores_parent_cached_commands() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Claude),
             name: Some("Claude Session".to_owned()),
             workdir: Some(parent_root.to_string_lossy().into_owned()),
@@ -1362,6 +1371,7 @@ fn claude_delegation_command_resolution_cwd_keeps_cache_for_session_workdir() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Claude),
             name: Some("Claude Session".to_owned()),
             workdir: Some(root.to_string_lossy().into_owned()),
@@ -1427,6 +1437,7 @@ fn claude_delegation_command_resolution_cwd_keeps_global_cached_commands() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Claude),
             name: Some("Claude Session".to_owned()),
             workdir: Some(parent_root.to_string_lossy().into_owned()),
@@ -1657,6 +1668,7 @@ fn rejects_cwd_override_for_non_delegation_command_resolution() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Codex),
             name: Some("Codex Session".to_owned()),
             workdir: Some(root.to_string_lossy().into_owned()),
@@ -1701,6 +1713,7 @@ fn rejects_oversized_delegation_command_resolution_cwd() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Codex),
             name: Some("Codex Session".to_owned()),
             workdir: Some(root.to_string_lossy().into_owned()),
@@ -1897,6 +1910,7 @@ Body fallback should not win.
         let state = test_app_state();
         let created = state
             .create_session(CreateSessionRequest {
+                opencode_approval_mode: None,
                 agent: Some(Agent::Codex),
                 name: Some("Codex Session".to_owned()),
                 workdir: Some(root.to_string_lossy().into_owned()),
@@ -2042,6 +2056,7 @@ Run tool check for $ARGUMENTS.
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Claude),
             name: Some("Claude Session".to_owned()),
             workdir: Some(root.to_string_lossy().into_owned()),
@@ -2104,6 +2119,7 @@ Run tool check for $ARGUMENTS.
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Claude),
             name: Some("Claude Session".to_owned()),
             workdir: Some(root.to_string_lossy().into_owned()),
@@ -2171,6 +2187,7 @@ Review staged and unstaged changes.
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Claude),
             name: Some("Claude Session".to_owned()),
             workdir: Some(root.to_string_lossy().into_owned()),
@@ -2234,6 +2251,7 @@ Review $ARGUMENTS.
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Claude),
             name: Some("Claude Session".to_owned()),
             workdir: Some(root.to_string_lossy().into_owned()),
@@ -2272,6 +2290,7 @@ fn native_delegate_resolution_uses_metadata_name_not_source_suffix() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Claude),
             name: Some("Claude Session".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -2325,6 +2344,7 @@ fn legacy_cached_prompt_template_delegate_resolution_uses_metadata_name_not_sour
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Claude),
             name: Some("Claude Session".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -2377,6 +2397,7 @@ fn prompt_template_delegate_resolution_does_not_use_metadata_when_source_path_mi
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Claude),
             name: Some("Claude Session".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -2463,6 +2484,7 @@ First prompt $ARGUMENTS.
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Codex),
             name: Some("Codex Session".to_owned()),
             workdir: Some(root.to_string_lossy().into_owned()),
@@ -2546,6 +2568,7 @@ fn cached_prompt_template_missing_metadata_file_resolves_without_defaults() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Claude),
             name: Some("Claude Session".to_owned()),
             workdir: Some(root.to_string_lossy().into_owned()),
@@ -2654,6 +2677,7 @@ fn native_delegate_resolution_does_not_use_prompt_template_metadata_by_name() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Claude),
             name: Some("Claude Session".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -2710,6 +2734,7 @@ fn rejects_note_for_native_slash_command_resolution() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Claude),
             name: Some("Claude Session".to_owned()),
             workdir: Some("/tmp".to_owned()),

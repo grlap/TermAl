@@ -140,8 +140,33 @@ Multiple requests are kept in arrival order: a later card cannot overtake the
 queue head, and the session remains in Approval until every pending request is
 resolved.
 
-OpenCode orchestrator nodes do not expose Auto-approve. OpenCode permission
-requests always remain visible approval cards.
+TermAl exposes a separate **Ask / Auto-approve** approval setting in OpenCode
+session settings, [`/approvals`](./slash-commands.md), session creation, and
+Settings → OpenCode. Only Settings changes the persisted app default. The
+creation dialog starts from that default and edits a draft for that one session;
+cancelling it does not change defaults. The app default affects new sessions,
+including agent-created OpenCode delegation children, which are write-capable
+(read-only OpenCode delegations are rejected). Existing sessions (including legacy
+records with no policy) keep Ask unless explicitly changed. Clones preserve the
+source policy. Orchestrator Auto-approve maps to the same session policy.
+
+Session settings requests must change `opencodeApprovalMode` separately from
+`model`, `opencodeEffort`, and `opencodeMode`. A request containing both policy
+and provider configuration is rejected with HTTP 400 before mutation or runtime
+admission, even if a supplied value is unchanged or the runtime is not running.
+This prevents a failed provider configuration change from leaving a new approval
+policy saved. Session creation may still specify both initial model and policy.
+
+Auto-approve selects only the agent-advertised `allow_once` option for each tool
+permission request. It never creates persistent `allow_always` grants or changes
+OpenCode configuration files. Missing/unknown allow options remain manual; human
+questions remain interactive. While a manual approval card is pending, further
+permission requests stay manual too; auto-approval resumes only when the session
+returns to Active. Stop ownership blocks automatic grants even during graceful
+cancellation while the displayed status has not yet changed. Stop an active turn
+before changing its approval policy; both the Prompt tab and slash palette block
+those changes while busy. This setting grants tool operations, not sandboxing: the read-only
+delegation restriction below remains unchanged.
 
 ## Delegation boundary
 

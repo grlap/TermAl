@@ -172,6 +172,16 @@ describe("OrchestratorTemplatesPanel", () => {
     ).toHaveValue("Builder");
   });
 
+  it("allows Auto-approve on OpenCode orchestrator nodes", async () => {
+    fetchTemplatesMock.mockResolvedValue({templates: [makeTemplate({sessions: [makeSession({agent: "OpenCode", autoApprove: false})]})]});
+    render(<OrchestratorTemplatesPanel />);
+    const control = await screen.findByRole("checkbox", {name: /Auto-approve this session's tool calls$/});
+    expect(control).toBeEnabled();
+    expect(control).not.toBeChecked();
+    fireEvent.click(control);
+    expect(control).toBeChecked();
+  });
+
   it("creates a new template from the editor draft", async () => {
     fetchTemplatesMock.mockResolvedValue({ templates: [] });
     createTemplateMock.mockResolvedValue({

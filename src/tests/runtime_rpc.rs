@@ -256,6 +256,7 @@ fn acp_prompt_command_keeps_writer_loop_responsive_while_waiting_for_response() 
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Cursor),
             name: Some("Cursor Prompt Loop".to_owned()),
             workdir: Some("/tmp".to_owned()),

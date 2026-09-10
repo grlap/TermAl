@@ -1,3 +1,4 @@
+import type { OpenCodeApprovalMode } from "./types";
 import type {
   ApprovalDecision,
   AgentType,
@@ -484,6 +485,7 @@ type CreateSessionRequest = {
   cursorMode?: CursorMode;
   claudeApprovalMode?: ClaudeApprovalMode;
   geminiApprovalMode?: GeminiApprovalMode;
+  opencodeApprovalMode?: OpenCodeApprovalMode;
 };
 
 export type CreateDelegationRequest = {
@@ -815,6 +817,7 @@ export function updateAppSettings(payload: {
   defaultCursorModel?: string;
   defaultGeminiModel?: string;
   defaultOpenCodeModel?: string;
+  defaultOpenCodeApprovalMode?: OpenCodeApprovalMode;
   defaultCodexReasoningEffort?: CodexReasoningEffort;
   defaultClaudeApprovalMode?: ClaudeApprovalMode;
   defaultClaudeEffort?: ClaudeEffortLevel;
@@ -1358,6 +1361,7 @@ export function updateSessionSettings(
     cursorMode?: CursorMode;
     claudeApprovalMode?: ClaudeApprovalMode;
     geminiApprovalMode?: GeminiApprovalMode;
+    opencodeApprovalMode?: OpenCodeApprovalMode;
     opencodeEffort?: string;
     opencodeMode?: string;
   },

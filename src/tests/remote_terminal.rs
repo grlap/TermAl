@@ -8,6 +8,7 @@ use super::*;
 fn replace_remote_settings_for_terminal_authority_test(state: &AppState, remote: RemoteConfig) {
     state
         .update_app_settings(UpdateAppSettingsRequest {
+            default_opencode_approval_mode: None,
             default_codex_model: None,
             default_claude_model: None,
             default_cursor_model: None,
@@ -966,6 +967,7 @@ async fn interruptible_remote_stream_reader_rejects_queued_bytes_after_endpoint_
 
     state
         .update_app_settings(UpdateAppSettingsRequest {
+            default_opencode_approval_mode: None,
             default_codex_model: None,
             default_claude_model: None,
             default_cursor_model: None,
@@ -1049,6 +1051,7 @@ async fn terminal_stream_error_event_preserves_unknown_remote_status_after_remov
         .expect("test project deletion should detach the remote");
     state
         .update_app_settings(UpdateAppSettingsRequest {
+            default_opencode_approval_mode: None,
             default_codex_model: None,
             default_claude_model: None,
             default_cursor_model: None,

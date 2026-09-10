@@ -9,6 +9,7 @@ fn guidance_session(agent: Agent) -> (AppState, String) {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(agent),
             name: Some("Host guidance wire test".to_owned()),
             workdir: Some("/tmp".to_owned()),

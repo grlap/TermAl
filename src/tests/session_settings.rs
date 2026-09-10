@@ -44,6 +44,7 @@ fn test_engram_mcp_installed_descriptor(session: &Session) -> EngramMcpInstalled
 #[test]
 fn remote_session_settings_payload_includes_agent_dependents_and_timeout_slack() {
     let payload = serde_json::to_value(UpdateSessionSettingsRequest {
+        opencode_approval_mode: None,
         name: None,
         model: Some("provider/model".to_owned()),
         approval_policy: None,
@@ -83,6 +84,8 @@ fn opencode_default_model_uses_explicit_wire_key() {
         serialized.get("defaultOpencodeModel").is_none(),
         "the accidental serde-derived spelling must not leak onto the wire"
     );
+    assert_eq!(serialized["defaultOpenCodeApprovalMode"], "ask");
+    assert!(serialized.get("defaultOpencodeApprovalMode").is_none());
 
     let request: UpdateAppSettingsRequest = serde_json::from_value(json!({
         "defaultOpenCodeModel": "openai/gpt-5.6-sol"
@@ -121,6 +124,7 @@ fn non_opencode_sessions_reject_opencode_effort() {
         let error = match state.update_session_settings(
             &session_id,
             UpdateSessionSettingsRequest {
+                opencode_approval_mode: None,
                 name: None,
                 model: None,
                 sandbox_mode: None,
@@ -383,6 +387,7 @@ fn offline_opencode_effort_and_mode_changes_do_not_claim_agent_effective_state()
         .update_session_settings(
             &session_id,
             UpdateSessionSettingsRequest {
+                opencode_approval_mode: None,
                 name: None,
                 model: None,
                 sandbox_mode: None,
@@ -447,6 +452,7 @@ fn offline_opencode_model_and_effort_change_defers_effort_membership_validation(
         .update_session_settings(
             &session_id,
             UpdateSessionSettingsRequest {
+                opencode_approval_mode: None,
                 name: None,
                 model: Some("openai/new-model".to_owned()),
                 sandbox_mode: None,
@@ -607,6 +613,7 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
 
     let updated = state
         .update_app_settings(UpdateAppSettingsRequest {
+            default_opencode_approval_mode: None,
             default_codex_model: Some("gpt-5.5".to_owned()),
             default_claude_model: Some("claude-sonnet-4-5".to_owned()),
             default_cursor_model: Some("cursor-premium".to_owned()),
@@ -734,6 +741,7 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
 
     let codex_created = reloaded_state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Codex),
             name: Some("Persisted Codex".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -765,6 +773,7 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
 
     let overridden_codex = reloaded_state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Codex),
             name: Some("Explicit Codex".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -794,6 +803,7 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
 
     let claude_created = reloaded_state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Claude),
             name: Some("Persisted Claude".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -818,6 +828,7 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
 
     let cursor_created = reloaded_state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Cursor),
             name: Some("Persisted Cursor".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -836,6 +847,7 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
 
     let gemini_created = reloaded_state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Gemini),
             name: Some("Persisted Gemini".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -861,6 +873,7 @@ fn default_model_preference_canonicalizes_default_sentinel_case() {
 
     state
         .update_app_settings(UpdateAppSettingsRequest {
+            default_opencode_approval_mode: None,
             default_codex_model: Some("gpt-5.5".to_owned()),
             default_claude_model: None,
             default_cursor_model: None,
@@ -877,6 +890,7 @@ fn default_model_preference_canonicalizes_default_sentinel_case() {
 
     let updated = state
         .update_app_settings(UpdateAppSettingsRequest {
+            default_opencode_approval_mode: None,
             default_codex_model: Some(" DEFAULT ".to_owned()),
             default_claude_model: None,
             default_cursor_model: None,
@@ -899,6 +913,7 @@ fn default_model_preference_canonicalizes_default_sentinel_case() {
 
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Codex),
             name: Some("Default Sentinel".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -1014,6 +1029,7 @@ fn opencode_model_ingress_rejects_values_that_cannot_round_trip_persistence() {
     ] {
         let state = test_app_state();
         let create_error = match state.create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::OpenCode),
             name: Some("Unsafe OpenCode model".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -1047,6 +1063,7 @@ fn update_app_settings_request_for_agent_model(
     model: String,
 ) -> UpdateAppSettingsRequest {
     UpdateAppSettingsRequest {
+        default_opencode_approval_mode: None,
         default_codex_model: (agent == Agent::Codex).then(|| model.clone()),
         default_claude_model: (agent == Agent::Claude).then(|| model.clone()),
         default_cursor_model: (agent == Agent::Cursor).then(|| model.clone()),
@@ -1163,6 +1180,7 @@ fn creates_codex_sessions_with_requested_prompt_defaults() {
 
     let response = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Codex),
             name: Some("Custom Codex".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -1208,6 +1226,7 @@ fn updates_cursor_session_model_settings() {
 
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Cursor),
             name: Some("Cursor Model".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -1227,6 +1246,7 @@ fn updates_cursor_session_model_settings() {
         .update_session_settings(
             &created.session_id,
             UpdateSessionSettingsRequest {
+                opencode_approval_mode: None,
                 name: None,
                 model: Some("gpt-5.3-codex".to_owned()),
                 sandbox_mode: None,
@@ -1261,6 +1281,7 @@ fn updates_codex_session_model_settings_without_restarting_runtime() {
 
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Codex),
             name: Some("Codex Model".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -1280,6 +1301,7 @@ fn updates_codex_session_model_settings_without_restarting_runtime() {
         .update_session_settings(
             &created.session_id,
             UpdateSessionSettingsRequest {
+                opencode_approval_mode: None,
                 name: None,
                 model: Some("gpt-5-mini".to_owned()),
                 sandbox_mode: None,
@@ -1322,6 +1344,7 @@ fn updates_codex_reasoning_effort_without_restarting_runtime() {
 
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Codex),
             name: Some("Codex Effort".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -1341,6 +1364,7 @@ fn updates_codex_reasoning_effort_without_restarting_runtime() {
         .update_session_settings(
             &created.session_id,
             UpdateSessionSettingsRequest {
+                opencode_approval_mode: None,
                 name: None,
                 model: None,
                 sandbox_mode: None,
@@ -1385,6 +1409,7 @@ fn normalizes_codex_reasoning_effort_when_switching_models() {
 
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Codex),
             name: Some("Codex Model Caps".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -1443,6 +1468,7 @@ fn normalizes_codex_reasoning_effort_when_switching_models() {
         .update_session_settings(
             &created.session_id,
             UpdateSessionSettingsRequest {
+                opencode_approval_mode: None,
                 name: None,
                 model: Some("gpt-5-codex-mini".to_owned()),
                 sandbox_mode: None,
@@ -1487,6 +1513,7 @@ fn rejects_unsupported_codex_reasoning_effort_for_selected_model() {
 
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Codex),
             name: Some("Codex Invalid Effort".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -1527,6 +1554,7 @@ fn rejects_unsupported_codex_reasoning_effort_for_selected_model() {
     let error = match state.update_session_settings(
         &created.session_id,
         UpdateSessionSettingsRequest {
+            opencode_approval_mode: None,
             name: None,
             model: None,
             sandbox_mode: None,
@@ -1563,6 +1591,7 @@ fn accepts_codex_max_and_ultra_reasoning_efforts_for_supporting_model() {
 
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Codex),
             name: Some("Codex Ultra Effort".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -1607,6 +1636,7 @@ fn accepts_codex_max_and_ultra_reasoning_efforts_for_supporting_model() {
             .update_session_settings(
                 &created.session_id,
                 UpdateSessionSettingsRequest {
+                    opencode_approval_mode: None,
                     name: None,
                     model: None,
                     sandbox_mode: None,
@@ -1736,6 +1766,7 @@ fn codex_fast_mode_is_catalog_gated_and_clears_on_unsupported_model_switch() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Codex),
             name: Some("Fast Codex".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -1753,6 +1784,7 @@ fn codex_fast_mode_is_catalog_gated_and_clears_on_unsupported_model_switch() {
     let empty_catalog_error = match state.update_session_settings(
         &created.session_id,
         UpdateSessionSettingsRequest {
+            opencode_approval_mode: None,
             name: None,
             model: None,
             approval_policy: None,
@@ -1807,6 +1839,7 @@ fn codex_fast_mode_is_catalog_gated_and_clears_on_unsupported_model_switch() {
         .update_session_settings(
             &created.session_id,
             UpdateSessionSettingsRequest {
+                opencode_approval_mode: None,
                 name: None,
                 model: None,
                 approval_policy: None,
@@ -1837,6 +1870,7 @@ fn codex_fast_mode_is_catalog_gated_and_clears_on_unsupported_model_switch() {
         .update_session_settings(
             &created.session_id,
             UpdateSessionSettingsRequest {
+                opencode_approval_mode: None,
                 name: None,
                 model: None,
                 approval_policy: None,
@@ -1871,6 +1905,7 @@ fn codex_fast_mode_is_catalog_gated_and_clears_on_unsupported_model_switch() {
         .update_session_settings(
             &created.session_id,
             UpdateSessionSettingsRequest {
+                opencode_approval_mode: None,
                 name: None,
                 model: Some("gpt-5.4-mini".to_owned()),
                 approval_policy: None,
@@ -1900,6 +1935,7 @@ fn codex_fast_mode_is_catalog_gated_and_clears_on_unsupported_model_switch() {
         .update_session_settings(
             &created.session_id,
             UpdateSessionSettingsRequest {
+                opencode_approval_mode: None,
                 name: None,
                 model: Some("gpt-5.5".to_owned()),
                 approval_policy: None,
@@ -1920,6 +1956,7 @@ fn codex_fast_mode_is_catalog_gated_and_clears_on_unsupported_model_switch() {
         .update_session_settings(
             &created.session_id,
             UpdateSessionSettingsRequest {
+                opencode_approval_mode: None,
                 name: None,
                 model: Some("gpt-5.4-mini".to_owned()),
                 approval_policy: None,
@@ -1947,6 +1984,7 @@ fn codex_fast_mode_is_catalog_gated_and_clears_on_unsupported_model_switch() {
     let error = match state.update_session_settings(
         &created.session_id,
         UpdateSessionSettingsRequest {
+            opencode_approval_mode: None,
             name: None,
             model: None,
             approval_policy: None,
@@ -1979,6 +2017,7 @@ fn updates_claude_session_model_settings_without_restarting_runtime() {
 
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Claude),
             name: Some("Claude Model".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -2014,6 +2053,7 @@ fn updates_claude_session_model_settings_without_restarting_runtime() {
         .update_session_settings(
             &created.session_id,
             UpdateSessionSettingsRequest {
+                opencode_approval_mode: None,
                 name: None,
                 model: Some("opus".to_owned()),
                 sandbox_mode: None,
@@ -2063,6 +2103,7 @@ fn installed_engram_agent_runtimes_rotate_on_identity_changes() {
     let claude_state = test_app_state();
     let claude = claude_state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Claude),
             name: Some("Claude Engram identity".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -2097,6 +2138,7 @@ fn installed_engram_agent_runtimes_rotate_on_identity_changes() {
         .update_session_settings(
             &claude.session_id,
             UpdateSessionSettingsRequest {
+                opencode_approval_mode: None,
                 name: None,
                 model: Some("claude-sonnet-4-1".to_owned()),
                 sandbox_mode: None,
@@ -2139,6 +2181,7 @@ fn installed_engram_agent_runtimes_rotate_on_identity_changes() {
     let cursor_state = test_app_state();
     let cursor = cursor_state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Cursor),
             name: Some("Cursor Engram identity".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -2171,6 +2214,7 @@ fn installed_engram_agent_runtimes_rotate_on_identity_changes() {
         .update_session_settings(
             &cursor.session_id,
             UpdateSessionSettingsRequest {
+                opencode_approval_mode: None,
                 name: None,
                 model: Some("cursor-next".to_owned()),
                 sandbox_mode: None,
@@ -2225,6 +2269,7 @@ fn installed_engram_agent_runtimes_rotate_on_identity_changes() {
         .update_session_settings(
             &opencode_id,
             UpdateSessionSettingsRequest {
+                opencode_approval_mode: None,
                 name: None,
                 model: None,
                 sandbox_mode: None,
@@ -2279,6 +2324,7 @@ fn installed_engram_agent_runtimes_rotate_on_identity_changes() {
         .update_session_settings(
             &codex_id,
             UpdateSessionSettingsRequest {
+                opencode_approval_mode: None,
                 name: None,
                 model: Some("gpt-5.5".to_owned()),
                 sandbox_mode: None,
@@ -2339,6 +2385,7 @@ fn installed_engram_agent_runtimes_rotate_on_identity_changes() {
         .update_session_settings(
             &gemini_id,
             UpdateSessionSettingsRequest {
+                opencode_approval_mode: None,
                 name: None,
                 model: Some("gemini-new".to_owned()),
                 sandbox_mode: None,
@@ -2414,6 +2461,7 @@ fn runtime_model_sync_preserves_the_installed_engram_actor_identity() {
         .update_session_settings(
             &session_id,
             UpdateSessionSettingsRequest {
+                opencode_approval_mode: None,
                 name: None,
                 model: None,
                 sandbox_mode: None,
@@ -2469,7 +2517,7 @@ fn runtime_model_sync_preserves_the_installed_engram_actor_identity() {
                 message.pointer("/params/sessionId"),
                 Some(&json!("cursor-model-sync-external"))
             );
-            assert_eq!(message.pointer("/params/optionId"), Some(&json!("mode")));
+            assert_eq!(message.pointer("/params/configId"), Some(&json!("mode")));
             assert_eq!(message.pointer("/params/value"), Some(&json!("ask")));
         }
         _ => panic!("expected live Cursor mode update request"),
@@ -2479,6 +2527,7 @@ fn runtime_model_sync_preserves_the_installed_engram_actor_identity() {
         .update_session_settings(
             &session_id,
             UpdateSessionSettingsRequest {
+                opencode_approval_mode: None,
                 name: None,
                 model: Some("cursor-user-model".to_owned()),
                 sandbox_mode: None,
@@ -2522,6 +2571,7 @@ fn updating_running_claude_session_to_default_model_requires_restart() {
 
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Claude),
             name: Some("Claude Default".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -2557,6 +2607,7 @@ fn updating_running_claude_session_to_default_model_requires_restart() {
         .update_session_settings(
             &created.session_id,
             UpdateSessionSettingsRequest {
+                opencode_approval_mode: None,
                 name: None,
                 model: Some("default".to_owned()),
                 sandbox_mode: None,
@@ -2607,6 +2658,7 @@ fn updates_claude_effort_and_marks_runtime_for_restart() {
 
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Claude),
             name: Some("Claude Effort".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -2642,6 +2694,7 @@ fn updates_claude_effort_and_marks_runtime_for_restart() {
         .update_session_settings(
             &created.session_id,
             UpdateSessionSettingsRequest {
+                opencode_approval_mode: None,
                 name: None,
                 model: None,
                 sandbox_mode: None,
@@ -2691,6 +2744,7 @@ fn syncs_claude_model_options_into_session_state() {
 
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Claude),
             name: Some("Claude Refresh".to_owned()),
             workdir: Some("/tmp".to_owned()),

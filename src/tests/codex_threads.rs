@@ -474,6 +474,7 @@ fn refreshes_codex_model_options_from_runtime() {
 
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Codex),
             name: Some("Codex Refresh".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -634,6 +635,7 @@ fn fork_codex_thread_creates_a_new_local_session() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Codex),
             name: Some("Codex Review".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -880,6 +882,7 @@ fn fork_codex_thread_falls_back_to_note_when_history_is_unavailable() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            opencode_approval_mode: None,
             agent: Some(Agent::Codex),
             name: Some("Codex Review".to_owned()),
             workdir: Some("/tmp".to_owned()),

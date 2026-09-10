@@ -842,6 +842,7 @@ fn remote_marker_create_is_rejected_after_post_decode_a_to_b_to_a_cycle() {
     state.remote_registry.set_test_after_json_decode(move || {
         state_for_hook
             .update_app_settings(UpdateAppSettingsRequest {
+                default_opencode_approval_mode: None,
                 default_codex_model: None,
                 default_claude_model: None,
                 default_cursor_model: None,
@@ -857,6 +858,7 @@ fn remote_marker_create_is_rejected_after_post_decode_a_to_b_to_a_cycle() {
             .expect("A -> B replacement should succeed");
         state_for_hook
             .update_app_settings(UpdateAppSettingsRequest {
+                default_opencode_approval_mode: None,
                 default_codex_model: None,
                 default_claude_model: None,
                 default_cursor_model: None,

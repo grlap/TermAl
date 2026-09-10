@@ -242,6 +242,7 @@ function sameSessionSummary(previous: Session, next: Session) {
     previous.claudeApprovalMode === next.claudeApprovalMode &&
     previous.geminiApprovalMode === next.geminiApprovalMode &&
     previous.opencodeModel === next.opencodeModel &&
+    previous.opencodeApprovalMode === next.opencodeApprovalMode &&
     previous.opencodeEffort === next.opencodeEffort &&
     previous.opencodeCurrentEffort === next.opencodeCurrentEffort &&
     sameModelOptions(previous.opencodeEffortOptions, next.opencodeEffortOptions) &&

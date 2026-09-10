@@ -67,7 +67,7 @@ import type {
   OrchestratorRuntimeAction,
   StandaloneControlSurfaceViewState,
 } from "./app-shell-internals";
-import type { AgentType, DiffMessage, Project, Session } from "./types";
+import type { AgentType, DiffMessage, OpenCodeApprovalMode, Project, Session } from "./types";
 
 type PendingScrollToBottomRequest = {
   reattach?: boolean;
@@ -125,6 +125,7 @@ type UseAppWorkspaceActionsParams = {
   adoptState: (nextState: StateResponse) => boolean;
   handleNewSession: (options: {
     agent: AgentType;
+    opencodeApprovalMode?: OpenCodeApprovalMode;
     preferredPaneId: string | null;
     projectSelectionId: string;
   }) => Promise<boolean>;
@@ -135,7 +136,7 @@ type UseAppWorkspaceActionsParams = {
 };
 
 type UseAppWorkspaceActionsReturn = {
-  handleCreateSessionDialogSubmit: () => Promise<void>;
+  handleCreateSessionDialogSubmit: (approvalMode?: OpenCodeApprovalMode) => Promise<void>;
   handleSidebarSessionClick: (
     sessionId: string,
     preferredPaneId?: string | null,
@@ -370,9 +371,10 @@ export function useAppWorkspaceActions({
     });
   }
 
-  async function handleCreateSessionDialogSubmit() {
+  async function handleCreateSessionDialogSubmit(approvalMode?: OpenCodeApprovalMode) {
     const created = await handleNewSession({
       agent: newSessionAgent,
+      ...(newSessionAgent === "OpenCode" ? { opencodeApprovalMode: approvalMode } : {}),
       preferredPaneId: createSessionPaneId,
       projectSelectionId: createSessionProjectId,
     });
