@@ -699,6 +699,7 @@ include!("codex_bin.rs");
 include!("acp.rs");
 include!("acp_opencode_config.rs");
 include!("codex.rs");
+include!("codex_engram_bootstrap.rs");
 include!("codex_events.rs");
 include!("codex_notices.rs");
 include!("codex_text_stream.rs");

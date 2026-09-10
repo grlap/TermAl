@@ -981,8 +981,7 @@ impl AppState {
                     context_preparation,
                     EngramContextNudgePreparation::Ready
                 ) && inner.find_session_index(session_id).is_some_and(|index| {
-                    inner.sessions[index].engram.context_nudge_pending
-                        || inner.sessions[index].engram.context_nudge_in_progress
+                    inner.sessions[index].engram.context_needs_preparation()
                 });
                 if !context_refresh_raced_prompt_admission {
                     break inner;
@@ -1316,8 +1315,7 @@ impl AppState {
             ) && inner
                 .find_visible_session_index(session_id)
                 .is_some_and(|index| {
-                    inner.sessions[index].engram.context_nudge_pending
-                        || inner.sessions[index].engram.context_nudge_in_progress
+                    inner.sessions[index].engram.context_needs_preparation()
                 });
             if !context_refresh_raced_prompt_admission {
                 break inner;

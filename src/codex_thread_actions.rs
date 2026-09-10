@@ -355,7 +355,7 @@ impl AppState {
             let record = inner
                 .session_mut_by_index(index)
                 .expect("session index should be valid");
-            record.engram.invalidate_context_nudge();
+            record.engram.mark_context_refresh_needed(None);
         }
         push_session_markdown_note_on_record(
             inner

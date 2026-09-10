@@ -2465,6 +2465,13 @@ struct EngramSessionState {
     pending_context_nudge: Option<String>,
     context_nudge_delivery_generation: Option<u64>,
     context_nudge_delivery_turn_generation: Option<u64>,
+    /// A compaction requests fresh orientation after any previously fetched
+    /// page has reached the runtime. Cleared when that fresh read starts.
+    context_refresh_needed: bool,
+    /// Best-effort dedup of the last 64 item ids, each at most 256 bytes.
+    /// Evicted, missing or oversized ids can signal again; delivery safety
+    /// must therefore not depend on deduplication.
+    signalled_compaction_item_ids: VecDeque<String>,
 }
 
 impl Default for EngramSessionState {
@@ -2491,15 +2498,40 @@ impl Default for EngramSessionState {
             pending_context_nudge: None,
             context_nudge_delivery_generation: None,
             context_nudge_delivery_turn_generation: None,
+            context_refresh_needed: false,
+            signalled_compaction_item_ids: VecDeque::new(),
         }
     }
 }
 
 impl EngramSessionState {
+    /// A fetched page is ready for admission even when another refresh is
+    /// deferred. Retrying preparation cannot advance until this page is sent.
+    fn context_needs_preparation(&self) -> bool {
+        self.pending_context_nudge.is_none()
+            && (self.context_nudge_pending || self.context_nudge_in_progress)
+    }
+
     fn invalidate_context_nudge(&mut self) {
         self.context_nudge_generation = self.context_nudge_generation.saturating_add(1);
         self.context_nudge_pending = true;
         self.pending_context_nudge = None;
+        self.context_refresh_needed = false;
+    }
+
+    fn mark_context_refresh_needed(&mut self, compaction_item_id: Option<&str>) -> bool {
+        if let Some(id) = compaction_item_id.filter(|id| id.len() <= 256) {
+            if self.signalled_compaction_item_ids.iter().any(|known| known == id) {
+                return false;
+            }
+            if self.signalled_compaction_item_ids.len() == 64 {
+                self.signalled_compaction_item_ids.pop_front();
+            }
+            self.signalled_compaction_item_ids.push_back(id.to_owned());
+        }
+        self.context_refresh_needed = true;
+        self.context_nudge_pending = true;
+        true
     }
 
     fn begin_checkpoint(&mut self, owner_generation: Option<u64>) -> bool {

@@ -123,14 +123,24 @@ impl AppState {
     }
 
     fn mark_engram_context_nudge_pending(&self, session_id: &str) {
+        self.mark_engram_context_refresh_needed(session_id, None);
+    }
+
+    /// Compaction is a deferred refresh, not a configuration invalidation.
+    /// Preparation retains fetched/in-flight pages until delivery acknowledges
+    /// them. Missing ids (including legacy/Claude signals) cannot be deduped.
+    fn mark_engram_context_refresh_needed(
+        &self,
+        session_id: &str,
+        compaction_item_id: Option<&str>,
+    ) -> bool {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let Some(index) = inner.find_session_index(session_id) else {
-            return;
+            return false;
         };
-        let record = inner
-            .session_mut_by_index(index)
-            .expect("session index should be valid");
-        record.engram.invalidate_context_nudge();
+        inner.session_mut_by_index(index)
+            .expect("session index should be valid")
+            .engram.mark_context_refresh_needed(compaction_item_id)
     }
 
     /// Refreshes the repository-declaration cache without holding the global
@@ -240,6 +250,11 @@ impl AppState {
             if !record.is_local_session() {
                 return EngramContextNudgePreparation::NotApplicable;
             }
+            // An advancing read would acknowledge this page before the model
+            // receives it. Deliver it first, even if a refresh is requested.
+            if record.engram.pending_context_nudge.is_some() {
+                return EngramContextNudgePreparation::Ready;
+            }
             if !record.engram.context_nudge_pending {
                 return EngramContextNudgePreparation::Ready;
             }
@@ -267,7 +282,11 @@ impl AppState {
                 else {
                     return EngramContextNudgePreparation::NotApplicable;
                 };
-                let generation = record.engram.context_nudge_generation.max(1);
+                let generation = if record.engram.context_refresh_needed {
+                    record.engram.context_nudge_generation.saturating_add(1)
+                } else {
+                    record.engram.context_nudge_generation
+                }.max(1);
                 let (actor_id, actor_context) = engram_runtime_actor_identity(
                     &inner.preferences.engram.developer_name,
                     record,
@@ -294,6 +313,9 @@ impl AppState {
                 record.engram.context_nudge_in_progress = true;
                 record.engram.context_nudge_in_progress_generation = Some(generation);
                 record.engram.context_nudge_generation = generation;
+                // A later boundary during this read sets this back to true;
+                // completing this read must not consume that later request.
+                record.engram.context_refresh_needed = false;
                 Some(target)
             }
             };
@@ -357,8 +379,9 @@ impl AppState {
             }
             match result {
                 Ok(context) => {
-                    record.engram.context_nudge_pending = false;
                     record.engram.pending_context_nudge = (!context.is_empty()).then_some(context);
+                    record.engram.context_nudge_pending = record.engram.context_refresh_needed
+                        && record.engram.pending_context_nudge.is_none();
                     return EngramContextNudgePreparation::Ready;
                 }
                 Err(error) => {
@@ -393,6 +416,7 @@ impl AppState {
             == Some(record.engram.context_nudge_generation)
         {
             record.engram.pending_context_nudge = None;
+            record.engram.context_nudge_pending |= record.engram.context_refresh_needed;
         }
         record.engram.context_nudge_delivery_generation = None;
         record.engram.context_nudge_delivery_turn_generation = None;

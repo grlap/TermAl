@@ -472,12 +472,13 @@ impl AppState {
         parent_session_id: &str,
         runtime_token: &RuntimeToken,
         codex_home: &FsPath,
-    ) -> Result<Value> {
-        self.termal_delegation_mcp_codex_config_with_engram(
-            parent_session_id,
-            self.engram_mcp_stdio_config_for_runtime(parent_session_id, runtime_token),
-            Some(codex_home),
-        )
+    ) -> Result<(Value, bool)> {
+        let engram = self.engram_mcp_stdio_config_for_runtime(parent_session_id, runtime_token);
+        let engram_enabled = engram.is_some();
+        let config = self.termal_delegation_mcp_codex_config_with_engram(
+            parent_session_id, engram, Some(codex_home),
+        )?;
+        Ok((config, engram_enabled))
     }
 
     fn termal_delegation_mcp_codex_config_with_engram(

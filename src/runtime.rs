@@ -51,6 +51,13 @@ enum CodexRuntimeCommand {
         session_id: String,
         command: CodexPromptCommand,
     },
+    /// Internal: config/read resolved the effective instructions for a new
+    /// Engram-enabled thread. The original setup slot still owns the prompt.
+    StartThreadAfterConfig {
+        session_id: String,
+        request_id: String,
+        params: Value,
+    },
     /// Internal: sent by the thread-setup waiter after extracting the thread id
     /// from a `thread/start` or `thread/resume` response. The writer thread
     /// picks this up and fires the `turn/start` request.

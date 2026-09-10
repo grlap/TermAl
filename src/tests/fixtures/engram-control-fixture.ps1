@@ -36,6 +36,7 @@ if ($workIndex -ge 0 -and ($args -contains "next") -and ($args -contains "--cont
         [Console]::Error.WriteLine("Engram base context argv/environment mismatch")
         exit 9
     }
+    [System.IO.File]::AppendAllText((Join-Path $engramHome "work-context-reads"), "next`n")
     $mode = (Get-Content -LiteralPath $projectFile -Raw).Trim()
     if ($mode -eq "fixture-work-next-gated" -and
         -not (Test-Path -LiteralPath (Join-Path $engramHome "work-context-released"))) {

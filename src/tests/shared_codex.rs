@@ -247,7 +247,7 @@ fn detach_removes_the_in_flight_thread_setup_so_the_next_prompt_starts_fresh() {
     }
 
     let pending_requests: CodexPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
-    let (input_tx, _dummy_input_rx) = mpsc::channel::<CodexRuntimeCommand>();
+    let (input_tx, input_rx) = mpsc::channel::<CodexRuntimeCommand>();
     let mut writer = Vec::new();
 
     let prompt_command = |prompt: &str, resume: Option<&str>| CodexPromptCommand {
@@ -308,6 +308,8 @@ fn detach_removes_the_in_flight_thread_setup_so_the_next_prompt_starts_fresh() {
          thread identities"
     );
 
+    answer_pending_codex_thread_setups(&pending_requests, "thread-old");
+
     // So the next prompt starts a FRESH thread instead of parking on — and inheriting
     // the thread identity of — the setup the stop invalidated.
     handle_shared_codex_prompt_command(
@@ -325,6 +327,15 @@ fn detach_removes_the_in_flight_thread_setup_so_the_next_prompt_starts_fresh() {
     )
     .unwrap();
 
+    finish_engram_config_for_test(
+        &state,
+        &runtime,
+        &pending_requests,
+        &input_tx,
+        &input_rx,
+        &mut writer,
+        json!({"config": {}}),
+    );
     let written = String::from_utf8(writer).expect("writer output should be utf-8");
     assert_eq!(
         written.matches("thread/resume").count(),
@@ -1251,7 +1262,7 @@ fn shared_codex_setup_request_for_mcp_test(
     }
     let pending_requests: CodexPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
     let mut writer = Vec::new();
-    let (input_tx, _input_rx) = mpsc::channel::<CodexRuntimeCommand>();
+    let (input_tx, input_rx) = mpsc::channel::<CodexRuntimeCommand>();
 
     handle_shared_codex_prompt_command(
         &mut writer,
@@ -1279,11 +1290,23 @@ fn shared_codex_setup_request_for_mcp_test(
     )
     .expect("seeded MCP config must not prevent Codex thread setup");
 
+    if engram_enabled && resume_thread_id.is_none() {
+        finish_engram_config_for_test(
+            &state,
+            &runtime,
+            &pending_requests,
+            &input_tx,
+            &input_rx,
+            &mut writer,
+            json!({"config": {}}),
+        );
+    }
     retire_pending_codex_thread_setups(&pending_requests);
     String::from_utf8(writer)
         .expect("Codex request should be UTF-8")
         .lines()
-        .find_map(|line| serde_json::from_str::<Value>(line).ok())
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .find(|message| message["method"] != "config/read")
         .expect("Codex thread setup should be valid JSON-RPC")
 }
 
@@ -1663,7 +1686,7 @@ fn shared_codex_thread_start_includes_delegation_mcp_config() {
 
     let pending_requests: CodexPendingRequestMap = Arc::new(Mutex::new(HashMap::new()));
     let mut writer = Vec::new();
-    let (input_tx, _input_rx) = mpsc::channel::<CodexRuntimeCommand>();
+    let (input_tx, input_rx) = mpsc::channel::<CodexRuntimeCommand>();
 
     handle_shared_codex_prompt_command(
         &mut writer,
@@ -1691,6 +1714,15 @@ fn shared_codex_thread_start_includes_delegation_mcp_config() {
     )
     .unwrap();
 
+    finish_engram_config_for_test(
+        &state,
+        &runtime,
+        &pending_requests,
+        &input_tx,
+        &input_rx,
+        &mut writer,
+        json!({"config": {}}),
+    );
     let written = String::from_utf8(writer).expect("Codex request should be UTF-8");
     assert!(
         written.contains("\"method\":\"thread/start\""),
@@ -1706,7 +1738,8 @@ fn shared_codex_thread_start_includes_delegation_mcp_config() {
     );
     let start_request = written
         .lines()
-        .find_map(|line| serde_json::from_str::<Value>(line).ok())
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .find(|message| message["method"] == "thread/start")
         .expect("thread/start should be valid JSON-RPC");
     assert_eq!(
         start_request.pointer("/params/serviceTier"),
@@ -5489,4 +5522,553 @@ fn codex_auto_approve_leaves_non_approval_requests_and_next_turn_settings_alone(
         );
     }
     assert!(input_rx.try_recv().is_err());
+}
+
+fn answer_engram_config_for_test(
+    pending: &CodexPendingRequestMap,
+    response: std::result::Result<Value, CodexResponseError>,
+) {
+    let mut requests = pending.lock().unwrap();
+    assert_eq!(requests.len(), 1, "only config/read is outstanding");
+    let (_, sender) = requests.drain().next().unwrap();
+    sender.send(response).unwrap();
+}
+
+fn finish_engram_config_for_test(
+    state: &AppState,
+    runtime: &SharedCodexRuntime,
+    pending: &CodexPendingRequestMap,
+    input_tx: &Sender<CodexRuntimeCommand>,
+    input_rx: &mpsc::Receiver<CodexRuntimeCommand>,
+    writer: &mut Vec<u8>,
+    response: Value,
+) {
+    answer_engram_config_for_test(pending, Ok(response));
+    let command = recv_within_guard(input_rx, "config/read should queue thread/start").unwrap();
+    run_engram_config_continuation_for_test(state, runtime, pending, input_tx, writer, command);
+}
+
+fn run_engram_config_continuation_for_test(
+    state: &AppState,
+    runtime: &SharedCodexRuntime,
+    pending: &CodexPendingRequestMap,
+    input_tx: &Sender<CodexRuntimeCommand>,
+    writer: &mut Vec<u8>,
+    command: CodexRuntimeCommand,
+) {
+    let CodexRuntimeCommand::StartThreadAfterConfig {
+        session_id,
+        request_id,
+        params,
+    } = command
+    else {
+        panic!("expected resolved config continuation");
+    };
+    handle_shared_codex_start_thread_after_config(
+        writer,
+        pending,
+        state,
+        &runtime.runtime_id,
+        &runtime.sessions,
+        &runtime.thread_sessions,
+        input_tx,
+        None,
+        &session_id,
+        request_id,
+        params,
+    )
+    .unwrap();
+}
+
+struct EngramBootstrapFixture {
+    state: AppState,
+    session_id: String,
+    runtime: SharedCodexRuntime,
+    input_rx: mpsc::Receiver<CodexRuntimeCommand>,
+    pending: CodexPendingRequestMap,
+    writer: Vec<u8>,
+}
+
+impl EngramBootstrapFixture {
+    fn new() -> Self {
+        let state = test_app_state();
+        let session_id = create_test_engram_codex_session(&state, "bootstrap");
+        let (runtime, input_rx, process) = test_shared_codex_runtime("bootstrap");
+        *state.shared_codex_runtime.lock().unwrap() = Some(runtime.clone());
+        {
+            let mut inner = state.inner.lock().unwrap();
+            let index = inner.find_session_index(&session_id).unwrap();
+            inner.sessions[index].runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+                runtime_id: runtime.runtime_id.clone(),
+                input_tx: runtime.input_tx.clone(),
+                process,
+                shared_session: Some(SharedCodexSessionHandle {
+                    runtime: runtime.clone(),
+                    session_id: session_id.clone(),
+                }),
+            });
+            inner.sessions[index].session.status = SessionStatus::Active;
+        }
+        Self {
+            state,
+            session_id,
+            runtime,
+            input_rx,
+            pending: Arc::new(Mutex::new(HashMap::new())),
+            writer: Vec::new(),
+        }
+    }
+
+    fn prompt(&mut self, text: &str) {
+        let cwd = self
+            .state
+            .test_temp_root
+            .as_ref()
+            .unwrap()
+            .path()
+            .join("bootstrap");
+        handle_shared_codex_prompt_command(
+            &mut self.writer,
+            &self.pending,
+            &self.state,
+            &self.runtime.runtime_id,
+            &test_missing_shared_codex_home(),
+            &self.runtime.sessions,
+            &self.runtime.thread_sessions,
+            &self.runtime.input_tx,
+            None,
+            &self.session_id,
+            CodexPromptCommand {
+                active_turn_generation: 0,
+                approval_policy: CodexApprovalPolicy::Never,
+                attachments: vec![],
+                cwd: cwd.to_string_lossy().into_owned(),
+                model: "gpt-5.4".to_owned(),
+                prompt: text.to_owned(),
+                reasoning_effort: CodexReasoningEffort::Medium,
+                service_tier: None,
+                resume_thread_id: None,
+                sandbox_mode: CodexSandboxMode::WorkspaceWrite,
+            },
+        )
+        .unwrap();
+    }
+
+    fn messages(&self) -> Vec<Value> {
+        std::str::from_utf8(&self.writer)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect()
+    }
+}
+
+impl Drop for EngramBootstrapFixture {
+    fn drop(&mut self) {
+        self.runtime
+            .sessions
+            .lock()
+            .unwrap()
+            .remove(&self.session_id);
+        self.pending.lock().unwrap().clear();
+    }
+}
+
+#[test]
+fn engram_bootstrap_preserves_effective_instructions_and_newest_prompt() {
+    let mut f = EngramBootstrapFixture::new();
+    f.prompt("opener");
+    let first = f.messages();
+    assert_eq!(first.len(), 1);
+    assert_eq!(first[0]["method"], "config/read");
+    let cwd = f
+        .state
+        .test_temp_root
+        .as_ref()
+        .unwrap()
+        .path()
+        .join("bootstrap");
+    assert_eq!(first[0]["params"]["cwd"], cwd.to_string_lossy().as_ref());
+    f.prompt("newest");
+    assert_eq!(
+        f.messages().len(),
+        1,
+        "writer returned, newer prompt coalesced"
+    );
+    let base = "  user + project instructions\r\nkeep trailing whitespace  \n";
+    finish_engram_config_for_test(
+        &f.state,
+        &f.runtime,
+        &f.pending,
+        &f.runtime.input_tx,
+        &f.input_rx,
+        &mut f.writer,
+        json!({"config": {"developer_instructions": base}}),
+    );
+    let written = f.messages();
+    assert_eq!(written.len(), 2);
+    assert_eq!(written[1]["method"], "thread/start");
+    assert_eq!(written[1]["params"]["cwd"], first[0]["params"]["cwd"]);
+    assert_eq!(
+        written[1]["params"]["developerInstructions"],
+        format!("{base}\n\n{CODEX_ENGRAM_RECOVERY_BOOTSTRAP}")
+    );
+    answer_pending_codex_thread_setups(&f.pending, "engram-thread");
+    let command =
+        recv_within_guard(&f.input_rx, "resolved setup should deliver latest prompt").unwrap();
+    let CodexRuntimeCommand::StartTurnAfterSetup { command, .. } = command else {
+        panic!("expected prompt delivery");
+    };
+    assert_eq!(command.prompt, "newest");
+}
+
+#[test]
+fn engram_bootstrap_config_failure_is_visible_and_allows_retry() {
+    for response in [
+        Err(CodexResponseError::JsonRpc("config/read denied".to_owned())),
+        Err(CodexResponseError::Timeout(
+            "config/read timed out".to_owned(),
+        )),
+        Ok(json!({"unexpected": {}})),
+        Ok(json!({"config": {"developer_instructions": 42}})),
+    ] {
+        let mut f = EngramBootstrapFixture::new();
+        f.prompt("opener");
+        f.prompt("newest");
+        // A short config deadline must not tear down a quiet shared server.
+        *f.runtime.stdout_activity.lock().unwrap() =
+            std::time::Instant::now() - Duration::from_secs(900);
+        answer_engram_config_for_test(&f.pending, response);
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            let snapshot = f.state.full_snapshot();
+            let session = snapshot
+                .sessions
+                .iter()
+                .find(|s| s.id == f.session_id)
+                .unwrap();
+            if session.status == SessionStatus::Error {
+                assert!(session.messages.iter().any(|m| matches!(m,
+                    Message::Text { text, .. } if text.contains("config/read"))));
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "config failure was not surfaced"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            f.runtime
+                .sessions
+                .lock()
+                .unwrap()
+                .get(&f.session_id)
+                .unwrap()
+                .pending_thread_setup
+                .is_none()
+        );
+        assert_eq!(
+            f.messages().len(),
+            1,
+            "must not start without resolved instructions"
+        );
+        assert!(f.state.session_matches_runtime_token(
+            &f.session_id,
+            &RuntimeToken::Codex(f.runtime.runtime_id.clone())
+        ));
+        f.prompt("retry");
+        assert_eq!(
+            f.messages().len(),
+            2,
+            "retry must issue a fresh config/read"
+        );
+        assert_eq!(f.messages()[1]["method"], "config/read");
+    }
+}
+
+#[test]
+fn engram_bootstrap_queued_response_cannot_start_detached_or_replacement_setup() {
+    let mut f = EngramBootstrapFixture::new();
+    f.prompt("old");
+    answer_engram_config_for_test(&f.pending, Ok(json!({"config": {}})));
+    let command = recv_within_guard(&f.input_rx, "config continuation should arrive").unwrap();
+    f.runtime.sessions.lock().unwrap().remove(&f.session_id);
+    f.prompt("replacement");
+    let replacement = f
+        .runtime
+        .sessions
+        .lock()
+        .unwrap()
+        .get(&f.session_id)
+        .unwrap()
+        .pending_thread_setup
+        .as_ref()
+        .unwrap()
+        .request_id
+        .clone();
+    run_engram_config_continuation_for_test(
+        &f.state,
+        &f.runtime,
+        &f.pending,
+        &f.runtime.input_tx,
+        &mut f.writer,
+        command,
+    );
+    assert!(shared_codex_thread_setup_is_current(
+        &f.runtime.sessions,
+        &f.session_id,
+        &replacement
+    ));
+    assert!(f.messages().iter().all(|m| m["method"] == "config/read"));
+}
+
+#[test]
+fn engram_bootstrap_composition_matches_override_precedence_and_null_inheritance() {
+    for (params, config, base) in [
+        (json!({}), json!({}), ""),
+        (json!({}), json!({"developer_instructions": null}), ""),
+        (
+            json!({"developerInstructions": null}),
+            json!({"developer_instructions": "inherited"}),
+            "inherited",
+        ),
+        (
+            json!({"developerInstructions": ""}),
+            json!({"developer_instructions": "ignored"}),
+            "",
+        ),
+        (
+            json!({"config": {"developer_instructions": "override"}}),
+            json!({"developer_instructions": "inherited"}),
+            "override",
+        ),
+        (
+            json!({"developerInstructions": "explicit", "config": {"developer_instructions": "override"}}),
+            json!({"developer_instructions": "inherited"}),
+            "explicit",
+        ),
+    ] {
+        let mut params = params;
+        compose_codex_engram_instructions(&mut params, &json!({"config": config})).unwrap();
+        let expected = if base.is_empty() {
+            CODEX_ENGRAM_RECOVERY_BOOTSTRAP.to_owned()
+        } else {
+            format!("{base}\n\n{CODEX_ENGRAM_RECOVERY_BOOTSTRAP}")
+        };
+        assert_eq!(params["developerInstructions"], expected);
+    }
+    for malformed in [Value::Null, json!({}), json!({"config": []})] {
+        assert!(compose_codex_engram_instructions(&mut json!({}), &malformed).is_err());
+    }
+}
+
+#[test]
+fn engram_bootstrap_disabled_and_resume_do_not_read_or_override_instructions() {
+    for (enabled, resume) in [(false, None), (false, Some("old")), (true, Some("old"))] {
+        let request = shared_codex_setup_request_for_mcp_test(
+            &test_missing_shared_codex_home(),
+            resume,
+            enabled,
+        );
+        assert_eq!(
+            request["method"],
+            if resume.is_some() {
+                "thread/resume"
+            } else {
+                "thread/start"
+            }
+        );
+        assert!(request["params"].get("developerInstructions").is_none());
+    }
+}
+
+#[test]
+fn engram_bootstrap_thread_start_write_failure_releases_resolved_setup() {
+    let mut f = EngramBootstrapFixture::new();
+    f.prompt("start");
+    answer_engram_config_for_test(&f.pending, Ok(json!({"config": {}})));
+    let command = recv_within_guard(&f.input_rx, "config continuation should arrive").unwrap();
+    let CodexRuntimeCommand::StartThreadAfterConfig {
+        session_id,
+        request_id,
+        params,
+    } = command
+    else {
+        panic!("expected config continuation");
+    };
+    struct BrokenWriter;
+    impl Write for BrokenWriter {
+        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "test broken writer",
+            ))
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let result = handle_shared_codex_start_thread_after_config(
+        &mut BrokenWriter,
+        &f.pending,
+        &f.state,
+        &f.runtime.runtime_id,
+        &f.runtime.sessions,
+        &f.runtime.thread_sessions,
+        &f.runtime.input_tx,
+        None,
+        &session_id,
+        request_id,
+        params,
+    );
+    assert!(
+        result.is_err(),
+        "transport failure must reach the writer loop"
+    );
+    assert!(f.pending.lock().unwrap().is_empty());
+    assert!(
+        f.runtime
+            .sessions
+            .lock()
+            .unwrap()
+            .get(&f.session_id)
+            .unwrap()
+            .pending_thread_setup
+            .is_none()
+    );
+}
+
+#[test]
+fn engram_bootstrap_closed_writer_channel_releases_setup() {
+    let mut f = EngramBootstrapFixture::new();
+    f.prompt("start");
+    // Dropping the command receiver must terminate the setup, not leave it parked.
+    let (_, replacement_rx) = mpsc::channel();
+    drop(std::mem::replace(&mut f.input_rx, replacement_rx));
+    answer_engram_config_for_test(&f.pending, Ok(json!({"config": {}})));
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let sessions = f.runtime.sessions.lock().unwrap();
+        let pending = sessions
+            .get(&f.session_id)
+            .and_then(|s| s.pending_thread_setup.as_ref());
+        if pending.is_none() {
+            break;
+        }
+        drop(sessions);
+        assert!(
+            std::time::Instant::now() < deadline,
+            "closed writer stranded config setup"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(f.pending.lock().unwrap().is_empty());
+    assert_eq!(f.messages().len(), 1);
+}
+
+#[test]
+fn engram_bootstrap_first_config_write_failure_releases_slot_and_allows_retry() {
+    let mut f = EngramBootstrapFixture::new();
+    struct BrokenWriter;
+    impl Write for BrokenWriter {
+        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "config write failed",
+            ))
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let result = handle_shared_codex_prompt_command(
+        &mut BrokenWriter,
+        &f.pending,
+        &f.state,
+        &f.runtime.runtime_id,
+        &test_missing_shared_codex_home(),
+        &f.runtime.sessions,
+        &f.runtime.thread_sessions,
+        &f.runtime.input_tx,
+        None,
+        &f.session_id,
+        CodexPromptCommand {
+            active_turn_generation: 0,
+            approval_policy: CodexApprovalPolicy::Never,
+            attachments: vec![],
+            cwd: f
+                .state
+                .test_temp_root
+                .as_ref()
+                .unwrap()
+                .path()
+                .join("bootstrap")
+                .to_string_lossy()
+                .into_owned(),
+            model: "gpt-5.4".to_owned(),
+            prompt: "first prompt".to_owned(),
+            reasoning_effort: CodexReasoningEffort::Medium,
+            service_tier: None,
+            resume_thread_id: None,
+            sandbox_mode: CodexSandboxMode::WorkspaceWrite,
+        },
+    );
+    assert!(
+        result.is_err(),
+        "transport error must reach the writer loop"
+    );
+    assert!(f.pending.lock().unwrap().is_empty());
+    assert!(
+        f.runtime
+            .sessions
+            .lock()
+            .unwrap()
+            .get(&f.session_id)
+            .unwrap()
+            .pending_thread_setup
+            .is_none()
+    );
+    f.prompt("retry after write failure");
+    assert_eq!(
+        f.messages().len(),
+        1,
+        "retry must not park behind a failed setup"
+    );
+    assert_eq!(f.messages()[0]["method"], "config/read");
+}
+
+#[test]
+fn engram_bootstrap_config_read_has_a_fixed_deadline_despite_sibling_activity() {
+    let mut f = EngramBootstrapFixture::new();
+    let started = std::time::Instant::now();
+    f.prompt("deadline");
+    let guard = CODEX_ENGRAM_CONFIG_READ_TIMEOUT + Duration::from_secs(10);
+    loop {
+        // Keep the shared server visibly active: the rollout patience budget
+        // would otherwise keep this read parked for fifteen minutes.
+        *f.runtime.stdout_activity.lock().unwrap() = std::time::Instant::now();
+        let snapshot = f.state.full_snapshot();
+        let session = snapshot
+            .sessions
+            .iter()
+            .find(|s| s.id == f.session_id)
+            .unwrap();
+        if session.status == SessionStatus::Error {
+            assert!(session.messages.iter().any(|m| matches!(m,
+                Message::Text { text, .. } if text.contains("config/read") && text.contains("timed out"))));
+            break;
+        }
+        assert!(
+            started.elapsed() < guard,
+            "config read borrowed the rollout replay deadline"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(f.pending.lock().unwrap().is_empty());
+    assert!(f.state.session_matches_runtime_token(
+        &f.session_id,
+        &RuntimeToken::Codex(f.runtime.runtime_id.clone())
+    ));
+    assert_eq!(f.messages().len(), 1, "timeout must not start a thread");
 }

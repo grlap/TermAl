@@ -827,6 +827,17 @@ fn handle_shared_codex_app_server_notification(
             let Some(item) = message.get("params").and_then(|params| params.get("item")) else {
                 return Ok(());
             };
+            // Manual compaction can have a different turn id; record the
+            // completed boundary before filtering ordinary work-turn items.
+            if item.get("type").and_then(Value::as_str) == Some("contextCompaction") {
+                if state.mark_engram_context_refresh_needed(
+                    session_id, item.get("id").and_then(Value::as_str),
+                ) {
+                    push_shared_codex_turn_notice(state, session_id, turn_state,
+                        "Codex compacted the thread context.")?;
+                }
+                return Ok(());
+            }
             let event_turn_id = shared_codex_event_turn_id(message);
             let matches_completed_agent_message = turn_id.is_none()
                 && completed_turn_id.is_some()
@@ -1252,8 +1263,8 @@ fn handle_shared_codex_thread_compacted(
     _recorder: &mut impl TurnRecorder,
 ) -> Result<()> {
     let event_turn_id = shared_codex_event_turn_id(message);
-    // Idle/manual compaction has no active turn id, but it still invalidates
-    // the work context that must accompany the next prompt.
+    // Even a boundary outside the active work turn requests fresh context.
+    // The refresh path preserves undelivered/in-flight pages for delivery.
     state.mark_engram_context_nudge_pending(session_id);
     if !shared_codex_event_matches_active_turn(current_turn_id, event_turn_id) {
         return Ok(());

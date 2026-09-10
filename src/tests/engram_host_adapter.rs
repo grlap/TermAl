@@ -5054,7 +5054,7 @@ fn real_process_fixture_enforces_stale_begin_and_unbegun_grant_recovery() {
     transport.shutdown_session(&refusal_connection.session_id);
 }
 
-fn real_engram_control_fixture_path() -> PathBuf {
+pub(super) fn real_engram_control_fixture_path() -> PathBuf {
     if cfg!(windows) {
         FsPath::new(env!("CARGO_MANIFEST_DIR"))
             .join("src/tests/fixtures/engram-control-fixture.ps1")
@@ -15686,7 +15686,10 @@ fn settings_reset_supersedes_an_inflight_engram_context_refresh() {
         assert!(record.engram.context_nudge_in_progress);
     }
 
-    state.mark_engram_context_nudge_pending(&session_id);
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        mark_engram_mcp_runtime_resets_locked(&mut inner, std::slice::from_ref(&session_id));
+    }
     context_gate.release();
     assert_eq!(
         refresh.join().expect("context refresh thread should join"),

@@ -1004,10 +1004,10 @@ codex app-server   # JSON-RPC over stdin/stdout
 3. **Stderr** — logs diagnostic output.
 4. **Waiter** — watches for child-process exit and tears down any attached sessions.
 
-**Fire-and-forget flow for prompts:** When a session already has a thread ID, the writer sends `turn/start` directly and returns. When a new thread is needed, the writer sends `thread/start` (or `thread/resume`) as a fire-and-forget write and spawns a waiter thread. That waiter extracts the thread ID from the response and feeds a `StartTurnAfterSetup` command back through the writer's command channel, which then sends `turn/start`. The writer thread never blocks on either step.
+**Fire-and-forget flow for prompts:** When a session already has a thread ID, the writer sends `turn/start` directly and returns. When a new thread is needed, the writer sends `thread/start` (or `thread/resume`) as a fire-and-forget write and spawns a waiter thread. That waiter extracts the thread ID from the response and feeds a `StartTurnAfterSetup` command back through the writer's command channel, which then sends `turn/start`. The writer thread never blocks on either step. For a new Engram-enabled thread, an asynchronous `config/read` first resolves existing developer instructions in the same working directory. Its waiter appends the recovery bootstrap and queues `StartThreadAfterConfig`; the writer then enters the same `thread/start` handshake. The original setup slot owns the newest parked prompt across both requests. The config read has a fixed 30-second deadline; expiry fails only that turn. Engram-disabled setup and `thread/resume` skip this extra request. See [Engram recovery context](features/engram-host-adapter.md#start-and-post-compaction-context) for scope and recovery limits.
 
 **Lifecycle:**
-1. Spawn shared process -> send `initialize` RPC -> receive capabilities (only blocking step)
+1. Spawn shared process -> send `initialize` RPC -> receive runtime metadata (only blocking step)
 2. For each session, send `thread/start` (new) or `thread/resume` (existing) -> waiter thread extracts thread ID
 3. On user message, send `turn/start` with input items (text + optional image attachments)
 4. Receive notifications such as `item/agentMessage/delta`, `item/completed`, and `turn/completed`
@@ -1389,6 +1389,7 @@ termal/
 |   |-- claude_spawn.rs      # Claude CLI subprocess spawn + wire writers
 |   |-- claude_args.rs       # Claude CLI argv construction + message parsing
 |   |-- codex.rs             # Codex shared-runtime spawn + session state
+|   |-- codex_engram_bootstrap.rs # New-thread instruction composition + async config/read
 |   |-- codex_home.rs        # Codex home directory setup + stderr formatters
 |   |-- codex_bin.rs         # Codex executable discovery + web-search formatters
 |   |-- codex_rpc.rs         # Codex JSON-RPC transport (send + wait for response)

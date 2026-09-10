@@ -1027,10 +1027,21 @@ fn revoke_project_engram_authority_off_lock(
     }
 }
 
+/// Runtime reset changes only these fields. Preserve a deferred compaction
+/// refresh as well as its undelivered page when persisting settings fails.
+struct EngramMcpRuntimeResetSnapshot {
+    session_id: String,
+    runtime_reset_required: bool,
+    context_nudge_generation: u64,
+    context_nudge_pending: bool,
+    pending_context_nudge: Option<String>,
+    context_refresh_needed: bool,
+}
+
 fn mark_engram_mcp_runtime_resets_locked(
     inner: &mut StateInner,
     session_ids: &[String],
-) -> Vec<(String, bool, u64, bool, Option<String>)> {
+) -> Vec<EngramMcpRuntimeResetSnapshot> {
     let mut previous = Vec::new();
     for session_id in session_ids {
         let Some(index) = inner.find_session_index(session_id) else {
@@ -1039,16 +1050,15 @@ fn mark_engram_mcp_runtime_resets_locked(
         if !inner.sessions[index].is_local_session() {
             continue;
         }
-        previous.push((
-            session_id.clone(),
-            inner.sessions[index].runtime_reset_required,
-            inner.sessions[index].engram.context_nudge_generation,
-            inner.sessions[index].engram.context_nudge_pending,
-            inner.sessions[index].engram.pending_context_nudge.clone(),
-        ));
-        let record = inner
-            .session_mut_by_index(index)
-            .expect("session index should be valid");
+        let record = inner.session_mut_by_index(index).expect("session index should be valid");
+        previous.push(EngramMcpRuntimeResetSnapshot {
+            session_id: session_id.clone(),
+            runtime_reset_required: record.runtime_reset_required,
+            context_nudge_generation: record.engram.context_nudge_generation,
+            context_nudge_pending: record.engram.context_nudge_pending,
+            pending_context_nudge: record.engram.pending_context_nudge.clone(),
+            context_refresh_needed: record.engram.context_refresh_needed,
+        });
         record.runtime_reset_required = true;
         record.engram.invalidate_context_nudge();
     }
@@ -1057,24 +1067,16 @@ fn mark_engram_mcp_runtime_resets_locked(
 
 fn restore_engram_mcp_runtime_resets_locked(
     inner: &mut StateInner,
-    previous: Vec<(String, bool, u64, bool, Option<String>)>,
+    previous: Vec<EngramMcpRuntimeResetSnapshot>,
 ) {
-    for (
-        session_id,
-        runtime_reset_required,
-        context_nudge_generation,
-        context_nudge_pending,
-        pending_context_nudge,
-    ) in previous
-    {
-        if let Some(index) = inner.find_session_index(&session_id) {
-            let record = inner
-                .session_mut_by_index(index)
-                .expect("session index should be valid");
-            record.runtime_reset_required = runtime_reset_required;
-            record.engram.context_nudge_generation = context_nudge_generation;
-            record.engram.context_nudge_pending = context_nudge_pending;
-            record.engram.pending_context_nudge = pending_context_nudge;
+    for snapshot in previous {
+        if let Some(index) = inner.find_session_index(&snapshot.session_id) {
+            let record = inner.session_mut_by_index(index).expect("session index should be valid");
+            record.runtime_reset_required = snapshot.runtime_reset_required;
+            record.engram.context_nudge_generation = snapshot.context_nudge_generation;
+            record.engram.context_nudge_pending = snapshot.context_nudge_pending;
+            record.engram.pending_context_nudge = snapshot.pending_context_nudge;
+            record.engram.context_refresh_needed = snapshot.context_refresh_needed;
         }
     }
 }

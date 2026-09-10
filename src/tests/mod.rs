@@ -43,6 +43,7 @@ mod delegation_validation;
 mod delegation_wait;
 mod delegations;
 mod engram_authority_fixture;
+mod engram_compaction;
 mod engram_host_adapter;
 mod file_changes;
 mod git;

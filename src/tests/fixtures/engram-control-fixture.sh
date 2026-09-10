@@ -53,6 +53,7 @@ case " $original_args " in
     [ "$ENGRAM_ACTOR_CONTEXT" = "$actor_context" ] || exit 9
     [ "$ENGRAM_SESSION_ID" = "$session_id" ] || exit 9
     mode=$(tr -d '\r\n' < "$project_file")
+    printf "next\n" >> "$engram_home/work-context-reads"
     if [ "$mode" = "fixture-work-next-gated" ] && [ ! -e "$engram_home/work-context-released" ]; then
       sh "$engram_home/work-context-gate.sh" >/dev/null
     fi

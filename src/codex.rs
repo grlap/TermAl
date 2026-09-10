@@ -52,6 +52,8 @@ fn spawn_codex_runtime(
 const SHARED_CODEX_STDIN_WRITE_TIMEOUT: Duration = Duration::from_secs(30);
 const SHARED_CODEX_STDIN_WATCHDOG_POLL_INTERVAL: Duration = Duration::from_millis(250);
 
+const SHARED_CODEX_THREAD_SETUP_TIMEOUT: Duration = Duration::from_secs(180);
+
 /// How often `wait_for_shared_codex_response_while_server_active` wakes up to
 /// re-check the server's stdout liveness while a response is outstanding.
 const SHARED_CODEX_RESPONSE_POLL_SLICE: Duration = Duration::from_secs(15);
@@ -421,6 +423,16 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
                             ),
                         )
                     }
+                    CodexRuntimeCommand::StartThreadAfterConfig {
+                        session_id,
+                        request_id,
+                        params,
+                    } => handle_shared_codex_start_thread_after_config(
+                        &mut stdin, &writer_pending_requests, &writer_state,
+                        &writer_runtime_id, &writer_sessions, &writer_thread_sessions,
+                        &writer_input_tx, Some(&writer_context), &session_id,
+                        request_id, params,
+                    ),
                     CodexRuntimeCommand::StartTurnAfterSetup {
                         session_id,
                         thread_id,
@@ -1046,8 +1058,6 @@ fn handle_shared_codex_prompt_command(
     session_id: &str,
     command: CodexPromptCommand,
 ) -> Result<()> {
-    const SHARED_CODEX_THREAD_SETUP_TIMEOUT: Duration = Duration::from_secs(180);
-
     // Decide and commit in ONE critical section. Reading the session state and
     // then acting on it under a second lock is a check-then-act race: the waiter
     // can complete in between, take the parked prompt, and start its turn — and
@@ -1184,7 +1194,7 @@ fn handle_shared_codex_prompt_command(
     // default and holding the slot the thing you have to opt into.
     let setup_guard = PendingCodexThreadSetupGuard::new(sessions, session_id, &request_id);
 
-    let mcp_config = state
+    let (mcp_config, engram_enabled) = state
         .termal_delegation_mcp_codex_config_for_shared_runtime(
             session_id,
             &RuntimeToken::Codex(runtime_id.to_owned()),
@@ -1226,6 +1236,46 @@ fn handle_shared_codex_prompt_command(
             }),
         ),
     };
+
+    // Eligibility and MCP configuration come from the same descriptor snapshot.
+    // Seeded user environment values are not proof of an enabled integration.
+    if method == "thread/start" && engram_enabled {
+        start_shared_codex_engram_config_read(
+            writer, pending_requests, state, runtime_id, sessions, input_tx,
+            writer_context, session_id, &request_id, params,
+        )?;
+        setup_guard.disarm();
+        return Ok(());
+    }
+
+    // Transfer ownership synchronously to the unchanged thread-setup handshake.
+    setup_guard.disarm();
+    finish_shared_codex_thread_setup(
+        writer, pending_requests, state, runtime_id, sessions, thread_sessions,
+        input_tx, writer_context, session_id, request_id, method, params,
+    )
+}
+
+/// The config waiter returns to the writer through a command. Recheck the slot
+/// here: stop/detach may have happened after the config response was queued.
+fn finish_shared_codex_thread_setup(
+    writer: &mut impl Write,
+    pending_requests: &CodexPendingRequestMap,
+    state: &AppState,
+    runtime_id: &str,
+    sessions: &SharedCodexSessionMap,
+    thread_sessions: &SharedCodexThreadMap,
+    input_tx: &Sender<CodexRuntimeCommand>,
+    writer_context: Option<&SharedCodexStdinContextState>,
+    session_id: &str,
+    request_id: String,
+    method: &str,
+    params: Value,
+) -> Result<()> {
+    if !shared_codex_thread_setup_is_current(sessions, session_id, &request_id) {
+        return Ok(());
+    }
+    let setup_guard = PendingCodexThreadSetupGuard::new(sessions, session_id, &request_id);
 
     set_shared_codex_writer_context(
         writer_context,

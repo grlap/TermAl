@@ -1404,6 +1404,7 @@ fn shared_codex_compaction_notice_inserts_before_visible_assistant_output() {
             .expect("Codex session should exist");
         inner.sessions[index].engram.context_nudge_pending = false;
         inner.sessions[index].engram.context_nudge_generation = 10;
+        inner.sessions[index].engram.pending_context_nudge = Some("undelivered".to_owned());
     }
 
     handle_shared_codex_app_server_message(
@@ -1453,7 +1454,7 @@ fn shared_codex_compaction_notice_inserts_before_visible_assistant_output() {
             .find_session_index(&session_id)
             .expect("Codex session should exist");
         assert!(inner.sessions[index].engram.context_nudge_pending);
-        assert_eq!(inner.sessions[index].engram.context_nudge_generation, 11);
+        assert_eq!(inner.sessions[index].engram.context_nudge_generation, 10);
     }
 
     runtime
@@ -1489,5 +1490,75 @@ fn shared_codex_compaction_notice_inserts_before_visible_assistant_output() {
         .find_session_index(&session_id)
         .expect("Codex session should exist");
     assert!(inner.sessions[index].engram.context_nudge_pending);
-    assert_eq!(inner.sessions[index].engram.context_nudge_generation, 12);
+    assert_eq!(inner.sessions[index].engram.context_nudge_generation, 10);
+    assert_eq!(
+        inner.sessions[index]
+            .engram
+            .pending_context_nudge
+            .as_deref(),
+        Some("undelivered")
+    );
+    drop(inner);
+    // The current event may belong to a different turn. Only completion
+    // requests refresh; replay of that same item must be coalesced.
+    let mut event = json!({"method":"item/started", "params":{
+        "threadId":"conversation-compact", "turnId":"manual-compact-turn",
+        "item":{"type":"contextCompaction","id":"compact-item-one"}
+    }});
+    for method in ["item/started", "item/completed", "item/completed"] {
+        {
+            let mut inner = state.inner.lock().expect("state mutex poisoned");
+            let index = inner.find_session_index(&session_id).expect("session");
+            inner.sessions[index].engram.context_refresh_needed = false;
+        }
+        event["method"] = json!(method);
+        let notice_count_before =
+            {
+                let inner = state.inner.lock().expect("state mutex poisoned");
+                inner.sessions[inner.find_session_index(&session_id).expect("session")]
+                .session.messages.iter().filter(|message| matches!(message,
+                    Message::Text { text, .. } if text == "Codex compacted the thread context."
+                )).count()
+            };
+        let previous_count = {
+            let inner = state.inner.lock().expect("state mutex poisoned");
+            inner.sessions[inner.find_session_index(&session_id).expect("session")]
+                .engram
+                .signalled_compaction_item_ids
+                .len()
+        };
+        handle_shared_codex_app_server_message(
+            &event,
+            &state,
+            &runtime.runtime_id,
+            &pending_requests,
+            &runtime.sessions,
+            &runtime.thread_sessions,
+            &mpsc::channel::<CodexRuntimeCommand>().0,
+        )
+        .expect("compaction event");
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let cache = &inner.sessions[inner.find_session_index(&session_id).expect("session")].engram;
+        assert_eq!(
+            cache.context_refresh_needed,
+            method == "item/completed" && previous_count == 0
+        );
+        assert_eq!(cache.pending_context_nudge.as_deref(), Some("undelivered"));
+        assert_eq!(cache.context_nudge_generation, 10);
+        let notices = inner.sessions[inner.find_session_index(&session_id).expect("session")]
+            .session
+            .messages
+            .iter()
+            .filter(|message| {
+                matches!(message,
+                    Message::Text { text, .. } if text == "Codex compacted the thread context."
+                )
+            })
+            .count();
+        assert_eq!(
+            notices,
+            notice_count_before + usize::from(method == "item/completed" && previous_count == 0),
+            "started and duplicate completion must not append another notice"
+        );
+    }
 }

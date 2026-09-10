@@ -150,6 +150,41 @@ or delivery failure preserves it for retry. ACP runtimes receive Base MCP, but
 this cut does not yet expose a portable ACP compaction event, so their refresh
 is session-start only.
 
+Compaction requests a deferred refresh. A fetched but undelivered page remains
+available for retry; an in-flight read finishes without discarding its result.
+Only after the runtime accepts that page can the next prompt fetch fresh context.
+This applies to Claude boundaries and both Codex compaction event forms. Current
+Codex item completions are deduplicated by the last 64 item ids of at most 256
+bytes each; missing, oversized, or evicted ids may signal again. Deduplication is
+best effort and is not the mechanism that protects page delivery. Configuration
+changes retain their separate invalidation behavior. These rules preserve host
+handoff; they do not prove that a model read or obeyed the delivered context.
+
+For a **new Codex thread** with Engram enabled, TermAl also reads the effective
+configuration through the same app-server's `config/read`, using the thread's
+working directory. It preserves existing developer instructions verbatim and
+appends a short recovery instruction in `thread/start.developerInstructions`.
+The read is asynchronous and has a fixed 30-second response deadline, independent
+of sibling stdout activity. An error fails the requesting turn visibly and permits
+retry instead of starting with incomplete instructions. Expiry of this short
+deadline does not retire the shared runtime. Other sessions continue.
+The read and start observe a configuration snapshot, not an atomic transaction
+against concurrent edits to configuration files.
+
+The recovery instruction asks the agent, at start and after its context is
+replaced by a summary, to use Engram `next` with `peek: true`, enumerate current
+project memories (following pagination), and read relevant full records even if
+they are not advertised as changed. These are read-only recovery operations;
+they do not advance ordinary delivery. Retrieved records retain their original
+authority. Codex reconstructs developer instructions during compaction, but
+delivery of an instruction does not prove that an agent followed it: a real
+post-compaction recovery remains a separate acceptance observation.
+
+This bootstrap applies only to new threads. Engram-disabled sessions and
+`thread/resume` retain their existing setup behavior; a live resumed Codex thread
+does not accept a replacement developer-instruction field. This change does not
+establish equivalent intra-turn recovery for Claude or ACP runtimes.
+
 ## Premium turn lifecycle
 
 Only a project with both `enabled` and `turnGatedControl` enters the control
