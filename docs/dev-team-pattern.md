@@ -261,12 +261,17 @@ termal_send_to_session   {sessionId (id or name), message,
 termal_list_mailboxes    {} → your mailboxes, participants, YOUR
                          processedThrough cursor, unread counts
 termal_read_mailbox      {mailboxId, afterSequence?, limit?} → ordered
-                         messages with mutable notificationState;
-                         reading never advances the cursor
-termal_acknowledge_mailbox {mailboxId, expectedProcessedThrough,
-                          processedThrough} → forward-only CAS after
-                          processing
+                         messages, receipt, hasMore, nextAfterSequence;
+                         records page issuance but never advances cursor
+termal_acknowledge_mailbox {mailboxId, receipt} → acknowledge the processed
+                          whole page; safe unchanged retry, no gap skipping
 ```
+
+UI browsing is a non-issuing preview; the agent MCP/CLI bridge explicitly opts
+into issuance. Legacy numeric ACK remains CAS but cannot cover unissued rows.
+Replies sent after a read are outside its receipt: acknowledge that page, then
+read/process/acknowledge the page containing the reply. See
+[agent mailboxes](features/agent-mailboxes.md) for bridge upgrade requirements.
 
 Sends are session-addressed; the pair mailbox is created lazily on the
 first send between two sessions. Put the §3 etiquette INTO the fields:

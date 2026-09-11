@@ -31,6 +31,8 @@ termal mailbox read [--as-session <id>] --mailbox-id <id>
                     [--json] [--base-url <url>]
 termal mailbox read-message [--as-session <id>] --message-id <id>
                     [--json] [--base-url <url>]
+termal mailbox acknowledge [--as-session <id>] --mailbox-id <id> --receipt <receipt>
+# Legacy numeric form (also validates recorded page issuance):
 termal mailbox acknowledge [--as-session <id>] --mailbox-id <id>
                     --expected <processedThrough> --through <processedThrough>
                     [--json] [--base-url <url>]
@@ -97,11 +99,26 @@ admits; other values are usage errors.
   replays reads, keyed sends and acknowledgements within one request budget.
   Any other failure is surfaced after the first attempt. If a send fails
   without a receipt, the error says to retry with the same key; if an
-  acknowledgement fails without a summary, list the mailboxes and retry from
-  the reported `processedThrough`.
-- `mailbox read` returns messages with `sequence > --after` (default 0),
-  at most `--limit` (default 50, server-bounded), oldest first.
-- `mailbox acknowledge` is a forward-only compare-and-set: `--expected` must
+  acknowledgement fails without a summary, retry the same receipt. On a gap
+  rejection, read from the current cursor and process the earlier page first.
+- `mailbox read` defaults to the durable cursor; explicit `--after` reads
+  strictly after that sequence. It returns at most `--limit` (default 50,
+  server-bounded), oldest first, including own sends. Save `receipt`;
+  `hasMore` and `nextAfterSequence` describe pagination. Empty pages have
+  no receipt. Reading records issuance but does not acknowledge. The bridge
+  inserts `issueReceipt: true`; UI HTTP reads omit it and only preview.
+  Old bridge binaries must be upgraded/restarted (or replaced by current CLI
+  calls): repeated preview reads cannot repair an issuance-related `409`.
+- After processing the whole page, use `mailbox acknowledge --receipt <receipt>`.
+  Keep it unchanged even after sending. Tokens are participant/mailbox-bound,
+  survive restart, and may be replayed safely. A later page cannot skip an
+  earlier unacknowledged visible page. Do not combine receipt and numeric flags.
+  A reply sent after the read is outside its page: ACK the original page, then
+  read/process/ACK the page containing your reply. Numeric ACK through that
+  unissued reply returns `409`; sending alone does not issue a page.
+- Legacy numeric acknowledgement remains a forward-only compare-and-set:
+  every newly acknowledged visible message must have recorded issuance.
+  Pre-upgrade reads may need repeating. `--expected` must
   equal the caller's current `processedThrough` and `--through` must not move
   it backwards; a mismatch is a `409` and exit code 1.
 
@@ -139,15 +156,14 @@ termal mailbox list
 termal mailbox send --to="Termal::Codex" \
   --message-file=handback.txt --idempotency-key=fable-handback-r3 \
   --topic="tm-7p9z.4 hand-back" --state-stamp=HEAD=4cacf05 --json
-termal mailbox read --mailbox-id mailbox-312caf7d \
-  --after 645 --limit 5
+termal mailbox read --mailbox-id mailbox-312caf7d --limit 5 --json
 termal mailbox acknowledge --mailbox-id mailbox-312caf7d \
-  --expected 645 --through 647
+  --receipt <receipt-from-read>
 ```
 
-A typical receive loop is `mailbox list` (read the current `processedThrough`),
-`mailbox read --after <processedThrough>`, act on the bodies, then
-`mailbox acknowledge --expected <processedThrough> --through <last sequence>`.
+A typical receive loop is `mailbox read --mailbox-id <id> --json`, process the
+whole page, then `mailbox acknowledge --mailbox-id <id> --receipt <receipt>`.
+List only to discover mailbox ids; process and acknowledge pages in order.
 When a reply is required, use `mailbox send` with a stable idempotency key
 derived from the hosted session and inbound message or task. Retry an ambiguous
 send with the exact same intent and key. Prefer `--json` for this automated

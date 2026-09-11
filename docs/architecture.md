@@ -369,8 +369,8 @@ All routes are under `/api`. The backend serves JSON, and the frontend proxies r
 | GET | `/api/sessions/{id}/mailboxes` | List neutral mailbox summaries for a participant, including peer display names, latest sequence, and unread count. Unknown session ids return `404`. |
 | POST | `/api/sessions/{id}/mailboxes/send` | Atomically append a routine message from `{id}` to a target root session. Requires a sender-scoped idempotency key; returns the durable receipt before/beside a best-effort metadata wake-up. Writer-admission exhaustion returns a typed `503` before this operation commits; bridge transport loss instead reports an unknown outcome and requires retrying the same key. |
 | POST | `/api/sessions/{id}/delegation-review-result` | Child-only submission for the current structured `/review-code` result. The backend derives the linked parent, topic, state stamp, and idempotency key; validates the complete schema; appends without waking the parent; and rejects root, explorer, unrelated, stale, or malformed callers. |
-| POST | `/api/sessions/{id}/mailboxes/{mailbox_id}/read` | Read a FIFO mailbox range without advancing the participant cursor. Each message exposes mutable `notificationState`; the send receipt's immutable point-in-time outcome remains `notificationDisposition`. This intentionally uses POST because the bounded range request is a JSON body; it remains read-only. |
-| POST | `/api/sessions/{id}/mailboxes/{mailbox_id}/acknowledge` | Advance `{id}`'s processed cursor with a forward-only compare-and-swap. Replaying an acknowledgement whose requested cursor is already satisfied succeeds idempotently; a stale expected cursor that requests additional progress returns a typed `409` whose detail survives the MCP bridge. The response summary is prepared inside the cursor transaction, leaving no fallible post-commit lookup. |
+| POST | `/api/sessions/{id}/mailboxes/{mailbox_id}/read` | Read a FIFO page without advancing the participant cursor. Default UI preview is read-only and issues no receipt. Agent MCP/CLI transport sets `issueReceipt: true`, committing participant-bound page issuance and returning `receipt`, `hasMore`, `nextAfterSequence` plus cursor metadata. Each message exposes mutable `notificationState`; immutable send outcome remains `notificationDisposition`. |
+| POST | `/api/sessions/{id}/mailboxes/{mailbox_id}/acknowledge` | Acknowledge a fully processed page by unchanged `receipt`, or use legacy numeric `expectedProcessedThrough`/`processedThrough` CAS; mixing forms is rejected. Newly covered visible messages require issuance, and receipts cannot skip visible unacknowledged gaps (`409`). Replays are idempotent without moving backwards. The summary is prepared inside the cursor transaction. See [agent mailboxes](features/agent-mailboxes.md) for own-reply paging and bridge upgrade requirements. |
 | GET | `/api/sessions/{id}/mailbox-messages/{message_id}` | Read one exact durable mailbox message after participant authorization, including its current mutable `notificationState`. |
 | GET | `/api/sessions/{id}/board` | List one local project's coordination-board entries through a local root session. Supports generation-aware pagination and an unchanged fast path. |
 | GET | `/api/sessions/{id}/board/keys/{key}` | Read one active coordination-board head, including its CAS revision, `updatedAtGeneration` (when the key last changed), and current `scopeGeneration`. Missing and tombstoned keys return `404` with reconciliation detail when available. |
@@ -663,8 +663,10 @@ migrated.
 
 Coordination bootstrap runs before the persist worker, coordination stores,
 and HTTP listener. An empty `coordination.sqlite` is initialized atomically
-with the current schema; an existing file must already match the current
-schema version, table set, and column order. TermAl never opens
+with the current schema. The exact frozen version-1 schema upgrades atomically
+to version 2 by adding mailbox page issuance; existing messages, cursors, and
+boards are preserved. Other existing files must match the current canonical
+schema; unknown versions are rejected. TermAl never opens
 `termal.sqlite` to recover coordination rows. Because no released
 single-database history exists, obsolete developer coordination databases are
 rejected with instructions to move or delete `coordination.sqlite` and reset

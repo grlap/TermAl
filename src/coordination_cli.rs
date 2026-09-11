@@ -30,8 +30,10 @@ const COORDINATION_CLI_USAGE: &str = "usage:
   termal mailbox read-message [--as-session <id>] --message-id <id>
                       [--json] [--base-url <url>]
   termal mailbox acknowledge [--as-session <id>] --mailbox-id <id>
-                      --expected <processedThrough> --through <processedThrough>
+                      --receipt <receipt>
                       [--json] [--base-url <url>]
+  Legacy acknowledge accepts --expected <cursor> --through <last> instead
+  of --receipt; every newly acknowledged visible message must have been issued.
 
 Flags accept `--flag value` and `--flag=value`. `--as-session` is the root
 session the command acts as and defaults to TERMAL_SESSION_ID; delegation-child
@@ -43,9 +45,15 @@ immediately before it; unread inbound messages are never skipped. A duplicate
 returns the current cursor snapshot and senderCursorAdvanced=false.
 Read without --after starts after the caller's durable processedThrough;
 --after 0 explicitly replays history. Read output includes afterSequence (the
-boundary used) and processedThrough (the durable cursor snapshot). Reading
-never acknowledges. Snapshots can change concurrently; acknowledge still
-requires --expected and forward-only contiguous processing.
+boundary used), processedThrough (the cursor snapshot), receipt, hasMore and
+nextAfterSequence. Reading never acknowledges. After processing a whole page,
+acknowledge its unchanged --receipt, even after sending. Retry that receipt on
+uncertainty; acknowledge pages in order. Old numeric clients must re-read if
+issuance is missing (including unacknowledged pre-upgrade reads).
+A reply sent after reading is outside that page: acknowledge the original page,
+then read/process/acknowledge the reply on the next page. Numeric ACK through
+that unissued reply returns 409. Reads through an old MCP bridge that omits
+issueReceipt are previews; upgrade/restart that bridge or use the current CLI.
 Exit codes: 0 success; 2 usage or argument error (no request was sent);
 1 any failure after a request was attempted (details on stderr).";
 
@@ -129,6 +137,11 @@ enum CoordinationCliCommand {
         mailbox_id: String,
         expected_processed_through: u64,
         processed_through: u64,
+    },
+    MailboxAcknowledgeReceipt {
+        as_session: String,
+        mailbox_id: String,
+        receipt: String,
     },
 }
 
@@ -416,6 +429,11 @@ fn parse_coordination_cli_args_with_default_session_id(
             )?,
             message_id: flags.take_required("--message-id")?,
         },
+        ("mailbox", "acknowledge") if flags.values.contains_key("--receipt") => CoordinationCliCommand::MailboxAcknowledgeReceipt {
+            as_session: take_coordination_cli_session_id(&mut flags, default_session_id.as_deref())?,
+            mailbox_id: flags.take_required("--mailbox-id")?,
+            receipt: flags.take_required("--receipt")?,
+        },
         ("mailbox", "acknowledge") => CoordinationCliCommand::MailboxAcknowledge {
             as_session: take_coordination_cli_session_id(
                 &mut flags,
@@ -622,7 +640,7 @@ fn validate_coordination_cli_output(
                 .map(|_| ())
                 .map_err(|err| unusable(format!("message: {err}")))
         }
-        CoordinationCliCommand::MailboxAcknowledge { .. } => {
+        CoordinationCliCommand::MailboxAcknowledge { .. } | CoordinationCliCommand::MailboxAcknowledgeReceipt { .. } => {
             serde_json::from_value::<MailboxSummary>(output.clone())
                 .map(|_| ())
                 .map_err(|err| unusable(format!("mailbox summary: {err}")))
@@ -727,6 +745,10 @@ fn execute_coordination_cli(command: &CoordinationCliCommand, base_url: &str) ->
         } => {
             let bridge = coordination_cli_authorized_bridge(as_session, base_url)?;
             bridge.tool_read_mailbox_message(json!({ "messageId": message_id }))
+        }
+        CoordinationCliCommand::MailboxAcknowledgeReceipt { as_session, mailbox_id, receipt } => {
+            let bridge = coordination_cli_authorized_bridge(as_session, base_url)?;
+            bridge.tool_acknowledge_mailbox(json!({"mailboxId":mailbox_id,"receipt":receipt}))
         }
         CoordinationCliCommand::MailboxAcknowledge {
             as_session,
@@ -926,6 +948,10 @@ fn render_coordination_cli_output(
                 coordination_cli_field(output, "afterSequence"),
                 coordination_cli_field(output, "processedThrough"),
             )?;
+            writeln!(out, "receipt {}, hasMore {}, nextAfterSequence {}",
+                coordination_cli_field(output, "receipt"),
+                coordination_cli_field(output, "hasMore"),
+                coordination_cli_field(output, "nextAfterSequence"))?;
             let messages = output
                 .get("messages")
                 .and_then(Value::as_array)
@@ -946,12 +972,16 @@ fn render_coordination_cli_output(
             render_coordination_cli_message(output, out)?;
         }
         CoordinationCliCommand::MailboxAcknowledge {
-            processed_through, ..
+            as_session, ..
+        } | CoordinationCliCommand::MailboxAcknowledgeReceipt {
+            as_session, ..
         } => writeln!(
             out,
             "acknowledged {} through #{} (latest #{}, unread {})",
             coordination_cli_field(output, "id"),
-            processed_through,
+            output.get("participants").and_then(Value::as_array)
+                .and_then(|participants| participants.iter().find(|p| p["sessionId"].as_str() == Some(as_session)))
+                .map(|p| coordination_cli_field(p, "processedThrough")).unwrap_or_else(|| "unknown".to_owned()),
             coordination_cli_field(output, "latestSequence"),
             coordination_cli_field(output, "unreadCount"),
         )?,

@@ -1297,6 +1297,7 @@ fn blocked_state_writer_does_not_block_mailbox_or_board_writes() {
             "state-block-board",
         ))
         .expect("board write must ignore a blocked state writer");
+    mailbox_store.read_range("session-state-block-target", &mailbox_receipt.mailbox_id, None, 10).unwrap();
     let acknowledged = mailbox_store
         .acknowledge(
             "session-state-block-target",

@@ -4,15 +4,31 @@ Current coordination SQLite schema ownership.
 Owns the independent `coordination.sqlite` path plus current-schema
 initialization and validation. Runtime mailbox and board stores use these
 helpers but keep separate long-lived connections and writer-admission domains.
-Unreleased legacy schemas are rejected with reset guidance rather than
-migrated or copied from `termal.sqlite`.
+The exact version-1 schema upgrades atomically to version 2 by adding mailbox
+read receipts; existing cursors and messages are preserved. Other unsupported
+schemas are rejected, never copied from `termal.sqlite`.
 */
 
 fn resolve_coordination_persistence_path(persistence_path: &FsPath) -> PathBuf {
     persistence_path.with_file_name("coordination.sqlite")
 }
 
-const COORDINATION_SQLITE_SCHEMA_VERSION: &str = "1";
+const COORDINATION_SQLITE_SCHEMA_VERSION: &str = "2";
+
+// Version 2 adds durable read receipts without rewriting any mailbox cursor or
+// message. Unacknowledged reads from version 1 must be repeated after upgrade.
+const MAILBOX_READ_PAGES_SCHEMA_SQL: &str = "
+    CREATE TABLE mailbox_read_pages (
+      receipt TEXT PRIMARY KEY,
+      mailbox_id TEXT NOT NULL,
+      session_id TEXT NOT NULL,
+      after_sequence INTEGER NOT NULL CHECK (after_sequence >= 0),
+      through_sequence INTEGER NOT NULL CHECK (through_sequence > after_sequence),
+      UNIQUE (mailbox_id, session_id, after_sequence, through_sequence),
+      FOREIGN KEY (mailbox_id, session_id)
+        REFERENCES mailbox_participants(mailbox_id, session_id) ON DELETE CASCADE
+    );
+";
 
 // Compatibility contract: SQLite preserves the schema SQL used to create each
 // object, and validation below compares that stored SQL with this canonical
@@ -20,7 +36,9 @@ const COORDINATION_SQLITE_SCHEMA_VERSION: &str = "1";
 // on-disk compatibility surface. Any edit that changes it, including cosmetic
 // punctuation spacing, must be paired with a schema-version bump and an
 // explicit migration or reset decision.
-const CURRENT_COORDINATION_SCHEMA_SQL: &str = "
+// Frozen historical v1 definition: never edit this when adding later versions.
+// Its normalized SHA-256 is independently pinned by a compatibility test.
+const COORDINATION_SCHEMA_V1_SQL: &str = "
     CREATE TABLE meta (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
@@ -162,18 +180,31 @@ fn coordination_schema_objects(
 }
 
 fn expected_coordination_schema_objects() -> Result<Vec<CoordinationSchemaObject>> {
+    expected_coordination_schema_objects_for_version(COORDINATION_SQLITE_SCHEMA_VERSION)
+}
+
+fn expected_coordination_schema_objects_for_version(version: &str) -> Result<Vec<CoordinationSchemaObject>> {
+    match version {
+        "1" | "2" => {},
+        _ => return Err(reject_unsupported_coordination_schema(format!("unknown version {version}"))),
+    }
     let connection = rusqlite::Connection::open_in_memory()
         .context("failed to open the canonical coordination schema database")?;
     connection
-        .execute_batch(CURRENT_COORDINATION_SCHEMA_SQL)
+        .execute_batch(COORDINATION_SCHEMA_V1_SQL)
         .context("failed to build the canonical coordination schema")?;
+    if version == "2" {
+        connection.execute_batch(MAILBOX_READ_PAGES_SCHEMA_SQL)?;
+    }
     coordination_schema_objects(&connection)
 }
 
 fn initialize_current_coordination_schema(transaction: &rusqlite::Transaction<'_>) -> Result<()> {
     transaction
-        .execute_batch(CURRENT_COORDINATION_SCHEMA_SQL)
+        .execute_batch(COORDINATION_SCHEMA_V1_SQL)
         .context("failed to initialize current SQLite coordination schema")?;
+    transaction.execute_batch(MAILBOX_READ_PAGES_SCHEMA_SQL)
+        .context("failed to initialize mailbox read receipts")?;
     transaction
         .execute(
             "INSERT INTO meta(key, value) VALUES('coordination_schema_version', ?1)",
@@ -191,7 +222,15 @@ fn reject_unsupported_coordination_schema(detail: impl std::fmt::Display) -> any
 }
 
 fn validate_current_coordination_schema(connection: &rusqlite::Connection) -> Result<()> {
-    let expected_schema = expected_coordination_schema_objects()?;
+    validate_coordination_schema_version(connection, COORDINATION_SQLITE_SCHEMA_VERSION)
+}
+
+fn validate_coordination_schema_version(connection: &rusqlite::Connection, version: &str) -> Result<()> {
+    let expected_schema = if version == COORDINATION_SQLITE_SCHEMA_VERSION {
+        expected_coordination_schema_objects()?
+    } else {
+        expected_coordination_schema_objects_for_version(version)?
+    };
     let actual_schema = coordination_schema_objects(connection)?;
     let expected_inventory = expected_schema
         .iter()
@@ -229,16 +268,40 @@ fn validate_current_coordination_schema(connection: &rusqlite::Connection) -> Re
         .ok_or_else(|| {
             reject_unsupported_coordination_schema("missing coordination schema version")
         })?;
-    if stored_schema_version != COORDINATION_SQLITE_SCHEMA_VERSION {
+    if stored_schema_version != version {
         return Err(reject_unsupported_coordination_schema(format!(
-            "found version `{stored_schema_version}`, expected `{COORDINATION_SQLITE_SCHEMA_VERSION}`"
+            "found version `{stored_schema_version}`, expected `{version}`"
         )));
     }
     Ok(())
 }
 
 fn ensure_sqlite_coordination_schema(connection: &rusqlite::Connection) -> Result<()> {
-    if !coordination_schema_objects(connection)?.is_empty() {
+    let actual_schema = coordination_schema_objects(connection)?;
+    if !actual_schema.is_empty() {
+        // Validate the complete old schema before any write. Only the exact
+        // version-1 schema is upgraded; unrelated/modified schemas still fail.
+        let version_one_schema = expected_coordination_schema_objects_for_version("1")?;
+        if actual_schema == version_one_schema {
+            let transaction = rusqlite::Transaction::new_unchecked(
+                connection, rusqlite::TransactionBehavior::Immediate,
+            )?;
+            // Another process may have upgraded while we waited for SQLite.
+            if coordination_schema_objects(&transaction)? == version_one_schema {
+                // Validate metadata only after acquiring the transaction:
+                // concurrent upgrade may have changed it since the first read.
+                // Unreadable metadata remains an operational error, not reset guidance.
+                validate_coordination_schema_version(&transaction, "1")?;
+                transaction.execute_batch(MAILBOX_READ_PAGES_SCHEMA_SQL)?;
+                transaction.execute(
+                    "UPDATE meta SET value = ?1 WHERE key = 'coordination_schema_version'",
+                    [COORDINATION_SQLITE_SCHEMA_VERSION],
+                )?;
+            }
+            validate_current_coordination_schema(&transaction)?;
+            transaction.commit()?;
+            return Ok(());
+        }
         return validate_current_coordination_schema(connection);
     }
 
@@ -301,6 +364,21 @@ fn bootstrap_coordination_database(coordination_path: &FsPath) -> Result<rusqlit
 #[cfg(test)]
 mod sqlite_coordination_tests {
     use super::*;
+
+    #[test]
+    fn historical_coordination_v1_schema_is_frozen_and_unknown_versions_rejected() {
+        // Independent pin of the shipped v1 SQL, not another invocation of the
+        // schema builder used by migrations. Whitespace normalization matches
+        // the on-disk comparison contract; token/punctuation changes fail.
+        let normalized = COORDINATION_SCHEMA_V1_SQL.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert_eq!(format!("{:x}", Sha256::digest(normalized.as_bytes())),
+            "185e9fbf25eafe9ae4a45a58654a54712853e60ab1f31e1d762f330431eca0b0");
+        for version in ["", "0", "3", "future"] {
+            assert!(expected_coordination_schema_objects_for_version(version).is_err(), "{version}");
+        }
+        assert!(expected_coordination_schema_objects_for_version("1").is_ok());
+        assert!(expected_coordination_schema_objects_for_version("2").is_ok());
+    }
     use std::time::Instant;
 
     #[test]
@@ -558,8 +636,14 @@ mod sqlite_coordination_tests {
             return;
         }
 
+        for upgrade in [false, true] {
         let root = TestTempRoot::create("termal-current-coordination-schema");
         let path = root.path().join("coordination.sqlite");
+        if upgrade {
+            let connection = rusqlite::Connection::open(&path).unwrap();
+            connection.execute_batch(COORDINATION_SCHEMA_V1_SQL).unwrap();
+            connection.execute_batch("INSERT INTO meta VALUES('coordination_schema_version', '1');").unwrap();
+        }
         let go = root.path().join("go");
         let test_executable = std::env::current_exe().expect("test executable should resolve");
         let test_module = module_path!()
@@ -616,6 +700,7 @@ mod sqlite_coordination_tests {
             .expect("metadata count should read");
         assert_eq!(metadata_count, 1);
         drop(connection);
+        }
     }
 
     #[test]

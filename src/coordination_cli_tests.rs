@@ -18,8 +18,8 @@ fn mailbox_wake_cli_help_teaches_read_first_and_snapshot_ack() {
     let usage = coordination_cli_usage();
     assert_eq!(usage.matches(TERMAL_MAILBOX_GUIDANCE).count(), 1);
     assert!(usage.contains("mailbox read --mailbox-id <id> --json"));
-    assert!(usage.contains("read.processedThrough"));
-    assert!(usage.contains("senderProcessedThrough after send"));
+    assert!(usage.contains("--receipt <receipt>"));
+    assert!(usage.contains("unchanged receipt"));
     assert!(usage.contains("mailbox list is discovery only"));
     assert!(usage.contains("--after 0 explicitly replays history"));
 }
@@ -627,6 +627,34 @@ fn mailbox_cursor_cli_read_uses_response_boundary_not_zero_default() {
 }
 
 #[test]
+fn mailbox_receipt_cli_parses_forwards_and_renders_committed_cursor() {
+    let invocation = parse_coordination_cli_args(cli_args(&[
+        "mailbox", "acknowledge", "--as-session", "session-root",
+        "--mailbox-id", "mailbox-1", "--receipt", "issued-token",
+    ])).unwrap();
+    let (base_url, requests, server) = spawn_test_mcp_http_server(2, |request| {
+        if request.path == "/api/state" { return (200, root_inventory_state()); }
+        assert_eq!(request.path, "/api/sessions/session-root/mailboxes/mailbox-1/acknowledge");
+        assert_eq!(serde_json::from_str::<Value>(&request.body).unwrap(), json!({"receipt": "issued-token"}));
+        (200, json!({"id": "mailbox-1", "latestSequence": 9, "unreadCount": 0,
+            "participants": [{"sessionId": "session-root", "displayName": "Root",
+                "processedThrough": 9}]}))
+    });
+    let result = execute_coordination_cli(&invocation.command, &base_url).unwrap();
+    server.join().unwrap();
+    assert_eq!(requests.lock().unwrap().len(), 2);
+    let mut output = Vec::new();
+    render_coordination_cli_output(&invocation.command, &result, &mut output).unwrap();
+    assert!(String::from_utf8(output).unwrap().contains("through #9"));
+    for extra in [vec!["--expected", "0"], vec!["--through", "1"]] {
+        let mut args = cli_args(&["mailbox", "acknowledge", "--as-session", "session-root",
+            "--mailbox-id", "mailbox-1", "--receipt", "issued-token"]);
+        args.extend(cli_args(&extra));
+        assert!(parse_coordination_cli_args(args).is_err(), "mixed acknowledgement formats must fail before HTTP");
+    }
+}
+
+#[test]
 fn coordination_cli_reports_unknown_callers_and_unreachable_servers_distinctly() {
     let (base_url, _requests, server) = spawn_test_mcp_http_server(1, |request| {
         assert_eq!(request.path, "/api/state");
@@ -667,7 +695,7 @@ fn coordination_cli_read_read_message_and_acknowledge_forward_exact_contracts() 
             ("POST", "/api/sessions/session-root/mailboxes/mailbox-1/read") => {
                 let body: Value =
                     serde_json::from_str(&request.body).expect("read body should be JSON");
-                assert_eq!(body, json!({ "afterSequence": 7, "limit": 5 }));
+                assert_eq!(body, json!({ "afterSequence": 7, "limit": 5, "issueReceipt": true }));
                 (
                     200,
                     json!({ "afterSequence": 7, "processedThrough": 7, "messages": [{
@@ -871,7 +899,7 @@ fn coordination_cli_renders_concise_human_output() {
             expected_processed_through: 7,
             processed_through: 8,
         },
-        &json!({ "id": "mailbox-1", "participants": [], "latestSequence": 8, "unreadCount": 0 }),
+        &json!({ "id": "mailbox-1", "participants": [{"sessionId": "session-root", "displayName": "Root", "processedThrough": 8}], "latestSequence": 8, "unreadCount": 0 }),
         &mut rendered,
     )
     .expect("acknowledgement should render");
@@ -888,13 +916,13 @@ fn coordination_cli_renders_concise_human_output() {
             after_sequence: Some(8),
             limit: None,
         },
-        &json!({ "mailboxId": "mailbox-1", "messages": [], "afterSequence": 8, "processedThrough": 8 }),
+        &json!({ "mailboxId": "mailbox-1", "messages": [], "afterSequence": 8, "processedThrough": 8, "receipt": null, "hasMore": false, "nextAfterSequence": null }),
         &mut rendered,
     )
     .expect("an empty read should render");
     assert_eq!(
         String::from_utf8(rendered).expect("rendered read should be UTF-8"),
-        "mailbox-1: afterSequence 8, processedThrough 8 (snapshot; reading does not acknowledge)\nno messages in mailbox-1 after #8\n"
+        "mailbox-1: afterSequence 8, processedThrough 8 (snapshot; reading does not acknowledge)\nreceipt -, hasMore false, nextAfterSequence -\nno messages in mailbox-1 after #8\n"
     );
 }
 
@@ -987,7 +1015,7 @@ fn coordination_cli_human_output_neutralizes_terminal_control_sequences() {
             after_sequence: None,
             limit: None,
         },
-        &json!({ "mailboxId": "mailbox-1", "messages": [message.clone()], "afterSequence": 0, "processedThrough": 0 }),
+        &json!({ "mailboxId": "mailbox-1", "messages": [message.clone()], "afterSequence": 0, "processedThrough": 0, "receipt": hostile, "hasMore": false, "nextAfterSequence": 1 }),
         &mut rendered,
     )
     .expect("hostile message should render");
@@ -1004,7 +1032,11 @@ fn coordination_cli_human_output_neutralizes_terminal_control_sequences() {
     // lines), then a blank line. A peer name or topic carrying newlines must
     // not add lines of its own.
     assert!(read.starts_with("mailbox-1: afterSequence 0, processedThrough 0"));
-    let lines = read.lines().skip(1).collect::<Vec<_>>();
+    let receipt_line = read.lines().nth(1).unwrap();
+    assert!(receipt_line.starts_with("receipt "));
+    assert!(receipt_line.contains("csi\u{FFFD}tab\u{FFFD}line"));
+    assert!(receipt_line.ends_with("hasMore false, nextAfterSequence 1"));
+    let lines = read.lines().skip(2).collect::<Vec<_>>();
     assert_eq!(lines.len(), 9, "unexpected line structure: {lines:?}");
     assert!(lines[0].starts_with("#1 2026-09-03T00:00:00Z from "));
     assert!(lines[0].contains("csi\u{FFFD}tab\u{FFFD}line"));

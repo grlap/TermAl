@@ -29,7 +29,7 @@ sender's durable cursor snapshot resulting from this operation; the second
 says whether this append advanced it. The cursor advances over the sender's
 own new message only when it already sat immediately before that message.
 An unread inbound gap prevents auto-advance; sending cannot skip that gap.
-These fields let a sender refresh its next acknowledgement's expected cursor
+For legacy numeric acknowledgements these fields refresh the expected cursor
 without another list call. They are snapshots, not protection against a
 concurrent send or acknowledgement.
 
@@ -89,14 +89,15 @@ The shared bootstrap body (bounded to 12 lines and 900 characters) is:
 
 ```text
 TermAl root coordination; not for delegation children.
-Read: termal_read_mailbox, `afterSequence` omitted; save processedThrough. Reading never acknowledges.
+Read: termal_read_mailbox; omit afterSequence, save receipt. Reading never acknowledges.
 Process bodies in order; reply: termal_send_to_session, stable idempotencyKey; retry identical intent/key.
-Ack: termal_acknowledge_mailbox, expectedProcessedThrough = read.processedThrough (or senderProcessedThrough after send), processedThrough = last contiguous sequence. Conflict: re-read.
-CLI fallback: invoke TERMAL_CLI (PowerShell: & $env:TERMAL_CLI; POSIX: "$TERMAL_CLI").
+Ack: termal_acknowledge_mailbox with mailboxId and unchanged receipt after processing the whole page, even after sending. Gap: re-read.
+Pages: hasMore/nextAfterSequence. Own sends are returned too. Receipt proves issuance only.
+CLI: TERMAL_CLI (PowerShell: & $env:TERMAL_CLI; POSIX: "$TERMAL_CLI").
 TERMAL_SESSION_ID / TERMAL_BASE_URL supply identity/URL; never impersonate.
 mailbox read --mailbox-id <id> --json (omit --after)
 mailbox send --to <id> --message <text> --idempotency-key <key> --json
-mailbox acknowledge --mailbox-id <id> --expected <cursor> --through <last> --json
+mailbox acknowledge --mailbox-id <id> --receipt <receipt> --json
 mailbox list is discovery only.
 ```
 
@@ -265,36 +266,57 @@ instead of truncated.
 
 ## Reading and acknowledgement
 
-Mailbox reads are pull-based and ordered by sequence. Fetching never mutates a
-participant cursor. HTTP range reads return one envelope:
-`{messages, afterSequence, processedThrough}`. MCP and CLI JSON add `mailboxId`
-to that same shape; the CLI's human-readable output prints both cursor fields.
-Omitting `afterSequence` (CLI: omitting `--after`) reads after the requesting
-participant's durable `processedThrough`, so a routine unread read does not
-need a preceding list call once the mailbox id is known. An explicit boundary
-is unchanged: `afterSequence: 0` replays from the beginning, and a positive
-value reads strictly after that sequence, regardless of the durable cursor.
-The response's `afterSequence` is the actual boundary used; `processedThrough`
-is the participant's durable cursor at read time. Both and the returned rows
-come from the same SQLite read snapshot. Later concurrent operations may move
-the cursor before acknowledgement; the snapshot does not bypass CAS.
+Mailbox reads are pull-based and ordered by sequence. Fetching never advances
+a participant cursor. HTTP range reads return
+`{messages, afterSequence, processedThrough, receipt, hasMore, nextAfterSequence}`.
+MCP and CLI JSON add `mailboxId`; human CLI output prints the token and
+pagination fields too. Omit `afterSequence` (CLI: `--after`) to read from
+the durable cursor. Explicit boundaries remain useful for replay and paging:
+zero replays history, and other values read strictly after that sequence.
+
+HTTP reads default to non-issuing preview (`issueReceipt` omitted or false).
+The UI uses that default, including already-open older bundles: browsing cannot
+authorize an agent's later numeric ACK. Preview page collection uses a read
+transaction without writer admission or issuance writes. The route retains the
+existing live-participant validation/reactivation step, which may repair stale
+`left_at` markers; that repair does not issue pages or advance cursors.
+The MCP/CLI bridge sets `issueReceipt: true`
+itself (not a model tool argument) for agent reads.
+
+For agent reads, the server commits an opaque receipt for each nonempty page, bound to the
+mailbox, participant and exact returned range. Rows, cursor and issuance share
+one transaction. `nextAfterSequence` is the last returned sequence, not a count;
+`hasMore` describes additional visible rows in that snapshot. An empty page
+has no receipt or next boundary. Own sent messages are returned too; structured
+review-result rows hidden from this participant are not returned. Consequently,
+visible sequences may have legitimate gaps.
 
 The routine workflow is read -> process/reply -> acknowledge:
 
-1. Call `termal_read_mailbox` with the mailbox id and `afterSequence` omitted,
-   or run `mailbox read --mailbox-id <id> --json`. Keep `read.processedThrough`.
-   `termal_list_mailboxes` / `mailbox list` is for discovery, not a mandatory
-   first step when the wake already supplies the mailbox id.
-2. Process the returned bodies in order. Reply when needed with a stable
-   idempotency key; an ambiguous send retries the same intent and key. Use the
-   reply receipt's `senderProcessedThrough` as the newer cursor snapshot.
-   To page before acknowledging, pass the last read sequence as the next
-   explicit `afterSequence` / `--after` boundary.
-3. Acknowledge only through the last contiguously processed sequence, not the
-   wake's latest sequence. Set `expectedProcessedThrough` (CLI `--expected`)
-   from `read.processedThrough`, or `receipt.senderProcessedThrough` after a
-   reply. On a CAS conflict, read again without an explicit boundary and
-   reconcile concurrent progress.
+1. Read with the mailbox id and no explicit boundary. Save `receipt`.
+   Listing is discovery only when the mailbox id is already known.
+2. Process the whole page in order. Reply using a stable idempotency key.
+   Retry ambiguous sends with the same intent/key; do not recalculate the
+   page receipt when sending changes the cursor. A reply appended after this
+   read is outside the page. Acknowledge the original page, then read/process/
+   acknowledge the next page containing that own reply. A numeric ACK through
+   the unissued reply returns `409`; sending does not issue a read page.
+3. Call `termal_acknowledge_mailbox({mailboxId, receipt})`, or
+   `mailbox acknowledge --mailbox-id <id> --receipt <receipt>`.
+   Supply no numeric boundaries with a receipt.
+4. Read the next page from the cursor. Prefetching with `nextAfterSequence`
+   is permitted, but process and acknowledge pages in order. A later receipt
+   cannot skip an earlier unacknowledged visible page, even if both were issued.
+   On a gap rejection, read from the current cursor and process that page first.
+
+Receipts survive restart and lost responses. Repeating an identical read range
+returns its existing token. Replaying an acknowledged receipt succeeds without
+moving the cursor backwards, including after a send or another acknowledgement
+has advanced it. An altered token or one issued to another participant/mailbox
+is rejected. Issuance proves neither that the response reached the agent nor
+that its contents were read, understood, or acted on; processing remains the
+agent's obligation. Exact-message lookup is diagnostic and does not issue a
+page receipt: use a range read before advancing the cursor.
 
 Human mailbox notifications render as a compact
 sender/preview/unread link; the agent-only metadata/pointer activation text remains
@@ -311,13 +333,23 @@ lagging participant boundary. Opening, expanding, paging, and closing use only
 summary/range reads and never call acknowledgement or otherwise advance an
 agent cursor.
 
-Acknowledgement is a forward-only compare-and-swap:
+Legacy numeric acknowledgement remains a forward-only compare-and-swap:
 
 - `expectedProcessedThrough` is the cursor value the agent observed through
   a read response's `processedThrough`, a send receipt's
   `senderProcessedThrough`, or `termal_list_mailboxes` in its own participant
   entry. An explicit read's `afterSequence` is not necessarily that cursor.
 - `processedThrough` is the last sequence it processed.
+- Every newly acknowledged visible message must have recorded page issuance
+  for this participant. Numeric boundaries are not a bypass: an unissued gap
+  returns `409`, requiring a new read and processing before retry. Historical
+  cursors are preserved on upgrade; unacknowledged reads made before version 2
+  must be repeated through an upgraded MCP/CLI bridge. Legacy numeric
+  instructions remain supported, but old bridge binaries omit `issueReceipt`
+  and therefore only preview: repeating their reads cannot resolve the `409`.
+  Upgrade/restart the bridge runtime or use the current CLI. Deployment must
+  refresh both server and agent bridge processes; do not assume replacing a
+  binary refreshes an already-running bridge. New clients use receipts.
 - Process messages contiguously; a send that leaves an unread gap does not
   authorize acknowledging past that gap. Sending a reply can auto-advance the
   cursor, so use its newer receipt snapshot when constructing the next CAS.
@@ -400,7 +432,7 @@ metadata while every body remains independently ordered and durable in SQLite.
 ## Storage and shutdown
 
 Mailboxes use normalized SQLite tables (`mailboxes`,
-`mailbox_participants`, and `mailbox_messages`) through one long-lived
+`mailbox_participants`, `mailbox_messages`, and `mailbox_read_pages`) through one long-lived
 connection to `~/.termal/coordination.sqlite`, configured with WAL,
 `synchronous=NORMAL`, and the existing five-second busy timeout. The
 coordination board uses a second long-lived connection to the same small
@@ -409,7 +441,7 @@ persistence stays in `termal.sqlite` with a different admission domain, so a
 large active transcript cannot block mailbox or board writes.
 
 Mailbox operations bypass the asynchronous AppState persist queue and remain
-usable after that worker shuts down. Request-owned append,
+usable after that worker shuts down. Request-owned append, page issuance,
 acknowledgement, and duplicate-finalization waits use a five-second deadline;
 if it expires, the backend returns `503 Service Unavailable`. Append and
 acknowledgement admission failures explicitly confirm that the attempted
@@ -420,7 +452,9 @@ External-process or OS-level lock exhaustion uses the same retryable
 classification instead of an internal-error `500`.
 
 Before either coordination store or the HTTP listener is available, TermAl
-initializes an empty `coordination.sqlite` with the current schema or validates
+initializes an empty `coordination.sqlite` with the current schema, atomically
+adds receipt storage to the exact version-1 schema without changing messages
+or cursors, or validates
 that an existing file already has the exact current version and canonical
 schema definitions, including column types and constraints, foreign keys, and
 named indexes. Empty-state initialization is decided again while holding an

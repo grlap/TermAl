@@ -4,10 +4,10 @@ use super::*;
 fn mailbox_wake_codex_instructions_teach_read_first_once() {
     let section = termal_codex_agents_section();
     assert_eq!(section.matches(TERMAL_MAILBOX_GUIDANCE).count(), 1);
-    assert!(section.contains("`afterSequence` omitted"));
+    assert!(section.contains("omit afterSequence"));
     assert!(section.contains("mailbox read --mailbox-id <id> --json"));
-    assert!(section.contains("senderProcessedThrough"));
-    assert!(section.contains("expectedProcessedThrough"));
+    assert!(section.contains("unchanged receipt"));
+    assert!(section.contains("hasMore/nextAfterSequence"));
     assert!(!section.contains("1. Run `mailbox list"));
     assert!(!section.contains("--after <processedThrough>"));
 }

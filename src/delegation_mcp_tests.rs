@@ -16,6 +16,17 @@ use std::thread;
 const TEST_MCP_HTTP_ACCEPT_DEADLINE: Duration = Duration::from_secs(10);
 
 #[test]
+fn mailbox_ack_schema_has_no_top_level_combinators() {
+    let tools = mcp_tools_list_result();
+    let schema = &tools["tools"].as_array().unwrap().iter()
+        .find(|tool| tool["name"] == "termal_acknowledge_mailbox").unwrap()["inputSchema"];
+    for keyword in ["oneOf", "anyOf", "allOf", "not"] {
+        assert!(schema.get(keyword).is_none(), "unexpected top-level {keyword}");
+    }
+    assert_eq!(schema["required"], json!(["mailboxId"]));
+}
+
+#[test]
 fn mailbox_wake_tool_descriptions_teach_read_first_and_snapshot_ack() {
     let tools = mcp_tools_list_result();
     let description = |name: &str| {
@@ -40,14 +51,14 @@ fn mailbox_wake_tool_descriptions_teach_read_first_and_snapshot_ack() {
     assert!(list.contains("not required before reading"));
     let read = description("termal_read_mailbox");
     assert_eq!(read.matches(TERMAL_MAILBOX_GUIDANCE).count(), 1);
-    assert!(read.contains("Omitted `afterSequence`"));
-    assert!(read.contains("read -> process -> acknowledge"));
-    assert!(read.contains("read.processedThrough"));
-    assert!(read.contains("senderProcessedThrough"));
+    assert!(read.contains("Omit afterSequence"));
+    assert!(read.contains("acknowledge it unchanged only after processing the entire page"));
+    assert!(read.contains("hasMore"));
+    assert!(read.contains("including own sends"));
     let acknowledge = description("termal_acknowledge_mailbox");
-    assert!(acknowledge.contains("afterSequence omitted"));
-    assert!(acknowledge.contains("read.processedThrough"));
-    assert!(acknowledge.contains("senderProcessedThrough"));
+    assert!(acknowledge.contains("unchanged receipt"));
+    assert!(acknowledge.contains("recorded issuance"));
+    assert!(acknowledge.contains("cannot skip an earlier"));
 }
 
 #[test]
@@ -534,9 +545,9 @@ fn delegation_mcp_acknowledgement_description_teaches_idempotent_replay() {
         .and_then(|tool| tool["description"].as_str())
         .expect("acknowledgement tool should have a description");
 
-    assert!(description.contains("New progress requires the observed cursor to match"));
-    assert!(description.contains("succeeds idempotently"));
-    assert!(description.contains("advance past the durable cursor conflicts"));
+    assert!(description.contains("durable and safe to retry"));
+    assert!(description.contains("another acknowledgement advanced the cursor"));
+    assert!(description.contains("Legacy expectedProcessedThrough/processedThrough remains a forward-only compare-and-swap"));
 }
 
 #[test]
@@ -1895,7 +1906,7 @@ fn mailbox_cursor_mcp_read_preserves_omission_and_explicit_boundary() {
             (200, json!({ "afterSequence": used, "processedThrough": 7, "messages": [] }))
         });
         let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url).unwrap();
-        let mut arguments = json!({ "mailboxId": "mailbox-1", "limit": 5 });
+        let mut arguments = json!({ "mailboxId": "mailbox-1", "limit": 5, "issueReceipt": false });
         if let Some(explicit) = explicit {
             arguments["afterSequence"] = json!(explicit);
         }
@@ -1905,11 +1916,45 @@ fn mailbox_cursor_mcp_read_preserves_omission_and_explicit_boundary() {
         let sent: Value = serde_json::from_str(&requests[0].body).unwrap();
         assert_eq!(sent.get("afterSequence"), explicit.map(|value| json!(value)).as_ref());
         assert_eq!(sent["limit"], 5);
+        assert_eq!(sent["issueReceipt"], true, "issuance is transport-owned, not a model argument");
         assert_eq!(result["mailboxId"], "mailbox-1");
         assert_eq!(result["afterSequence"], used);
         assert_eq!(result["processedThrough"], 7);
         assert_eq!(result["messages"], json!([]));
     }
+}
+
+#[test]
+fn mailbox_receipt_mcp_forwards_page_token_and_rejects_numeric_mix() {
+    let (base_url, _, server) = spawn_test_mcp_http_server(2, |request| {
+        if request.path.ends_with("/read") {
+            return (200, json!({"messages": [{
+                "id": "message-7", "mailboxId": "mailbox-1", "sequence": 7,
+                "senderSessionId": "session-peer", "senderName": "Peer",
+                "targetSessionId": "session-parent", "targetName": "Parent",
+                "createdAt": "2026-09-10T00:00:00Z", "class": "routine",
+                "body": "process this page", "notificationState": "durableButNotWoken"
+            }], "afterSequence": 6, "processedThrough": 6,
+                "receipt": "opaque-page", "hasMore": true, "nextAfterSequence": 7}));
+        }
+        assert!(request.path.ends_with("/acknowledge"));
+        assert_eq!(serde_json::from_str::<Value>(&request.body).unwrap(), json!({"receipt": "opaque-page"}));
+        (200, json!({"id": "mailbox-1", "participants": [], "latestSequence": 7, "unreadCount": 0}))
+    });
+    let bridge = TermalDelegationMcpBridge::new("session-parent".into(), base_url).unwrap();
+    let page = bridge.tool_read_mailbox(json!({"mailboxId": "mailbox-1"})).unwrap();
+    assert_eq!(page["receipt"], "opaque-page");
+    assert_eq!(page["hasMore"], true);
+    assert_eq!(page["nextAfterSequence"], 7);
+    for arguments in [
+        json!({"mailboxId": "mailbox-1", "receipt": "opaque-page", "processedThrough": 7}),
+        json!({"mailboxId": "mailbox-1", "receipt": "opaque-page", "expectedProcessedThrough": 0}),
+        json!({"mailboxId": "mailbox-1", "receipt": ""}),
+    ] {
+        assert!(bridge.tool_acknowledge_mailbox(arguments).is_err());
+    }
+    bridge.tool_acknowledge_mailbox(json!({"mailboxId": "mailbox-1", "receipt": page["receipt"]})).unwrap();
+    server.join().unwrap();
 }
 
 #[test]

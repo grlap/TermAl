@@ -785,9 +785,10 @@ termal_submit_review_result({ schemaVersion, status, summary, findings, commands
 termal_send_to_session({ sessionId, message, idempotencyKey, topic?, stateStamp?, class? }) -> { sessionId, resolvedFrom, mailboxId, messageId, sequence, unreadDepth, notificationDisposition, duplicate }
 termal_list_sessions() -> { sessions: [{ sessionId, name, agent, status, workdir, preview }] }
 termal_list_mailboxes() -> { mailboxes: [{ id, participants, latestSequence, unreadCount, latestMessagePreview, latestMessageAt }] }
-termal_read_mailbox({ mailboxId, afterSequence?, limit? }) -> { mailboxId, messages }
+termal_read_mailbox({ mailboxId, afterSequence?, limit? }) -> { mailboxId, messages, afterSequence, processedThrough, receipt, hasMore, nextAfterSequence }
 termal_read_mailbox_message({ messageId }) -> MailboxMessage
-termal_acknowledge_mailbox({ mailboxId, expectedProcessedThrough, processedThrough }) -> MailboxSummary
+termal_acknowledge_mailbox({ mailboxId, receipt }) -> MailboxSummary
+// Legacy alternative: { mailboxId, expectedProcessedThrough, processedThrough }
 ```
 
 `termal_list_delegations` is the recovery path when a spawn result or parent
@@ -813,10 +814,15 @@ placing the message body directly into the receiver's turn queue:
 - `termal_list_mailboxes`, `termal_read_mailbox`, and
   `termal_read_mailbox_message` let the receiver pull durable bodies without
   advancing its cursor.
-- `termal_acknowledge_mailbox` uses a forward-only compare-and-swap for new
-  progress. Replaying a `processedThrough` value at or below the durable cursor
-  succeeds idempotently after a lost response; only a stale request that tries
-  to advance past the durable cursor conflicts.
+- Agent range reads record participant-bound page issuance; UI HTTP reads
+  default to non-issuing preview. The MCP/CLI bridge opts in via `issueReceipt`.
+- `termal_acknowledge_mailbox` accepts an unchanged page receipt after the whole
+  page is processed. Replays are idempotent; a later page cannot skip visible
+  gaps. Legacy numeric CAS also requires issuance for every newly covered
+  message and rejects unissued gaps with `409`. Do not mix the two forms.
+  A reply sent after reading belongs to a later page: read and acknowledge it
+  separately. Old bridge binaries need upgrading/restarting or current CLI,
+  not merely another read through the same non-issuing bridge.
 
 Receipt `notificationDisposition` is the immutable original dispatch outcome:
 `deliveredToIdleSession`, `queuedBehindActiveTurn`, or

@@ -865,6 +865,7 @@ async fn structured_review_envelopes_stay_out_of_routine_mailbox_surfaces() {
         AxumPath((parent_session_id.clone(), receipt.mailbox_id.clone())),
         State(state.clone()),
         Json(ReadMailboxRequest {
+            issue_receipt: true,
             after_sequence: Some(0),
             limit: 20,
         }),
@@ -937,6 +938,7 @@ async fn structured_review_envelopes_stay_out_of_routine_mailbox_surfaces() {
         AxumPath((parent_session_id, receipt.mailbox_id)),
         State(state),
         Json(ReadMailboxRequest {
+            issue_receipt: true,
             after_sequence: Some(0),
             limit: 20,
         }),

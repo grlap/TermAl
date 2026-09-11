@@ -29,6 +29,43 @@ fn test_input() -> MailboxAppendInput {
 }
 
 #[test]
+fn mailbox_acknowledgement_rejects_a_message_not_in_the_issued_page() {
+    let root = MailboxTestRoot::new();
+    let store = MailboxStore::open(&root.database_path()).unwrap();
+    let first = store.append(&test_input()).unwrap();
+    let mut second = test_input();
+    second.idempotency_key = "unissued-second".to_owned();
+    second.body = "Unissued obligation B".to_owned();
+    store.append(&second).unwrap();
+    let page = store.read_range("session-target", &first.mailbox_id, None, 1).unwrap();
+    assert_eq!(page.messages.len(), 1);
+    assert_eq!(page.messages[0].sequence, 1);
+    let result = store.acknowledge("session-target", &first.mailbox_id, 0, 2);
+    let cursor = mailbox_processed_through(&store.connection().unwrap(), &first.mailbox_id, "session-target").unwrap();
+    assert!(result.is_err(), "ack of unissued obligation B (#2) succeeded; processedThrough={cursor}");
+    assert_eq!(cursor, 0, "rejected ack must not process obligation B");
+}
+
+#[test]
+fn mailbox_preview_neither_acquires_writer_admission_nor_records_issuance() {
+    let root = MailboxTestRoot::new();
+    let store = MailboxStore::open(&root.database_path()).unwrap();
+    let first = store.append(&test_input()).unwrap();
+    let guard = store.lock_writer("holding writer during preview test").unwrap();
+    store.connection().unwrap().execute_batch("PRAGMA query_only = ON").unwrap();
+    let page = store.read_range_with_issuance("session-target", &first.mailbox_id, None, 1, false).unwrap();
+    assert_eq!(page.messages[0].sequence, 1);
+    assert_eq!(page.processed_through, 0);
+    assert_eq!(page.receipt, None);
+    assert_eq!(page.next_after_sequence, Some(1));
+    assert!(!page.has_more);
+    assert_eq!(store.connection().unwrap().query_row("SELECT count(*) FROM mailbox_read_pages", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+    store.connection().unwrap().execute_batch("PRAGMA query_only = OFF").unwrap();
+    drop(guard);
+    assert_eq!(mailbox_api_error(store.acknowledge("session-target", &first.mailbox_id, 0, 1).unwrap_err()).status, StatusCode::CONFLICT);
+}
+
+#[test]
 fn mailbox_api_status_uses_typed_error_kind_instead_of_message_text() {
     let internal = mailbox_api_error(anyhow!(
         "internal database lookup reported not found and exceeds retry budget"
@@ -71,6 +108,194 @@ fn mailbox_api_status_uses_typed_error_kind_instead_of_message_text() {
 }
 
 #[test]
+fn mailbox_receipts_require_order_and_are_bound_to_the_issued_participant() {
+    let root = MailboxTestRoot::new();
+    let store = MailboxStore::open(&root.database_path()).unwrap();
+    let first = store.append(&test_input()).unwrap();
+    let mut input = test_input();
+    input.idempotency_key = "page-two".into();
+    store.append(&input).unwrap();
+    let one = store.read_range("session-target", &first.mailbox_id, None, 1).unwrap();
+    assert!(one.has_more);
+    assert_eq!(one.next_after_sequence, Some(1));
+    let two = store.read_range("session-target", &first.mailbox_id, one.next_after_sequence, 1).unwrap();
+    assert!(!two.has_more);
+    assert_eq!(two.next_after_sequence, Some(2));
+    let token = one.receipt.as_deref().unwrap();
+    assert_eq!(store.read_range("session-target", &first.mailbox_id, None, 1).unwrap().receipt, one.receipt,
+        "an identical lost read response can be recovered");
+    for invalid in ["forged-receipt", &format!("{token}-changed")] {
+        assert!(store.acknowledge_page("session-target", &first.mailbox_id, invalid).is_err());
+    }
+    assert!(store.acknowledge_page("session-sender", &first.mailbox_id, token).is_err());
+    let mut other = test_input();
+    other.sender_session_id = "third-peer".into();
+    other.idempotency_key = "other-mailbox".into();
+    let other = store.append(&other).unwrap();
+    assert!(store.acknowledge_page("session-target", &other.mailbox_id, token).is_err());
+    assert!(store.acknowledge_page("session-target", &first.mailbox_id, two.receipt.as_deref().unwrap())
+        .unwrap_err().to_string().contains("skips an unacknowledged page"));
+    assert_eq!(mailbox_processed_through(&store.connection().unwrap(), &first.mailbox_id, "session-target").unwrap(), 0);
+    store.acknowledge_page("session-target", &first.mailbox_id, token).unwrap();
+    store.acknowledge_page("session-target", &first.mailbox_id, two.receipt.as_deref().unwrap()).unwrap();
+    store.acknowledge_page("session-target", &first.mailbox_id, token).unwrap();
+    let empty = store.read_range("session-target", &first.mailbox_id, None, 1).unwrap();
+    assert_eq!(empty.processed_through, 2);
+    assert!(empty.messages.is_empty());
+    assert_eq!(empty.receipt, None);
+    assert_eq!(empty.next_after_sequence, None);
+    assert!(!empty.has_more);
+}
+
+#[test]
+fn mailbox_receipt_survives_send_restart_and_lost_ack_response() {
+    let root = MailboxTestRoot::new();
+    let path = root.database_path();
+    let store = MailboxStore::open(&path).unwrap();
+    let first = store.append(&test_input()).unwrap();
+    let page = store.read_range("session-target", &first.mailbox_id, None, 1).unwrap();
+    let mut reply = test_input();
+    std::mem::swap(&mut reply.sender_session_id, &mut reply.target_session_id);
+    reply.idempotency_key = "reply-before-ack".into();
+    let reply_receipt = store.append(&reply).unwrap();
+    assert_eq!(reply_receipt.sender_processed_through, 0);
+    assert!(!reply_receipt.sender_cursor_advanced);
+    let error = store.acknowledge("session-target", &first.mailbox_id, 0, 2).unwrap_err();
+    assert_eq!(mailbox_api_error(error).status, StatusCode::CONFLICT,
+        "a reply appended after the page was read has not been issued");
+    drop(store);
+    let store = MailboxStore::open(&path).unwrap();
+    store.acknowledge_page("session-target", &first.mailbox_id, page.receipt.as_deref().unwrap()).unwrap();
+    let own = store.read_range("session-target", &first.mailbox_id, None, 10).unwrap();
+    assert_eq!(own.processed_through, 1, "old receipt cannot cover the subsequent reply");
+    assert_eq!(own.messages.len(), 1);
+    assert_eq!(own.messages[0].sender_session_id, "session-target");
+    assert_eq!(own.messages[0].sequence, 2);
+    store.acknowledge("session-target", &first.mailbox_id, 1, 2).unwrap();
+    store.acknowledge_page("session-target", &first.mailbox_id, own.receipt.as_deref().unwrap()).unwrap();
+    reply.idempotency_key = "reply-after-ack".into();
+    assert_eq!(store.append(&reply).unwrap().sender_processed_through, 3);
+    store.acknowledge_page("session-target", &first.mailbox_id, page.receipt.as_deref().unwrap()).unwrap();
+    assert_eq!(mailbox_processed_through(&store.connection().unwrap(), &first.mailbox_id, "session-target").unwrap(), 3);
+}
+
+#[test]
+fn mailbox_explicit_read_and_exact_lookup_cannot_bypass_an_unissued_gap() {
+    let root = MailboxTestRoot::new();
+    let store = MailboxStore::open(&root.database_path()).unwrap();
+    let first = store.append(&test_input()).unwrap();
+    store.read_message("session-target", &first.message_id).unwrap();
+    assert!(store.acknowledge("session-target", &first.mailbox_id, 0, 1).is_err(),
+        "exact lookup is not page issuance");
+    let mut input = test_input();
+    input.idempotency_key = "skipped-second".into();
+    store.append(&input).unwrap();
+    let later = store.read_range("session-target", &first.mailbox_id, Some(1), 10).unwrap();
+    assert!(store.acknowledge_page("session-target", &first.mailbox_id, later.receipt.as_deref().unwrap()).is_err());
+    assert!(store.acknowledge("session-target", &first.mailbox_id, 0, 2).is_err());
+    store.read_range("session-target", &first.mailbox_id, None, 1).unwrap();
+    store.acknowledge("session-target", &first.mailbox_id, 0, 2).unwrap();
+}
+
+#[test]
+fn mailbox_version_one_upgrade_preserves_cursors_and_requires_new_issuance() {
+    let root = MailboxTestRoot::new();
+    let path = root.database_path();
+    let first = {
+        let store = MailboxStore::open(&path).unwrap();
+        let first = store.append(&test_input()).unwrap();
+        store.read_range("session-target", &first.mailbox_id, None, 10).unwrap();
+        store.acknowledge("session-target", &first.mailbox_id, 0, 1).unwrap();
+        let mut input = test_input();
+        input.idempotency_key = "unprocessed-before-upgrade".into();
+        store.append(&input).unwrap();
+        // Exact old schema and existing durable state, in an isolated fixture.
+        store.connection().unwrap().execute_batch(
+            "DROP TABLE mailbox_read_pages;
+             UPDATE meta SET value = '1' WHERE key = 'coordination_schema_version';"
+        ).unwrap();
+        first
+    };
+    let store = MailboxStore::open(&path).unwrap();
+    assert_eq!(mailbox_processed_through(&store.connection().unwrap(), &first.mailbox_id, "session-target").unwrap(), 1);
+    store.acknowledge("session-target", &first.mailbox_id, 0, 1).unwrap();
+    assert!(store.acknowledge("session-target", &first.mailbox_id, 1, 2).is_err());
+    let page = store.read_range("session-target", &first.mailbox_id, None, 10).unwrap();
+    assert_eq!(page.messages[0].sequence, 2);
+    store.acknowledge_page("session-target", &first.mailbox_id, page.receipt.as_deref().unwrap()).unwrap();
+    validate_current_coordination_schema(&store.connection().unwrap()).unwrap();
+}
+
+#[test]
+fn mailbox_version_one_upgrade_rejects_modified_schema_without_mutation() {
+    let connection = rusqlite::Connection::open_in_memory().unwrap();
+    connection.execute_batch(COORDINATION_SCHEMA_V1_SQL).unwrap();
+    connection.execute_batch(
+        "INSERT INTO meta VALUES('coordination_schema_version', '1');
+         CREATE TABLE foreign_payload(body TEXT);
+         INSERT INTO foreign_payload VALUES('retain me');"
+    ).unwrap();
+    let before = coordination_schema_objects(&connection).unwrap();
+    assert!(ensure_sqlite_coordination_schema(&connection).is_err());
+    assert_eq!(coordination_schema_objects(&connection).unwrap(), before);
+    assert_eq!(connection.query_row("SELECT body FROM foreign_payload", [], |r| r.get::<_, String>(0)).unwrap(), "retain me");
+    assert_eq!(connection.query_row("SELECT value FROM meta", [], |r| r.get::<_, String>(0)).unwrap(), "1");
+}
+
+#[test]
+fn mailbox_version_one_unreadable_metadata_is_not_reset_guidance() {
+    let connection = rusqlite::Connection::open_in_memory().unwrap();
+    connection.execute_batch(COORDINATION_SCHEMA_V1_SQL).unwrap();
+    connection.execute_batch("INSERT INTO meta VALUES('coordination_schema_version', x'00');").unwrap();
+    let before = coordination_schema_objects(&connection).unwrap();
+    let error = ensure_sqlite_coordination_schema(&connection).unwrap_err();
+    assert!(format!("{error:#}").contains("failed to read the coordination schema version"));
+    assert_eq!(coordination_schema_objects(&connection).unwrap(), before);
+}
+
+#[test]
+fn mailbox_receipt_allows_hidden_review_gaps_but_returns_own_messages() {
+    let root = MailboxTestRoot::new();
+    let store = MailboxStore::open(&root.database_path()).unwrap();
+    let mut input = test_input();
+    input.topic = Some(DELEGATION_REVIEW_RESULT_TOPIC.into());
+    let hidden = store.append_delegation_review_result(&input).unwrap();
+    input.topic = None;
+    input.idempotency_key = "visible-after-review".into();
+    store.append(&input).unwrap();
+    let page = store.read_range("session-target", &hidden.mailbox_id, None, 1).unwrap();
+    assert_eq!(page.messages.iter().map(|m| m.sequence).collect::<Vec<_>>(), vec![2]);
+    assert_eq!(page.next_after_sequence, Some(2));
+    assert!(!page.has_more);
+    store.acknowledge_page("session-target", &hidden.mailbox_id, page.receipt.as_deref().unwrap()).unwrap();
+    let own = store.read_range("session-sender", &hidden.mailbox_id, Some(0), 10).unwrap();
+    assert_eq!(own.messages.iter().map(|m| m.sequence).collect::<Vec<_>>(), vec![1, 2]);
+}
+
+#[test]
+fn mailbox_receipt_concurrent_reads_and_replays_share_durable_authority() {
+    let root = MailboxTestRoot::new();
+    let path = root.database_path();
+    let store = MailboxStore::open(&path).unwrap();
+    let first = store.append(&test_input()).unwrap();
+    let other = MailboxStore::open(&path).unwrap();
+    let barrier = Arc::new(std::sync::Barrier::new(2));
+    let peer_barrier = barrier.clone();
+    let mailbox_id = first.mailbox_id.clone();
+    let worker = std::thread::spawn(move || {
+        peer_barrier.wait();
+        let page = other.read_range("session-target", &mailbox_id, Some(0), 10).unwrap();
+        other.acknowledge_page("session-target", &mailbox_id, page.receipt.as_deref().unwrap()).unwrap();
+        page.receipt
+    });
+    barrier.wait();
+    let page = store.read_range("session-target", &first.mailbox_id, Some(0), 10).unwrap();
+    store.acknowledge_page("session-target", &first.mailbox_id, page.receipt.as_deref().unwrap()).unwrap();
+    assert_eq!(worker.join().unwrap(), page.receipt);
+    assert_eq!(mailbox_processed_through(&store.connection().unwrap(), &first.mailbox_id, "session-target").unwrap(), 1);
+}
+
+#[test]
 fn mailbox_append_and_acknowledgement_bound_same_file_writer_contention() {
     let root = MailboxTestRoot::new();
     let path = root.database_path();
@@ -102,6 +327,7 @@ fn mailbox_append_and_acknowledgement_bound_same_file_writer_contention() {
     let receipt = store
         .append(&test_input())
         .expect("append should succeed after writer release");
+    store.read_range("session-target", &receipt.mailbox_id, None, 10).unwrap();
 
     let coordination_writer_guard = lock_sqlite_state_writer(&coordination_writer_lock);
     let acknowledge_err = store
@@ -288,6 +514,7 @@ fn append_retry_after_reopen_returns_original_durable_receipt() {
     assert_eq!(first.notification_disposition, "durableButNotWoken");
 
     let store = MailboxStore::open(&path).expect("mailbox store should reopen");
+    store.read_range("session-target", &first.mailbox_id, None, 10).unwrap();
     store
         .acknowledge("session-target", &first.mailbox_id, 0, 1)
         .expect("target cursor should advance before retry");
@@ -658,6 +885,7 @@ fn boot_recovery_marks_only_unread_active_participant_notifications() {
         "boot recovery must be idempotent"
     );
 
+    store.read_range("session-target", &first.mailbox_id, None, 10).unwrap();
     store
         .acknowledge(
             "session-target",
@@ -791,6 +1019,7 @@ fn acknowledgement_is_forward_only_compare_and_swap() {
     let path = root.database_path();
     let store = MailboxStore::open(&path).expect("mailbox store should open");
     let receipt = store.append(&test_input()).expect("append should succeed");
+    store.read_range("session-target", &receipt.mailbox_id, None, 10).unwrap();
 
     let summary = store
         .acknowledge("session-target", &receipt.mailbox_id, 0, 1)

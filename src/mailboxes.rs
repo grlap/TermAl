@@ -3,7 +3,9 @@ Durable neutral mailbox storage.
 
 Mailboxes are coordination records, not agent sessions: they have no runtime,
 workdir, prompt queue, or model. SQLite is authoritative for message bodies and
-participant cursors. This store owns one long-lived connection, independent of
+participant cursors and issued read-page receipts. Reads record issuance but
+never acknowledgement; both receipt and legacy numeric acknowledgements verify
+issuance before advancing. This store owns one long-lived connection, independent of
 the ordinary AppState persist worker, so mailbox append/read/ack remains usable
 after that worker shuts down.
 */
@@ -105,6 +107,12 @@ struct MailboxReadResponse {
     messages: Vec<MailboxMessage>,
     after_sequence: u64,
     processed_through: u64,
+    #[serde(default)]
+    receipt: Option<String>,
+    #[serde(default)]
+    has_more: bool,
+    #[serde(default)]
+    next_after_sequence: Option<u64>,
 }
 
 struct MailboxAppendResult {
@@ -209,6 +217,10 @@ struct SendMailboxMessageRequest {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ReadMailboxRequest {
+    // Only the agent MCP/CLI transport opts into durable page issuance.
+    // Missing stays preview-safe for existing UI bundles and old bridges.
+    #[serde(default)]
+    issue_receipt: bool,
     #[serde(default)]
     after_sequence: Option<u64>,
     #[serde(default = "default_mailbox_read_limit")]
@@ -218,8 +230,9 @@ struct ReadMailboxRequest {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct AcknowledgeMailboxRequest {
-    expected_processed_through: u64,
-    processed_through: u64,
+    receipt: Option<String>,
+    expected_processed_through: Option<u64>,
+    processed_through: Option<u64>,
 }
 
 fn default_mailbox_read_limit() -> u64 {
@@ -1092,11 +1105,12 @@ async fn read_mailbox(
         state.ensure_mailbox_session_active(&session_id)?;
         state
             .mailbox_store
-            .read_range(
+            .read_range_with_issuance(
                 &session_id,
                 &mailbox_id,
                 request.after_sequence,
                 request.limit,
+                request.issue_receipt,
             )
             .map_err(mailbox_api_error)
     })
@@ -1126,14 +1140,26 @@ async fn acknowledge_mailbox(
 ) -> Result<Json<MailboxSummary>, ApiError> {
     let summary = run_blocking_api(move || {
         state.ensure_mailbox_session_active(&session_id)?;
-        state
-            .acknowledge_mailbox_and_remove_covered_wakeups(
+        match (request.receipt, request.expected_processed_through, request.processed_through) {
+            (Some(receipt), None, None) => {
+                let summary = state.mailbox_store.acknowledge_page(&session_id, &mailbox_id, &receipt)
+                    .map_err(mailbox_api_error)?;
+                let through = summary.participants.iter()
+                    .find(|participant| participant.session_id == session_id)
+                    .map(|participant| participant.processed_through).unwrap_or(0);
+                if let Err(err) = state.remove_acknowledged_mailbox_wakeups(&session_id, &mailbox_id, through) {
+                    eprintln!("mailbox> receipt committed but wake cleanup failed: {err:#}");
+                }
+                Ok(summary)
+            }
+            (None, Some(expected), Some(through)) => state.acknowledge_mailbox_and_remove_covered_wakeups(
                 &session_id,
                 &mailbox_id,
-                request.expected_processed_through,
-                request.processed_through,
-            )
-            .map_err(mailbox_api_error)
+                expected,
+                through,
+            ).map_err(mailbox_api_error),
+            _ => Err(ApiError::bad_request("Supply receipt OR both expectedProcessedThrough and processedThrough")),
+        }
     })
     .await?;
     Ok(Json(summary))
@@ -2174,6 +2200,7 @@ impl MailboxStore {
         self.wakeups_for_session(session_id, MailboxWakeupRecovery::NeverWoken)
     }
 
+    #[cfg(test)]
     fn read_range(
         &self,
         session_id: &str,
@@ -2181,13 +2208,32 @@ impl MailboxStore {
         after_sequence: Option<u64>,
         limit: u64,
     ) -> Result<MailboxReadResponse> {
+        self.read_range_with_issuance(session_id, mailbox_id, after_sequence, limit, true)
+    }
+
+    fn read_range_with_issuance(
+        &self,
+        session_id: &str,
+        mailbox_id: &str,
+        after_sequence: Option<u64>,
+        limit: u64,
+        issue_receipt: bool,
+    ) -> Result<MailboxReadResponse> {
         let limit = limit.clamp(1, 200);
+        let _write_guard = if issue_receipt {
+            Some(self.lock_writer("recording mailbox page issuance")?)
+        } else {
+            None
+        };
         let mut connection = self.connection()?;
         // Snapshot authorization, cursor, and rows together, including when
         // another store connection acknowledges concurrently.
-        let transaction = connection
-            .transaction()
-            .context("failed to begin mailbox read")?;
+        let transaction = if issue_receipt {
+            begin_mailbox_write(&mut connection, "recording mailbox page issuance")?
+        } else {
+            connection.transaction_with_behavior(rusqlite::TransactionBehavior::Deferred)
+                .context("failed to begin mailbox preview snapshot")?
+        };
         require_mailbox_participant(&transaction, mailbox_id, session_id)?;
         let processed_through = mailbox_processed_through(&transaction, mailbox_id, session_id)?;
         let after_sequence = after_sequence.unwrap_or(processed_through);
@@ -2212,22 +2258,43 @@ impl MailboxStore {
                 rusqlite::params![
                     mailbox_id,
                     after_sequence,
-                    limit,
+                    limit + 1,
                     session_id,
                     DELEGATION_REVIEW_RESULT_TOPIC
                 ],
                 mailbox_message_from_row,
             )
             .context("failed to query mailbox messages")?;
-        let messages = rows
+        let mut messages = rows
             .map(|row| row.context("failed to decode mailbox message"))
             .collect::<Result<Vec<_>>>()?;
         drop(statement);
-        transaction.commit().context("failed to finish mailbox read")?;
+        let has_more = messages.len() as u64 > limit;
+        messages.truncate(limit as usize);
+        let next_after_sequence = messages.last().map(|message| message.sequence);
+        let receipt = if let Some(through) = next_after_sequence.filter(|_| issue_receipt) {
+            let candidate = uuid::Uuid::new_v4().to_string();
+            transaction.execute(
+                "INSERT INTO mailbox_read_pages(receipt, mailbox_id, session_id, after_sequence, through_sequence)
+                 VALUES(?1, ?2, ?3, ?4, ?5)
+                 ON CONFLICT(mailbox_id, session_id, after_sequence, through_sequence) DO NOTHING",
+                rusqlite::params![candidate, mailbox_id, session_id, after_sequence, through],
+            )?;
+            Some(transaction.query_row(
+                "SELECT receipt FROM mailbox_read_pages WHERE mailbox_id = ?1 AND session_id = ?2
+                 AND after_sequence = ?3 AND through_sequence = ?4",
+                rusqlite::params![mailbox_id, session_id, after_sequence, through],
+                |row| row.get(0),
+            )?)
+        } else { None };
+        transaction.commit().map_err(|err| mailbox_sqlite_write_error("committing mailbox page issuance", err))?;
         Ok(MailboxReadResponse {
             messages,
             after_sequence,
             processed_through,
+            receipt,
+            has_more,
+            next_after_sequence,
         })
     }
 
@@ -2274,6 +2341,17 @@ impl MailboxStore {
         expected_processed_through: u64,
         processed_through: u64,
     ) -> Result<MailboxSummary> {
+        self.acknowledge_validated(session_id, mailbox_id, None, expected_processed_through, processed_through)
+    }
+
+    fn acknowledge_page(&self, session_id: &str, mailbox_id: &str, receipt: &str) -> Result<MailboxSummary> {
+        self.acknowledge_validated(session_id, mailbox_id, Some(receipt), 0, 0)
+    }
+
+    fn acknowledge_validated(
+        &self, session_id: &str, mailbox_id: &str, receipt: Option<&str>,
+        mut expected_processed_through: u64, mut processed_through: u64,
+    ) -> Result<MailboxSummary> {
         if processed_through < expected_processed_through {
             return Err(mailbox_store_error(
                 MailboxStoreErrorKind::Validation,
@@ -2285,26 +2363,61 @@ impl MailboxStore {
         let transaction =
             begin_mailbox_write(&mut connection, "beginning mailbox acknowledgement")?;
         require_mailbox_participant(&transaction, mailbox_id, session_id)?;
-        let latest_sequence = transaction
-            .query_row(
-                "SELECT next_sequence - 1 FROM mailboxes WHERE id = ?1",
-                rusqlite::params![mailbox_id],
-                |row| row.get::<_, u64>(0),
-            )
-            .map_err(|err| match err {
-                rusqlite::Error::QueryReturnedNoRows => {
-                    mailbox_store_error(MailboxStoreErrorKind::NotFound, "mailbox not found")
-                }
-                other => anyhow!(other),
-            })?;
+        let current = mailbox_processed_through(&transaction, mailbox_id, session_id)?;
+        if let Some(receipt) = receipt {
+            let page = transaction.query_row(
+                "SELECT after_sequence, through_sequence FROM mailbox_read_pages
+                 WHERE receipt = ?1 AND mailbox_id = ?2 AND session_id = ?3",
+                rusqlite::params![receipt, mailbox_id, session_id],
+                |row| Ok((row.get::<_, u64>(0)?, row.get::<_, u64>(1)?)),
+            ).optional()?.ok_or_else(|| mailbox_store_error(
+                MailboxStoreErrorKind::Validation, "mailbox receipt was not issued to this participant and mailbox; read again",
+            ))?;
+            // A later page must not acknowledge an earlier unprocessed visible
+            // page, even if both have been read. Hidden review rows are not gaps.
+            if page.1 > current && transaction.query_row(
+                "SELECT EXISTS(SELECT 1 FROM mailbox_messages WHERE mailbox_id = ?1
+                 AND sequence > ?2 AND sequence <= ?3
+                 AND NOT (target_session_id = ?4 AND COALESCE(topic, '') = ?5))",
+                rusqlite::params![mailbox_id, current, page.0, session_id, DELEGATION_REVIEW_RESULT_TOPIC],
+                |row| row.get::<_, bool>(0),
+            )? {
+                return Err(mailbox_store_error(MailboxStoreErrorKind::Conflict,
+                    "mailbox receipt skips an unacknowledged page; read from the current cursor and process it first"));
+            }
+            expected_processed_through = current;
+            processed_through = page.1.max(current);
+        }
+        let latest_sequence: u64 = transaction.query_row(
+            "SELECT next_sequence - 1 FROM mailboxes WHERE id = ?1",
+            rusqlite::params![mailbox_id], |row| row.get(0),
+        )?;
         if processed_through > latest_sequence {
-            return Err(mailbox_store_error(
-                MailboxStoreErrorKind::Validation,
-                format!(
-                    "mailbox acknowledgement {} exceeds latest sequence {}",
-                    processed_through, latest_sequence
-                ),
-            ));
+            return Err(mailbox_store_error(MailboxStoreErrorKind::Validation,
+                format!("mailbox acknowledgement {} exceeds latest sequence {}", processed_through, latest_sequence)));
+        }
+        if processed_through > current {
+            if expected_processed_through != current {
+                return Err(mailbox_store_error(MailboxStoreErrorKind::Conflict,
+                    "mailbox acknowledgement conflict: cursor changed; read again"));
+            }
+            // Numeric compatibility is NOT a bypass. Every visible row in the
+            // advance must have been issued; already processed history needs no
+            // backfill at upgrade. Own messages remain visible, hidden review
+            // payloads do not. Issuance records never certify comprehension.
+            let unissued = transaction.query_row(
+                "SELECT EXISTS(SELECT 1 FROM mailbox_messages m WHERE m.mailbox_id = ?1
+                 AND m.sequence > ?2 AND m.sequence <= ?3
+                 AND NOT (m.target_session_id = ?4 AND COALESCE(m.topic, '') = ?5)
+                 AND NOT EXISTS(SELECT 1 FROM mailbox_read_pages p WHERE p.mailbox_id = m.mailbox_id
+                     AND p.session_id = ?4 AND p.after_sequence < m.sequence AND p.through_sequence >= m.sequence))",
+                rusqlite::params![mailbox_id, current, processed_through, session_id, DELEGATION_REVIEW_RESULT_TOPIC],
+                |row| row.get::<_, bool>(0),
+            )?;
+            if unissued {
+                return Err(mailbox_store_error(MailboxStoreErrorKind::Conflict,
+                    "mailbox acknowledgement includes messages not issued to this participant; read from the current cursor using the current MCP/CLI bridge, process, then acknowledge. Old bridges without issueReceipt only preview: upgrade/restart the bridge or use the current CLI"));
+            }
         }
         let updated = transaction
             .execute(

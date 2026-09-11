@@ -1259,7 +1259,8 @@ impl TermalDelegationMcpBridge {
             .map(|value| required_u64(Some(value), "limit"))
             .transpose()?
             .unwrap_or(50);
-        let mut body = json!({ "limit": limit });
+        // Transport-owned: model arguments cannot turn an agent read into UI preview.
+        let mut body = json!({ "limit": limit, "issueReceipt": true });
         if let Some(after_sequence) = after_sequence {
             body["afterSequence"] = json!(after_sequence);
         }
@@ -1276,7 +1277,10 @@ impl TermalDelegationMcpBridge {
             "mailboxId": mailbox_id,
             "messages": range.messages,
             "afterSequence": range.after_sequence,
-            "processedThrough": range.processed_through
+            "processedThrough": range.processed_through,
+            "receipt": range.receipt,
+            "hasMore": range.has_more,
+            "nextAfterSequence": range.next_after_sequence
         }))
     }
 
@@ -1292,12 +1296,20 @@ impl TermalDelegationMcpBridge {
     fn tool_acknowledge_mailbox(&self, arguments: Value) -> Result<Value> {
         let mailbox_id =
             required_path_identifier(arguments.get("mailboxId"), "mailboxId")?;
-        let expected_processed_through = required_u64(
-            arguments.get("expectedProcessedThrough"),
-            "expectedProcessedThrough",
-        )?;
-        let processed_through =
-            required_u64(arguments.get("processedThrough"), "processedThrough")?;
+        let body = if arguments.get("receipt").is_some() {
+            if arguments.get("expectedProcessedThrough").is_some() || arguments.get("processedThrough").is_some() {
+                bail!("Supply receipt OR both expectedProcessedThrough and processedThrough");
+            }
+            json!({"receipt": required_path_identifier(arguments.get("receipt"), "receipt")?})
+        } else {
+            let expected_processed_through = required_u64(
+                arguments.get("expectedProcessedThrough"),
+                "expectedProcessedThrough",
+            )?;
+            let processed_through =
+                required_u64(arguments.get("processedThrough"), "processedThrough")?;
+            json!({"expectedProcessedThrough": expected_processed_through, "processedThrough": processed_through})
+        };
         let path = format!(
             "/api/sessions/{}/mailboxes/{}/acknowledge",
             self.serving_session_id, mailbox_id
@@ -1305,10 +1317,7 @@ impl TermalDelegationMcpBridge {
         let response = self
             .post_json_with_safe_replay(
                 &path,
-                &json!({
-                    "expectedProcessedThrough": expected_processed_through,
-                    "processedThrough": processed_through
-                }),
+                &body,
             )
             .map_err(mailbox_acknowledgement_bridge_error)?;
         let summary = serde_json::from_value::<MailboxSummary>(response).map_err(|source| {
@@ -1883,9 +1892,9 @@ fn mailbox_acknowledgement_bridge_error(err: anyhow::Error) -> anyhow::Error {
     {
         return anyhow!(
             "mailbox acknowledgement response was not received; the cursor outcome is unknown. \
-             Call termal_read_mailbox with afterSequence omitted, reconcile any unread bodies, \
-             then use read.processedThrough as \
-             expectedProcessedThrough: {err}"
+             For receipt acknowledgement, retry the same receipt unchanged. \
+             Legacy numeric clients: call termal_read_mailbox with afterSequence omitted, \
+             reconcile unread bodies, then use read.processedThrough as expectedProcessedThrough: {err}"
         );
     }
     err
@@ -2316,7 +2325,7 @@ fn mcp_tools_list_result() -> Value {
             },
             {
                 "name": "termal_send_to_session",
-                "description": "Durably append a routine message to the neutral mailbox shared with another root-level TermAl session, then best-effort wake that peer with metadata only. `sessionId` accepts a TermAl id or case-insensitive session name; prefer an exact id for sustained traffic because names require peer discovery. `idempotencyKey` is required and sender-scoped: retrying the same intent returns the original message and dispatch outcome with duplicate=true; reusing it for different content conflicts. If transport fails before a receipt arrives, the append outcome is unknown: retry the exact same intent and key. Receipt `notificationDisposition` is the immutable point-in-time dispatch outcome; mailbox reads expose the evolving row lifecycle as `notificationState`. `senderProcessedThrough` is the sender's resulting durable cursor snapshot; `senderCursorAdvanced` says whether this append advanced it. A fresh send advances only over its own message when the cursor already sat immediately before it, never skipping unread inbound messages. A duplicate returns the current cursor snapshot and senderCursorAdvanced=false. Use the snapshot for the next CAS acknowledgement, but concurrent progress can still require reconciliation. The durable body is fetched through termal_read_mailbox. FIRE-AND-FORGET — there is no reply to await.",
+                "description": "Durably append a routine message to the neutral mailbox shared with another root-level TermAl session, then best-effort wake that peer with metadata only. `sessionId` accepts a TermAl id or case-insensitive session name; prefer an exact id for sustained traffic because names require peer discovery. `idempotencyKey` is required and sender-scoped: retrying the same intent returns the original message and dispatch outcome with duplicate=true; reusing it for different content conflicts. If transport fails before a receipt arrives, the append outcome is unknown: retry the exact same intent and key. Receipt `notificationDisposition` is the immutable point-in-time dispatch outcome; mailbox reads expose the evolving row lifecycle as `notificationState`. `senderProcessedThrough` is the sender's resulting durable cursor snapshot; `senderCursorAdvanced` says whether this append advanced it. A fresh send advances only over its own message when the cursor already sat immediately before it, never skipping unread inbound messages. A duplicate returns the current cursor snapshot and senderCursorAdvanced=false. Legacy numeric clients may use that snapshot for CAS; receipt acknowledgements keep the read receipt unchanged. The durable body is fetched through termal_read_mailbox. FIRE-AND-FORGET — there is no reply to await.",
                 "inputSchema": {
                     "type": "object",
                     "required": ["sessionId", "message", "idempotencyKey"],
@@ -2352,7 +2361,7 @@ fn mcp_tools_list_result() -> Value {
             },
             {
                 "name": "termal_read_mailbox",
-                "description": "Fetch a FIFO range of durable mailbox messages. Routine workflow: read -> process -> acknowledge; no prior list call is needed. Omitted `afterSequence` starts after this participant's durable `processedThrough`; an explicit boundary keeps its meaning (0 replays history). Returns {mailboxId, messages, afterSequence, processedThrough}: afterSequence is the boundary actually used and processedThrough is the participant cursor from the same read snapshot. Reading never advances the cursor. Process bodies contiguously, then call termal_acknowledge_mailbox with expectedProcessedThrough = read.processedThrough, or the newer send receipt's senderProcessedThrough after a reply, and processedThrough = the last processed sequence (not the wake's latest sequence). For another page before acknowledgement, pass the last read sequence as afterSequence. On a CAS conflict, read again with afterSequence omitted and reconcile concurrent progress; snapshots do not bypass CAS. Each message's notificationState is the mutable wake lifecycle state, not the sender receipt's immutable notificationDisposition.",
+                "description": "Read a FIFO page without acknowledging it. Omit afterSequence to start at the durable cursor. Returns messages (including own sends), receipt, hasMore, nextAfterSequence and cursor metadata. Save receipt and acknowledge it unchanged only after processing the entire page, even if you send a reply meanwhile. Empty pages have no receipt. Process/ack pages in order; explicit afterSequence may replay history but cannot authorize skipping earlier visible messages. The server records issuance, not proof of reading or understanding. Legacy numeric clients remain supported with issuance validation; pre-upgrade reads may need repeating. A reply appended after reading is outside that receipt: acknowledge the original page, then read/process/acknowledge the next page including your reply. Numeric ACK through that unissued reply returns 409. The bridge sets issueReceipt itself; UI previews and old bridge binaries without that flag do not issue pages. Upgrade/restart an old bridge or use the current CLI; repeating its preview cannot repair missing issuance.",
                 "inputSchema": {
                     "type": "object",
                     "required": ["mailboxId"],
@@ -2365,7 +2374,7 @@ fn mcp_tools_list_result() -> Value {
             },
             {
                 "name": "termal_read_mailbox_message",
-                "description": "Fetch one exact durable mailbox message by receipt messageId. Its `notificationState` is the current mutable wake lifecycle state, not the sender receipt's immutable `notificationDisposition`. The caller must be a current participant.",
+                "description": "Fetch one exact durable mailbox message by receipt messageId. Its `notificationState` is the current mutable wake lifecycle state, not the sender receipt's immutable `notificationDisposition`. The caller must be a current participant. This exact lookup does not issue a page receipt; range-read before acknowledging.",
                 "inputSchema": {
                     "type": "object",
                     "required": ["messageId"],
@@ -2376,12 +2385,13 @@ fn mcp_tools_list_result() -> Value {
             },
             {
                 "name": "termal_acknowledge_mailbox",
-                "description": "Advance this session's mailbox processed cursor after contiguous processing with a forward-only compare-and-swap. First read with termal_read_mailbox and afterSequence omitted; a list call is not required. Set expectedProcessedThrough = read.processedThrough, or the newer send receipt's senderProcessedThrough after a reply. Set processedThrough to the last processed sequence, never skipping unread messages to reach a wake's latest sequence. New progress requires the observed cursor to match; replay at or below the durable cursor succeeds idempotently after a lost response; only a stale attempt to advance past the durable cursor conflicts. On conflict, read again without afterSequence and reconcile newer progress.",
+                "description": "After processing an entire read page, acknowledge with mailboxId and its unchanged receipt. Do not also send numeric boundaries. Receipts are participant/mailbox-bound, durable and safe to retry, even if sending or another acknowledgement advanced the cursor. A later page cannot skip an earlier unacknowledged visible page. On a gap, read from the current cursor and process that page first. Legacy expectedProcessedThrough/processedThrough remains a forward-only compare-and-swap, but every newly acknowledged visible message must have recorded issuance; on rejection, re-read. Neither path proves comprehension.",
                 "inputSchema": {
                     "type": "object",
-                    "required": ["mailboxId", "expectedProcessedThrough", "processedThrough"],
+                    "required": ["mailboxId"],
                     "properties": {
                         "mailboxId": { "type": "string" },
+                        "receipt": { "type": "string", "minLength": 1 },
                         "expectedProcessedThrough": { "type": "integer", "minimum": 0 },
                         "processedThrough": { "type": "integer", "minimum": 0 }
                     }

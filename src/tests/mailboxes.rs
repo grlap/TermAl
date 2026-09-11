@@ -274,6 +274,132 @@ fn lightweight_test_state_does_not_hold_a_mailbox_database_descriptor() {
     );
 }
 
+#[tokio::test]
+async fn mailbox_ui_preview_does_not_authorize_agent_acknowledgement() {
+    let (state, sender_id, target_id) = mailbox_test_state();
+    let first = state
+        .append_mailbox_message_and_notify(&sender_id, mailbox_send_request(&target_id))
+        .unwrap();
+    let base = format!("/api/sessions/{target_id}/mailboxes/{}", first.mailbox_id);
+    let page = mailbox_cursor_http_post(
+        &state,
+        format!("{base}/read"),
+        json!({"afterSequence": 0, "limit": 200}),
+    )
+    .await;
+    assert_eq!(page["messages"].as_array().unwrap().len(), 1);
+    let response = app_router(state.clone())
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("{base}/acknowledge"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(
+                        &json!({"expectedProcessedThrough": 0, "processedThrough": 1}),
+                    )
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status(),
+        StatusCode::CONFLICT,
+        "UI browsing must not issue a page on behalf of the agent"
+    );
+    assert!(page["receipt"].is_null());
+    assert_eq!(
+        mailbox_processed_through(
+            &state.mailbox_store.connection().unwrap(),
+            &first.mailbox_id,
+            &target_id
+        )
+        .unwrap(),
+        0
+    );
+    // An upgraded bridge explicitly issues the page; legacy numeric ACK is
+    // still supported after that read. Repeating old no-flag reads is not enough.
+    let issued = mailbox_cursor_http_post(
+        &state,
+        format!("{base}/read"),
+        json!({"issueReceipt": true}),
+    )
+    .await;
+    assert!(issued["receipt"].is_string());
+    mailbox_cursor_http_post(
+        &state,
+        format!("{base}/acknowledge"),
+        json!({"expectedProcessedThrough": 0, "processedThrough": 1}),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn mailbox_http_receipt_ack_is_separate_and_rejects_mixed_boundaries() {
+    let (state, sender_id, target_id) = mailbox_test_state();
+    let first = state
+        .append_mailbox_message_and_notify(&sender_id, mailbox_send_request(&target_id))
+        .unwrap();
+    let path = format!(
+        "/api/sessions/{target_id}/mailboxes/{}/acknowledge",
+        first.mailbox_id
+    );
+    let page = mailbox_cursor_http_post(
+        &state,
+        format!(
+            "/api/sessions/{target_id}/mailboxes/{}/read",
+            first.mailbox_id
+        ),
+        json!({"issueReceipt": true}),
+    )
+    .await;
+    assert!(page["receipt"].is_string());
+    assert_eq!(page["nextAfterSequence"], 1);
+    assert_eq!(page["hasMore"], false);
+    assert_eq!(page["processedThrough"], 0);
+    for body in [
+        json!({"receipt": page["receipt"], "expectedProcessedThrough": 0, "processedThrough": 1}),
+        json!({"receipt": "not-issued"}),
+        json!({}),
+    ] {
+        let error = app_router(state.clone())
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(&path)
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&body).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(error.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            mailbox_processed_through(
+                &state.mailbox_store.connection().unwrap(),
+                &first.mailbox_id,
+                &target_id
+            )
+            .unwrap(),
+            0
+        );
+    }
+    for _ in 0..2 {
+        let ack =
+            mailbox_cursor_http_post(&state, path.clone(), json!({"receipt": page["receipt"]}))
+                .await;
+        assert_eq!(ack["unreadCount"], 0);
+    }
+    let inner = state.inner.lock().unwrap();
+    assert!(
+        inner.sessions[inner.find_session_index(&target_id).unwrap()]
+            .queued_prompts
+            .is_empty()
+    );
+}
+
 async fn mailbox_cursor_http_post(state: &AppState, path: String, body: Value) -> Value {
     let response = app_router(state.clone())
         .oneshot(
@@ -340,6 +466,10 @@ async fn assert_mailbox_cursor_read(after_sequence: Option<u64>) {
     let (state, sender_id, target_id) = mailbox_test_state();
     let first = state
         .append_mailbox_message_and_notify(&sender_id, mailbox_send_request(&target_id))
+        .unwrap();
+    state
+        .mailbox_store
+        .read_range(&target_id, &first.mailbox_id, None, 10)
         .unwrap();
     state
         .mailbox_store
@@ -439,7 +569,8 @@ async fn mailbox_cursor_http_reply_receipt_supports_next_cas_without_list() {
     let mailbox_id = receipt.mailbox_id;
     let read_path = format!("/api/sessions/{target_id}/mailboxes/{mailbox_id}/read");
     let ack_path = format!("/api/sessions/{target_id}/mailboxes/{mailbox_id}/acknowledge");
-    let read = mailbox_cursor_http_post(&state, read_path.clone(), json!({})).await;
+    let read =
+        mailbox_cursor_http_post(&state, read_path.clone(), json!({"issueReceipt": true})).await;
     mailbox_cursor_http_post(
         &state,
         ack_path.clone(),
@@ -458,6 +589,9 @@ async fn mailbox_cursor_http_reply_receipt_supports_next_cas_without_list() {
     state
         .append_mailbox_message_and_notify(&sender_id, next)
         .unwrap();
+    let next_read =
+        mailbox_cursor_http_post(&state, read_path.clone(), json!({"issueReceipt": true})).await;
+    assert_eq!(next_read["messages"][0]["sequence"], 3);
     mailbox_cursor_http_post(
         &state,
         ack_path,
@@ -527,6 +661,7 @@ async fn mailbox_read_routes_reject_delegation_children_as_non_peers() {
         AxumPath((target_id.clone(), receipt.mailbox_id.clone())),
         State(state.clone()),
         Json(ReadMailboxRequest {
+            issue_receipt: true,
             after_sequence: Some(0),
             limit: 20,
         }),
@@ -547,8 +682,9 @@ async fn mailbox_read_routes_reject_delegation_children_as_non_peers() {
         AxumPath((target_id, receipt.mailbox_id)),
         State(state),
         Json(AcknowledgeMailboxRequest {
-            expected_processed_through: 0,
-            processed_through: receipt.sequence,
+            receipt: None,
+            expected_processed_through: Some(0),
+            processed_through: Some(receipt.sequence),
         }),
     )
     .await
@@ -765,6 +901,7 @@ async fn normal_mailbox_interactions_reactivate_stale_live_participants() {
         AxumPath((target_id.clone(), first.mailbox_id.clone())),
         State(state.clone()),
         Json(ReadMailboxRequest {
+            issue_receipt: true,
             after_sequence: Some(0),
             limit: 20,
         }),
@@ -781,8 +918,9 @@ async fn normal_mailbox_interactions_reactivate_stale_live_participants() {
         AxumPath((target_id.clone(), first.mailbox_id.clone())),
         State(state.clone()),
         Json(AcknowledgeMailboxRequest {
-            expected_processed_through: 0,
-            processed_through: second.sequence,
+            receipt: None,
+            expected_processed_through: Some(0),
+            processed_through: Some(second.sequence),
         }),
     )
     .await
@@ -1907,6 +2045,10 @@ fn acknowledgement_eagerly_removes_the_covered_queued_wake() {
     let receipt = state
         .append_mailbox_message_and_notify(&sender_id, mailbox_send_request(&target_id))
         .expect("mailbox send should queue one wake-up");
+    state
+        .mailbox_store
+        .read_range(&target_id, &receipt.mailbox_id, None, 10)
+        .unwrap();
 
     let summary = state
         .acknowledge_mailbox_and_remove_covered_wakeups(
@@ -1940,6 +2082,10 @@ fn queue_drain_skips_a_stale_wake_left_after_the_cursor_advanced() {
     let receipt = state
         .append_mailbox_message_and_notify(&sender_id, mailbox_send_request(&target_id))
         .expect("mailbox send should queue one wake-up");
+    state
+        .mailbox_store
+        .read_range(&target_id, &receipt.mailbox_id, None, 10)
+        .unwrap();
     state
         .mailbox_store
         .acknowledge(&target_id, &receipt.mailbox_id, 0, receipt.sequence)
@@ -2990,7 +3136,9 @@ async fn mailbox_http_routes_append_read_and_acknowledge_without_implicit_read_a
                     receipt.mailbox_id
                 ))
                 .header("content-type", "application/json")
-                .body(Body::from(r#"{"afterSequence":0,"limit":20}"#))
+                .body(Body::from(
+                    r#"{"afterSequence":0,"limit":20,"issueReceipt":true}"#,
+                ))
                 .expect("read request should build"),
         )
         .await

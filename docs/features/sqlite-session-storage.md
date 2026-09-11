@@ -235,7 +235,13 @@ On startup:
 2. Bootstrap `coordination.sqlite` before any coordination stores, background
    persistence worker, or HTTP listener. An empty file receives the complete
    current schema atomically after emptiness is rechecked under an SQLite
-   immediate transaction. An existing file must already match the current
+   immediate transaction. Coordination schema version 2 adds
+   `mailbox_read_pages` for durable participant-bound read receipts. The exact
+   canonical version-1 schema upgrades in one immediate transaction, preserving
+   all messages, board data and cursors. Unacknowledged pre-upgrade reads must
+   be repeated to establish issuance; no live database reset is required for
+   this upgrade. See [mailbox acknowledgements](agent-mailboxes.md#reading-and-acknowledgement).
+   Every other existing file must match the current
    schema version and canonical schema definitions, including column types and
    constraints, foreign keys, and named indexes. Only a genuinely absent or
    unsupported version/schema receives reset guidance; lock, corruption, I/O,
