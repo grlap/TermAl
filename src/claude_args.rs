@@ -72,6 +72,22 @@ fn push_claude_cli_permission_args(
     if let Some(permission_mode) = approval_mode.initial_cli_permission_mode() {
         args.extend(["--permission-mode".to_owned(), permission_mode.to_owned()]);
     }
+    if approval_mode == ClaudeApprovalMode::ReadOnlyAutoApprove {
+        // Claude evaluates ask before inherited allow rules. Route every tool
+        // through our host checker, including newly added tools and MCP calls.
+        // Sandboxed Bash and permission hooks otherwise provide earlier allow
+        // paths; hooks can also mutate the checkout without a tool request.
+        // This process-only overlay preserves project commands/instructions and
+        // does not rewrite user/project settings. Managed policy remains upstream.
+        args.extend([
+            "--settings".to_owned(),
+            json!({
+                "permissions": { "ask": ["*"] },
+                "sandbox": { "autoAllowBashIfSandboxed": false },
+                "disableAllHooks": true,
+            }).to_string(),
+        ]);
+    }
     if let Some(effort) = effort.as_cli_value() {
         args.extend(["--effort".to_owned(), effort.to_owned()]);
     }

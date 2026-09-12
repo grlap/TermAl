@@ -361,6 +361,24 @@ creation instead of guessing from names or leaving a headless child blocked on
 approval. ACP agents remain available in `mode: explorer` where the requested
 write policy is supported.
 
+Claude read-only children keep user/project/local settings for command and
+instruction discovery, but receive a process-only permission overlay: explicit
+`default` mode, `permissions.ask: ["*"]`, and
+`sandbox.autoAllowBashIfSandboxed: false`. Inherited allow rules must not bypass
+TermAl's host classifier. Tool discovery (`ToolSearch`) is permitted; executing
+a discovered tool is checked separately, including the authenticated review
+submission exception. Unknown tools and nested agent tools are denied.
+Hooks are disabled in these children because they can run shell commands or
+answer permission requests before the host; ordinary sessions retain their hooks.
+No user or repository settings file is rewritten. This is a CLI permission
+boundary, not an OS sandbox, and does not override administrator-managed policy.
+The upstream contract is documented in Claude's
+[permission rules](https://code.claude.com/docs/en/permissions) and
+[hook settings](https://code.claude.com/docs/en/hooks#disable-or-remove-hooks).
+The allow-list bypass and ask override were checked with CLI 2.1.268 using a
+local mock API and a disposable trusted workspace, separately from Rust tests
+that pin the launch arguments and host decisions.
+
 The composer makes this boundary visible. Claude and Codex preselect Reviewer.
 Cursor and Gemini preselect Explorer and keep Reviewer visible but disabled with
 an explanation. OpenCode also preselects Explorer and uses an isolated worktree,

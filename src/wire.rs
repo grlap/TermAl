@@ -880,12 +880,13 @@ impl ClaudeEffortLevel {
 impl ClaudeApprovalMode {
     /// Returns the `--permission-mode` flag value to pass to the
     /// Claude CLI at spawn time, or `None` to let the CLI choose its
-    /// default. `Plan` is the only mode that must be requested
-    /// explicitly at launch.
+    /// default. Read-only delegates explicitly select default so inherited
+    /// acceptEdits/bypass/auto modes cannot replace host permission admission.
     fn initial_cli_permission_mode(self) -> Option<&'static str> {
         match self {
             Self::Plan => Some("plan"),
-            Self::Ask | Self::AutoApprove | Self::ReadOnlyAutoApprove => None,
+            Self::ReadOnlyAutoApprove => Some("default"),
+            Self::Ask | Self::AutoApprove => None,
         }
     }
 

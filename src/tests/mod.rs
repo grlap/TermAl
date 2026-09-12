@@ -20,6 +20,7 @@ mod acp_gemini;
 mod agent_commands;
 mod agent_readiness;
 mod claude;
+mod claude_permission_boundary;
 mod cli;
 mod codex_bin;
 mod codex_delegation_release;

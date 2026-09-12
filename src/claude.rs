@@ -460,7 +460,9 @@ fn claude_tool_permission_request_is_read_only(
     cwd: &str,
 ) -> bool {
     match request.tool_name.as_str() {
-        "Read" | "LS" | "Glob" | "Grep" => true,
+        // ToolSearch only discovers definitions; executing the discovered tool
+        // gets its own permission request (and control-plane authority check).
+        "Read" | "LS" | "Glob" | "Grep" | "ToolSearch" => true,
         // The Windows PowerShell tool is DENIED for read-only reviewers. It carries
         // its command in the same `command` field, so an earlier revision routed it
         // through the Bash reader below. That reader implements BASH grammar, and
