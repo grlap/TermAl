@@ -402,11 +402,11 @@ describe("Backend connection state", () => {
         });
       });
 
-      fireEvent.click(screen.getByRole("button", { name: /workspace /i }));
-      const switcherDialog = await screen.findByRole("dialog", {
-        name: "Workspace switcher",
-      });
-      expect(switcherDialog).toBeInTheDocument();
+      const dock = screen.getByRole("navigation", { name: "Control panel dock" });
+      fireEvent.click(within(dock).getByRole("button", { name: "Workspaces" }));
+      const workspacesPanel = await screen.findByRole("region", { name: "Workspaces" });
+      expect(workspacesPanel).toBeInTheDocument();
+      expect(screen.queryByRole("dialog", { name: "Workspace switcher" })).not.toBeInTheDocument();
 
       act(() => {
         eventSource.dispatchState({
@@ -1018,18 +1018,10 @@ describe("Backend connection state", () => {
       ).toBeNull();
       expect(container.querySelector(".workspace-connection-status")).toBeNull();
       expect(container.querySelector(".workspace-status-strip")).toBeNull();
-      const workspaceSwitcherTrigger = screen.getByRole("button", {
-        name: /workspace /i,
-      });
-      expect(workspaceSwitcherTrigger).toBeInTheDocument();
-      expect(
-        workspaceSwitcherTrigger.closest(".pane-bar-right"),
-      ).not.toBeNull();
-      expect(
-        container.querySelector(
-          ".control-panel-header-actions .workspace-switcher",
-        ),
-      ).toBeNull();
+      expect(container.querySelector(".pane-bar-right .theme-mode-toggle")).not.toBeNull();
+      const dock = screen.getByRole("navigation", { name: "Control panel dock" });
+      expect(within(dock).getByRole("button", { name: "Workspaces" })).toBeInTheDocument();
+      expect(screen.queryByRole("dialog", { name: "Workspace switcher" })).not.toBeInTheDocument();
 
       const eventSource = latestEventSource();
       expect(eventSource).toBeDefined();

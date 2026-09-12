@@ -113,7 +113,6 @@ import {
 import {
   ControlPanelConnectionIndicator,
   ThemeModeToggle,
-  WorkspaceSwitcher,
 } from "./workspace-shell-controls";
 import type { RuntimeAction } from "./runtime-action-button";
 import { OrchestratorRuntimeActionButton } from "./OrchestratorRuntimeActionButton";
@@ -290,7 +289,6 @@ export default function App() {
   const [workspace, setWorkspace] = useState<WorkspaceState>(
     initialWorkspaceBootstrap.workspace,
   );
-  const [isWorkspaceSwitcherOpen, setIsWorkspaceSwitcherOpen] = useState(false);
   const [, setDraftsBySessionId] = useState<Record<string, string>>({});
   const [draftAttachmentsBySessionId, setDraftAttachmentsBySessionId] =
     useState<Record<string, DraftImageAttachment[]>>({});
@@ -512,7 +510,6 @@ export default function App() {
   const controlPanelSurfaceRef = useRef<ControlPanelSurfaceHandle | null>(null);
   const lastDerivedControlPanelFilesystemRootRef = useRef<string | null>(null);
   const lastDerivedControlPanelGitWorkdirRef = useRef<string | null>(null);
-  const workspaceSwitcherRef = useRef<HTMLDivElement | null>(null);
   const sessionsRef = useRef<Session[]>([]);
   const workspaceRef = useRef(workspace);
   const codexStateRef = useRef(codexState);
@@ -808,8 +805,8 @@ export default function App() {
     workspaceSummaries,
     workspaceSummariesRef,
     setWorkspaceSummaries,
-    isWorkspaceSwitcherLoading,
-    workspaceSwitcherError,
+    isWorkspacesListLoading,
+    workspacesListError,
     deletingWorkspaceIds,
     ignoreFetchedWorkspaceLayoutRef,
     workspaceLayoutLoadPendingRef,
@@ -817,7 +814,6 @@ export default function App() {
     flushWorkspaceLayoutSaveRef,
     refreshWorkspaceSummaries,
     flushPendingWorkspaceLayoutSave,
-    handleWorkspaceSwitcherToggle,
     handleOpenWorkspaceHere,
     handleOpenNewWorkspaceHere,
     handleOpenNewWorkspaceWindow,
@@ -861,11 +857,8 @@ export default function App() {
       setEditorFontSizePx,
       setDensityPercent,
     },
-    setIsWorkspaceSwitcherOpen,
     setRequestError,
     isMountedRef,
-    clearRecoveredBackendRequestError,
-    setBackendConnectionState,
     reportRequestError,
     applyControlPanelLayout,
   });
@@ -1599,47 +1592,6 @@ export default function App() {
   }, [activeSession?.agent, activeSession?.id]);
 
   useEffect(() => {
-    if (!isWorkspaceSwitcherOpen) {
-      return;
-    }
-
-    void refreshWorkspaceSummaries();
-  }, [isWorkspaceSwitcherOpen, refreshWorkspaceSummaries]);
-
-  useEffect(() => {
-    if (!isWorkspaceSwitcherOpen) {
-      return;
-    }
-
-    function handlePointerDown(event: PointerEvent) {
-      const target = event.target;
-      if (!(target instanceof Node)) {
-        return;
-      }
-
-      if (workspaceSwitcherRef.current?.contains(target)) {
-        return;
-      }
-
-      setIsWorkspaceSwitcherOpen(false);
-    }
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        setIsWorkspaceSwitcherOpen(false);
-      }
-    }
-
-    document.addEventListener("pointerdown", handlePointerDown);
-    window.addEventListener("keydown", handleKeyDown);
-
-    return () => {
-      document.removeEventListener("pointerdown", handlePointerDown);
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [isWorkspaceSwitcherOpen]);
-
-  useEffect(() => {
     sessionsRef.current = sessions;
   }, [sessions]);
 
@@ -2028,11 +1980,9 @@ export default function App() {
         backendConnectionState={backendConnectionState}
         workspaceViewId={workspaceViewId}
         deletingWorkspaceIds={deletingWorkspaceIds}
-        workspaceSwitcherError={workspaceSwitcherError}
-        isWorkspaceSwitcherLoading={isWorkspaceSwitcherLoading}
-        isWorkspaceSwitcherOpen={isWorkspaceSwitcherOpen}
+        workspacesListError={workspacesListError}
+        isWorkspacesListLoading={isWorkspacesListLoading}
         workspaceSummaries={workspaceSummaries}
-        workspaceSwitcherRef={workspaceSwitcherRef}
         windowId={windowId}
         pendingOrchestratorActionById={pendingOrchestratorActionById}
         killingSessionIds={killingSessionIds}
@@ -2074,10 +2024,11 @@ export default function App() {
         handleProjectMenuStartSession={handleProjectMenuStartSession}
         handleOrchestratorRuntimeAction={handleOrchestratorRuntimeAction}
         handleDeleteWorkspace={handleDeleteWorkspace}
+        handleRenameWorkspace={handleRenameWorkspace}
         handleOpenNewWorkspaceHere={handleOpenNewWorkspaceHere}
         handleOpenNewWorkspaceWindow={handleOpenNewWorkspaceWindow}
         handleOpenWorkspaceHere={handleOpenWorkspaceHere}
-        handleWorkspaceSwitcherToggle={handleWorkspaceSwitcherToggle}
+        refreshWorkspaceSummaries={refreshWorkspaceSummaries}
         handleRetryBackendConnection={handleRetryBackendConnection}
       />
     );
@@ -2092,21 +2043,6 @@ export default function App() {
             themeMode === "auto" && themeSessionOverride !== null
           }
           onToggle={toggleThemeKind}
-        />
-        <WorkspaceSwitcher
-          currentWorkspaceId={workspaceViewId}
-          deletingWorkspaceIds={deletingWorkspaceIds}
-          error={workspaceSwitcherError}
-          isLoading={isWorkspaceSwitcherLoading}
-          isOpen={isWorkspaceSwitcherOpen}
-          summaries={workspaceSummaries}
-          switcherRef={workspaceSwitcherRef}
-          onDeleteWorkspace={handleDeleteWorkspace}
-          onRenameWorkspace={handleRenameWorkspace}
-          onOpenNewWorkspaceHere={handleOpenNewWorkspaceHere}
-          onOpenNewWorkspaceWindow={handleOpenNewWorkspaceWindow}
-          onOpenWorkspace={handleOpenWorkspaceHere}
-          onToggle={handleWorkspaceSwitcherToggle}
         />
       </>
     );

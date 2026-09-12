@@ -97,6 +97,8 @@ export function createControlPanelSectionLauncherTab(
   const { filesystemRoot, gitWorkdir, originProjectId, originSessionId } =
     options;
   switch (sectionId) {
+    case "workspaces":
+      return null;
     case "files":
       return (filesystemRoot?.trim() ?? "")
         ? createFilesystemTab(filesystemRoot, originSessionId, originProjectId)

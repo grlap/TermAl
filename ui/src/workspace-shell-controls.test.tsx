@@ -32,7 +32,7 @@ describe("ThemeModeToggle", () => {
     );
   });
 
-  it("uses a shared grid row to match the workspace switcher height", async () => {
+  it("sizes pane-bar-right for the theme toggle only, without a leftover second column", async () => {
     const nodeFsModule = "node:fs";
     const { readFileSync } = (await import(nodeFsModule)) as {
       readFileSync: (path: string, encoding: "utf8") => string;
@@ -49,7 +49,7 @@ describe("ThemeModeToggle", () => {
     const paneBarRule = styles.match(/\.pane-bar-right\s*\{([^}]*)\}/)?.[1];
     const responsivePaneBarRule = [...styles.matchAll(/\.pane-bar-right\s*\{([^}]*)\}/g)]
       .map((match) => match[1])
-      .find((rule) => /grid-template-columns:/.test(rule ?? ""));
+      .find((rule) => /width:\s*100%/.test(rule ?? ""));
     const responsivePaneRule = [...styles.matchAll(/\.pane-bar\s*\{([^}]*)\}/g)]
       .map((match) => match[1])
       .find((rule) => /grid-template-columns:/.test(rule ?? ""));
@@ -57,10 +57,9 @@ describe("ThemeModeToggle", () => {
     expect(paneBarRule).toMatch(/display:\s*inline-grid\s*;/);
     expect(paneBarRule).toMatch(/grid-auto-flow:\s*column\s*;/);
     expect(paneBarRule).toMatch(/align-items:\s*stretch\s*;/);
-    expect(responsivePaneBarRule).toMatch(
-      /grid-template-columns:\s*max-content\s+minmax\(0,\s*1fr\)\s*;/,
-    );
     expect(responsivePaneBarRule).toMatch(/width:\s*100%\s*;/);
+    expect(responsivePaneBarRule).not.toMatch(/minmax\(0,\s*1fr\)/);
+    expect(responsivePaneBarRule).not.toMatch(/grid-template-columns:/);
     expect(responsivePaneRule).toMatch(
       /grid-template-columns:\s*minmax\(0,\s*1fr\)\s*;/,
     );

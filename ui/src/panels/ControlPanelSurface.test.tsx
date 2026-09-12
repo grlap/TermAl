@@ -4,7 +4,11 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { createRef } from "react";
 
 import { createControlPanelSectionLauncherTab } from "../control-surface-state";
-import { ControlPanelSurface, type ControlPanelSurfaceHandle } from "./ControlPanelSurface";
+import {
+  ControlPanelSurface,
+  normalizeControlPanelSectionOrder,
+  type ControlPanelSurfaceHandle,
+} from "./ControlPanelSurface";
 
 describe("ControlPanelSurface", () => {
   beforeEach(() => {
@@ -57,6 +61,7 @@ describe("ControlPanelSurface", () => {
     expect(getDockSectionLabels()).toEqual([
       "Git status",
       "Files",
+      "Workspaces",
       "Projects",
       "Sessions",
       "Orchestrators",
@@ -138,10 +143,11 @@ describe("ControlPanelSurface", () => {
     expect(screen.getByTestId("section-body")).toHaveTextContent("sessions");
   });
 
-  it("uses Projects, Sessions, Orchestrators, Files, Git status as the default dock order", () => {
+  it("uses Workspaces, Projects, Sessions, Orchestrators, Files, Git status as the default dock order", () => {
     renderSurface();
 
     expect(getDockSectionLabels()).toEqual([
+      "Workspaces",
       "Projects",
       "Sessions",
       "Orchestrators",
@@ -159,11 +165,100 @@ describe("ControlPanelSurface", () => {
     renderSurface();
 
     expect(getDockSectionLabels()).toEqual([
+      "Workspaces",
       "Projects",
       "Sessions",
       "Orchestrators",
       "Files",
       "Git status",
+    ]);
+  });
+
+  it("inserts a missing Workspaces section before Projects and honors a saved Workspaces position", () => {
+    expect(normalizeControlPanelSectionOrder([
+      "git",
+      "files",
+      "projects",
+      "sessions",
+      "orchestrators",
+    ])).toEqual([
+      "git",
+      "files",
+      "workspaces",
+      "projects",
+      "sessions",
+      "orchestrators",
+    ]);
+    expect(normalizeControlPanelSectionOrder([
+      "sessions",
+      "projects",
+      "workspaces",
+      "files",
+    ])).toEqual([
+      "sessions",
+      "projects",
+      "workspaces",
+      "files",
+      "orchestrators",
+      "git",
+    ]);
+    expect(normalizeControlPanelSectionOrder([
+      "workspaces",
+      "projects",
+      "workspaces",
+      "board" as never,
+      "sessions",
+    ])).toEqual([
+      "workspaces",
+      "projects",
+      "sessions",
+      "orchestrators",
+      "files",
+      "git",
+    ]);
+    expect(normalizeControlPanelSectionOrder([
+      "workspaces",
+      "projects",
+      "sessions",
+      "orchestrators",
+      "files",
+      "git",
+    ])).toEqual([
+      "workspaces",
+      "projects",
+      "sessions",
+      "orchestrators",
+      "files",
+      "git",
+    ]);
+
+    window.localStorage.setItem(
+      "termal-control-panel-section-order-v2",
+      JSON.stringify(["git", "files", "projects", "sessions", "orchestrators"]),
+    );
+    const { unmount } = renderSurface();
+    expect(getDockSectionLabels()).toEqual([
+      "Git status",
+      "Files",
+      "Workspaces",
+      "Projects",
+      "Sessions",
+      "Orchestrators",
+    ]);
+    unmount();
+
+    window.localStorage.setItem(
+      "termal-control-panel-section-order-v2",
+      JSON.stringify(["sessions", "projects", "workspaces", "files", "git", "orchestrators"]),
+    );
+    renderSurface();
+    expect(getDockSectionLabels()).toEqual([
+      "Sessions",
+      "Projects",
+      "Workspaces",
+      "Files",
+      "Git status",
+      "Orchestrators",
     ]);
   });
 
@@ -181,6 +276,7 @@ describe("ControlPanelSurface", () => {
     fireEvent.dragEnd(gitButton, { dataTransfer, shiftKey: true });
 
     expect(getDockSectionLabels()).toEqual([
+      "Workspaces",
       "Projects",
       "Git status",
       "Sessions",
@@ -192,6 +288,7 @@ describe("ControlPanelSurface", () => {
     renderSurface();
 
     expect(getDockSectionLabels()).toEqual([
+      "Workspaces",
       "Projects",
       "Git status",
       "Sessions",
@@ -214,6 +311,17 @@ describe("ControlPanelSurface", () => {
 
     expect(onSectionTabDragStart).toHaveBeenCalledTimes(1);
     expect(onSectionTabDragStart.mock.calls[0]?.[1]).toBe("projects");
+
+    const workspacesButton = screen.getByRole("button", { name: "Workspaces" });
+    expect(workspacesButton).toHaveAttribute("title", "Workspaces (drag to reorder)");
+    fireEvent.dragStart(workspacesButton, { dataTransfer: createDataTransfer() });
+    expect(onSectionTabDragStart).toHaveBeenCalledTimes(1);
+    expect(createControlPanelSectionLauncherTab("workspaces", {
+      filesystemRoot: "/tmp",
+      gitWorkdir: "/tmp",
+      originProjectId: "project-1",
+      originSessionId: "session-1",
+    })).toBeNull();
   });
 });
 
@@ -227,6 +335,10 @@ function renderSurface(
     originSessionId: "session-1",
   };
   const sectionLauncherTabs = {
+    workspaces: createControlPanelSectionLauncherTab(
+      "workspaces",
+      launcherOptions,
+    ),
     projects: createControlPanelSectionLauncherTab(
       "projects",
       launcherOptions,

@@ -1,32 +1,55 @@
 // app-workspace-layout.ts
 //
 // Owns: the workspace-layout persistence lifecycle plus the
-// workspace-switcher refresh/delete control flow that used to
+// workspaces-list refresh/delete control flow that used to
 // live inline in App.tsx. That includes the workspace-summary
 // request-token guards (`beginWorkspaceSummariesRequest`,
-// `isLatestWorkspaceSummariesRequest`), the workspace-summaries
-// state + ref, the switcher loading/error state, the
-// deleting-workspace-ids state + ref, the pending-layout-save
-// refs and their flush helpers (`clearPendingWorkspaceLayoutSave
-// Timeout`, `persistPendingWorkspaceLayoutSave`,
+// `isLatestWorkspaceSummariesRequest`), in-flight GET reuse, the
+// workspace-summaries state + ref, the list loading/error
+// state, the deleting-workspace-ids state + ref, the
+// pending-layout-save refs and their flush helpers
+// (`clearPendingWorkspaceLayoutSaveTimeout`,
+// `persistPendingWorkspaceLayoutSave`,
 // `flushPendingWorkspaceLayoutSave`, `flushWorkspaceLayoutSave
 // Ref`), the fetch-layout effect that flips
 // `isWorkspaceLayoutReady` (including the workspace-restart
 // recovery notice via `workspaceLayoutRestartErrorMessageRef`),
 // the persist-layout effect, and the single `pagehide` listener
 // that keeps the pending layout save alive across unloads.
-// Storage pause/retry is independent of completed hydration: it gates saves,
-// not read-only consumers of an already restored workspace. Server adoption
-// stores before publishing either its tree or its appearance preferences.
+// Storage pause/retry is independent of completed hydration: it
+// gates saves, not read-only consumers of an already restored
+// workspace. Server adoption stores before publishing either its
+// tree or its appearance preferences.
 //
-// Does not own: the switcher open/closed UI state
-// (`isWorkspaceSwitcherOpen` / `setIsWorkspaceSwitcherOpen` stay
-// in App.tsx), the JSX that renders the switcher or the
-// restart-required notice, the generic backend-connection
-// state, or the workspace/session/projects/orchestrator state
-// the effects merely read. The outside-click and
-// refresh-on-switcher-open effects also stay in App.tsx because
-// they couple to `isWorkspaceSwitcherOpen`.
+// Refresh/delete invariants:
+// - Loading is GET-in-flight only, tracked by a GET generation
+//   separate from the apply token.
+// - DELETE bumps the apply token so a stale GET cannot write the
+//   list; that GET may still clear loading if no newer GET is in
+//   flight. A superseded GET must not clear a newer GET.
+// - In-flight GET reuse stays token-gated and only while the
+//   captured list identity still matches.
+// - Explicit Refresh/Reload clear the outward error immediately
+//   and refuse a GET whose captured list identity is already
+//   stale after rename/SSE. `forceFresh` always starts a new GET.
+// - List and delete errors share the outward string | null, but
+//   keep provenance internally. A successful current GET clears a
+//   recovered list-GET error and does not clear a delete error. A
+//   preserveError list-GET failure keeps only a current delete
+//   error; otherwise it records the latest list error. A stale GET
+//   cannot write the list or erase a newer error.
+// - After the last pending DELETE settles, automatic resync
+//   starts a fresh GET with `preserveError`, even if that delete
+//   no longer owns the latest request token. Failed automatic
+//   resync keeps a visible delete error; a successful automatic
+//   GET also keeps that delete error.
+// - Outstanding DELETEs are tracked separately so the header can
+//   say Deleting versus Loading.
+//
+// Does not own: the Workspaces panel JSX, the restart-required
+// notice, the generic backend-connection state, or the
+// workspace/session/projects/orchestrator state the effects
+// merely read.
 //
 // Split out of: ui/src/App.tsx (Slice 12 of the App-split plan,
 // see docs/app-split-plan.md).
@@ -51,7 +74,6 @@ import {
 } from "./api";
 import { ApiRequestError, isBackendUnavailableError } from "./api-request";
 import { hydrateControlPanelLayout } from "./control-panel-layout";
-import type { BackendConnectionState } from "./backend-connection";
 import { resolveRecoveredWorkspaceLayoutRequestError } from "./state-adoption";
 import {
   collectWorkspaceSessionReferences,
@@ -61,6 +83,7 @@ import {
   workspaceHasDelegatedChildSessionReferences,
 } from "./workspace";
 import { type WorkspaceState } from "./workspace-types";
+import type { RefreshWorkspaceSummaries } from "./workspace-summaries-refresh";
 import { appTestHooks } from "./app-test-hooks";
 import {
   createWorkspaceViewId,
@@ -93,6 +116,7 @@ import {
   type WorkspaceLayoutPersistencePayload,
 } from "./app-shell-internals";
 import type { Session } from "./types";
+import type { WorkspaceDeleteRequest } from "./workspace-delete-request";
 
 export type UseAppWorkspaceLayoutParams = {
   workspaceViewId: string;
@@ -134,11 +158,8 @@ export type UseAppWorkspaceLayoutParams = {
     setEditorFontSizePx: Dispatch<SetStateAction<number>>;
     setDensityPercent: Dispatch<SetStateAction<number>>;
   };
-  setIsWorkspaceSwitcherOpen: Dispatch<SetStateAction<boolean>>;
   setRequestError: Dispatch<SetStateAction<string | null>>;
   isMountedRef: MutableRefObject<boolean>;
-  clearRecoveredBackendRequestError: () => void;
-  setBackendConnectionState: (state: BackendConnectionState) => void;
   reportRequestError: (error: unknown, options?: { message?: string }) => void;
   applyControlPanelLayout: (
     nextWorkspace: WorkspaceState,
@@ -194,8 +215,8 @@ export type UseAppWorkspaceLayoutReturn = {
   workspaceSummaries: WorkspaceLayoutSummary[];
   workspaceSummariesRef: MutableRefObject<WorkspaceLayoutSummary[]>;
   setWorkspaceSummaries: Dispatch<SetStateAction<WorkspaceLayoutSummary[]>>;
-  isWorkspaceSwitcherLoading: boolean;
-  workspaceSwitcherError: string | null;
+  isWorkspacesListLoading: boolean;
+  workspacesListError: string | null;
   deletingWorkspaceIds: string[];
   ignoreFetchedWorkspaceLayoutRef: MutableRefObject<boolean>;
   workspaceLayoutLoadPendingRef: MutableRefObject<boolean>;
@@ -203,14 +224,13 @@ export type UseAppWorkspaceLayoutReturn = {
   flushWorkspaceLayoutSaveRef: MutableRefObject<
     (options?: { keepalive?: boolean }) => void
   >;
-  refreshWorkspaceSummaries: () => Promise<void>;
+  refreshWorkspaceSummaries: RefreshWorkspaceSummaries;
   flushPendingWorkspaceLayoutSave: (options?: { keepalive?: boolean }) => void;
   navigateToWorkspace: (nextWorkspaceViewId: string) => void;
-  handleWorkspaceSwitcherToggle: () => void;
   handleOpenWorkspaceHere: (nextWorkspaceViewId: string) => void;
   handleOpenNewWorkspaceHere: () => void;
   handleOpenNewWorkspaceWindow: () => void;
-  handleDeleteWorkspace: (workspaceId: string) => Promise<void>;
+  handleDeleteWorkspace: (workspaceId: string) => WorkspaceDeleteRequest;
   handleRenameWorkspace: (workspaceId: string, label: string) => Promise<void>;
 };
 
@@ -256,11 +276,8 @@ export function useAppWorkspaceLayout(
     setControlPanelSide,
     preferences,
     setPreferences,
-    setIsWorkspaceSwitcherOpen,
     setRequestError,
     isMountedRef,
-    clearRecoveredBackendRequestError,
-    setBackendConnectionState,
     reportRequestError,
     applyControlPanelLayout,
   } = params;
@@ -305,11 +322,12 @@ export function useAppWorkspaceLayout(
   const [workspaceSummaries, setWorkspaceSummaries] = useState<
     WorkspaceLayoutSummary[]
   >([]);
-  const [isWorkspaceSwitcherLoading, setIsWorkspaceSwitcherLoading] =
+  const [isWorkspacesListLoading, setIsWorkspacesListLoading] =
     useState(false);
-  const [workspaceSwitcherError, setWorkspaceSwitcherError] = useState<
-    string | null
-  >(null);
+  const [workspacesListErrorRecord, setWorkspacesListErrorRecord] = useState<{
+    source: "list" | "delete";
+    message: string;
+  } | null>(null);
   const [deletingWorkspaceIds, setDeletingWorkspaceIds] = useState<string[]>(
     [],
   );
@@ -318,6 +336,12 @@ export function useAppWorkspaceLayout(
   const workspaceLayoutRestartErrorMessageRef = useRef<string | null>(null);
   const workspaceLayoutLoadPendingRef = useRef(false);
   const workspaceSummariesRequestTokenRef = useRef(0);
+  const workspaceSummariesGetIdRef = useRef(0);
+  const workspaceSummariesInFlightRef = useRef<{
+    token: number;
+    promise: Promise<void>;
+    snapshot: WorkspaceLayoutSummary[];
+  } | null>(null);
   const deletingWorkspaceIdsRef = useRef<Set<string>>(new Set());
   const pendingWorkspaceLayoutSaveRef =
     useRef<PendingWorkspaceLayoutSave | null>(null);
@@ -521,48 +545,92 @@ export function useAppWorkspaceLayout(
     }
   }
 
-  const refreshWorkspaceSummaries = useCallback(async () => {
-    const requestToken = beginWorkspaceSummariesRequest();
-    const workspacesAtRequest = workspaceSummariesRef.current;
-    setIsWorkspaceSwitcherLoading(true);
-    setWorkspaceSwitcherError(null);
-    try {
-      const response = await fetchWorkspaceLayouts();
-      if (
-        !isMountedRef.current ||
-        !isLatestWorkspaceSummariesRequest(requestToken)
-      ) {
-        return;
-      }
-      // Only apply the refresh result when the workspace list has not been
-      // updated by another source (SSE-delivered workspace data, a delete
-      // handler, etc.) during the fetch. This avoids overwriting a more
-      // authoritative SSE-delivered list with a stale /api/workspaces
-      // snapshot, while still applying the result when only unrelated
-      // session/orchestrator events arrived.
-      if (workspaceSummariesRef.current === workspacesAtRequest) {
-        workspaceSummariesRef.current = response.workspaces;
-        setWorkspaceSummaries(response.workspaces);
-      }
-    } catch (error) {
-      if (
-        !isMountedRef.current ||
-        !isLatestWorkspaceSummariesRequest(requestToken)
-      ) {
-        return;
-      }
-      setWorkspaceSwitcherError(getErrorMessage(error));
-    } finally {
-      if (
-        isMountedRef.current &&
-        isLatestWorkspaceSummariesRequest(requestToken)
-      ) {
-        setIsWorkspaceSwitcherLoading(false);
-      }
+  const refreshWorkspaceSummaries = useCallback<RefreshWorkspaceSummaries>((options) => {
+    if (!options?.preserveError) {
+      setWorkspacesListErrorRecord(null);
     }
-    // All dependencies are stable callbacks or refs, so re-subscribing only
-    // happens if the browser-recovery handler itself changes.
-  }, [clearRecoveredBackendRequestError, setBackendConnectionState]);
+    const inflight = workspaceSummariesInFlightRef.current;
+    if (
+      inflight
+      && isLatestWorkspaceSummariesRequest(inflight.token)
+      && !options?.forceFresh
+      && workspaceSummariesRef.current === inflight.snapshot
+    ) {
+      return inflight.promise;
+    }
+    const requestToken = beginWorkspaceSummariesRequest();
+    const getId = ++workspaceSummariesGetIdRef.current;
+    const workspacesAtRequest = workspaceSummariesRef.current;
+    setIsWorkspacesListLoading(true);
+    const request = (async () => {
+      try {
+        const response = await fetchWorkspaceLayouts();
+        if (
+          !isMountedRef.current ||
+          !isLatestWorkspaceSummariesRequest(requestToken)
+        ) {
+          return;
+        }
+        // Only apply the refresh result when the workspace list has not been
+        // updated by another source (SSE-delivered workspace data, a delete
+        // handler, etc.) during the fetch. This avoids overwriting a more
+        // authoritative SSE-delivered list with a stale /api/workspaces
+        // snapshot, while still applying the result when only unrelated
+        // session/orchestrator events arrived.
+        if (workspaceSummariesRef.current === workspacesAtRequest) {
+          workspaceSummariesRef.current = response.workspaces;
+          setWorkspaceSummaries(response.workspaces);
+        }
+        setWorkspacesListErrorRecord((current) =>
+          current?.source === "list" ? null : current,
+        );
+      } catch (error) {
+        if (
+          !isMountedRef.current ||
+          !isLatestWorkspaceSummariesRequest(requestToken)
+        ) {
+          return;
+        }
+        const nextError = getErrorMessage(error);
+        if (options?.preserveError) {
+          setWorkspacesListErrorRecord((current) =>
+            current?.source === "delete"
+              ? current
+              : { source: "list", message: nextError },
+          );
+        } else {
+          setWorkspacesListErrorRecord({ source: "list", message: nextError });
+        }
+      } finally {
+        if (
+          isMountedRef.current &&
+          workspaceSummariesGetIdRef.current === getId
+        ) {
+          setIsWorkspacesListLoading(false);
+        }
+      }
+    })();
+    workspaceSummariesInFlightRef.current = {
+      token: requestToken,
+      promise: request,
+      snapshot: workspacesAtRequest,
+    };
+    void request.finally(() => {
+      if (workspaceSummariesInFlightRef.current?.promise === request) {
+        workspaceSummariesInFlightRef.current = null;
+      }
+    });
+    return request;
+    // Actual dependencies: stable setState identities plus the mount
+    // ref. Request tokens, GET generation, and the list snapshot are
+    // read through refs, so the callback stays current without listing
+    // unused backend-connection handlers.
+  }, [
+    isMountedRef,
+    setIsWorkspacesListLoading,
+    setWorkspaceSummaries,
+    setWorkspacesListErrorRecord,
+  ]);
 
   function clearPendingWorkspaceLayoutSaveTimeout() {
     if (
@@ -664,12 +732,7 @@ export function useAppWorkspaceLayout(
     }
   }
 
-  function handleWorkspaceSwitcherToggle() {
-    setIsWorkspaceSwitcherOpen((current) => !current);
-  }
-
   function handleOpenWorkspaceHere(nextWorkspaceViewId: string) {
-    setIsWorkspaceSwitcherOpen(false);
     if (nextWorkspaceViewId === workspaceViewId) {
       return;
     }
@@ -691,7 +754,6 @@ export function useAppWorkspaceLayout(
     if (href !== undefined) {
       window.open(href, "_blank", "noopener");
     }
-    setIsWorkspaceSwitcherOpen(false);
   }
 
   async function handleRenameWorkspace(workspaceId: string, label: string) {
@@ -710,67 +772,65 @@ export function useAppWorkspaceLayout(
     setWorkspaceSummaries(next);
   }
 
-  async function handleDeleteWorkspace(workspaceId: string) {
+  function handleDeleteWorkspace(workspaceId: string): WorkspaceDeleteRequest {
     if (
       workspaceId === workspaceViewId ||
       deletingWorkspaceIdsRef.current.has(workspaceId)
     ) {
-      return;
+      return { started: false, completed: Promise.resolve() };
     }
 
     const nextDeletingWorkspaceIds = new Set(deletingWorkspaceIdsRef.current);
     nextDeletingWorkspaceIds.add(workspaceId);
     deletingWorkspaceIdsRef.current = nextDeletingWorkspaceIds;
     setDeletingWorkspaceIds([...nextDeletingWorkspaceIds]);
-    setWorkspaceSwitcherError(null);
+    setWorkspacesListErrorRecord(null);
 
     const requestToken = beginWorkspaceSummariesRequest();
     const workspacesAtRequest = workspaceSummariesRef.current;
-    setIsWorkspaceSwitcherLoading(true);
-    try {
-      const deleteResponse = await deleteWorkspaceLayout(workspaceId);
-      deleteStoredWorkspaceLayout(workspaceId);
-      if (isMountedRef.current) {
-        if (
-          isLatestWorkspaceSummariesRequest(requestToken) &&
-          workspaceSummariesRef.current === workspacesAtRequest
-        ) {
-          // This is the latest workspace request and the workspace list
-          // has not been updated by another source (SSE, another delete,
-          // a refresh) during the flight: the server's post-delete list is
-          // the most up-to-date view and safely reflects concurrent
-          // cross-tab operations.
-          workspaceSummariesRef.current = deleteResponse.workspaces;
-          setWorkspaceSummaries(deleteResponse.workspaces);
-        } else {
-          // Either a newer workspace request was initiated (e.g. a refresh)
-          // or the workspace list was updated by SSE / another handler
-          // during the delete. Don't replace the entire list (the newer
-          // source is more authoritative), but ensure the confirmed-deleted
-          // workspace is removed locally.
-          setWorkspaceSummaries((current) => {
-            const next = current.filter((w) => w.id !== workspaceId);
+    const completed = (async () => {
+      try {
+        const deleteResponse = await deleteWorkspaceLayout(workspaceId);
+        deleteStoredWorkspaceLayout(workspaceId);
+        if (isMountedRef.current) {
+          if (
+            isLatestWorkspaceSummariesRequest(requestToken) &&
+            workspaceSummariesRef.current === workspacesAtRequest
+          ) {
+            // This is the latest workspace request and the workspace list
+            // has not been updated by another source (SSE, another delete,
+            // a refresh) during the flight: the server's post-delete list is
+            // the most up-to-date view and safely reflects concurrent
+            // cross-tab operations.
+            workspaceSummariesRef.current = deleteResponse.workspaces;
+            setWorkspaceSummaries(deleteResponse.workspaces);
+          } else {
+            // Either a newer workspace request was initiated (e.g. a refresh)
+            // or the workspace list was updated by SSE / another handler
+            // during the delete. Don't replace the entire list (the newer
+            // source is more authoritative), but ensure the confirmed-deleted
+            // workspace is removed locally.
+            const next = workspaceSummariesRef.current.filter((w) => w.id !== workspaceId);
             workspaceSummariesRef.current = next;
-            return next;
+            setWorkspaceSummaries(next);
+          }
+        }
+      } catch (error) {
+        if (isMountedRef.current) {
+          setWorkspacesListErrorRecord({
+            source: "delete",
+            message: getErrorMessage(error),
           });
         }
+      } finally {
+        finishDeletingWorkspace(workspaceId);
+        if (isMountedRef.current && deletingWorkspaceIdsRef.current.size === 0) {
+          void refreshWorkspaceSummaries({ preserveError: true, forceFresh: true });
+        }
       }
-    } catch (error) {
-      if (
-        isMountedRef.current &&
-        isLatestWorkspaceSummariesRequest(requestToken)
-      ) {
-        setWorkspaceSwitcherError(getErrorMessage(error));
-      }
-    } finally {
-      finishDeletingWorkspace(workspaceId);
-      if (
-        isMountedRef.current &&
-        isLatestWorkspaceSummariesRequest(requestToken)
-      ) {
-        setIsWorkspaceSwitcherLoading(false);
-      }
-    }
+    })();
+
+    return { started: true, completed };
   }
 
   useEffect(() => {
@@ -1168,8 +1228,8 @@ export function useAppWorkspaceLayout(
     workspaceSummaries,
     workspaceSummariesRef,
     setWorkspaceSummaries,
-    isWorkspaceSwitcherLoading,
-    workspaceSwitcherError,
+    isWorkspacesListLoading,
+    workspacesListError: workspacesListErrorRecord?.message ?? null,
     deletingWorkspaceIds,
     ignoreFetchedWorkspaceLayoutRef,
     workspaceLayoutLoadPendingRef,
@@ -1178,7 +1238,6 @@ export function useAppWorkspaceLayout(
     refreshWorkspaceSummaries,
     flushPendingWorkspaceLayoutSave,
     navigateToWorkspace,
-    handleWorkspaceSwitcherToggle,
     handleOpenWorkspaceHere,
     handleOpenNewWorkspaceHere,
     handleOpenNewWorkspaceWindow,

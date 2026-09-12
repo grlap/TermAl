@@ -1,7 +1,7 @@
 // App.workspace-layout.test.tsx
 //
 // Owns: integration tests for the workspace-layout layer of
-// App — the workspace switcher UI (open / saved-workspaces
+// App — the Workspaces control-panel section (open / saved-workspaces
 // listing / new-window / delete / delete-errors / stale-refresh
 // races / overlapping-delete ordering / active-workspace delete
 // guard), the pagehide keepalive flush of pending layout saves,
@@ -38,6 +38,7 @@ import * as api from "./api";
 import { ACTIVE_PROMPT_POLL_INTERVAL_MS } from "./active-prompt-poll";
 import App from "./App";
 import { resolveFetchedWorkspaceThemePreferences } from "./app-workspace-layout";
+import { workspaceDisplayName } from "./panels/WorkspacesPanel";
 import { ThemedCombobox } from "./preferences/themed-combobox";
 import {
   describeCodexModelAdjustmentNotice,
@@ -236,6 +237,20 @@ vi.mock("./MonacoCodeEditor", () => ({
   }),
 }));
 
+async function openWorkspacesPanel() {
+  const dock = await screen.findByRole("navigation", { name: "Control panel dock" });
+  await clickAndSettle(within(dock).getByRole("button", { name: "Workspaces" }));
+  return screen.getByRole("region", { name: "Workspaces" });
+}
+
+async function deleteWorkspaceRow(workspaceId: string, scope?: HTMLElement) {
+  const displayName = workspaceDisplayName({ id: workspaceId });
+  const root = scope ? within(scope) : screen;
+  await clickAndSettle(root.getByRole("button", { name: `Actions for workspace ${displayName}` }));
+  await clickAndSettle(screen.getByRole("menuitem", { name: `Delete workspace ${displayName}` }));
+  await clickAndSettle(screen.getByRole("button", { name: "Confirm delete" }));
+}
+
 describe("App workspace layout", () => {
   const originalScrollTo = HTMLElement.prototype.scrollTo;
   const originalRequestAnimationFrame = globalThis.requestAnimationFrame;
@@ -342,7 +357,7 @@ describe("App workspace layout", () => {
     await clickAndSettle(sessionRowButton);
   }
 
-  it("opens the workspace switcher with one refresh under StrictMode", async () => {
+  it("mounts the Workspaces section with one list GET under StrictMode", async () => {
     await withVerifiedNoReactActWarnings(async () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
@@ -396,13 +411,7 @@ describe("App workspace layout", () => {
         });
         await settleAsyncUi();
 
-        await clickAndSettle(
-          await screen.findByRole("button", { name: /workspace /i }),
-        );
-
-        await screen.findByRole("dialog", {
-          name: "Workspace switcher",
-        });
+        await openWorkspacesPanel();
         await waitFor(() => {
           expect(fetchWorkspaceLayoutsSpy).toHaveBeenCalledTimes(1);
         });
@@ -415,7 +424,313 @@ describe("App workspace layout", () => {
     });
   });
 
-  it("shows a workspace switcher with saved workspaces and can open a new workspace window", async () => {
+  it("keeps chrome New here enabled while the workspaces list GET is in flight", async () => {
+    await withVerifiedNoReactActWarnings(async () => {
+      const originalFetch = globalThis.fetch;
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const pendingLayouts = createDeferred<{
+        workspaces: Array<{
+          id: string;
+          revision: number;
+          updatedAt: string;
+          controlPanelSide: "left" | "right";
+        }>;
+      }>();
+      const fetchWorkspaceLayoutsSpy = vi
+        .mocked(api.fetchWorkspaceLayouts)
+        .mockReturnValue(pendingLayouts.promise);
+      const fetchMock = vi.fn(
+        async (input: RequestInfo | URL, _init?: RequestInit) => {
+          const requestUrl = new URL(String(input), "http://localhost");
+          if (requestUrl.pathname === "/api/state") {
+            return jsonResponse({
+              revision: 1,
+              projects: [],
+              sessions: [],
+            });
+          }
+
+          throw new Error(
+            `Unexpected fetch: ${requestUrl.pathname}${requestUrl.search}`,
+          );
+        },
+      );
+
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+
+      try {
+        await renderApp();
+        const panel = await openWorkspacesPanel();
+        const newHere = screen.getByRole("button", { name: "New workspace here" });
+        const refresh = screen.getByRole("button", { name: "Refresh workspaces" });
+        expect(newHere.closest(".control-panel-header-actions")).not.toBeNull();
+        expect(within(panel).queryByRole("button", { name: "New workspace here" })).toBeNull();
+        expect(newHere).toBeEnabled();
+        expect(screen.getByRole("button", { name: "New window" })).toBeEnabled();
+        expect(refresh).toBeDisabled();
+        expect(within(panel).getByText("Loading saved workspaces…")).toBeInTheDocument();
+
+        pendingLayouts.resolve({ workspaces: [] });
+        await settleAsyncUi();
+        await waitFor(() => {
+          expect(screen.getByRole("button", { name: "Refresh workspaces" })).toBeEnabled();
+        });
+      } finally {
+        fetchWorkspaceLayoutsSpy.mockRestore();
+        restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+
+  it("keeps chrome Refresh busy when a remount GET resolves before a pending DELETE", async () => {
+    await withVerifiedNoReactActWarnings(async () => {
+      const originalFetch = globalThis.fetch;
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const remountGet = createDeferred<{
+        workspaces: Array<{
+          id: string;
+          revision: number;
+          updatedAt: string;
+          controlPanelSide: "left" | "right";
+        }>;
+      }>();
+      const autoGet = createDeferred<{
+        workspaces: Array<{
+          id: string;
+          revision: number;
+          updatedAt: string;
+          controlPanelSide: "left" | "right";
+        }>;
+      }>();
+      const deletePending = createDeferred<{
+        workspaces: Array<{
+          id: string;
+          revision: number;
+          updatedAt: string;
+          controlPanelSide: "left" | "right";
+        }>;
+      }>();
+      const workspaces = [
+        {
+          id: "monitor-left",
+          revision: 4,
+          updatedAt: "2026-03-28 18:00:00",
+          controlPanelSide: "left" as const,
+        },
+        {
+          id: "monitor-right",
+          revision: 1,
+          updatedAt: "2026-03-28 17:30:00",
+          controlPanelSide: "right" as const,
+        },
+      ];
+      const fetchWorkspaceLayoutsSpy = vi
+        .mocked(api.fetchWorkspaceLayouts)
+        .mockResolvedValueOnce({ workspaces })
+        .mockReturnValueOnce(remountGet.promise)
+        .mockReturnValueOnce(autoGet.promise);
+      const deleteWorkspaceLayoutSpy = vi
+        .spyOn(api, "deleteWorkspaceLayout")
+        .mockReturnValue(deletePending.promise);
+      const fetchMock = vi.fn(
+        async (input: RequestInfo | URL, _init?: RequestInit) => {
+          const requestUrl = new URL(String(input), "http://localhost");
+          if (requestUrl.pathname === "/api/state") {
+            return jsonResponse({
+              revision: 1,
+              projects: [],
+              sessions: [],
+            });
+          }
+
+          throw new Error(
+            `Unexpected fetch: ${requestUrl.pathname}${requestUrl.search}`,
+          );
+        },
+      );
+
+      window.localStorage.setItem(
+        `${WORKSPACE_LAYOUT_STORAGE_KEY}:monitor-left`,
+        JSON.stringify({
+          controlPanelSide: "left",
+          workspace: {
+            lastContentPaneId: null,
+            lastViewerPaneId: null,
+            root: null,
+            panes: [],
+            activePaneId: null,
+          },
+        }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+
+      try {
+        await renderApp();
+        const workspacesRegion = await openWorkspacesPanel();
+        await deleteWorkspaceRow("monitor-left", workspacesRegion);
+        await waitFor(() => {
+          expect(deleteWorkspaceLayoutSpy).toHaveBeenCalledWith("monitor-left");
+        });
+        expect(screen.getByRole("button", { name: "Refresh workspaces" })).toBeDisabled();
+
+        const dock = screen.getByRole("navigation", { name: "Control panel dock" });
+        await clickAndSettle(within(dock).getByRole("button", { name: "Sessions" }));
+        await waitFor(() => {
+          expect(document.querySelector(".workspaces-panel")).toBeNull();
+        });
+
+        const remountedWorkspaces = await openWorkspacesPanel();
+        remountGet.resolve({ workspaces });
+        await settleAsyncUi();
+        expect(screen.getByRole("button", { name: "Refresh workspaces" })).toBeDisabled();
+        expect(screen.getByRole("button", { name: "New workspace here" })).toBeEnabled();
+        expect(screen.getByRole("button", { name: "New window" })).toBeEnabled();
+        expect(within(remountedWorkspaces).getByRole("status")).toHaveTextContent("Deleting");
+        expect(screen.queryByText("Loading saved workspaces…")).not.toBeInTheDocument();
+
+        deletePending.resolve({
+          workspaces: [workspaces[1]],
+        });
+        autoGet.resolve({
+          workspaces: [workspaces[1]],
+        });
+        await settleAsyncUi();
+        await waitFor(() => {
+          expect(screen.getByRole("button", { name: "Refresh workspaces" })).toBeEnabled();
+        });
+      } finally {
+        fetchWorkspaceLayoutsSpy.mockRestore();
+        deleteWorkspaceLayoutSpy.mockRestore();
+        restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+        window.localStorage.removeItem(
+          `${WORKSPACE_LAYOUT_STORAGE_KEY}:monitor-left`,
+        );
+      }
+    });
+  });
+
+  it("keeps a delete error through Workspaces remount refresh and clears it on Refresh", async () => {
+    await withVerifiedNoReactActWarnings(async () => {
+      const originalFetch = globalThis.fetch;
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const workspaces = [
+        {
+          id: "monitor-left",
+          revision: 4,
+          updatedAt: "2026-03-28 18:00:00",
+          controlPanelSide: "left" as const,
+        },
+        {
+          id: "monitor-right",
+          revision: 1,
+          updatedAt: "2026-03-28 17:30:00",
+          controlPanelSide: "right" as const,
+        },
+      ];
+      const fetchWorkspaceLayoutsSpy = vi
+        .mocked(api.fetchWorkspaceLayouts)
+        .mockResolvedValue({ workspaces });
+      const deleteWorkspaceLayoutSpy = vi
+        .spyOn(api, "deleteWorkspaceLayout")
+        .mockRejectedValue(new Error("Delete failed."));
+      const fetchMock = vi.fn(
+        async (input: RequestInfo | URL, _init?: RequestInit) => {
+          const requestUrl = new URL(String(input), "http://localhost");
+          if (requestUrl.pathname === "/api/state") {
+            return jsonResponse({
+              revision: 1,
+              projects: [],
+              sessions: [],
+            });
+          }
+
+          throw new Error(
+            `Unexpected fetch: ${requestUrl.pathname}${requestUrl.search}`,
+          );
+        },
+      );
+
+      window.localStorage.setItem(
+        `${WORKSPACE_LAYOUT_STORAGE_KEY}:monitor-left`,
+        JSON.stringify({
+          controlPanelSide: "left",
+          workspace: {
+            lastContentPaneId: null,
+            lastViewerPaneId: null,
+            root: null,
+            panes: [],
+            activePaneId: null,
+          },
+        }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+
+      try {
+        await renderApp();
+        const workspacesRegion = await openWorkspacesPanel();
+        await deleteWorkspaceRow("monitor-left", workspacesRegion);
+        await waitFor(() => {
+          expect(within(workspacesRegion).getByRole("alert")).toHaveTextContent("Delete failed.");
+        });
+
+        const dock = screen.getByRole("navigation", { name: "Control panel dock" });
+        await clickAndSettle(within(dock).getByRole("button", { name: "Sessions" }));
+        await waitFor(() => {
+          expect(document.querySelector(".workspaces-panel")).toBeNull();
+        });
+
+        const remounted = await openWorkspacesPanel();
+        expect(within(remounted).getByRole("alert")).toHaveTextContent("Delete failed.");
+
+        await clickAndSettle(screen.getByRole("button", { name: "Refresh workspaces" }));
+        await waitFor(() => {
+          expect(within(remounted).queryByRole("alert")).not.toBeInTheDocument();
+        });
+      } finally {
+        fetchWorkspaceLayoutsSpy.mockRestore();
+        deleteWorkspaceLayoutSpy.mockRestore();
+        restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+        window.localStorage.removeItem(
+          `${WORKSPACE_LAYOUT_STORAGE_KEY}:monitor-left`,
+        );
+      }
+    });
+  });
+
+  it("shows the Workspaces region with saved workspaces and can open a new workspace window", async () => {
     await withVerifiedNoReactActWarnings(async () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
@@ -478,19 +793,12 @@ describe("App workspace layout", () => {
           await screen.findByRole("button", { name: "Open tab" }),
         );
 
-        const switcherTrigger = await screen.findByRole("button", {
-          name: /workspace /i,
-        });
-        await clickAndSettle(switcherTrigger);
-
-        const switcherDialog = await screen.findByRole("dialog", {
-          name: "Workspace switcher",
-        });
+        const workspacesRegion = await openWorkspacesPanel();
         expect(
-          within(switcherDialog).getAllByText("monitor-left").length,
+          within(workspacesRegion).getAllByText("monitor-left").length,
         ).toBeGreaterThan(0);
         expect(
-          within(switcherDialog).getAllByText("monitor-right").length,
+          within(workspacesRegion).getAllByText("monitor-right").length,
         ).toBeGreaterThan(0);
 
         await clickAndSettle(
@@ -512,7 +820,7 @@ describe("App workspace layout", () => {
     });
   });
 
-  it("saves the current workspace label and updates the switcher and browser title", async () => {
+  it("saves the current workspace label and updates the Workspaces list and browser title", async () => {
     await withVerifiedNoReactActWarnings(async () => {
       const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
       window.history.replaceState(null, "", "?workspace=workspace-label-test");
@@ -546,15 +854,16 @@ describe("App workspace layout", () => {
       vi.stubGlobal("ResizeObserver", ResizeObserverMock);
       try {
         await renderApp();
-        await clickAndSettle(await screen.findByRole("button", { name: /workspace /i }));
+        await openWorkspacesPanel();
         await clickAndSettle(await screen.findByRole("button", {
-          name: "Edit label for workspace workspace-label-test",
+          name: `Actions for workspace ${workspaceDisplayName({ id: "workspace-label-test" })}`,
         }));
+        await clickAndSettle(screen.getByRole("menuitem", { name: "Rename" }));
         fireEvent.change(screen.getByRole("textbox", { name: "Workspace label" }), {
           target: { value: "  Backend  " },
         });
         await clickAndSettle(screen.getByRole("button", { name: "Save label" }));
-        expect(await screen.findByRole("button", { name: "Workspace Backend" })).toBeInTheDocument();
+        expect(await screen.findByRole("button", { name: "Backend (current)" })).toBeInTheDocument();
         expect(document.title).toBe("Backend · TermAl");
         expect(screen.queryByRole("textbox", { name: "Workspace label" })).not.toBeInTheDocument();
         expect(window.location.search).toBe("?workspace=workspace-label-test");
@@ -564,14 +873,79 @@ describe("App workspace layout", () => {
     });
   });
 
-  it("deletes a saved workspace from the workspace switcher", async () => {
+  it("renames a non-current workspace without changing the current document title", async () => {
+    await withVerifiedNoReactActWarnings(async () => {
+      const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      window.history.replaceState(null, "", "?workspace=workspace-label-test");
+      vi.mocked(api.fetchWorkspaceLayouts).mockResolvedValue({
+        workspaces: [
+          {
+            id: "workspace-label-test",
+            label: "Backend",
+            revision: 1,
+            updatedAt: "2026-09-06 12:00:00",
+            controlPanelSide: "left",
+          },
+          {
+            id: "workspace-other",
+            label: "Alpha",
+            revision: 1,
+            updatedAt: "2026-09-06 11:00:00",
+            controlPanelSide: "left",
+          },
+        ],
+      });
+      const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(String(input), "http://localhost");
+        if (url.pathname === "/api/state") {
+          return jsonResponse({ revision: 1, projects: [], sessions: [] });
+        }
+        if (url.pathname === "/api/workspaces/workspace-other/label") {
+          expect(init?.method).toBe("PATCH");
+          expect(JSON.parse(String(init?.body))).toEqual({ label: "Reviews" });
+          return jsonResponse({
+            layout: {
+              ...makeWorkspaceLayoutResponse({ id: "workspace-other", revision: 2 }).layout,
+              label: "Reviews",
+            },
+          });
+        }
+        throw new Error(`Unexpected fetch: ${url.pathname}`);
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal("EventSource", EventSourceMock);
+      vi.stubGlobal("ResizeObserver", ResizeObserverMock);
+      try {
+        await renderApp();
+        const workspacesRegion = await openWorkspacesPanel();
+        expect(await screen.findByRole("button", { name: "Backend (current)" })).toBeInTheDocument();
+        const titleBefore = document.title;
+        await clickAndSettle(within(workspacesRegion).getByRole("button", {
+          name: "Actions for workspace Alpha",
+        }));
+        await clickAndSettle(screen.getByRole("menuitem", { name: "Rename" }));
+        fireEvent.change(screen.getByRole("textbox", { name: "Workspace label" }), {
+          target: { value: "  Reviews  " },
+        });
+        await clickAndSettle(screen.getByRole("button", { name: "Save label" }));
+        expect(await within(workspacesRegion).findByRole("button", { name: "Reviews" })).toBeInTheDocument();
+        expect(within(workspacesRegion).getByRole("button", { name: "Backend (current)" })).toBeInTheDocument();
+        expect(document.title).toBe(titleBefore);
+        expect(window.location.search).toBe("?workspace=workspace-label-test");
+      } finally {
+        window.history.replaceState(null, "", originalUrl);
+      }
+    });
+  });
+
+  it("deletes a saved workspace from the Workspaces region", async () => {
     await withVerifiedNoReactActWarnings(async () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
       const originalResizeObserver = globalThis.ResizeObserver;
       const fetchWorkspaceLayoutsSpy = vi
         .mocked(api.fetchWorkspaceLayouts)
-        .mockResolvedValue({
+        .mockResolvedValueOnce({
           workspaces: [
             {
               id: "monitor-left",
@@ -579,6 +953,16 @@ describe("App workspace layout", () => {
               updatedAt: "2026-03-28 18:00:00",
               controlPanelSide: "left",
             },
+            {
+              id: "monitor-right",
+              revision: 1,
+              updatedAt: "2026-03-28 17:30:00",
+              controlPanelSide: "right",
+            },
+          ],
+        })
+        .mockResolvedValue({
+          workspaces: [
             {
               id: "monitor-right",
               revision: 1,
@@ -646,30 +1030,20 @@ describe("App workspace layout", () => {
       try {
         await renderApp();
 
-        await clickAndSettle(
-          await screen.findByRole("button", { name: /workspace /i }),
-        );
-
-        const switcherDialog = await screen.findByRole("dialog", {
-          name: "Workspace switcher",
-        });
-        const deleteButton = within(switcherDialog).getByRole("button", {
-          name: "Delete workspace monitor-left",
-        });
-
-        await clickAndSettle(deleteButton);
+        const workspacesRegion = await openWorkspacesPanel();
+        await deleteWorkspaceRow("monitor-left", workspacesRegion);
 
         await waitFor(() => {
           expect(deleteWorkspaceLayoutSpy).toHaveBeenCalledWith("monitor-left");
         });
         await waitFor(() => {
           expect(
-            within(switcherDialog).queryAllByText("monitor-left").length,
+            within(workspacesRegion).queryAllByText("monitor-left").length,
           ).toBe(0);
         });
         expect(
-          within(switcherDialog).getByRole("button", {
-            name: "Delete workspace monitor-right",
+          within(workspacesRegion).getByRole("button", {
+            name: "Actions for workspace monitor-right",
           }),
         ).toBeInTheDocument();
         expect(deleteStoredWorkspaceLayoutSpy).toHaveBeenCalledWith(
@@ -758,38 +1132,23 @@ describe("App workspace layout", () => {
       try {
         await renderApp();
 
-        await clickAndSettle(
-          await screen.findByRole("button", { name: /workspace /i }),
-        );
-
-        const switcherDialog = await screen.findByRole("dialog", {
-          name: "Workspace switcher",
-        });
-        await clickAndSettle(
-          within(switcherDialog).getByRole("button", {
-            name: "Delete workspace monitor-left",
-          }),
-        );
+        const workspacesRegion = await openWorkspacesPanel();
+        await deleteWorkspaceRow("monitor-left", workspacesRegion);
 
         await waitFor(() => {
           expect(deleteWorkspaceLayoutSpy).toHaveBeenCalledWith("monitor-left");
         });
         expect(
-          await within(switcherDialog).findByText("Delete failed."),
+          await within(workspacesRegion).findByText("Delete failed."),
         ).toBeInTheDocument();
         expect(
-          within(switcherDialog).getAllByText("monitor-left").length,
+          within(workspacesRegion).getAllByText("monitor-left").length,
         ).toBeGreaterThan(0);
-        expect(
-          within(switcherDialog).getByRole("button", {
-            name: "Delete workspace monitor-left",
-          }),
-        ).toBeEnabled();
-        expect(
-          within(switcherDialog).getByRole("button", {
-            name: "Delete workspace monitor-left",
-          }),
-        ).toHaveTextContent("Delete");
+        const retryOverflow = within(workspacesRegion).getByRole("button", {
+          name: "Actions for workspace monitor-left",
+        });
+        expect(retryOverflow).toBeEnabled();
+        expect(retryOverflow).toHaveTextContent("⋯");
         expect(
           window.localStorage.getItem(
             `${WORKSPACE_LAYOUT_STORAGE_KEY}:monitor-left`,
@@ -823,7 +1182,7 @@ describe("App workspace layout", () => {
       }>();
       const fetchWorkspaceLayoutsSpy = vi
         .mocked(api.fetchWorkspaceLayouts)
-        .mockResolvedValue({
+        .mockResolvedValueOnce({
           workspaces: [
             {
               id: "monitor-left",
@@ -831,6 +1190,16 @@ describe("App workspace layout", () => {
               updatedAt: "2026-03-28 18:00:00",
               controlPanelSide: "left",
             },
+            {
+              id: "monitor-right",
+              revision: 1,
+              updatedAt: "2026-03-28 17:30:00",
+              controlPanelSide: "right",
+            },
+          ],
+        })
+        .mockResolvedValue({
+          workspaces: [
             {
               id: "monitor-right",
               revision: 1,
@@ -890,32 +1259,20 @@ describe("App workspace layout", () => {
       try {
         await renderApp();
 
-        await clickAndSettle(
-          await screen.findByRole("button", { name: /workspace /i }),
-        );
-
-        const switcherDialog = await screen.findByRole("dialog", {
-          name: "Workspace switcher",
-        });
-        await clickAndSettle(
-          within(switcherDialog).getByRole("button", {
-            name: "Delete workspace monitor-left",
-          }),
-        );
+        const workspacesRegion = await openWorkspacesPanel();
+        await deleteWorkspaceRow("monitor-left", workspacesRegion);
 
         await waitFor(() => {
           expect(deleteWorkspaceLayoutSpy).toHaveBeenCalledWith("monitor-left");
         });
-        expect(
-          within(switcherDialog).getByRole("button", {
-            name: "Delete workspace monitor-left",
-          }),
-        ).toBeDisabled();
-        expect(
-          within(switcherDialog).getByRole("button", {
-            name: "Delete workspace monitor-left",
-          }),
-        ).toHaveTextContent("Deleting");
+        const pendingOverflow = within(workspacesRegion).getByRole("button", {
+          name: "Deleting. Actions for workspace monitor-left",
+        });
+        expect(pendingOverflow).toBeDisabled();
+        expect(pendingOverflow).toHaveTextContent("Deleting");
+        expect(pendingOverflow).toHaveAccessibleName(
+          "Deleting. Actions for workspace monitor-left",
+        );
 
         deleteWorkspaceDeferred.resolve({
           workspaces: [
@@ -931,7 +1288,7 @@ describe("App workspace layout", () => {
 
         await waitFor(() => {
           expect(
-            within(switcherDialog).queryAllByText("monitor-left").length,
+            within(workspacesRegion).queryAllByText("monitor-left").length,
           ).toBe(0);
         });
       } finally {
@@ -978,6 +1335,16 @@ describe("App workspace layout", () => {
         ],
       });
       fetchWorkspaceLayoutsSpy.mockReturnValueOnce(staleRefresh.promise);
+      fetchWorkspaceLayoutsSpy.mockResolvedValue({
+        workspaces: [
+          {
+            id: "monitor-right",
+            revision: 1,
+            updatedAt: "2026-03-28 17:30:00",
+            controlPanelSide: "right",
+          },
+        ],
+      });
       const deleteWorkspaceLayoutSpy = vi
         .spyOn(api, "deleteWorkspaceLayout")
         .mockResolvedValue({
@@ -1033,42 +1400,26 @@ describe("App workspace layout", () => {
       try {
         await renderApp();
 
-        const switcherTrigger = await screen.findByRole("button", {
-          name: /workspace /i,
-        });
-        await clickAndSettle(switcherTrigger);
-
-        let switcherDialog = await screen.findByRole("dialog", {
-          name: "Workspace switcher",
-        });
+        let workspacesRegion = await openWorkspacesPanel();
         expect(
-          within(switcherDialog).getAllByText("monitor-left").length,
+          within(workspacesRegion).getAllByText("monitor-left").length,
         ).toBeGreaterThan(0);
 
-        await clickAndSettle(switcherTrigger);
+        const dock = screen.getByRole("navigation", { name: "Control panel dock" });
+        await clickAndSettle(within(dock).getByRole("button", { name: "Sessions" }));
         await waitFor(() => {
-          expect(
-            screen.queryByRole("dialog", { name: "Workspace switcher" }),
-          ).not.toBeInTheDocument();
+          expect(document.querySelector(".workspaces-panel")).toBeNull();
         });
 
-        await clickAndSettle(switcherTrigger);
-        switcherDialog = await screen.findByRole("dialog", {
-          name: "Workspace switcher",
-        });
-
-        await clickAndSettle(
-          within(switcherDialog).getByRole("button", {
-            name: "Delete workspace monitor-left",
-          }),
-        );
+        workspacesRegion = await openWorkspacesPanel();
+        await deleteWorkspaceRow("monitor-left", workspacesRegion);
 
         await waitFor(() => {
           expect(deleteWorkspaceLayoutSpy).toHaveBeenCalledWith("monitor-left");
         });
         await waitFor(() => {
           expect(
-            within(switcherDialog).queryAllByText("monitor-left").length,
+            within(workspacesRegion).queryAllByText("monitor-left").length,
           ).toBe(0);
         });
 
@@ -1092,12 +1443,12 @@ describe("App workspace layout", () => {
 
         await waitFor(() => {
           expect(
-            within(switcherDialog).queryAllByText("monitor-left").length,
+            within(workspacesRegion).queryAllByText("monitor-left").length,
           ).toBe(0);
         });
-        expect(fetchWorkspaceLayoutsSpy).toHaveBeenCalledTimes(2);
+        expect(fetchWorkspaceLayoutsSpy).toHaveBeenCalledTimes(3);
         expect(
-          within(switcherDialog).getAllByText("monitor-right").length,
+          within(workspacesRegion).getAllByText("monitor-right").length,
         ).toBeGreaterThan(0);
       } finally {
         deleteWorkspaceLayoutSpy.mockRestore();
@@ -1132,7 +1483,7 @@ describe("App workspace layout", () => {
       }>();
       const fetchWorkspaceLayoutsSpy = vi
         .mocked(api.fetchWorkspaceLayouts)
-        .mockResolvedValue({
+        .mockResolvedValueOnce({
           workspaces: [
             {
               id: "monitor-left",
@@ -1147,7 +1498,8 @@ describe("App workspace layout", () => {
               controlPanelSide: "right",
             },
           ],
-        });
+        })
+        .mockResolvedValue({ workspaces: [] });
       const deleteWorkspaceLayoutSpy = vi
         .spyOn(api, "deleteWorkspaceLayout")
         .mockImplementation((workspaceId: string) => {
@@ -1215,18 +1567,8 @@ describe("App workspace layout", () => {
       try {
         await renderApp();
 
-        await clickAndSettle(
-          await screen.findByRole("button", { name: /workspace /i }),
-        );
-
-        const switcherDialog = await screen.findByRole("dialog", {
-          name: "Workspace switcher",
-        });
-        await clickAndSettle(
-          within(switcherDialog).getByRole("button", {
-            name: "Delete workspace monitor-left",
-          }),
-        );
+        const workspacesRegion = await openWorkspacesPanel();
+        await deleteWorkspaceRow("monitor-left", workspacesRegion);
         await waitFor(() => {
           expect(deleteWorkspaceLayoutSpy).toHaveBeenNthCalledWith(
             1,
@@ -1234,11 +1576,7 @@ describe("App workspace layout", () => {
           );
         });
 
-        await clickAndSettle(
-          within(switcherDialog).getByRole("button", {
-            name: "Delete workspace monitor-right",
-          }),
-        );
+        await deleteWorkspaceRow("monitor-right", workspacesRegion);
         await waitFor(() => {
           expect(deleteWorkspaceLayoutSpy).toHaveBeenNthCalledWith(
             2,
@@ -1260,11 +1598,11 @@ describe("App workspace layout", () => {
 
         await waitFor(() => {
           expect(
-            within(switcherDialog).queryByText("monitor-right"),
+            within(workspacesRegion).queryByText("monitor-right"),
           ).not.toBeInTheDocument();
         });
         expect(
-          within(switcherDialog).getAllByText("monitor-left").length,
+          within(workspacesRegion).getAllByText("monitor-left").length,
         ).toBeGreaterThan(0);
 
         deleteMonitorLeft.resolve({ workspaces: [] });
@@ -1272,7 +1610,7 @@ describe("App workspace layout", () => {
 
         await waitFor(() => {
           expect(
-            within(switcherDialog).queryAllByText("monitor-left").length,
+            within(workspacesRegion).queryAllByText("monitor-left").length,
           ).toBe(0);
         });
         expect(
@@ -1296,7 +1634,7 @@ describe("App workspace layout", () => {
     });
   });
 
-  it("does not offer delete for the active workspace in the workspace switcher", async () => {
+  it("does not offer delete for the active workspace in the Workspaces region", async () => {
     await withVerifiedNoReactActWarnings(async () => {
       const originalFetch = globalThis.fetch;
       const originalEventSource = globalThis.EventSource;
@@ -1358,22 +1696,20 @@ describe("App workspace layout", () => {
       try {
         await renderApp();
 
+        const workspacesRegion = await openWorkspacesPanel();
         await clickAndSettle(
-          await screen.findByRole("button", { name: /workspace /i }),
+          within(workspacesRegion).getByRole("button", {
+            name: "Actions for workspace monitor-left",
+          }),
         );
-
-        const switcherDialog = await screen.findByRole("dialog", {
-          name: "Workspace switcher",
-        });
-
         expect(
-          within(switcherDialog).queryByRole("button", {
+          screen.queryByRole("menuitem", {
             name: "Delete workspace monitor-left",
           }),
         ).not.toBeInTheDocument();
         expect(
-          within(switcherDialog).getByRole("button", {
-            name: "Delete workspace monitor-right",
+          within(workspacesRegion).getByRole("button", {
+            name: "Actions for workspace monitor-right",
           }),
         ).toBeInTheDocument();
         expect(deleteWorkspaceLayoutSpy).not.toHaveBeenCalled();

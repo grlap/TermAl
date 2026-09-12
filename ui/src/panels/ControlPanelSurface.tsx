@@ -18,6 +18,7 @@ import {
 import type { WorkspaceTab } from "../workspace-types";
 
 export type ControlPanelSectionId =
+  | "workspaces"
   | "files"
   | "sessions"
   | "projects"
@@ -25,6 +26,7 @@ export type ControlPanelSectionId =
   | "git";
 
 const DEFAULT_CONTROL_PANEL_SECTION_ORDER: readonly ControlPanelSectionId[] = [
+  "workspaces",
   "projects",
   "sessions",
   "orchestrators",
@@ -88,6 +90,8 @@ const RESPONSE_BOARD_ACTION: ControlPanelActionDefinition = {
 
 export function ControlPanelSectionIcon({ sectionId }: { sectionId: ControlPanelSectionId }) {
   switch (sectionId) {
+    case "workspaces":
+      return <WorkspacesIcon />;
     case "files":
       return <ProjectsIcon />;
     case "sessions":
@@ -123,6 +127,11 @@ export const ControlPanelSurface = forwardRef<ControlPanelSurfaceHandle, Control
   const [dropTarget, setDropTarget] = useState<DockDropTarget | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const sectionDefinitionLookup: Record<ControlPanelSectionId, ControlPanelSectionDefinition> = {
+    workspaces: {
+      id: "workspaces",
+      label: "Workspaces",
+      icon: <ControlPanelSectionIcon sectionId="workspaces" />,
+    },
     files: {
       id: "files",
       label: "Files",
@@ -448,7 +457,9 @@ function moveSectionOrder(
   ];
 }
 
-function normalizeControlPanelSectionOrder(order: readonly ControlPanelSectionId[]): ControlPanelSectionId[] {
+export function normalizeControlPanelSectionOrder(
+  order: readonly ControlPanelSectionId[],
+): ControlPanelSectionId[] {
   const seen = new Set<ControlPanelSectionId>();
   const normalized: ControlPanelSectionId[] = [];
 
@@ -466,7 +477,19 @@ function normalizeControlPanelSectionOrder(order: readonly ControlPanelSectionId
       continue;
     }
 
+    if (sectionId === "workspaces") {
+      const projectsIndex = normalized.indexOf("projects");
+      if (projectsIndex >= 0) {
+        normalized.splice(projectsIndex, 0, "workspaces");
+      } else {
+        normalized.push("workspaces");
+      }
+      seen.add(sectionId);
+      continue;
+    }
+
     normalized.push(sectionId);
+    seen.add(sectionId);
   }
 
   return normalized;
@@ -518,6 +541,25 @@ function persistControlPanelSectionOrder(order: readonly ControlPanelSectionId[]
   window.localStorage.setItem(
     CONTROL_PANEL_SECTION_ORDER_STORAGE_KEY,
     JSON.stringify(normalizeControlPanelSectionOrder(order)),
+  );
+}
+
+function WorkspacesIcon() {
+  return (
+    <svg viewBox="0 0 20 20" focusable="false" aria-hidden="true">
+      <rect
+        x="3.25"
+        y="4"
+        width="13.5"
+        height="11.25"
+        rx="1.4"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+      />
+      <path d="M3.25 7.35h13.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M10 7.35v7.9" fill="none" stroke="currentColor" strokeWidth="1.5" />
+    </svg>
   );
 }
 

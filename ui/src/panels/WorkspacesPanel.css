@@ -1,0 +1,226 @@
+/* Owns Workspaces row/overflow chrome. Does not own global .panel
+   surface tokens. Split from workspace-shell-controls / App styles.
+   main.tsx imports App/component CSS before styles.css, so a lone
+   .workspaces-panel-menu selector ties global .panel
+   (position:relative; z-index:1). The dual .panel selector keeps
+   absolute / z-index:8 winning on a fresh load. animation:none
+   opts the menu out of global .panel rise-in so first-frame
+   translateY(12px) cannot inflate getBoundingClientRect. */
+.workspaces-panel {
+  display: grid;
+  gap: 0.7rem;
+  min-width: 0;
+}
+
+.workspaces-panel-toolbar {
+  display: grid;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.workspaces-panel-search {
+  min-width: 0;
+  width: 100%;
+}
+
+.workspace-label-form {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+}
+
+.workspace-label-form label {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.workspace-label-form input {
+  min-width: 0;
+  width: 100%;
+}
+
+.workspaces-panel-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.workspaces-panel-confirm {
+  display: grid;
+  gap: 0.55rem;
+  min-width: 0;
+  padding: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+}
+
+.workspaces-panel-confirm p,
+.workspaces-panel-status,
+.workspaces-panel-error {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.workspaces-panel-error {
+  color: var(--signal-red);
+  display: grid;
+  gap: 0.45rem;
+}
+
+.workspaces-panel-error p {
+  margin: 0;
+}
+
+.workspaces-panel-retry {
+  justify-self: start;
+}
+
+.workspaces-panel-list {
+  display: grid;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.workspaces-panel-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.4rem;
+  align-items: stretch;
+  min-width: 0;
+}
+
+.workspaces-panel-switch {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 0.85rem;
+  background: var(--surface-white-soft);
+  color: inherit;
+  padding: 0.55rem 0.7rem;
+  text-align: left;
+}
+
+.workspaces-panel-switch:hover,
+.workspaces-panel-switch.selected {
+  border-color: var(--accent-blue-border);
+  background: var(--surface-white);
+}
+
+.workspaces-panel-item-copy {
+  display: grid;
+  gap: 0.12rem;
+  min-width: 0;
+}
+
+.workspaces-panel-item-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.workspaces-panel-item-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 700;
+}
+
+.workspaces-panel-item-status {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  padding: 0.16rem 0.45rem;
+  border-radius: var(--control-radius-pill);
+  background: var(--accent-blue-bg);
+  color: var(--signal-blue);
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.workspaces-panel-item-meta {
+  color: var(--muted);
+  font-size: 0.74rem;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspaces-panel-item-overflow {
+  position: relative;
+  display: grid;
+  align-items: stretch;
+}
+
+.workspaces-panel-overflow-trigger {
+  min-width: 2.1rem;
+  padding-inline: 0.45rem;
+}
+
+.workspaces-panel-menu.panel,
+.workspaces-panel-menu {
+  position: absolute;
+  top: calc(100% + 0.3rem);
+  right: 0;
+  z-index: 8;
+  display: grid;
+  min-width: 10.5rem;
+  max-width: min(16rem, calc(100vw - 1.5rem));
+  padding: 0.35rem;
+  overflow-y: auto;
+  animation: none;
+}
+
+.workspaces-panel-menu-up.panel,
+.workspaces-panel-menu-up {
+  top: auto;
+  bottom: calc(100% + 0.3rem);
+}
+
+.workspaces-panel-menu-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  padding: 0.45rem 0.6rem;
+  border: 0;
+  border-radius: 0.55rem;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  text-decoration: none;
+  font: inherit;
+  cursor: pointer;
+}
+
+.workspaces-panel-menu-item:hover,
+.workspaces-panel-menu-item:focus-visible {
+  background: var(--surface-white-soft);
+}
+
+.workspaces-panel-menu-item-danger:hover,
+.workspaces-panel-menu-item-danger:focus-visible {
+  background: var(--accent-rose-bg);
+  color: var(--signal-red);
+}
+
+.workspaces-panel-confirm-delete:hover {
+  border-color: var(--accent-rose-border);
+  background: var(--accent-rose-bg);
+  color: var(--signal-red);
+}
+
+.workspaces-panel-overflow-trigger:disabled,
+.workspaces-panel-menu-item:disabled,
+.workspaces-panel-confirm [aria-disabled="true"] {
+  cursor: wait;
+  opacity: 0.7;
+}

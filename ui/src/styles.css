@@ -1401,218 +1401,6 @@ textarea {
   cursor: default;
 }
 
-.workspace-switcher {
-  position: relative;
-  flex: none;
-}
-
-.workspace-switcher-trigger {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.7rem;
-  min-width: 0;
-  padding: 0.45rem 0.72rem;
-  border-radius: 0.95rem;
-}
-
-.workspace-switcher-trigger.open {
-  border-color: var(--accent-blue-border);
-  background: var(--surface-white);
-  box-shadow: 0 0 0 0.24rem var(--accent-blue-soft);
-}
-
-.workspace-switcher-trigger-copy {
-  display: grid;
-  gap: 0.08rem;
-  min-width: 0;
-  text-align: left;
-}
-
-.workspace-switcher-trigger-label {
-  color: var(--muted);
-  font-size: 0.72rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.workspace-switcher-trigger-value {
-  font-family: var(--code-font);
-  font-size: 0.86rem;
-}
-
-.workspace-switcher-menu {
-  position: absolute;
-  top: calc(100% + 0.55rem);
-  right: 0;
-  z-index: 15;
-  display: grid;
-  gap: 0.8rem;
-  width: min(26rem, calc(100vw - 2rem));
-  padding: 0.95rem;
-}
-
-.workspace-switcher-menu-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.75rem;
-}
-
-.workspace-switcher-menu-header h3 {
-  margin: 0.18rem 0 0;
-  font-size: 1rem;
-}
-
-.workspace-switcher-current-id {
-  display: inline-flex;
-  align-items: center;
-  max-width: 12rem;
-  padding: 0.3rem 0.55rem;
-  border: 1px solid var(--line);
-  border-radius: var(--control-radius-pill);
-  background: var(--surface-white-soft);
-  color: var(--muted);
-  font-family: var(--code-font);
-  font-size: 0.74rem;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.workspace-switcher-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.55rem;
-}
-
-.workspace-switcher-list {
-  display: grid;
-  gap: 0.55rem;
-  max-height: min(22rem, 50vh);
-  overflow: auto;
-}
-
-.workspace-switcher-item-shell {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 0.55rem;
-  align-items: stretch;
-}
-
-.workspace-switcher-item {
-  display: grid;
-  width: 100%;
-  min-width: 0;
-  border: 1px solid var(--line);
-  border-radius: 1rem;
-  background: var(--surface-white-soft);
-  color: inherit;
-  padding: 0.78rem 0.85rem;
-  text-align: left;
-}
-
-.workspace-label-form {
-  grid-column: 1 / -1;
-  display: grid;
-  gap: 0.55rem;
-  padding: 0.75rem;
-  border: 1px solid var(--line);
-  border-radius: 1rem;
-}
-
-.workspace-label-form label {
-  display: grid;
-  gap: 0.35rem;
-}
-
-.workspace-label-form input {
-  min-width: 0;
-  width: 100%;
-}
-
-.workspace-switcher-item:hover,
-.workspace-switcher-item.selected {
-  border-color: var(--accent-blue-border);
-  background: var(--surface-white);
-}
-
-.workspace-switcher-item-actions {
-  display: grid;
-  gap: 0.4rem;
-  width: 4.7rem;
-}
-
-.workspace-switcher-item-open {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  text-decoration: none;
-}
-
-.workspace-switcher-item-open,
-.workspace-switcher-item-delete {
-  align-self: stretch;
-  min-width: 4.7rem;
-  padding-inline: 0.72rem;
-  border-radius: 1rem;
-  color: var(--muted);
-  font-size: 0.78rem;
-}
-
-.workspace-switcher-item-delete:hover {
-  border-color: var(--accent-rose-border);
-  background: var(--accent-rose-bg);
-  color: var(--signal-red);
-}
-
-.workspace-switcher-item-delete:disabled {
-  cursor: wait;
-  opacity: 0.7;
-}
-
-.workspace-switcher-item-copy {
-  display: grid;
-  gap: 0.18rem;
-  min-width: 0;
-}
-
-.workspace-switcher-item-title-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.55rem;
-}
-
-.workspace-switcher-item-title {
-  font-weight: 700;
-}
-
-.workspace-switcher-item-status {
-  display: inline-flex;
-  align-items: center;
-  padding: 0.16rem 0.45rem;
-  border-radius: var(--control-radius-pill);
-  background: var(--accent-blue-bg);
-  color: var(--signal-blue);
-  font-size: 0.68rem;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.workspace-switcher-item-meta,
-.workspace-switcher-status,
-.workspace-switcher-error {
-  margin: 0;
-  color: var(--muted);
-  font-size: 0.78rem;
-  line-height: 1.4;
-}
-
-.workspace-switcher-error {
-  color: var(--signal-red);
-}
-
 .workspace-connection-chip {
   display: inline-flex;
   align-items: center;
@@ -2832,19 +2620,6 @@ textarea {
   justify-content: end;
   gap: 0.5rem;
   flex: 0 0 auto;
-}
-
-.pane-bar-right .workspace-switcher-trigger {
-  gap: 0.5rem;
-  padding: 0.32rem 0.58rem;
-}
-
-.pane-bar-right .workspace-switcher-trigger-label {
-  font-size: 0.66rem;
-}
-
-.pane-bar-right .workspace-switcher-trigger-value {
-  font-size: 0.8rem;
 }
 
 .theme-mode-toggle {
@@ -10700,21 +10475,6 @@ textarea {
     flex-wrap: wrap;
   }
 
-  .workspace-switcher {
-    flex: 1 1 auto;
-  }
-
-  .workspace-switcher-trigger {
-    width: 100%;
-    justify-content: space-between;
-  }
-
-  .workspace-switcher-menu {
-    left: 0;
-    right: 0;
-    width: auto;
-  }
-
   .thread-actions {
     align-items: stretch;
   }
@@ -10732,8 +10492,8 @@ textarea {
     justify-content: stretch;
   }
 
+  /* Backend status lives in pane-bar-left. This row only has the theme toggle. */
   .pane-bar-right {
-    grid-template-columns: max-content minmax(0, 1fr);
     width: 100%;
   }
 

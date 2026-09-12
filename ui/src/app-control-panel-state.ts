@@ -53,6 +53,7 @@ import {
 import type { AgentReadiness, AgentType, Project, RemoteConfig, Session } from "./types";
 
 type ControlSurfaceSectionId =
+  | "workspaces"
   | "files"
   | "sessions"
   | "projects"

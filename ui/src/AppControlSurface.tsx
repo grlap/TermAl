@@ -11,10 +11,7 @@ import {
   type ComboboxOption,
 } from "./session-model-utils";
 import { ProjectListSection } from "./ProjectListSection";
-import {
-  ControlPanelConnectionIndicator,
-  WorkspaceSwitcher,
-} from "./workspace-shell-controls";
+import { ControlPanelConnectionIndicator } from "./workspace-shell-controls";
 import { OrchestratorRuntimeActionButton } from "./OrchestratorRuntimeActionButton";
 import {
   buildControlSurfaceSessionListEntries,
@@ -30,6 +27,13 @@ import {
 import { FileSystemPanel } from "./panels/FileSystemPanel";
 import { GitStatusPanel } from "./panels/GitStatusPanel";
 import { OrchestratorTemplateLibraryPanel } from "./panels/OrchestratorTemplateLibraryPanel";
+import {
+  WorkspacesPanel,
+  WorkspacesPanelHeaderActions,
+  workspacesRefreshBusy,
+} from "./panels/WorkspacesPanel";
+import type { WorkspaceDeleteRequest } from "./workspace-delete-request";
+import type { RefreshWorkspaceSummaries } from "./workspace-summaries-refresh";
 import { ThemedCombobox } from "./preferences/themed-combobox";
 import { attachSessionDragData } from "./session-drag";
 import { primaryModifierLabel, type SessionFlagMap } from "./app-utils";
@@ -106,11 +110,9 @@ type AppControlSurfaceProps = {
   backendConnectionState: BackendConnectionState;
   workspaceViewId: string;
   deletingWorkspaceIds: string[];
-  workspaceSwitcherError: string | null;
-  isWorkspaceSwitcherLoading: boolean;
-  isWorkspaceSwitcherOpen: boolean;
+  workspacesListError: string | null;
+  isWorkspacesListLoading: boolean;
   workspaceSummaries: WorkspaceLayoutSummary[];
-  workspaceSwitcherRef: RefObject<HTMLDivElement | null>;
   windowId: string;
   pendingOrchestratorActionById: Record<string, OrchestratorRuntimeAction | undefined>;
   killingSessionIds: SessionFlagMap;
@@ -150,11 +152,12 @@ type AppControlSurfaceProps = {
   handleProjectMenuRemoveProject: (project: Project) => Promise<void>;
   handleProjectMenuStartSession: (paneId: string | null, projectId: string) => void;
   handleOrchestratorRuntimeAction: (instanceId: string, action: OrchestratorRuntimeAction) => Promise<void>;
-  handleDeleteWorkspace: (workspaceId: string) => Promise<void>;
+  handleDeleteWorkspace: (workspaceId: string) => WorkspaceDeleteRequest;
+  handleRenameWorkspace: (workspaceId: string, label: string) => Promise<void>;
   handleOpenNewWorkspaceHere: () => void;
   handleOpenNewWorkspaceWindow: () => void;
   handleOpenWorkspaceHere: (nextWorkspaceViewId: string) => void;
-  handleWorkspaceSwitcherToggle: () => void;
+  refreshWorkspaceSummaries: RefreshWorkspaceSummaries;
   handleRetryBackendConnection: () => void;
 };
 
@@ -200,11 +203,9 @@ export function AppControlSurface({
   backendConnectionState,
   workspaceViewId,
   deletingWorkspaceIds,
-  workspaceSwitcherError,
-  isWorkspaceSwitcherLoading,
-  isWorkspaceSwitcherOpen,
+  workspacesListError,
+  isWorkspacesListLoading,
   workspaceSummaries,
-  workspaceSwitcherRef,
   windowId,
   pendingOrchestratorActionById,
   killingSessionIds,
@@ -240,10 +241,11 @@ export function AppControlSurface({
   handleProjectMenuStartSession,
   handleOrchestratorRuntimeAction,
   handleDeleteWorkspace,
+  handleRenameWorkspace,
   handleOpenNewWorkspaceHere,
   handleOpenNewWorkspaceWindow,
   handleOpenWorkspaceHere,
-  handleWorkspaceSwitcherToggle,
+  refreshWorkspaceSummaries,
   handleRetryBackendConnection,
 }: AppControlSurfaceProps): JSX.Element {
     const surfaceId = fixedSection ? `${paneId}-${fixedSection}` : paneId;
@@ -646,6 +648,19 @@ export function AppControlSurface({
 
     function renderControlPanelHeaderActions(sectionId: ControlPanelSectionId) {
       switch (sectionId) {
+        case "workspaces":
+          return (
+            <WorkspacesPanelHeaderActions
+              isRefreshing={workspacesRefreshBusy(
+                isWorkspacesListLoading,
+                deletingWorkspaceIds,
+              )}
+              onOpenNewWorkspaceHere={handleOpenNewWorkspaceHere}
+              onOpenNewWorkspaceWindow={handleOpenNewWorkspaceWindow}
+              onRefresh={refreshWorkspaceSummaries}
+            />
+          );
+
         case "files":
           return fixedSection
             ? null
@@ -876,6 +891,21 @@ export function AppControlSurface({
 
     function renderControlPanelSection(sectionId: ControlPanelSectionId) {
       switch (sectionId) {
+        case "workspaces":
+          return (
+            <WorkspacesPanel
+              currentWorkspaceId={workspaceViewId}
+              deletingWorkspaceIds={deletingWorkspaceIds}
+              error={workspacesListError}
+              isLoading={isWorkspacesListLoading}
+              summaries={workspaceSummaries}
+              onDeleteWorkspace={handleDeleteWorkspace}
+              onRenameWorkspace={handleRenameWorkspace}
+              onRefresh={refreshWorkspaceSummaries}
+              onOpenWorkspace={handleOpenWorkspaceHere}
+            />
+          );
+
         case "files":
           return (
             <section
@@ -1319,6 +1349,7 @@ export function AppControlSurface({
           renderHeaderActions={renderControlPanelHeaderActions}
           renderSection={renderControlPanelSection}
           sectionLauncherTabs={{
+            workspaces: buildControlPanelLauncherTab("workspaces"),
             files: buildControlPanelLauncherTab("files"),
             git: buildControlPanelLauncherTab("git"),
             projects: buildControlPanelLauncherTab("projects"),

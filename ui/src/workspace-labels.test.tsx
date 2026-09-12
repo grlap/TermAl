@@ -1,40 +1,43 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { createRef, type ComponentProps } from "react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import type { ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { WorkspaceSwitcher } from "./workspace-shell-controls";
 
-function props(): ComponentProps<typeof WorkspaceSwitcher> {
+import { WorkspacesPanel } from "./panels/WorkspacesPanel";
+
+function props(): ComponentProps<typeof WorkspacesPanel> {
   return {
     currentWorkspaceId: "workspace-current",
     summaries: [
       { id: "workspace-current", label: "Backend", revision: 1, updatedAt: "today", controlPanelSide: "left" },
       { id: "workspace-other", revision: 1, updatedAt: "today", controlPanelSide: "left" },
     ],
-    deletingWorkspaceIds: [], error: null, isLoading: false, isOpen: true,
-    switcherRef: createRef<HTMLDivElement>(), onDeleteWorkspace: vi.fn(),
+    deletingWorkspaceIds: [],
+    error: null,
+    isLoading: false,
+    onDeleteWorkspace: vi.fn(() => ({ started: false, completed: Promise.resolve() })),
     onRenameWorkspace: vi.fn().mockResolvedValue(undefined),
-    onOpenNewWorkspaceHere: vi.fn(), onOpenNewWorkspaceWindow: vi.fn(),
-    onOpenWorkspace: vi.fn(), onToggle: vi.fn(),
+    onRefresh: vi.fn(),
+    onOpenWorkspace: vi.fn(),
   };
 }
 
 describe("workspace labels", () => {
   it("uses labels for display while navigation keeps the saved workspace ID", () => {
     const input = props();
-    render(<WorkspaceSwitcher {...input} />);
-    expect(screen.getByRole("button", { name: "Workspace Backend" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /^Backend\s*Current\s*workspace-current/ }));
+    render(<WorkspacesPanel {...input} />);
+    fireEvent.click(screen.getByRole("button", { name: "Backend (current)" }));
     expect(input.onOpenWorkspace).toHaveBeenCalledWith("workspace-current");
-    expect(screen.queryByRole("button", { name: "Edit label for workspace workspace-other" })).not.toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: /^Edit label for workspace/ })).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Actions for workspace workspace-other" }));
+    expect(screen.getByRole("menuitem", { name: "Rename" })).toBeInTheDocument();
   });
 
   it("saves a trimmed label, waits for success, and supports clearing it", async () => {
     const input = props();
     let finishSave!: () => void;
     input.onRenameWorkspace = vi.fn().mockImplementationOnce(() => new Promise<void>((resolve) => { finishSave = resolve; }));
-    const view = render(<WorkspaceSwitcher {...input} />);
-    fireEvent.click(screen.getByRole("button", { name: "Edit label for workspace workspace-current" }));
+    const view = render(<WorkspacesPanel {...input} />);
+    fireEvent.click(screen.getByRole("button", { name: "Actions for workspace Backend" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Workspace label" }), { target: { value: "  Reviews  " } });
     fireEvent.click(screen.getByRole("button", { name: "Save label" }));
     expect(input.onRenameWorkspace).toHaveBeenCalledWith("workspace-current", "Reviews");
@@ -42,9 +45,11 @@ describe("workspace labels", () => {
     await act(async () => finishSave());
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
 
-    view.rerender(<WorkspaceSwitcher {...input} summaries={input.summaries.map((summary) => ({ ...summary, label: "Reviews" }))} />);
-    expect(screen.getByRole("button", { name: "Workspace Reviews" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Edit label for workspace workspace-current" }));
+    view.rerender(<WorkspacesPanel {...input} summaries={input.summaries.map((summary) => ({ ...summary, label: "Reviews" }))} />);
+    expect(screen.getByRole("button", { name: "Reviews (current)" })).toBeInTheDocument();
+    const currentRow = screen.getAllByRole("listitem").find((row) => within(row).queryByText("Current"))!;
+    fireEvent.click(within(currentRow).getByRole("button", { name: "Actions for workspace Reviews" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
     fireEvent.change(screen.getByRole("textbox"), { target: { value: " " } });
     fireEvent.click(screen.getByRole("button", { name: "Save label" }));
     await waitFor(() => expect(input.onRenameWorkspace).toHaveBeenLastCalledWith("workspace-current", ""));
@@ -53,8 +58,9 @@ describe("workspace labels", () => {
   it("keeps the draft and reports save errors; Escape cancels without navigating", async () => {
     const input = props();
     input.onRenameWorkspace = vi.fn().mockRejectedValue(new Error("Backend needs restart"));
-    render(<WorkspaceSwitcher {...input} />);
-    fireEvent.click(screen.getByRole("button", { name: "Edit label for workspace workspace-current" }));
+    render(<WorkspacesPanel {...input} />);
+    fireEvent.click(screen.getByRole("button", { name: "Actions for workspace Backend" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "Planning" } });
     fireEvent.click(screen.getByRole("button", { name: "Save label" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Backend needs restart");
@@ -67,16 +73,15 @@ describe("workspace labels", () => {
   it("keeps rows and the current-workspace editor stable while live summaries reorder", async () => {
     const input = props();
     input.summaries = [...input.summaries, { ...input.summaries[1], id: "workspace-another", label: "Reviews" }];
-    const view = render(<WorkspaceSwitcher {...input} />);
+    const view = render(<WorkspacesPanel {...input} />);
     const rowIds = () => screen.getAllByRole("listitem").map((row) =>
-      row.querySelector(".workspace-switcher-item-meta")?.textContent,
+      row.querySelector(".visually-hidden")?.textContent,
     );
     const initialRows = rowIds();
-    const edit = screen.getByRole("button", { name: "Edit label for workspace workspace-current" });
-    expect(edit.closest('[role="list"]')).toBeNull();
-    fireEvent.click(edit);
+    fireEvent.click(screen.getByRole("button", { name: "Actions for workspace Backend" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "Draft name" } });
-    view.rerender(<WorkspaceSwitcher {...input} summaries={[...input.summaries].reverse().map((summary) => ({
+    view.rerender(<WorkspacesPanel {...input} summaries={[...input.summaries].reverse().map((summary) => ({
       ...summary, updatedAt: "later", revision: summary.revision + 1,
     }))} />);
     expect(rowIds()).toEqual(initialRows);

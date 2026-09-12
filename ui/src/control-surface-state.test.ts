@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildControlSurfaceSessionListEntries,
   buildControlSurfaceSessionListState,
+  createControlPanelSectionLauncherTab,
   resolveWorkspaceScopedSessionId,
 } from "./control-surface-state";
 import type { Project, Session } from "./types";
@@ -21,6 +22,17 @@ function createSession(overrides: Partial<Session>): Session {
     ...overrides,
   };
 }
+
+describe("createControlPanelSectionLauncherTab", () => {
+  it("does not create a launcher tab for Workspaces", () => {
+    expect(createControlPanelSectionLauncherTab("workspaces", {
+      filesystemRoot: "/tmp",
+      gitWorkdir: "/tmp",
+      originProjectId: "project-1",
+      originSessionId: "session-1",
+    })).toBeNull();
+  });
+});
 
 describe("buildControlSurfaceSessionListState", () => {
   it("separates definite session-list matches from unloaded transcript state", () => {

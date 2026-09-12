@@ -1,45 +1,26 @@
+// Owns hook-level workspace-layout persistence, storage pause/retry,
+// and recovery-notice races.
+//
+// Does not own: workspace-summary refresh/delete races or the shared
+// local-workspace fixture builder.
+//
+// Split out of: inline App.tsx persistence tests; fixture lives in
+// app-workspace-layout.test-support.ts.
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import * as api from "./api";
 import { ApiRequestError, createBackendUnavailableError } from "./api-request";
-import { useAppWorkspaceLayout, type UseAppWorkspaceLayoutParams } from "./app-workspace-layout";
+import { useAppWorkspaceLayout } from "./app-workspace-layout";
+import {
+  localWorkspaceFixture as workspace,
+  paramsForLocalWorkspace,
+} from "./app-workspace-layout.test-support";
 import { createInitialWorkspaceBootstrap } from "./initial-workspace-bootstrap";
-import { hasPendingWorkspaceLayout, persistWorkspaceLayout, WorkspaceLayoutStorageReadError } from "./workspace-storage";
-import type { WorkspaceState } from "./workspace-types";
+import { hasPendingWorkspaceLayout, WorkspaceLayoutStorageReadError } from "./workspace-storage";
 import type { ControlPanelSide } from "./workspace-storage";
+import type { WorkspaceState } from "./workspace-types";
 import { makeSession } from "./app-test-harness";
-
-const workspace: WorkspaceState = {
-  lastContentPaneId: "pane-session", lastViewerPaneId: null,
-  activePaneId: "pane-session", root: { type: "pane", paneId: "pane-session" },
-  panes: [{ id: "pane-session", activeTabId: "tab-session", activeSessionId: "session-1",
-    tabs: [{ id: "tab-session", kind: "session", sessionId: "session-1" }],
-    viewMode: "session", lastSessionViewMode: "session", sourcePath: null }],
-};
-
-function paramsForLocalWorkspace(): UseAppWorkspaceLayoutParams {
-  const workspaceViewId = "workspace-local-only";
-  persistWorkspaceLayout(workspaceViewId, { controlPanelSide: "left", workspace });
-  const initial = createInitialWorkspaceBootstrap(workspaceViewId);
-  return {
-    workspaceViewId, workspace: initial.workspace, setWorkspace: vi.fn(),
-    sessions: [], sessionsRef: { current: [] }, isSessionStateReady: false,
-    controlPanelSide: "left", setControlPanelSide: vi.fn(),
-    preferences: initial,
-    setPreferences: {
-      setThemeId: vi.fn(), setLightThemeId: vi.fn(), setDarkThemeId: vi.fn(),
-      setThemeMode: vi.fn(), setStyleId: vi.fn(), setMarkdownThemeId: vi.fn(),
-      setMarkdownStyleId: vi.fn(), setDiagramThemeOverrideMode: vi.fn(),
-      setDiagramLook: vi.fn(), setDiagramPalette: vi.fn(), setFontSizePx: vi.fn(),
-      setEditorFontSizePx: vi.fn(), setDensityPercent: vi.fn(),
-    },
-    setIsWorkspaceSwitcherOpen: vi.fn(), setRequestError: vi.fn(),
-    isMountedRef: { current: true }, clearRecoveredBackendRequestError: vi.fn(),
-    setBackendConnectionState: vi.fn(), reportRequestError: vi.fn(),
-    applyControlPanelLayout: (value) => value,
-  };
-}
 
 beforeEach(() => {
   vi.useFakeTimers();

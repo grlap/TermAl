@@ -108,27 +108,48 @@ This supports:
 - one browser on the right monitor with `?workspace=review`
 - an intentionally shared layout by opening the same URL in another browser
 
-In the Workspace switcher, choose **Open in new tab** beside another saved
-workspace to open its existing layout while keeping this tab in place. This
-is a native link: middle-click, Ctrl/Cmd-click, and the browser's link context
-menu work too. Clicking the main row still switches this tab. No workspace
-is copied or created by the new-tab action.
+Open the **Workspaces** control-panel section — the outlined layout icon in
+the dock, directly above Projects by default — to list saved browser layouts.
+The section uses the same rail active marker and keyboard behavior as the
+other dock sections. Its header has **New workspace here** (+), secondary
+**New window**, and **Refresh**. **Refresh** is the only header action
+disabled while the saved-list GET is in flight or a DELETE is in progress.
+Those are separate states: GET shows “Loading saved workspaces…”, and
+delete-only shows “Deleting”. **New workspace here** and
+**New window** stay available. Search matches a label or id. A row click
+switches this tab; the overflow menu holds **Rename** for a persisted layout,
+plus **Open in new tab** and **Delete** for every non-current row. Delete asks
+for confirmation. This is not a persisted workspace-list tab and cannot be
+dragged out as a launcher.
 
-The current row has no new-tab action: two tabs saving the same workspace ID
-would overwrite the same saved layout. This does not detect whether another
-saved workspace is already open elsewhere; same-ID writes remain last-write-wins.
+**Open in new tab** is a native link: middle-click, Ctrl/Cmd-click, and the
+browser's link context menu work too. No workspace is copied or created by
+the new-tab action.
+
+The current row has no new-tab or delete action: two tabs saving the same
+workspace ID would overwrite the same saved layout. This does not detect
+whether another saved workspace is already open elsewhere; same-ID writes
+remain last-write-wins.
+
+If the dock is closed, moved to the right, or showing another section, use
+the ordinary open-control-panel action and choose Workspaces. There is no
+separate pane-bar workspace popover.
 
 ### Workspace labels
 
-Open **Workspace → Add current label** (or **Edit current label**) to name
-the workspace in the current browser tab. The editor stays above the saved
-list and only edits the current workspace. Labels appear in the switcher,
-its current-workspace button, and the browser tab title. Workspace IDs and
-URLs stay unchanged; an empty label restores the ID-based display.
+Use a row's overflow **Rename** to name a persisted workspace. The editor
+stays above the saved list. Labels appear in the Workspaces list and the
+browser tab title. Workspace IDs and URLs stay unchanged; an empty label
+restores the ID-based display. The main row shows the label or a short-id
+fallback, an optional muted updated time, and a Current badge on this
+browser's workspace. The full UUID stays in the accessible details and
+tooltip, not as a wide chip.
 
 The saved list pins the current workspace first, then sorts by label or ID,
 with the ID as a tie-breaker. Live updates and layout autosaves do not reorder
-the list by activity time.
+the list by activity time. A missing Workspaces entry in an older saved dock
+order is inserted immediately before Projects; a user-chosen Workspaces
+position is left in place.
 
 Labels are optional server-persisted metadata, limited to 80 characters.
 `PATCH /api/workspaces/{id}/label` accepts `{ "label": "Reviews" }` and returns
@@ -199,7 +220,7 @@ The frontend remains responsible for schema validation.
 
 ## API
 
-The shipped Phase 1 API includes a list route for the workspace switcher in
+The shipped Phase 1 API includes a list route for the Workspaces section in
 addition to direct get/put by ID.
 
 ```text
@@ -233,7 +254,7 @@ If the workspace view does not exist, return `404`.
 ### GET `/api/workspaces`
 
 Returns a summary list ordered by most recent update. The frontend uses this to
-populate the workspace switcher and to reopen saved browser layouts.
+populate the Workspaces section and to reopen saved browser layouts.
 
 ### PUT `/api/workspaces/{id}`
 
@@ -255,7 +276,7 @@ Behavior:
 - replace the stored layout document
 - increment `revision`
 - bump the global app `revision`
-- emit a fresh `/api/state` snapshot so other connected switchers see the updated summaries
+- emit a fresh `/api/state` snapshot so other connected Workspaces lists see the updated summaries
 
 ## Concurrency semantics
 
@@ -300,7 +321,7 @@ The existing frontend workspace validation remains the gatekeeper:
 
 - collaborative live layout editing
 - visual presence indicators showing which browser owns which workspace
-- rename management beyond the current switcher list
+- rename management beyond the current Workspaces list
 - server-side semantic understanding of every workspace tab variant
 
 Those can come later once the basic multi-browser workflow is solid.
@@ -313,7 +334,7 @@ Those can come later once the basic multi-browser workflow is solid.
 4. Move workspace persistence from one global `localStorage` key to:
    - per-workspace local cache
    - server-backed list/get/put routes
-5. Add a workspace switcher that can list saved layouts, open another workspace
+5. Add a Workspaces dock section that can list saved layouts, open another workspace
    in the current tab, or spawn a new browser window with a fresh workspace ID.
 6. Keep the current layout model and reconciliation logic unchanged.
 
@@ -325,5 +346,5 @@ Those can come later once the basic multi-browser workflow is solid.
 - Opening the exact same `?workspace=<id>` URL in another browser restores the
   same workspace view.
 - Layout persistence no longer depends on one browser-global localStorage key.
-- Workspace layout saves publish updated `/api/state` snapshots so other browser switchers
-  stay in sync.
+- Workspace layout saves publish updated `/api/state` snapshots so other browser
+  Workspaces lists stay in sync.
