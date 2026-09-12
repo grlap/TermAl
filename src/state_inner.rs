@@ -118,6 +118,7 @@ impl StateInner {
             .then(|| session_model.clone());
 
         let record = SessionRecord {
+            codex_delegation_release: None,
             active_codex_approval_policy: None,
             active_codex_reasoning_effort: None,
             active_codex_sandbox_mode: None,

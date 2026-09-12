@@ -5184,6 +5184,385 @@ fn completed_delegation_refresh_detaches_and_kills_child_runtime() {
 }
 
 #[test]
+fn terminal_shared_codex_delegation_releases_only_child_thread() {
+    for result_status in ["completed", "failed"] {
+        let (state, old_input_rx) =
+            test_app_state_with_delegation_codex_runtime("terminal-thread-release");
+        drop(old_input_rx);
+        let process_owner = phase_sync::ParkedProcess::spawn();
+        let (runtime, input_rx, process) = test_shared_codex_runtime_with_process(
+            "terminal-thread-release",
+            process_owner.process.clone(),
+        );
+        *state.shared_codex_runtime.lock().unwrap() = Some(runtime.clone());
+        let parent = test_session_id(&state, Agent::Codex);
+        {
+            let mut inner = state.inner.lock().unwrap();
+            let index = inner.find_session_index(&parent).unwrap();
+            let record = &mut inner.sessions[index];
+            record.runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+                runtime_id: runtime.runtime_id.clone(),
+                input_tx: runtime.input_tx.clone(),
+                process: process.clone(),
+                shared_session: Some(SharedCodexSessionHandle {
+                    runtime: runtime.clone(),
+                    session_id: parent.clone(),
+                }),
+            });
+            record.session.status = SessionStatus::Active;
+            set_record_external_session_id(record, Some("active-parent-thread".to_owned()));
+        }
+        let created = state
+            .create_read_only_delegation(
+                &parent,
+                CreateDelegationRequest {
+                    prompt: "Finish the fixture.".to_owned(),
+                    title: None,
+                    cwd: None,
+                    agent: Some(Agent::Codex),
+                    model: None,
+                    mode: Some(DelegationMode::Explorer),
+                    write_policy: Some(DelegationWritePolicy::ReadOnly),
+                },
+            )
+            .unwrap();
+        recv_within_guard(&input_rx, "initial child prompt").unwrap();
+        let child_id = &created.delegation.child_session_id;
+        state
+            .set_external_session_id(child_id, "child-to-release".to_owned())
+            .unwrap();
+        finish_delegation_child_with_assistant_text(
+            &state,
+            child_id,
+            &format!("## Result\nStatus: {result_status}\n\nSummary:\nPersist before releasing."),
+        );
+        state
+            .refresh_delegation_for_child_session(child_id)
+            .unwrap();
+        // The worker must acknowledge persistence before the archive request.
+        // A bounded receive is only a deadlock guard, not a silence witness.
+        let command = recv_within_guard(&input_rx, "durable child archive").ok();
+        assert!(
+            matches!(&command, Some(CodexRuntimeCommand::JsonRpcRequest { method, params, .. })
+            if method == "thread/archive" && params["threadId"] == "child-to-release"),
+            "terminal child archive request count: expected 1, observed 0"
+        );
+        let CodexRuntimeCommand::JsonRpcRequest { response_tx, .. } = command.unwrap() else {
+            unreachable!()
+        };
+        let persisted = load_state(state.persistence_path.as_path())
+            .unwrap()
+            .unwrap();
+        assert!(
+            persisted
+                .delegations
+                .iter()
+                .any(|delegation| delegation.id == created.delegation.id
+                    && delegation.result.is_some()
+                    && delegation_is_terminal(delegation.status)),
+            "durable result must precede archive enqueue"
+        );
+        {
+            let inner = state.inner.lock().unwrap();
+            let delegation =
+                &inner.delegations[inner.find_delegation_index(&created.delegation.id).unwrap()];
+            assert!(
+                delegation.result.is_some(),
+                "result precedes resource release"
+            );
+            assert!(delegation_is_terminal(delegation.status));
+            assert_eq!(
+                inner.sessions[inner.find_session_index(&parent).unwrap()]
+                    .session
+                    .codex_thread_state,
+                Some(CodexThreadState::Active)
+            );
+        }
+        response_tx.send(Ok(json!({}))).unwrap();
+        assert_eq!(
+            state
+                .wait_for_codex_child_release(child_id)
+                .unwrap()
+                .unwrap(),
+            CodexReleaseOutcome::Archived
+        );
+        assert_eq!(
+            state
+                .get_session(child_id)
+                .unwrap()
+                .session
+                .codex_thread_state,
+            Some(CodexThreadState::Archived)
+        );
+        assert_eq!(
+            process.try_wait().unwrap(),
+            None,
+            "shared server must survive child release"
+        );
+        {
+            let inner = state.inner.lock().unwrap();
+            let root = &inner.sessions[inner.find_session_index(&parent).unwrap()];
+            assert_eq!(root.session.status, SessionStatus::Active);
+            assert!(
+                root.runtime.runtime_token().is_some(),
+                "active root stays attached"
+            );
+        }
+
+        let resumed_state = state.clone();
+        let delegation_id = created.delegation.id.clone();
+        let parent_id = parent.clone();
+        let followup = std::thread::spawn(move || {
+            resumed_state.followup_delegation(
+                &parent_id,
+                &delegation_id,
+                "Continue the fixture.".to_owned(),
+            )
+        });
+        let command = recv_within_guard(&input_rx, "unarchive before follow-up").unwrap();
+        let CodexRuntimeCommand::JsonRpcRequest {
+            method,
+            params,
+            response_tx,
+            ..
+        } = command
+        else {
+            panic!("prompt preceded unarchive")
+        };
+        assert_eq!(method, "thread/unarchive");
+        assert_eq!(params["threadId"], "child-to-release");
+        response_tx.send(Ok(json!({}))).unwrap();
+        let command = recv_within_guard(&input_rx, "follow-up prompt").unwrap();
+        assert!(matches!(command, CodexRuntimeCommand::Prompt { .. }));
+        assert!(followup.join().unwrap().is_ok());
+    }
+}
+
+#[tokio::test]
+async fn user_message_reopens_completed_codex_delegation_child() {
+    let (state, input_rx) = test_app_state_with_delegation_codex_runtime("user-child-reopen");
+    let parent = test_session_id(&state, Agent::Codex);
+    let created = state
+        .create_read_only_delegation(
+            &parent,
+            CreateDelegationRequest {
+                prompt: "Finish fixture.".to_owned(),
+                title: None,
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(DelegationMode::Explorer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .unwrap();
+    recv_within_guard(&input_rx, "initial prompt").unwrap();
+    let child_id = created.delegation.child_session_id.clone();
+    finish_delegation_child_with_assistant_text(
+        &state,
+        &child_id,
+        "## Result\nStatus: completed\n\nSummary:\nKept transcript.",
+    );
+    state
+        .refresh_delegation_for_child_session(&child_id)
+        .unwrap();
+    let app = app_router(state.clone());
+    let (status, _body): (StatusCode, Value) = request_json(
+        &app,
+        Request::builder()
+            .method("POST")
+            .uri(format!("/api/sessions/{child_id}/messages"))
+            .header("content-type", "application/json")
+            .body(Body::from(
+                json!({"text":"Continue from the UI","attachments":[]}).to_string(),
+            ))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::ACCEPTED,
+        "reopened child must accept the user's next prompt"
+    );
+    assert!(matches!(
+        recv_within_guard(&input_rx, "user follow-up").unwrap(),
+        CodexRuntimeCommand::Prompt { .. }
+    ));
+    assert!(state.get_session(&child_id).unwrap().session.messages.iter().any(|message|
+        matches!(message, Message::Text { text, .. } if text.contains("Kept transcript."))));
+}
+
+#[test]
+fn terminal_codex_child_archive_waits_for_connected_writer_content_fence() {
+    for persist_succeeds in [false, true] {
+        let (mut state, input_rx) =
+            test_app_state_with_delegation_codex_runtime("release-durable-fence");
+        let parent = test_session_id(&state, Agent::Codex);
+        let created = state
+            .create_read_only_delegation(
+                &parent,
+                CreateDelegationRequest {
+                    prompt: "Finish fixture.".to_owned(),
+                    title: None,
+                    cwd: None,
+                    agent: Some(Agent::Codex),
+                    model: None,
+                    mode: Some(DelegationMode::Explorer),
+                    write_policy: Some(DelegationWritePolicy::ReadOnly),
+                },
+            )
+            .unwrap();
+        recv_within_guard(&input_rx, "initial prompt").unwrap();
+        let child_id = created.delegation.child_session_id;
+        state
+            .set_external_session_id(&child_id, "durable-child".to_owned())
+            .unwrap();
+        let (persist_tx, persist_rx) = mpsc::channel();
+        state.persist_tx = persist_tx;
+        finish_delegation_child_with_assistant_text(
+            &state,
+            &child_id,
+            "## Result\nStatus: completed\n\nSummary:\nPersist exact result first.",
+        );
+        state
+            .refresh_delegation_for_child_session(&child_id)
+            .unwrap();
+        let requests: Vec<_> = persist_rx.try_iter().collect();
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|request| matches!(request, PersistRequest::Fence(_)))
+                .count(),
+            1,
+            "connected writer must receive one content fence before archive"
+        );
+        assert!(
+            matches!(input_rx.try_recv(), Err(mpsc::TryRecvError::Empty)),
+            "queued terminal state is not yet durable"
+        );
+        if persist_succeeds {
+            let mut batch = PersistFenceBatch::default();
+            for request in requests {
+                batch.accept(request);
+            }
+            let delta = collect_persist_delta_from_shared_state(&state.inner, 0);
+            persist_delta_with_fences(
+                &mut SqlitePersistConnectionCache::new(),
+                &state.persistence_path,
+                &delta,
+                &mut batch,
+            )
+            .unwrap();
+            let command =
+                recv_within_guard(&input_rx, "archive after durable content acknowledgement")
+                    .unwrap();
+            let CodexRuntimeCommand::JsonRpcRequest {
+                method,
+                response_tx,
+                ..
+            } = command
+            else {
+                panic!("archive expected");
+            };
+            assert_eq!(method, "thread/archive");
+            let durable = load_state(&state.persistence_path).unwrap().unwrap();
+            assert!(durable.delegations.iter().any(|record| {
+                record.id == created.delegation.id
+                    && record
+                        .result
+                        .as_ref()
+                        .is_some_and(|result| result.summary == "Persist exact result first.")
+            }));
+            response_tx.send(Ok(json!({}))).unwrap();
+            assert_eq!(
+                state
+                    .wait_for_codex_child_release(&child_id)
+                    .unwrap()
+                    .unwrap(),
+                CodexReleaseOutcome::Archived
+            );
+        } else {
+            for request in requests {
+                if let PersistRequest::Fence(fence) = request {
+                    fence.finish(Err(PersistFenceError::WriteFailed(
+                        "fixture disk failure".to_owned(),
+                    )));
+                }
+            }
+            assert!(matches!(
+                state
+                    .wait_for_codex_child_release(&child_id)
+                    .unwrap()
+                    .unwrap(),
+                CodexReleaseOutcome::NotSent(_)
+            ));
+            assert!(
+                matches!(input_rx.try_recv(), Err(mpsc::TryRecvError::Empty)),
+                "failed durability must never archive the child's thread"
+            );
+            // A recovered persistence worker must make an unsent archive
+            // retryable without a manual Archive or application restart.
+            let retry_state = state.clone();
+            let retry_child = child_id.clone();
+            let retry =
+                std::thread::spawn(move || retry_state.prepare_codex_child_followup(&retry_child));
+            loop {
+                if let PersistRequest::Fence(fence) =
+                    phase_sync::receive(&persist_rx, "retry terminal durability")
+                {
+                    fence.finish(Err(PersistFenceError::WriteFailed(
+                        "still blocked".to_owned(),
+                    )));
+                    break;
+                }
+            }
+            assert!(
+                retry
+                    .join()
+                    .unwrap()
+                    .unwrap_err()
+                    .message
+                    .contains("still blocked")
+            );
+            assert!(
+                state
+                    .get_delegation(&parent, &created.delegation.id)
+                    .unwrap()
+                    .delegation
+                    .result
+                    .is_some(),
+                "failed retry must not clear the parent's terminal result"
+            );
+            drop(persist_rx);
+            state
+                .prepare_codex_child_followup(&child_id)
+                .expect("NotSent release can recover after the durability failure");
+            let durable = load_state(&state.persistence_path).unwrap().unwrap();
+            assert!(
+                durable.delegations.iter().any(|record| {
+                    record.id == created.delegation.id && record.result.is_some()
+                }),
+                "retry must confirm the terminal result before allowing re-arm"
+            );
+            state
+                .followup_delegation(
+                    &parent,
+                    &created.delegation.id,
+                    "Continue after storage recovery.".to_owned(),
+                )
+                .unwrap();
+            assert!(
+                matches!(
+                    phase_sync::receive(&input_rx, "followup after NotSent recovery"),
+                    CodexRuntimeCommand::Prompt { .. }
+                ),
+                "an unsent archive needs no archive/unarchive RPC before the next prompt"
+            );
+        }
+    }
+}
+
+#[test]
 fn cancel_preserves_failed_delegation_result() {
     let state = test_app_state();
     let parent_session_id = test_session_id(&state, Agent::Codex);

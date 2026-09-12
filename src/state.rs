@@ -1644,6 +1644,8 @@ impl std::fmt::Debug for EngramMcpInstalledDescriptor {
 /// Represents a session record.
 #[derive(Clone)]
 struct SessionRecord {
+    /// Process-local barrier; persisted Archived state handles restart/resume.
+    codex_delegation_release: Option<Arc<CodexDelegationRelease>>,
     active_codex_approval_policy: Option<CodexApprovalPolicy>,
     active_codex_reasoning_effort: Option<CodexReasoningEffort>,
     active_codex_sandbox_mode: Option<CodexSandboxMode>,

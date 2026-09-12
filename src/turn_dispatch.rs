@@ -1295,6 +1295,17 @@ impl AppState {
         if prompt.is_empty() && attachments.is_empty() {
             return Err(ApiError::bad_request("prompt cannot be empty"));
         }
+        // Background/direct dispatch must not restore a terminal child before
+        // rejecting it. Explicit follow-up (including the user route) rearms
+        // the delegation before reaching this path. Recheck at admission too.
+        {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            if inner.find_visible_session_index(session_id).is_some_and(|index|
+                delegated_child_dispatch_is_blocked_locked(&inner, index)) {
+                return Err(ApiError::conflict(DELEGATION_NO_LONGER_STARTABLE_MESSAGE));
+            }
+        }
+        self.prepare_codex_child_followup(session_id)?;
         if request.source_mailbox.is_none() {
             if let Err(err) =
                 self.reconcile_never_woken_mailbox_notifications_for_session(session_id)
@@ -1342,6 +1353,11 @@ impl AppState {
             return Err(ApiError::conflict(
                 DELEGATION_NO_LONGER_STARTABLE_MESSAGE,
             ));
+        }
+
+        if inner.sessions[index].codex_delegation_release.as_ref().is_some_and(|release|
+            release.outcome.lock().expect("Codex release mutex poisoned").is_none()) {
+            return Err(ApiError::conflict("Codex thread cleanup started during prompt admission; retry the prompt"));
         }
 
         // Resolve peer-sender attribution (`termal_send_to_session`) to the

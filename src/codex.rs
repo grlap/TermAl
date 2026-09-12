@@ -11,6 +11,8 @@
 // reject_undeliverable), delta-suffix deduplication with UTF-8 safety,
 // subagent-result buffering with flush-after-final-assistant ordering,
 // and stdout parsing with capped line reads + bad-JSON streak tracking.
+// Definitive lost-rollout recovery is delegated to codex_thread_recovery.rs;
+// its writer continuation reuses the normal setup handshake owned here.
 //
 // The Codex protocol types (`CodexRuntimeCommand`, `CodexPromptCommand`,
 // `CodexJsonRpcResponseCommand`, `CodexPendingApproval`,
@@ -285,6 +287,41 @@ fn spawn_shared_codex_stdin_watchdog(
     Ok(())
 }
 
+fn start_shared_codex_rpc_command(
+    writer: &mut impl Write,
+    pending_requests: &CodexPendingRequestMap,
+    request_id: String,
+    method: &str,
+    params: Value,
+    timeout: Duration,
+    response_tx: Sender<std::result::Result<Value, CodexResponseError>>,
+) -> Result<()> {
+    match start_codex_json_rpc_request_with_id(writer, pending_requests, request_id, method, params) {
+        Ok(pending) => {
+            let pending_requests = pending_requests.clone();
+            let method = method.to_owned();
+            std::thread::spawn(move || {
+                let result = wait_for_codex_json_rpc_response(
+                    &pending_requests, pending, &method, Some(timeout),
+                );
+                let _ = response_tx.send(result);
+            });
+            Ok(())
+        }
+        Err(error) => {
+            // Preserve the typed write failure for the caller before retiring
+            // this writer. A partial write/failed flush still has unknown
+            // delivery, so Transport must not be interpreted as NotSent.
+            let fatal = match &error {
+                CodexResponseError::Transport(detail) => Some(anyhow!(detail.clone())),
+                _ => None,
+            };
+            let _ = response_tx.send(Err(error));
+            fatal.map_or(Ok(()), Err)
+        }
+    }
+}
+
 fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
     if !state.agent_runtime_spawning_enabled {
         bail!("agent runtime spawning is disabled for this AppState");
@@ -462,6 +499,23 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
                             ),
                         )
                     }
+                    CodexRuntimeCommand::RecoverLostThread { session_id, request_id, thread_id, detail } => {
+                        handle_shared_codex_lost_thread_recovery(
+                            &mut stdin,
+                            &writer_pending_requests,
+                            &writer_state,
+                            &writer_runtime_id,
+                            &writer_codex_home,
+                            &writer_sessions,
+                            &writer_thread_sessions,
+                            &writer_input_tx,
+                            Some(&writer_context),
+                            &session_id,
+                            &request_id,
+                            &thread_id,
+                            &detail,
+                        )
+                    }
                     CodexRuntimeCommand::JsonRpcRequest {
                         method,
                         params,
@@ -478,40 +532,15 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
                         // Fire-and-forget: write the request, then spawn a
                         // waiter thread for the response. The writer thread
                         // returns immediately so other commands are not blocked.
-                        match start_codex_json_rpc_request_with_id(
+                        start_shared_codex_rpc_command(
                             &mut stdin,
                             &writer_pending_requests,
                             request_id,
                             &method,
                             params,
-                        ) {
-                            Ok(pending) => {
-                                let waiter_pending = writer_pending_requests.clone();
-                                let method_owned = method.clone();
-                                std::thread::spawn(move || match wait_for_codex_json_rpc_response(
-                                    &waiter_pending,
-                                    pending,
-                                    &method_owned,
-                                    Some(timeout),
-                                ) {
-                                    Ok(result) => {
-                                        let _ = response_tx.send(Ok(result));
-                                    }
-                                    Err(CodexResponseError::JsonRpc(detail)
-                                        | CodexResponseError::Timeout(detail)
-                                        | CodexResponseError::Transport(detail)) => {
-                                        let _ = response_tx.send(Err(detail));
-                                    }
-                                });
-                                Ok(())
-                            }
-                            Err(CodexResponseError::Transport(detail)) => Err(anyhow!(detail)),
-                            Err(CodexResponseError::JsonRpc(detail)
-                                | CodexResponseError::Timeout(detail)) => {
-                                let _ = response_tx.send(Err(detail));
-                                Ok(())
-                            }
-                        }
+                            timeout,
+                            response_tx,
+                        )
                     }
                     CodexRuntimeCommand::JsonRpcResponse { response } => {
                         stdin.set_activity_context(format!(
@@ -1182,6 +1211,36 @@ fn handle_shared_codex_prompt_command(
         CodexThreadSetupDecision::StartSetup(request) => request,
     };
 
+    start_shared_codex_thread_setup_request(
+        writer,
+        pending_requests,
+        state,
+        runtime_id,
+        codex_home,
+        sessions,
+        thread_sessions,
+        input_tx,
+        writer_context,
+        session_id,
+        request_id,
+        setup_request,
+    )
+}
+
+fn start_shared_codex_thread_setup_request(
+    writer: &mut impl Write,
+    pending_requests: &CodexPendingRequestMap,
+    state: &AppState,
+    runtime_id: &str,
+    codex_home: &FsPath,
+    sessions: &SharedCodexSessionMap,
+    thread_sessions: &SharedCodexThreadMap,
+    input_tx: &Sender<CodexRuntimeCommand>,
+    writer_context: Option<&SharedCodexStdinContextState>,
+    session_id: &str,
+    request_id: String,
+    setup_request: CodexThreadSetupRequest,
+) -> Result<()> {
     // Slow path: need to create or resume a thread first. Fire-and-forget the
     // setup request and spawn a waiter so the writer thread is not blocked.
     //
@@ -1276,6 +1335,10 @@ fn finish_shared_codex_thread_setup(
         return Ok(());
     }
     let setup_guard = PendingCodexThreadSetupGuard::new(sessions, session_id, &request_id);
+    // Bind recovery to the thread in this RPC, not a later parked command.
+    let resumed_thread_id = (method == "thread/resume")
+        .then(|| params.get("threadId").and_then(Value::as_str).map(str::to_owned))
+        .flatten();
 
     set_shared_codex_writer_context(
         writer_context,
@@ -1556,6 +1619,24 @@ fn finish_shared_codex_thread_setup(
                 }
             }
             Err(err) => {
+                if let Some(thread_id) = resumed_thread_id.filter(|_| is_lost_codex_rollout_error(&err)) {
+                    if !shared_codex_thread_setup_is_current(
+                        &waiter_sessions,
+                        &waiter_session_id,
+                        &request_id,
+                    ) {
+                        return;
+                    }
+                    let recovery = CodexRuntimeCommand::RecoverLostThread {
+                        session_id: waiter_session_id.clone(),
+                        request_id: request_id.clone(),
+                        thread_id,
+                        detail: err.to_string(),
+                    };
+                    if waiter_input_tx.send(recovery).is_ok() {
+                        return; // Same setup keeps ownership until the writer handles recovery.
+                    }
+                }
                 handle_shared_codex_thread_setup_response_error_if_current(
                     &waiter_sessions,
                     &waiter_state,

@@ -402,6 +402,7 @@ impl PersistedSessionRecord {
         }
 
         let mut record = SessionRecord {
+            codex_delegation_release: None,
             active_codex_approval_policy: self.active_codex_approval_policy,
             active_codex_reasoning_effort: self.active_codex_reasoning_effort,
             active_codex_sandbox_mode: self.active_codex_sandbox_mode,

@@ -1059,13 +1059,19 @@ impl TermalDelegationMcpBridge {
         let delegation_id =
             required_path_identifier(arguments.get("delegationId"), "delegationId")?;
         let message = required_string(arguments.get("message"), "message")?;
-        self.post_json(
-            &format!(
-                "/api/sessions/{}/delegations/{}/followup",
-                self.serving_session_id, delegation_id
-            ),
-            &json!({ "message": message }),
-        )
+        let path = format!("/api/sessions/{}/delegations/{}/followup", self.serving_session_id, delegation_id);
+        self.decode_response("POST", &path, self.followup_request(&path, &json!({ "message": message })).send())
+    }
+
+    fn followup_request(&self, path: &str, body: &Value) -> reqwest::blocking::RequestBuilder {
+        // Single attempt: this operation re-arms a delegation and is NOT safe
+        // to replay blindly. Allow all serial recovery waits before the normal
+        // HTTP allowance for admission/persistence. Contended recovery fails
+        // fast instead of waiting for another caller's resume lock.
+        let recovery = CODEX_CHILD_RELEASE_WAIT_TIMEOUT
+            + CODEX_THREAD_RECONCILIATION_REPLY_TIMEOUT * 2
+            + CODEX_CHILD_RESULT_FENCE_TIMEOUT + CODEX_CHILD_UNARCHIVE_REPLY_TIMEOUT;
+        self.client.post(self.url(path)).timeout(recovery + self.request_timeout).json(body)
     }
 
     fn tool_submit_review_result(&self, arguments: Value) -> Result<Value> {

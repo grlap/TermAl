@@ -16,6 +16,144 @@ fn structured_review_test_app_state() -> AppState {
 }
 
 #[test]
+fn rejected_followup_preserves_completed_structured_review() {
+    for rejection in ["attachment", "empty", "boot"] {
+        let (state, _, parent) = mailbox_test_state();
+        let (delegation, child) = install_required_review_delegation(&state, &parent);
+        state
+            .submit_delegation_review_result(&child, structured_review_request())
+            .unwrap();
+        finish_delegation_child_with_assistant_text(&state, &child, "Finished review.");
+        state.refresh_delegation_for_child_session(&child).unwrap();
+        let before = {
+            let inner = state.inner.lock().unwrap();
+            inner.delegations[inner.find_delegation_index(&delegation).unwrap()].clone()
+        };
+        assert_eq!(
+            before.review_result_schema_version,
+            Some(DELEGATION_REVIEW_RESULT_SCHEMA_VERSION)
+        );
+        assert_eq!(
+            before.result.as_ref().unwrap().summary,
+            "One medium issue found."
+        );
+        if rejection == "boot" {
+            let mut inner = state.inner.lock().unwrap();
+            let index = inner.find_session_index(&child).unwrap();
+            inner.sessions[index].engram_boot_recovery_pending = true;
+        }
+        let result = state.followup_delegation_request(
+            &parent,
+            &delegation,
+            SendMessageRequest {
+                text: if rejection == "empty" {
+                    " "
+                } else {
+                    "Continue"
+                }
+                .to_owned(),
+                expanded_text: None,
+                source_session_id: None,
+                source_mailbox: None,
+                attachments: if rejection == "attachment" {
+                    vec![SendMessageAttachmentRequest {
+                        media_type: "application/pdf".to_owned(),
+                        data: "eA==".to_owned(),
+                        file_name: None,
+                    }]
+                } else {
+                    vec![]
+                },
+            },
+        );
+        assert!(result.is_err(), "fixture must reject {rejection}");
+        let after = {
+            let inner = state.inner.lock().unwrap();
+            inner.delegations[inner.find_delegation_index(&delegation).unwrap()].clone()
+        };
+        assert_eq!(
+            after, before,
+            "rejected {rejection} must preserve the result, schema and submission attempt"
+        );
+    }
+}
+
+#[test]
+fn structured_result_is_durable_before_child_archive_and_active_review_is_not_released() {
+    let (state, _root_sender_id, parent) = mailbox_test_state();
+    let (delegation_id, child_id) = install_required_review_delegation(&state, &parent);
+    let (runtime, input_rx, process) = test_shared_codex_runtime("structured-release-order");
+    *state.shared_codex_runtime.lock().unwrap() = Some(runtime.clone());
+    {
+        let mut inner = state.inner.lock().unwrap();
+        let index = inner.find_session_index(&child_id).unwrap();
+        let child = &mut inner.sessions[index];
+        child.runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+            runtime_id: runtime.runtime_id.clone(),
+            input_tx: runtime.input_tx.clone(),
+            process,
+            shared_session: Some(SharedCodexSessionHandle {
+                runtime,
+                session_id: child_id.clone(),
+            }),
+        });
+        child.session.status = SessionStatus::Active;
+    }
+    state
+        .set_external_session_id(&child_id, "structured-thread".to_owned())
+        .unwrap();
+    state
+        .submit_delegation_review_result(&child_id, structured_review_request())
+        .unwrap();
+    state
+        .refresh_delegation_for_child_session(&child_id)
+        .unwrap();
+    assert!(
+        input_rx.try_recv().is_err(),
+        "an active review must keep its tools even after submitting"
+    );
+    finish_delegation_child_with_assistant_text(&state, &child_id, "Finished review.");
+    state
+        .refresh_delegation_for_child_session(&child_id)
+        .unwrap();
+    let command = recv_within_guard(&input_rx, "durable terminal review archive")
+        .expect("terminal review enqueued archive");
+    let CodexRuntimeCommand::JsonRpcRequest {
+        method,
+        response_tx,
+        ..
+    } = command
+    else {
+        panic!("archive expected")
+    };
+    assert_eq!(method, "thread/archive");
+    let persisted = load_state(state.persistence_path.as_path())
+        .unwrap()
+        .unwrap();
+    let delegation = persisted
+        .delegations
+        .iter()
+        .find(|record| record.id == delegation_id)
+        .unwrap();
+    assert_eq!(
+        delegation.review_result_schema_version,
+        Some(DELEGATION_REVIEW_RESULT_SCHEMA_VERSION)
+    );
+    assert_eq!(
+        delegation.result.as_ref().unwrap().summary,
+        "One medium issue found."
+    );
+    response_tx.send(Ok(json!({}))).unwrap();
+    assert_eq!(
+        state
+            .wait_for_codex_child_release(&child_id)
+            .unwrap()
+            .unwrap(),
+        CodexReleaseOutcome::Archived
+    );
+}
+
+#[test]
 fn reviewer_delegation_prompt_injects_termal_owned_result_protocol() {
     let record = DelegationRecord {
         id: "delegation-marker-test".to_owned(),

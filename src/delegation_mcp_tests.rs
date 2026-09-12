@@ -3668,3 +3668,32 @@ fn delegation_mcp_board_set_treats_a_max_prior_revision_receipt_as_mismatch_not_
     );
     server.join().expect("test server should join");
 }
+
+#[test]
+fn delegation_followup_http_budget_covers_release_reconciliation_and_restore() {
+    let bridge = TermalDelegationMcpBridge::new(
+        "session-parent".to_owned(),
+        "http://127.0.0.1:1".to_owned(),
+    )
+    .unwrap();
+    let request = bridge
+        .followup_request(
+            "/api/sessions/session-parent/delegations/delegation-child/followup",
+            &json!({"message":"Continue"}),
+        )
+        .build()
+        .unwrap();
+    let recovery = CODEX_CHILD_RELEASE_WAIT_TIMEOUT
+        + CODEX_THREAD_RECONCILIATION_REPLY_TIMEOUT * 2
+        + CODEX_CHILD_RESULT_FENCE_TIMEOUT
+        + CODEX_CHILD_UNARCHIVE_REPLY_TIMEOUT;
+    assert_eq!(
+        request.timeout().copied().unwrap(),
+        recovery + TERMAL_DELEGATION_MCP_HTTP_TIMEOUT,
+        "followup HTTP timeout must cover serial release/reconciliation/durability/unarchive plus ordinary request allowance"
+    );
+    assert_eq!(
+        bridge.request_timeout, TERMAL_DELEGATION_MCP_HTTP_TIMEOUT,
+        "ordinary requests keep their existing timeout"
+    );
+}

@@ -75,9 +75,9 @@ impl AppState {
     /// then waits on a one-shot reply channel with a one-second grace
     /// window past `timeout` (the runtime itself enforces `timeout` for
     /// the remote call). The three error paths map to `ApiError`: a
-    /// runtime-level transport or queueing failure and a missing result
-    /// both surface as `internal`; a Codex-side JSON-RPC error or
-    /// explicit timeout comes back as `bad_request`. Used by the Codex
+    /// transport/queueing failures, missing results and timeouts surface
+    /// as `internal`; a Codex-side JSON-RPC error comes back as
+    /// `bad_request`. Used by the Codex
     /// thread actions in `src/codex_thread_actions.rs` and the
     /// model-list pagination path in `src/codex_rpc.rs`.
     fn perform_codex_json_rpc_request(
@@ -86,10 +86,37 @@ impl AppState {
         params: Value,
         timeout: Duration,
     ) -> Result<Value, ApiError> {
+        self.perform_codex_json_rpc_request_typed(method, params, timeout)
+            .map_err(|error| match error {
+                CodexResponseError::Transport(detail) | CodexResponseError::Timeout(detail) => {
+                    ApiError::internal(detail)
+                }
+                error => ApiError::bad_request(format!("Codex request `{method}` failed: {error}")),
+            })
+    }
+
+    // Archive recovery must distinguish a server rejection from a timeout;
+    // the latter removes only the local waiter, not the server operation.
+    fn perform_codex_json_rpc_request_typed(
+        &self,
+        method: &str,
+        params: Value,
+        timeout: Duration,
+    ) -> Result<Value, CodexResponseError> {
         let runtime = self.shared_codex_runtime().map_err(|err| {
-            ApiError::internal(format!("failed to start shared Codex runtime: {err:#}"))
+            CodexResponseError::Transport(format!("failed to start shared Codex runtime: {err:#}"))
         })?;
-        let (response_tx, response_rx) = mpsc::channel::<std::result::Result<Value, String>>();
+        self.perform_codex_json_rpc_request_on_runtime(&runtime, method, params, timeout)
+    }
+
+    fn perform_codex_json_rpc_request_on_runtime(
+        &self,
+        runtime: &SharedCodexRuntime,
+        method: &str,
+        params: Value,
+        timeout: Duration,
+    ) -> Result<Value, CodexResponseError> {
+        let (response_tx, response_rx) = mpsc::channel();
         runtime
             .input_tx
             .send(CodexRuntimeCommand::JsonRpcRequest {
@@ -99,18 +126,15 @@ impl AppState {
                 response_tx,
             })
             .map_err(|err| {
-                ApiError::internal(format!("failed to queue Codex request `{method}`: {err}"))
+                CodexResponseError::Transport(format!("failed to queue Codex request `{method}`: {err}"))
             })?;
 
         match response_rx.recv_timeout(timeout + Duration::from_secs(1)) {
-            Ok(Ok(result)) => Ok(result),
-            Ok(Err(detail)) => Err(ApiError::bad_request(format!(
-                "Codex request `{method}` failed: {detail}"
-            ))),
-            Err(mpsc::RecvTimeoutError::Timeout) => Err(ApiError::internal(format!(
+            Ok(result) => result,
+            Err(mpsc::RecvTimeoutError::Timeout) => Err(CodexResponseError::Timeout(format!(
                 "timed out waiting for Codex request `{method}`"
             ))),
-            Err(mpsc::RecvTimeoutError::Disconnected) => Err(ApiError::internal(format!(
+            Err(mpsc::RecvTimeoutError::Disconnected) => Err(CodexResponseError::Transport(format!(
                 "Codex request `{method}` did not return a result"
             ))),
         }

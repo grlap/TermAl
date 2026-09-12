@@ -1130,6 +1130,251 @@ fn codex_archive_and_unarchive_actions_update_thread_state_and_block_dispatch() 
     ));
 }
 
+// The archive side effect can complete even when its response reports an error.
+// A positive archived inventory entry must reconcile the local flag, and a
+// repeat request must be idempotent rather than returning a local 409.
+#[test]
+fn codex_archive_error_reconciles_confirmed_archive_and_retry() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    state
+        .set_external_session_id(&session_id, "released-thread".to_owned())
+        .unwrap();
+    let (runtime, input_rx, _process) = test_shared_codex_runtime("archive-error-reconcile");
+    *state.shared_codex_runtime.lock().unwrap() = Some(runtime);
+    let worker = std::thread::spawn(move || {
+        while let Ok(CodexRuntimeCommand::JsonRpcRequest {
+            method,
+            params,
+            response_tx,
+            ..
+        }) = input_rx.recv()
+        {
+            let result = match method.as_str() {
+                "thread/archive" => Err(CodexResponseError::Timeout(
+                    "timed out after releasing thread resources (fixture)".to_owned(),
+                )),
+                "thread/list" => {
+                    assert_eq!(params["archived"], true);
+                    Ok(json!({"data":[{"id":"released-thread"}],"nextCursor":null}))
+                }
+                _ => panic!("unexpected archive reconciliation method: {method}"),
+            };
+            let _ = response_tx.send(result);
+        }
+    });
+    let outcome = state.archive_codex_thread(&session_id);
+    let actual = outcome.as_ref().err().map(|error| error.status);
+    // Named red witness: before reconciliation this is Some(400).
+    assert_eq!(actual, None, "confirmed release must not remain HTTP 400");
+    assert_eq!(
+        state
+            .get_session(&session_id)
+            .unwrap()
+            .session
+            .codex_thread_state,
+        Some(CodexThreadState::Archived)
+    );
+    assert!(
+        state.archive_codex_thread(&session_id).is_ok(),
+        "archive retry is idempotent"
+    );
+    state.shared_codex_runtime.lock().unwrap().take();
+    worker.join().unwrap();
+}
+
+#[test]
+fn codex_archive_notification_reconciles_detached_thread() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    state
+        .set_external_session_id(&session_id, "detached-thread".to_owned())
+        .unwrap();
+    let (runtime, _input_rx, _process) = test_shared_codex_runtime("late-archive-notification");
+    *state.shared_codex_runtime.lock().unwrap() = Some(runtime.clone());
+    handle_shared_codex_app_server_message(
+        &json!({"method":"thread/archived","params":{"threadId":"detached-thread"}}),
+        &state,
+        &runtime.runtime_id,
+        &Arc::new(Mutex::new(HashMap::new())),
+        &runtime.sessions,
+        &runtime.thread_sessions,
+        &runtime.input_tx,
+    )
+    .unwrap();
+    assert_eq!(
+        state
+            .get_session(&session_id)
+            .unwrap()
+            .session
+            .codex_thread_state,
+        Some(CodexThreadState::Archived),
+        "late archive must reconcile detached local Active"
+    );
+}
+
+#[test]
+fn codex_archive_error_without_positive_evidence_remains_an_error() {
+    for inventory in [
+        json!({"data":[],"nextCursor":null}),
+        json!({"invalid":true}),
+    ] {
+        let state = test_app_state();
+        let session_id = test_session_id(&state, Agent::Codex);
+        state
+            .set_external_session_id(&session_id, "unconfirmed-thread".to_owned())
+            .unwrap();
+        let (runtime, input_rx, _process) = test_shared_codex_runtime("unconfirmed-archive");
+        *state.shared_codex_runtime.lock().unwrap() = Some(runtime);
+        let worker = std::thread::spawn(move || {
+            for expected in ["thread/archive", "thread/list"] {
+                let command = recv_within_guard(&input_rx, "archive/probe").unwrap();
+                let CodexRuntimeCommand::JsonRpcRequest {
+                    method,
+                    response_tx,
+                    ..
+                } = command
+                else {
+                    panic!("unexpected command")
+                };
+                assert_eq!(method, expected);
+                response_tx
+                    .send(if method == "thread/archive" {
+                        Err(CodexResponseError::Transport(
+                            "fixture archive failed".to_owned(),
+                        ))
+                    } else {
+                        Ok(inventory.clone())
+                    })
+                    .unwrap();
+            }
+        });
+        let error = state
+            .archive_codex_thread(&session_id)
+            .err()
+            .expect("unknown is not archived");
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert!(error.message.contains("fixture archive failed"));
+        assert_eq!(
+            state
+                .get_session(&session_id)
+                .unwrap()
+                .session
+                .codex_thread_state,
+            Some(CodexThreadState::Active)
+        );
+        worker.join().unwrap();
+    }
+}
+
+#[test]
+fn codex_archive_notification_from_replaced_server_cannot_change_detached_thread() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    state
+        .set_external_session_id(&session_id, "same-thread".to_owned())
+        .unwrap();
+    let (runtime, _input_rx, _process) = test_shared_codex_runtime("current-server");
+    *state.shared_codex_runtime.lock().unwrap() = Some(runtime.clone());
+    handle_shared_codex_app_server_message(
+        &json!({"method":"thread/archived","params":{"threadId":"same-thread"}}),
+        &state,
+        "replaced-server",
+        &Arc::new(Mutex::new(HashMap::new())),
+        &runtime.sessions,
+        &runtime.thread_sessions,
+        &runtime.input_tx,
+    )
+    .unwrap();
+    assert_eq!(
+        state
+            .get_session(&session_id)
+            .unwrap()
+            .session
+            .codex_thread_state,
+        Some(CodexThreadState::Active)
+    );
+}
+
+#[test]
+fn codex_archive_late_confirmation_recovers_failed_child_release() {
+    for retry_archive in [false, true] {
+        let state = test_app_state();
+        let session_id = test_session_id(&state, Agent::Codex);
+        state
+            .set_external_session_id(&session_id, "late-child".to_owned())
+            .unwrap();
+        {
+            let mut inner = state.inner.lock().unwrap();
+            let index = inner.find_session_index(&session_id).unwrap();
+            inner.sessions[index].session.parent_delegation_id =
+                Some("fixture-delegation".to_owned());
+        }
+        let (runtime, input_rx, _process) = test_shared_codex_runtime("late-child-release");
+        *state.shared_codex_runtime.lock().unwrap() = Some(runtime.clone());
+        let worker = std::thread::spawn(move || {
+            while let Ok(CodexRuntimeCommand::JsonRpcRequest {
+                method,
+                response_tx,
+                ..
+            }) = input_rx.recv()
+            {
+                let reply = match method.as_str() {
+                    "thread/archive" => Err(CodexResponseError::Timeout(
+                        "fixture response lost".to_owned(),
+                    )),
+                    "thread/list" => Ok(json!({"data":[],"nextCursor":null})),
+                    "thread/unarchive" => Ok(json!({})),
+                    _ => panic!("unexpected RPC: {method}"),
+                };
+                let _ = response_tx.send(reply);
+            }
+        });
+        assert!(state.archive_codex_thread(&session_id).is_err());
+        assert!(
+            state
+                .prepare_codex_child_followup(&session_id)
+                .unwrap_err()
+                .message
+                .contains("not confirmed"),
+            "an enqueued archive with an unknown result must still block follow-up"
+        );
+        handle_shared_codex_app_server_message(
+            &json!({"method":"thread/archived","params":{"threadId":"late-child"}}),
+            &state,
+            &runtime.runtime_id,
+            &Arc::new(Mutex::new(HashMap::new())),
+            &runtime.sessions,
+            &runtime.thread_sessions,
+            &runtime.input_tx,
+        )
+        .unwrap();
+        if retry_archive {
+            assert!(state.archive_codex_thread(&session_id).is_ok());
+        }
+        // This barrier came from the manual Archive action. Positive late
+        // confirmation resolves it, but only explicit Unarchive restores it.
+        state.unarchive_codex_thread(&session_id).unwrap();
+        let resumed = state.prepare_codex_child_followup(&session_id);
+        assert_eq!(
+            resumed.as_ref().err().map(|error| error.status),
+            None,
+            "positive late confirmation must supersede the failed release barrier"
+        );
+        assert_eq!(
+            state
+                .get_session(&session_id)
+                .unwrap()
+                .session
+                .codex_thread_state,
+            Some(CodexThreadState::Active)
+        );
+        state.shared_codex_runtime.lock().unwrap().take();
+        drop(runtime);
+        worker.join().unwrap();
+    }
+}
+
 // pins that inbound `thread/archived` and `thread/unarchived`
 // notifications from the shared Codex app server resolve the thread
 // id to a local session and update its `codex_thread_state`

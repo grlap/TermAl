@@ -374,6 +374,30 @@ fn handle_shared_codex_app_server_message(
         }
     };
     let runtime_token = RuntimeToken::Codex(runtime_id.to_owned());
+    // Terminal delegation cleanup has removed the runtime token, but archive
+    // notifications still describe a persisted thread. Do not discard this
+    // evidence solely because its logical session has already detached.
+    if matches!(method, "thread/archived" | "thread/unarchived") {
+        let current_server = state.shared_codex_runtime.lock().expect("shared Codex runtime mutex poisoned")
+            .as_ref().is_some_and(|runtime| runtime.runtime_id == runtime_id);
+        if current_server {
+            let mut inner = state.inner.lock().expect("state mutex poisoned");
+            if let Some(index) = inner.find_session_index(&session_id) {
+                let record = &inner.sessions[index];
+                if matches!(record.runtime, SessionRuntime::None)
+                    && record.external_session_id.as_deref() == message_thread_id
+                    && !record.runtime_stop_in_progress
+                    && !matches!(record.session.status, SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping) {
+                    let next = if method == "thread/archived" { CodexThreadState::Archived } else { CodexThreadState::Active };
+                    if record.session.codex_thread_state != Some(next) {
+                        set_record_codex_thread_state(inner.session_mut_by_index(index).expect("validated detached Codex session index"), next);
+                        state.commit_locked(&mut inner)?;
+                    }
+                    return Ok(());
+                }
+            }
+        }
+    }
     if !state.session_matches_runtime_token(&session_id, &runtime_token) {
         trace_shared_codex_event(
             "drop",

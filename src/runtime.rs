@@ -58,6 +58,14 @@ enum CodexRuntimeCommand {
         request_id: String,
         params: Value,
     },
+    /// A definitive lost-rollout reply; the writer revalidates the setup and
+    /// starts fresh without dropping the pending user prompt.
+    RecoverLostThread {
+        session_id: String,
+        request_id: String,
+        thread_id: String,
+        detail: String,
+    },
     /// Internal: sent by the thread-setup waiter after extracting the thread id
     /// from a `thread/start` or `thread/resume` response. The writer thread
     /// picks this up and fires the `turn/start` request.
@@ -70,7 +78,8 @@ enum CodexRuntimeCommand {
         method: String,
         params: Value,
         timeout: Duration,
-        response_tx: Sender<std::result::Result<Value, String>>,
+        // Preserve definitive server replies versus uncompleted local waits.
+        response_tx: Sender<std::result::Result<Value, CodexResponseError>>,
     },
     JsonRpcResponse {
         response: CodexJsonRpcResponseCommand,

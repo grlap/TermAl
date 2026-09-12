@@ -8,6 +8,7 @@ this brief leads with the mental model and the pitfalls rather than a call graph
 Primary implementation:
 
 - `src/codex.rs` — spawn/attach, the writer loop, thread-setup + parking, waiters
+- `src/codex_thread_recovery.rs` — definitive lost-rollout recovery on resume
 - `src/codex_events.rs` — inbound event routing and per-session state mutation
 - `src/runtime.rs` — `SharedCodexSessionState`, `CodexRuntimeCommand`, the type defs
 - `src/session_runtime.rs` — `SharedCodexRuntime`, `RuntimeToken`, detach
@@ -97,6 +98,32 @@ thread-level Engram shell-policy overlay. The shared process cannot leak an
 inherited per-session identity because its own environment is scrubbed, while
 unrelated policy in the user's seeded Codex configuration remains user-owned
 and authoritative.
+
+## Unreadable rollout recovery
+
+A definitive `thread/resume` failure from the Codex thread store can leave a
+TermAl session pointing at history Codex can no longer load (for example, an
+empty rollout after a host restart). The shared app-server integration keeps
+the TermAl session and transcript, clears its external thread identity, records
+the lost thread id and reason in the transcript, and runs normal `thread/start`
+setup for the **same pending prompt**. The new thread uses the current MCP and
+shell configuration and, when enabled, the normal Engram bootstrap merged with
+effective developer instructions. A recovery preamble tells the new thread that
+its former model context is unavailable and to consult retained transcript and
+configured project memory before continuing. This is not a reconstruction of
+the old model context. Rollout files are never edited or deleted.
+
+Recovery recognizes only specific JSON-RPC diagnostics: no rollout found,
+empty rollout, missing or unparsable session metadata, or a metadata read failing
+with a missing-file/path OS error. Timeout, transport loss, busy/locked storage,
+permission errors, and unknown diagnostics retain the old identity and use the
+existing visible failure path. The allowlist is intentionally conservative;
+app-server message wording can change. A failure of the fresh `thread/start`
+is reported normally, not recursively retried. Stop, replaced setup, changed
+runtime, changed external identity, and turn-generation guards apply before
+recovery changes any state. This automatic behavior is specific to the shared
+app-server integration; no new operator reset action or standalone REPL behavior
+is introduced.
 
 ## Approval policy ownership
 

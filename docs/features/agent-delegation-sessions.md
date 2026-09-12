@@ -20,6 +20,88 @@ Related:
 - [Diff Review Workflow](./diff-review-workflow.md)
 - [Code Navigation MCP](./code-navigation-mcp.md)
 
+## Completed Codex child thread lifecycle
+
+After a child reaches `completed` or `failed` and its terminal result is
+persisted, TermAl queues a session-scoped `thread/archive` on the shared Codex
+app-server. Required reviewer submissions are recorded through the structured
+result protocol before successful completion; a missing submission remains a
+failed/unavailable review, never a clean result. The child record, transcript,
+and external thread ID survive cleanup. Claude and ACP teardown is unchanged;
+the shared Codex process and other sessions are not killed.
+
+Archive is used instead of `thread/unsubscribe`: the latter has an inactivity
+grace period, whereas the archive measurement released the observed per-thread
+MCP processes. See the [official app-server lifecycle contract](https://learn.chatgpt.com/docs/app-server#archive-a-thread).
+No startup sweep archives pre-existing idle threads; backlog cleanup would be a
+separate operator decision.
+
+The archive RPC has a 30-second bound. Its JSON-RPC error body is logged, and an
+ambiguous failure is reconciled using a matching `thread/archived` notification
+or positive identity in paged archived `thread/list` results (a separate
+10-second/20-page probe budget, plus one second of response-delivery grace).
+Only after a definitive JSON-RPC error reply can a second bounded probe identify
+the thread in non-archived inventory, record `NotArchived`, and permit follow-up.
+An unsettled server rejection is kept as `Rejected`; timeout and transport loss
+are `Ambiguous`, because cancelling a local waiter does not cancel server work.
+Follow-up retries archived inventory for both outcomes. Active inventory settles
+`Rejected`, or `Ambiguous` only after the originating process has observably exited
+and a replacement runtime is current. Merely clearing/replacing the runtime slot
+does not prove exit; a write/flush transport failure does not prove non-delivery.
+A manual Archive retry uses the same exit-plus-positive-active evidence before
+issuing a replacement archive. While the old process may still finish its request,
+only positive archived evidence can settle ambiguity; active inventory cannot.
+The RPC error still reaches the caller/log; its text alone is not evidence that
+archive had no side effect. Missing MCP processes, an empty/truncated
+inventory, or a failed probe do not prove archive success. An already-confirmed
+archive is idempotent. If confirmation remains unavailable, the error stays
+visible. Archive retries probe for confirmation but cannot resend until the above
+conditions hold; TermAl does not silently assume success.
+
+Cleanup is reserved alongside terminal state. Before archive is queued, the
+background writer must acknowledge the exact terminal delegation content after
+SQL commit (a five-second fence); a queued write or revision alone is not proof.
+Failure or timeout records `NotSent` and does not send archive. Follow-up retries
+the exact durability fence before it can re-arm and clear the terminal result;
+if storage remains unavailable, the result stays intact and retryable. Retry
+captures the current terminal record for the same child and submission attempt;
+metadata changes do not permanently invalidate an old snapshot, but a different
+or running attempt cannot satisfy it. Manual Archive carries the outstanding
+durability obligation into its replacement barrier and checks it before RPC.
+A known unsent archive needs no manual Archive action. Once archive was enqueued,
+an unconfirmed outcome stays fenced until the appropriate positive evidence arrives.
+If the writer is disconnected, the cleanup worker uses the normal synchronous
+persistence fallback, still off the shared stdout thread.
+The same cleanup worker owns local shared-session detachment and completes it
+before archive; no independent delayed detach can remove a later registration.
+An off-lock barrier covers both detach and archive, without blocking the shared
+stdout reader. Dropped tickets retain local cleanup and durability obligations
+for retry. Ordinary non-delegated sessions do not wait on this child path.
+The caller wait budget is derived from the five-second fence, 31-second RPC
+receipt, two eleven-second inventory response budgets and ten seconds of detach/commit
+headroom (68 seconds). It bounds waiting, not a blocked mutex or SQL commit.
+The MCP follow-up HTTP request has a separate derived allowance: release (68 s),
+two reconciliation responses (22 s), durability retry (5 s), unarchive response
+(31 s), and ordinary request overhead (30 s): 156 seconds. It is single-attempt,
+not automatically replayed on timeout; a network failure still has an unknown
+outcome and must be checked before retrying. Concurrent recovery returns a conflict
+instead of waiting indefinitely on another follow-up's recovery lock.
+`termal_followup_session` waits for cleanup and
+unarchives before the next prompt. Explicit user input to a completed/failed
+Codex child uses the same follow-up path, preserving its transcript; canceled
+children and background/peer dispatch retain the terminal guard. The persisted
+archive flag is preserved after restart, but automatic unarchive requires an
+in-memory barrier originating from terminal cleanup. A manual Archive (or an
+archived thread with no surviving origin after restart) requires explicit
+Unarchive, including a manual Archive used to recover failed automatic cleanup.
+The recovery error explains this extra step. Successful unarchive records
+`Restored`, not `Archived`, in that barrier.
+Invalid follow-up payloads (including unsupported or malformed image attachments)
+and cheap child-admission failures are rejected before re-arm clears the stored
+result or advances its submission attempt. Admission is rechecked under the
+re-arm lock; this does not change which accepted user continuations re-arm a
+delegation.
+
 ## Problem
 
 TermAl already supports many ordinary agent sessions, but a lead agent cannot

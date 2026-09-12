@@ -1466,7 +1466,23 @@ async fn send_message(
     let snapshot = run_blocking_api({
         let state = state.clone();
         let session_id = session_id.clone();
-        move || dispatch_turn_and_snapshot(&state, &session_id, request)
+        move || {
+            // Explicit UI input may reopen a finished child. Runtime queues and
+            // peer deliveries still pass through the terminal dispatch fence.
+            let followup = if request.source_session_id.is_none() && request.source_mailbox.is_none() {
+                let inner = state.inner.lock().expect("state mutex poisoned");
+                inner.delegations.iter().find(|delegation| delegation.child_session_id == session_id
+                    && delegation.agent == Agent::Codex
+                    && matches!(delegation.status, DelegationStatus::Completed | DelegationStatus::Failed))
+                    .map(|delegation| (delegation.parent_session_id.clone(), delegation.id.clone()))
+            } else { None };
+            if let Some((parent, delegation)) = followup {
+                state.followup_delegation_request(&parent, &delegation, request)?;
+                Ok(SendMessageRouteResponse { state: state.summary_snapshot(), message_disposition: None })
+            } else {
+                dispatch_turn_and_snapshot(&state, &session_id, request)
+            }
+        }
     })
     .await?;
 
