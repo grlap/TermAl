@@ -5,6 +5,7 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 
 import { MessageMeta } from "./message-card-meta";
+import { MessageActivityStatus } from "./message-activity-status";
 import { MessageNavigationButtons } from "./panels/conversation-navigation";
 import {
   renderHighlightedText,
@@ -183,7 +184,10 @@ const ParallelAgentRow = memo(function ParallelAgentRow({
             <span
               className={`parallel-agent-status parallel-agent-status-${parallelAgentStatusTone(agent.status)}`}
             >
-              {parallelAgentStatusLabel(agent.status)}
+              <MessageActivityStatus
+                state={agent.status === "initializing" || agent.status === "running" ? "running" : "inactive"}
+                label={parallelAgentStatusLabel(agent.status)}
+              />
             </span>
           </div>
           <div className="parallel-agent-detail-row">

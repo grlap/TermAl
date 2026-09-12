@@ -4,6 +4,7 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { MessageMeta } from "./message-card-meta";
+import { RequestActivityStatus } from "./message-activity-status";
 import {
   renderHighlightedText,
   type SearchHighlightTone,
@@ -245,7 +246,18 @@ export function UserInputRequestCard({
     <article
       className={`message-card user-input-card${pending ? "" : " decided"}`}
     >
-      <MessageMeta author={message.author} timestamp={message.timestamp} />
+      <MessageMeta
+        author={message.author}
+        timestamp={message.timestamp}
+        trailing={
+          <RequestActivityStatus
+            pending={pending}
+            enabled={actionsEnabled}
+            submitting={dispatched || submissionPending}
+            resolvedLabel={message.state}
+          />
+        }
+      />
       <div className="card-label">Input request</div>
       <h3>
         {renderHighlightedText(message.title, searchQuery, searchHighlightTone)}
@@ -805,7 +817,11 @@ export function McpElicitationRequestCard({
     <article
       className={`message-card user-input-card${pending ? "" : " decided"}`}
     >
-      <MessageMeta author={message.author} timestamp={message.timestamp} />
+      <MessageMeta
+        author={message.author}
+        timestamp={message.timestamp}
+        trailing={<RequestActivityStatus pending={pending} resolvedLabel={message.state} />}
+      />
       <div className="card-label">MCP input</div>
       <h3>
         {renderHighlightedText(message.title, searchQuery, searchHighlightTone)}
@@ -1084,7 +1100,11 @@ export function CodexAppRequestCard({
     <article
       className={`message-card user-input-card${pending ? "" : " decided"}`}
     >
-      <MessageMeta author={message.author} timestamp={message.timestamp} />
+      <MessageMeta
+        author={message.author}
+        timestamp={message.timestamp}
+        trailing={<RequestActivityStatus pending={pending} resolvedLabel={message.state} />}
+      />
       <div className="card-label">Codex request</div>
       <h3>
         {renderHighlightedText(message.title, searchQuery, searchHighlightTone)}

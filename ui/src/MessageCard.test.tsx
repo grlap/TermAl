@@ -30,21 +30,108 @@ vi.mock("./api", async (importOriginal) => {
 });
 
 describe("MessageCard", () => {
+  it("keeps three progress squares through appends and removes them when the answer settles", () => {
+    const message: TextMessage = {
+      id: "progress-answer",
+      type: "text",
+      author: "assistant",
+      timestamp: "10:00",
+      text: "Answer in progress",
+    };
+    const callbacks = {
+      onApprovalDecision: vi.fn(),
+      onUserInputSubmit: vi.fn(),
+    };
+    const { container, rerender } = render(
+      <MessageCard
+        {...callbacks}
+        message={message}
+        isStreamingAssistantTextMessage
+      />,
+    );
+    const indicator = container.querySelector(".assistant-response-progress")!;
+    expect(indicator).toHaveAttribute("aria-hidden", "true");
+    expect(indicator.children).toHaveLength(3);
+    // The indicator is outside the Markdown height guard, not part of its measurement.
+    expect(indicator.closest(".streaming-markdown-height-floor")).toBeNull();
+    const updatedMessage = {
+      ...message,
+      text: "Answer in progress with more text",
+    };
+    rerender(
+      <MessageCard
+        {...callbacks}
+        message={updatedMessage}
+        isStreamingAssistantTextMessage
+      />,
+    );
+    expect(container.querySelector(".assistant-response-progress")).toBe(
+      indicator,
+    );
+    rerender(<MessageCard {...callbacks} message={updatedMessage} />);
+    expect(container.querySelector(".assistant-response-progress")).toBeNull();
+    expect(screen.getByText(updatedMessage.text)).toBeInTheDocument();
+  });
+
+  it("shows progress during search but never on settled answers or user prompts", () => {
+    const message: TextMessage = {
+      id: "progress-search",
+      type: "text",
+      author: "assistant",
+      timestamp: "10:00",
+      text: "An answer",
+    };
+    const callbacks = {
+      onApprovalDecision: vi.fn(),
+      onUserInputSubmit: vi.fn(),
+    };
+    const { container, rerender } = render(<MessageCard {...callbacks} message={message} />);
+    expect(container.querySelector(".assistant-response-progress")).toBeNull();
+    rerender(
+      <MessageCard
+        {...callbacks}
+        message={message}
+        searchQuery="answer"
+        isStreamingAssistantTextMessage
+      />,
+    );
+    expect(
+      container.querySelector(".assistant-response-progress"),
+    ).toBeInTheDocument();
+    rerender(
+      <MessageCard
+        {...callbacks}
+        message={{ ...message, author: "you" }}
+        isStreamingAssistantTextMessage
+      />,
+    );
+    expect(container.querySelector(".assistant-response-progress")).toBeNull();
+  });
+
   it("stabilizes transient streaming Markdown shrink through MessageCard wiring", () => {
     const originalResizeObserver = globalThis.ResizeObserver;
     const originalRequestAnimationFrame = window.requestAnimationFrame;
     const originalCancelAnimationFrame = window.cancelAnimationFrame;
-    let resizeCallback: ResizeObserverCallback | null = null;
+    // The height guard and text cursor independently observe this body.
+    const resizeCallbacks = new Set<ResizeObserverCallback>();
+    const resizeCallback: ResizeObserverCallback = (entries, observer) => {
+      for (const callback of resizeCallbacks) callback(entries, observer);
+    };
     let unmount: (() => void) | null = null;
     let nextFrameId = 1;
     const animationFrames = new Map<number, FrameRequestCallback>();
     class ResizeObserverHarness {
+      callback: ResizeObserverCallback;
       constructor(callback: ResizeObserverCallback) {
-        resizeCallback = callback;
+        this.callback = callback;
       }
 
-      observe() {}
-      disconnect() {}
+      observe() {
+        resizeCallbacks.add(this.callback);
+      }
+      disconnect() {
+        resizeCallbacks.delete(this.callback);
+      }
       unobserve() {}
     }
     globalThis.ResizeObserver =

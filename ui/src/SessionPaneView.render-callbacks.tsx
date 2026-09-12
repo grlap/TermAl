@@ -40,22 +40,7 @@ import type {
   SessionSettingsValue,
 } from "./types";
 
-export function streamingAssistantTextMessageIdForSession(
-  session: Session | null,
-) {
-  if (session?.status !== "active") {
-    return null;
-  }
-  const latestMessage = session.messages[session.messages.length - 1];
-  if (
-    latestMessage &&
-    latestMessage.author === "assistant" &&
-    latestMessage.type === "text"
-  ) {
-    return latestMessage.id;
-  }
-  return null;
-}
+export { streamingAssistantTextMessageIdForSession } from "./session-streaming-text";
 
 export function shouldPreferStreamingAssistantTextRender(
   message: Message,

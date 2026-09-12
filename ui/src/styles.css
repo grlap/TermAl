@@ -5770,7 +5770,109 @@ textarea {
 }
 
 .bubble-assistant {
+  position: relative;
   max-width: min(42rem, 90%);
+}
+
+.assistant-response-progress {
+  /* JS follows the final text glyph; bottom/start is the no-room fallback.
+     Always outside flow, never part of the Markdown/scroll height. */
+  position: absolute;
+  left: var(--message-card-padding-x);
+  bottom: calc(var(--bubble-card-padding-y) * 0.2);
+  display: flex;
+  gap: 0.2rem;
+  pointer-events: none;
+  user-select: none;
+}
+
+.assistant-response-progress > span,
+.message-activity-squares > span {
+  width: min(0.25rem, calc(var(--bubble-card-padding-y) * 0.5));
+  height: min(0.25rem, calc(var(--bubble-card-padding-y) * 0.5));
+  background: var(--signal-blue);
+  opacity: 0.25;
+}
+
+.assistant-response-progress > span,
+.message-activity-status[data-activity="running"] .message-activity-squares > span {
+  animation: assistant-response-pulse 2.4s ease-in-out infinite;
+}
+
+.assistant-response-progress > span:nth-child(2),
+.message-activity-status[data-activity="running"] .message-activity-squares > span:nth-child(2) {
+  animation-delay: 0.3s;
+}
+
+.assistant-response-progress > span:nth-child(3),
+.message-activity-status[data-activity="running"] .message-activity-squares > span:nth-child(3) {
+  animation-delay: 0.6s;
+}
+
+@keyframes assistant-response-pulse {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .assistant-response-progress > span,
+  .message-activity-status[data-activity="running"] .message-activity-squares > span {
+    animation: none;
+    opacity: 0.7;
+  }
+}
+
+.message-activity-status {
+  position: relative;
+  display: inline-block;
+  min-width: 0;
+  max-width: 100%;
+  /* The slot stays reserved when an operation finishes; squares never wrap. */
+  padding-right: 1.8rem;
+  white-space: nowrap;
+  text-transform: capitalize;
+}
+
+.message-activity-label {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.message-activity-squares {
+  position: absolute;
+  right: 0;
+  bottom: 0.2em;
+  display: flex;
+  gap: 0.2rem;
+  pointer-events: none;
+}
+
+.message-activity-status[data-activity="waiting"] .message-activity-squares > span {
+  background: currentColor;
+  opacity: 0.7;
+}
+
+.message-activity-status[data-activity="inactive"] .message-activity-squares {
+  visibility: hidden;
+}
+
+.message-meta-end:has(.message-activity-status) {
+  flex-wrap: nowrap;
+}
+
+.message-meta-end:has(.message-activity-status) > span:last-child {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.command-status-chip:has(.message-activity-status) {
+  min-width: 0;
 }
 
 @supports selector(:has(*)) {

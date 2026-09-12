@@ -15,6 +15,8 @@ import { copyTextToClipboard } from "./clipboard";
 import { DeferredMarkdownContent } from "./deferred-markdown-content";
 import { MailboxMessageLink } from "./mailbox-message-link";
 import { StreamingMarkdownHeightGuard } from "./message-card-streaming-height";
+import { AssistantResponseProgress } from "./assistant-response-progress";
+import { MessageActivityStatus, RequestActivityStatus } from "./message-activity-status";
 import {
   DELEGATION_FAN_IN_AUTHOR_LABEL,
   shouldCollapseDelegationFanInMessage,
@@ -194,9 +196,11 @@ export const MessageCard = memo(
         // Non-assistant messages (user, system) skip this branch
         // entirely and render as plain text (see the `:` arm of the
         // outer ternary further below).
-        const shouldRenderStreamingAssistantText =
+        const isCurrentStreamingAssistantText =
           isStreamingAssistantTextMessage &&
-          message.author === "assistant" &&
+          message.author === "assistant";
+        const shouldRenderStreamingAssistantText =
+          isCurrentStreamingAssistantText &&
           searchQuery.trim().length === 0;
 
         if (connectionRetryNotice) {
@@ -323,6 +327,9 @@ export const MessageCard = memo(
                 source={message.source.mailbox}
                 onOpenMailbox={onOpenMailbox}
               />
+            ) : null}
+            {isCurrentStreamingAssistantText ? (
+              <AssistantResponseProgress />
             ) : null}
           </article>
         );
@@ -661,7 +668,10 @@ export function CommandCard({
           <span
             className={`chip chip-status chip-status-${statusTone} command-status-chip`}
           >
-            {message.status}
+            <MessageActivityStatus
+              state={message.status === "running" ? "running" : "inactive"}
+              label={message.status}
+            />
           </span>
         }
       />
@@ -964,7 +974,17 @@ function ApprovalCard({
     <article
       className={`message-card approval-card${decided ? " decided" : ""}`}
     >
-      <MessageMeta author={message.author} timestamp={message.timestamp} />
+      <MessageMeta
+        author={message.author}
+        timestamp={message.timestamp}
+        trailing={
+          <RequestActivityStatus
+            pending={!decided}
+            enabled={actionsEnabled}
+            resolvedLabel={resolvedDecision ? renderDecision(resolvedDecision) : ""}
+          />
+        }
+      />
       <div className="card-label">Approval</div>
       <h3>
         {renderHighlightedText(message.title, searchQuery, searchHighlightTone)}

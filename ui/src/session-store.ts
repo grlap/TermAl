@@ -19,6 +19,10 @@
 //     narrow and exists to decouple the prompt path first.
 
 import { useMemo, useSyncExternalStore } from "react";
+import {
+  recordSessionStreamingTextState,
+  resetSessionStreamingTextStateForTesting,
+} from "./session-streaming-text";
 import type {
   AgentType,
   ApprovalPolicy,
@@ -753,6 +757,7 @@ export function syncComposerSessionsStore({
     }
 
     const previousRecord = previousRecordsById[session.id];
+    recordSessionStreamingTextState(session, previousRecord);
     if (previousRecord !== session) {
       nextRecordsById ??= { ...previousRecordsById };
       nextRecordsById[session.id] = session;
@@ -833,6 +838,7 @@ export function syncComposerSessionsStoreIncremental({
   changedSessions.forEach((session) => {
     const previousComposer = previousComposerById[session.id];
     const previousRecord = previousRecordsById[session.id];
+    recordSessionStreamingTextState(session, previousRecord);
     const previousSummary = previousSummaryById[session.id];
     const nextComposer = buildComposerSessionSnapshot(
       session,
@@ -910,6 +916,7 @@ export function upsertSessionStoreSession({
   const previousComposer = previousComposerById[session.id];
   const previousRecord = previousRecordsById[session.id];
   const previousSummary = previousSummaryById[session.id];
+  recordSessionStreamingTextState(session, previousRecord);
   const nextComposer = buildComposerSessionSnapshot(
     session,
     committedDraft,
@@ -1083,6 +1090,7 @@ export function useComposerSessionSnapshot(sessionId: string | null) {
 
 export function resetSessionStoreForTesting() {
   currentState = INITIAL_STATE;
+  resetSessionStreamingTextStateForTesting();
   emitStoreChange();
 }
 
