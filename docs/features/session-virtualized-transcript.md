@@ -36,10 +36,11 @@ after the conversation content, outside virtualized cards and the Markdown
 height guard. `transcript-activity-slot.tsx` owns this line. It stays mounted
 and keeps the same height across working, idle, approval, and stopping states;
 only its content changes. It never writes scroll position. New cards grow
-above it normally. The existing pane activity strip and card/text-end squares
-remain available for comparison.
+above it normally. Progress squares appear only in this trailing line, not at
+the end of assistant responses or inside command, request, and parallel-agent
+cards. Those cards retain their textual operation status.
 
-Throughout an `active` turn, the line shows the existing squares and “Agent is
+Throughout an `active` turn, the line shows three squares and “Agent is
 working”, including streaming text, running commands, and parallel agents.
 It shows “Agent is stopping” while stopping and “Agent is working” when an idle
 session has queued prompts and the queue is not paused. It receives the strip's
@@ -50,20 +51,25 @@ transcript output. Idle without queued work or a delegation wait, error, approva
 and paused idle queues leave it empty;
 approval/input cards already show their own “Waiting for you” state. Historical
 windows lacking the live tail always keep the line empty, even during active or
-stopping states. Reduced-motion renders static squares.
+stopping states.
+
+The LIFT motion raises the blue squares in sequence (`1.1s`, staggered by
+`0.16s`) with a soft glow while the label gently breathes over `2.2s`. Only
+transform and opacity animate; the glow is a fixed shadow that fades with each
+square. The `0.4em` squares lift by `0.18em` within the fixed `1.5em` line.
+Spacing scales with the text size so squares do not overlap the label. Working
+and stopping use the same motion. With `prefers-reduced-motion: reduce`, both
+the label and squares stay still at `0.7` opacity.
 
 The slot is visual only (`aria-hidden`); the pane activity strip remains the
-authoritative live announcement for session activity. The decorative text-end
-cursor is also `aria-hidden`, not a per-card live region. Card/text-end squares
-are retained for Greg's visual comparison. `session-live-tail.ts` owns the
+authoritative live announcement for session activity. `session-live-tail.ts` owns the
 slot's history-window predicate. The separately staged `session-streaming-text.ts`
 keeps its identical predicate for now: switching that classifier to the helper
 is a later mechanical move, not part of this change. The slot no longer imports
 streaming evidence or infers turn boundaries from resident message order.
 
 Tests pin the mounted node, status transitions, and constant CSS dimensions in
-JSDOM; real-browser layout and the preferred live indicator remain a visual
-comparison, not a claimed pixel measurement from JSDOM.
+JSDOM; these assertions do not claim real-browser pixel or scroll measurements.
 
 ## Network History Paging
 

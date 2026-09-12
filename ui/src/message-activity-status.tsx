@@ -1,4 +1,4 @@
-// Owns status-label decoration only. Callers supply per-operation state;
+// Owns status text only. Callers supply per-operation state;
 // this component does not infer activity from session state or touch scrolling.
 export function MessageActivityStatus({
   state,
@@ -10,11 +10,6 @@ export function MessageActivityStatus({
   return (
     <span className="message-activity-status" data-activity={state}>
       <span className="message-activity-label">{label}</span>
-      <span className="message-activity-squares" aria-hidden="true">
-        <span />
-        <span />
-        <span />
-      </span>
     </span>
   );
 }

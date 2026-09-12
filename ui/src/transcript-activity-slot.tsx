@@ -1,7 +1,6 @@
 // Owns the permanently reserved trailing activity line and its status label.
 // New feature mounted by SessionPaneView, not a split of an existing module.
 // Does not own cards, stream tracking, announcements, or scroll writes.
-import { MessageActivityStatus } from "./message-activity-status";
 import { resolveSessionActivity, type SessionActivityOptions } from "./panels/AgentSessionPanel.waiting-indicator";
 import { isSessionAtLiveTail } from "./session-live-tail";
 import type { Session } from "./types";
@@ -33,7 +32,16 @@ export function TranscriptActivitySlot({ session, ...inputs }: { session: Sessio
       // The activity strip owns announcements. This duplicate is visual only.
       aria-hidden="true"
     >
-      {label ? <MessageActivityStatus state="running" label={label} /> : null}
+      {label ? (
+        <span className="message-activity-status" data-activity="running">
+          <span className="message-activity-label">{label}</span>
+          <span className="message-activity-squares" aria-hidden="true">
+            <span />
+            <span />
+            <span />
+          </span>
+        </span>
+      ) : null}
     </div>
   );
 }

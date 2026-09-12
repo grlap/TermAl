@@ -16,19 +16,18 @@ function card(message: Message, enabled = true, submitting = false) {
     userInputActionsEnabled={enabled} userInputSubmissionPending={submitting} />;
 }
 
-it("animates only running commands and retains the same slot after success or error", () => {
+it("keeps command status text without duplicating the trailing activity squares", () => {
   const command = { ...meta, type: "command", command: "pwd", output: "", status: "running" } as const;
   const view = render(card(command));
   const status = view.container.querySelector(".message-activity-status")!;
-  const slot = status.querySelector(".message-activity-squares");
   expect(status).toHaveAttribute("data-activity", "running");
   expect(status).toHaveTextContent("running");
-  expect(slot?.children).toHaveLength(3);
+  expect(status.querySelector(".message-activity-squares")).toBeNull();
   for (const state of ["success", "error"] as const) {
     view.rerender(card({ ...command, status: state }));
     expect(status).toHaveAttribute("data-activity", "inactive");
     expect(status).toHaveTextContent(state);
-    expect(status.querySelector(".message-activity-squares")).toBe(slot);
+    expect(status.querySelector(".message-activity-squares")).toBeNull();
   }
 });
 
@@ -40,6 +39,7 @@ it("uses each tool/subagent's own state in a mixed parallel card", () => {
   const markers = view.container.querySelectorAll(".message-activity-status");
   expect(Array.from(markers, (marker) => marker.getAttribute("data-activity")))
     .toEqual(["running", "running", "inactive", "inactive"]);
+  expect(view.container.querySelector(".message-activity-squares")).toBeNull();
 });
 
 it("distinguishes input waiting, queued, sending and completed states", () => {
@@ -53,6 +53,7 @@ it("distinguishes input waiting, queued, sending and completed states", () => {
   view.rerender(card(input, true, true));
   expect(status).toHaveAttribute("data-activity", "running");
   expect(status).toHaveTextContent("Sending");
+  expect(status.querySelector(".message-activity-squares")).toBeNull();
   view.rerender(card({ ...input, state: "submitted" }, true, true));
   expect(status).toHaveAttribute("data-activity", "inactive");
   expect(status).toHaveTextContent("submitted");

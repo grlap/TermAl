@@ -15,7 +15,6 @@ import { copyTextToClipboard } from "./clipboard";
 import { DeferredMarkdownContent } from "./deferred-markdown-content";
 import { MailboxMessageLink } from "./mailbox-message-link";
 import { StreamingMarkdownHeightGuard } from "./message-card-streaming-height";
-import { AssistantResponseProgress } from "./assistant-response-progress";
 import { MessageActivityStatus, RequestActivityStatus } from "./message-activity-status";
 import {
   DELEGATION_FAN_IN_AUTHOR_LABEL,
@@ -327,9 +326,6 @@ export const MessageCard = memo(
                 source={message.source.mailbox}
                 onOpenMailbox={onOpenMailbox}
               />
-            ) : null}
-            {isCurrentStreamingAssistantText ? (
-              <AssistantResponseProgress />
             ) : null}
           </article>
         );

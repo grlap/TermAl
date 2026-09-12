@@ -121,6 +121,13 @@ it("keeps the same one-line CSS box and DOM node through every activity state", 
   try {
     const view = render(<TranscriptActivitySlot session={session([prompt])} />);
     const slot = view.container.firstElementChild as HTMLElement;
+    const squares = slot.querySelector(".message-activity-squares")!;
+    expect(squares.children).toHaveLength(3);
+    expect(getComputedStyle(squares.children[0]).animation).toContain("transcript-activity-lift 1.1s");
+    expect(getComputedStyle(squares.children[1]).animationDelay).toBe("0.16s");
+    expect(getComputedStyle(squares.children[2]).animationDelay).toBe("0.32s");
+    expect(getComputedStyle(slot.querySelector(".message-activity-label")!).animation)
+      .toContain("transcript-activity-breathe 2.2s");
     expect(getComputedStyle(slot.querySelector(".message-activity-status")!).textTransform).toBe("none");
     for (const value of [session([prompt]), session([prompt, answer]), session([prompt, command]),
       session([], { status: "stopping" }), session([], { status: "idle", pendingPrompts }),
@@ -136,7 +143,14 @@ it("keeps the same one-line CSS box and DOM node through every activity state", 
       expect(computed.overflow).toBe("hidden");
     }
     expect(slot).toBeEmptyDOMElement();
-    expect(css).toMatch(/prefers-reduced-motion: reduce[\s\S]*animation: none/);
+    expect(css).toContain("@keyframes transcript-activity-lift");
+    expect(css).toContain("transform: translateY(-0.18em)");
+    const reducedMotion = css.slice(css.indexOf("@media (prefers-reduced-motion: reduce)"));
+    expect(reducedMotion).toContain(".message-activity-label");
+    expect(reducedMotion).toContain(".message-activity-squares > span");
+    expect(reducedMotion).toContain("animation: none");
+    expect(reducedMotion).toContain("transform: none");
+    expect(reducedMotion).toContain("opacity: 0.7");
   } finally {
     style.remove();
   }

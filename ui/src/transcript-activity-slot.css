@@ -1,5 +1,5 @@
-/* One text line is reserved in every state. No animation or transition owns
-   these dimensions; only the existing decorative squares change opacity. */
+/* One text line is reserved in every state. Animation changes only transform
+   and opacity, never the reserved dimensions or transcript scroll position. */
 .transcript-activity-slot {
   box-sizing: border-box;
   flex: 0 0 auto;
@@ -14,13 +14,70 @@
 }
 
 .transcript-activity-slot .message-activity-status {
+  position: relative;
+  /* Three .4em squares + two .28em gaps + .4em clearance from the label.
+     Use em throughout so the squares cannot overlap text at larger font sizes. */
+  padding-right: 2.16em;
   vertical-align: top;
   text-transform: none;
 }
 
+.transcript-activity-slot .message-activity-label {
+  animation: transcript-activity-breathe 2.2s ease-in-out infinite;
+}
+
+.transcript-activity-slot .message-activity-squares {
+  position: absolute;
+  right: 0;
+  bottom: 0.3em;
+  display: flex;
+  gap: 0.28em;
+  pointer-events: none;
+}
+
+.transcript-activity-slot .message-activity-squares > span {
+  width: 0.4em;
+  height: 0.4em;
+  border-radius: 1px;
+  background: var(--signal-blue);
+  opacity: 0.3;
+  /* A fixed glow fades with the square: the shadow itself is not animated. */
+  box-shadow: 0 0 6px color-mix(in srgb, var(--signal-blue) 60%, transparent);
+  animation: transcript-activity-lift 1.1s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+.transcript-activity-slot .message-activity-squares > span:nth-child(2) {
+  animation-delay: 0.16s;
+}
+
+.transcript-activity-slot .message-activity-squares > span:nth-child(3) {
+  animation-delay: 0.32s;
+}
+
+@keyframes transcript-activity-lift {
+  0%, 60%, 100% {
+    transform: translateY(0);
+    opacity: 0.3;
+  }
+  25% {
+    /* .3em bottom + .4em square + .18em lift fits inside the 1.5em slot. */
+    transform: translateY(-0.18em);
+    opacity: 1;
+  }
+}
+
+@keyframes transcript-activity-breathe {
+  0%, 100% { opacity: 0.75; }
+  50% { opacity: 1; }
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .transcript-activity-slot .message-activity-label,
   .transcript-activity-slot .message-activity-squares > span {
     animation: none;
+    transform: none;
     opacity: 0.7;
+    will-change: auto;
   }
 }

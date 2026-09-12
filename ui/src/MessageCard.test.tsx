@@ -30,7 +30,7 @@ vi.mock("./api", async (importOriginal) => {
 });
 
 describe("MessageCard", () => {
-  it("keeps three progress squares through appends and removes them when the answer settles", () => {
+  it("leaves progress decoration to the trailing activity line through appends and settling", () => {
     const message: TextMessage = {
       id: "progress-answer",
       type: "text",
@@ -49,11 +49,7 @@ describe("MessageCard", () => {
         isStreamingAssistantTextMessage
       />,
     );
-    const indicator = container.querySelector(".assistant-response-progress")!;
-    expect(indicator).toHaveAttribute("aria-hidden", "true");
-    expect(indicator.children).toHaveLength(3);
-    // The indicator is outside the Markdown height guard, not part of its measurement.
-    expect(indicator.closest(".streaming-markdown-height-floor")).toBeNull();
+    expect(container.querySelector(".assistant-response-progress")).toBeNull();
     const updatedMessage = {
       ...message,
       text: "Answer in progress with more text",
@@ -65,15 +61,13 @@ describe("MessageCard", () => {
         isStreamingAssistantTextMessage
       />,
     );
-    expect(container.querySelector(".assistant-response-progress")).toBe(
-      indicator,
-    );
+    expect(container.querySelector(".assistant-response-progress")).toBeNull();
     rerender(<MessageCard {...callbacks} message={updatedMessage} />);
     expect(container.querySelector(".assistant-response-progress")).toBeNull();
     expect(screen.getByText(updatedMessage.text)).toBeInTheDocument();
   });
 
-  it("shows progress during search but never on settled answers or user prompts", () => {
+  it("does not add progress squares during search, on settled answers or user prompts", () => {
     const message: TextMessage = {
       id: "progress-search",
       type: "text",
@@ -97,7 +91,7 @@ describe("MessageCard", () => {
     );
     expect(
       container.querySelector(".assistant-response-progress"),
-    ).toBeInTheDocument();
+    ).toBeNull();
     rerender(
       <MessageCard
         {...callbacks}
@@ -112,7 +106,7 @@ describe("MessageCard", () => {
     const originalResizeObserver = globalThis.ResizeObserver;
     const originalRequestAnimationFrame = window.requestAnimationFrame;
     const originalCancelAnimationFrame = window.cancelAnimationFrame;
-    // The height guard and text cursor independently observe this body.
+    // Track all observers registered by the Markdown height guard.
     const resizeCallbacks = new Set<ResizeObserverCallback>();
     const resizeCallback: ResizeObserverCallback = (entries, observer) => {
       for (const callback of resizeCallbacks) callback(entries, observer);
