@@ -215,6 +215,60 @@ function renderSessionPaneView(
 }
 
 describe("SessionPaneView session-store synchronization", () => {
+  it("passes local sending, stopping and delegation waits to the trailing slot", () => {
+    const session = makeSession({ status: "idle" });
+    const props = makeSessionPaneViewProps(session);
+    const view = render(<SessionPaneView {...props} isSending />);
+    const slot = view.container.querySelector(".transcript-activity-slot")!;
+    expect(slot).toHaveTextContent("Agent is working");
+    view.rerender(<SessionPaneView {...props} isStopping />);
+    expect(slot).toHaveTextContent("Agent is stopping");
+    view.rerender(<SessionPaneView {...props} delegationWaits={[{
+      id: "wait-1", parentSessionId: session.id, delegationIds: ["child-1"],
+      mode: "all", createdAt: "2026-09-11T23:00:00Z", title: "Review",
+    }]} />);
+    expect(slot).toHaveTextContent("Agent is working");
+    view.rerender(<SessionPaneView {...props} />);
+    expect(view.container.querySelector(".transcript-activity-slot")).toBe(slot);
+    expect(slot).toBeEmptyDOMElement();
+  });
+
+  it("keeps one trailing activity slot across working, stopping and queued store updates", () => {
+    const session = makeSession();
+    const active = { ...session, messages: [...session.messages, {
+      id: "finished-command", author: "assistant", type: "command", timestamp: "10:01",
+      command: "pwd", output: "/repo", status: "success",
+    }] } as Session;
+    const view = renderSessionPaneView(active);
+    expect(view.container.querySelectorAll(".transcript-activity-slot").length,
+      "reserved trailing slot count after successful command").toBe(1);
+    const slot = view.container.querySelector(".transcript-activity-slot")!;
+    expect(slot).toHaveAttribute("data-waiting", "true");
+    expect(slot.parentElement?.lastElementChild).toBe(slot);
+    expect(slot.closest(".streaming-markdown-height-content")).toBeNull();
+    expect(slot).toHaveAttribute("aria-hidden", "true");
+    const publish = (patch: Partial<Session>) => act(() => upsertSessionStoreSession({
+      session: { ...active, ...patch }, committedDraft: "", draftAttachments: [],
+    }));
+    publish({ status: "stopping" });
+    expect(slot).toHaveTextContent("Agent is stopping");
+    const pendingPrompts = [{ id: "queued-next", timestamp: "10:02", text: "Next task" }];
+    publish({ status: "idle", pendingPrompts });
+    expect(slot).toHaveTextContent("Agent is working");
+    publish({ status: "idle", pendingPrompts, queuePaused: true });
+    expect(slot).toBeEmptyDOMElement();
+    publish({ status: "active", messages: [...active.messages, {
+      id: "streaming-answer", author: "assistant", type: "text", timestamp: "10:03", text: "Streaming...",
+    }] });
+    expect(slot).toHaveTextContent("Agent is working");
+    act(() => upsertSessionStoreSession({
+      session: { ...active, status: "idle" }, committedDraft: "", draftAttachments: [],
+    }));
+    expect(view.container.querySelector(".transcript-activity-slot")).toBe(slot);
+    expect(slot).toHaveAttribute("data-waiting", "false");
+    view.unmount();
+  });
+
   afterEach(() => {
     resetSessionStoreForTesting();
     scrollMockState.params = [];

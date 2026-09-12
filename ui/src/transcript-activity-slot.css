@@ -1,0 +1,26 @@
+/* One text line is reserved in every state. No animation or transition owns
+   these dimensions; only the existing decorative squares change opacity. */
+.transcript-activity-slot {
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  height: 1.5em;
+  min-height: 1.5em;
+  max-height: 1.5em;
+  line-height: 1.5;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+}
+
+.transcript-activity-slot .message-activity-status {
+  vertical-align: top;
+  text-transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .transcript-activity-slot .message-activity-squares > span {
+    animation: none;
+    opacity: 0.7;
+  }
+}

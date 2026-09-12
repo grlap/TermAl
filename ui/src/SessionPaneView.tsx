@@ -55,6 +55,7 @@ import {
   AgentSessionPanelFooter,
 } from "./panels/AgentSessionPanel";
 import { SessionActivityStrip } from "./panels/session-activity-cards";
+import { TranscriptActivitySlot } from "./transcript-activity-slot";
 import { useSessionRecordSnapshot } from "./session-store";
 import { DiffPanel } from "./panels/DiffPanel";
 import { FileSystemPanel } from "./panels/FileSystemPanel";
@@ -1900,6 +1901,18 @@ export function SessionPaneView({
             renderPromptSettings={renderSessionPromptSettings}
           />
         )}
+        {isSessionTabActive && pane.viewMode === "session" ? (
+          <TranscriptActivitySlot
+            session={activeSession}
+            isSending={isSending}
+            isStopping={isStopping}
+            delegationWaitPrompt={
+              showDelegationWaitIndicator
+                ? delegationWaitIndicatorPrompt(activeDelegationWaits)
+                : null
+            }
+          />
+        ) : null}
       </section>
       {isSessionTabActive && pane.viewMode === "session" && activeSession ? (
         <SessionActivityStrip

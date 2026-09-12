@@ -29,6 +29,42 @@ The current model is:
 3. **Measured page heights** refine spacer geometry, but mounted DOM remains
    authoritative while the user is actively reading.
 
+## Trailing activity line
+
+`SessionPaneView` reserves one trailing text line (`1.5em`, line-height `1.5`)
+after the conversation content, outside virtualized cards and the Markdown
+height guard. `transcript-activity-slot.tsx` owns this line. It stays mounted
+and keeps the same height across working, idle, approval, and stopping states;
+only its content changes. It never writes scroll position. New cards grow
+above it normally. The existing pane activity strip and card/text-end squares
+remain available for comparison.
+
+Throughout an `active` turn, the line shows the existing squares and “Agent is
+working”, including streaming text, running commands, and parallel agents.
+It shows “Agent is stopping” while stopping and “Agent is working” when an idle
+session has queued prompts and the queue is not paused. It receives the strip's
+same sending, stopping and delegation-wait inputs: sending and waiting for child
+sessions show “Agent is working”; a local Stop immediately shows “Agent is stopping”.
+Activity comes from the same status resolver as the pane strip, not from gaps in
+transcript output. Idle without queued work or a delegation wait, error, approval,
+and paused idle queues leave it empty;
+approval/input cards already show their own “Waiting for you” state. Historical
+windows lacking the live tail always keep the line empty, even during active or
+stopping states. Reduced-motion renders static squares.
+
+The slot is visual only (`aria-hidden`); the pane activity strip remains the
+authoritative live announcement for session activity. The decorative text-end
+cursor is also `aria-hidden`, not a per-card live region. Card/text-end squares
+are retained for Greg's visual comparison. `session-live-tail.ts` owns the
+slot's history-window predicate. The separately staged `session-streaming-text.ts`
+keeps its identical predicate for now: switching that classifier to the helper
+is a later mechanical move, not part of this change. The slot no longer imports
+streaming evidence or infers turn boundaries from resident message order.
+
+Tests pin the mounted node, status transitions, and constant CSS dimensions in
+JSDOM; real-browser layout and the preferred live indicator remain a visual
+comparison, not a claimed pixel measurement from JSDOM.
+
 ## Network History Paging
 
 Large transcripts are not returned to the browser as one unbounded session
