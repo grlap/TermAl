@@ -476,7 +476,8 @@ describe("App workspace layout", () => {
         expect(within(panel).queryByRole("button", { name: "New workspace here" })).toBeNull();
         expect(newHere).toBeEnabled();
         expect(screen.getByRole("button", { name: "New window" })).toBeEnabled();
-        expect(refresh).toBeDisabled();
+        expect(refresh).toHaveAttribute("aria-disabled", "true");
+        expect(refresh).not.toHaveAttribute("disabled");
         expect(within(panel).getByText("Loading saved workspaces…")).toBeInTheDocument();
 
         pendingLayouts.resolve({ workspaces: [] });
@@ -591,7 +592,8 @@ describe("App workspace layout", () => {
         await waitFor(() => {
           expect(deleteWorkspaceLayoutSpy).toHaveBeenCalledWith("monitor-left");
         });
-        expect(screen.getByRole("button", { name: "Refresh workspaces" })).toBeDisabled();
+        expect(screen.getByRole("button", { name: "Refresh workspaces" })).toHaveAttribute("aria-disabled", "true");
+        expect(screen.getByRole("button", { name: "Refresh workspaces" })).not.toHaveAttribute("disabled");
 
         const dock = screen.getByRole("navigation", { name: "Control panel dock" });
         await clickAndSettle(within(dock).getByRole("button", { name: "Sessions" }));
@@ -602,7 +604,8 @@ describe("App workspace layout", () => {
         const remountedWorkspaces = await openWorkspacesPanel();
         remountGet.resolve({ workspaces });
         await settleAsyncUi();
-        expect(screen.getByRole("button", { name: "Refresh workspaces" })).toBeDisabled();
+        expect(screen.getByRole("button", { name: "Refresh workspaces" })).toHaveAttribute("aria-disabled", "true");
+        expect(screen.getByRole("button", { name: "Refresh workspaces" })).not.toHaveAttribute("disabled");
         expect(screen.getByRole("button", { name: "New workspace here" })).toBeEnabled();
         expect(screen.getByRole("button", { name: "New window" })).toBeEnabled();
         expect(within(remountedWorkspaces).getByRole("status")).toHaveTextContent("Deleting");

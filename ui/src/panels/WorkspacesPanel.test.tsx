@@ -1077,7 +1077,8 @@ describe("WorkspacesPanel", () => {
     );
     expect(screen.getByRole("button", { name: "New workspace here" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "New window" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Refresh workspaces" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Refresh workspaces" })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("button", { name: "Refresh workspaces" })).not.toHaveAttribute("disabled");
   });
 
   it("restores overflow focus after a deferred save, but not if the user moved away", async () => {
@@ -2361,7 +2362,7 @@ describe("WorkspacesPanelHeaderActions", () => {
     expect(onRefresh).toHaveBeenCalledWith();
   });
 
-  it("disables only Refresh for GET or outstanding deletes and stays idle otherwise", () => {
+  it("marks only Refresh aria-disabled for GET or outstanding deletes and stays idle otherwise", () => {
     const view = render(
       <WorkspacesPanelHeaderActions
         isRefreshing={workspacesRefreshBusy(true, [])}
@@ -2370,7 +2371,8 @@ describe("WorkspacesPanelHeaderActions", () => {
         onRefresh={vi.fn()}
       />,
     );
-    expect(screen.getByRole("button", { name: "Refresh workspaces" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Refresh workspaces" })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("button", { name: "Refresh workspaces" })).not.toHaveAttribute("disabled");
     expect(screen.getByRole("button", { name: "New workspace here" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "New window" })).toBeEnabled();
 
@@ -2382,7 +2384,8 @@ describe("WorkspacesPanelHeaderActions", () => {
         onRefresh={vi.fn()}
       />,
     );
-    expect(screen.getByRole("button", { name: "Refresh workspaces" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Refresh workspaces" })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("button", { name: "Refresh workspaces" })).not.toHaveAttribute("disabled");
     expect(screen.getByRole("button", { name: "New workspace here" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "New window" })).toBeEnabled();
 
@@ -2397,5 +2400,101 @@ describe("WorkspacesPanelHeaderActions", () => {
     expect(screen.getByRole("button", { name: "Refresh workspaces" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "New workspace here" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "New window" })).toBeEnabled();
+  });
+
+  it("keeps Refresh focused while busy and ignores click or Enter", () => {
+    const onRefresh = vi.fn();
+    render(
+      <WorkspacesPanelHeaderActions
+        isRefreshing={workspacesRefreshBusy(true, [])}
+        onOpenNewWorkspaceHere={vi.fn()}
+        onOpenNewWorkspaceWindow={vi.fn()}
+        onRefresh={onRefresh}
+      />,
+    );
+    const refresh = screen.getByRole("button", { name: "Refresh workspaces" });
+    refresh.focus();
+    fireEvent.click(refresh);
+    const enter = createEvent.keyDown(refresh, { key: "Enter" });
+    const space = createEvent.keyDown(refresh, { key: " " });
+    fireEvent(refresh, enter);
+    fireEvent(refresh, space);
+    expect(enter.defaultPrevented).toBe(true);
+    expect(space.defaultPrevented).toBe(true);
+    expect(onRefresh).not.toHaveBeenCalled();
+    expect(refresh).toHaveFocus();
+    expect(refresh).toHaveAttribute("aria-disabled", "true");
+    expect(refresh).not.toHaveAttribute("disabled");
+  });
+
+  it("keeps busy Refresh visually muted including hover while remaining focusable", async () => {
+    const stylesCss = await readStylesheetText("../styles.css");
+    const probe = installStylesheet("header-action-cssom-probe", stylesCss);
+    let busyRuleText = "";
+    try {
+      const sheet = probe.sheet;
+      expect(sheet, "styles.css must parse enough CSSOM rules to select header actions").not.toBeNull();
+      const styleRules = Array.from(sheet!.cssRules).filter(
+        (rule): rule is CSSStyleRule => rule instanceof CSSStyleRule,
+      );
+      const selectors = styleRules.flatMap((rule) =>
+        rule.selectorText.split(",").map((part) => part.replace(/\s+/g, " ").trim()),
+      );
+      expect(selectors.some((selector) =>
+        selector.includes(".control-panel-header-action")
+        && /\[aria-disabled/.test(selector)
+        && !selector.includes(":hover")
+        && !selector.includes("focus-visible")
+      )).toBe(true);
+      expect(selectors.some((selector) =>
+        selector.includes(".control-panel-header-open-button")
+        && selector.includes(":hover")
+        && selector.includes(":not(")
+        && /aria-disabled/.test(selector)
+      )).toBe(true);
+      expect(selectors.some((selector) =>
+        selector.includes(".control-panel-header-action")
+        && /\[aria-disabled/.test(selector)
+        && selector.includes("focus-visible")
+      )).toBe(true);
+      // JSDOM does not simulate real :hover or :focus-visible matching.
+      // Keep those as stylesheet-presence checks only; computed styles
+      // below use the busy rule that applies without a pseudo-state.
+      busyRuleText = styleRules
+        .filter((rule) => {
+          const parts = rule.selectorText.split(",").map((part) => part.replace(/\s+/g, " ").trim());
+          return parts.some((selector) =>
+            selector.includes(".control-panel-header-action")
+            && (/:disabled\b/.test(selector) || /\[aria-disabled/.test(selector))
+            && !selector.includes(":hover")
+            && !selector.includes("focus-visible")
+          );
+        })
+        .map((rule) => rule.cssText)
+        .join("\n");
+      expect(busyRuleText.length).toBeGreaterThan(0);
+    } finally {
+      probe.remove();
+    }
+
+    const style = installStylesheet("header-action-busy", busyRuleText);
+    try {
+      render(
+        <WorkspacesPanelHeaderActions
+          isRefreshing={workspacesRefreshBusy(true, [])}
+          onOpenNewWorkspaceHere={vi.fn()}
+          onOpenNewWorkspaceWindow={vi.fn()}
+          onRefresh={vi.fn()}
+        />,
+      );
+      const refresh = screen.getByRole("button", { name: "Refresh workspaces" });
+      refresh.focus();
+      const computed = getComputedStyle(refresh);
+      expect(computed.opacity).toBe("0.64");
+      expect(computed.cursor).toBe("default");
+      expect(refresh).toHaveFocus();
+    } finally {
+      style.remove();
+    }
   });
 });

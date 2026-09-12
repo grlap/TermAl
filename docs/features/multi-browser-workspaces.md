@@ -113,8 +113,10 @@ the dock, directly above Projects by default — to list saved browser layouts.
 The section uses the same rail active marker and keyboard behavior as the
 other dock sections. Its header has **New workspace here** (+), secondary
 **New window**, and **Refresh**. **Refresh** is the only header action
-disabled while the saved-list GET is in flight or a DELETE is in progress.
-Those are separate states: GET shows “Loading saved workspaces…”, and
+blocked while the saved-list GET is in flight or a DELETE is in progress.
+It stays focusable: the control uses `aria-disabled` rather than the HTML
+`disabled` attribute, and click, Enter, and Space are ignored while busy.
+Those busy states are separate: GET shows “Loading saved workspaces…”, and
 delete-only shows “Deleting”. **New workspace here** and
 **New window** stay available. Search matches a label or id. A row click
 switches this tab; the overflow menu holds **Rename** for a persisted layout,

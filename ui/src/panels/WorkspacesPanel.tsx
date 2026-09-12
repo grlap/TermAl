@@ -162,8 +162,21 @@ export function WorkspacesPanelHeaderActions({
       <button
         className="control-panel-header-action control-panel-header-open-button"
         type="button"
-        onClick={() => onRefresh()}
-        disabled={isRefreshing}
+        onClick={() => {
+          if (isRefreshing) {
+            return;
+          }
+          onRefresh();
+        }}
+        onKeyDown={(event) => {
+          if (!isRefreshing) {
+            return;
+          }
+          if (event.key === " " || event.key === "Enter") {
+            event.preventDefault();
+          }
+        }}
+        aria-disabled={isRefreshing || undefined}
         aria-label="Refresh workspaces"
         title="Refresh"
       >

@@ -3548,7 +3548,7 @@ textarea {
   height: calc(18px * var(--density-scale));
 }
 
-.control-panel-header-open-button:hover {
+.control-panel-header-open-button:hover:not(:disabled):not([aria-disabled="true"]) {
   border-color: var(--signal-blue);
   background: color-mix(
     in srgb,
@@ -3574,10 +3574,15 @@ textarea {
   box-shadow: 0 0 0 0.22rem var(--accent-blue-soft);
 }
 
-.control-panel-header-action:disabled {
+.control-panel-header-action:disabled,
+.control-panel-header-action[aria-disabled="true"] {
   cursor: default;
   opacity: 0.64;
   transform: none;
+}
+
+.control-panel-header-action:disabled:not(:focus-visible),
+.control-panel-header-action[aria-disabled="true"]:not(:focus-visible) {
   box-shadow: none;
 }
 
