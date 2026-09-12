@@ -2466,7 +2466,8 @@ struct EngramSessionState {
     context_nudge_delivery_generation: Option<u64>,
     context_nudge_delivery_turn_generation: Option<u64>,
     /// A compaction requests fresh orientation after any previously fetched
-    /// page has reached the runtime. Cleared when that fresh read starts.
+    /// peek snapshot has reached the runtime. This is local prompt buffering,
+    /// not Engram delivery state. Cleared when that fresh read starts.
     context_refresh_needed: bool,
     /// Best-effort dedup of the last 64 item ids, each at most 256 bytes.
     /// Evicted, missing or oversized ids can signal again; delivery safety
@@ -2505,8 +2506,9 @@ impl Default for EngramSessionState {
 }
 
 impl EngramSessionState {
-    /// A fetched page is ready for admission even when another refresh is
-    /// deferred. Retrying preparation cannot advance until this page is sent.
+    /// A cached orientation is ready for admission even with a deferred refresh.
+    /// Runtime acceptance releases this local buffer; it never acknowledges an
+    /// Engram page. All host orientation reads use non-advancing peek.
     fn context_needs_preparation(&self) -> bool {
         self.pending_context_nudge.is_none()
             && (self.context_nudge_pending || self.context_nudge_in_progress)

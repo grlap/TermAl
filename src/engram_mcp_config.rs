@@ -250,8 +250,9 @@ impl AppState {
             if !record.is_local_session() {
                 return EngramContextNudgePreparation::NotApplicable;
             }
-            // An advancing read would acknowledge this page before the model
-            // receives it. Deliver it first, even if a refresh is requested.
+            // Reuse the pending orientation snapshot until runtime admission.
+            // This is only a local prompt cache: peek neither stages nor
+            // acknowledges an Engram delivery page, including on refresh.
             if record.engram.pending_context_nudge.is_some() {
                 return EngramContextNudgePreparation::Ready;
             }
@@ -395,6 +396,7 @@ impl AppState {
         }
     }
 
+    // Acknowledges local runtime-channel acceptance, not Engram work delivery.
     fn acknowledge_engram_context_nudge_delivery(
         &self,
         session_id: &str,
@@ -444,6 +446,11 @@ fn run_engram_context_nudge(
     }
     command
         .arg("next")
+        // Startup and post-compaction context are advisory and may be
+        // truncated or never sent. Only the agent's ordinary next advances.
+        // Generation informs the read-only memories.changed signal. Peek
+        // neither persists nor acknowledges that memory advertisement.
+        .arg("--peek")
         .arg("--context-generation")
         .arg(context_generation)
         .env(ENGRAM_HOME_ENV, &target.home)

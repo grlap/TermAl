@@ -72,14 +72,146 @@ fn delivered(state: &AppState, id: &str) {
                 .engram
                 .pending_context_nudge
                 .is_some(),
-            "stale delivery cannot consume a page"
+            "stale runtime acknowledgement cannot consume cached orientation"
         );
     }
     state.acknowledge_engram_context_nudge_delivery(id, 42);
 }
 
+fn delivery_cursor(root: &Path) -> usize {
+    match fs::read_to_string(root.join("work-delivery-cursor")) {
+        Ok(value) => value.trim().parse().unwrap(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => 0,
+        Err(error) => panic!("read delivery cursor: {error}"),
+    }
+}
+
 #[test]
-fn compaction_keeps_undelivered_page_until_ack_then_refreshes() {
+fn startup_and_compaction_nudges_peek_without_consuming_truncated_or_unsent_context() {
+    for after_compaction in [false, true] {
+        let (state, id, root) = fixture(false);
+        fs::write(root.join(".engram-project"), "fixture-work-next-delivery\n").unwrap();
+        if after_compaction {
+            assert_eq!(
+                state.prepare_engram_context_nudge_off_lock(&id),
+                EngramContextNudgePreparation::Ready
+            );
+            delivered(&state, &id);
+            state.mark_engram_context_nudge_pending(&id);
+        }
+        assert_eq!(
+            state.prepare_engram_context_nudge_off_lock(&id),
+            EngramContextNudgePreparation::Ready
+        );
+        #[cfg(windows)]
+        let args: Vec<String> = serde_json::from_str(
+            &fs::read_to_string(root.join("work-context-args.json"))
+                .unwrap()
+                .trim_start_matches('\u{feff}'),
+        )
+        .unwrap();
+        #[cfg(not(windows))]
+        let args: Vec<String> = fs::read_to_string(root.join("work-context-args.txt"))
+            .unwrap()
+            .split_whitespace()
+            .map(str::to_owned)
+            .collect();
+        assert_eq!(
+            args.iter().filter(|arg| *arg == "--peek").count(),
+            1,
+            "nudge argv must contain one non-advancing --peek"
+        );
+        assert_eq!(
+            args.iter()
+                .filter(|arg| *arg == "--context-generation")
+                .count(),
+            1,
+            "peek must include the generation for its read-only changed signal"
+        );
+        let expected_generation = if after_compaction {
+            "termal-2"
+        } else {
+            "termal-1"
+        };
+        assert!(
+            args.windows(2).any(|pair| {
+                pair[0] == "--context-generation" && pair[1] == expected_generation
+            }),
+            "nudge must advertise the current generation: {args:?}"
+        );
+        assert_eq!(
+            delivery_cursor(&root),
+            0,
+            "orientation must not consume ordinary delivery"
+        );
+        {
+            let inner = state.inner.lock().unwrap();
+            let context = inner.sessions[inner.find_session_index(&id).unwrap()]
+                .engram
+                .pending_context_nudge
+                .as_ref()
+                .unwrap();
+            assert_eq!(context.len(), ENGRAM_CONTEXT_NUDGE_MAX_BYTES);
+            assert!(
+                !context.contains("complete-page-tail"),
+                "fixture must actually exercise host truncation"
+            );
+        }
+        // Do not deliver this cached, truncated snapshot. Compaction + prepare
+        // retains it without turning it into an Engram delivery receipt.
+        let reads_before = reads(&root);
+        state.mark_engram_context_nudge_pending(&id);
+        assert_eq!(
+            state.prepare_engram_context_nudge_off_lock(&id),
+            EngramContextNudgePreparation::Ready
+        );
+        assert_eq!(reads(&root), reads_before);
+        assert_eq!(delivery_cursor(&root), 0);
+        // Positive control: the same fixture's ordinary next DOES advance,
+        // and still returns the complete first page after host truncation.
+        for page in [0, 1] {
+            let output = engram_command(&real_engram_control_fixture_path())
+                .args(["--project-file"])
+                .arg(root.join(".engram-project"))
+                .arg("--home")
+                .arg(&root)
+                .args([
+                    "work",
+                    "--actor-id",
+                    "fixture-agent",
+                    "--session-id",
+                    &id,
+                    "--actor-context",
+                    "fixture-context",
+                    "next",
+                ])
+                .env(ENGRAM_HOME_ENV, &root)
+                .env(ENGRAM_ACTOR_ID_ENV, "fixture-agent")
+                .env(ENGRAM_SESSION_ID_ENV, &id)
+                .env(ENGRAM_ACTOR_CONTEXT_ENV, "fixture-context")
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let text = String::from_utf8(output.stdout).unwrap();
+            assert!(text.starts_with(&format!("delivery-page-{page}")));
+            assert!(text.contains("complete-page-tail"));
+            assert_eq!(delivery_cursor(&root), page + 1);
+        }
+        delivered(&state, &id);
+        assert_eq!(
+            delivery_cursor(&root),
+            2,
+            "host cache acknowledgement is not an Engram acknowledgement"
+        );
+    }
+}
+
+#[test]
+fn compaction_keeps_unsent_orientation_until_runtime_ack_then_refreshes() {
     let (state, id, root) = fixture(false);
     assert_eq!(
         state.prepare_engram_context_nudge_off_lock(&id),
@@ -93,7 +225,7 @@ fn compaction_keeps_undelivered_page_until_ack_then_refreshes() {
     assert_eq!(
         reads(&root),
         1,
-        "compaction must not acknowledge an undelivered page with another advancing read"
+        "compaction must reuse cached orientation until runtime acceptance"
     );
     delivered(&state, &id);
     assert_eq!(
@@ -121,7 +253,7 @@ fn compaction_during_read_keeps_result_and_defers_next_read_until_ack() {
     assert_eq!(
         reads(&root),
         1,
-        "compaction must retain the in-flight page rather than advancing again"
+        "compaction must retain the in-flight orientation rather than refetching"
     );
     assert_eq!(
         state.prepare_engram_context_nudge_off_lock(&id),

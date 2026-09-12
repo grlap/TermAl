@@ -6,7 +6,7 @@ The local Engram integration has two independent tiers:
 
 - **Base** is available to every enabled, repository-declared local project.
   TermAl injects the Engram MCP server into each local agent session and adds
-  fresh `engram work next` context at session start and after compaction.
+  advisory `engram work next --peek` context at session start and after compaction.
 - **Turn-gated control** is a premium project opt-in and defaults off. When it
   is enabled, the existing host-private bind/evaluate/begin/checkpoint protocol
   can withhold a prompt until Engram authorizes that exact turn.
@@ -132,9 +132,28 @@ off-lock:
 engram --project-file <project>/.engram-project --home <home> \
   work --actor-id <developer>/<agent-kind> \
   --session-id <termal-session-id> \
-  --actor-context 'agent=<kind>;model=<model>;reasoning=<effort>' next \
+  --actor-context 'agent=<kind>;model=<model>;reasoning=<effort>' next --peek \
   --context-generation termal-<generation>
 ```
+
+Both startup and post-compaction use the same non-advancing orientation read:
+either nudge may be truncated or never reach a runtime, so neither may consume
+ordinary delivery. The installed CLI's `work next --help` defines `--peek` as
+not staging or advancing delivery, focus, or memory advertisement. TermAl passes
+`--context-generation` alongside `--peek` so Engram can calculate the read-only
+`memories.changed` signal for the current context generation. Peek returns a
+memory advertisement (`count` and `changed`), not full memory contents; those
+are read through `work memories`. Repeated peeks with a new generation can keep
+reporting `changed: true` without persisting or acknowledging that advertisement.
+Only an advancing `next` with that generation acknowledges it; acknowledgement
+is not proof that the agent read the memories. The host also uses generation
+locally to reject stale nudge results and order deferred refreshes. The agent
+continues ordinary advancing `work next` through MCP; host orientation does not
+replace that read.
+This protects the delivery cursor, not the completeness of recovery: the host
+prepares the nudge at the next TermAl prompt dispatch, not synchronously at the
+compaction boundary. It does not guarantee an Engram block before the model's
+first action in an automatically continued post-compaction turn.
 
 The command receives the same `ENGRAM_*` environment values as the MCP child,
 and its actor/context flags are byte-identical to that environment. Its trimmed
@@ -150,13 +169,17 @@ or delivery failure preserves it for retry. ACP runtimes receive Base MCP, but
 this cut does not yet expose a portable ACP compaction event, so their refresh
 is session-start only.
 
-Compaction requests a deferred refresh. A fetched but undelivered page remains
-available for retry; an in-flight read finishes without discarding its result.
-Only after the runtime accepts that page can the next prompt fetch fresh context.
+Compaction requests a deferred refresh. A fetched but unsent orientation snapshot
+remains available for retry; an in-flight peek finishes without discarding its
+result. Only after the runtime accepts that snapshot can the next prompt fetch
+fresh orientation. The retained cache and its delivery acknowledgement concern
+only local prompt admission, not an Engram delivery page or receipt. Truncation,
+discarding the local cache, and a prompt that is never sent leave ordinary Engram
+delivery untouched; acknowledging the local cache sends no Engram command.
 This applies to Claude boundaries and both Codex compaction event forms. Current
 Codex item completions are deduplicated by the last 64 item ids of at most 256
 bytes each; missing, oversized, or evicted ids may signal again. Deduplication is
-best effort and is not the mechanism that protects page delivery. Configuration
+best effort and is not the mechanism that protects ordinary delivery. Configuration
 changes retain their separate invalidation behavior. These rules preserve host
 handoff; they do not prove that a model read or obeyed the delivered context.
 
@@ -173,9 +196,9 @@ against concurrent edits to configuration files.
 
 The recovery instruction asks the agent, at start and after its context is
 replaced by a summary, to use Engram `next` with `peek: true`, enumerate current
-project memories (following pagination), and read relevant full records even if
-they are not advertised as changed. These are read-only recovery operations;
-they do not advance ordinary delivery. Retrieved records retain their original
+project memories (following pagination), and read relevant full records regardless
+of `memories.changed`, including after compaction. These are read-only recovery
+operations; they do not advance ordinary delivery. Retrieved records retain their original
 authority. Codex reconstructs developer instructions during compaction, but
 delivery of an instruction does not prove that an agent followed it: a real
 post-compaction recovery remains a separate acceptance observation.

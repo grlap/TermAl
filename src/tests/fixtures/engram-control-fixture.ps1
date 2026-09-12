@@ -27,7 +27,7 @@ if (-not $projectFile -or -not $engramHome) {
 }
 
 $workIndex = [Array]::IndexOf($args, "work")
-if ($workIndex -ge 0 -and ($args -contains "next") -and ($args -contains "--context-generation")) {
+if ($workIndex -ge 0 -and ($args -contains "next")) {
     if (-not $env:ENGRAM_HOME -or -not $env:ENGRAM_ACTOR_ID -or -not $env:ENGRAM_ACTOR_CONTEXT -or -not $env:ENGRAM_SESSION_ID) {
         [Console]::Error.WriteLine("missing Engram base context environment")
         exit 8
@@ -37,7 +37,20 @@ if ($workIndex -ge 0 -and ($args -contains "next") -and ($args -contains "--cont
         exit 9
     }
     [System.IO.File]::AppendAllText((Join-Path $engramHome "work-context-reads"), "next`n")
+    $args | ConvertTo-Json -Compress | Set-Content -LiteralPath (Join-Path $engramHome "work-context-args.json")
     $mode = (Get-Content -LiteralPath $projectFile -Raw).Trim()
+    if ($mode -eq "fixture-work-next-delivery") {
+        # Model the documented peek/next boundary, independently of host cache.
+        $cursorPath = Join-Path $engramHome "work-delivery-cursor"
+        $page = if (Test-Path -LiteralPath $cursorPath) { [int](Get-Content -LiteralPath $cursorPath -Raw) } else { 0 }
+        if (-not ($args -contains "--peek")) {
+            [System.IO.File]::WriteAllText($cursorPath, [string]($page + 1))
+        }
+        [Console]::Out.WriteLine("delivery-page-$page")
+        [Console]::Out.WriteLine("x" * 40000)
+        [Console]::Out.WriteLine("complete-page-tail")
+        exit 0
+    }
     if ($mode -eq "fixture-work-next-gated" -and
         -not (Test-Path -LiteralPath (Join-Path $engramHome "work-context-released"))) {
         & (Join-Path $engramHome "work-context-gate.cmd") > $null

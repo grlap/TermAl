@@ -7,6 +7,7 @@ actor_id=""
 actor_context=""
 session_id=""
 is_doctor=0
+is_peek=0
 original_args=$*
 while [ "$#" -gt 0 ]; do
   if [ "$1" = "--project-file" ]; then
@@ -37,13 +38,16 @@ while [ "$#" -gt 0 ]; do
   if [ "$1" = "doctor" ]; then
     is_doctor=1
   fi
+  if [ "$1" = "--peek" ]; then
+    is_peek=1
+  fi
   shift
 done
 [ -n "$project_file" ] || exit 2
 [ -n "$engram_home" ] || exit 2
 
 case " $original_args " in
-  *" --context-generation "*)
+  *" work "*" next "*)
     [ -n "${ENGRAM_HOME:-}" ] || exit 8
     [ -n "${ENGRAM_ACTOR_ID:-}" ] || exit 8
     [ -n "${ENGRAM_ACTOR_CONTEXT:-}" ] || exit 8
@@ -54,6 +58,21 @@ case " $original_args " in
     [ "$ENGRAM_SESSION_ID" = "$session_id" ] || exit 9
     mode=$(tr -d '\r\n' < "$project_file")
     printf "next\n" >> "$engram_home/work-context-reads"
+    printf '%s\n' "$original_args" > "$engram_home/work-context-args.txt"
+    if [ "$mode" = "fixture-work-next-delivery" ]; then
+      # Model the documented peek/next boundary, independently of host cache.
+      page=0
+      if [ -f "$engram_home/work-delivery-cursor" ]; then
+        page=$(cat "$engram_home/work-delivery-cursor")
+      fi
+      if [ "$is_peek" -eq 0 ]; then
+        printf '%s' "$((page + 1))" > "$engram_home/work-delivery-cursor"
+      fi
+      printf 'delivery-page-%s\n' "$page"
+      awk 'BEGIN { for (i = 0; i < 40000; i++) printf "x"; print "" }'
+      printf 'complete-page-tail\n'
+      exit 0
+    fi
     if [ "$mode" = "fixture-work-next-gated" ] && [ ! -e "$engram_home/work-context-released" ]; then
       sh "$engram_home/work-context-gate.sh" >/dev/null
     fi

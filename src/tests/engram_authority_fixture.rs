@@ -73,11 +73,19 @@ fn authority_command() {
         return;
     }
     if args[4] == "work" {
-        assert_eq!(args.len(), 14, "work-context argv: {args:?}");
+        assert_eq!(args.len(), 15, "work-context argv: {args:?}");
         assert_eq!(args[5], "--actor-id");
         assert_eq!(args[7], "--session-id");
         assert_eq!(args[9], "--actor-context");
-        assert_eq!(&args[11..13], ["next", "--context-generation"]);
+        assert_eq!(&args[11..14], ["next", "--peek", "--context-generation"]);
+        assert!(
+            args[14]
+                .strip_prefix("termal-")
+                .and_then(|value| value.parse::<u64>().ok())
+                .is_some_and(|generation| generation > 0),
+            "work-context generation: {:?}",
+            args[14]
+        );
         for (name, value) in [
             ("ENGRAM_HOME", &args[3]),
             ("ENGRAM_ACTOR_ID", &args[6]),
