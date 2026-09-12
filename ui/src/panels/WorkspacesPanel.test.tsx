@@ -17,7 +17,6 @@ import { SettingsDialogShell } from "../preferences/SettingsDialogShell";
 import {
   visibleWorkspaceSummaries,
   workspaceDescriptionDomId,
-  WorkspacesPanel,
   WorkspacesPanelHeaderActions,
   matchingRetainedWorkspaceSummary,
   publishLiveWorkspaceSummary,
@@ -25,6 +24,11 @@ import {
   workspaceDisplayName,
   workspaceOverflowTriggerLabel,
 } from "./WorkspacesPanel";
+import {
+  PersistentWorkspacesPanelHarness,
+  WorkspacesPanelHarness,
+  type WorkspacesPanelHarnessProps,
+} from "./workspaces-panel-test-harness";
 import type { WorkspaceDeleteRequest } from "../workspace-delete-request";
 import { useCommittedRef } from "./use-committed-ref";
 import { WorkspaceRowOverflowMenu } from "./WorkspaceRowOverflowMenu";
@@ -38,7 +42,7 @@ import {
   workspaceOverflowMenuNeedsReveal,
 } from "./workspace-overflow-menu-geometry";
 
-function props(): ComponentProps<typeof WorkspacesPanel> {
+function props(): WorkspacesPanelHarnessProps {
   return {
     currentWorkspaceId: "workspace-zulu",
     summaries: [
@@ -319,7 +323,7 @@ describe("WorkspacesPanel", () => {
 
   it("pins the current workspace first even when its label sorts last", () => {
     const input = props();
-    render(<WorkspacesPanel {...input} />);
+    render(<WorkspacesPanelHarness {...input} />);
     const titles = screen.getAllByRole("listitem").map((row) =>
       row.querySelector(".workspaces-panel-item-title")?.textContent,
     );
@@ -334,19 +338,19 @@ describe("WorkspacesPanel", () => {
     input.summaries = [
       { id: "workspace-alpha", label: "Alpha", revision: 1, updatedAt: "yesterday", controlPanelSide: "left" },
     ];
-    const view = render(<WorkspacesPanel {...input} />);
+    const view = render(<WorkspacesPanelHarness {...input} />);
     const current = screen.getByRole("button", { name: "workspace-missing (current)" });
     expect(current).toHaveAttribute("title", "workspace-missing");
     expect(within(current.closest("[role='listitem']")!).queryByRole("button", { name: /Actions for/ })).toBeNull();
     expect(screen.queryByRole("menuitem", { name: /Open in new tab/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /Open in new tab/ })).not.toBeInTheDocument();
 
-    view.rerender(<WorkspacesPanel {...input} summaries={[...input.summaries].reverse()} />);
+    view.rerender(<WorkspacesPanelHarness {...input} summaries={[...input.summaries].reverse()} />);
     expect(screen.getByRole("button", { name: "workspace-missing (current)" })).toBeInTheDocument();
   });
 
   it("filters by label or id and reports a no-match state", () => {
-    render(<WorkspacesPanel {...props()} />);
+    render(<WorkspacesPanelHarness {...props()} />);
     fireEvent.change(screen.getByRole("searchbox", { name: "Search workspaces" }), {
       target: { value: "alpha" },
     });
@@ -369,7 +373,7 @@ describe("WorkspacesPanel", () => {
     const input = props();
     input.isLoading = true;
     input.error = "Backend needs restart";
-    render(<WorkspacesPanel {...input} />);
+    render(<WorkspacesPanelHarness {...input} />);
     expect(screen.getByText("Loading saved workspaces…")).toBeInTheDocument();
     expect(screen.getByRole("alert")).toHaveTextContent("Backend needs restart");
     expect(input.onRefresh).toHaveBeenCalledTimes(1);
@@ -383,63 +387,29 @@ describe("WorkspacesPanel", () => {
     const first = vi.fn();
     const second = vi.fn();
     const input = props();
-    const view = render(<WorkspacesPanel {...input} onRefresh={first} />);
+    const view = render(<WorkspacesPanelHarness {...input} onRefresh={first} />);
     expect(first).toHaveBeenCalledTimes(1);
     expect(first).toHaveBeenLastCalledWith({ preserveError: true });
 
-    view.rerender(<WorkspacesPanel {...input} onRefresh={second} />);
+    view.rerender(<WorkspacesPanelHarness {...input} onRefresh={second} />);
     expect(first).toHaveBeenCalledTimes(1);
     expect(second).not.toHaveBeenCalled();
 
-    view.rerender(<WorkspacesPanel {...input} onRefresh={second} error="Backend needs restart" />);
+    view.rerender(<WorkspacesPanelHarness {...input} onRefresh={second} error="Backend needs restart" />);
     fireEvent.click(screen.getByRole("button", { name: "Reload list" }));
     expect(second).toHaveBeenCalledTimes(1);
     expect(second).toHaveBeenLastCalledWith();
 
     view.unmount();
-    render(<WorkspacesPanel {...input} onRefresh={second} />);
+    render(<WorkspacesPanelHarness {...input} onRefresh={second} />);
     expect(second).toHaveBeenCalledTimes(2);
     expect(second).toHaveBeenLastCalledWith({ preserveError: true });
-  });
-
-  it("moves focus to search after Reload unmounts when Reload owned focus", () => {
-    const input = props();
-    input.error = "Backend needs restart";
-    const view = render(<WorkspacesPanel {...input} />);
-    const reload = screen.getByRole("button", { name: "Reload list" });
-    reload.focus();
-    fireEvent.click(reload);
-    view.rerender(<WorkspacesPanel {...input} error={null} />);
-    expect(screen.queryByRole("button", { name: "Reload list" })).not.toBeInTheDocument();
-    expect(screen.getByRole("searchbox", { name: "Search workspaces" })).toHaveFocus();
-  });
-
-  it("does not steal focus when Reload chrome disappears without Reload activation", () => {
-    const input = props();
-    input.error = "Backend needs restart";
-    const view = render(<WorkspacesPanel {...input} />);
-    const search = screen.getByRole("searchbox", { name: "Search workspaces" });
-    search.focus();
-    view.rerender(<WorkspacesPanel {...input} error={null} />);
-    expect(search).toHaveFocus();
-  });
-
-  it("restores search after Reload when the document body has focus", () => {
-    const input = props();
-    input.error = "Backend needs restart";
-    const view = render(<WorkspacesPanel {...input} />);
-    document.body.focus();
-    expect(document.activeElement).toBe(document.body);
-    fireEvent.click(screen.getByRole("button", { name: "Reload list" }));
-    view.rerender(<WorkspacesPanel {...input} error={null} />);
-    expect(screen.queryByRole("button", { name: "Reload list" })).not.toBeInTheDocument();
-    expect(screen.getByRole("searchbox", { name: "Search workspaces" })).toHaveFocus();
   });
 
   it("keeps a rejected rename draft and restores focus on cancel", async () => {
     const input = props();
     input.onRenameWorkspace = vi.fn().mockRejectedValue(new Error("Backend needs restart"));
-    render(<WorkspacesPanel {...input} />);
+    render(<WorkspacesPanelHarness {...input} />);
     fireEvent.click(screen.getByRole("button", { name: "Actions for workspace Zulu" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
     const field = screen.getByRole("textbox", { name: "Workspace label" });
@@ -456,7 +426,7 @@ describe("WorkspacesPanel", () => {
   it("disables overflow actions while a delete is pending", () => {
     const input = props();
     input.deletingWorkspaceIds = ["workspace-alpha"];
-    render(<WorkspacesPanel {...input} />);
+    render(<WorkspacesPanelHarness {...input} />);
     const overflow = screen.getByRole("button", {
       name: workspaceOverflowTriggerLabel("Alpha", true),
     });
@@ -468,7 +438,7 @@ describe("WorkspacesPanel", () => {
   it("unlocks confirm, cancel, and escape when delete does not start", async () => {
     const input = props();
     const user = userEvent.setup();
-    render(<WorkspacesPanel {...input} />);
+    render(<WorkspacesPanelHarness {...input} />);
     await user.click(screen.getByRole("button", { name: "Actions for workspace Alpha" }));
     await user.click(screen.getByRole("menuitem", { name: "Delete workspace Alpha" }));
     await user.click(screen.getByRole("button", { name: "Confirm delete" }));
@@ -492,7 +462,7 @@ describe("WorkspacesPanel", () => {
     const input = props();
     input.onDeleteWorkspace = vi.fn(() => ({ started: true, completed: Promise.resolve() }));
     const user = userEvent.setup();
-    render(<WorkspacesPanel {...input} />);
+    render(<WorkspacesPanelHarness {...input} />);
     await user.click(screen.getByRole("button", { name: "Actions for workspace Alpha" }));
     await user.click(screen.getByRole("menuitem", { name: "Delete workspace Alpha" }));
     await user.click(screen.getByRole("button", { name: "Confirm delete" }));
@@ -524,7 +494,7 @@ describe("WorkspacesPanel", () => {
       return { started: false, completed: Promise.resolve() };
     });
     const user = userEvent.setup();
-    render(<WorkspacesPanel {...input} />);
+    render(<WorkspacesPanelHarness {...input} />);
     await user.click(screen.getByRole("button", { name: "Actions for workspace Alpha" }));
     await user.click(screen.getByRole("menuitem", { name: "Delete workspace Alpha" }));
     await user.click(screen.getByRole("button", { name: "Confirm delete" }));
@@ -550,7 +520,7 @@ describe("WorkspacesPanel", () => {
     };
     window.addEventListener("unhandledrejection", onUnhandled);
     const user = userEvent.setup();
-    render(<WorkspacesPanel {...input} />);
+    render(<WorkspacesPanelHarness {...input} />);
     try {
       await user.click(screen.getByRole("button", { name: "Actions for workspace Alpha" }));
       await user.click(screen.getByRole("menuitem", { name: "Delete workspace Alpha" }));
@@ -573,11 +543,11 @@ describe("WorkspacesPanel", () => {
     const deferred = createDeferredDeleteRequest();
     input.onDeleteWorkspace = vi.fn(() => deferred.request);
     const user = userEvent.setup();
-    const view = render(<WorkspacesPanel {...input} />);
+    const view = render(<WorkspacesPanelHarness {...input} />);
     await user.click(screen.getByRole("button", { name: "Actions for workspace Alpha" }));
     await user.click(screen.getByRole("menuitem", { name: "Delete workspace Alpha" }));
     await user.click(screen.getByRole("button", { name: "Confirm delete" }));
-    view.rerender(<WorkspacesPanel {...input} />);
+    view.rerender(<WorkspacesPanelHarness {...input} />);
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     await user.keyboard("{Escape}");
     await user.click(screen.getByRole("button", { name: "Confirm delete" }));
@@ -600,12 +570,12 @@ describe("WorkspacesPanel", () => {
       return started === 1 ? first.request : second.request;
     });
     const user = userEvent.setup();
-    const view = render(<WorkspacesPanel {...input} />);
+    const view = render(<WorkspacesPanelHarness {...input} />);
     await user.click(screen.getByRole("button", { name: "Actions for workspace Alpha" }));
     await user.click(screen.getByRole("menuitem", { name: "Delete workspace Alpha" }));
     await user.click(screen.getByRole("button", { name: "Confirm delete" }));
-    view.rerender(<WorkspacesPanel {...input} deletingWorkspaceIds={["workspace-alpha"]} />);
-    view.rerender(<WorkspacesPanel {...input} deletingWorkspaceIds={[]} />);
+    view.rerender(<WorkspacesPanelHarness {...input} deletingWorkspaceIds={["workspace-alpha"]} />);
+    view.rerender(<WorkspacesPanelHarness {...input} deletingWorkspaceIds={[]} />);
     await user.click(screen.getByRole("button", { name: "Confirm delete" }));
     expect(input.onDeleteWorkspace).toHaveBeenCalledTimes(2);
     await act(async () => {
@@ -625,7 +595,7 @@ describe("WorkspacesPanel", () => {
 
   it("requires delete confirmation before calling the handler", () => {
     const input = props();
-    render(<WorkspacesPanel {...input} />);
+    render(<WorkspacesPanelHarness {...input} />);
     fireEvent.click(screen.getByRole("button", { name: "Actions for workspace Alpha" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete workspace Alpha" }));
     expect(screen.getByRole("group", { name: "Delete workspace workspace-alpha" })).toBeInTheDocument();
@@ -647,8 +617,8 @@ describe("WorkspacesPanel", () => {
     const user = userEvent.setup();
     render(
       <>
-        <WorkspacesPanel {...input} />
-        <WorkspacesPanel {...input} />
+        <WorkspacesPanelHarness {...input} />
+        <WorkspacesPanelHarness {...input} />
       </>,
     );
     const alphaOverflows = screen.getAllByRole("button", { name: "Actions for workspace Alpha" });
@@ -690,8 +660,8 @@ describe("WorkspacesPanel", () => {
     ];
     render(
       <>
-        <WorkspacesPanel {...input} />
-        <WorkspacesPanel {...input} />
+        <WorkspacesPanelHarness {...input} />
+        <WorkspacesPanelHarness {...input} />
       </>,
     );
     const reviewOverflows = screen.getAllByRole("button", { name: "Actions for workspace Review" });
@@ -724,7 +694,7 @@ describe("WorkspacesPanel", () => {
       { id: "workspace-zulu", label: "Zulu", revision: 1, updatedAt: "today", controlPanelSide: "left" },
     ];
     const user = userEvent.setup();
-    render(<WorkspacesPanel {...input} />);
+    render(<WorkspacesPanelHarness {...input} />);
     const overflows = screen.getAllByRole("button", { name: "Actions for workspace Twin" });
     expect(overflows).toHaveLength(2);
     const describedBy = overflows.map((button) => button.getAttribute("aria-describedby"));
@@ -749,7 +719,7 @@ describe("WorkspacesPanel", () => {
   it("confirms and cancels the inline delete group from the keyboard", async () => {
     const input = props();
     const user = userEvent.setup();
-    render(<WorkspacesPanel {...input} />);
+    render(<WorkspacesPanelHarness {...input} />);
     await user.click(screen.getByRole("button", { name: "Actions for workspace Alpha" }));
     await user.click(screen.getByRole("menuitem", { name: "Delete workspace Alpha" }));
     expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus();
@@ -772,20 +742,20 @@ describe("WorkspacesPanel", () => {
 
   it("hides new-tab and delete on the current row, including its synthetic fallback", () => {
     const input = props();
-    const view = render(<WorkspacesPanel {...input} />);
+    const view = render(<WorkspacesPanelHarness {...input} />);
     fireEvent.click(screen.getByRole("button", { name: "Actions for workspace Zulu" }));
     expect(screen.queryByRole("menuitem", { name: "Open in new tab: workspace Zulu" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /Open in new tab/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: /Delete/ })).not.toBeInTheDocument();
 
-    view.rerender(<WorkspacesPanel {...input} summaries={input.summaries.slice(0, 1)} currentWorkspaceId="workspace-zulu" />);
+    view.rerender(<WorkspacesPanelHarness {...input} summaries={input.summaries.slice(0, 1)} currentWorkspaceId="workspace-zulu" />);
     expect(screen.getByRole("button", { name: "workspace-zulu (current)" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Actions for workspace Zulu" })).not.toBeInTheDocument();
   });
 
   it("leaves new-tab activations to the browser", async () => {
     const input = props();
-    render(<WorkspacesPanel {...input} />);
+    render(<WorkspacesPanelHarness {...input} />);
     fireEvent.click(screen.getByRole("button", { name: "Actions for workspace Alpha" }));
     const link = screen.getByRole("menuitem", { name: "Open in new tab: workspace Alpha" });
     const sourceUrl = window.location.href;
@@ -816,7 +786,7 @@ describe("WorkspacesPanel", () => {
       controlPanelSide: "left",
     }];
     input.currentWorkspaceId = input.summaries[0].id;
-    render(<WorkspacesPanel {...input} />);
+    render(<WorkspacesPanelHarness {...input} />);
     const title = screen.getByText(label);
     expect(title).toHaveClass("workspaces-panel-item-title");
     expect(workspaceDisplayName(input.summaries[0])).toHaveLength(80);
@@ -828,7 +798,7 @@ describe("WorkspacesPanel", () => {
     const input = props();
     let finishSave!: () => void;
     input.onRenameWorkspace = vi.fn().mockImplementationOnce(() => new Promise<void>((resolve) => { finishSave = resolve; }));
-    render(<WorkspacesPanel {...input} />);
+    render(<WorkspacesPanelHarness {...input} />);
     fireEvent.click(screen.getByRole("button", { name: "Actions for workspace Zulu" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Workspace label" }), { target: { value: "  Reviews  " } });
@@ -842,7 +812,7 @@ describe("WorkspacesPanel", () => {
   it("saves a rename through a pointerdown-to-click on Save label", async () => {
     const input = props();
     const user = userEvent.setup();
-    render(<WorkspacesPanel {...input} />);
+    render(<WorkspacesPanelHarness {...input} />);
     await user.click(screen.getByRole("button", { name: "Actions for workspace Zulu" }));
     await user.click(screen.getByRole("menuitem", { name: "Rename" }));
     const field = screen.getByRole("textbox", { name: "Workspace label" });
@@ -863,7 +833,7 @@ describe("WorkspacesPanel", () => {
       }),
     );
     const user = userEvent.setup();
-    render(<WorkspacesPanel {...input} />);
+    render(<WorkspacesPanelHarness {...input} />);
     await user.click(screen.getByRole("button", { name: "Actions for workspace Zulu" }));
     await user.click(screen.getByRole("menuitem", { name: "Rename" }));
     const field = screen.getByRole("textbox", { name: "Workspace label" });
@@ -882,7 +852,7 @@ describe("WorkspacesPanel", () => {
   it("confirms delete through a pointerdown-to-click and focuses Cancel first", async () => {
     const input = props();
     const user = userEvent.setup();
-    render(<WorkspacesPanel {...input} />);
+    render(<WorkspacesPanelHarness {...input} />);
     await user.click(screen.getByRole("button", { name: "Actions for workspace Alpha" }));
     await user.click(screen.getByRole("menuitem", { name: "Delete workspace Alpha" }));
     expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus();
@@ -893,7 +863,7 @@ describe("WorkspacesPanel", () => {
   it("returns focus to the overflow trigger when delete confirmation is cancelled", async () => {
     const input = props();
     const user = userEvent.setup();
-    render(<WorkspacesPanel {...input} />);
+    render(<WorkspacesPanelHarness {...input} />);
     const overflow = screen.getByRole("button", { name: "Actions for workspace Alpha" });
     await user.click(overflow);
     await user.click(screen.getByRole("menuitem", { name: "Delete workspace Alpha" }));
@@ -905,7 +875,7 @@ describe("WorkspacesPanel", () => {
   it("moves overflow-menu focus with Arrow, Home, and End", async () => {
     const input = props();
     const user = userEvent.setup();
-    render(<WorkspacesPanel {...input} />);
+    render(<WorkspacesPanelHarness {...input} />);
     await user.click(screen.getByRole("button", { name: "Actions for workspace Alpha" }));
     const rename = screen.getByRole("menuitem", { name: "Rename" });
     const openTab = screen.getByRole("menuitem", { name: "Open in new tab: workspace Alpha" });
@@ -924,7 +894,7 @@ describe("WorkspacesPanel", () => {
   it("closes the overflow menu on outside pointer without restoring overflow focus", async () => {
     const input = props();
     const user = userEvent.setup();
-    render(<WorkspacesPanel {...input} />);
+    render(<WorkspacesPanelHarness {...input} />);
     const overflow = screen.getByRole("button", { name: "Actions for workspace Alpha" });
     await user.click(overflow);
     await waitFor(() => expect(screen.getByRole("menuitem", { name: "Rename" })).toHaveFocus());
@@ -991,16 +961,16 @@ describe("WorkspacesPanel", () => {
     const input = props();
     input.onDeleteWorkspace = vi.fn(() => hangingDeleteRequest());
     const user = userEvent.setup();
-    const view = render(<WorkspacesPanel {...input} />);
+    const view = render(<WorkspacesPanelHarness {...input} />);
     await user.click(screen.getByRole("button", { name: "Actions for workspace Alpha" }));
     await user.click(screen.getByRole("menuitem", { name: "Delete workspace Alpha" }));
     await user.click(screen.getByRole("button", { name: "Confirm delete" }));
     view.rerender(
-      <WorkspacesPanel {...input} deletingWorkspaceIds={["workspace-alpha"]} />,
+      <WorkspacesPanelHarness {...input} deletingWorkspaceIds={["workspace-alpha"]} />,
     );
     expect(within(screen.getByRole("group", { name: /Delete workspace/ })).getByRole("button", { name: "Deleting" })).toHaveFocus();
     view.rerender(
-      <WorkspacesPanel
+      <WorkspacesPanelHarness
         {...input}
         deletingWorkspaceIds={[]}
         summaries={input.summaries.filter((summary) => summary.id !== "workspace-alpha")}
@@ -1021,12 +991,12 @@ describe("WorkspacesPanel", () => {
       updatedAt: "yesterday",
       controlPanelSide: "left",
     }];
-    const isolated = render(<WorkspacesPanel {...fallback} />);
+    const isolated = render(<WorkspacesPanelHarness {...fallback} />);
     await user.click(screen.getByRole("button", { name: "Actions for workspace Alpha" }));
     await user.click(screen.getByRole("menuitem", { name: "Delete workspace Alpha" }));
     await user.click(screen.getByRole("button", { name: "Confirm delete" }));
-    isolated.rerender(<WorkspacesPanel {...fallback} deletingWorkspaceIds={["workspace-alpha"]} />);
-    isolated.rerender(<WorkspacesPanel {...fallback} deletingWorkspaceIds={[]} summaries={[]} />);
+    isolated.rerender(<WorkspacesPanelHarness {...fallback} deletingWorkspaceIds={["workspace-alpha"]} />);
+    isolated.rerender(<WorkspacesPanelHarness {...fallback} deletingWorkspaceIds={[]} summaries={[]} />);
     await waitFor(() => {
       expect(screen.getByRole("searchbox", { name: "Search workspaces" })).toHaveFocus();
     });
@@ -1040,22 +1010,22 @@ describe("WorkspacesPanel", () => {
       { id: "workspace-beta", label: "Beta", revision: 1, updatedAt: "earlier", controlPanelSide: "left" },
     ];
     const user = userEvent.setup();
-    const view = render(<WorkspacesPanel {...input} />);
+    const view = render(<WorkspacesPanelHarness {...input} />);
     await user.click(screen.getByRole("button", { name: "Actions for workspace Alpha" }));
     await user.click(screen.getByRole("menuitem", { name: "Delete workspace Alpha" }));
     await user.click(screen.getByRole("button", { name: "Confirm delete" }));
-    view.rerender(<WorkspacesPanel {...input} deletingWorkspaceIds={["workspace-alpha"]} />);
+    view.rerender(<WorkspacesPanelHarness {...input} deletingWorkspaceIds={["workspace-alpha"]} />);
     expect(screen.getByRole("group", { name: /Delete workspace/ })).toBeInTheDocument();
     expect(within(screen.getByRole("group", { name: /Delete workspace/ })).getByRole("button", { name: "Deleting" })).toHaveFocus();
     view.rerender(
-      <WorkspacesPanel {...input} deletingWorkspaceIds={[]} error="Delete failed." />,
+      <WorkspacesPanelHarness {...input} deletingWorkspaceIds={[]} error="Delete failed." />,
     );
     expect(screen.getByRole("group", { name: /Delete workspace/ })).toBeInTheDocument();
     const search = screen.getByRole("searchbox", { name: "Search workspaces" });
     await user.click(search);
     expect(search).toHaveFocus();
     view.rerender(
-      <WorkspacesPanel
+      <WorkspacesPanelHarness
         {...input}
         deletingWorkspaceIds={[]}
         error="Delete failed."
@@ -1082,8 +1052,8 @@ describe("WorkspacesPanel", () => {
     ];
     render(
       <>
-        <WorkspacesPanel {...input} />
-        <WorkspacesPanel {...input} />
+        <WorkspacesPanelHarness {...input} />
+        <WorkspacesPanelHarness {...input} />
       </>,
     );
     const spaced = screen.getAllByRole("button", { name: "Spaced (current)" });
@@ -1111,8 +1081,9 @@ describe("WorkspacesPanel", () => {
     );
     expect(screen.getByRole("button", { name: "New workspace here" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "New window" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Refresh workspaces" })).toHaveAttribute("aria-disabled", "true");
-    expect(screen.getByRole("button", { name: "Refresh workspaces" })).not.toHaveAttribute("disabled");
+    const refresh = screen.getByRole("button", { name: "Refresh workspaces" });
+    expect(refresh).toHaveAttribute("aria-disabled", "true");
+    expect(refresh).not.toHaveAttribute("disabled");
   });
 
   it("restores overflow focus after a deferred save, but not if the user moved away", async () => {
@@ -1122,7 +1093,7 @@ describe("WorkspacesPanel", () => {
       finishSave = resolve;
     }));
     const user = userEvent.setup();
-    const view = render(<WorkspacesPanel {...input} />);
+    const view = render(<WorkspacesPanelHarness {...input} />);
     await user.click(screen.getByRole("button", { name: "Actions for workspace Zulu" }));
     await user.click(screen.getByRole("menuitem", { name: "Rename" }));
     await user.click(screen.getByRole("button", { name: "Save label" }));
@@ -1137,7 +1108,7 @@ describe("WorkspacesPanel", () => {
     input.onRenameWorkspace = vi.fn().mockImplementationOnce(() => new Promise<void>((resolve) => {
       finishSecond = resolve;
     }));
-    render(<WorkspacesPanel {...input} />);
+    render(<WorkspacesPanelHarness {...input} />);
     await user.click(screen.getByRole("button", { name: "Actions for workspace Zulu" }));
     await user.click(screen.getByRole("menuitem", { name: "Rename" }));
     await user.click(screen.getByRole("button", { name: "Save label" }));
@@ -1155,7 +1126,7 @@ describe("WorkspacesPanel", () => {
     function Harness({ settingsOpen }: { settingsOpen: boolean }) {
       return (
         <>
-          <WorkspacesPanel {...input} />
+          <WorkspacesPanelHarness {...input} />
           {settingsOpen ? (
             <SettingsDialogShell onClose={onCloseSettings}>
               <p>Appearance</p>
@@ -1182,7 +1153,7 @@ describe("WorkspacesPanel", () => {
     const user = userEvent.setup();
     render(
       <>
-        <WorkspacesPanel {...input} />
+        <WorkspacesPanelHarness {...input} />
         <textarea aria-label="Composer" />
       </>,
     );
@@ -1199,7 +1170,7 @@ describe("WorkspacesPanel", () => {
   it("ignores Escape after a consumed handler", async () => {
     const input = props();
     const user = userEvent.setup();
-    render(<WorkspacesPanel {...input} />);
+    render(<WorkspacesPanelHarness {...input} />);
     await user.click(screen.getByRole("button", { name: "Actions for workspace Zulu" }));
     await user.click(screen.getByRole("menuitem", { name: "Rename" }));
     const field = screen.getByRole("textbox", { name: "Workspace label" });
@@ -1216,7 +1187,7 @@ describe("WorkspacesPanel", () => {
   it("ignores composing Escape without a preventDefault fixture", async () => {
     const input = props();
     const user = userEvent.setup();
-    render(<WorkspacesPanel {...input} />);
+    render(<WorkspacesPanelHarness {...input} />);
     await user.click(screen.getByRole("button", { name: "Actions for workspace Zulu" }));
     await user.click(screen.getByRole("menuitem", { name: "Rename" }));
     const field = screen.getByRole("textbox", { name: "Workspace label" });
@@ -1234,16 +1205,16 @@ describe("WorkspacesPanel", () => {
       { id: "workspace-beta", label: "Beta", revision: 1, updatedAt: "earlier", controlPanelSide: "left" },
     ];
     const user = userEvent.setup();
-    const view = render(<WorkspacesPanel {...input} />);
+    const view = render(<WorkspacesPanelHarness {...input} />);
     await user.click(screen.getByRole("button", { name: "Actions for workspace Alpha" }));
     await user.click(screen.getByRole("menuitem", { name: "Delete workspace Alpha" }));
     await user.click(screen.getByRole("button", { name: "Confirm delete" }));
-    view.rerender(<WorkspacesPanel {...input} deletingWorkspaceIds={["workspace-alpha"]} />);
+    view.rerender(<WorkspacesPanelHarness {...input} deletingWorkspaceIds={["workspace-alpha"]} />);
     await user.click(screen.getByRole("button", { name: "Actions for workspace Beta" }));
     await user.click(screen.getByRole("menuitem", { name: "Delete workspace Beta" }));
     expect(screen.getByRole("group", { name: "Delete workspace workspace-beta" })).toBeInTheDocument();
     view.rerender(
-      <WorkspacesPanel
+      <WorkspacesPanelHarness
         {...input}
         deletingWorkspaceIds={[]}
         summaries={input.summaries.filter((summary) => summary.id !== "workspace-alpha")}
@@ -1261,20 +1232,20 @@ describe("WorkspacesPanel", () => {
       { id: "workspace-beta", label: "Beta", revision: 1, updatedAt: "earlier", controlPanelSide: "left" },
     ];
     const user = userEvent.setup();
-    const view = render(<WorkspacesPanel {...input} />);
+    const view = render(<WorkspacesPanelHarness {...input} />);
     await user.click(screen.getByRole("button", { name: "Actions for workspace Alpha" }));
     await user.click(screen.getByRole("menuitem", { name: "Delete workspace Alpha" }));
     await user.click(screen.getByRole("button", { name: "Confirm delete" }));
-    view.rerender(<WorkspacesPanel {...input} deletingWorkspaceIds={["workspace-alpha"]} />);
+    view.rerender(<WorkspacesPanelHarness {...input} deletingWorkspaceIds={["workspace-alpha"]} />);
     await user.click(screen.getByRole("button", { name: "Actions for workspace Beta" }));
     await user.click(screen.getByRole("menuitem", { name: "Delete workspace Beta" }));
     await user.click(screen.getByRole("button", { name: "Confirm delete" }));
     view.rerender(
-      <WorkspacesPanel {...input} deletingWorkspaceIds={["workspace-alpha", "workspace-beta"]} />,
+      <WorkspacesPanelHarness {...input} deletingWorkspaceIds={["workspace-alpha", "workspace-beta"]} />,
     );
     expect(screen.getByRole("group", { name: "Delete workspace workspace-beta" })).toBeInTheDocument();
     view.rerender(
-      <WorkspacesPanel
+      <WorkspacesPanelHarness
         {...input}
         deletingWorkspaceIds={["workspace-beta"]}
         summaries={input.summaries.filter((summary) => summary.id !== "workspace-alpha")}
@@ -1282,7 +1253,7 @@ describe("WorkspacesPanel", () => {
     );
     expect(screen.getByRole("group", { name: "Delete workspace workspace-beta" })).toBeInTheDocument();
     view.rerender(
-      <WorkspacesPanel
+      <WorkspacesPanelHarness
         {...input}
         deletingWorkspaceIds={[]}
         summaries={input.summaries.filter((summary) => summary.id === "workspace-zulu")}
@@ -1296,7 +1267,7 @@ describe("WorkspacesPanel", () => {
   it("moves rename input focus when the target workspace changes", async () => {
     const input = props();
     const user = userEvent.setup();
-    render(<WorkspacesPanel {...input} />);
+    render(<WorkspacesPanelHarness {...input} />);
     await user.click(screen.getByRole("button", { name: "Actions for workspace Zulu" }));
     await user.click(screen.getByRole("menuitem", { name: "Rename" }));
     expect(screen.getByRole("textbox", { name: "Workspace label" })).toHaveFocus();
@@ -1312,7 +1283,7 @@ describe("WorkspacesPanel", () => {
   it("closes the overflow menu when Tab leaves the menu and trigger", async () => {
     const input = props();
     const user = userEvent.setup();
-    render(<WorkspacesPanel {...input} />);
+    render(<WorkspacesPanelHarness {...input} />);
     await user.click(screen.getByRole("button", { name: "Actions for workspace Alpha" }));
     await waitFor(() => expect(screen.getByRole("menuitem", { name: "Rename" })).toHaveFocus());
     await user.tab();
@@ -1325,18 +1296,18 @@ describe("WorkspacesPanel", () => {
     const input = props();
     input.onDeleteWorkspace = vi.fn(() => hangingDeleteRequest());
     const user = userEvent.setup();
-    const view = render(<WorkspacesPanel {...input} />);
+    const view = render(<WorkspacesPanelHarness {...input} />);
     await user.click(screen.getByRole("button", { name: "Actions for workspace Alpha" }));
     await user.click(screen.getByRole("menuitem", { name: "Delete workspace Alpha" }));
     await user.click(screen.getByRole("button", { name: "Confirm delete" }));
-    view.rerender(<WorkspacesPanel {...input} deletingWorkspaceIds={["workspace-alpha"]} />);
+    view.rerender(<WorkspacesPanelHarness {...input} deletingWorkspaceIds={["workspace-alpha"]} />);
     const dialog = screen.getByRole("group", { name: "Delete workspace workspace-alpha" });
     const pending = within(dialog).getByRole("button", { name: "Deleting" });
     expect(pending).toHaveAttribute("aria-disabled", "true");
     expect(pending).not.toBeDisabled();
     expect(document.activeElement === pending || document.activeElement === dialog).toBe(true);
     expect(document.activeElement).not.toBe(document.body);
-    view.rerender(<WorkspacesPanel {...input} deletingWorkspaceIds={[]} error="Delete failed." />);
+    view.rerender(<WorkspacesPanelHarness {...input} deletingWorkspaceIds={[]} error="Delete failed." />);
     expect(dialog).toBeInTheDocument();
     expect(document.activeElement).not.toBe(document.body);
   });
@@ -1350,7 +1321,7 @@ describe("WorkspacesPanel", () => {
       }),
     );
     const user = userEvent.setup();
-    render(<WorkspacesPanel {...input} />);
+    render(<WorkspacesPanelHarness {...input} />);
     await user.click(screen.getByRole("button", { name: "Actions for workspace Zulu" }));
     await user.click(screen.getByRole("menuitem", { name: "Rename" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Workspace label" }), {
@@ -1375,7 +1346,7 @@ describe("WorkspacesPanel", () => {
   it("invokes Reload list without forwarding the click event", () => {
     const input = props();
     input.error = "Backend needs restart";
-    render(<WorkspacesPanel {...input} />);
+    render(<WorkspacesPanelHarness {...input} />);
     expect(input.onRefresh).toHaveBeenCalledTimes(1);
     expect(input.onRefresh).toHaveBeenLastCalledWith({ preserveError: true });
     fireEvent.click(screen.getByRole("button", { name: "Reload list" }));
@@ -1386,7 +1357,7 @@ describe("WorkspacesPanel", () => {
   it("keeps Reload list as a sibling of the message-only list error alert", () => {
     const input = props();
     input.error = "Backend needs restart";
-    render(<WorkspacesPanel {...input} />);
+    render(<WorkspacesPanelHarness {...input} />);
     const alert = screen.getByRole("alert");
     expect(alert).toHaveTextContent("Backend needs restart");
     expect(alert).not.toHaveTextContent("Reload list");
@@ -1395,11 +1366,234 @@ describe("WorkspacesPanel", () => {
     expect(input.onRefresh).toHaveBeenLastCalledWith();
   });
 
+  it("moves focus to search after Reload unmounts when Reload owned focus", () => {
+    const input = props();
+    input.error = "Backend needs restart";
+    const view = render(<WorkspacesPanelHarness {...input} />);
+    const reload = screen.getByRole("button", { name: "Reload list" });
+    reload.focus();
+    fireEvent.click(reload);
+    view.rerender(<WorkspacesPanelHarness {...input} error={null} />);
+    expect(screen.queryByRole("button", { name: "Reload list" })).not.toBeInTheDocument();
+    expect(screen.getByRole("searchbox", { name: "Search workspaces" })).toHaveFocus();
+  });
+
+  it("does not steal focus when Reload chrome disappears without Reload activation", () => {
+    const input = props();
+    input.error = "Backend needs restart";
+    const view = render(<WorkspacesPanelHarness {...input} />);
+    const search = screen.getByRole("searchbox", { name: "Search workspaces" });
+    search.focus();
+    view.rerender(<WorkspacesPanelHarness {...input} error={null} />);
+    expect(search).toHaveFocus();
+  });
+
+  it("restores search after Reload when the document body has focus", () => {
+    const input = props();
+    input.error = "Backend needs restart";
+    const view = render(<WorkspacesPanelHarness {...input} />);
+    document.body.focus();
+    expect(document.activeElement).toBe(document.body);
+    fireEvent.click(screen.getByRole("button", { name: "Reload list" }));
+    view.rerender(<WorkspacesPanelHarness {...input} error={null} />);
+    expect(screen.queryByRole("button", { name: "Reload list" })).not.toBeInTheDocument();
+    expect(screen.getByRole("searchbox", { name: "Search workspaces" })).toHaveFocus();
+  });
+
+  it("replaces a failed rename when Delete is requested on another row", async () => {
+    const input = props();
+    let rejectSave!: (error: Error) => void;
+    input.onRenameWorkspace = vi.fn(
+      () => new Promise<void>((_, reject) => {
+        rejectSave = reject;
+      }),
+    );
+    const user = userEvent.setup();
+    render(<WorkspacesPanelHarness {...input} />);
+    await user.click(screen.getByRole("button", { name: "Actions for workspace Zulu" }));
+    await user.click(screen.getByRole("menuitem", { name: "Rename" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Workspace label" }), {
+      target: { value: "Planning" },
+    });
+    await user.click(screen.getByRole("button", { name: "Save label" }));
+    await act(async () => rejectSave(new Error("Rename failed.")));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Rename failed.");
+    expect(screen.getByRole("textbox", { name: "Workspace label" })).toHaveValue("Planning");
+    await user.click(screen.getByRole("button", { name: "Actions for workspace Alpha" }));
+    await user.click(screen.getByRole("menuitem", { name: "Delete workspace Alpha" }));
+    expect(screen.queryByRole("form", { name: "Label workspace workspace-zulu" })).not.toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Delete workspace workspace-alpha" })).toBeInTheDocument();
+  });
+
+  it("replaces a failed rename when Rename is used on another row", async () => {
+    const input = props();
+    let rejectSave!: (error: Error) => void;
+    input.onRenameWorkspace = vi.fn(
+      () => new Promise<void>((_, reject) => {
+        rejectSave = reject;
+      }),
+    );
+    const user = userEvent.setup();
+    render(<WorkspacesPanelHarness {...input} />);
+    await user.click(screen.getByRole("button", { name: "Actions for workspace Zulu" }));
+    await user.click(screen.getByRole("menuitem", { name: "Rename" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Workspace label" }), {
+      target: { value: "Planning" },
+    });
+    await user.click(screen.getByRole("button", { name: "Save label" }));
+    await act(async () => rejectSave(new Error("Rename failed.")));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Rename failed.");
+    expect(screen.getByRole("textbox", { name: "Workspace label" })).toHaveValue("Planning");
+    await user.click(screen.getByRole("button", { name: "Actions for workspace Alpha" }));
+    await user.click(screen.getByRole("menuitem", { name: "Rename" }));
+    expect(screen.getByRole("form", { name: "Label workspace workspace-alpha" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Workspace label" })).toHaveValue("Alpha");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("keeps a captured rename draft when live summary metadata changes", async () => {
+    const input = props();
+    const user = userEvent.setup();
+    const view = render(<WorkspacesPanelHarness {...input} />);
+    await user.click(screen.getByRole("button", { name: "Actions for workspace Zulu" }));
+    await user.click(screen.getByRole("menuitem", { name: "Rename" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Workspace label" }), {
+      target: { value: "Planning" },
+    });
+    view.rerender(
+      <WorkspacesPanelHarness
+        {...input}
+        summaries={input.summaries.map((summary) => (
+          summary.id === "workspace-zulu"
+            ? { ...summary, label: "Server label", revision: 2, updatedAt: "now" }
+            : summary
+        ))}
+      />,
+    );
+    expect(screen.getByRole("form", { name: "Label workspace workspace-zulu" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Workspace label" })).toHaveValue("Planning");
+  });
+
+  it("clears an idle rename when Delete is requested, matching startRename clearing confirm", async () => {
+    const input = props();
+    const user = userEvent.setup();
+    render(<WorkspacesPanelHarness {...input} />);
+    await user.click(screen.getByRole("button", { name: "Actions for workspace Alpha" }));
+    await user.click(screen.getByRole("menuitem", { name: "Rename" }));
+    expect(screen.getByRole("form", { name: "Label workspace workspace-alpha" })).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("textbox", { name: "Workspace label" }), {
+      target: { value: "Planning" },
+    });
+    await user.click(screen.getByRole("button", { name: "Actions for workspace Alpha" }));
+    await user.click(screen.getByRole("menuitem", { name: "Delete workspace Alpha" }));
+    expect(screen.queryByRole("form", { name: "Label workspace workspace-alpha" })).not.toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Delete workspace workspace-alpha" })).toBeInTheDocument();
+  });
+
+  it("restores overflow after cancelling delete without consuming pending rename restore intent", async () => {
+    const input = props();
+    let finishSave!: () => void;
+    input.onRenameWorkspace = vi.fn().mockImplementationOnce(() => new Promise<void>((resolve) => {
+      finishSave = resolve;
+    }));
+    const user = userEvent.setup();
+    render(<WorkspacesPanelHarness {...input} />);
+    await user.click(screen.getByRole("button", { name: "Actions for workspace Zulu" }));
+    await user.click(screen.getByRole("menuitem", { name: "Rename" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Workspace label" }), {
+      target: { value: "Planning" },
+    });
+    await user.click(screen.getByRole("button", { name: "Save label" }));
+    await user.click(screen.getByRole("button", { name: "Actions for workspace Alpha" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete workspace Alpha" }));
+    expect(screen.getByRole("button", { name: "Saving…" })).toBeDisabled();
+    const confirm = screen.getByRole("group", { name: "Delete workspace workspace-alpha" });
+    await user.click(within(confirm).getByRole("button", { name: "Cancel" }));
+    expect(screen.getByRole("button", { name: "Actions for workspace Alpha" })).toHaveFocus();
+    expect(screen.getByRole("textbox", { name: "Workspace label" })).toHaveValue("Planning");
+    expect(screen.getByRole("button", { name: "Saving…" })).toBeDisabled();
+    await act(async () => finishSave());
+    expect(screen.getByRole("button", { name: "Actions for workspace Alpha" })).toHaveFocus();
+    expect(screen.queryByRole("textbox", { name: "Workspace label" })).not.toBeInTheDocument();
+  });
+
+  it("cancels a reachable Delete confirm on Escape while an in-flight rename stays locked", async () => {
+    const input = props();
+    input.onRenameWorkspace = vi.fn(() => new Promise<void>(() => {}));
+    const user = userEvent.setup();
+    render(<WorkspacesPanelHarness {...input} />);
+    await user.click(screen.getByRole("button", { name: "Actions for workspace Zulu" }));
+    await user.click(screen.getByRole("menuitem", { name: "Rename" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Workspace label" }), {
+      target: { value: "Planning" },
+    });
+    await user.click(screen.getByRole("button", { name: "Save label" }));
+    await user.click(screen.getByRole("button", { name: "Actions for workspace Alpha" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete workspace Alpha" }));
+    const confirm = screen.getByRole("group", { name: "Delete workspace workspace-alpha" });
+    expect(confirm).toBeInTheDocument();
+    expect(within(confirm).getByRole("button", { name: "Cancel" })).toHaveFocus();
+    expect(screen.getByRole("textbox", { name: "Workspace label" })).toHaveValue("Planning");
+    expect(screen.getByRole("button", { name: "Saving…" })).toBeDisabled();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("group", { name: "Delete workspace workspace-alpha" })).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Workspace label" })).toHaveValue("Planning");
+    expect(screen.getByRole("button", { name: "Saving…" })).toBeDisabled();
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("form", { name: "Label workspace workspace-zulu" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Workspace label" })).toHaveValue("Planning");
+    expect(screen.getByRole("button", { name: "Saving…" })).toBeDisabled();
+  });
+
+  it("does not steal remount focus after a successful save completed while unmounted", async () => {
+    const input = props();
+    let finishSave!: () => void;
+    input.onRenameWorkspace = vi.fn().mockImplementationOnce(() => new Promise<void>((resolve) => {
+      finishSave = resolve;
+    }));
+    const user = userEvent.setup();
+    const view = render(<PersistentWorkspacesPanelHarness {...input} showPanel />);
+    await user.click(screen.getByRole("button", { name: "Actions for workspace Zulu" }));
+    await user.click(screen.getByRole("menuitem", { name: "Rename" }));
+    await user.click(screen.getByRole("button", { name: "Save label" }));
+    view.rerender(<PersistentWorkspacesPanelHarness {...input} showPanel={false} />);
+    expect(screen.queryByRole("region", { name: "Workspaces" })).not.toBeInTheDocument();
+    document.body.focus();
+    await act(async () => {
+      finishSave();
+    });
+    view.rerender(<PersistentWorkspacesPanelHarness {...input} showPanel />);
+    expect(screen.queryByRole("textbox", { name: "Workspace label" })).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it("does not move remount focus from an unrelated control after unmounted success", async () => {
+    const input = props();
+    let finishSave!: () => void;
+    input.onRenameWorkspace = vi.fn().mockImplementationOnce(() => new Promise<void>((resolve) => {
+      finishSave = resolve;
+    }));
+    const user = userEvent.setup();
+    const view = render(<PersistentWorkspacesPanelHarness {...input} showPanel />);
+    await user.click(screen.getByRole("button", { name: "Actions for workspace Zulu" }));
+    await user.click(screen.getByRole("menuitem", { name: "Rename" }));
+    await user.click(screen.getByRole("button", { name: "Save label" }));
+    view.rerender(<PersistentWorkspacesPanelHarness {...input} showPanel={false} />);
+    const unrelated = screen.getByRole("button", { name: "Unrelated control" });
+    unrelated.focus();
+    await act(async () => {
+      finishSave();
+    });
+    view.rerender(<PersistentWorkspacesPanelHarness {...input} showPanel />);
+    expect(unrelated).toHaveFocus();
+    expect(screen.queryByRole("textbox", { name: "Workspace label" })).not.toBeInTheDocument();
+  });
+
   it("moves pending-save menu focus across enabled items only", async () => {
     const input = props();
     input.onRenameWorkspace = vi.fn(() => new Promise<void>(() => {}));
     const user = userEvent.setup();
-    render(<WorkspacesPanel {...input} />);
+    render(<WorkspacesPanelHarness {...input} />);
     await user.click(screen.getByRole("button", { name: "Actions for workspace Zulu" }));
     await user.click(screen.getByRole("menuitem", { name: "Rename" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Workspace label" }), {
@@ -1432,7 +1626,7 @@ describe("WorkspacesPanel", () => {
       }),
     );
     const user = userEvent.setup();
-    render(<WorkspacesPanel {...input} />);
+    render(<WorkspacesPanelHarness {...input} />);
     await user.click(screen.getByRole("button", { name: "Actions for workspace Zulu" }));
     await user.click(screen.getByRole("menuitem", { name: "Rename" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Workspace label" }), {
@@ -1457,7 +1651,7 @@ describe("WorkspacesPanel", () => {
       }),
     );
     const user = userEvent.setup();
-    render(<WorkspacesPanel {...input} />);
+    render(<WorkspacesPanelHarness {...input} />);
     await user.click(screen.getByRole("button", { name: "Actions for workspace Zulu" }));
     await user.click(screen.getByRole("menuitem", { name: "Rename" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Workspace label" }), {
@@ -1475,7 +1669,7 @@ describe("WorkspacesPanel", () => {
     const input = props();
     input.onRenameWorkspace = vi.fn(() => new Promise<void>(() => {}));
     const user = userEvent.setup();
-    const view = render(<WorkspacesPanel {...input} />);
+    const view = render(<WorkspacesPanelHarness {...input} />);
     await user.click(screen.getByRole("button", { name: "Actions for workspace Alpha" }));
     await user.click(screen.getByRole("menuitem", { name: "Rename" }));
     fireEvent.change(screen.getByRole("searchbox", { name: "Search workspaces" }), {
@@ -1484,7 +1678,7 @@ describe("WorkspacesPanel", () => {
     expect(screen.getByRole("form", { name: "Label workspace workspace-alpha" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Alpha" })).not.toBeInTheDocument();
     view.rerender(
-      <WorkspacesPanel
+      <WorkspacesPanelHarness
         {...input}
         summaries={input.summaries.filter((summary) => summary.id !== "workspace-alpha")}
       />,
@@ -1505,7 +1699,7 @@ describe("WorkspacesPanel", () => {
       }),
     );
     const user = userEvent.setup();
-    const view = render(<WorkspacesPanel {...input} />);
+    const view = render(<WorkspacesPanelHarness {...input} />);
     await user.click(screen.getByRole("button", { name: "Actions for workspace Alpha" }));
     await user.click(screen.getByRole("menuitem", { name: "Rename" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Workspace label" }), {
@@ -1513,7 +1707,7 @@ describe("WorkspacesPanel", () => {
     });
     await user.click(screen.getByRole("button", { name: "Save label" }));
     view.rerender(
-      <WorkspacesPanel
+      <WorkspacesPanelHarness
         {...input}
         summaries={input.summaries.filter((summary) => summary.id !== "workspace-alpha")}
       />,
@@ -1531,12 +1725,12 @@ describe("WorkspacesPanel", () => {
   it("does not let a removed confirmation swallow Escape or restore a missing trigger", async () => {
     const input = props();
     const user = userEvent.setup();
-    const view = render(<WorkspacesPanel {...input} />);
+    const view = render(<WorkspacesPanelHarness {...input} />);
     await user.click(screen.getByRole("button", { name: "Actions for workspace Alpha" }));
     await user.click(screen.getByRole("menuitem", { name: "Delete workspace Alpha" }));
     expect(screen.getByRole("group", { name: "Delete workspace workspace-alpha" })).toBeInTheDocument();
     view.rerender(
-      <WorkspacesPanel
+      <WorkspacesPanelHarness
         {...input}
         summaries={input.summaries.filter((summary) => summary.id !== "workspace-alpha")}
       />,
@@ -1553,7 +1747,7 @@ describe("WorkspacesPanel", () => {
     const input = props();
     input.isLoading = false;
     input.deletingWorkspaceIds = ["workspace-alpha"];
-    render(<WorkspacesPanel {...input} />);
+    render(<WorkspacesPanelHarness {...input} />);
     expect(screen.getByRole("status")).toHaveTextContent("Deleting");
     expect(screen.queryByText("Loading saved workspaces…")).not.toBeInTheDocument();
   });
@@ -1562,7 +1756,7 @@ describe("WorkspacesPanel", () => {
     const input = props();
     input.isLoading = true;
     input.deletingWorkspaceIds = ["workspace-alpha"];
-    render(<WorkspacesPanel {...input} />);
+    render(<WorkspacesPanelHarness {...input} />);
     expect(screen.getByRole("status")).toHaveTextContent("Loading saved workspaces…");
     expect(screen.getByRole("status")).not.toHaveTextContent("Deleting");
   });
@@ -1695,7 +1889,7 @@ describe("WorkspacesPanel", () => {
   it("keeps an open overflow menu usable without an overflow ancestor", async () => {
     const input = props();
     const user = userEvent.setup();
-    render(<WorkspacesPanel {...input} />);
+    render(<WorkspacesPanelHarness {...input} />);
     await user.click(screen.getByRole("button", { name: "Actions for workspace Alpha" }));
     const menu = screen.getByRole("menu");
     const maxHeight = Number.parseFloat(menu.style.maxHeight);
@@ -1757,25 +1951,25 @@ describe("WorkspacesPanel", () => {
 
   it("keeps a persistent polite live status across idle, loading, and deleting", () => {
     const input = props();
-    const view = render(<WorkspacesPanel {...input} />);
+    const view = render(<WorkspacesPanelHarness {...input} />);
     const status = screen.getByRole("status");
     expect(status).toHaveAttribute("aria-live", "polite");
     expect(status).toHaveTextContent("");
     expect(screen.getAllByRole("status")).toHaveLength(1);
 
-    view.rerender(<WorkspacesPanel {...input} isLoading />);
+    view.rerender(<WorkspacesPanelHarness {...input} isLoading />);
     expect(screen.getByRole("status")).toBe(status);
     expect(status).toHaveTextContent("Loading saved workspaces…");
     expect(screen.getAllByRole("status")).toHaveLength(1);
 
     view.rerender(
-      <WorkspacesPanel {...input} isLoading={false} deletingWorkspaceIds={["workspace-alpha"]} />,
+      <WorkspacesPanelHarness {...input} isLoading={false} deletingWorkspaceIds={["workspace-alpha"]} />,
     );
     expect(screen.getByRole("status")).toBe(status);
     expect(status).toHaveTextContent("Deleting");
     expect(screen.getAllByRole("status")).toHaveLength(1);
 
-    view.rerender(<WorkspacesPanel {...input} isLoading={false} deletingWorkspaceIds={[]} />);
+    view.rerender(<WorkspacesPanelHarness {...input} isLoading={false} deletingWorkspaceIds={[]} />);
     expect(screen.getByRole("status")).toBe(status);
     expect(status).toHaveTextContent("");
   });
@@ -1812,7 +2006,7 @@ describe("WorkspacesPanel", () => {
     try {
       render(
         <div className="control-panel-body" style={{ overflow: "auto" }}>
-          <WorkspacesPanel {...input} />
+          <WorkspacesPanelHarness {...input} />
         </div>,
       );
       await user.click(screen.getByRole("button", { name: "Actions for workspace Alpha" }));
@@ -1837,7 +2031,7 @@ describe("WorkspacesPanel", () => {
     try {
       // JSDOM leaves animationName empty and only fills the animation shorthand.
       expect(getComputedStyle(plainPanel).animation, "ordinary .panel must receive rise-in from styles.css").toContain("rise-in");
-      render(<WorkspacesPanel {...input} />);
+      render(<WorkspacesPanelHarness {...input} />);
       await user.click(screen.getByRole("button", { name: "Actions for workspace Zulu" }));
       const menu = screen.getByRole("menu");
       expect(getComputedStyle(menu).animation).toBe("none");
@@ -1877,7 +2071,7 @@ describe("WorkspacesPanel", () => {
     try {
       render(
         <div className="control-panel-body" style={{ overflow: "auto" }}>
-          <WorkspacesPanel {...input} />
+          <WorkspacesPanelHarness {...input} />
         </div>,
       );
       await user.click(screen.getByRole("button", { name: "Actions for workspace Zulu" }));
@@ -1936,7 +2130,7 @@ describe("WorkspacesPanel", () => {
       Object.defineProperty(scroller, "scrollTop", { configurable: true, value: 12 });
       Object.defineProperty(scroller, "scrollHeight", { configurable: true, value: 200 });
       Object.defineProperty(scroller, "clientHeight", { configurable: true, value: 80 });
-      const view = render(<WorkspacesPanel {...input} />, { container: document.body.appendChild(scroller) });
+      const view = render(<WorkspacesPanelHarness {...input} />, { container: document.body.appendChild(scroller) });
       await user.click(screen.getByRole("button", { name: "Actions for workspace Alpha" }));
       await waitFor(() => {
         const menu = screen.getByRole("menu");
@@ -1984,7 +2178,7 @@ describe("WorkspacesPanel", () => {
     try {
       render(
         <div data-overflow-boundary="" style={{ overflow: "auto" }}>
-          <WorkspacesPanel {...input} />
+          <WorkspacesPanelHarness {...input} />
         </div>,
       );
       await user.click(screen.getByRole("button", { name: "Actions for workspace Zulu" }));
@@ -2037,7 +2231,7 @@ describe("WorkspacesPanel", () => {
     try {
       render(
         <div className="control-panel-body" style={{ overflow: "auto" }}>
-          <WorkspacesPanel {...input} />
+          <WorkspacesPanelHarness {...input} />
         </div>,
       );
       await user.click(screen.getByRole("button", { name: "Actions for workspace Zulu" }));
@@ -2105,7 +2299,7 @@ describe("WorkspacesPanel", () => {
     try {
       const view = render(
         <div className="control-panel-body" style={{ overflow: "auto" }}>
-          <WorkspacesPanel {...input} />
+          <WorkspacesPanelHarness {...input} />
         </div>,
       );
       const scroller = view.container.querySelector(".control-panel-body");
@@ -2252,7 +2446,7 @@ describe("WorkspacesPanel", () => {
     try {
       const view = render(
         <div className="control-panel-body" style={{ overflow: "auto" }}>
-          <WorkspacesPanel {...input} />
+          <WorkspacesPanelHarness {...input} />
         </div>,
       );
       await user.click(screen.getByRole("button", { name: "Actions for workspace Alpha" }));
@@ -2264,7 +2458,7 @@ describe("WorkspacesPanel", () => {
       geometry.unclampedHeight = 80;
       view.rerender(
         <div className="control-panel-body" style={{ overflow: "auto" }}>
-          <WorkspacesPanel
+          <WorkspacesPanelHarness
             {...input}
             summaries={[
               ...input.summaries,
@@ -2286,7 +2480,7 @@ describe("WorkspacesPanel", () => {
   it("restores surviving overflow after Cancel or Escape when the row is filtered out", async () => {
     const input = props();
     const user = userEvent.setup();
-    render(<WorkspacesPanel {...input} />);
+    render(<WorkspacesPanelHarness {...input} />);
     await user.click(screen.getByRole("button", { name: "Actions for workspace Alpha" }));
     await user.click(screen.getByRole("menuitem", { name: "Rename" }));
     fireEvent.change(screen.getByRole("searchbox", { name: "Search workspaces" }), {
@@ -2312,7 +2506,7 @@ describe("WorkspacesPanel", () => {
   it("does not steal search focus when Escape cancels a filtered rename from search", async () => {
     const input = props();
     const user = userEvent.setup();
-    render(<WorkspacesPanel {...input} />);
+    render(<WorkspacesPanelHarness {...input} />);
     await user.click(screen.getByRole("button", { name: "Actions for workspace Alpha" }));
     await user.click(screen.getByRole("menuitem", { name: "Rename" }));
     const search = screen.getByRole("searchbox", { name: "Search workspaces" });
@@ -2326,7 +2520,7 @@ describe("WorkspacesPanel", () => {
   it("restores surviving overflow after cancelling a filtered delete confirmation", async () => {
     const input = props();
     const user = userEvent.setup();
-    render(<WorkspacesPanel {...input} />);
+    render(<WorkspacesPanelHarness {...input} />);
     await user.click(screen.getByRole("button", { name: "Actions for workspace Alpha" }));
     await user.click(screen.getByRole("menuitem", { name: "Delete workspace Alpha" }));
     fireEvent.change(screen.getByRole("searchbox", { name: "Search workspaces" }), {
@@ -2342,7 +2536,7 @@ describe("WorkspacesPanel", () => {
   it("keeps a menu item activatable after a null-relatedTarget blur and an animation frame", async () => {
     const input = props();
     const user = userEvent.setup();
-    render(<WorkspacesPanel {...input} />);
+    render(<WorkspacesPanelHarness {...input} />);
     await user.click(screen.getByRole("button", { name: "Actions for workspace Alpha" }));
     const rename = screen.getByRole("menuitem", { name: "Rename" });
     await waitFor(() => expect(rename).toHaveFocus());

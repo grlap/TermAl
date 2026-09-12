@@ -3,8 +3,9 @@
 // Does not mutate menu class or style, reveal, or own trigger/menu
 // DOM, keyboard, or list/search/rename/delete. WorkspaceRowOverflowMenu
 // owns applying those numbers through React state. Split from
-// WorkspacesPanel.tsx. ControlPanelSurface owns making
-// `.control-panel-body` the overflow:auto ancestor.
+// WorkspacesPanel.tsx. styles.css owns the overflow:auto rule on
+// `.control-panel-body`. ControlPanelSurface owns that overflow
+// ancestor DOM.
 
 export type WorkspaceOverflowScrollRoom = {
   canScrollUp: boolean;

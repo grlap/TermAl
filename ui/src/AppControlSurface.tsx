@@ -32,6 +32,7 @@ import {
   WorkspacesPanelHeaderActions,
   workspacesRefreshBusy,
 } from "./panels/WorkspacesPanel";
+import type { WorkspaceRenameEditor } from "./panels/use-workspace-rename-editor";
 import type { WorkspaceDeleteRequest } from "./workspace-delete-request";
 import type { RefreshWorkspaceSummaries } from "./workspace-summaries-refresh";
 import { ThemedCombobox } from "./preferences/themed-combobox";
@@ -153,7 +154,7 @@ type AppControlSurfaceProps = {
   handleProjectMenuStartSession: (paneId: string | null, projectId: string) => void;
   handleOrchestratorRuntimeAction: (instanceId: string, action: OrchestratorRuntimeAction) => Promise<void>;
   handleDeleteWorkspace: (workspaceId: string) => WorkspaceDeleteRequest;
-  handleRenameWorkspace: (workspaceId: string, label: string) => Promise<void>;
+  workspaceRenameEditor: WorkspaceRenameEditor;
   handleOpenNewWorkspaceHere: () => void;
   handleOpenNewWorkspaceWindow: () => void;
   handleOpenWorkspaceHere: (nextWorkspaceViewId: string) => void;
@@ -241,7 +242,7 @@ export function AppControlSurface({
   handleProjectMenuStartSession,
   handleOrchestratorRuntimeAction,
   handleDeleteWorkspace,
-  handleRenameWorkspace,
+  workspaceRenameEditor,
   handleOpenNewWorkspaceHere,
   handleOpenNewWorkspaceWindow,
   handleOpenWorkspaceHere,
@@ -900,9 +901,9 @@ export function AppControlSurface({
               isLoading={isWorkspacesListLoading}
               summaries={workspaceSummaries}
               onDeleteWorkspace={handleDeleteWorkspace}
-              onRenameWorkspace={handleRenameWorkspace}
               onRefresh={refreshWorkspaceSummaries}
               onOpenWorkspace={handleOpenWorkspaceHere}
+              renameEditor={workspaceRenameEditor}
             />
           );
 

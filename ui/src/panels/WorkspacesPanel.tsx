@@ -11,12 +11,27 @@
 // preserveError. Explicit Refresh/Reload always use the current
 // onRefresh and do not forward the click event as refresh options.
 // Owned-delete pending/generation/observed lifecycle lives in
-// use-owned-workspace-deletes.ts. This file keeps confirm UI,
-// retained summaries, and overflow focus restoration.
-// Scalar edit/delete mirrors publish through useCommittedRef. Live
-// retained summaries publish in a commit-phase insertion effect, never
-// during render. Fallback uses a retained summary only when its id
-// matches the current edit/confirm owner.
+// use-owned-workspace-deletes.ts. The required renameEditor is
+// owned on App above the movable AppControlSurface. This file
+// keeps confirm UI, confirm retained summaries, and overflow
+// focus restoration.
+// requestDelete and startRename replace an unlocked editor,
+// including a failed draft and its error. An in-flight save is
+// never discarded and Escape stays ignored until PATCH settles.
+// The vanish effect keeps a failed editor when the live row is
+// gone and no new user Rename/Delete has happened. Reload
+// restores search focus only when its own activation removed
+// the error chrome. Successful save focus intent is scoped to
+// the mounted editor view. Returning to an extant idle or
+// failed rename editor focuses the label input
+// (editingWorkspaceId effect plus autoFocus). Delete-confirm
+// cancellation uses a panel-local restore ref. Rename restore
+// intent is taken once from the hook. Escape and requestDelete
+// consult renameEditor.isSaveLocked() rather than a panel
+// mirror of isSavingLabel. Live confirm summaries publish in a
+// commit-phase insertion effect, never during render. Fallback
+// uses a retained confirm summary only when its id matches the
+// current confirm owner.
 
 import {
   useEffect,
@@ -30,8 +45,8 @@ import {
 
 import type { WorkspaceLayoutSummary } from "../api";
 import type { WorkspaceDeleteRequest } from "../workspace-delete-request";
-import { useCommittedRef } from "./use-committed-ref";
 import { useOwnedWorkspaceDeletes } from "./use-owned-workspace-deletes";
+import type { WorkspaceRenameEditor } from "./use-workspace-rename-editor";
 import {
   isIgnorableEscape,
   WorkspaceRowOverflowMenu,
@@ -114,6 +129,7 @@ export function matchingRetainedWorkspaceSummary(
   if (live) {
     return live;
   }
+  // Rename fallback is the startRename snapshot; only the id is compared.
   if (allowFallback && ownerId && retained?.id === ownerId) {
     return retained;
   }
@@ -193,9 +209,9 @@ export function WorkspacesPanel({
   isLoading,
   summaries,
   onDeleteWorkspace,
-  onRenameWorkspace,
   onRefresh,
   onOpenWorkspace,
+  renameEditor,
 }: {
   currentWorkspaceId: string;
   deletingWorkspaceIds: readonly string[];
@@ -203,9 +219,9 @@ export function WorkspacesPanel({
   isLoading: boolean;
   summaries: readonly WorkspaceLayoutSummary[];
   onDeleteWorkspace: (workspaceId: string) => WorkspaceDeleteRequest;
-  onRenameWorkspace: (workspaceId: string, label: string) => Promise<void>;
   onRefresh: (options?: { preserveError?: boolean }) => void;
   onOpenWorkspace: (workspaceId: string) => void;
+  renameEditor: WorkspaceRenameEditor;
 }) {
   const searchId = useId();
   const descriptionInstanceId = useId();
@@ -213,24 +229,32 @@ export function WorkspacesPanel({
   const [searchQuery, setSearchQuery] = useState("");
   const [menuWorkspaceId, setMenuWorkspaceId] = useState<string | null>(null);
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
-  const [editingWorkspaceId, setEditingWorkspaceId] = useState<string | null>(null);
-  const [labelDraft, setLabelDraft] = useState("");
-  const [isSavingLabel, setIsSavingLabel] = useState(false);
-  const [labelError, setLabelError] = useState<string | null>(null);
+  const {
+    editingWorkspaceId,
+    editingSummarySnapshot,
+    labelDraft,
+    isSavingLabel,
+    labelError,
+    takePendingRestoreFocusId,
+    takePendingRestoreLabelFocus,
+    setLabelDraft,
+    setEditorViewMounted,
+    startRename: startOwnedRename,
+    cancelRename: cancelOwnedRename,
+    clearUnlockedRename,
+    isSaveLocked,
+    saveLabel,
+  } = renameEditor;
   const confirmDialogRef = useRef<HTMLDivElement | null>(null);
   const confirmCancelRef = useRef<HTMLButtonElement | null>(null);
   const labelInputRef = useRef<HTMLInputElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
-  const reloadButtonRef = useRef<HTMLButtonElement | null>(null);
-  const reloadOwnsLostFocusRef = useRef(false);
   const overflowButtonRefs = useRef(new Map<string, HTMLButtonElement>());
   const restoreFocusIdRef = useRef<string | null>(null);
-  const pendingRestoreFocusIdRef = useRef<string | null>(null);
-  const pendingRestoreLabelFocusRef = useRef(false);
-  const retainedEditingSummaryRef = useRef<WorkspaceLayoutSummary | null>(null);
+  const pendingRestoreDeleteFocusIdRef = useRef<string | null>(null);
+  const reloadButtonRef = useRef<HTMLButtonElement | null>(null);
+  const reloadOwnsLostFocusRef = useRef(false);
   const retainedConfirmingSummaryRef = useRef<WorkspaceLayoutSummary | null>(null);
-  const isSavingLabelRef = useCommittedRef(isSavingLabel);
-  const editingWorkspaceIdRef = useCommittedRef(editingWorkspaceId);
 
   const visibleSummaries = useMemo(
     () => visibleWorkspaceSummaries(summaries, currentWorkspaceId),
@@ -277,12 +301,11 @@ export function WorkspacesPanel({
   const liveEditingSummary = visibleSummaries.find((summary) => summary.id === editingWorkspaceId) ?? null;
   const liveConfirmingSummary = visibleSummaries.find((summary) => summary.id === confirmingDeleteId) ?? null;
   useInsertionEffect(() => {
-    publishLiveWorkspaceSummary(retainedEditingSummaryRef, liveEditingSummary);
     publishLiveWorkspaceSummary(retainedConfirmingSummaryRef, liveConfirmingSummary);
-  }, [liveConfirmingSummary, liveEditingSummary]);
+  }, [liveConfirmingSummary]);
   const editingSummary = matchingRetainedWorkspaceSummary(
     liveEditingSummary,
-    retainedEditingSummaryRef.current,
+    editingSummarySnapshot,
     editingWorkspaceId,
     Boolean(editingWorkspaceId && (isSavingLabel || labelError)),
   );
@@ -312,6 +335,13 @@ export function WorkspacesPanel({
   }, [onRefresh]);
 
   useEffect(() => {
+    setEditorViewMounted(true);
+    return () => {
+      setEditorViewMounted(false);
+    };
+  }, [setEditorViewMounted]);
+
+  useEffect(() => {
     if (error || !reloadOwnsLostFocusRef.current) {
       return;
     }
@@ -325,6 +355,8 @@ export function WorkspacesPanel({
     if (!editingWorkspaceId) {
       return;
     }
+    // Idle and failed remounts intentionally focus the label input.
+    // Pending saves disable the field, so this is a no-op then.
     labelInputRef.current?.focus();
   }, [editingWorkspaceId]);
 
@@ -351,11 +383,23 @@ export function WorkspacesPanel({
   }, [confirmingDeleteId, deletingWorkspaceIdSet, isOwnedDeletePending]);
 
   useEffect(() => {
-    const restoreId = pendingRestoreFocusIdRef.current;
-    if (!restoreId || isSavingLabel) {
+    const deleteRestoreId = pendingRestoreDeleteFocusIdRef.current;
+    if (deleteRestoreId) {
+      pendingRestoreDeleteFocusIdRef.current = null;
+      if (shouldRestoreLostFocus()) {
+        const deleteTarget = overflowButtonRefs.current.get(deleteRestoreId);
+        if (deleteTarget && !deleteTarget.disabled) {
+          deleteTarget.focus();
+          return;
+        }
+        focusSurvivingOverflow();
+        return;
+      }
+    }
+    const restoreId = takePendingRestoreFocusId();
+    if (!restoreId) {
       return;
     }
-    pendingRestoreFocusIdRef.current = null;
     if (!shouldRestoreLostFocus()) {
       return;
     }
@@ -365,14 +409,17 @@ export function WorkspacesPanel({
       return;
     }
     focusSurvivingOverflow();
-  }, [confirmingDeleteId, editingWorkspaceId, isSavingLabel, visibleSummaries]);
+  }, [confirmingDeleteId, editingWorkspaceId, isSavingLabel, takePendingRestoreFocusId, visibleSummaries]);
 
   useEffect(() => {
-    if (isSavingLabel || !editingWorkspaceId || !pendingRestoreLabelFocusRef.current) {
+    if (isSavingLabel || !editingWorkspaceId) {
       return;
     }
     const input = labelInputRef.current;
     if (!input || input.disabled) {
+      return;
+    }
+    if (!takePendingRestoreLabelFocus()) {
       return;
     }
     const active = document.activeElement;
@@ -384,12 +431,11 @@ export function WorkspacesPanel({
       && active !== input
       && !(form && form.contains(active)),
     );
-    pendingRestoreLabelFocusRef.current = false;
     if (movedAway) {
       return;
     }
     input.focus();
-  }, [editingWorkspaceId, isSavingLabel, labelError]);
+  }, [editingWorkspaceId, isSavingLabel, labelError, takePendingRestoreLabelFocus]);
 
   useEffect(() => {
     if (!menuWorkspaceId) {
@@ -409,12 +455,12 @@ export function WorkspacesPanel({
       return;
     }
     if (isSavingLabel || labelError) {
+      // Keep a failed or pending editor when the live row vanishes
+      // and the user has not started a new Rename or Delete.
       return;
     }
-    setEditingWorkspaceId(null);
-    setLabelDraft("");
-    retainedEditingSummaryRef.current = null;
-  }, [editingWorkspaceId, isSavingLabel, labelError, visibleSummaries]);
+    clearUnlockedRename();
+  }, [clearUnlockedRename, editingWorkspaceId, isSavingLabel, labelError, visibleSummaries]);
 
   useEffect(() => {
     if (!confirmingDeleteId) {
@@ -453,18 +499,14 @@ export function WorkspacesPanel({
   }
 
   function cancelRename(workspaceId: string) {
-    pendingRestoreFocusIdRef.current = workspaceId;
-    setEditingWorkspaceId(null);
-    setLabelError(null);
-    retainedEditingSummaryRef.current = null;
-    pendingRestoreLabelFocusRef.current = false;
+    cancelOwnedRename(workspaceId);
   }
 
   function cancelDeleteConfirmation(workspaceId: string) {
     if (isOwnedDeletePending(workspaceId) || deletingWorkspaceIdSet.has(workspaceId)) {
       return;
     }
-    pendingRestoreFocusIdRef.current = workspaceId;
+    pendingRestoreDeleteFocusIdRef.current = workspaceId;
     setConfirmingDeleteId((current) => (current === workspaceId ? null : current));
   }
 
@@ -490,54 +532,27 @@ export function WorkspacesPanel({
       cancelDeleteConfirmation(confirmingSummary.id);
       return;
     }
-    if (editingSummary && !isSavingLabelRef.current) {
+    if (editingSummary && !isSaveLocked()) {
       event.preventDefault();
       cancelRename(editingSummary.id);
     }
   }
 
-  async function saveLabel() {
-    if (!editingWorkspaceId || isSavingLabel) {
-      return;
-    }
-    const savedId = editingWorkspaceId;
-    const savedLabel = labelDraft.trim();
-    setIsSavingLabel(true);
-    setLabelError(null);
-    try {
-      await onRenameWorkspace(savedId, savedLabel);
-      if (editingWorkspaceIdRef.current !== savedId) {
-        return;
-      }
-      pendingRestoreFocusIdRef.current = savedId;
-      setEditingWorkspaceId(null);
-    } catch (saveError) {
-      if (editingWorkspaceIdRef.current !== savedId) {
-        return;
-      }
-      pendingRestoreLabelFocusRef.current = true;
-      setLabelError(saveError instanceof Error ? saveError.message : String(saveError));
-    } finally {
-      setIsSavingLabel(false);
-    }
-  }
-
   function startRename(summary: WorkspaceLayoutSummary) {
-    if (isSavingLabelRef.current) {
+    if (!startOwnedRename(summary)) {
       return;
     }
     restoreFocusIdRef.current = summary.id;
-    if (pendingRestoreFocusIdRef.current !== summary.id) {
-      pendingRestoreFocusIdRef.current = null;
-    }
     setMenuWorkspaceId(null);
     setConfirmingDeleteId(null);
-    setEditingWorkspaceId(summary.id);
-    setLabelDraft(summary.label ?? "");
-    setLabelError(null);
   }
 
   function requestDelete(workspaceId: string) {
+    // Unlocked rename (idle or failed) clears here the same way
+    // startRename clears confirm. An in-flight save keeps its draft.
+    if (!isSaveLocked()) {
+      clearUnlockedRename();
+    }
     restoreFocusIdRef.current = workspaceId;
     setMenuWorkspaceId(null);
     setConfirmingDeleteId(workspaceId);
@@ -587,7 +602,7 @@ export function WorkspacesPanel({
               placeholder="For example: Backend, Reviews, Planning"
               onChange={(event) => setLabelDraft(event.currentTarget.value)}
               onKeyDown={(event) => {
-                if (isIgnorableEscape(event) || isSavingLabelRef.current) {
+                if (isIgnorableEscape(event) || isSaveLocked()) {
                   return;
                 }
                 event.preventDefault();

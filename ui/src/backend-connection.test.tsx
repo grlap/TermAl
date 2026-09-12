@@ -327,7 +327,7 @@ describe("Backend connection state", () => {
     }
   });
 
-  it("updates workspace switcher summaries from live SSE state", async () => {
+  it("updates Workspaces summaries from live SSE state", async () => {
     const originalFetch = globalThis.fetch;
     const originalEventSource = globalThis.EventSource;
     const originalResizeObserver = globalThis.ResizeObserver;

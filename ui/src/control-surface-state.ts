@@ -98,6 +98,8 @@ export function createControlPanelSectionLauncherTab(
     options;
   switch (sectionId) {
     case "workspaces":
+      // No standalone tab: only one Workspaces view mounts, so
+      // App can own one rename-editor mounted flag and remount focus.
       return null;
     case "files":
       return (filesystemRoot?.trim() ?? "")

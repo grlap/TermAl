@@ -1,10 +1,12 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import type { ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
 
-import { WorkspacesPanel } from "./panels/WorkspacesPanel";
+import {
+  WorkspacesPanelHarness,
+  type WorkspacesPanelHarnessProps,
+} from "./panels/workspaces-panel-test-harness";
 
-function props(): ComponentProps<typeof WorkspacesPanel> {
+function props(): WorkspacesPanelHarnessProps {
   return {
     currentWorkspaceId: "workspace-current",
     summaries: [
@@ -24,7 +26,7 @@ function props(): ComponentProps<typeof WorkspacesPanel> {
 describe("workspace labels", () => {
   it("uses labels for display while navigation keeps the saved workspace ID", () => {
     const input = props();
-    render(<WorkspacesPanel {...input} />);
+    render(<WorkspacesPanelHarness {...input} />);
     fireEvent.click(screen.getByRole("button", { name: "Backend (current)" }));
     expect(input.onOpenWorkspace).toHaveBeenCalledWith("workspace-current");
     fireEvent.click(screen.getByRole("button", { name: "Actions for workspace workspace-other" }));
@@ -35,7 +37,7 @@ describe("workspace labels", () => {
     const input = props();
     let finishSave!: () => void;
     input.onRenameWorkspace = vi.fn().mockImplementationOnce(() => new Promise<void>((resolve) => { finishSave = resolve; }));
-    const view = render(<WorkspacesPanel {...input} />);
+    const view = render(<WorkspacesPanelHarness {...input} />);
     fireEvent.click(screen.getByRole("button", { name: "Actions for workspace Backend" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Workspace label" }), { target: { value: "  Reviews  " } });
@@ -45,7 +47,7 @@ describe("workspace labels", () => {
     await act(async () => finishSave());
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
 
-    view.rerender(<WorkspacesPanel {...input} summaries={input.summaries.map((summary) => ({ ...summary, label: "Reviews" }))} />);
+    view.rerender(<WorkspacesPanelHarness {...input} summaries={input.summaries.map((summary) => ({ ...summary, label: "Reviews" }))} />);
     expect(screen.getByRole("button", { name: "Reviews (current)" })).toBeInTheDocument();
     const currentRow = screen.getAllByRole("listitem").find((row) => within(row).queryByText("Current"))!;
     fireEvent.click(within(currentRow).getByRole("button", { name: "Actions for workspace Reviews" }));
@@ -58,7 +60,7 @@ describe("workspace labels", () => {
   it("keeps the draft and reports save errors; Escape cancels without navigating", async () => {
     const input = props();
     input.onRenameWorkspace = vi.fn().mockRejectedValue(new Error("Backend needs restart"));
-    render(<WorkspacesPanel {...input} />);
+    render(<WorkspacesPanelHarness {...input} />);
     fireEvent.click(screen.getByRole("button", { name: "Actions for workspace Backend" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "Planning" } });
@@ -73,7 +75,7 @@ describe("workspace labels", () => {
   it("keeps rows and the current-workspace editor stable while live summaries reorder", async () => {
     const input = props();
     input.summaries = [...input.summaries, { ...input.summaries[1], id: "workspace-another", label: "Reviews" }];
-    const view = render(<WorkspacesPanel {...input} />);
+    const view = render(<WorkspacesPanelHarness {...input} />);
     const rowIds = () => screen.getAllByRole("listitem").map((row) =>
       row.querySelector(".visually-hidden")?.textContent,
     );
@@ -81,7 +83,7 @@ describe("workspace labels", () => {
     fireEvent.click(screen.getByRole("button", { name: "Actions for workspace Backend" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "Draft name" } });
-    view.rerender(<WorkspacesPanel {...input} summaries={[...input.summaries].reverse().map((summary) => ({
+    view.rerender(<WorkspacesPanelHarness {...input} summaries={[...input.summaries].reverse().map((summary) => ({
       ...summary, updatedAt: "later", revision: summary.revision + 1,
     }))} />);
     expect(rowIds()).toEqual(initialRows);

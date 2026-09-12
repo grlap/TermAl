@@ -95,6 +95,7 @@ import { useAppWorkspaceActions } from "./app-workspace-actions";
 import { useAppControlPanelState } from "./app-control-panel-state";
 import { useLastActiveSessionDocumentTitle } from "./browser-session-title";
 import { AppControlSurface } from "./AppControlSurface";
+import { useWorkspaceRenameEditor } from "./panels/use-workspace-rename-editor";
 import { AppDialogs } from "./AppDialogs";
 import { appTestHooks } from "./app-test-hooks";
 import { ProjectListSection } from "./ProjectListSection";
@@ -861,6 +862,13 @@ export default function App() {
     isMountedRef,
     reportRequestError,
     applyControlPanelLayout,
+  });
+  // Workspaces cannot be a standalone launcher tab, so only one
+  // WorkspacesPanel can mount. The editor lives here so a dock-side
+  // move that remounts AppControlSurface keeps pending/failed state.
+  // App unmount is the cleanup boundary; this is not reload-durable.
+  const workspaceRenameEditor = useWorkspaceRenameEditor({
+    onRenameWorkspace: handleRenameWorkspace,
   });
 
   useLastActiveSessionDocumentTitle(
@@ -2024,7 +2032,7 @@ export default function App() {
         handleProjectMenuStartSession={handleProjectMenuStartSession}
         handleOrchestratorRuntimeAction={handleOrchestratorRuntimeAction}
         handleDeleteWorkspace={handleDeleteWorkspace}
-        handleRenameWorkspace={handleRenameWorkspace}
+        workspaceRenameEditor={workspaceRenameEditor}
         handleOpenNewWorkspaceHere={handleOpenNewWorkspaceHere}
         handleOpenNewWorkspaceWindow={handleOpenNewWorkspaceWindow}
         handleOpenWorkspaceHere={handleOpenWorkspaceHere}

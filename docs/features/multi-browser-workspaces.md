@@ -147,6 +147,28 @@ fallback, an optional muted updated time, and a Current badge on this
 browser's workspace. The full UUID stays in the accessible details and
 tooltip, not as a wide chip.
 
+A new overflow **Rename** or **Delete** replaces an unlocked editor,
+including a failed draft and its error. A pending PATCH is not replaced.
+If the target row disappears and the user has not started a new Rename
+or Delete, a failed editor is kept.
+
+Rename draft, in-flight PATCH, error, and the summary captured at
+Rename are owned by `useWorkspaceRenameEditor` on `App`. Later live
+list metadata does not overwrite that snapshot; fallback only
+matches the captured id. They survive switching
+to another dock section and moving the Control panel tab to the opposite
+pane edge, because those remount `WorkspacesPanel` / `AppControlSurface`
+but not `App`. A dock-side move remounts the Control panel on Sessions;
+reopen Workspaces to see the preserved editor. The Control panel tab
+has no close control, and `applyControlPanelLayout` always re-docks it.
+Workspaces cannot be opened as a standalone launcher tab, so only one
+Workspaces view mounts and shares that single editor. App unmount is
+the cleanup boundary; this state is not kept across a browser reload.
+Returning to an extant idle or failed rename editor focuses the label
+input. A save that finished while Workspaces was unmounted does not
+steal remount focus, and a still-pending save keeps its existing
+guards.
+
 The saved list pins the current workspace first, then sorts by label or ID,
 with the ID as a tie-breaker. Live updates and layout autosaves do not reorder
 the list by activity time. A missing Workspaces entry in an older saved dock

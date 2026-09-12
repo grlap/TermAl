@@ -1,10 +1,12 @@
 import { act, createEvent, fireEvent, render, screen, within } from "@testing-library/react";
-import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { WorkspacesPanel } from "./panels/WorkspacesPanel";
+import {
+  WorkspacesPanelHarness,
+  type WorkspacesPanelHarnessProps,
+} from "./panels/workspaces-panel-test-harness";
 
-function props(): ComponentProps<typeof WorkspacesPanel> {
+function props(): WorkspacesPanelHarnessProps {
   return {
     currentWorkspaceId: "workspace-current",
     summaries: [
@@ -41,7 +43,7 @@ describe("saved workspace new-tab links", () => {
   it("links to each other saved ID while retaining the URL context", () => {
     window.history.replaceState(null, "", "/nested/termal/?workspace=workspace-current&mode=review#details");
     const sourceUrl = new URL(window.location.href);
-    render(<WorkspacesPanel {...props()} />);
+    render(<WorkspacesPanelHarness {...props()} />);
 
     for (const [label, id] of [["Empty", "workspace-empty"], ["workspace-cv", "workspace-cv"]] as const) {
       fireEvent.click(screen.getByRole("button", { name: `Actions for workspace ${label}` }));
@@ -69,7 +71,7 @@ describe("saved workspace new-tab links", () => {
     ["context menu", "contextmenu", { button: 2 }],
   ] as const)("leaves %s to the browser without mutating the current workspace", (_, type, options) => {
     const input = props();
-    render(<WorkspacesPanel {...input} />);
+    render(<WorkspacesPanelHarness {...input} />);
     fireEvent.click(screen.getByRole("button", { name: "Actions for workspace Empty" }));
     const link = screen.getByRole("menuitem", { name: "Open in new tab: workspace Empty" });
     const sourceUrl = window.location.href;
@@ -94,7 +96,7 @@ describe("saved workspace new-tab links", () => {
     ["middle click", "auxclick", { button: 1 }],
   ] as const)("dismisses the menu after an unprevented %s without replacing the anchor", async (_, type, options) => {
     const input = props();
-    render(<WorkspacesPanel {...input} />);
+    render(<WorkspacesPanelHarness {...input} />);
     const trigger = screen.getByRole("button", { name: "Actions for workspace Empty" });
     fireEvent.click(trigger);
     const link = screen.getByRole("menuitem", { name: "Open in new tab: workspace Empty" });
@@ -124,7 +126,7 @@ describe("saved workspace new-tab links", () => {
 
   it("dismisses from the native click that follows Enter, not from keydown alone", async () => {
     const input = props();
-    render(<WorkspacesPanel {...input} />);
+    render(<WorkspacesPanelHarness {...input} />);
     const trigger = screen.getByRole("button", { name: "Actions for workspace Empty" });
     fireEvent.click(trigger);
     const link = screen.getByRole("menuitem", { name: "Open in new tab: workspace Empty" });
@@ -151,7 +153,7 @@ describe("saved workspace new-tab links", () => {
 
   it("keeps the new-tab anchor after contextmenu and right-button auxclick", async () => {
     const input = props();
-    render(<WorkspacesPanel {...input} />);
+    render(<WorkspacesPanelHarness {...input} />);
     fireEvent.click(screen.getByRole("button", { name: "Actions for workspace Empty" }));
     const link = screen.getByRole("menuitem", { name: "Open in new tab: workspace Empty" });
     let contextPrevented: boolean | undefined;
@@ -180,7 +182,7 @@ describe("saved workspace new-tab links", () => {
     render(
       <>
         <textarea aria-label="Composer" />
-        <WorkspacesPanel {...input} />
+        <WorkspacesPanelHarness {...input} />
       </>,
     );
     fireEvent.click(screen.getByRole("button", { name: "Actions for workspace Empty" }));
@@ -200,7 +202,7 @@ describe("saved workspace new-tab links", () => {
 
   it("does not close a newer row menu from a stale new-tab dismiss", async () => {
     const input = props();
-    render(<WorkspacesPanel {...input} />);
+    render(<WorkspacesPanelHarness {...input} />);
     fireEvent.click(screen.getByRole("button", { name: "Actions for workspace Empty" }));
     const emptyLink = screen.getByRole("menuitem", { name: "Open in new tab: workspace Empty" });
     document.addEventListener("click", (event) => event.preventDefault(), { once: true });
@@ -215,12 +217,12 @@ describe("saved workspace new-tab links", () => {
 
   it("does not offer a new-tab link on the current row, including its synthetic fallback", () => {
     const input = props();
-    const view = render(<WorkspacesPanel {...input} />);
+    const view = render(<WorkspacesPanelHarness {...input} />);
     const currentRow = () => screen.getAllByRole("listitem").find((row) => within(row).queryByText("Current"))!;
     fireEvent.click(within(currentRow()).getByRole("button", { name: "Actions for workspace Termal" }));
     expect(screen.queryByRole("menuitem", { name: "Open in new tab: workspace Termal" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /Open in new tab/ })).not.toBeInTheDocument();
-    view.rerender(<WorkspacesPanel {...input} summaries={input.summaries.slice(1)} />);
+    view.rerender(<WorkspacesPanelHarness {...input} summaries={input.summaries.slice(1)} />);
     expect(screen.queryByRole("menuitem", { name: /Open in new tab/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /Open in new tab/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Actions for workspace Termal" })).not.toBeInTheDocument();
@@ -228,7 +230,7 @@ describe("saved workspace new-tab links", () => {
 
   it("keeps same-tab navigation and deletion as separate existing actions", () => {
     const input = props();
-    render(<WorkspacesPanel {...input} />);
+    render(<WorkspacesPanelHarness {...input} />);
     fireEvent.click(screen.getByRole("button", { name: "Empty" }));
     expect(input.onOpenWorkspace).toHaveBeenCalledExactlyOnceWith("workspace-empty");
     expect(input.onDeleteWorkspace).not.toHaveBeenCalled();
@@ -241,7 +243,7 @@ describe("saved workspace new-tab links", () => {
 
   it("activates an enabled new-tab menuitem from Space once and dismisses after the generated click", async () => {
     const input = props();
-    render(<WorkspacesPanel {...input} />);
+    render(<WorkspacesPanelHarness {...input} />);
     const trigger = screen.getByRole("button", { name: "Actions for workspace Empty" });
     fireEvent.click(trigger);
     const link = screen.getByRole("menuitem", { name: "Open in new tab: workspace Empty" });
@@ -279,7 +281,7 @@ describe("saved workspace new-tab links", () => {
 
   it("does not activate new-tab from Space when composing, repeating, or already consumed", async () => {
     const input = props();
-    render(<WorkspacesPanel {...input} />);
+    render(<WorkspacesPanelHarness {...input} />);
     fireEvent.click(screen.getByRole("button", { name: "Actions for workspace Empty" }));
     const link = screen.getByRole("menuitem", { name: "Open in new tab: workspace Empty" });
     let clickCount = 0;
@@ -302,7 +304,7 @@ describe("saved workspace new-tab links", () => {
 
   it("does not hijack Space on overflow menu buttons", async () => {
     const input = props();
-    render(<WorkspacesPanel {...input} />);
+    render(<WorkspacesPanelHarness {...input} />);
     fireEvent.click(screen.getByRole("button", { name: "Actions for workspace Empty" }));
     const rename = screen.getByRole("menuitem", { name: "Rename" });
     let keyPrevented: boolean | undefined;

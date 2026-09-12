@@ -4,7 +4,8 @@
 // App — the Workspaces control-panel section (open / saved-workspaces
 // listing / new-window / delete / delete-errors / stale-refresh
 // races / overlapping-delete ordering / active-workspace delete
-// guard), the pagehide keepalive flush of pending layout saves,
+// guard / deferred rename PATCH across dock unmount), the pagehide
+// keepalive flush of pending layout saves,
 // and the workspace-layout restart-required recovery notices
 // (claim-side merge, notice clearance, unrelated-error
 // preservation) that run outside the live-state transport tests.
@@ -249,6 +250,139 @@ async function deleteWorkspaceRow(workspaceId: string, scope?: HTMLElement) {
   await clickAndSettle(root.getByRole("button", { name: `Actions for workspace ${displayName}` }));
   await clickAndSettle(screen.getByRole("menuitem", { name: `Delete workspace ${displayName}` }));
   await clickAndSettle(screen.getByRole("button", { name: "Confirm delete" }));
+}
+
+const renameRegressionCurrentWorkspace = {
+  id: "workspace-label-test",
+  revision: 1,
+  updatedAt: "2026-09-06 12:00:00",
+  controlPanelSide: "left" as const,
+};
+
+const renameRegressionCurrentLabeledWorkspace = {
+  ...renameRegressionCurrentWorkspace,
+  label: "Backend",
+};
+
+const renameRegressionOtherWorkspace = {
+  id: "workspace-other",
+  label: "Alpha",
+  revision: 1,
+  updatedAt: "2026-09-06 11:00:00",
+  controlPanelSide: "left" as const,
+};
+
+async function withAppRenameRegression(
+  workspaces: Array<{
+    id: string;
+    label?: string;
+    revision: number;
+    updatedAt: string;
+    controlPanelSide: "left" | "right";
+  }>,
+  renamePending: Promise<Awaited<ReturnType<typeof api.renameWorkspaceLayout>>>,
+  run: (renameSpy: ReturnType<typeof vi.spyOn>) => Promise<void>,
+) {
+  await withVerifiedNoReactActWarnings(async () => {
+    const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    window.history.replaceState(null, "", "?workspace=workspace-label-test");
+    vi.mocked(api.fetchWorkspaceLayouts).mockResolvedValue({ workspaces });
+    const renameSpy = vi.spyOn(api, "renameWorkspaceLayout").mockReturnValue(renamePending);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), "http://localhost");
+      if (url.pathname === "/api/state") {
+        return jsonResponse({ revision: 1, projects: [], sessions: [] });
+      }
+      throw new Error(`Unexpected fetch: ${url.pathname}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("EventSource", EventSourceMock);
+    vi.stubGlobal("ResizeObserver", ResizeObserverMock);
+    try {
+      await renderApp();
+      await run(renameSpy);
+    } finally {
+      renameSpy.mockRestore();
+      window.history.replaceState(null, "", originalUrl);
+    }
+  });
+}
+
+async function openWorkspaceRowRename(displayName: string, label: string) {
+  const workspacesRegion = await openWorkspacesPanel();
+  await clickAndSettle(within(workspacesRegion).getByRole("button", {
+    name: `Actions for workspace ${displayName}`,
+  }));
+  await clickAndSettle(screen.getByRole("menuitem", { name: "Rename" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "Workspace label" }), {
+    target: { value: label },
+  });
+  return workspacesRegion;
+}
+
+async function leaveWorkspacesSection() {
+  const dock = screen.getByRole("navigation", { name: "Control panel dock" });
+  await clickAndSettle(within(dock).getByRole("button", { name: "Sessions" }));
+  await waitFor(() => {
+    expect(document.querySelector(".workspaces-panel")).toBeNull();
+  });
+}
+
+async function moveControlPanelDockToOppositeEdge() {
+  const controlPanelTab = screen.getByRole("tab", { name: /Control panel/i });
+  const dragGrip = within(controlPanelTab).getByRole("button", {
+    name: "Drag Control panel",
+  });
+  const sessionTab = screen.getByRole("tab", { name: /Session 1/i });
+  const sessionPane = sessionTab.closest(".workspace-pane");
+  if (!(sessionPane instanceof HTMLElement)) {
+    throw new Error("Session pane not found");
+  }
+  const dataTransfer = createDragDataTransfer();
+  await act(async () => {
+    fireEvent.dragStart(dragGrip, { dataTransfer });
+  });
+  await settleAsyncUi();
+  const rightDropZone = sessionPane.querySelector(".pane-drop-zone-right");
+  if (!(rightDropZone instanceof HTMLDivElement)) {
+    throw new Error("Right drop zone not found");
+  }
+  await act(async () => {
+    fireEvent.dragEnter(rightDropZone, { dataTransfer });
+    fireEvent.dragOver(rightDropZone, { dataTransfer });
+    fireEvent.drop(rightDropZone, { dataTransfer });
+    fireEvent.dragEnd(dragGrip, { dataTransfer });
+  });
+  await settleAsyncUi();
+}
+
+async function withAppRenameDockMoveRegression(
+  workspaces: Array<{
+    id: string;
+    label?: string;
+    revision: number;
+    updatedAt: string;
+    controlPanelSide: "left" | "right";
+  }>,
+  renamePending: Promise<Awaited<ReturnType<typeof api.renameWorkspaceLayout>>>,
+  run: (renameSpy: ReturnType<typeof vi.spyOn>) => Promise<void>,
+) {
+  await withVerifiedNoReactActWarnings(async () => {
+    const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    window.history.replaceState(null, "", "?workspace=workspace-label-test");
+    vi.mocked(api.fetchWorkspaceLayouts).mockResolvedValue({ workspaces });
+    const renameSpy = vi.spyOn(api, "renameWorkspaceLayout").mockReturnValue(renamePending);
+    const context = await renderAppWithProjectAndSession({
+      includeWorkspacePersistence: true,
+    });
+    try {
+      await run(renameSpy);
+    } finally {
+      renameSpy.mockRestore();
+      context.cleanup();
+      window.history.replaceState(null, "", originalUrl);
+    }
+  });
 }
 
 describe("App workspace layout", () => {
@@ -939,6 +1073,413 @@ describe("App workspace layout", () => {
         window.history.replaceState(null, "", originalUrl);
       }
     });
+  });
+
+  it("restores a rejected rename draft after leaving Workspaces and returning", async () => {
+    let rejectRename!: (error: Error) => void;
+    const renamePending = new Promise<Awaited<ReturnType<typeof api.renameWorkspaceLayout>>>(
+      (_, reject) => {
+        rejectRename = reject;
+      },
+    );
+    await withAppRenameRegression([renameRegressionCurrentWorkspace], renamePending, async (renameSpy) => {
+      await openWorkspaceRowRename(
+        workspaceDisplayName({ id: "workspace-label-test" }),
+        "Backend",
+      );
+      await clickAndSettle(screen.getByRole("button", { name: "Save label" }));
+      expect(renameSpy).toHaveBeenCalledTimes(1);
+
+      await leaveWorkspacesSection();
+      await act(async () => {
+        rejectRename(new Error("Rename failed."));
+        await renamePending.catch(() => {});
+      });
+
+      await openWorkspacesPanel();
+      const labelInput = screen.getByRole("textbox", { name: "Workspace label" });
+      expect(labelInput).toHaveValue("Backend");
+      expect(labelInput).toHaveFocus();
+      expect(screen.getByRole("alert")).toHaveTextContent("Rename failed.");
+      expect(renameSpy).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("focuses the label input when returning to an idle rename editor", async () => {
+    const renamePending = new Promise<Awaited<ReturnType<typeof api.renameWorkspaceLayout>>>(() => {});
+    await withAppRenameRegression([renameRegressionCurrentWorkspace], renamePending, async (renameSpy) => {
+      await openWorkspaceRowRename(
+        workspaceDisplayName({ id: "workspace-label-test" }),
+        "Backend",
+      );
+      expect(renameSpy).not.toHaveBeenCalled();
+      await leaveWorkspacesSection();
+      await openWorkspacesPanel();
+      const labelInput = screen.getByRole("textbox", { name: "Workspace label" });
+      expect(labelInput).toHaveValue("Backend");
+      expect(labelInput).toHaveFocus();
+      expect(renameSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  it("preserves an idle non-current rename after leaving Workspaces and returning", async () => {
+    const renamePending = new Promise<Awaited<ReturnType<typeof api.renameWorkspaceLayout>>>(() => {});
+    await withAppRenameRegression(
+      [renameRegressionCurrentLabeledWorkspace, renameRegressionOtherWorkspace],
+      renamePending,
+      async (renameSpy) => {
+        await openWorkspaceRowRename("Alpha", "Reviews");
+        expect(renameSpy).not.toHaveBeenCalled();
+        await leaveWorkspacesSection();
+        await openWorkspacesPanel();
+        expect(screen.getByRole("form", { name: "Label workspace workspace-other" })).toBeInTheDocument();
+        const labelInput = screen.getByRole("textbox", { name: "Workspace label" });
+        expect(labelInput).toHaveValue("Reviews");
+        expect(labelInput).toHaveFocus();
+        expect(renameSpy).not.toHaveBeenCalled();
+      },
+    );
+  });
+
+  it("clears an idle non-current rename when the target is removed while away", async () => {
+    const renamePending = new Promise<Awaited<ReturnType<typeof api.renameWorkspaceLayout>>>(() => {});
+    await withAppRenameRegression(
+      [renameRegressionCurrentLabeledWorkspace, renameRegressionOtherWorkspace],
+      renamePending,
+      async (renameSpy) => {
+        await openWorkspaceRowRename("Alpha", "Reviews");
+        expect(renameSpy).not.toHaveBeenCalled();
+        await leaveWorkspacesSection();
+        vi.mocked(api.fetchWorkspaceLayouts).mockResolvedValue({
+          workspaces: [renameRegressionCurrentLabeledWorkspace],
+        });
+        await dispatchStateEvent(latestEventSource(), {
+          revision: 2,
+          projects: [],
+          orchestrators: [],
+          sessions: [],
+          workspaces: [renameRegressionCurrentLabeledWorkspace],
+        });
+        await openWorkspacesPanel();
+        expect(screen.queryByRole("form", { name: "Label workspace workspace-other" })).not.toBeInTheDocument();
+        expect(screen.queryByRole("textbox", { name: "Workspace label" })).not.toBeInTheDocument();
+        expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Backend (current)" })).toBeInTheDocument();
+        expect(renameSpy).not.toHaveBeenCalled();
+      },
+    );
+  });
+
+  it("does not start a second PATCH when returning to Workspaces before rename completion", async () => {
+    const renamePending = new Promise<Awaited<ReturnType<typeof api.renameWorkspaceLayout>>>(() => {});
+    await withAppRenameRegression([renameRegressionCurrentWorkspace], renamePending, async (renameSpy) => {
+      await openWorkspaceRowRename(
+        workspaceDisplayName({ id: "workspace-label-test" }),
+        "Backend",
+      );
+      await clickAndSettle(screen.getByRole("button", { name: "Save label" }));
+      expect(renameSpy).toHaveBeenCalledTimes(1);
+
+      await leaveWorkspacesSection();
+      await openWorkspacesPanel();
+      expect(screen.getByRole("button", { name: "Saving…" })).toBeDisabled();
+      const labelInput = screen.getByRole("textbox", { name: "Workspace label" });
+      expect(labelInput).toHaveValue("Backend");
+      expect(labelInput).toBeDisabled();
+      expect(labelInput).not.toHaveFocus();
+      expect(renameSpy).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("reconciles a successful rename that completed while Workspaces was unmounted", async () => {
+    let resolveRename!: (value: Awaited<ReturnType<typeof api.renameWorkspaceLayout>>) => void;
+    const renamePending = new Promise<Awaited<ReturnType<typeof api.renameWorkspaceLayout>>>(
+      (resolve) => {
+        resolveRename = resolve;
+      },
+    );
+    const renamedLayout = {
+      ...makeWorkspaceLayoutResponse({ id: "workspace-label-test", revision: 2 }).layout,
+      label: "Backend",
+    };
+    await withAppRenameRegression([renameRegressionCurrentWorkspace], renamePending, async (renameSpy) => {
+      await openWorkspaceRowRename(
+        workspaceDisplayName({ id: "workspace-label-test" }),
+        "Backend",
+      );
+      await clickAndSettle(screen.getByRole("button", { name: "Save label" }));
+      expect(renameSpy).toHaveBeenCalledTimes(1);
+
+      await leaveWorkspacesSection();
+      await act(async () => {
+        resolveRename({ layout: renamedLayout });
+        await renamePending;
+      });
+      vi.mocked(api.fetchWorkspaceLayouts).mockResolvedValue({
+        workspaces: [{
+          id: "workspace-label-test",
+          label: "Backend",
+          revision: 2,
+          updatedAt: renamedLayout.updatedAt,
+          controlPanelSide: "left",
+        }],
+      });
+
+      await openWorkspacesPanel();
+      expect(await screen.findByRole("button", { name: "Backend (current)" })).toBeInTheDocument();
+      expect(document.title).toBe("Backend · TermAl");
+      expect(screen.queryByRole("textbox", { name: "Workspace label" })).not.toBeInTheDocument();
+      expect(document.activeElement).toBe(document.body);
+      expect(renameSpy).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("keeps a non-current rename editor after the target is removed while away and the PATCH rejects", async () => {
+    let rejectRename!: (error: Error) => void;
+    const renamePending = new Promise<Awaited<ReturnType<typeof api.renameWorkspaceLayout>>>(
+      (_, reject) => {
+        rejectRename = reject;
+      },
+    );
+    await withAppRenameRegression(
+      [renameRegressionCurrentLabeledWorkspace, renameRegressionOtherWorkspace],
+      renamePending,
+      async (renameSpy) => {
+        await openWorkspaceRowRename("Alpha", "Reviews");
+        await clickAndSettle(screen.getByRole("button", { name: "Save label" }));
+        expect(renameSpy).toHaveBeenCalledTimes(1);
+
+        await leaveWorkspacesSection();
+        vi.mocked(api.fetchWorkspaceLayouts).mockResolvedValue({
+          workspaces: [renameRegressionCurrentLabeledWorkspace],
+        });
+        await dispatchStateEvent(latestEventSource(), {
+          revision: 2,
+          projects: [],
+          orchestrators: [],
+          sessions: [],
+          workspaces: [renameRegressionCurrentLabeledWorkspace],
+        });
+        await act(async () => {
+          rejectRename(new Error("Rename failed."));
+          await renamePending.catch(() => {});
+        });
+
+        await openWorkspacesPanel();
+        expect(screen.getByRole("form", { name: "Label workspace workspace-other" })).toBeInTheDocument();
+        const labelInput = screen.getByRole("textbox", { name: "Workspace label" });
+        expect(labelInput).toHaveValue("Reviews");
+        expect(labelInput).toHaveFocus();
+        expect(screen.getByRole("alert")).toHaveTextContent("Rename failed.");
+        expect(renameSpy).toHaveBeenCalledTimes(1);
+      },
+    );
+  });
+
+  it("keeps a non-current pending rename editor after the target is removed while away", async () => {
+    const renamePending = new Promise<Awaited<ReturnType<typeof api.renameWorkspaceLayout>>>(() => {});
+    await withAppRenameRegression(
+      [renameRegressionCurrentLabeledWorkspace, renameRegressionOtherWorkspace],
+      renamePending,
+      async (renameSpy) => {
+        await openWorkspaceRowRename("Alpha", "Reviews");
+        await clickAndSettle(screen.getByRole("button", { name: "Save label" }));
+        expect(renameSpy).toHaveBeenCalledTimes(1);
+
+        await leaveWorkspacesSection();
+        vi.mocked(api.fetchWorkspaceLayouts).mockResolvedValue({
+          workspaces: [renameRegressionCurrentLabeledWorkspace],
+        });
+        await dispatchStateEvent(latestEventSource(), {
+          revision: 2,
+          projects: [],
+          orchestrators: [],
+          sessions: [],
+          workspaces: [renameRegressionCurrentLabeledWorkspace],
+        });
+
+        await openWorkspacesPanel();
+        expect(screen.getByRole("form", { name: "Label workspace workspace-other" })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Saving…" })).toBeDisabled();
+        const labelInput = screen.getByRole("textbox", { name: "Workspace label" });
+        expect(labelInput).toHaveValue("Reviews");
+        expect(labelInput).toBeDisabled();
+        expect(labelInput).not.toHaveFocus();
+        expect(renameSpy).toHaveBeenCalledTimes(1);
+      },
+    );
+  });
+
+  it("cannot close the Control panel tab and keeps a rejected rename after hiding Workspaces", async () => {
+    let rejectRename!: (error: Error) => void;
+    const renamePending = new Promise<Awaited<ReturnType<typeof api.renameWorkspaceLayout>>>(
+      (_, reject) => {
+        rejectRename = reject;
+      },
+    );
+    await withAppRenameRegression([renameRegressionCurrentWorkspace], renamePending, async (renameSpy) => {
+      await openWorkspaceRowRename(
+        workspaceDisplayName({ id: "workspace-label-test" }),
+        "Backend",
+      );
+      await clickAndSettle(screen.getByRole("button", { name: "Save label" }));
+      expect(screen.queryByRole("button", { name: /Remove Control panel/i })).not.toBeInTheDocument();
+      expect(renameSpy).toHaveBeenCalledTimes(1);
+
+      await leaveWorkspacesSection();
+      await act(async () => {
+        rejectRename(new Error("Rename failed."));
+        await renamePending.catch(() => {});
+      });
+
+      await openWorkspacesPanel();
+      const labelInput = screen.getByRole("textbox", { name: "Workspace label" });
+      expect(labelInput).toHaveValue("Backend");
+      expect(labelInput).toHaveFocus();
+      expect(screen.getByRole("alert")).toHaveTextContent("Rename failed.");
+    });
+  });
+
+  it("does not start a second PATCH after moving the dock while rename is pending", async () => {
+    const renamePending = new Promise<Awaited<ReturnType<typeof api.renameWorkspaceLayout>>>(() => {});
+    await withAppRenameDockMoveRegression([renameRegressionCurrentWorkspace], renamePending, async (renameSpy) => {
+      await openWorkspaceRowRename(
+        workspaceDisplayName({ id: "workspace-label-test" }),
+        "Backend",
+      );
+      await clickAndSettle(screen.getByRole("button", { name: "Save label" }));
+      expect(renameSpy).toHaveBeenCalledTimes(1);
+
+      await moveControlPanelDockToOppositeEdge();
+      await openWorkspacesPanel();
+      expect(screen.getByRole("button", { name: "Saving…" })).toBeDisabled();
+      expect(screen.getByRole("textbox", { name: "Workspace label" })).toHaveValue("Backend");
+
+      await leaveWorkspacesSection();
+      await openWorkspacesPanel();
+      expect(screen.getByRole("button", { name: "Saving…" })).toBeDisabled();
+      expect(renameSpy).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("keeps a rejected rename after moving the Control panel dock", async () => {
+    let rejectRename!: (error: Error) => void;
+    const renamePending = new Promise<Awaited<ReturnType<typeof api.renameWorkspaceLayout>>>(
+      (_, reject) => {
+        rejectRename = reject;
+      },
+    );
+    await withAppRenameDockMoveRegression([renameRegressionCurrentWorkspace], renamePending, async (renameSpy) => {
+      await openWorkspaceRowRename(
+        workspaceDisplayName({ id: "workspace-label-test" }),
+        "Backend",
+      );
+      await clickAndSettle(screen.getByRole("button", { name: "Save label" }));
+      expect(renameSpy).toHaveBeenCalledTimes(1);
+
+      await moveControlPanelDockToOppositeEdge();
+      await act(async () => {
+        rejectRename(new Error("Rename failed."));
+        await renamePending.catch(() => {});
+      });
+
+      await openWorkspacesPanel();
+      const labelInput = screen.getByRole("textbox", { name: "Workspace label" });
+      expect(labelInput).toHaveValue("Backend");
+      expect(labelInput).toHaveFocus();
+      expect(screen.getByRole("alert")).toHaveTextContent("Rename failed.");
+      expect(screen.getByRole("form", { name: "Label workspace workspace-label-test" })).toBeInTheDocument();
+      expect(renameSpy).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("reconciles a successful rename that completed after the dock moved", async () => {
+    let resolveRename!: (value: Awaited<ReturnType<typeof api.renameWorkspaceLayout>>) => void;
+    const renamePending = new Promise<Awaited<ReturnType<typeof api.renameWorkspaceLayout>>>(
+      (resolve) => {
+        resolveRename = resolve;
+      },
+    );
+    const renamedLayout = {
+      ...makeWorkspaceLayoutResponse({ id: "workspace-label-test", revision: 2 }).layout,
+      label: "Backend",
+    };
+    await withAppRenameDockMoveRegression([renameRegressionCurrentWorkspace], renamePending, async (renameSpy) => {
+      await openWorkspaceRowRename(
+        workspaceDisplayName({ id: "workspace-label-test" }),
+        "Backend",
+      );
+      await clickAndSettle(screen.getByRole("button", { name: "Save label" }));
+      expect(renameSpy).toHaveBeenCalledTimes(1);
+
+      await moveControlPanelDockToOppositeEdge();
+      await act(async () => {
+        resolveRename({ layout: renamedLayout });
+        await renamePending;
+      });
+      vi.mocked(api.fetchWorkspaceLayouts).mockResolvedValue({
+        workspaces: [{
+          id: "workspace-label-test",
+          label: "Backend",
+          revision: 2,
+          updatedAt: renamedLayout.updatedAt,
+          controlPanelSide: "left",
+        }],
+      });
+
+      await openWorkspacesPanel();
+      expect(await screen.findByRole("button", { name: "Backend (current)" })).toBeInTheDocument();
+      expect(document.title).toMatch(/^Backend ·/);
+      expect(screen.queryByRole("textbox", { name: "Workspace label" })).not.toBeInTheDocument();
+      expect(document.activeElement).toBe(document.body);
+      expect(renameSpy).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("keeps a non-current rename snapshot after the target is removed and the dock moves", async () => {
+    let rejectRename!: (error: Error) => void;
+    const renamePending = new Promise<Awaited<ReturnType<typeof api.renameWorkspaceLayout>>>(
+      (_, reject) => {
+        rejectRename = reject;
+      },
+    );
+    await withAppRenameDockMoveRegression(
+      [renameRegressionCurrentLabeledWorkspace, renameRegressionOtherWorkspace],
+      renamePending,
+      async (renameSpy) => {
+        await openWorkspaceRowRename("Alpha", "Reviews");
+        await clickAndSettle(screen.getByRole("button", { name: "Save label" }));
+        expect(renameSpy).toHaveBeenCalledTimes(1);
+
+        vi.mocked(api.fetchWorkspaceLayouts).mockResolvedValue({
+          workspaces: [renameRegressionCurrentLabeledWorkspace],
+        });
+        await dispatchStateEvent(latestEventSource(), {
+          revision: 2,
+          projects: [],
+          orchestrators: [],
+          sessions: [makeSession("session-1", {
+            name: "Session 1",
+            projectId: "project-termal",
+            workdir: "/projects/termal",
+          })],
+          workspaces: [renameRegressionCurrentLabeledWorkspace],
+        });
+        await moveControlPanelDockToOppositeEdge();
+        await act(async () => {
+          rejectRename(new Error("Rename failed."));
+          await renamePending.catch(() => {});
+        });
+
+        await openWorkspacesPanel();
+        expect(screen.getByRole("form", { name: "Label workspace workspace-other" })).toBeInTheDocument();
+        const labelInput = screen.getByRole("textbox", { name: "Workspace label" });
+        expect(labelInput).toHaveValue("Reviews");
+        expect(labelInput).toHaveFocus();
+        expect(screen.getByRole("alert")).toHaveTextContent("Rename failed.");
+        expect(renameSpy).toHaveBeenCalledTimes(1);
+      },
+    );
   });
 
   it("deletes a saved workspace from the Workspaces region", async () => {
