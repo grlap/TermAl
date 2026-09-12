@@ -402,6 +402,40 @@ describe("WorkspacesPanel", () => {
     expect(second).toHaveBeenLastCalledWith({ preserveError: true });
   });
 
+  it("moves focus to search after Reload unmounts when Reload owned focus", () => {
+    const input = props();
+    input.error = "Backend needs restart";
+    const view = render(<WorkspacesPanel {...input} />);
+    const reload = screen.getByRole("button", { name: "Reload list" });
+    reload.focus();
+    fireEvent.click(reload);
+    view.rerender(<WorkspacesPanel {...input} error={null} />);
+    expect(screen.queryByRole("button", { name: "Reload list" })).not.toBeInTheDocument();
+    expect(screen.getByRole("searchbox", { name: "Search workspaces" })).toHaveFocus();
+  });
+
+  it("does not steal focus when Reload chrome disappears without Reload activation", () => {
+    const input = props();
+    input.error = "Backend needs restart";
+    const view = render(<WorkspacesPanel {...input} />);
+    const search = screen.getByRole("searchbox", { name: "Search workspaces" });
+    search.focus();
+    view.rerender(<WorkspacesPanel {...input} error={null} />);
+    expect(search).toHaveFocus();
+  });
+
+  it("restores search after Reload when the document body has focus", () => {
+    const input = props();
+    input.error = "Backend needs restart";
+    const view = render(<WorkspacesPanel {...input} />);
+    document.body.focus();
+    expect(document.activeElement).toBe(document.body);
+    fireEvent.click(screen.getByRole("button", { name: "Reload list" }));
+    view.rerender(<WorkspacesPanel {...input} error={null} />);
+    expect(screen.queryByRole("button", { name: "Reload list" })).not.toBeInTheDocument();
+    expect(screen.getByRole("searchbox", { name: "Search workspaces" })).toHaveFocus();
+  });
+
   it("keeps a rejected rename draft and restores focus on cancel", async () => {
     const input = props();
     input.onRenameWorkspace = vi.fn().mockRejectedValue(new Error("Backend needs restart"));

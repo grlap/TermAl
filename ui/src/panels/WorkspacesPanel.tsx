@@ -221,6 +221,8 @@ export function WorkspacesPanel({
   const confirmCancelRef = useRef<HTMLButtonElement | null>(null);
   const labelInputRef = useRef<HTMLInputElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const reloadButtonRef = useRef<HTMLButtonElement | null>(null);
+  const reloadOwnsLostFocusRef = useRef(false);
   const overflowButtonRefs = useRef(new Map<string, HTMLButtonElement>());
   const restoreFocusIdRef = useRef<string | null>(null);
   const pendingRestoreFocusIdRef = useRef<string | null>(null);
@@ -308,6 +310,16 @@ export function WorkspacesPanel({
     didMountRefreshRef.current = true;
     onRefresh({ preserveError: true });
   }, [onRefresh]);
+
+  useEffect(() => {
+    if (error || !reloadOwnsLostFocusRef.current) {
+      return;
+    }
+    reloadOwnsLostFocusRef.current = false;
+    if (shouldRestoreLostFocus()) {
+      searchInputRef.current?.focus();
+    }
+  }, [error]);
 
   useEffect(() => {
     if (!editingWorkspaceId) {
@@ -738,9 +750,15 @@ export function WorkspacesPanel({
         <div className="workspaces-panel-error">
           <p role="alert">{error}</p>
           <button
+            ref={reloadButtonRef}
             className="ghost-button workspaces-panel-retry"
             type="button"
-            onClick={() => onRefresh()}
+            onClick={() => {
+              reloadOwnsLostFocusRef.current =
+                document.activeElement === reloadButtonRef.current
+                || shouldRestoreLostFocus();
+              onRefresh();
+            }}
           >
             Reload list
           </button>
