@@ -1601,14 +1601,17 @@ fn summarize_acp_tool_output(update: &Value) -> String {
 fn acp_tool_status(update: &Value) -> CommandStatus {
     match update.get("status").and_then(Value::as_str) {
         Some("completed") => {
+            // ACP completion is successful even for tools with no shell exit
+            // code. Keep the existing explicit nonzero-code failure signal;
+            // other rawOutput fields are arbitrary tool data, not ACP status.
             if update
                 .pointer("/rawOutput/exitCode")
                 .and_then(Value::as_i64)
-                == Some(0)
+                .is_some_and(|code| code != 0)
             {
-                CommandStatus::Success
-            } else {
                 CommandStatus::Error
+            } else {
+                CommandStatus::Success
             }
         }
         Some("failed") | Some("error") => CommandStatus::Error,
