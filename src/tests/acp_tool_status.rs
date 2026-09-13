@@ -72,12 +72,7 @@ fn acp_completed_tool_updates_preserve_status_in_cursor_transcript() {
             json!({"exitCode": 1}),
             CommandStatus::Error,
         ),
-        (
-            "Read failure",
-            "failed",
-            Value::Null,
-            CommandStatus::Error,
-        ),
+        ("Read failure", "failed", Value::Null, CommandStatus::Error),
     ];
     for (title, status, raw_output, _) in &cases {
         for update in [
@@ -108,7 +103,10 @@ fn acp_completed_tool_updates_preserve_status_in_cursor_transcript() {
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert_eq!(commands, cases.iter().map(|case| case.3).collect::<Vec<_>>());
+        assert_eq!(
+            commands,
+            cases.iter().map(|case| case.3).collect::<Vec<_>>()
+        );
     };
     let inner = state.inner.lock().expect("state mutex poisoned");
     assert_commands(&inner.sessions[inner.find_session_index(&session_id).unwrap()].session);
@@ -117,6 +115,8 @@ fn acp_completed_tool_updates_preserve_status_in_cursor_transcript() {
     // eventual durability of the production deferred-persist path.
     state.persist_internal_locked(&inner).unwrap();
     drop(inner);
-    let saved = load_state(state.persistence_path.as_path()).unwrap().unwrap();
+    let saved = load_state(state.persistence_path.as_path())
+        .unwrap()
+        .unwrap();
     assert_commands(&saved.sessions[saved.find_session_index(&session_id).unwrap()].session);
 }

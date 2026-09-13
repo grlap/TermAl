@@ -291,9 +291,11 @@ fn rejected_followup_after_restore_rearchives_without_admitting_a_prompt() {
             );
         }
         assert!(child.queued_prompts.is_empty());
-        assert!(!inner
-            .delegation_followup_admissions
-            .contains_key(&delegation));
+        assert!(
+            !inner
+                .delegation_followup_admissions
+                .contains_key(&delegation)
+        );
     }
 }
 

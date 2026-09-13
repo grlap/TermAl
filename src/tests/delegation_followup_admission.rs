@@ -163,9 +163,11 @@ fn delayed_followup_direct_promotion_commit_failure_settles_without_delivery() {
         *state.shared_codex_runtime.lock().unwrap() = Some(runtime);
         {
             let mut inner = state.inner.lock().unwrap();
-            assert!(!inner
-                .delegation_followup_admissions
-                .contains_key(&delegation));
+            assert!(
+                !inner
+                    .delegation_followup_admissions
+                    .contains_key(&delegation)
+            );
             let index = inner.find_session_index(&child).unwrap();
             inner.sessions[index].engram.project_reset_in_progress = false;
             inner.sessions[index].set_auto_dispatch_blocked(blocked);
@@ -221,15 +223,19 @@ fn delayed_followup_direct_promotion_commit_failure_settles_without_delivery() {
         assert_eq!(record.session.status, SessionStatus::Error);
         assert!(matches!(record.runtime, SessionRuntime::None));
         assert!(record.queued_prompts.is_empty());
-        assert!(!record
-            .session
-            .messages
-            .iter()
-            .any(|message| message.id() == prompt_id));
-        assert!(!inner
-            .delegation_waits
-            .iter()
-            .any(|item| item.id == wait.wait.id));
+        assert!(
+            !record
+                .session
+                .messages
+                .iter()
+                .any(|message| message.id() == prompt_id)
+        );
+        assert!(
+            !inner
+                .delegation_waits
+                .iter()
+                .any(|item| item.id == wait.wait.id)
+        );
         assert_eq!(
             inner.sessions[inner.find_session_index(&parent).unwrap()]
                 .queued_prompts
@@ -328,9 +334,11 @@ fn canceled_restored_followup_keeps_cleanup_and_manual_archive_retries_same_atte
             assert!(matches!(record.runtime, SessionRuntime::None));
             assert!(record.queued_prompts.is_empty());
             let release = record.codex_delegation_release.as_ref().unwrap();
-            assert!(release
-                .compensation_pending
-                .load(std::sync::atomic::Ordering::Acquire));
+            assert!(
+                release
+                    .compensation_pending
+                    .load(std::sync::atomic::Ordering::Acquire)
+            );
             assert_eq!(
                 release.undurable_terminal.lock().unwrap().as_ref(),
                 Some(&canceled)
@@ -361,21 +369,25 @@ fn canceled_restored_followup_keeps_cleanup_and_manual_archive_retries_same_atte
                 .delegation,
             canceled
         );
-        assert!(state
-            .followup_delegation(&parent, &delegation, "Must remain canceled".to_owned())
-            .is_err());
+        assert!(
+            state
+                .followup_delegation(&parent, &delegation, "Must remain canceled".to_owned())
+                .is_err()
+        );
         assert!(input_rx.try_recv().is_err());
         let inner = state.inner.lock().unwrap();
         let record = &inner.sessions[inner.find_session_index(&child).unwrap()];
         assert!(record_has_archived_codex_thread(record));
-        assert!(record
-            .codex_delegation_release
-            .as_ref()
-            .unwrap()
-            .undurable_terminal
-            .lock()
-            .unwrap()
-            .is_none());
+        assert!(
+            record
+                .codex_delegation_release
+                .as_ref()
+                .unwrap()
+                .undurable_terminal
+                .lock()
+                .unwrap()
+                .is_none()
+        );
     }
 }
 
@@ -441,9 +453,11 @@ fn followup_admission_commit_failure_settles_undelivered_attempt_and_releases_ru
                     inner.delegations[inner.find_delegation_index(&delegation).unwrap()],
                     previous
                 );
-                assert!(inner.sessions[inner.find_session_index(&child).unwrap()]
-                    .queued_prompts
-                    .is_empty());
+                assert!(
+                    inner.sessions[inner.find_session_index(&child).unwrap()]
+                        .queued_prompts
+                        .is_empty()
+                );
             }
             admission.release().unwrap();
             state
@@ -465,19 +479,23 @@ fn followup_admission_commit_failure_settles_undelivered_attempt_and_releases_ru
             let inner = state.inner.lock().unwrap();
             let failed = &inner.delegations[inner.find_delegation_index(&delegation).unwrap()];
             assert_eq!(failed.status, DelegationStatus::Failed);
-            assert!(failed
-                .result
-                .as_ref()
-                .unwrap()
-                .summary
-                .contains("admission could not be persisted"));
+            assert!(
+                failed
+                    .result
+                    .as_ref()
+                    .unwrap()
+                    .summary
+                    .contains("admission could not be persisted")
+            );
             let record = &inner.sessions[inner.find_session_index(&child).unwrap()];
             assert_eq!(record.session.status, SessionStatus::Error);
             assert!(matches!(record.runtime, SessionRuntime::None));
             assert!(record.queued_prompts.is_empty());
-            assert!(inner.delegation_followup_admissions[&delegation]
-                .failure
-                .is_some());
+            assert!(
+                inner.delegation_followup_admissions[&delegation]
+                    .failure
+                    .is_some()
+            );
         }
         // Cleanup also runs if storage is still unavailable at release.
         admission.state.persistence_path = Arc::new(failed_path.clone());
@@ -497,12 +515,14 @@ fn followup_admission_commit_failure_settles_undelivered_attempt_and_releases_ru
                 .status,
             DelegationStatus::Failed
         );
-        assert!(!state
-            .inner
-            .lock()
-            .unwrap()
-            .delegation_followup_admissions
-            .contains_key(&delegation));
+        assert!(
+            !state
+                .inner
+                .lock()
+                .unwrap()
+                .delegation_followup_admissions
+                .contains_key(&delegation)
+        );
         remove_test_directory(failed_path);
     }
 }
@@ -636,11 +656,13 @@ fn canceled_queued_followup_never_reuses_old_result_or_discards_successor() {
                         next.as_ref().unwrap().as_str()
                     );
                 } else {
-                    assert!(status
-                        .result
-                        .unwrap()
-                        .summary
-                        .contains("canceled before it started"));
+                    assert!(
+                        status
+                            .result
+                            .unwrap()
+                            .summary
+                            .contains("canceled before it started")
+                    );
                 }
             }
         }
@@ -694,9 +716,11 @@ fn delayed_queued_followup_start_failure_settles_after_reservation_release() {
             .unwrap();
         {
             let mut inner = state.inner.lock().unwrap();
-            assert!(!inner
-                .delegation_followup_admissions
-                .contains_key(&delegation));
+            assert!(
+                !inner
+                    .delegation_followup_admissions
+                    .contains_key(&delegation)
+            );
             let index = inner.find_session_index(&child).unwrap();
             inner.sessions[index].engram.project_reset_in_progress = false;
         }
@@ -715,10 +739,12 @@ fn delayed_queued_followup_start_failure_settles_after_reservation_release() {
         let record = &inner.sessions[inner.find_session_index(&child).unwrap()];
         assert!(record.queued_prompts.is_empty());
         assert!(matches!(record.runtime, SessionRuntime::None));
-        assert!(!inner
-            .delegation_waits
-            .iter()
-            .any(|item| item.id == wait.wait.id));
+        assert!(
+            !inner
+                .delegation_waits
+                .iter()
+                .any(|item| item.id == wait.wait.id)
+        );
         assert_eq!(
             inner.sessions[inner.find_session_index(&parent).unwrap()]
                 .queued_prompts
@@ -879,14 +905,18 @@ fn queued_followup_survives_project_reset_polling_and_dispatches_once() {
                 record.queued_prompts[0].pending_prompt.text,
                 "New follow-up"
             );
-            assert!(!inner
-                .delegation_followup_admissions
-                .contains_key(&delegation));
+            assert!(
+                !inner
+                    .delegation_followup_admissions
+                    .contains_key(&delegation)
+            );
         }
-        assert!(state
-            .start_next_queued_turn_off_lock(&child, true, false)
-            .unwrap()
-            .is_none());
+        assert!(
+            state
+                .start_next_queued_turn_off_lock(&child, true, false)
+                .unwrap()
+                .is_none()
+        );
         {
             let mut inner = state.inner.lock().unwrap();
             let index = inner.find_session_index(&child).unwrap();
@@ -902,10 +932,12 @@ fn queued_followup_survives_project_reset_polling_and_dispatches_once() {
             CodexRuntimeCommand::Prompt { .. }
         ));
         assert!(input_rx.try_recv().is_err());
-        assert!(state
-            .start_next_queued_turn_off_lock(&child, true, false)
-            .unwrap()
-            .is_none());
+        assert!(
+            state
+                .start_next_queued_turn_off_lock(&child, true, false)
+                .unwrap()
+                .is_none()
+        );
         let mut updates = 0;
         while let Ok(event) = events.try_recv() {
             let event: Value = serde_json::from_str(&event).unwrap();
@@ -994,9 +1026,11 @@ fn queued_followup_survives_project_reset_polling_and_dispatches_once() {
                 Some(DELEGATION_REVIEW_RESULT_SCHEMA_VERSION)
             );
         }
-        assert!(inner.sessions[inner.find_session_index(&child).unwrap()]
-            .queued_prompts
-            .is_empty());
+        assert!(
+            inner.sessions[inner.find_session_index(&child).unwrap()]
+                .queued_prompts
+                .is_empty()
+        );
     }
 }
 
@@ -1070,9 +1104,11 @@ fn followup_reservation_defers_all_wait_until_admission_or_rejection() {
                     .any(|item| item.id == wait.wait.id),
                 "A's reservation must keep All pending"
             );
-            assert!(inner.sessions[inner.find_session_index(&parent).unwrap()]
-                .queued_prompts
-                .is_empty());
+            assert!(
+                inner.sessions[inner.find_session_index(&parent).unwrap()]
+                    .queued_prompts
+                    .is_empty()
+            );
         }
         response_tx
             .send(if succeeds {
@@ -1090,10 +1126,12 @@ fn followup_reservation_defers_all_wait_until_admission_or_rejection() {
             ));
             {
                 let inner = state.inner.lock().unwrap();
-                assert!(inner
-                    .delegation_waits
-                    .iter()
-                    .any(|item| item.id == wait.wait.id));
+                assert!(
+                    inner
+                        .delegation_waits
+                        .iter()
+                        .any(|item| item.id == wait.wait.id)
+                );
                 assert!(!inner.delegation_followup_admissions.contains_key(&a));
             }
             // Avoid testing external archive here; the wait concerns the review result.
@@ -1113,10 +1151,12 @@ fn followup_reservation_defers_all_wait_until_admission_or_rejection() {
             assert!(result.is_err());
         }
         let inner = state.inner.lock().unwrap();
-        assert!(!inner
-            .delegation_waits
-            .iter()
-            .any(|item| item.id == wait.wait.id));
+        assert!(
+            !inner
+                .delegation_waits
+                .iter()
+                .any(|item| item.id == wait.wait.id)
+        );
         assert_eq!(
             inner.sessions[inner.find_session_index(&parent).unwrap()]
                 .queued_prompts
@@ -1153,12 +1193,14 @@ fn released_followup_guard_cannot_remove_the_next_reservation() {
             .insert(id.clone(), FollowupAdmissionReservation::new(None));
     }
     drop(guard);
-    assert!(state
-        .inner
-        .lock()
-        .unwrap()
-        .delegation_followup_admissions
-        .contains_key(&id));
+    assert!(
+        state
+            .inner
+            .lock()
+            .unwrap()
+            .delegation_followup_admissions
+            .contains_key(&id)
+    );
 }
 
 #[test]
@@ -1328,9 +1370,11 @@ fn followup_runtime_start_failure_never_clears_the_previous_review_or_card() {
             parent_before
         );
         assert_eq!(inner.running_read_only_delegations, read_only_before);
-        assert!(inner
-            .delegation_followup_admissions
-            .contains_key(&delegation));
+        assert!(
+            inner
+                .delegation_followup_admissions
+                .contains_key(&delegation)
+        );
         // Observe the exact gap before the caller can perform compensation or
         // release its reservation. Another commit cannot persist a cleared result.
         state.commit_locked(&mut inner).unwrap();
@@ -1604,18 +1648,24 @@ fn followup_engram_queue_start_failure_settles_instead_of_stranding_running() {
         .unwrap()
         .delegation;
     assert_eq!(failed.status, DelegationStatus::Failed);
-    assert!(failed
-        .result
-        .unwrap()
-        .summary
-        .contains("agent runtime spawning is disabled"));
+    assert!(
+        failed
+            .result
+            .unwrap()
+            .summary
+            .contains("agent runtime spawning is disabled")
+    );
     let inner = state.inner.lock().unwrap();
-    assert!(inner.sessions[inner.find_session_index(&child).unwrap()]
-        .queued_prompts
-        .is_empty());
-    assert!(!inner
-        .delegation_followup_admissions
-        .contains_key(&created.delegation.id));
+    assert!(
+        inner.sessions[inner.find_session_index(&child).unwrap()]
+            .queued_prompts
+            .is_empty()
+    );
+    assert!(
+        !inner
+            .delegation_followup_admissions
+            .contains_key(&created.delegation.id)
+    );
 }
 
 #[test]
@@ -1672,18 +1722,24 @@ fn followup_wait_commit_failure_retains_idle_parent_wake_for_exactly_once_retry(
         fs::create_dir_all(&failed_path).unwrap();
         let mut failing = state.clone();
         failing.persistence_path = Arc::new(failed_path.clone());
-        assert!(failing
-            .release_delegation_followup_reservation(&delegation)
-            .is_err());
+        assert!(
+            failing
+                .release_delegation_followup_reservation(&delegation)
+                .is_err()
+        );
         {
             let inner = state.inner.lock().unwrap();
-            assert!(inner
-                .delegation_waits
-                .iter()
-                .any(|item| item.id == wait.wait.id));
-            assert!(inner.sessions[inner.find_session_index(&parent).unwrap()]
-                .queued_prompts
-                .is_empty());
+            assert!(
+                inner
+                    .delegation_waits
+                    .iter()
+                    .any(|item| item.id == wait.wait.id)
+            );
+            assert!(
+                inner.sessions[inner.find_session_index(&parent).unwrap()]
+                    .queued_prompts
+                    .is_empty()
+            );
         }
         let (runtime, input_rx, _) = test_shared_codex_runtime("retry-wait-parent");
         *state.shared_codex_runtime.lock().unwrap() = Some(runtime);
@@ -1695,10 +1751,12 @@ fn followup_wait_commit_failure_retains_idle_parent_wake_for_exactly_once_retry(
         state.get_delegation(&parent, &delegation).unwrap();
         assert!(input_rx.try_recv().is_err());
         let inner = state.inner.lock().unwrap();
-        assert!(!inner
-            .delegation_waits
-            .iter()
-            .any(|item| item.id == wait.wait.id));
+        assert!(
+            !inner
+                .delegation_waits
+                .iter()
+                .any(|item| item.id == wait.wait.id)
+        );
         drop(inner);
         remove_test_directory(failed_path);
     }
@@ -1749,9 +1807,11 @@ fn restored_queued_followup_failure_keeps_compensation_without_runtime_on_all_di
         *state.shared_codex_runtime.lock().unwrap() = None;
         {
             let mut inner = state.inner.lock().unwrap();
-            assert!(!inner
-                .delegation_followup_admissions
-                .contains_key(&delegation));
+            assert!(
+                !inner
+                    .delegation_followup_admissions
+                    .contains_key(&delegation)
+            );
             let index = inner.find_session_index(&child).unwrap();
             inner.sessions[index].engram.project_reset_in_progress = false;
         }
@@ -1788,9 +1848,11 @@ fn restored_queued_followup_failure_keeps_compensation_without_runtime_on_all_di
             );
             let record = &inner.sessions[inner.find_session_index(&child).unwrap()];
             let release = record.codex_delegation_release.as_ref().unwrap();
-            assert!(release
-                .compensation_pending
-                .load(std::sync::atomic::Ordering::Acquire));
+            assert!(
+                release
+                    .compensation_pending
+                    .load(std::sync::atomic::Ordering::Acquire)
+            );
             assert!(release.undurable_terminal.lock().unwrap().is_some());
             assert!(record.queued_prompts.is_empty());
         }
@@ -1819,14 +1881,18 @@ fn restored_queued_followup_failure_keeps_compensation_without_runtime_on_all_di
             assert!(state.shared_codex_runtime.lock().unwrap().is_none());
             let inner = state.inner.lock().unwrap();
             let record = &inner.sessions[inner.find_session_index(&child).unwrap()];
-            assert!(record
-                .codex_delegation_release
-                .as_ref()
-                .unwrap()
-                .needs_followup_compensation());
-            assert!(!inner
-                .delegation_followup_admissions
-                .contains_key(&delegation));
+            assert!(
+                record
+                    .codex_delegation_release
+                    .as_ref()
+                    .unwrap()
+                    .needs_followup_compensation()
+            );
+            assert!(
+                !inner
+                    .delegation_followup_admissions
+                    .contains_key(&delegation)
+            );
         }
         let (runtime, input_rx, _) = test_shared_codex_runtime("compensation-retry");
         *state.shared_codex_runtime.lock().unwrap() = Some(runtime);
