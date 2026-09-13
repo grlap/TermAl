@@ -2851,6 +2851,7 @@ fn make_persist_test_delegation(
         review_result_recovery_probe_attempt: None,
         review_result_recovery_error: None,
         review_result_schema_version: None,
+        queued_followup_prompt_id: None,
         review_result_submission_attempt: 0,
     }
 }

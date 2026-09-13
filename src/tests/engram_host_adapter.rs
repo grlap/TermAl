@@ -1735,7 +1735,7 @@ impl EngramControlTransport for GatedEngramControlTransport {
     }
 }
 
-fn enable_test_project_engram(state: &AppState, project_id: &str, root: &FsPath) {
+pub(super) fn enable_test_project_engram(state: &AppState, project_id: &str, root: &FsPath) {
     let mut inner = state.inner.lock().expect("state mutex poisoned");
     {
         let project = inner
@@ -5564,6 +5564,7 @@ fn link_engram_mcp_test_descendant(
         review_result_recovery_probe_attempt: None,
         review_result_recovery_error: None,
         review_result_schema_version: None,
+        queued_followup_prompt_id: None,
         review_result_submission_attempt: 0,
     });
     state
@@ -13406,6 +13407,8 @@ fn assert_terminal_callback_abandons_blocked_begin(
     let followup_state = state.clone();
     let followup_parent = parent_session_id.clone();
     let followup_prompt = format!("Dispatch after the {label} terminal callback.");
+    let followed_delegation_id = delegation_id.clone();
+    let mut followup_events = state.subscribe_delta_events();
     let followup_handle = std::thread::spawn(move || {
         followup_state.followup_delegation(&followup_parent, &delegation_id, followup_prompt)
     });
@@ -13480,6 +13483,38 @@ fn assert_terminal_callback_abandons_blocked_begin(
         .join()
         .expect("follow-up thread should not panic")
         .expect("follow-up should dispatch the successor");
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        assert!(
+            !inner
+                .delegation_followup_admissions
+                .contains_key(&followed_delegation_id),
+            "successful Engram dispatch-card admission releases its reservation"
+        );
+        let delegation = &inner.delegations[inner
+            .find_delegation_index(&followed_delegation_id)
+            .unwrap()];
+        assert_eq!(delegation.review_result_submission_attempt, 2);
+    }
+    let mut rearm_updates = 0;
+    loop {
+        let event = match followup_events.try_recv() {
+            Ok(event) => event,
+            Err(broadcast::error::TryRecvError::Empty) => break,
+            Err(error) => panic!("follow-up re-arm event evidence lost: {error}"),
+        };
+        let event: Value = serde_json::from_str(&event).unwrap();
+        if event["type"] == "delegationUpdated"
+            && event["delegationId"] == followed_delegation_id
+            && event["status"] == "running"
+        {
+            rearm_updates += 1;
+        }
+    }
+    assert_eq!(
+        rearm_updates, 1,
+        "Engram queue and start commits must re-arm once"
+    );
     assert!(matches!(
         recv_within_guard(&runtime_rx, "the successor prompt should reach the runtime")
             .expect("the successor prompt should reach the runtime"),

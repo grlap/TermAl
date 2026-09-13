@@ -318,10 +318,50 @@ impl AppState {
         }
         sync_pending_prompts(record);
 
-        self.commit_locked(&mut inner).map_err(|err| {
+        let lifecycle = reconcile_removed_followup_prompt_locked(&mut inner, session_id, prompt_id);
+        let detached = if lifecycle.is_some() {
+            let delegation = inner
+                .find_delegation_index_by_child_session_id(session_id)
+                .expect("reconciled delegation exists");
+            let mut detached =
+                detach_terminal_delegation_child_runtime_locked(&mut inner, delegation);
+            retain_followup_archive_compensation_locked(&mut inner, delegation, &mut detached);
+            detached
+        } else {
+            DetachedDelegationChildRuntime::default()
+        };
+        let reconcile_waits = lifecycle.is_some();
+        let committed = self.commit_locked(&mut inner);
+        if committed.is_ok() {
+            if let Some(delta) = lifecycle {
+                self.publish_delegation_lifecycle_delta(
+                    inner.revision,
+                    strip_parent_card_delta(delta),
+                );
+            }
+        }
+        let wait_commit = if committed.is_ok() && reconcile_waits {
+            self.commit_followup_wait_refresh_locked(&mut inner, None)
+        } else {
+            Ok((inner.revision, DelegationWaitRefresh::default()))
+        };
+        let revision = inner.revision;
+        drop(inner);
+        let (wait_error, waits) = match wait_commit {
+            Ok((_, waits)) => (None, waits),
+            Err(error) => (Some(error), DelegationWaitRefresh::default()),
+        };
+        if reconcile_waits || detached.did_mutate() || waits.did_mutate() {
+            self.publish_delegation_refresh_side_effects(revision, None, detached, waits);
+        }
+        committed.map_err(|err| {
             ApiError::internal(format!("failed to persist session state: {err:#}"))
         })?;
-        drop(inner);
+        if let Some(error) = wait_error {
+            return Err(ApiError::internal(format!(
+                "failed to persist delegation wait: {error:#}"
+            )));
+        }
         self.resume_pending_orchestrator_transitions()
             .map_err(|err| {
                 ApiError::internal(format!(
@@ -846,6 +886,7 @@ impl AppState {
             .flatten();
         let orchestrator_stop_instance_id = options.orchestrator_stop_instance_id.clone();
         let suppress_automatic_resume = options.pause_automatic_resumes_on_success;
+        let mut queued_followup_start_error = None;
         let transition = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
@@ -1029,7 +1070,11 @@ impl AppState {
                 let pending_engram_for_abandon = pending_engram.clone();
                 let result = self
                     .start_next_queued_turn_locked(&mut inner, index, false, pending_engram)
-                    .map_err(|err| ApiError::internal(format!("{err:#}")));
+                    .map_err(|err| {
+                        let api_error = ApiError::internal(format!("{err:#}"));
+                        queued_followup_start_error = Some(err);
+                        api_error
+                    });
                 match &result {
                     Ok(Some(_)) => {
                         let successor_message_index = inner.sessions[index]
@@ -1174,6 +1219,10 @@ impl AppState {
                             );
                         }
                     }
+                    if let Some(start_error) = queued_followup_start_error {
+                        let settled = self.finish_queued_followup_start_error(start_error);
+                        eprintln!("queued follow-up start after stop failed: {}", settled.message);
+                    }
                     return Err(error);
                 }
         };
@@ -1196,6 +1245,10 @@ impl AppState {
             self.note_stopped_orchestrator_session(orchestrator_instance_id, session_id);
         }
 
+        // Publish this stop commit before any newer failed-attempt commit.
+        if let Some(error) = queued_followup_start_error {
+            return Err(self.finish_queued_followup_start_error(error));
+        }
         if let Some(started) = queued_turn_result? {
             deliver_turn_dispatch(self, started.dispatch)?;
         }

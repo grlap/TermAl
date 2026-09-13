@@ -236,6 +236,7 @@ struct RemovedSessionDelegationReconciliation {
 #[derive(Default)]
 struct DetachedDelegationChildRuntime {
     codex_release: Option<CodexDelegationReleaseTicket>,
+    codex_compensation_session: Option<String>,
     runtime: Option<KillableRuntime>,
     transcript_deltas: Vec<DelegationChildTranscriptDelta>,
 }
@@ -268,7 +269,10 @@ fn validate_delegation_followup_child_locked(
 
 impl DetachedDelegationChildRuntime {
     fn did_mutate(&self) -> bool {
-        self.codex_release.is_some() || self.runtime.is_some() || !self.transcript_deltas.is_empty()
+        self.codex_release.is_some()
+            || self.codex_compensation_session.is_some()
+            || self.runtime.is_some()
+            || !self.transcript_deltas.is_empty()
     }
 }
 
@@ -660,6 +664,7 @@ impl AppState {
             review_result_recovery_probe_attempt: None,
             review_result_recovery_error: None,
             review_result_schema_version: None,
+            queued_followup_prompt_id: None,
             review_result_submission_attempt: if mode == DelegationMode::Reviewer {
                 1
             } else {
@@ -1122,6 +1127,16 @@ impl AppState {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index =
                 find_parent_delegation_index_locked(&inner, parent_session_id, delegation_id)?;
+            if delegation_is_terminal(inner.delegations[index].status) {
+                if let Some(reservation) = inner
+                    .delegation_followup_admissions
+                    .get_mut(delegation_id)
+                {
+                    // Cancel the not-yet-admitted follow-up, not its historical
+                    // result. Keep its owner until any restore is compensated.
+                    reservation.canceled = true;
+                }
+            }
             let lifecycle_delta = refresh_delegation_from_child_locked(&mut inner, index);
             let detached_child = detach_terminal_delegation_child_runtime_locked(&mut inner, index);
             let wait_refresh = refresh_delegation_waits_locked(&mut inner);
@@ -1184,6 +1199,10 @@ impl AppState {
 
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let index = find_parent_delegation_index_locked(&inner, parent_session_id, delegation_id)?;
+        // Capture ownership before cancellation clears the queued-attempt
+        // marker. Generic terminal reads must not undo manual Unarchive.
+        let canceling_unstarted_followup =
+            delegation_followup_awaits_first_turn(&inner, &inner.delegations[index]);
         let lifecycle_delta = if stop_conflicted {
             let refreshed_delta = refresh_delegation_from_child_locked(&mut inner, index);
             if delegation_is_terminal(inner.delegations[index].status) {
@@ -1194,7 +1213,10 @@ impl AppState {
         } else {
             mark_delegation_canceled_locked(&mut inner, index, cancel_reason)
         };
-        let detached_child = detach_terminal_delegation_child_runtime_locked(&mut inner, index);
+        let mut detached_child = detach_terminal_delegation_child_runtime_locked(&mut inner, index);
+        if canceling_unstarted_followup {
+            retain_followup_archive_compensation_locked(&mut inner, index, &mut detached_child);
+        }
         let wait_refresh = refresh_delegation_waits_locked(&mut inner);
         let revision = if lifecycle_delta.is_some()
             || detached_child.did_mutate()
@@ -1242,7 +1264,10 @@ impl AppState {
     }
 
     fn followup_delegation_request(
-        &self, parent_session_id: &str, delegation_id: &str, request: SendMessageRequest,
+        &self,
+        parent_session_id: &str,
+        delegation_id: &str,
+        request: SendMessageRequest,
     ) -> Result<DelegationStatusResponse, ApiError> {
         // Reject malformed payloads before recovery/re-arm can clear a review.
         parse_prompt_image_attachments(&request.attachments)?;
@@ -1255,7 +1280,11 @@ impl AppState {
             let index =
                 find_parent_delegation_index_locked(&inner, parent_session_id, delegation_id)?;
             let child = inner.delegations[index].child_session_id.clone();
-            validate_delegation_followup_child_locked(&inner, &child, !request.attachments.is_empty())?;
+            validate_delegation_followup_child_locked(
+                &inner,
+                &child,
+                !request.attachments.is_empty(),
+            )?;
             child
         };
         self.recover_durable_delegation_review_submission(&child_session_id)?;
@@ -1263,24 +1292,28 @@ impl AppState {
         // Complete post-commit release before re-arming; while waiting, status
         // readers must still see the previous terminal result, not an idle
         // Running child whose old transcript could be completed a second time.
+        // Keep the thread archived until reservation succeeds; dispatch owns
+        // restoration so a rejected Phase 1 cannot leak a restored child.
         let previous = self.get_delegation(parent_session_id, delegation_id)?;
-        if matches!(previous.delegation.status, DelegationStatus::Completed | DelegationStatus::Failed) {
-            self.prepare_codex_child_followup(&child_session_id)?;
+        if matches!(
+            previous.delegation.status,
+            DelegationStatus::Completed | DelegationStatus::Failed
+        ) {
+            self.prepare_codex_child_rearm(&child_session_id)?;
         }
 
-        // Phase 1 (atomic): refresh from the child, then gate on a RESUMABLE state — a
-        // completed or failed delegation whose child session still exists — and re-arm it
-        // terminal -> running in the SAME critical section. Doing the gate and the re-arm
-        // under one lock is load-bearing: it makes a second concurrent follow-up observe a
-        // running delegation and get rejected, instead of both passing the gate and queuing
-        // two turns. The turn-dispatch path also rejects a turn for a delegation child whose
-        // delegation is no longer running, so the re-arm must precede dispatch.
-        let (child_session_id, response) = {
+        // Phase 1 (atomic): reserve one resumable terminal attempt. Concurrent
+        // follow-ups cannot share this reservation; ordinary dispatch cannot
+        // bypass the terminal-state gate. Re-arm is deferred to prompt admission.
+        let mut admission = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index =
                 find_parent_delegation_index_locked(&inner, parent_session_id, delegation_id)?;
-            validate_delegation_followup_child_locked(&inner, &inner.delegations[index].child_session_id,
-                !request.attachments.is_empty())?;
+            validate_delegation_followup_child_locked(
+                &inner,
+                &inner.delegations[index].child_session_id,
+                !request.attachments.is_empty(),
+            )?;
             let refresh_delta = refresh_delegation_from_child_locked(&mut inner, index);
             let detached_child = detach_terminal_delegation_child_runtime_locked(&mut inner, index);
 
@@ -1289,11 +1322,21 @@ impl AppState {
             let child_present = inner.find_session_index(&child_session_id).is_some();
             // Only completed/failed delegations are resumable. Canceled is terminal but a
             // deliberate teardown — re-arming it would silently undo the cancellation.
-            let gate_error = if !delegation_is_terminal(status) {
+            let gate_error = if inner
+                .delegation_followup_admissions
+                .contains_key(delegation_id)
+            {
+                Some(ApiError::conflict(
+                    "delegation follow-up admission is already in progress",
+                ))
+            } else if !delegation_is_terminal(status) {
                 Some(ApiError::conflict(
                     "delegation is still running; wait for it to complete (termal_resume_after_delegations) before following up",
                 ))
-            } else if !matches!(status, DelegationStatus::Completed | DelegationStatus::Failed) {
+            } else if !matches!(
+                status,
+                DelegationStatus::Completed | DelegationStatus::Failed
+            ) {
                 Some(ApiError::conflict(
                     "delegation was canceled and cannot be resumed",
                 ))
@@ -1329,47 +1372,99 @@ impl AppState {
                 return Err(gate_error);
             }
 
-            // Re-arm terminal -> running (clears result/completed_at, parent card -> running).
-            // Supersedes any transient completion the gate refresh just derived, so we publish
-            // the re-arm delta rather than `refresh_delta`.
-            let rearm_delta = rearm_terminal_delegation_for_followup_locked(&mut inner, index);
+            // Reserve without clearing the previous attempt. Restoration can block
+            // or fail; polling must continue to see the exact terminal record.
+            let previous = inner.delegations[index].clone();
+            let last_prompt = delegation_last_user_prompt_id_locked(&inner, &child_session_id);
+            let restore_candidate = inner
+                .find_session_index(&child_session_id)
+                .is_some_and(|index| codex_followup_may_restore_record(&inner.sessions[index]));
+            inner.delegation_followup_admissions.insert(
+                delegation_id.to_owned(),
+                FollowupAdmissionReservation::new(last_prompt),
+            );
             let wait_refresh = refresh_delegation_waits_locked(&mut inner);
-            let revision = self.commit_locked(&mut inner).map_err(|err| {
-                ApiError::internal(format!("failed to persist delegation follow-up: {err:#}"))
-            })?;
-            let delegation = inner.delegations[index].clone();
+            let revision = if refresh_delta.is_some()
+                || detached_child.did_mutate()
+                || wait_refresh.did_mutate()
+            {
+                match self.commit_locked(&mut inner) {
+                    Ok(revision) => revision,
+                    Err(err) => {
+                        inner.delegation_followup_admissions.remove(delegation_id);
+                        return Err(ApiError::internal(format!(
+                            "failed to persist delegation follow-up: {err:#}"
+                        )));
+                    }
+                }
+            } else {
+                inner.revision
+            };
             drop(inner);
+            let admission = DelegationFollowupAdmission {
+                state: self.clone(),
+                previous,
+                restore_candidate,
+                released: false,
+            };
             self.publish_delegation_refresh_side_effects(
                 revision,
-                rearm_delta,
+                refresh_delta,
                 detached_child,
                 wait_refresh,
             );
-            (
-                child_session_id,
-                DelegationStatusResponse {
-                    revision,
-                    delegation,
-                    server_instance_id: self.server_instance_id.clone(),
-                },
-            )
+            admission
         };
 
-        // Phase 2: deliver the follow-up prompt. The child was detached on completion, so
-        // `dispatch_turn_and_snapshot` respawns + resumes it (Claude `--resume`, Codex
-        // `thread/resume`) and dispatches the turn. If dispatch fails, the child is unchanged
-        // (still idle holding its prior result packet), so a refresh re-derives the original
-        // terminal state rather than leaving the delegation stuck running.
-        if let Err(err) = dispatch_turn_and_snapshot(
-            self,
+        // Phase 2: restore off-lock, then start/queue and re-arm under one state
+        // lock. A rejected start never clears the previous terminal attempt.
+        let dispatch = match self.dispatch_turn_with_followup(
             &child_session_id,
             request,
+            Some(&admission.previous),
         ) {
-            let _ = self.refresh_delegation_for_child_session(&child_session_id);
-            return Err(err);
+            Ok(dispatch) => dispatch,
+            Err(mut error) => {
+                admission.fail_queued_start(&error.message);
+                match admission.rollback_before_prompt() {
+                    Ok(true) => error
+                        .message
+                        .push_str("; archive compensation scheduled; cleanup may still be pending"),
+                    Ok(false) => {}
+                    Err(cleanup_error) => error
+                        .message
+                        .push_str(&format!("; {}", cleanup_error.message)),
+                }
+                if let Err(wait_error) = admission.release() {
+                    error.message.push_str(&format!(
+                        "; failed to refresh follow-up waits: {wait_error:#}"
+                    ));
+                }
+                return Err(error);
+            }
+        };
+        let admitted_response = admission.admitted_response();
+        let delivery = match dispatch {
+            DispatchTurnResult::Dispatched(dispatch)
+            | DispatchTurnResult::DispatchedAfterQueue(dispatch) => {
+                deliver_turn_dispatch(self, dispatch)
+            }
+            DispatchTurnResult::Queued => Ok(()),
+        };
+        let released = admission.release();
+        if let Err(mut error) = delivery {
+            if let Err(wait_error) = released {
+                error.message.push_str(&format!(
+                    "; failed to refresh follow-up waits: {wait_error:#}"
+                ));
+            }
+            return Err(error);
         }
-
-        Ok(response)
+        released.map_err(|error| {
+            ApiError::internal(format!("failed to refresh follow-up waits: {error:#}"))
+        })?;
+        drop(admission);
+        admitted_response.ok_or_else(|| ApiError::internal("follow-up admission response missing"))
     }
 
     fn refresh_delegation_for_child_session(&self, child_session_id: &str) -> Result<()> {
@@ -1408,6 +1503,11 @@ impl AppState {
     ) {
         if let Some(release) = detached_child.codex_release.take() {
             release.start(self);
+        }
+        if let Some(session_id) = detached_child.codex_compensation_session.take() {
+            if let Err(error) = self.rearchive_undispatched_codex_child(&session_id) {
+                eprintln!("delegation archive compensation retained for retry: {}", error.message);
+            }
         }
         let lifecycle_reason = delegation_lifecycle_trace_reason(lifecycle_delta.as_ref());
         let canceled_child_cleanup = matches!(
@@ -2326,7 +2426,12 @@ fn delegation_wait_resume_prompt_locked(
     let terminal_records = records
         .iter()
         .copied()
-        .filter(|delegation| delegation_is_terminal(delegation.status))
+        .filter(|delegation| {
+            delegation_is_terminal(delegation.status)
+                && !inner
+                    .delegation_followup_admissions
+                    .contains_key(&delegation.id)
+        })
         .collect::<Vec<_>>();
     let satisfied = match wait.mode {
         DelegationWaitMode::Any => !terminal_records.is_empty(),
@@ -2648,6 +2753,10 @@ fn refresh_delegation_from_child_locked(
         return None;
     }
 
+    if delegation_followup_awaits_first_turn(inner, &delegation) {
+        return None;
+    }
+
     let child_outcome = delegation_child_outcome(inner, &delegation.child_session_id);
     if !matches!(&child_outcome, DelegationChildOutcome::Running) {
         if let Some(result) = delegation
@@ -2758,6 +2867,7 @@ fn refresh_delegation_from_child_locked(
                 {
                     let record = inner.delegations.get_mut(delegation_index)?;
                     record.status = DelegationStatus::Failed;
+                    record.queued_followup_prompt_id = None;
                     record.completed_at = Some(completed_at.clone());
                     record.result = Some(result.clone());
                     record.submitted_review_result = None;
@@ -2798,6 +2908,7 @@ fn refresh_delegation_from_child_locked(
             {
                 let record = inner.delegations.get_mut(delegation_index)?;
                 record.status = DelegationStatus::Completed;
+                record.queued_followup_prompt_id = None;
                 record.completed_at = Some(completed_at.clone());
                 record.result = Some(result.clone());
                 record.submitted_review_result = None;
@@ -2985,8 +3096,10 @@ fn detach_terminal_delegation_child_runtime_locked(
         return DetachedDelegationChildRuntime::default();
     }
     let child_session_id = delegation.child_session_id.clone();
-    let release_eligible = matches!(delegation.status, DelegationStatus::Completed | DelegationStatus::Failed)
-        && delegation.result.is_some();
+    let release_eligible = matches!(
+        delegation.status,
+        DelegationStatus::Completed | DelegationStatus::Failed
+    ) && delegation.result.is_some();
     let terminal = delegation.clone();
     let mut detached = detach_delegation_child_runtime_locked(inner, &child_session_id, None);
     if release_eligible {
@@ -2995,12 +3108,18 @@ fn detach_terminal_delegation_child_runtime_locked(
                 if let Some(index) = inner.find_session_index(&child_session_id) {
                     let child = &mut inner.sessions[index];
                     if let Some(thread_id) = child.external_session_id.clone() {
-                        let release = Arc::new(CodexDelegationRelease::for_child(shared.clone(), terminal.clone()));
+                        let release = Arc::new(CodexDelegationRelease::for_child(
+                            shared.clone(),
+                            terminal.clone(),
+                        ));
                         child.codex_delegation_release = Some(release.clone());
                         detached.codex_release = Some(CodexDelegationReleaseTicket {
-                            release, session_id: child_session_id, thread_id,
-                            runtime: shared.runtime.clone(), armed: true,
-                            terminal,
+                            release,
+                            session_id: child_session_id,
+                            thread_id,
+                            runtime: shared.runtime.clone(),
+                            armed: true,
+                            terminal: terminal.clone(),
                         });
                     }
                 }
@@ -3140,6 +3259,7 @@ fn mark_delegation_failed_locked(
     };
     let record = inner.delegations.get_mut(delegation_index)?;
     record.status = DelegationStatus::Failed;
+    record.queued_followup_prompt_id = None;
     record.completed_at = Some(completed_at.clone());
     record.result = Some(result.clone());
     record.submitted_review_result = None;
@@ -3191,6 +3311,7 @@ fn mark_delegation_canceled_locked(
     };
     let record = inner.delegations.get_mut(delegation_index)?;
     record.status = DelegationStatus::Canceled;
+    record.queued_followup_prompt_id = None;
     record.completed_at = Some(canceled_at.clone());
     record.result = Some(result);
     // Explicit user cancellation wins the lifecycle status, but an accepted
@@ -3358,6 +3479,7 @@ fn detach_delegation_child_runtime_locked(
     }
     DetachedDelegationChildRuntime {
         codex_release: None,
+        codex_compensation_session: None,
         runtime,
         transcript_deltas,
     }

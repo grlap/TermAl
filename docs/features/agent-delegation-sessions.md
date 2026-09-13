@@ -102,6 +102,57 @@ result or advances its submission attempt. Admission is rechecked under the
 re-arm lock; this does not change which accepted user continuations re-arm a
 delegation.
 
+## Follow-up admission and failure ownership
+
+The follow-up transaction is coordinated with the [backend architecture](../architecture.md#delegation-follow-up-admission).
+It first reserves the terminal delegation without clearing the previous result.
+A competing request receives HTTP 409 (`delegation follow-up admission is already in progress`).
+While this reservation exists, delegation waits treat the retained terminal record
+as pending. Public cancellation invalidates admission but keeps that previous result
+readable; releasing a rejected reservation makes it eligible for waits again.
+
+Codex restoration runs after reservation but **before** atomic prompt admission.
+The delegation is re-armed only when the new prompt starts or is queued under the
+same state lock as its commit. Rejection after restoration schedules compensating
+archive off-lock. A detached restored child retains a retryable cleanup owner even
+if the shared runtime is unavailable; a later follow-up retries that compensation
+through the lazy runtime startup path rather than requiring unrelated Codex activity.
+Only a restore performed by follow-up dispatch grants compensation ownership;
+cancellation or rejection before prompt start cannot undo a preceding manual Unarchive.
+For an unstarted canceled attempt, manual Archive can retry its same-attempt
+durability obligation and cleanup; cancellation still prohibits another follow-up.
+This ownership is process-local, like the terminal-release barrier described above.
+Transport/timeouts with an unknown external unarchive outcome remain a separate
+reconciliation limitation: a failed request is not proof that the server did nothing.
+
+Queued first prompts carry `queuedFollowupPromptId` in the persisted delegation
+and status response. Until that exact user-message boundary starts, the old
+transcript cannot finish the new attempt or spend its durable-review recovery probe.
+The id remains historical after promotion until terminal settlement; its presence
+alone does not mean that the prompt is still queued.
+The fence survives SQLite reload without an in-memory admission reservation.
+An explicit resume or later input drains a persisted user queue after restart.
+Startup failure settles the accepted attempt as Failed and releases its runtime;
+this also applies when startup happens after the original Queued response.
+
+Canceling that queued prompt transfers the attempt only to another User-sourced
+prompt, prioritized ahead of automatic wakes. If none remains, the delegation is
+Canceled (`Follow-up prompt canceled before it started`) and its pending queue is
+cleared by terminal cleanup. Mailbox/orchestrator wakes do not replace a canceled
+user follow-up. Fence transfer is carried by the full state snapshot; terminal
+cancellation also emits its lifecycle delta and refreshes parent waits.
+
+If the admission commit fails while the prompt is only queued and no admission
+was committed, its queued entry is removed and the exact previous delegation and
+parent card are restored. If runtime startup already established a user-message
+boundary, failure instead explicitly settles the undispatched attempt as Failed.
+Wait consumption has its own rollback: failed persistence restores both the wait
+and the parent's previous queue so a later refresh can deliver one resume prompt.
+
+Manual Codex Archive uses the common RPC error mapping: Transport/Timeout returns
+HTTP 500 with the transport detail; JSON-RPC rejection returns HTTP 400 with the
+request-method prefix.
+
 ## Problem
 
 TermAl already supports many ordinary agent sessions, but a lead agent cannot

@@ -6,6 +6,76 @@
 
 use super::*;
 
+pub(super) fn install_required_review_delegation(
+    state: &AppState,
+    parent_session_id: &str,
+) -> (String, String) {
+    let mut inner = state.inner.lock().expect("state mutex poisoned");
+    let delegation_id = inner.next_delegation_id();
+    let child = inner.create_session(
+        Agent::Codex,
+        Some("Structured reviewer".to_owned()),
+        "/tmp".to_owned(),
+        None,
+        None,
+    );
+    let child_session_id = child.session.id.clone();
+    let child_index = inner
+        .find_session_index(&child_session_id)
+        .expect("review child should exist");
+    inner.sessions[child_index].session.parent_delegation_id = Some(delegation_id.clone());
+    inner.delegations.push(DelegationRecord {
+        id: delegation_id.clone(),
+        parent_session_id: parent_session_id.to_owned(),
+        child_session_id: child_session_id.clone(),
+        mode: DelegationMode::Reviewer,
+        status: DelegationStatus::Running,
+        title: "Structured review".to_owned(),
+        prompt: "Use the repository's review workflow.".to_owned(),
+        cwd: "/tmp".to_owned(),
+        agent: Agent::Codex,
+        model: None,
+        write_policy: DelegationWritePolicy::ReadOnly,
+        created_at: stamp_now(),
+        started_at: Some(stamp_now()),
+        completed_at: None,
+        result: None,
+        submitted_review_result: None,
+        post_submission_transport_error: None,
+        review_result_recovery_probe_attempt: None,
+        review_result_recovery_error: None,
+        review_result_schema_version: None,
+        queued_followup_prompt_id: None,
+        review_result_submission_attempt: 1,
+    });
+    state.commit_locked(&mut inner).unwrap();
+    (delegation_id, child_session_id)
+}
+
+pub(super) fn structured_review_request() -> SubmitDelegationReviewResultRequest {
+    SubmitDelegationReviewResultRequest {
+        schema_version: DELEGATION_REVIEW_RESULT_SCHEMA_VERSION,
+        status: DelegationStatus::Completed,
+        summary: "One medium issue found.".to_owned(),
+        findings: vec![SubmitDelegationReviewFinding {
+            severity: "Medium".to_owned(),
+            file: Some("src/example.rs".to_owned()),
+            line: Some(42),
+            message: "The exact structured finding survives regardless of reviewer prose."
+                .to_owned(),
+        }],
+        commands_run: vec![SubmitDelegationReviewCommand {
+            command: "git status --short".to_owned(),
+            status: DelegationReviewCommandStatus::Success,
+        }],
+        files_inspected: vec!["src/example.rs".to_owned()],
+        notes: vec!["Review lenses ran inline.".to_owned()],
+        suggested_tracker_updates: vec![
+            "Proposal only: bug, priority 2 — preserve the exact finding.".to_owned(),
+        ],
+    }
+}
+
 pub(super) fn finish_delegation_child_with_assistant_text(
     state: &AppState,
     child_session_id: &str,

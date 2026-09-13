@@ -1215,55 +1215,74 @@ fn codex_archive_notification_reconciles_detached_thread() {
 
 #[test]
 fn codex_archive_error_without_positive_evidence_remains_an_error() {
-    for inventory in [
-        json!({"data":[],"nextCursor":null}),
-        json!({"invalid":true}),
+    for (rpc_error, expected_status) in [
+        (
+            CodexResponseError::Transport("fixture archive failed".to_owned()),
+            StatusCode::INTERNAL_SERVER_ERROR,
+        ),
+        (
+            CodexResponseError::Timeout("fixture archive failed".to_owned()),
+            StatusCode::INTERNAL_SERVER_ERROR,
+        ),
+        (
+            CodexResponseError::JsonRpc("fixture archive failed".to_owned()),
+            StatusCode::BAD_REQUEST,
+        ),
     ] {
-        let state = test_app_state();
-        let session_id = test_session_id(&state, Agent::Codex);
-        state
-            .set_external_session_id(&session_id, "unconfirmed-thread".to_owned())
-            .unwrap();
-        let (runtime, input_rx, _process) = test_shared_codex_runtime("unconfirmed-archive");
-        *state.shared_codex_runtime.lock().unwrap() = Some(runtime);
-        let worker = std::thread::spawn(move || {
-            for expected in ["thread/archive", "thread/list"] {
-                let command = recv_within_guard(&input_rx, "archive/probe").unwrap();
-                let CodexRuntimeCommand::JsonRpcRequest {
-                    method,
-                    response_tx,
-                    ..
-                } = command
-                else {
-                    panic!("unexpected command")
-                };
-                assert_eq!(method, expected);
-                response_tx
-                    .send(if method == "thread/archive" {
-                        Err(CodexResponseError::Transport(
-                            "fixture archive failed".to_owned(),
-                        ))
-                    } else {
-                        Ok(inventory.clone())
-                    })
-                    .unwrap();
-            }
-        });
-        let error = state
-            .archive_codex_thread(&session_id)
-            .err()
-            .expect("unknown is not archived");
-        assert_eq!(error.status, StatusCode::BAD_REQUEST);
-        assert!(error.message.contains("fixture archive failed"));
-        assert_eq!(
+        for inventory in [
+            json!({"data":[],"nextCursor":null}),
+            json!({"invalid":true}),
+        ] {
+            let state = test_app_state();
+            let session_id = test_session_id(&state, Agent::Codex);
             state
-                .get_session(&session_id)
-                .unwrap()
-                .session
-                .codex_thread_state,
-            Some(CodexThreadState::Active)
-        );
-        worker.join().unwrap();
+                .set_external_session_id(&session_id, "unconfirmed-thread".to_owned())
+                .unwrap();
+            let (runtime, input_rx, _process) = test_shared_codex_runtime("unconfirmed-archive");
+            *state.shared_codex_runtime.lock().unwrap() = Some(runtime);
+            let rpc_error = rpc_error.clone();
+            let worker = std::thread::spawn(move || {
+                let methods = if matches!(rpc_error, CodexResponseError::JsonRpc(_)) {
+                    vec!["thread/archive", "thread/list", "thread/list"]
+                } else {
+                    vec!["thread/archive", "thread/list"]
+                };
+                for expected in methods {
+                    let command = recv_within_guard(&input_rx, "archive/probe").unwrap();
+                    let CodexRuntimeCommand::JsonRpcRequest {
+                        method,
+                        response_tx,
+                        ..
+                    } = command
+                    else {
+                        panic!("unexpected command")
+                    };
+                    assert_eq!(method, expected);
+                    response_tx
+                        .send(if method == "thread/archive" {
+                            Err(rpc_error.clone())
+                        } else {
+                            Ok(inventory.clone())
+                        })
+                        .unwrap();
+                }
+            });
+            let error = state
+                .archive_codex_thread(&session_id)
+                .err()
+                .expect("unknown is not archived");
+            assert_eq!(error.status, expected_status);
+            assert!(error.message.contains("fixture archive failed"));
+            assert_eq!(
+                state
+                    .get_session(&session_id)
+                    .unwrap()
+                    .session
+                    .codex_thread_state,
+                Some(CodexThreadState::Active)
+            );
+            worker.join().unwrap();
+        }
     }
 }
 

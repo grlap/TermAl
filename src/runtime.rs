@@ -686,6 +686,16 @@ enum CodexResponseError {
 }
 
 impl CodexResponseError {
+    /// Maps typed RPC failures consistently at the HTTP boundary.
+    fn into_api_error(self, method: &str) -> ApiError {
+        match self {
+            Self::Transport(detail) | Self::Timeout(detail) => ApiError::internal(detail),
+            Self::JsonRpc(detail) => {
+                ApiError::bad_request(format!("Codex request `{method}` failed: {detail}"))
+            }
+        }
+    }
+
     /// Returns the transport detail when the request failed before Codex sent a JSON-RPC result.
     fn as_transport(&self) -> Option<&str> {
         match self {

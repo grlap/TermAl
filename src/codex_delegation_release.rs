@@ -4,6 +4,39 @@
 // state; only its post-commit ticket may enqueue the external side effect.
 
 const CODEX_CHILD_RESULT_FENCE_TIMEOUT: Duration = Duration::from_secs(5);
+
+// Only a failed/canceled first follow-up owns this compensation. A generic
+// terminal status read must not undo an explicit manual Unarchive action.
+fn retain_followup_archive_compensation_locked(
+    inner: &mut StateInner,
+    delegation_index: usize,
+    detached: &mut DetachedDelegationChildRuntime,
+) {
+    let terminal = inner.delegations[delegation_index].clone();
+    if detached.runtime.is_none() && detached.codex_release.is_none() {
+        if let Some(index) = inner.find_session_index(&terminal.child_session_id) {
+            let child = &mut inner.sessions[index];
+            let restored = child
+                .codex_delegation_release
+                .as_ref()
+                .is_some_and(|release| release.needs_followup_compensation());
+            if restored && child.external_session_id.is_some() {
+                let release = Arc::new(CodexDelegationRelease {
+                    undurable_terminal: Mutex::new(Some(terminal.clone())),
+                    terminal_release: true,
+                    compensation_pending: std::sync::atomic::AtomicBool::new(true),
+                    ..Default::default()
+                });
+                release.finish(CodexReleaseOutcome::NotSent(
+                    "detached restored child awaits archive compensation".to_owned(),
+                ));
+                child.codex_delegation_release = Some(release);
+                detached.codex_compensation_session = Some(terminal.child_session_id.clone());
+            }
+        }
+    }
+}
+
 const CODEX_CHILD_ARCHIVE_RPC_TIMEOUT: Duration = Duration::from_secs(30);
 const CODEX_CHILD_ARCHIVE_REPLY_TIMEOUT: Duration = Duration::from_secs(31);
 const CODEX_THREAD_RECONCILIATION_TIMEOUT: Duration = Duration::from_secs(10);
@@ -32,6 +65,12 @@ enum CodexReleaseOutcome {
     Ambiguous(String),
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CodexRestoreOwner {
+    Manual,
+    Followup,
+}
+
 #[derive(Default)]
 struct CodexDelegationRelease {
     outcome: Mutex<Option<CodexReleaseOutcome>>,
@@ -43,12 +82,30 @@ struct CodexDelegationRelease {
     undurable_terminal: Mutex<Option<DelegationRecord>>,
     // Only automatic terminal release authorizes automatic unarchive.
     terminal_release: bool,
+    // A detached restored thread still needs archive even when no transport
+    // exists. Keep a retry owner instead of treating Restored as cleanup.
+    compensation_pending: std::sync::atomic::AtomicBool,
+    // Restored alone also describes manual Unarchive. Only a restore performed
+    // by the follow-up may be undone when that attempt never starts.
+    followup_restore_owned: std::sync::atomic::AtomicBool,
     // Retain process identity, not its writer sender (which would keep the
     // runtime channel alive). A replaced slot alone does not prove exit.
     archive_origin: Mutex<Option<(String, Arc<SharedChild>)>>,
 }
 
 impl CodexDelegationRelease {
+    fn needs_followup_compensation(&self) -> bool {
+        let outcome = self.outcome.lock().expect("Codex release mutex poisoned");
+        (self
+            .followup_restore_owned
+            .load(std::sync::atomic::Ordering::Acquire)
+            && matches!(*outcome, Some(CodexReleaseOutcome::Restored)))
+            || (self
+                .compensation_pending
+                .load(std::sync::atomic::Ordering::Acquire)
+                && matches!(*outcome, Some(CodexReleaseOutcome::NotSent(_))))
+    }
+
     fn record_archive_origin(&self, runtime: &SharedCodexRuntime) {
         *self
             .archive_origin
@@ -189,10 +246,11 @@ impl CodexDelegationRelease {
                         current.child_session_id == terminal.child_session_id
                             && current.review_result_submission_attempt
                                 == terminal.review_result_submission_attempt
-                            && matches!(
+                            && (matches!(
                                 current.status,
                                 DelegationStatus::Completed | DelegationStatus::Failed
-                            )
+                            ) || (terminal.status == DelegationStatus::Canceled
+                                && current.status == DelegationStatus::Canceled))
                     })
                     .ok_or_else(|| {
                         ApiError::conflict(
@@ -273,6 +331,7 @@ impl CodexDelegationReleaseTicket {
                     timeout: CODEX_CHILD_ARCHIVE_RPC_TIMEOUT, response_tx,
                 }).map_err(|error| ApiError::internal(format!("failed to queue child thread archive: {error}")))?;
                 sent = true; // Enqueued: loss of a reply is now ambiguous.
+                release.compensation_pending.store(false, std::sync::atomic::Ordering::Release);
                 let reply = response_rx.recv_timeout(CODEX_CHILD_ARCHIVE_REPLY_TIMEOUT)
                     .map_err(|error| match error {
                         mpsc::RecvTimeoutError::Timeout => CodexResponseError::Timeout(error.to_string()),
@@ -318,6 +377,84 @@ impl CodexDelegationReleaseTicket {
 }
 
 impl AppState {
+    // A restore can race cancellation/recovery after reservation. No prompt was
+    // admitted, so return the detached terminal child to automatic archive
+    // ownership even if Stop has made its local status Stopping. This is not a
+    // manual thread action and must not bypass a live runtime or queued prompt.
+    fn rearchive_undispatched_codex_child(&self, session_id: &str) -> Result<(), ApiError> {
+        let runtime = self
+            .shared_codex_runtime
+            .lock()
+            .expect("shared Codex runtime mutex poisoned")
+            .clone();
+        let ticket = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let delegation_index = inner
+                .find_delegation_index_by_child_session_id(session_id)
+                .ok_or_else(|| {
+                    ApiError::conflict("delegation disappeared before archive compensation")
+                })?;
+            let terminal = inner.delegations[delegation_index].clone();
+            let index = inner.find_session_index(session_id).ok_or_else(|| {
+                ApiError::conflict("child disappeared before archive compensation")
+            })?;
+            let child = &inner.sessions[index];
+            if !delegation_is_terminal(terminal.status)
+                || !matches!(child.runtime, SessionRuntime::None)
+                || !child.queued_prompts.is_empty()
+            {
+                return Err(ApiError::conflict(
+                    "child is no longer detached and terminal for archive compensation",
+                ));
+            }
+            let Some(old_release) = child.codex_delegation_release.clone() else {
+                return Ok(());
+            };
+            if !old_release.needs_followup_compensation() {
+                return Ok(()); // Another cleanup owner already superseded this restore.
+            }
+            let thread_id = child
+                .external_session_id
+                .clone()
+                .ok_or_else(|| ApiError::conflict("restored child has no thread id"))?;
+            let release = Arc::new(CodexDelegationRelease {
+                undurable_terminal: Mutex::new(Some(terminal.clone())),
+                terminal_release: true,
+                compensation_pending: std::sync::atomic::AtomicBool::new(true),
+                ..Default::default()
+            });
+            inner.sessions[index].codex_delegation_release = Some(release.clone());
+            let Some(runtime) = runtime else {
+                release.finish(CodexReleaseOutcome::NotSent(
+                    "archive compensation pending: Codex runtime unavailable".to_owned(),
+                ));
+                self.commit_locked(&mut inner).map_err(|error| {
+                    ApiError::internal(format!("failed reserving archive compensation: {error:#}"))
+                })?;
+                return Err(ApiError::conflict(
+                    "Codex runtime unavailable; archive compensation retained for retry",
+                ));
+            };
+            let ticket = CodexDelegationReleaseTicket {
+                release: release.clone(),
+                session_id: session_id.to_owned(),
+                thread_id,
+                runtime,
+                terminal,
+                armed: true,
+            };
+            self.commit_locked(&mut inner).map_err(|error| {
+                ApiError::internal(format!("failed reserving archive compensation: {error:#}"))
+            })?;
+            ticket
+        };
+        ticket.start(self);
+        // The release slot retains cleanup, failure diagnostics and retry
+        // ownership. Do not hold the rejected HTTP request through another
+        // archive deadline; the next follow-up waits on this same barrier.
+        Ok(())
+    }
+
     fn wait_for_codex_child_release(
         &self,
         session_id: &str,
@@ -332,6 +469,50 @@ impl AppState {
     }
 
     fn prepare_codex_child_followup(&self, session_id: &str) -> Result<(), ApiError> {
+        self.prepare_codex_child_followup_with_restore(session_id, true)
+    }
+
+    // Terminal results must be durable before atomic re-arm admission, but
+    // that preflight must not undo archival if admission is later rejected.
+    // Admitted dispatch calls prepare_codex_child_followup to restore the thread.
+    fn prepare_codex_child_rearm(&self, session_id: &str) -> Result<(), ApiError> {
+        self.prepare_codex_child_followup_with_restore(session_id, false)
+    }
+
+    fn prepare_codex_child_followup_with_restore(
+        &self,
+        session_id: &str,
+        restore: bool,
+    ) -> Result<(), ApiError> {
+        let compensation_pending = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            inner
+                .find_session_index(session_id)
+                .and_then(|index| inner.sessions[index].codex_delegation_release.as_ref())
+                .is_some_and(|release| {
+                    release
+                        .compensation_pending
+                        .load(std::sync::atomic::Ordering::Acquire)
+                        && matches!(
+                            *release
+                                .outcome
+                                .lock()
+                                .expect("Codex release mutex poisoned"),
+                            Some(CodexReleaseOutcome::NotSent(_))
+                        )
+                })
+        };
+        if compensation_pending {
+            // Background compensation retains ownership without booting a new
+            // server. An explicit retry must bootstrap it itself, otherwise
+            // an empty lazy slot would keep rejecting this request forever.
+            self.shared_codex_runtime().map_err(|error| {
+                ApiError::internal(format!(
+                    "failed to start Codex runtime for archive compensation: {error:#}",
+                ))
+            })?;
+            self.rearchive_undispatched_codex_child(session_id)?;
+        }
         // Ordinary/remote sessions use normal admission, not a child-release
         // wait on an in-flight manual Archive operation.
         let eligible = {
@@ -448,7 +629,9 @@ impl AppState {
                     "the current Codex thread was archived manually; unarchive it before sending another prompt",
                 ));
             }
-            self.unarchive_codex_thread(session_id)?;
+            if restore {
+                self.unarchive_codex_thread_with_owner(session_id, CodexRestoreOwner::Followup)?;
+            }
         }
         Ok(())
     }

@@ -1419,6 +1419,13 @@ struct StateInner {
     orchestrator_instances: Vec<OrchestratorInstance>,
     /// Durable parent-child delegation links for ordinary sessions.
     delegations: Vec<DelegationRecord>,
+    /// In-process admission owners. Terminal records remain durable and readable
+    /// until a reserved follow-up reaches prompt admission under the state lock.
+    /// Values retain the last Author::You id before admission (None for an
+    /// empty transcript). Cancellation blocks admission but retains cleanup
+    /// ownership until release. A new user boundary or queue entry transfers
+    /// ownership from pre-prompt archive compensation to the new attempt.
+    delegation_followup_admissions: HashMap<String, FollowupAdmissionReservation>,
     /// Durable delegation rows isolated during startup validation. See
     /// `quarantined_persisted_session_ids` for the preservation contract.
     quarantined_persisted_delegation_ids: BTreeSet<String>,
@@ -1479,6 +1486,7 @@ impl StateInner {
             quarantined_persisted_session_ids: BTreeSet::new(),
             orchestrator_instances: Vec::new(),
             delegations: Vec::new(),
+            delegation_followup_admissions: HashMap::new(),
             quarantined_persisted_delegation_ids: BTreeSet::new(),
             delegation_waits: Vec::new(),
             delegation_mutation_stamps: BTreeMap::new(),

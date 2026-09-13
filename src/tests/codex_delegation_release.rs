@@ -36,6 +36,354 @@ fn codex_rpc_timeout_and_transport_are_host_errors_but_rejection_is_bad_request(
 }
 
 #[test]
+fn rejected_followup_admission_does_not_unarchive_terminal_child() {
+    for rejection in ["recovery", "stopping", "canceled"] {
+        let (state, child, delegation, release, input_rx) =
+            terminal_child_with_pending_durability();
+        release.retry_durability(&state).unwrap();
+        release.finish(CodexReleaseOutcome::Ambiguous(
+            "lost archive reply".to_owned(),
+        ));
+        let previous = {
+            let inner = state.inner.lock().unwrap();
+            inner.delegations[inner.find_delegation_index(&delegation).unwrap()].clone()
+        };
+        let input_tx = state
+            .shared_codex_runtime
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .input_tx
+            .clone();
+        let worker_state = state.clone();
+        let worker_child = child.clone();
+        let worker_delegation = delegation.clone();
+        let worker = std::thread::spawn(move || {
+            let mut restores = 0;
+            loop {
+                match phase_sync::receive(&input_rx, "follow-up recovery RPC or completion") {
+                    CodexRuntimeCommand::JsonRpcRequest {
+                        method,
+                        params,
+                        response_tx,
+                        ..
+                    } => {
+                        match method.as_str() {
+                            "thread/list" => {
+                                assert_eq!(params["archived"], true);
+                                // This probe is reached after initial validation but before
+                                // atomic re-arm admission. Race a new rejection into that gap.
+                                let mut inner = worker_state.inner.lock().unwrap();
+                                let index = inner.find_session_index(&worker_child).unwrap();
+                                match rejection {
+                                    "recovery" => {
+                                        inner.sessions[index].engram_boot_recovery_pending = true
+                                    }
+                                    "stopping" => {
+                                        inner.sessions[index].session.status =
+                                            SessionStatus::Stopping
+                                    }
+                                    "canceled" => {
+                                        let index = inner
+                                            .find_delegation_index(&worker_delegation)
+                                            .unwrap();
+                                        inner.delegations[index].status =
+                                            DelegationStatus::Canceled;
+                                    }
+                                    _ => unreachable!(),
+                                }
+                                drop(inner);
+                                response_tx.send(Ok(json!({"data":[{"id":"durability-thread"}],"nextCursor":null}))).unwrap();
+                            }
+                            "thread/unarchive" => {
+                                restores += 1;
+                                response_tx.send(Ok(json!({}))).unwrap();
+                            }
+                            _ => panic!("unexpected RPC {method}"),
+                        }
+                    }
+                    CodexRuntimeCommand::JsonRpcNotification { method }
+                        if method == "fixture/done" =>
+                    {
+                        break;
+                    }
+                    _ => panic!("rejected follow-up must not dispatch a prompt"),
+                }
+            }
+            restores
+        });
+        let result = state.followup_delegation(
+            &previous.parent_session_id,
+            &delegation,
+            "Continue".to_owned(),
+        );
+        input_tx
+            .send(CodexRuntimeCommand::JsonRpcNotification {
+                method: "fixture/done".to_owned(),
+            })
+            .unwrap();
+        let restores = worker.join().unwrap();
+        assert_eq!(
+            result.err().expect("follow-up must be rejected").status,
+            StatusCode::CONFLICT,
+            "{rejection}"
+        );
+        assert_eq!(
+            restores, 0,
+            "rejected {rejection} admission must leave the child archived"
+        );
+        let inner = state.inner.lock().unwrap();
+        let current = &inner.delegations[inner.find_delegation_index(&delegation).unwrap()];
+        assert_eq!(current.result, previous.result);
+        assert_eq!(current.completed_at, previous.completed_at);
+        assert_eq!(
+            current.review_result_submission_attempt,
+            previous.review_result_submission_attempt
+        );
+        let child = &inner.sessions[inner.find_session_index(&child).unwrap()];
+        assert!(record_has_archived_codex_thread(child));
+        assert_eq!(release.wait().unwrap(), CodexReleaseOutcome::Archived);
+    }
+}
+
+#[test]
+fn rejected_followup_after_restore_rearchives_without_admitting_a_prompt() {
+    for rejection in ["recovery", "stopping", "canceled", "compensation"] {
+        let (state, child, delegation, release, input_rx) =
+            terminal_child_with_pending_durability();
+        release.retry_durability(&state).unwrap();
+        release.finish(CodexReleaseOutcome::Archived);
+        let previous = {
+            let mut inner = state.inner.lock().unwrap();
+            let index = inner.find_session_index(&child).unwrap();
+            set_record_codex_thread_state(&mut inner.sessions[index], CodexThreadState::Archived);
+            inner.delegations[inner.find_delegation_index(&delegation).unwrap()].clone()
+        };
+        let worker_state = state.clone();
+        let worker_child = child.clone();
+        let worker_delegation = delegation.clone();
+        let (returned_tx, returned_rx) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let CodexRuntimeCommand::JsonRpcRequest {
+                method,
+                response_tx,
+                ..
+            } = phase_sync::receive(&input_rx, "restore before late admission rejection")
+            else {
+                panic!("expected unarchive")
+            };
+            assert_eq!(method, "thread/unarchive");
+            if rejection == "canceled" {
+                let parent = {
+                    let inner = worker_state.inner.lock().unwrap();
+                    inner.delegations[inner.find_delegation_index(&worker_delegation).unwrap()]
+                        .parent_session_id
+                        .clone()
+                };
+                worker_state
+                    .cancel_delegation(&parent, &worker_delegation)
+                    .unwrap();
+            } else {
+                let mut inner = worker_state.inner.lock().unwrap();
+                let index = inner.find_session_index(&worker_child).unwrap();
+                match rejection {
+                    "recovery" => inner.sessions[index].engram_boot_recovery_pending = true,
+                    "stopping" | "compensation" => {
+                        inner.sessions[index].session.status = SessionStatus::Stopping
+                    }
+                    _ => {
+                        let index = inner.find_delegation_index(&worker_delegation).unwrap();
+                        inner.delegations[index].status = DelegationStatus::Canceled;
+                    }
+                }
+            }
+            response_tx.send(Ok(json!({}))).unwrap();
+            let CodexRuntimeCommand::JsonRpcRequest {
+                method,
+                response_tx,
+                ..
+            } = phase_sync::receive(&input_rx, "compensating archive, never a prompt")
+            else {
+                panic!("expected compensating archive")
+            };
+            assert_eq!(method, "thread/archive");
+            phase_sync::receive(
+                &returned_rx,
+                "follow-up rejection returned before archive reply",
+            );
+            if rejection == "compensation" {
+                response_tx
+                    .send(Err(CodexResponseError::Transport(
+                        "archive transport failed".to_owned(),
+                    )))
+                    .unwrap();
+                // An ambiguous transport failure probes archived inventory only;
+                // active inventory cannot prove the old RPC will not arrive later.
+                let CodexRuntimeCommand::JsonRpcRequest {
+                    method,
+                    response_tx,
+                    ..
+                } = phase_sync::receive(&input_rx, "unavailable compensation inventory")
+                else {
+                    panic!("expected inventory RPC")
+                };
+                assert_eq!(method, "thread/list");
+                response_tx
+                    .send(Err(CodexResponseError::Transport(
+                        "inventory unavailable".to_owned(),
+                    )))
+                    .unwrap();
+            } else {
+                response_tx.send(Ok(json!({}))).unwrap();
+            }
+        });
+        let error = state
+            .followup_delegation(
+                &previous.parent_session_id,
+                &delegation,
+                "Continue".to_owned(),
+            )
+            .err()
+            .expect("late admission must reject");
+        assert_eq!(error.status, StatusCode::CONFLICT);
+        if rejection == "compensation" {
+            assert!(
+                error.message.starts_with("session is stopping;"),
+                "{}",
+                error.message
+            );
+            assert!(
+                error.message.contains("archive compensation scheduled"),
+                "{}",
+                error.message
+            );
+        }
+        returned_tx.send(()).unwrap();
+        worker.join().unwrap();
+        state.wait_for_codex_child_release(&child).unwrap();
+        let inner = state.inner.lock().unwrap();
+        let current = &inner.delegations[inner.find_delegation_index(&delegation).unwrap()];
+        assert_eq!(current.result, previous.result);
+        assert_eq!(
+            current.review_result_submission_attempt,
+            previous.review_result_submission_attempt
+        );
+        assert_eq!(current.completed_at, previous.completed_at);
+        let child = &inner.sessions[inner.find_session_index(&child).unwrap()];
+        if rejection == "compensation" {
+            assert!(
+                matches!(
+                    child
+                        .codex_delegation_release
+                        .as_ref()
+                        .unwrap()
+                        .wait()
+                        .unwrap(),
+                    CodexReleaseOutcome::Ambiguous(_)
+                ),
+                "failed compensation must retain a retryable owner"
+            );
+        } else {
+            assert!(
+                record_has_archived_codex_thread(child),
+                "late {rejection} must not leak a restored thread"
+            );
+        }
+        assert!(child.queued_prompts.is_empty());
+        assert!(!inner
+            .delegation_followup_admissions
+            .contains_key(&delegation));
+    }
+}
+
+#[test]
+fn successful_followup_restore_with_failed_local_commit_retains_archive_compensation() {
+    let (state, child, delegation, release, input_rx) = terminal_child_with_pending_durability();
+    release.retry_durability(&state).unwrap();
+    // Admission can observe an archive that was just started by terminal
+    // detach, before the archived flag is published. Retain that ownership.
+    *release.outcome.lock().unwrap() = None;
+    let restore_candidate = {
+        let inner = state.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(&child).unwrap()];
+        assert!(!record_has_archived_codex_thread(record));
+        assert!(codex_followup_may_restore_record(record));
+        codex_followup_may_restore_record(record)
+    };
+    release.finish(CodexReleaseOutcome::Archived);
+    let previous = {
+        let mut inner = state.inner.lock().unwrap();
+        let index = inner.find_session_index(&child).unwrap();
+        set_record_codex_thread_state(&mut inner.sessions[index], CodexThreadState::Archived);
+        let watermark = delegation_last_user_prompt_id_locked(&inner, &child);
+        inner.delegation_followup_admissions.insert(
+            delegation.clone(),
+            FollowupAdmissionReservation::new(watermark),
+        );
+        inner.delegations[inner.find_delegation_index(&delegation).unwrap()].clone()
+    };
+    let admission = DelegationFollowupAdmission {
+        state: state.clone(),
+        previous: previous.clone(),
+        restore_candidate,
+        released: false,
+    };
+    let failed_path = test_temp_dir().join(format!(
+        "followup-restore-commit-failure-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&failed_path).unwrap();
+    let mut failing_state = state.clone();
+    failing_state.persistence_path = Arc::new(failed_path.clone());
+    let worker = std::thread::spawn(move || {
+        for expected in ["thread/unarchive", "thread/archive"] {
+            let CodexRuntimeCommand::JsonRpcRequest {
+                method,
+                response_tx,
+                ..
+            } = phase_sync::receive(&input_rx, "restore/compensation RPC")
+            else {
+                panic!("expected RPC")
+            };
+            assert_eq!(method, expected);
+            response_tx.send(Ok(json!({}))).unwrap();
+        }
+    });
+    let error = failing_state
+        .unarchive_codex_thread_with_owner(&child, CodexRestoreOwner::Followup)
+        .err()
+        .expect("local commit must fail");
+    assert!(
+        error
+            .message
+            .contains("failed to persist restored Codex thread note"),
+        "{}",
+        error.message
+    );
+    assert_eq!(
+        release.wait().unwrap(),
+        CodexReleaseOutcome::Restored,
+        "successful external restore must survive failed local persistence"
+    );
+    // The valid parent store represents persistence becoming writable again.
+    admission.rollback_before_prompt().unwrap();
+    worker.join().unwrap();
+    state.wait_for_codex_child_release(&child).unwrap();
+    let inner = state.inner.lock().unwrap();
+    assert_eq!(
+        inner.delegations[inner.find_delegation_index(&delegation).unwrap()],
+        previous
+    );
+    assert!(record_has_archived_codex_thread(
+        &inner.sessions[inner.find_session_index(&child).unwrap()]
+    ));
+    drop(inner);
+    drop(admission);
+    remove_test_directory(failed_path);
+}
+
+#[test]
 fn archive_write_failure_preserves_transport_and_recovers_after_runtime_exit() {
     // Exercise both follow-up admission and the manual recovery action. The
     // fake transport calls the same writer handler production dispatch uses.

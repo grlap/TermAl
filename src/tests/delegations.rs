@@ -52,6 +52,7 @@ fn delegation_prompt_tells_child_to_fail_fast_on_blocking_tooling() {
         review_result_recovery_probe_attempt: None,
         review_result_recovery_error: None,
         review_result_schema_version: None,
+        queued_followup_prompt_id: None,
         review_result_submission_attempt: 0,
     };
     let prompt = build_delegation_prompt(&record);
@@ -2544,6 +2545,7 @@ fn terminal_delegation_child_dispatch_is_blocked_before_runtime_start() {
             review_result_recovery_probe_attempt: None,
             review_result_recovery_error: None,
             review_result_schema_version: None,
+            queued_followup_prompt_id: None,
             review_result_submission_attempt: 0,
         });
         state.commit_locked(&mut inner).unwrap();

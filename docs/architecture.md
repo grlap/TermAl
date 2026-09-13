@@ -4,6 +4,16 @@
 
 ---
 
+## Delegation follow-up admission
+
+Follow-ups reserve a terminal result before restoring a Codex thread and re-arm
+at the prompt's start/queue commit. `delegation_followup_admission.rs` owns this
+transaction, wait-consumption rollback and typed startup-failure settlement;
+`turn_dispatch.rs` owns queue promotion, and `codex_delegation_release.rs` owns
+archive execution and retry barriers. No archive wait holds the shared state lock.
+See [the delegation feature contract](features/agent-delegation-sessions.md#follow-up-admission-and-failure-ownership)
+for cancellation, persistence failures, queued attempt identity and restart limits.
+
 ## No-legacy audit — 2026-09-05
 
 This audit covers Rust, frontend TypeScript, scripts, tests and documentation.

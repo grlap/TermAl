@@ -313,7 +313,7 @@ impl AppState {
             eprintln!("codex archive> thread={} error={error}", context.thread_id);
             if !self.probe_codex_archive_state(&context.thread_id, true) {
                 confirmed_not_archived = rejected && self.probe_codex_archive_state(&context.thread_id, false);
-                return Err(ApiError::bad_request(format!("Codex request `thread/archive` failed: {error}")));
+                return Err(error.into_api_error("thread/archive"));
             }
         }
 
@@ -422,6 +422,14 @@ impl AppState {
         &self,
         session_id: &str,
     ) -> std::result::Result<StateResponse, ApiError> {
+        self.unarchive_codex_thread_with_owner(session_id, CodexRestoreOwner::Manual)
+    }
+
+    fn unarchive_codex_thread_with_owner(
+        &self,
+        session_id: &str,
+        owner: CodexRestoreOwner,
+    ) -> std::result::Result<StateResponse, ApiError> {
         if self.remote_session_target(session_id)?.is_some() {
             return self.proxy_remote_unarchive_codex_thread(session_id);
         }
@@ -447,13 +455,16 @@ impl AppState {
             .find_session_index(session_id)
             .ok_or_else(|| ApiError::not_found("session not found"))?;
         let note_message_id = inner.next_message_id();
-        set_record_codex_thread_state(inner
-            .session_mut_by_index(index)
-            .expect("session index should be valid"), CodexThreadState::Active);
+        set_record_codex_thread_state(
+            inner
+                .session_mut_by_index(index)
+                .expect("session index should be valid"),
+            CodexThreadState::Active,
+        );
         push_session_markdown_note_on_record(
             inner
-            .session_mut_by_index(index)
-            .expect("session index should be valid"),
+                .session_mut_by_index(index)
+                .expect("session index should be valid"),
             note_message_id,
             "Restored Codex thread",
             format!(
@@ -461,14 +472,20 @@ impl AppState {
                 context.thread_id
             ),
         );
+        // The external restore already succeeded. Keep compensation ownership
+        // even if the following local persistence operation fails.
+        if let Some(release) = &inner.sessions[index].codex_delegation_release {
+            release.followup_restore_owned.store(
+                owner == CodexRestoreOwner::Followup,
+                std::sync::atomic::Ordering::Release,
+            );
+            release.confirm_completed_outcome(CodexReleaseOutcome::Restored);
+        }
         self.commit_locked(&mut inner).map_err(|err| {
             ApiError::internal(format!(
                 "failed to persist restored Codex thread note: {err:#}"
             ))
         })?;
-        if let Some(release) = &inner.sessions[index].codex_delegation_release {
-            release.confirm_completed_outcome(CodexReleaseOutcome::Restored);
-        }
         Ok(self.snapshot_from_inner(&inner))
     }
 

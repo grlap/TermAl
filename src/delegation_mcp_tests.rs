@@ -103,6 +103,7 @@ fn serialized_delegation_child_state(
         review_result_recovery_probe_attempt: None,
         review_result_recovery_error: None,
         review_result_schema_version: None,
+        queued_followup_prompt_id: None,
         review_result_submission_attempt: u32::from(mode == DelegationMode::Reviewer),
     };
     let delegation = serde_json::to_value(delegation_state_summary_from_record(&record))

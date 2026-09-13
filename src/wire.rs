@@ -1325,6 +1325,14 @@ struct DelegationRecord {
     /// arrived through the strict mailbox contract.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     review_result_schema_version: Option<u32>,
+    /// First accepted follow-up prompt when admission queued rather than started
+    /// it. While this exact id is queued and has no user-message boundary, old
+    /// child output belongs to the previous attempt. Persisted with the queue;
+    /// subsequent turns and their leftover queues must not inherit this fence.
+    /// Cleared on terminal settlement; retained during promotion so a failed
+    /// queue-promotion commit can restore the queue without losing its fence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    queued_followup_prompt_id: Option<String>,
     /// Backend-owned turn number for idempotent structured review submission.
     /// Required reviewer delegations start at one; other delegations keep zero.
     /// The value advances whenever a completed review is rearmed.

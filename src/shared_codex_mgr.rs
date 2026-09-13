@@ -87,12 +87,7 @@ impl AppState {
         timeout: Duration,
     ) -> Result<Value, ApiError> {
         self.perform_codex_json_rpc_request_typed(method, params, timeout)
-            .map_err(|error| match error {
-                CodexResponseError::Transport(detail) | CodexResponseError::Timeout(detail) => {
-                    ApiError::internal(detail)
-                }
-                error => ApiError::bad_request(format!("Codex request `{method}` failed: {error}")),
-            })
+            .map_err(|error| error.into_api_error(method))
     }
 
     // Archive recovery must distinguish a server rejection from a timeout;

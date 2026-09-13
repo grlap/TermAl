@@ -193,10 +193,11 @@ impl AppState {
                 return Ok(());
             }
             if delegation.status == DelegationStatus::Running
-                && matches!(
-                    delegation_child_outcome(&inner, child_session_id),
-                    DelegationChildOutcome::Running
-                )
+                && (delegation_followup_awaits_first_turn(&inner, delegation)
+                    || matches!(
+                        delegation_child_outcome(&inner, child_session_id),
+                        DelegationChildOutcome::Running
+                    ))
             {
                 return Ok(());
             }
@@ -729,6 +730,7 @@ fn terminalize_submitted_review_result_locked(
         let record = inner.delegations.get_mut(delegation_index)?;
         record.status = lifecycle_status;
         record.completed_at = Some(terminal_at.clone());
+        record.queued_followup_prompt_id = None;
         record.result = Some(result.clone());
         record.submitted_review_result = None;
         record.post_submission_transport_error = post_submission_transport_error;

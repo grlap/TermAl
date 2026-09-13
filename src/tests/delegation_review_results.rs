@@ -6,6 +6,7 @@
 
 use super::delegation_support::{
     finish_delegation_child_with_assistant_text, install_delegation_codex_runtime,
+    install_required_review_delegation, structured_review_request,
     test_app_state_with_drained_delegation_codex_runtime,
 };
 use super::mailboxes::mailbox_test_state;
@@ -13,69 +14,6 @@ use super::*;
 
 fn structured_review_test_app_state() -> AppState {
     test_app_state_with_drained_delegation_codex_runtime("structured-review-test-runtime")
-}
-
-#[test]
-fn rejected_followup_preserves_completed_structured_review() {
-    for rejection in ["attachment", "empty", "boot"] {
-        let (state, _, parent) = mailbox_test_state();
-        let (delegation, child) = install_required_review_delegation(&state, &parent);
-        state
-            .submit_delegation_review_result(&child, structured_review_request())
-            .unwrap();
-        finish_delegation_child_with_assistant_text(&state, &child, "Finished review.");
-        state.refresh_delegation_for_child_session(&child).unwrap();
-        let before = {
-            let inner = state.inner.lock().unwrap();
-            inner.delegations[inner.find_delegation_index(&delegation).unwrap()].clone()
-        };
-        assert_eq!(
-            before.review_result_schema_version,
-            Some(DELEGATION_REVIEW_RESULT_SCHEMA_VERSION)
-        );
-        assert_eq!(
-            before.result.as_ref().unwrap().summary,
-            "One medium issue found."
-        );
-        if rejection == "boot" {
-            let mut inner = state.inner.lock().unwrap();
-            let index = inner.find_session_index(&child).unwrap();
-            inner.sessions[index].engram_boot_recovery_pending = true;
-        }
-        let result = state.followup_delegation_request(
-            &parent,
-            &delegation,
-            SendMessageRequest {
-                text: if rejection == "empty" {
-                    " "
-                } else {
-                    "Continue"
-                }
-                .to_owned(),
-                expanded_text: None,
-                source_session_id: None,
-                source_mailbox: None,
-                attachments: if rejection == "attachment" {
-                    vec![SendMessageAttachmentRequest {
-                        media_type: "application/pdf".to_owned(),
-                        data: "eA==".to_owned(),
-                        file_name: None,
-                    }]
-                } else {
-                    vec![]
-                },
-            },
-        );
-        assert!(result.is_err(), "fixture must reject {rejection}");
-        let after = {
-            let inner = state.inner.lock().unwrap();
-            inner.delegations[inner.find_delegation_index(&delegation).unwrap()].clone()
-        };
-        assert_eq!(
-            after, before,
-            "rejected {rejection} must preserve the result, schema and submission attempt"
-        );
-    }
 }
 
 #[test]
@@ -176,6 +114,7 @@ fn reviewer_delegation_prompt_injects_termal_owned_result_protocol() {
         review_result_recovery_probe_attempt: None,
         review_result_recovery_error: None,
         review_result_schema_version: None,
+        queued_followup_prompt_id: None,
         review_result_submission_attempt: 1,
     };
     let prompt = build_delegation_prompt(&record);
@@ -221,6 +160,7 @@ fn non_reviewer_delegation_prompt_does_not_inject_review_result_protocol() {
         review_result_recovery_probe_attempt: None,
         review_result_recovery_error: None,
         review_result_schema_version: None,
+        queued_followup_prompt_id: None,
         review_result_submission_attempt: 0,
     };
 
@@ -305,16 +245,14 @@ fn codex_reviewer_auto_accepts_only_authorized_review_result_control_plane_reque
     });
     let (input_tx, input_rx) = mpsc::channel();
 
-    assert!(
-        try_auto_respond_delegation_control_plane_request(
-            "mcpServer/elicitation/request",
-            &request,
-            &state,
-            &created.delegation.child_session_id,
-            &input_tx,
-        )
-        .expect("authorized control-plane request should be handled")
-    );
+    assert!(try_auto_respond_delegation_control_plane_request(
+        "mcpServer/elicitation/request",
+        &request,
+        &state,
+        &created.delegation.child_session_id,
+        &input_tx,
+    )
+    .expect("authorized control-plane request should be handled"));
     let response = recv_within_guard(
         &input_rx,
         "Codex should receive an automatic control-plane response",
@@ -333,87 +271,16 @@ fn codex_reviewer_auto_accepts_only_authorized_review_result_control_plane_reque
 
     let mut unrelated = request;
     unrelated["params"]["_meta"]["tool_description"] = json!("Different tool");
-    assert!(
-        !try_auto_respond_delegation_control_plane_request(
-            "mcpServer/elicitation/request",
-            &unrelated,
-            &state,
-            &created.delegation.child_session_id,
-            &input_tx,
-        )
-        .expect("unrelated MCP request should remain interactive")
-    );
+    assert!(!try_auto_respond_delegation_control_plane_request(
+        "mcpServer/elicitation/request",
+        &unrelated,
+        &state,
+        &created.delegation.child_session_id,
+        &input_tx,
+    )
+    .expect("unrelated MCP request should remain interactive"));
 
     let _ = fs::remove_file(state.persistence_path.as_path());
-}
-
-fn install_required_review_delegation(
-    state: &AppState,
-    parent_session_id: &str,
-) -> (String, String) {
-    let mut inner = state.inner.lock().expect("state mutex poisoned");
-    let delegation_id = inner.next_delegation_id();
-    let child = inner.create_session(
-        Agent::Codex,
-        Some("Structured reviewer".to_owned()),
-        "/tmp".to_owned(),
-        None,
-        None,
-    );
-    let child_session_id = child.session.id.clone();
-    let child_index = inner
-        .find_session_index(&child_session_id)
-        .expect("review child should exist");
-    inner.sessions[child_index].session.parent_delegation_id = Some(delegation_id.clone());
-    inner.delegations.push(DelegationRecord {
-        id: delegation_id.clone(),
-        parent_session_id: parent_session_id.to_owned(),
-        child_session_id: child_session_id.clone(),
-        mode: DelegationMode::Reviewer,
-        status: DelegationStatus::Running,
-        title: "Structured review".to_owned(),
-        prompt: "Use the repository's review workflow.".to_owned(),
-        cwd: "/tmp".to_owned(),
-        agent: Agent::Codex,
-        model: None,
-        write_policy: DelegationWritePolicy::ReadOnly,
-        created_at: stamp_now(),
-        started_at: Some(stamp_now()),
-        completed_at: None,
-        result: None,
-        submitted_review_result: None,
-        post_submission_transport_error: None,
-        review_result_recovery_probe_attempt: None,
-        review_result_recovery_error: None,
-        review_result_schema_version: None,
-        review_result_submission_attempt: 1,
-    });
-    state.commit_locked(&mut inner).unwrap();
-    (delegation_id, child_session_id)
-}
-
-fn structured_review_request() -> SubmitDelegationReviewResultRequest {
-    SubmitDelegationReviewResultRequest {
-        schema_version: DELEGATION_REVIEW_RESULT_SCHEMA_VERSION,
-        status: DelegationStatus::Completed,
-        summary: "One medium issue found.".to_owned(),
-        findings: vec![SubmitDelegationReviewFinding {
-            severity: "Medium".to_owned(),
-            file: Some("src/example.rs".to_owned()),
-            line: Some(42),
-            message: "The exact structured finding survives regardless of reviewer prose."
-                .to_owned(),
-        }],
-        commands_run: vec![SubmitDelegationReviewCommand {
-            command: "git status --short".to_owned(),
-            status: DelegationReviewCommandStatus::Success,
-        }],
-        files_inspected: vec!["src/example.rs".to_owned()],
-        notes: vec!["Review lenses ran inline.".to_owned()],
-        suggested_tracker_updates: vec![
-            "Proposal only: bug, priority 2 — preserve the exact finding.".to_owned(),
-        ],
-    }
 }
 
 #[test]
@@ -492,12 +359,10 @@ fn structured_review_result_uses_durable_mailbox_and_bypasses_prose_parser() {
     assert_eq!(result.summary, "One medium issue found.");
     assert_eq!(result.findings.len(), 1);
     assert_eq!(result.findings[0].severity, "Medium");
-    assert!(
-        result
-            .notes
-            .iter()
-            .any(|note| note == "Inspected src/example.rs")
-    );
+    assert!(result
+        .notes
+        .iter()
+        .any(|note| note == "Inspected src/example.rs"));
     let inner = state.inner.lock().expect("state mutex poisoned");
     let record = inner
         .delegations
@@ -770,13 +635,11 @@ fn invalid_durable_review_envelope_is_quarantined_without_bricking_lifecycle_api
         .get_delegation(&parent_session_id, &delegation_id)
         .expect("status must survive a corrupt durable envelope");
     assert_eq!(status.delegation.status, DelegationStatus::Failed);
-    assert!(
-        status
-            .delegation
-            .review_result_recovery_error
-            .as_deref()
-            .is_some_and(|reason| reason.contains("JSON is invalid"))
-    );
+    assert!(status
+        .delegation
+        .review_result_recovery_error
+        .as_deref()
+        .is_some_and(|reason| reason.contains("JSON is invalid")));
     assert_eq!(
         status.delegation.review_result_recovery_probe_attempt,
         Some(1)
@@ -787,12 +650,10 @@ fn invalid_durable_review_envelope_is_quarantined_without_bricking_lifecycle_api
         .expect("result must remain readable after quarantine")
         .result;
     assert_eq!(result.status, DelegationStatus::Failed);
-    assert!(
-        result
-            .notes
-            .iter()
-            .any(|note| note.contains("quarantined during recovery"))
-    );
+    assert!(result
+        .notes
+        .iter()
+        .any(|note| note.contains("quarantined during recovery")));
     state
         .get_delegation_result_output(
             &parent_session_id,
@@ -872,13 +733,11 @@ fn mismatched_durable_review_envelope_is_quarantined_without_an_api_error() {
         .get_delegation(&parent_session_id, &delegation_id)
         .expect("metadata mismatch must not escape as an API error");
     assert_eq!(status.delegation.status, DelegationStatus::Failed);
-    assert!(
-        status
-            .delegation
-            .review_result_recovery_error
-            .as_deref()
-            .is_some_and(|reason| reason.contains("metadata does not match"))
-    );
+    assert!(status
+        .delegation
+        .review_result_recovery_error
+        .as_deref()
+        .is_some_and(|reason| reason.contains("metadata does not match")));
 }
 
 #[test]
@@ -929,11 +788,9 @@ fn durable_review_recovery_propagates_primary_state_persistence_failures() {
         Err(error) => error,
     };
     assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR);
-    assert!(
-        error
-            .message
-            .contains("failed to persist structured delegation review result")
-    );
+    assert!(error
+        .message
+        .contains("failed to persist structured delegation review result"));
     let inner = state.inner.lock().expect("state mutex poisoned");
     let record = inner
         .delegations
@@ -1011,20 +868,16 @@ async fn structured_review_envelopes_stay_out_of_routine_mailbox_surfaces() {
     .await
     .expect("routine mailbox read should succeed");
     assert!(messages.messages.is_empty());
-    assert!(
-        state
-            .mailbox_store
-            .unread_wakeup_for_mailbox(&parent_session_id, &receipt.mailbox_id)
-            .expect("wakeup lookup should succeed")
-            .is_none()
-    );
-    assert!(
-        state
-            .mailbox_store
-            .unread_wakeups_for_session(&parent_session_id)
-            .expect("session wakeup lookup should succeed")
-            .is_empty()
-    );
+    assert!(state
+        .mailbox_store
+        .unread_wakeup_for_mailbox(&parent_session_id, &receipt.mailbox_id)
+        .expect("wakeup lookup should succeed")
+        .is_none());
+    assert!(state
+        .mailbox_store
+        .unread_wakeups_for_session(&parent_session_id)
+        .expect("session wakeup lookup should succeed")
+        .is_empty());
 
     let ordinary = state
         .mailbox_store
@@ -1161,11 +1014,9 @@ fn required_review_result_fails_closed_when_submission_is_missing() {
     assert_eq!(result.status, DelegationStatus::Failed);
     assert_eq!(result.findings.len(), 1);
     assert_eq!(result.findings[0].severity, "Unavailable");
-    assert!(
-        result.findings[0]
-            .message
-            .contains("unavailable, not empty")
-    );
+    assert!(result.findings[0]
+        .message
+        .contains("unavailable, not empty"));
 }
 
 #[test]
@@ -1260,12 +1111,10 @@ fn completed_structured_review_survives_later_child_runtime_failure() {
         .find(|record| record.id == delegation_id)
         .expect("delegation should remain available");
     assert_eq!(record.status, DelegationStatus::Completed);
-    assert!(
-        record
-            .post_submission_transport_error
-            .as_deref()
-            .is_some_and(|detail| detail.contains("runtime exited after"))
-    );
+    assert!(record
+        .post_submission_transport_error
+        .as_deref()
+        .is_some_and(|detail| detail.contains("runtime exited after")));
     assert!(inner.delegation_waits.is_empty());
     let parent = inner
         .sessions
@@ -1302,12 +1151,10 @@ fn completed_structured_review_survives_idle_child_without_final_prose() {
         .iter()
         .find(|record| record.id == delegation_id)
         .expect("delegation should remain available");
-    assert!(
-        record
-            .post_submission_transport_error
-            .as_deref()
-            .is_some_and(|detail| detail.contains("idle without a final assistant packet"))
-    );
+    assert!(record
+        .post_submission_transport_error
+        .as_deref()
+        .is_some_and(|detail| detail.contains("idle without a final assistant packet")));
 }
 
 #[test]
@@ -1338,12 +1185,10 @@ fn completed_structured_review_survives_child_session_removal() {
         .find(|record| record.id == delegation_id)
         .expect("delegation should remain available");
     assert_eq!(record.status, DelegationStatus::Completed);
-    assert!(
-        record
-            .post_submission_transport_error
-            .as_deref()
-            .is_some_and(|detail| detail.contains("session was removed"))
-    );
+    assert!(record
+        .post_submission_transport_error
+        .as_deref()
+        .is_some_and(|detail| detail.contains("session was removed")));
 }
 
 #[test]
@@ -1426,12 +1271,10 @@ fn failed_structured_review_survives_later_child_runtime_failure() {
         .find(|record| record.id == delegation_id)
         .expect("delegation should remain available");
     assert_eq!(record.status, DelegationStatus::Failed);
-    assert!(
-        record
-            .post_submission_transport_error
-            .as_deref()
-            .is_some_and(|detail| detail.contains("runtime also failed"))
-    );
+    assert!(record
+        .post_submission_transport_error
+        .as_deref()
+        .is_some_and(|detail| detail.contains("runtime also failed")));
 }
 
 #[test]

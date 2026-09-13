@@ -34,6 +34,7 @@ mod coordination_board_routes;
 mod coordination_instructions;
 mod cursor;
 mod delegation_child_links;
+mod delegation_followup_admission;
 mod delegation_lifecycle;
 mod delegation_metadata;
 mod delegation_outcome_recovery;
