@@ -90,9 +90,7 @@ const MAX_CLAUDE_UNATTENDED_QUESTIONS_PER_TURN: usize = 3;
 /// Reserves one unattended self-resolution slot for this turn. This is
 /// called after transport-specific request-id dedupe, so replaying the same
 /// control request does not consume another slot.
-fn reserve_claude_unattended_question_self_resolution(
-    state: &mut ClaudeTurnState,
-) -> Result<()> {
+fn reserve_claude_unattended_question_self_resolution(state: &mut ClaudeTurnState) -> Result<()> {
     if state.unattended_questions_self_resolved_this_turn
         >= MAX_CLAUDE_UNATTENDED_QUESTIONS_PER_TURN
     {
@@ -128,9 +126,24 @@ fn claude_question_is_unattended(
     }
 }
 
+impl AppState {
+    /// Resolve the exact tool capability before consulting current authority.
+    /// Result-submission authority must never grant another control-plane tool.
+    fn claude_control_plane_request_allowed(&self, session_id: &str, message: &Value) -> bool {
+        parse_claude_tool_permission_request(message)
+            .and_then(|request| {
+                delegation_control_plane_capability_for_claude_tool_name(&request.tool_name)
+            })
+            .is_some_and(|capability| {
+                self.delegation_control_plane_capability_allowed(session_id, capability)
+            })
+    }
+}
+
 /// Classifies Claude control request. `delegation_child` is the session's
 /// delegation-child identity read together with `approval_mode` under one
-/// state lock (see `claude_control_request_context`).
+/// state lock (see `claude_control_request_context`). Control-plane access is
+/// for this exact message, resolved by `claude_control_plane_request_allowed`.
 fn classify_claude_control_request(
     message: &Value,
     state: &mut ClaudeTurnState,
@@ -360,27 +373,27 @@ fn parse_claude_ask_user_question_list(raw_questions: &[Value]) -> Result<Vec<Us
                         .iter()
                         .enumerate()
                         .map(|(option_index, raw_option)| {
-                        let raw_option = raw_option.as_object().ok_or_else(|| {
-                            anyhow!(
-                                "Claude question {} option {} is not an object",
-                                index + 1,
-                                option_index + 1
-                            )
-                        })?;
-                        let raw_label = raw_option
-                            .get("label")
-                            .and_then(Value::as_str)
-                            .filter(|label| !label.trim().is_empty())
-                            .ok_or_else(|| {
+                            let raw_option = raw_option.as_object().ok_or_else(|| {
                                 anyhow!(
-                                    "Claude question {} option {} has no label",
+                                    "Claude question {} option {} is not an object",
                                     index + 1,
                                     option_index + 1
                                 )
                             })?;
-                        // Claude matches returned answers against the exact
-                        // option labels, so preserve them byte-for-byte.
-                        let label = raw_label;
+                            let raw_label = raw_option
+                                .get("label")
+                                .and_then(Value::as_str)
+                                .filter(|label| !label.trim().is_empty())
+                                .ok_or_else(|| {
+                                    anyhow!(
+                                        "Claude question {} option {} has no label",
+                                        index + 1,
+                                        option_index + 1
+                                    )
+                                })?;
+                            // Claude matches returned answers against the exact
+                            // option labels, so preserve them byte-for-byte.
+                            let label = raw_label;
                             if !option_labels.insert(label.to_owned()) {
                                 return Err(anyhow!(
                                     "Claude question {} contains duplicate option label `{label}`",
@@ -388,13 +401,13 @@ fn parse_claude_ask_user_question_list(raw_questions: &[Value]) -> Result<Vec<Us
                                 ));
                             }
                             Ok(UserInputQuestionOption {
-                            description: raw_option
-                                .get("description")
-                                .and_then(Value::as_str)
-                                .map(str::trim)
-                                .unwrap_or_default()
-                                .to_owned(),
-                            label: label.to_owned(),
+                                description: raw_option
+                                    .get("description")
+                                    .and_then(Value::as_str)
+                                    .map(str::trim)
+                                    .unwrap_or_default()
+                                    .to_owned(),
+                                label: label.to_owned(),
                             })
                         })
                         .collect::<Result<Vec<_>>>()?,
@@ -643,23 +656,15 @@ fn claude_bash_literal_for_loop_is_read_only(command: &str, cwd: &str) -> bool {
         return false;
     }
     let mut body = vec![first_body];
-    body.extend(
-        clauses[2..clauses.len() - 1]
-            .iter()
-            .map(String::as_str),
-    );
-    if body.len() > MAX_BODY_COMMANDS
-        || body.iter().any(|command| command.trim().is_empty())
-    {
+    body.extend(clauses[2..clauses.len() - 1].iter().map(String::as_str));
+    if body.len() > MAX_BODY_COMMANDS || body.iter().any(|command| command.trim().is_empty()) {
         return false;
     }
 
     values.iter().all(|value| {
         let expanded = body
             .iter()
-            .map(|body_command| {
-                claude_expand_bash_loop_variable(body_command, variable, value)
-            })
+            .map(|body_command| claude_expand_bash_loop_variable(body_command, variable, value))
             .collect::<Option<Vec<_>>>();
         expanded.is_some_and(|commands| {
             // Validate the body as one shell sequence, not isolated commands.
@@ -746,11 +751,7 @@ fn claude_bash_loop_literal_is_safe(value: &str) -> bool {
         })
 }
 
-fn claude_expand_bash_loop_variable(
-    command: &str,
-    variable: &str,
-    value: &str,
-) -> Option<String> {
+fn claude_expand_bash_loop_variable(command: &str, variable: &str, value: &str) -> Option<String> {
     let mut expanded = String::with_capacity(command.len());
     let mut quote: Option<char> = None;
     let mut characters = command.chars().peekable();
@@ -804,9 +805,10 @@ fn claude_expand_bash_loop_variable(
                     expanded.push_str(value);
                 } else {
                     let mut name = String::new();
-                    while characters.peek().is_some_and(|next| {
-                        *next == '_' || next.is_ascii_alphanumeric()
-                    }) {
+                    while characters
+                        .peek()
+                        .is_some_and(|next| *next == '_' || next.is_ascii_alphanumeric())
+                    {
                         name.push(characters.next().expect("peeked loop variable character"));
                     }
                     if name != variable {
@@ -933,8 +935,20 @@ fn claude_bash_tokens_are_read_only(tokens: &[&str]) -> bool {
     // are here so reviewers can fingerprint a diff (`git diff … | sha256sum`) to prove
     // content identity — a common, entirely read-only review technique.
     let read_only_commands = [
-        "cat", "cksum", "echo", "grep", "head", "ls", "md5sum", "nl", "pwd", "sha1sum",
-        "sha256sum", "sha512sum", "tail", "wc",
+        "cat",
+        "cksum",
+        "echo",
+        "grep",
+        "head",
+        "ls",
+        "md5sum",
+        "nl",
+        "pwd",
+        "sha1sum",
+        "sha256sum",
+        "sha512sum",
+        "tail",
+        "wc",
     ];
     if read_only_commands.contains(&command) {
         return true;
@@ -1056,8 +1070,15 @@ fn claude_find_tokens_are_read_only(tokens: &[&str]) -> bool {
     !tokens.iter().any(|token| {
         matches!(
             *token,
-            "-delete" | "-exec" | "-execdir" | "-fls" | "-fprint" | "-fprint0" | "-fprintf"
-                | "-ok" | "-okdir"
+            "-delete"
+                | "-exec"
+                | "-execdir"
+                | "-fls"
+                | "-fprint"
+                | "-fprint0"
+                | "-fprintf"
+                | "-ok"
+                | "-okdir"
         )
     })
 }
@@ -1324,9 +1345,13 @@ fn claude_git_tokens_are_read_only(tokens: &[&str]) -> bool {
             matches!(
                 *token,
                 "-a" | "--all"
-                    | "-r" | "--remotes"
-                    | "-v" | "-vv" | "--verbose"
-                    | "-l" | "--list"
+                    | "-r"
+                    | "--remotes"
+                    | "-v"
+                    | "-vv"
+                    | "--verbose"
+                    | "-l"
+                    | "--list"
                     | "--show-current"
                     | "--no-color"
             ) || token.starts_with("--sort=")
@@ -1547,7 +1572,10 @@ fn claude_system_event_is_effect_free(message: &Value) -> bool {
 /// Returns whether a Claude `user` envelope is the CLI's echo of the submitted
 /// prompt rather than a tool-result boundary.
 fn claude_user_event_is_prompt_echo(message: &Value) -> bool {
-    let Some(content) = message.pointer("/message/content").and_then(Value::as_array) else {
+    let Some(content) = message
+        .pointer("/message/content")
+        .and_then(Value::as_array)
+    else {
         return false;
     };
     !content.is_empty()

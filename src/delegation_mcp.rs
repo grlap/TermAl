@@ -2,11 +2,8 @@ const TERMAL_DELEGATION_MCP_SERVER_NAME: &str = "termal-delegation";
 const TERMAL_SESSION_ID_ENV: &str = "TERMAL_SESSION_ID";
 const TERMAL_BASE_URL_ENV: &str = "TERMAL_BASE_URL";
 const TERMAL_CLI_ENV: &str = "TERMAL_CLI";
-const TERMAL_AGENT_PROCESS_ENV_NAMES: [&str; 3] = [
-    TERMAL_SESSION_ID_ENV,
-    TERMAL_BASE_URL_ENV,
-    TERMAL_CLI_ENV,
-];
+const TERMAL_AGENT_PROCESS_ENV_NAMES: [&str; 3] =
+    [TERMAL_SESSION_ID_ENV, TERMAL_BASE_URL_ENV, TERMAL_CLI_ENV];
 const TERMAL_SUBMIT_REVIEW_RESULT_TOOL_NAME: &str = "termal_submit_review_result";
 const TERMAL_SUBMIT_REVIEW_RESULT_QUALIFIED_TOOL_NAME: &str =
     "mcp__termal-delegation__termal_submit_review_result";
@@ -66,6 +63,7 @@ const TERMAL_DELEGATION_SAFE_REPLAY_MIN_REPLAY_BUDGET: Duration = Duration::from
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum DelegationControlPlaneCapability {
     SubmitReviewResult,
+    ReviewFreeze,
 }
 
 fn delegation_control_plane_capability_for_claude_tool_name(
@@ -78,8 +76,15 @@ fn delegation_control_plane_capability_for_claude_tool_name(
     // elicitation classifier below. ACP reviewer mode is rejected at creation
     // because ACP v1 permission requests do not carry a portable,
     // authenticated MCP tool identity.
-    (tool_name == TERMAL_SUBMIT_REVIEW_RESULT_QUALIFIED_TOOL_NAME)
-        .then_some(DelegationControlPlaneCapability::SubmitReviewResult)
+    match tool_name {
+        TERMAL_SUBMIT_REVIEW_RESULT_QUALIFIED_TOOL_NAME => {
+            Some(DelegationControlPlaneCapability::SubmitReviewResult)
+        }
+        TERMAL_REVIEW_FREEZE_QUALIFIED_TOOL_NAME => {
+            Some(DelegationControlPlaneCapability::ReviewFreeze)
+        }
+        _ => None,
+    }
 }
 
 fn delegation_control_plane_capability_for_codex_elicitation(
@@ -88,10 +93,23 @@ fn delegation_control_plane_capability_for_codex_elicitation(
     if request.server_name != TERMAL_DELEGATION_MCP_SERVER_NAME {
         return None;
     }
-    let McpElicitationRequestMode::Form { meta: Some(meta), .. } = &request.mode else {
+    let McpElicitationRequestMode::Form {
+        meta: Some(meta), ..
+    } = &request.mode
+    else {
         return None;
     };
     let metadata = meta.as_object()?;
+    if metadata.get("codex_approval_kind").and_then(Value::as_str) == Some("mcp_tool_call")
+        && metadata.get("tool_description").and_then(Value::as_str)
+            == Some(TERMAL_REVIEW_FREEZE_TOOL_DESCRIPTION)
+        && metadata.get("tool_params").is_some_and(|value| {
+            serde_json::from_value::<ReviewFreezeRequest>(value.clone())
+                .is_ok_and(|request| request.validate().is_ok())
+        })
+    {
+        return Some(DelegationControlPlaneCapability::ReviewFreeze);
+    }
     (metadata.get("codex_approval_kind").and_then(Value::as_str) == Some("mcp_tool_call")
         && metadata.get("tool_description").and_then(Value::as_str)
             == Some(TERMAL_SUBMIT_REVIEW_RESULT_TOOL_DESCRIPTION)
@@ -224,10 +242,7 @@ fn termal_agent_process_env_with_command(
     ])
 }
 
-fn termal_agent_process_env(
-    session_id: &str,
-    base_url: &str,
-) -> Result<BTreeMap<String, String>> {
+fn termal_agent_process_env(session_id: &str, base_url: &str) -> Result<BTreeMap<String, String>> {
     let command = termal_delegation_mcp_current_exe()?;
     Ok(termal_agent_process_env_with_command(
         &command, session_id, base_url,
@@ -258,9 +273,7 @@ fn termal_delegation_mcp_acp_servers_with_command(
 ) -> Value {
     let server =
         termal_delegation_mcp_stdio_config_with_command(command, parent_session_id, base_url);
-    json!([termal_delegation_mcp_acp_server_from_stdio_config(
-        &server
-    )])
+    json!([termal_delegation_mcp_acp_server_from_stdio_config(&server)])
 }
 
 fn termal_delegation_mcp_acp_server_from_stdio_config(
@@ -283,10 +296,7 @@ fn mcp_acp_server_from_stdio_config<'a>(
         env: server
             .env
             .iter()
-            .map(|(name, value)| TermalDelegationAcpEnvVariable {
-                name,
-                value,
-            })
+            .map(|(name, value)| TermalDelegationAcpEnvVariable { name, value })
             .collect(),
     }
 }
@@ -298,8 +308,7 @@ fn termal_delegation_mcp_codex_config_with_command(
 ) -> Value {
     let server =
         termal_delegation_mcp_stdio_config_with_command(command, parent_session_id, base_url);
-    let termal_env =
-        termal_agent_process_env_with_command(command, parent_session_id, base_url);
+    let termal_env = termal_agent_process_env_with_command(command, parent_session_id, base_url);
     json!({
         "mcp_servers": {
             TERMAL_DELEGATION_MCP_SERVER_NAME: server,
@@ -476,7 +485,9 @@ impl AppState {
         let engram = self.engram_mcp_stdio_config_for_runtime(parent_session_id, runtime_token);
         let engram_enabled = engram.is_some();
         let config = self.termal_delegation_mcp_codex_config_with_engram(
-            parent_session_id, engram, Some(codex_home),
+            parent_session_id,
+            engram,
+            Some(codex_home),
         )?;
         Ok((config, engram_enabled))
     }
@@ -510,11 +521,8 @@ impl AppState {
         // table. Begin with the user table copied into the shared CODEX_HOME,
         // then overlay TermAl-owned names so a seeded collision cannot redirect
         // delegation or Engram traffic to an arbitrary process.
-        let termal_config = termal_delegation_mcp_codex_config_with_command(
-            &command,
-            parent_session_id,
-            &base_url,
-        );
+        let termal_config =
+            termal_delegation_mcp_codex_config_with_command(&command, parent_session_id, &base_url);
         let termal_servers = termal_config
             .get("mcp_servers")
             .and_then(Value::as_object)
@@ -525,10 +533,7 @@ impl AppState {
             config
                 .as_object_mut()
                 .context("TermAl Codex config should be an object")?
-                .insert(
-                    "shell_environment_policy".to_owned(),
-                    Value::Object(policy),
-                );
+                .insert("shell_environment_policy".to_owned(), Value::Object(policy));
         }
         merge_owned_agent_shell_env_into_codex_config(
             &mut config,
@@ -595,11 +600,10 @@ fn merge_owned_agent_shell_env_into_codex_config(
                 if !source_env.contains_key(*name) {
                     continue;
                 }
-                if !include_only.iter().any(|entry| {
-                    entry
-                        .as_str()
-                        .is_some_and(|entry| entry == *name)
-                }) {
+                if !include_only
+                    .iter()
+                    .any(|entry| entry.as_str().is_some_and(|entry| entry == *name))
+                {
                     include_only.push(Value::String((*name).to_owned()));
                 }
             }
@@ -651,6 +655,7 @@ struct TermalDelegationMcpBridge {
     /// Derived from the same state snapshot as caller kind so explorer and
     /// worker children never receive the reviewer-only submission tool.
     caller_requires_structured_review_result: OnceLock<bool>,
+    caller_allows_review_freeze: OnceLock<bool>,
     // Sleep hook for explicit safe-replay retries. Production uses
     // `std::thread::sleep`; tests inject a recording no-op so retry cadence is
     // asserted without real waiting (no-flaky-tests law: no timing
@@ -713,7 +718,9 @@ fn is_root_peer_session(session: &Value, delegation_child_ids: &HashSet<&str>) -
         && session
             .get("id")
             .and_then(Value::as_str)
-            .map_or(true, |session_id| !delegation_child_ids.contains(session_id))
+            .map_or(true, |session_id| {
+                !delegation_child_ids.contains(session_id)
+            })
 }
 
 impl TermalDelegationMcpBridge {
@@ -744,6 +751,7 @@ impl TermalDelegationMcpBridge {
             request_timeout,
             caller_is_delegation_child: OnceLock::new(),
             caller_requires_structured_review_result: OnceLock::new(),
+            caller_allows_review_freeze: OnceLock::new(),
             safe_replay_retry_sleeper: std::thread::sleep,
         })
     }
@@ -837,6 +845,9 @@ impl TermalDelegationMcpBridge {
                 );
             }
         }
+        if name == TERMAL_REVIEW_FREEZE_TOOL_NAME && !self.caller_allows_review_freeze() {
+            bail!("`{name}` is available only to a read-only reviewer child");
+        }
         let result = match name.as_str() {
             "termal_spawn_session" => self.tool_spawn_session(arguments),
             "termal_list_delegations" => self.tool_list_delegations(arguments),
@@ -845,6 +856,13 @@ impl TermalDelegationMcpBridge {
             "termal_cancel_session" => self.tool_cancel_session(arguments),
             "termal_followup_session" => self.tool_followup_session(arguments),
             "termal_submit_review_result" => self.tool_submit_review_result(arguments),
+            "termal_review_freeze_check" => self.post_json(
+                &format!(
+                    "/api/sessions/{}/delegation-review-freeze",
+                    self.serving_session_id
+                ),
+                &arguments,
+            ),
             "termal_send_to_session" => self.tool_send_to_session(arguments),
             "termal_list_sessions" => self.tool_list_sessions(arguments),
             "termal_list_mailboxes" => self.tool_list_mailboxes(arguments),
@@ -858,13 +876,14 @@ impl TermalDelegationMcpBridge {
             "termal_resume_after_delegations" => self.tool_resume_after_delegations(arguments),
             other => Err(anyhow!("unknown TermAl delegation MCP tool `{other}`")),
         }?;
-        Ok(mcp_tool_text_result(&result, false))
+        Ok(delegation_mcp_tool_result(&name, &result))
     }
 
     fn tool_spawn_session(&self, arguments: Value) -> Result<Value> {
         let prompt = required_string(arguments.get("prompt"), "prompt")?;
         let cwd = optional_string(arguments.get("cwd"));
-        let resolved_prompt = self.resolve_spawn_prompt_if_agent_command(&prompt, cwd.as_deref())?;
+        let resolved_prompt =
+            self.resolve_spawn_prompt_if_agent_command(&prompt, cwd.as_deref())?;
         let mut body = serde_json::Map::new();
         body.insert("prompt".to_owned(), Value::String(resolved_prompt.prompt));
         if !insert_optional_string(&mut body, "title", arguments.get("title")) {
@@ -915,22 +934,23 @@ impl TermalDelegationMcpBridge {
         };
         let command_name =
             required_agent_command_name(Some(&Value::String(parsed.command_name.clone())))?;
-        let resolved = match self.try_resolve_agent_command_for_spawn(&command_name, &parsed, cwd)? {
-            Some(resolved) => resolved,
-            None if cwd.is_none() => return Ok(McpSpawnPrompt::literal(prompt)),
-            None => {
-                if self
-                    .try_resolve_agent_command_for_spawn(&command_name, &parsed, None)?
-                    .is_some()
-                {
-                    bail!(
-                        "agent command `{command_name}` was not found in requested cwd `{}`",
-                        cwd.unwrap_or_default()
-                    );
+        let resolved =
+            match self.try_resolve_agent_command_for_spawn(&command_name, &parsed, cwd)? {
+                Some(resolved) => resolved,
+                None if cwd.is_none() => return Ok(McpSpawnPrompt::literal(prompt)),
+                None => {
+                    if self
+                        .try_resolve_agent_command_for_spawn(&command_name, &parsed, None)?
+                        .is_some()
+                    {
+                        bail!(
+                            "agent command `{command_name}` was not found in requested cwd `{}`",
+                            cwd.unwrap_or_default()
+                        );
+                    }
+                    return Ok(McpSpawnPrompt::literal(prompt));
                 }
-                return Ok(McpSpawnPrompt::literal(prompt));
-            }
-        };
+            };
         let prompt = resolved
             .get("expandedPrompt")
             .or_else(|| resolved.get("visiblePrompt"))
@@ -1059,8 +1079,16 @@ impl TermalDelegationMcpBridge {
         let delegation_id =
             required_path_identifier(arguments.get("delegationId"), "delegationId")?;
         let message = required_string(arguments.get("message"), "message")?;
-        let path = format!("/api/sessions/{}/delegations/{}/followup", self.serving_session_id, delegation_id);
-        self.decode_response("POST", &path, self.followup_request(&path, &json!({ "message": message })).send())
+        let path = format!(
+            "/api/sessions/{}/delegations/{}/followup",
+            self.serving_session_id, delegation_id
+        );
+        self.decode_response(
+            "POST",
+            &path,
+            self.followup_request(&path, &json!({ "message": message }))
+                .send(),
+        )
     }
 
     fn followup_request(&self, path: &str, body: &Value) -> reqwest::blocking::RequestBuilder {
@@ -1070,8 +1098,12 @@ impl TermalDelegationMcpBridge {
         // fast instead of waiting for another caller's resume lock.
         let recovery = CODEX_CHILD_RELEASE_WAIT_TIMEOUT
             + CODEX_THREAD_RECONCILIATION_REPLY_TIMEOUT * 2
-            + CODEX_CHILD_RESULT_FENCE_TIMEOUT + CODEX_CHILD_UNARCHIVE_REPLY_TIMEOUT;
-        self.client.post(self.url(path)).timeout(recovery + self.request_timeout).json(body)
+            + CODEX_CHILD_RESULT_FENCE_TIMEOUT
+            + CODEX_CHILD_UNARCHIVE_REPLY_TIMEOUT;
+        self.client
+            .post(self.url(path))
+            .timeout(recovery + self.request_timeout)
+            .json(body)
     }
 
     fn tool_submit_review_result(&self, arguments: Value) -> Result<Value> {
@@ -1104,32 +1136,27 @@ impl TermalDelegationMcpBridge {
             Value::String(session_id.clone()),
         );
         body.insert("message".to_owned(), Value::String(message));
-        body.insert(
-            "idempotencyKey".to_owned(),
-            Value::String(idempotency_key),
-        );
+        body.insert("idempotencyKey".to_owned(), Value::String(idempotency_key));
         insert_optional_string(&mut body, "topic", arguments.get("topic"));
         insert_optional_string(&mut body, "stateStamp", arguments.get("stateStamp"));
         if let Some(class) = optional_string(arguments.get("class")) {
             body.insert("class".to_owned(), Value::String(class));
         }
-        let path = format!(
-            "/api/sessions/{}/mailboxes/send",
-            self.serving_session_id
-        );
+        let path = format!("/api/sessions/{}/mailboxes/send", self.serving_session_id);
         let response = self
             .post_json_with_safe_replay(&path, &Value::Object(body))
             .map_err(mailbox_send_bridge_error)?;
-        let receipt = serde_json::from_value::<MailboxAppendReceipt>(response).map_err(|source| {
-            mailbox_send_bridge_error(
-                TermalDelegationResponseError {
-                    method: "POST",
-                    path: path.clone(),
-                    message: format!("mailbox send response shape was invalid: {source}"),
-                }
-                .into(),
-            )
-        })?;
+        let receipt =
+            serde_json::from_value::<MailboxAppendReceipt>(response).map_err(|source| {
+                mailbox_send_bridge_error(
+                    TermalDelegationResponseError {
+                        method: "POST",
+                        path: path.clone(),
+                        message: format!("mailbox send response shape was invalid: {source}"),
+                    }
+                    .into(),
+                )
+            })?;
         let mut response = serde_json::to_value(receipt)
             .context("failed to encode validated mailbox send receipt")?;
         let object = response
@@ -1181,10 +1208,10 @@ impl TermalDelegationMcpBridge {
 
     fn tool_board_set(&self, arguments: Value) -> Result<Value> {
         let key = required_board_key_shaped(arguments.get("key"), "key")?;
-        let expected_revision = required_u64(arguments.get("expectedRevision"), "expectedRevision")?;
+        let expected_revision =
+            required_u64(arguments.get("expectedRevision"), "expectedRevision")?;
         let idempotency_key = required_string(arguments.get("idempotencyKey"), "idempotencyKey")?;
-        let state_stamp =
-            optional_nonempty_string(arguments.get("stateStamp"), "stateStamp")?;
+        let state_stamp = optional_nonempty_string(arguments.get("stateStamp"), "stateStamp")?;
         let correlation = BoardSetCorrelation {
             key: key.clone(),
             expected_revision,
@@ -1224,20 +1251,17 @@ impl TermalDelegationMcpBridge {
         // like a malformed body — outcome unknown, retry same key (review,
         // mailbox #236-3).
         let path = format!("/api/sessions/{}/board/set", self.serving_session_id);
-        let receipt = serde_json::from_value::<CoordinationBoardSetReceipt>(response).map_err(
-            |source| {
+        let receipt =
+            serde_json::from_value::<CoordinationBoardSetReceipt>(response).map_err(|source| {
                 board_set_bridge_error(
                     TermalDelegationResponseError {
                         method: "POST",
                         path: path.clone(),
-                        message: format!(
-                            "failed to decode coordination board receipt: {source}"
-                        ),
+                        message: format!("failed to decode coordination board receipt: {source}"),
                     }
                     .into(),
                 )
-            },
-        )?;
+            })?;
         if let Err(mismatch) = correlate_board_receipt(&receipt, &correlation) {
             return Err(board_set_bridge_error(
                 TermalDelegationResponseError {
@@ -1254,8 +1278,7 @@ impl TermalDelegationMcpBridge {
     }
 
     fn tool_read_mailbox(&self, arguments: Value) -> Result<Value> {
-        let mailbox_id =
-            required_path_identifier(arguments.get("mailboxId"), "mailboxId")?;
+        let mailbox_id = required_path_identifier(arguments.get("mailboxId"), "mailboxId")?;
         let after_sequence = arguments
             .get("afterSequence")
             .map(|value| required_u64(Some(value), "afterSequence"))
@@ -1277,8 +1300,8 @@ impl TermalDelegationMcpBridge {
             ),
             &body,
         )?;
-        let range: MailboxReadResponse = serde_json::from_value(response)
-            .context("mailbox read response shape was invalid")?;
+        let range: MailboxReadResponse =
+            serde_json::from_value(response).context("mailbox read response shape was invalid")?;
         Ok(json!({
             "mailboxId": mailbox_id,
             "messages": range.messages,
@@ -1291,8 +1314,7 @@ impl TermalDelegationMcpBridge {
     }
 
     fn tool_read_mailbox_message(&self, arguments: Value) -> Result<Value> {
-        let message_id =
-            required_path_identifier(arguments.get("messageId"), "messageId")?;
+        let message_id = required_path_identifier(arguments.get("messageId"), "messageId")?;
         self.get_json_with_safe_replay(&format!(
             "/api/sessions/{}/mailbox-messages/{}",
             self.serving_session_id, message_id
@@ -1300,10 +1322,11 @@ impl TermalDelegationMcpBridge {
     }
 
     fn tool_acknowledge_mailbox(&self, arguments: Value) -> Result<Value> {
-        let mailbox_id =
-            required_path_identifier(arguments.get("mailboxId"), "mailboxId")?;
+        let mailbox_id = required_path_identifier(arguments.get("mailboxId"), "mailboxId")?;
         let body = if arguments.get("receipt").is_some() {
-            if arguments.get("expectedProcessedThrough").is_some() || arguments.get("processedThrough").is_some() {
+            if arguments.get("expectedProcessedThrough").is_some()
+                || arguments.get("processedThrough").is_some()
+            {
                 bail!("Supply receipt OR both expectedProcessedThrough and processedThrough");
             }
             json!({"receipt": required_path_identifier(arguments.get("receipt"), "receipt")?})
@@ -1321,10 +1344,7 @@ impl TermalDelegationMcpBridge {
             self.serving_session_id, mailbox_id
         );
         let response = self
-            .post_json_with_safe_replay(
-                &path,
-                &body,
-            )
+            .post_json_with_safe_replay(&path, &body)
             .map_err(mailbox_acknowledgement_bridge_error)?;
         let summary = serde_json::from_value::<MailboxSummary>(response).map_err(|source| {
             mailbox_acknowledgement_bridge_error(
@@ -1595,10 +1615,19 @@ impl TermalDelegationMcpBridge {
         };
         let is_child = !is_root_peer_session(session, &delegation_child_ids);
         let requires_structured_review_result = is_child
-            && delegation_child_requires_structured_review_result(
-                &state,
-                &self.serving_session_id,
-            );
+            && delegation_child_requires_structured_review_result(&state, &self.serving_session_id);
+        let allows_review_freeze = requires_structured_review_result
+            && state
+                .get("delegations")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .any(|d| {
+                    d.get("childSessionId").and_then(Value::as_str)
+                        == Some(self.serving_session_id.as_str())
+                        && d.get("reviewFreezeAllowed").and_then(Value::as_bool) == Some(true)
+                });
+        let _ = self.caller_allows_review_freeze.set(allows_review_freeze);
         let _ = self.caller_is_delegation_child.set(is_child);
         let _ = self
             .caller_requires_structured_review_result
@@ -1616,6 +1645,14 @@ impl TermalDelegationMcpBridge {
             .unwrap_or(false)
     }
 
+    fn caller_allows_review_freeze(&self) -> bool {
+        let _ = self.caller_is_delegation_child();
+        self.caller_allows_review_freeze
+            .get()
+            .copied()
+            .unwrap_or(false)
+    }
+
     /// The advertised tool list for this bridge's caller. Root sessions do not
     /// see child-only submission tools; delegation children do not see peer or
     /// board tools.
@@ -1627,6 +1664,9 @@ impl TermalDelegationMcpBridge {
                 let Some(name) = tool.get("name").and_then(Value::as_str) else {
                     return true;
                 };
+                if name == TERMAL_REVIEW_FREEZE_TOOL_NAME {
+                    return caller_is_child && self.caller_allows_review_freeze();
+                }
                 if caller_is_child {
                     !tool_requires_root_session(name)
                         && (!tool_requires_delegation_child(name)
@@ -1717,8 +1757,7 @@ impl TermalDelegationMcpBridge {
             if !retry {
                 return result;
             }
-            let delay =
-                safe_replay_retry_delay(&self.serving_session_id, completed_attempts);
+            let delay = safe_replay_retry_delay(&self.serving_session_id, completed_attempts);
             // Only sleep-and-replay when the remaining budget can fund the
             // delay AND leave a minimally useful request window; otherwise
             // surface the last typed rejection now. The comparison is
@@ -1785,8 +1824,12 @@ impl TermalDelegationMcpBridge {
 }
 
 fn mailbox_send_bridge_error(err: anyhow::Error) -> anyhow::Error {
-    if err.downcast_ref::<TermalDelegationTransportError>().is_some()
-        || err.downcast_ref::<TermalDelegationResponseError>().is_some()
+    if err
+        .downcast_ref::<TermalDelegationTransportError>()
+        .is_some()
+        || err
+            .downcast_ref::<TermalDelegationResponseError>()
+            .is_some()
     {
         return anyhow!(
             "mailbox send receipt was not received; the append outcome is unknown. Retry with the \
@@ -1880,8 +1923,12 @@ fn correlate_board_receipt(
 /// `duplicate: true`, an uncommitted one applies fresh. Typed non-2xx API
 /// errors (400/404/409/503) pass through unchanged: their outcome is known.
 fn board_set_bridge_error(err: anyhow::Error) -> anyhow::Error {
-    if err.downcast_ref::<TermalDelegationTransportError>().is_some()
-        || err.downcast_ref::<TermalDelegationResponseError>().is_some()
+    if err
+        .downcast_ref::<TermalDelegationTransportError>()
+        .is_some()
+        || err
+            .downcast_ref::<TermalDelegationResponseError>()
+            .is_some()
     {
         return anyhow!(
             "board update receipt was not received; the write outcome is unknown. Retry the \
@@ -1893,8 +1940,12 @@ fn board_set_bridge_error(err: anyhow::Error) -> anyhow::Error {
 }
 
 fn mailbox_acknowledgement_bridge_error(err: anyhow::Error) -> anyhow::Error {
-    if err.downcast_ref::<TermalDelegationTransportError>().is_some()
-        || err.downcast_ref::<TermalDelegationResponseError>().is_some()
+    if err
+        .downcast_ref::<TermalDelegationTransportError>()
+        .is_some()
+        || err
+            .downcast_ref::<TermalDelegationResponseError>()
+            .is_some()
     {
         return anyhow!(
             "mailbox acknowledgement response was not received; the cursor outcome is unknown. \
@@ -2075,13 +2126,9 @@ fn required_board_key_shaped(value: Option<&Value>, field: &str) -> Result<Strin
     let key = required_string(value, field)?;
     if matches!(key.as_str(), "." | "..")
         || key.len() > COORDINATION_BOARD_MAX_KEY_BYTES
-        || !key
-            .bytes()
-            .all(|byte| {
-                byte.is_ascii_lowercase()
-                    || byte.is_ascii_digit()
-                    || matches!(byte, b'.' | b'_' | b'-')
-            })
+        || !key.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'.' | b'_' | b'-')
+        })
     {
         return Err(anyhow!(
             "{field} must be 1-{} bytes of lowercase alphanumerics, `.`, `_`, or `-`, and must \
@@ -2111,7 +2158,7 @@ fn tool_requires_root_session(name: &str) -> bool {
 }
 
 fn tool_requires_delegation_child(name: &str) -> bool {
-    name == TERMAL_SUBMIT_REVIEW_RESULT_TOOL_NAME
+    name == TERMAL_SUBMIT_REVIEW_RESULT_TOOL_NAME || name == TERMAL_REVIEW_FREEZE_TOOL_NAME
 }
 
 fn delegation_write_policy_input_schema() -> Value {
@@ -2276,6 +2323,19 @@ fn mcp_tools_list_result() -> Value {
                     "properties": {
                         "delegationId": { "type": "string" },
                         "message": { "type": "string" }
+                    }
+                }
+            },
+            {
+                "name": TERMAL_REVIEW_FREEZE_TOOL_NAME,
+                "description": TERMAL_REVIEW_FREEZE_TOOL_DESCRIPTION,
+                "annotations": { "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false },
+                "inputSchema": {
+                    "type": "object", "additionalProperties": false,
+                    "required": ["manifestPath", "expectedFingerprint"],
+                    "properties": {
+                        "manifestPath": { "type": "string", "maxLength": 4096 },
+                        "expectedFingerprint": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
                     }
                 }
             },
@@ -2447,11 +2507,19 @@ fn mcp_tools_list_result() -> Value {
     });
     // Keep one bootstrap body in tools/list; the other mailbox entry points
     // point to the read tool while retaining their tool-specific contracts.
-    for tool in result["tools"].as_array_mut().expect("static MCP tools array") {
-        if matches!(tool["name"].as_str(), Some(
-            "termal_read_mailbox" | "termal_send_to_session" |
-            "termal_list_mailboxes" | "termal_acknowledge_mailbox"
-        )) {
+    for tool in result["tools"]
+        .as_array_mut()
+        .expect("static MCP tools array")
+    {
+        if matches!(
+            tool["name"].as_str(),
+            Some(
+                "termal_read_mailbox"
+                    | "termal_send_to_session"
+                    | "termal_list_mailboxes"
+                    | "termal_acknowledge_mailbox"
+            )
+        ) {
             let protocol = if tool["name"] == "termal_read_mailbox" {
                 TERMAL_MAILBOX_GUIDANCE
             } else {
@@ -2459,7 +2527,9 @@ fn mcp_tools_list_result() -> Value {
             };
             tool["description"] = json!(format!(
                 "{}\n\n{protocol}",
-                tool["description"].as_str().expect("static tool description")
+                tool["description"]
+                    .as_str()
+                    .expect("static tool description")
             ));
         }
     }
@@ -2493,6 +2563,12 @@ fn mcp_json_rpc_tool_error(id: Value, message: String) -> Value {
             "isError": true,
         }),
     )
+}
+
+fn delegation_mcp_tool_result(name: &str, result: &Value) -> Value {
+    let is_error = name == TERMAL_REVIEW_FREEZE_TOOL_NAME
+        && result.get("verified").and_then(Value::as_bool) != Some(true);
+    mcp_tool_text_result(result, is_error)
 }
 
 fn mcp_tool_text_result(value: &Value, is_error: bool) -> Value {
@@ -2535,9 +2611,7 @@ fn required_path_identifier(value: Option<&Value>, label: &str) -> Result<String
     let value = required_string(value, label)?;
     if value
         .chars()
-        .any(|ch| {
-            ch == '/' || ch == '?' || ch == '#' || ch == '%' || ch == '\\' || ch.is_control()
-        })
+        .any(|ch| ch == '/' || ch == '?' || ch == '#' || ch == '%' || ch == '\\' || ch.is_control())
     {
         bail!("{label} must not contain /, \\, ?, #, %, or control characters");
     }
@@ -2549,9 +2623,10 @@ fn required_path_identifier(value: Option<&Value>, label: &str) -> Result<String
 
 fn required_agent_command_name(value: Option<&Value>) -> Result<String> {
     let value = required_string(value, "command")?;
-    if value.chars().any(|ch| {
-        ch == '/' || ch == '?' || ch == '#' || ch == '\\' || ch.is_control()
-    }) {
+    if value
+        .chars()
+        .any(|ch| ch == '/' || ch == '?' || ch == '#' || ch == '\\' || ch.is_control())
+    {
         bail!("command must not contain /, \\, ?, #, or control characters");
     }
     if value == "." || value == ".." {

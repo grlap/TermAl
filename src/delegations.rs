@@ -244,11 +244,13 @@ struct DetachedDelegationChildRuntime {
 // Pure checks repeated at re-arm admission so an invalid follow-up never
 // clears a terminal result. Payload parsing happens before recovery too.
 fn validate_delegation_followup_child_locked(
-    inner: &StateInner, child_id: &str, has_attachments: bool,
+    inner: &StateInner,
+    child_id: &str,
+    has_attachments: bool,
 ) -> Result<(), ApiError> {
-    let index = inner.find_visible_session_index(child_id).ok_or_else(|| ApiError::conflict(
-        "delegation child session no longer exists and cannot be resumed",
-    ))?;
+    let index = inner.find_visible_session_index(child_id).ok_or_else(|| {
+        ApiError::conflict("delegation child session no longer exists and cannot be resumed")
+    })?;
     let record = &inner.sessions[index];
     if record.engram_boot_recovery_pending {
         return Err(ApiError::conflict(ENGRAM_BOOT_RECOVERY_PENDING_MESSAGE));
@@ -256,12 +258,15 @@ fn validate_delegation_followup_child_locked(
     if record.runtime_stop_in_progress || record.session.status == SessionStatus::Stopping {
         return Err(ApiError::conflict("session is stopping"));
     }
-    record.remote_proxy_identity().map_err(|error| ApiError::internal(format!(
-        "session has invalid remote proxy identity: {error:#}",
-    )))?;
+    record.remote_proxy_identity().map_err(|error| {
+        ApiError::internal(format!(
+            "session has invalid remote proxy identity: {error:#}",
+        ))
+    })?;
     if has_attachments && !matches!(record.session.agent, Agent::Codex | Agent::Claude) {
         return Err(ApiError::bad_request(format!(
-            "{} sessions do not support image attachments yet", record.session.agent.name(),
+            "{} sessions do not support image attachments yet",
+            record.session.agent.name(),
         )));
     }
     Ok(())
@@ -354,10 +359,8 @@ fn running_read_only_delegation_index_entry(
         .then_some(index)
 }
 
-const OPENCODE_READ_ONLY_DELEGATION_ERROR: &str =
-    "OpenCode delegations do not support writePolicy `readOnly`; use `isolatedWorktree` for bounded writable work";
-const ACP_REVIEWER_DELEGATION_ERROR: &str =
-    "reviewer mode requires Claude or Codex because ACP permission requests do not provide an authenticated MCP tool identity; for Cursor, Gemini, or OpenCode pass mode `explorer` with a supported write policy";
+const OPENCODE_READ_ONLY_DELEGATION_ERROR: &str = "OpenCode delegations do not support writePolicy `readOnly`; use `isolatedWorktree` for bounded writable work";
+const ACP_REVIEWER_DELEGATION_ERROR: &str = "reviewer mode requires Claude or Codex because ACP permission requests do not provide an authenticated MCP tool identity; for Cursor, Gemini, or OpenCode pass mode `explorer` with a supported write policy";
 
 fn find_parent_delegation_index_locked(
     inner: &StateInner,
@@ -460,11 +463,9 @@ impl AppState {
                 .ok_or_else(ApiError::local_session_missing)?;
             let parent_record = &inner.sessions[parent_index];
             let parent = &parent_record.session;
-            let parent_remote_identity = parent_record
-                .remote_proxy_identity()
-                .map_err(|err| {
-                    ApiError::internal(format!("invalid parent session proxy: {err:#}"))
-                })?;
+            let parent_remote_identity = parent_record.remote_proxy_identity().map_err(|err| {
+                ApiError::internal(format!("invalid parent session proxy: {err:#}"))
+            })?;
             (
                 parent.workdir.clone(),
                 parent.project_id.clone(),
@@ -511,12 +512,8 @@ impl AppState {
         if mode == DelegationMode::Reviewer && !agent.supports_structured_review_results() {
             return Err(ApiError::bad_request(ACP_REVIEWER_DELEGATION_ERROR));
         }
-        if agent == Agent::OpenCode
-            && requested_write_policy == DelegationWritePolicy::ReadOnly
-        {
-            return Err(ApiError::bad_request(
-                OPENCODE_READ_ONLY_DELEGATION_ERROR,
-            ));
+        if agent == Agent::OpenCode && requested_write_policy == DelegationWritePolicy::ReadOnly {
+            return Err(ApiError::bad_request(OPENCODE_READ_ONLY_DELEGATION_ERROR));
         }
         // OpenCode model ingress: the generic delegation length check above
         // runs before `agent` is known, so it cannot apply the agent-specific
@@ -984,18 +981,13 @@ impl AppState {
                 find_parent_delegation_index_locked(&inner, parent_session_id, delegation_id)?;
             let delegation = &inner.delegations[index];
             if !delegation_is_terminal(delegation.status) || delegation.result.is_none() {
-                return Err(ApiError::conflict(
-                    "delegation result is not available yet",
-                ));
+                return Err(ApiError::conflict("delegation result is not available yet"));
             }
             let transcript_output = inner
                 .find_session_index(&delegation.child_session_id)
                 .and_then(|child_index| inner.sessions.get(child_index))
                 .and_then(|child| {
-                    delegation_child_authoritative_output(
-                        &child.session,
-                        delegation.status,
-                    )
+                    delegation_child_authoritative_output(&child.session, delegation.status)
                 });
             let (output, summary_fallback) = match transcript_output {
                 Some(output) => (output, false),
@@ -1128,9 +1120,8 @@ impl AppState {
             let index =
                 find_parent_delegation_index_locked(&inner, parent_session_id, delegation_id)?;
             if delegation_is_terminal(inner.delegations[index].status) {
-                if let Some(reservation) = inner
-                    .delegation_followup_admissions
-                    .get_mut(delegation_id)
+                if let Some(reservation) =
+                    inner.delegation_followup_admissions.get_mut(delegation_id)
                 {
                     // Cancel the not-yet-admitted follow-up, not its historical
                     // result. Keep its owner until any restore is compensated.
@@ -1257,10 +1248,17 @@ impl AppState {
         delegation_id: &str,
         message: String,
     ) -> Result<DelegationStatusResponse, ApiError> {
-        self.followup_delegation_request(parent_session_id, delegation_id, SendMessageRequest {
-            text: message, expanded_text: None, attachments: Vec::new(),
-            source_session_id: None, source_mailbox: None,
-        })
+        self.followup_delegation_request(
+            parent_session_id,
+            delegation_id,
+            SendMessageRequest {
+                text: message,
+                expanded_text: None,
+                attachments: Vec::new(),
+                source_session_id: None,
+                source_mailbox: None,
+            },
+        )
     }
 
     fn followup_delegation_request(
@@ -1506,7 +1504,10 @@ impl AppState {
         }
         if let Some(session_id) = detached_child.codex_compensation_session.take() {
             if let Err(error) = self.rearchive_undispatched_codex_child(&session_id) {
-                eprintln!("delegation archive compensation retained for retry: {}", error.message);
+                eprintln!(
+                    "delegation archive compensation retained for retry: {}",
+                    error.message
+                );
             }
         }
         let lifecycle_reason = delegation_lifecycle_trace_reason(lifecycle_delta.as_ref());
@@ -2167,6 +2168,9 @@ Final answer requirements:\n\
     if record.mode == DelegationMode::Reviewer {
         prompt.push_str("\n\n");
         prompt.push_str(DELEGATION_REVIEW_RESULT_PROTOCOL_INSTRUCTIONS.trim());
+        if matches!(record.write_policy, DelegationWritePolicy::ReadOnly) {
+            prompt.push_str("\n\nIf your task requires Engram schema-1 freeze verification, use `termal_review_freeze_check` before and after inspection with the manifest path and the parent's independently supplied SHA-256 literal. It runs a compiled host checker and returns a real separate-stream subprocess observation. Require `verified: true` and `observer.stdoutExact: true`; failure is unavailable verification, never a clean review. Do not run Node, repository helpers, or arbitrary interpreters as a workaround.");
+        }
     }
     prompt
 }
@@ -2178,12 +2182,28 @@ impl AppState {
         capability: DelegationControlPlaneCapability,
     ) -> bool {
         let inner = self.inner.lock().expect("state mutex poisoned");
-        let Some(delegation_index) = inner.find_delegation_index_by_child_session_id(child_session_id)
+        let Some(delegation_index) =
+            inner.find_delegation_index_by_child_session_id(child_session_id)
         else {
             return false;
         };
         let delegation = &inner.delegations[delegation_index];
         match capability {
+            DelegationControlPlaneCapability::ReviewFreeze => {
+                delegation.child_session_id == child_session_id
+                    && delegation.mode == DelegationMode::Reviewer
+                    && delegation.status == DelegationStatus::Running
+                    && matches!(delegation.write_policy, DelegationWritePolicy::ReadOnly)
+                    && inner
+                        .find_session_index(child_session_id)
+                        .is_some_and(|index| {
+                            let child = &inner.sessions[index];
+                            !child.hidden
+                                && child.is_local_session()
+                                && child.session.parent_delegation_id.as_deref()
+                                    == Some(delegation.id.as_str())
+                        })
+            }
             DelegationControlPlaneCapability::SubmitReviewResult => {
                 delegation.child_session_id == child_session_id
                     && delegation.mode == DelegationMode::Reviewer
@@ -2838,8 +2858,7 @@ fn refresh_delegation_from_child_locked(
         } => {
             let completed_at = stamp_now();
             if delegation.mode == DelegationMode::Reviewer {
-                let unavailable_summary =
-                    "Reviewer completed without the required structured result. Inspect the full child output; TermAl did not classify this review as clean.";
+                let unavailable_summary = "Reviewer completed without the required structured result. Inspect the full child output; TermAl did not classify this review as clean.";
                 let mut unavailable_notes = vec![
                     "The reviewer's human-readable output remains available through paged full-output reads."
                         .to_owned(),
@@ -4228,7 +4247,10 @@ fn delegation_child_authoritative_output(
         };
         if latest_assistant_output.is_none() {
             latest_assistant_output = Some(raw_text);
-            if matches!(status, DelegationStatus::Failed | DelegationStatus::Canceled) {
+            if matches!(
+                status,
+                DelegationStatus::Failed | DelegationStatus::Canceled
+            ) {
                 break;
             }
         }
@@ -4288,7 +4310,6 @@ fn delegation_result_output_page(
         next_offset_bytes,
     })
 }
-
 
 fn compact_delegation_public_summary(summary: &str) -> String {
     let compact = summary
@@ -4451,6 +4472,8 @@ fn delegation_state_summary_from_record(record: &DelegationRecord) -> Delegation
         child_session_id: record.child_session_id.clone(),
         mode: record.mode,
         review_result_required: record.mode == DelegationMode::Reviewer,
+        review_freeze_allowed: record.mode == DelegationMode::Reviewer
+            && matches!(record.write_policy, DelegationWritePolicy::ReadOnly),
     }
 }
 

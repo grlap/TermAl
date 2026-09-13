@@ -24,7 +24,7 @@ fn create_test_dir_symlink(target: &FsPath, link: &FsPath) -> std::io::Result<()
 }
 
 #[cfg(windows)]
-fn windows_symlink_privilege_unavailable(err: &std::io::Error) -> bool {
+pub(super) fn windows_symlink_privilege_unavailable(err: &std::io::Error) -> bool {
     err.kind() == std::io::ErrorKind::PermissionDenied || err.raw_os_error() == Some(1314)
 }
 

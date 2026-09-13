@@ -1315,11 +1315,7 @@ struct DelegationRecord {
     /// allowing it to break parent lifecycle APIs. It is serialized for the
     /// current process so operators can see the reason, but ignored on reload
     /// so recovery gets a fresh probe after restart.
-    #[serde(
-        default,
-        skip_deserializing,
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(default, skip_deserializing, skip_serializing_if = "Option::is_none")]
     review_result_recovery_error: Option<String>,
     /// Prevents later prose-parser upgrades from overwriting a result that
     /// arrived through the strict mailbox contract.
@@ -1410,6 +1406,9 @@ struct DelegationStateSummary {
     child_session_id: String,
     mode: DelegationMode,
     review_result_required: bool,
+    /// Static policy capability; the endpoint separately checks live authority.
+    #[serde(default)]
+    review_freeze_allowed: bool,
 }
 
 /// Request payload for creating a Phase 1 read-only delegation.

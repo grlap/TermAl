@@ -20,6 +20,7 @@ mod acp_gemini;
 mod acp_tool_status;
 mod agent_commands;
 mod agent_readiness;
+mod bounded_read_process;
 mod claude;
 mod claude_permission_boundary;
 mod cli;
@@ -60,6 +61,7 @@ mod opencode_approvals;
 mod opencode_config;
 mod orchestrator;
 mod phase_sync;
+mod review_freeze;
 mod test_temp_paths;
 pub use orchestrator::{
     sample_deadlocked_orchestrator_template_draft, sample_orchestrator_template_draft,
@@ -96,6 +98,7 @@ mod telegram_settings;
 mod telegram_support;
 mod terminal;
 mod turns;
+mod work_visualizer;
 mod workspace;
 mod workspace_labels;
 

@@ -36,6 +36,10 @@ describe("ControlPanelSurface", () => {
     expect(screen.getByRole("heading", { level: 2, name: "Orchestrators" })).toBeInTheDocument();
     expect(screen.getByTestId("section-body")).toHaveTextContent("orchestrators");
 
+    fireEvent.click(screen.getByRole("button", { name: "Work" }));
+    expect(screen.getByRole("heading", { level: 2, name: "Work" })).toBeInTheDocument();
+    expect(screen.getByTestId("section-body")).toHaveTextContent("work");
+
     fireEvent.click(screen.getByRole("button", { name: "Git status" }));
 
     expect(screen.getByRole("heading", { level: 2, name: "Git status" })).toBeInTheDocument();
@@ -65,6 +69,7 @@ describe("ControlPanelSurface", () => {
       "Projects",
       "Sessions",
       "Orchestrators",
+      "Work",
     ]);
   });
 
@@ -143,12 +148,13 @@ describe("ControlPanelSurface", () => {
     expect(screen.getByTestId("section-body")).toHaveTextContent("sessions");
   });
 
-  it("uses Workspaces, Projects, Sessions, Orchestrators, Files, Git status as the default dock order", () => {
+  it("includes Work after Projects in the default dock order", () => {
     renderSurface();
 
     expect(getDockSectionLabels()).toEqual([
       "Workspaces",
       "Projects",
+      "Work",
       "Sessions",
       "Orchestrators",
       "Files",
@@ -167,6 +173,7 @@ describe("ControlPanelSurface", () => {
     expect(getDockSectionLabels()).toEqual([
       "Workspaces",
       "Projects",
+      "Work",
       "Sessions",
       "Orchestrators",
       "Files",
@@ -188,6 +195,7 @@ describe("ControlPanelSurface", () => {
       "projects",
       "sessions",
       "orchestrators",
+      "work",
     ]);
     expect(normalizeControlPanelSectionOrder([
       "sessions",
@@ -199,6 +207,7 @@ describe("ControlPanelSurface", () => {
       "projects",
       "workspaces",
       "files",
+      "work",
       "orchestrators",
       "git",
     ]);
@@ -212,6 +221,7 @@ describe("ControlPanelSurface", () => {
       "workspaces",
       "projects",
       "sessions",
+      "work",
       "orchestrators",
       "files",
       "git",
@@ -230,6 +240,7 @@ describe("ControlPanelSurface", () => {
       "orchestrators",
       "files",
       "git",
+      "work",
     ]);
 
     window.localStorage.setItem(
@@ -244,6 +255,7 @@ describe("ControlPanelSurface", () => {
       "Projects",
       "Sessions",
       "Orchestrators",
+      "Work",
     ]);
     unmount();
 
@@ -259,6 +271,7 @@ describe("ControlPanelSurface", () => {
       "Files",
       "Git status",
       "Orchestrators",
+      "Work",
     ]);
   });
 
@@ -279,6 +292,7 @@ describe("ControlPanelSurface", () => {
       "Workspaces",
       "Projects",
       "Git status",
+      "Work",
       "Sessions",
       "Orchestrators",
       "Files",
@@ -291,6 +305,7 @@ describe("ControlPanelSurface", () => {
       "Workspaces",
       "Projects",
       "Git status",
+      "Work",
       "Sessions",
       "Orchestrators",
       "Files",

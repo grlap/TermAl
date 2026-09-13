@@ -463,11 +463,12 @@ mod visible_session_hydration_error_tests {
             .expect("reviewer delegation link should exist")
             .as_object()
             .expect("delegation link should be an object");
-        assert_eq!(delegation.len(), 4);
+        assert_eq!(delegation.len(), 5);
         assert_eq!(delegation["id"], record.id);
         assert_eq!(delegation["childSessionId"], record.child_session_id);
         assert_eq!(delegation["mode"], "reviewer");
         assert_eq!(delegation["reviewResultRequired"], true);
+        assert_eq!(delegation["reviewFreezeAllowed"], true);
         assert!(!delegation.contains_key("status"));
         assert!(!delegation.contains_key("title"));
         assert!(!delegation.contains_key("result"));
@@ -481,6 +482,7 @@ mod visible_session_hydration_error_tests {
             .expect("explorer delegation link should exist");
         assert_eq!(explorer_delegation["mode"], "explorer");
         assert_eq!(explorer_delegation["reviewResultRequired"], false);
+        assert_eq!(explorer_delegation["reviewFreezeAllowed"], false);
         assert!(!delegation_child_requires_structured_review_result(
             &json,
             &explorer_record.child_session_id,

@@ -18,6 +18,7 @@ import {
 import type { WorkspaceTab } from "../workspace-types";
 
 export type ControlPanelSectionId =
+  | "work"
   | "workspaces"
   | "files"
   | "sessions"
@@ -28,6 +29,7 @@ export type ControlPanelSectionId =
 const DEFAULT_CONTROL_PANEL_SECTION_ORDER: readonly ControlPanelSectionId[] = [
   "workspaces",
   "projects",
+  "work",
   "sessions",
   "orchestrators",
   "files",
@@ -90,6 +92,8 @@ const RESPONSE_BOARD_ACTION: ControlPanelActionDefinition = {
 
 export function ControlPanelSectionIcon({ sectionId }: { sectionId: ControlPanelSectionId }) {
   switch (sectionId) {
+    case "work":
+      return <BoardIcon />;
     case "workspaces":
       return <WorkspacesIcon />;
     case "files":
@@ -127,6 +131,7 @@ export const ControlPanelSurface = forwardRef<ControlPanelSurfaceHandle, Control
   const [dropTarget, setDropTarget] = useState<DockDropTarget | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const sectionDefinitionLookup: Record<ControlPanelSectionId, ControlPanelSectionDefinition> = {
+    work: { id: "work", label: "Work", icon: <ControlPanelSectionIcon sectionId="work" /> },
     workspaces: {
       id: "workspaces",
       label: "Workspaces",

@@ -378,6 +378,10 @@ complete typed payload, derives the delegation/child/parent identity, and
 appends a self-describing envelope to the parent-child mailbox under topic
 `delegation-review-result/v1`. The mailbox append is durable and idempotent; it
 intentionally does not wake the parent ahead of the normal delegation fan-in.
+Reviewers that require Engram schema-1 freeze checks also receive the narrow
+[`termal_review_freeze_check` capability](review-freeze-verification.md). It
+replaces repository Node checker/observer execution, not source inspection or
+the parent's quality gates. Interpreter and workspace-write refusals remain.
 The validated payload is held provisionally until the child turn independently
 becomes terminal, then promoted to the delegation result. Once accepted, that
 payload is the authoritative terminal truth: a later runtime error, idle teardown,

@@ -78,6 +78,16 @@ fn claude_read_only_host_checks_commands_even_if_cli_settings_allow_them() {
     let submit = "mcp__termal-delegation__termal_submit_review_result";
     assert_permission(submit, json!({"schemaVersion":1}), false, false);
     assert_permission(submit, json!({"schemaVersion":1}), true, true);
+    let freeze = "mcp__termal-delegation__termal_review_freeze_check";
+    assert_permission(freeze, json!({}), false, false);
+    assert_permission(freeze, json!({}), true, true);
+    for command in [
+        "node scripts/review-freeze-fingerprint.mjs --check .git/freeze.json",
+        "node -e 'require(\"fs\").writeFileSync(\"sentinel\",\"bad\")'",
+        "git add .",
+    ] {
+        assert_permission("Bash", json!({"command":command}), true, false);
+    }
 }
 
 fn assert_permission(tool: &str, input: Value, authority: bool, allowed: bool) {

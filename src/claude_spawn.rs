@@ -65,11 +65,7 @@ fn claude_transient_api_retry_delay(
     } else {
         CLAUDE_TRANSIENT_API_RETRY_BASE_DELAY
     };
-    session_stable_retry_delay(
-        base_delay,
-        session_id,
-        completed_attempts,
-    )
+    session_stable_retry_delay(base_delay, session_id, completed_attempts)
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -159,8 +155,7 @@ fn write_claude_runtime_command(
             Ok(())
         }
         ClaudeRuntimeCommand::RetryLastPrompt {
-            replay_generation,
-            ..
+            replay_generation, ..
         } => {
             let prompt = replay_prompt
                 .lock()
@@ -326,8 +321,7 @@ fn write_private_claude_mcp_config(
     runtime_id: &str,
     contents: &str,
 ) -> Result<ClaudeMcpConfigFile> {
-    fs::create_dir_all(dir)
-        .with_context(|| format!("failed to create `{}`", dir.display()))?;
+    fs::create_dir_all(dir).with_context(|| format!("failed to create `{}`", dir.display()))?;
     // The directory must be a real directory in TermAl's data tree, not a
     // symlink that redirects the secret somewhere else.
     let dir_metadata = fs::symlink_metadata(dir)
@@ -437,7 +431,8 @@ fn spawn_claude_runtime(
         let writer_replay_prompt = replay_prompt.clone();
         std::thread::spawn(move || {
             let mut stdin = stdin;
-            if let Err(err) = write_claude_initialize(&mut stdin, &writer_state, &writer_session_id) {
+            if let Err(err) = write_claude_initialize(&mut stdin, &writer_state, &writer_session_id)
+            {
                 let _ = writer_state.handle_runtime_exit_if_matches(
                     &writer_session_id,
                     &writer_runtime_token,
@@ -483,9 +478,7 @@ fn spawn_claude_runtime(
                             let _ = writer_state.fail_turn_if_runtime_matches(
                                 &writer_session_id,
                                 &writer_runtime_token,
-                                &format!(
-                                    "failed to record Claude automatic retry: {err:#}"
-                                ),
+                                &format!("failed to record Claude automatic retry: {err:#}"),
                             );
                             continue;
                         }
@@ -654,20 +647,21 @@ fn spawn_claude_runtime(
                     // Approval mode and delegation-child identity are read
                     // under one state lock so the attendedness policy never
                     // sees a torn pair.
-                    let (approval_mode, delegation_child) =
-                        match reader_state.claude_control_request_context(&reader_session_id) {
-                            Ok(context) => context,
-                            Err(err) => {
-                                let _ = reader_state.fail_turn_if_runtime_matches(
-                                    &reader_session_id,
-                                    &reader_runtime_token,
-                                    &format!(
-                                        "failed to resolve Claude approval mode for session: {err:#}"
-                                    ),
-                                );
-                                break;
-                            }
-                        };
+                    let (approval_mode, delegation_child) = match reader_state
+                        .claude_control_request_context(&reader_session_id)
+                    {
+                        Ok(context) => context,
+                        Err(err) => {
+                            let _ = reader_state.fail_turn_if_runtime_matches(
+                                &reader_session_id,
+                                &reader_runtime_token,
+                                &format!(
+                                    "failed to resolve Claude approval mode for session: {err:#}"
+                                ),
+                            );
+                            break;
+                        }
+                    };
 
                     let action = match classify_claude_control_request(
                         &message,
@@ -675,10 +669,8 @@ fn spawn_claude_runtime(
                         approval_mode,
                         delegation_child,
                         &reader_cwd,
-                        reader_state.delegation_control_plane_capability_allowed(
-                            &reader_session_id,
-                            DelegationControlPlaneCapability::SubmitReviewResult,
-                        ),
+                        reader_state
+                            .claude_control_plane_request_allowed(&reader_session_id, &message),
                     ) {
                         Ok(action) => action,
                         Err(err) => {
@@ -795,12 +787,10 @@ fn spawn_claude_runtime(
                 } else if message_type == Some("control_cancel_request") {
                     turn_state.replay_became_unsafe = true;
                     if let Some(request_id) = message.get("request_id").and_then(Value::as_str) {
-                        if let Err(err) = reader_state
-                            .clear_claude_pending_interaction_by_request(
-                                &reader_session_id,
-                                request_id,
-                            )
-                        {
+                        if let Err(err) = reader_state.clear_claude_pending_interaction_by_request(
+                            &reader_session_id,
+                            request_id,
+                        ) {
                             // Without the owning session, the cancellation cannot be
                             // reconciled with the persisted request card. Stop this reader
                             // instead of accepting more control traffic for stale state.
@@ -875,10 +865,7 @@ fn spawn_claude_runtime(
                 }
 
                 if let Some(replay_generation) = replay_generation.as_deref() {
-                    clear_claude_replay_prompt_if_matches(
-                        &reader_replay_prompt,
-                        replay_generation,
-                    );
+                    clear_claude_replay_prompt_if_matches(&reader_replay_prompt, replay_generation);
                 }
 
                 if claude_event_marks_engram_context_nudge(&message) {
@@ -956,31 +943,31 @@ fn spawn_claude_runtime(
                 &wait_runtime_exit_error_override,
             );
             match wait_result {
-            Ok(status) if status.success() => {
-                let _ = wait_state.handle_runtime_exit_if_matches(
-                    &wait_session_id,
-                    &wait_runtime_token,
-                    error_override.as_deref(),
-                );
-            }
-            Ok(status) => {
-                let detail = error_override
-                    .unwrap_or_else(|| format!("Claude session exited with status {status}"));
-                let _ = wait_state.handle_runtime_exit_if_matches(
-                    &wait_session_id,
-                    &wait_runtime_token,
-                    Some(&detail),
-                );
-            }
-            Err(err) => {
-                let detail = error_override
-                    .unwrap_or_else(|| format!("failed waiting for Claude session: {err}"));
-                let _ = wait_state.handle_runtime_exit_if_matches(
-                    &wait_session_id,
-                    &wait_runtime_token,
-                    Some(&detail),
-                );
-            }
+                Ok(status) if status.success() => {
+                    let _ = wait_state.handle_runtime_exit_if_matches(
+                        &wait_session_id,
+                        &wait_runtime_token,
+                        error_override.as_deref(),
+                    );
+                }
+                Ok(status) => {
+                    let detail = error_override
+                        .unwrap_or_else(|| format!("Claude session exited with status {status}"));
+                    let _ = wait_state.handle_runtime_exit_if_matches(
+                        &wait_session_id,
+                        &wait_runtime_token,
+                        Some(&detail),
+                    );
+                }
+                Err(err) => {
+                    let detail = error_override
+                        .unwrap_or_else(|| format!("failed waiting for Claude session: {err}"));
+                    let _ = wait_state.handle_runtime_exit_if_matches(
+                        &wait_session_id,
+                        &wait_runtime_token,
+                        Some(&detail),
+                    );
+                }
             }
         })
     };
@@ -1001,7 +988,11 @@ fn claude_event_marks_engram_context_nudge(message: &Value) -> bool {
 }
 
 /// Writes Claude initialize.
-fn write_claude_initialize(writer: &mut impl Write, state: &AppState, session_id: &str) -> Result<()> {
+fn write_claude_initialize(
+    writer: &mut impl Write,
+    state: &AppState,
+    session_id: &str,
+) -> Result<()> {
     let guidance = termal_root_mailbox_guidance(state, session_id).unwrap_or_default();
     write_claude_message(
         writer,

@@ -26,6 +26,7 @@ import {
 } from "./panels/ControlPanelSurface";
 import { FileSystemPanel } from "./panels/FileSystemPanel";
 import { GitStatusPanel } from "./panels/GitStatusPanel";
+import { WorkPanel } from "./panels/WorkPanel";
 import { OrchestratorTemplateLibraryPanel } from "./panels/OrchestratorTemplateLibraryPanel";
 import {
   WorkspacesPanel,
@@ -892,6 +893,8 @@ export function AppControlSurface({
 
     function renderControlPanelSection(sectionId: ControlPanelSectionId) {
       switch (sectionId) {
+        case "work":
+          return <WorkPanel projects={projects} focusedProjectId={activeSession?.projectId ?? null} />;
         case "workspaces":
           return (
             <WorkspacesPanel

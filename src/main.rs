@@ -102,6 +102,9 @@ async fn run() -> Result<()> {
     match Mode::parse(args)? {
         Mode::Server => run_server().await,
         Mode::Repl { agent } => run_repl(agent),
+        Mode::ReviewFreeze(args) => {
+            tokio::task::spawn_blocking(move || review_freeze_mode(&args)).await?
+        }
         Mode::DelegationMcp {
             parent_session_id,
             base_url,
@@ -351,6 +354,11 @@ fn app_router(state: AppState) -> Router {
             post(verify_project_engram_settings),
         )
         .route("/api/projects/{id}/digest", get(get_project_digest))
+        .route("/api/projects/{id}/work", get(get_project_work))
+        .route(
+            "/api/projects/{id}/work/engram/{work_ref}",
+            get(get_project_work_detail),
+        )
         .route(
             "/api/projects/{id}/actions/{action_id}",
             post(dispatch_project_action),
@@ -446,6 +454,10 @@ fn app_router(state: AppState) -> Router {
         .route(
             "/api/sessions/{id}/delegation-review-result",
             post(submit_delegation_review_result),
+        )
+        .route(
+            "/api/sessions/{id}/delegation-review-freeze",
+            post(verify_delegation_review_freeze),
         )
         .route(
             "/api/sessions/{id}/mailboxes/{mailbox_id}/read",
@@ -603,6 +615,7 @@ fn run_repl(agent: Agent) -> Result<()> {
 /// Enumerates value modes.
 enum Mode {
     Server,
+    ReviewFreeze(Vec<String>),
     Repl {
         agent: Agent,
     },
@@ -624,6 +637,7 @@ impl Mode {
     fn parse(args: Vec<String>) -> Result<Self> {
         match args.first().map(String::as_str) {
             None | Some("server") => Ok(Self::Server),
+            Some("review-freeze-check") => Ok(Self::ReviewFreeze(args)),
             Some("sessions") | Some("mailbox") => {
                 Ok(Self::CoordinationCli(parse_coordination_cli_args(args)?))
             }
@@ -674,8 +688,16 @@ include!("state.rs");
 include!("engram_host_adapter.rs");
 include!("coordination_instructions.rs");
 include!("delegation_mcp.rs");
+include!("review_freeze.rs");
+include!("bounded_read_process.rs");
+include!("review_freeze_process.rs");
+include!("review_freeze_api.rs");
 include!("coordination_cli.rs");
 include!("engram_mcp_config.rs");
+include!("work_visualizer_types.rs");
+include!("work_visualizer_process.rs");
+include!("work_visualizer.rs");
+include!("work_visualizer_detail.rs");
 include!("session_runtime.rs");
 include!("session_interaction.rs");
 include!("messages.rs");

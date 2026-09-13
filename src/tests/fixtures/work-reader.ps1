@@ -1,0 +1,14 @@
+$ErrorActionPreference = 'Stop'
+$fixtureHomeIndex = [Array]::IndexOf($args, '--home')
+$fixtureHome = $args[$fixtureHomeIndex + 1]
+$args | Set-Content -LiteralPath (Join-Path $fixtureHome 'work-read-args.txt')
+if ($args -contains '--search=stale') { [Console]::Error.WriteLine('work_catalog_cursor_invalid: fixture changed'); exit 1 }
+if ($args -contains '--search=malformed') { [Console]::WriteLine('not json'); exit 0 }
+if ($args -contains 'show') {
+  if ($args -contains '--after=stale') { [Console]::Error.WriteLine('work_show_cursor_invalid: fixture changed'); exit 1 }
+  $fixtureStatus = '"status":{"work":{"short_ref":"w-test","title":"Fixture","outcome":"Goal","acceptance":[],"priority":2,"kind":"bug","lifecycle":"open"},"availability":"ready"},'
+  if ($args -contains '--after=older') { $fixtureStatus = '' }
+  [Console]::WriteLine(('{' + $fixtureStatus + '"notes":[],"notes_window":{"total":0,"shown":0,"newer":0,"older":0,"read_cut":{"project_position":1,"observed_at":"now"}}}'))
+  exit 0
+}
+[Console]::WriteLine('{"items":[{"work":{"work_id":"fixture-id","short_ref":"w-test","title":"Fixture","kind":"bug","lifecycle":"open","priority":2,"labels":[],"assigned_to":null,"parent_id":null,"updated_at":"2026-09-13T00:00:00Z"},"availability":"ready","blocked_by":[]}],"total":1,"shown_before":0,"more":false}')

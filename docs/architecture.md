@@ -4,6 +4,12 @@
 
 ---
 
+## Work visualizer
+
+The project-scoped read-only Work panel is specified in
+[Work visualizer](features/work-visualizer.md). Engram is the first source;
+reads reuse established host bindings and never enable an integration.
+
 ## Delegation follow-up admission
 
 Follow-ups reserve a terminal result before restoring a Codex thread and re-arm
@@ -107,8 +113,11 @@ conditions are separate transport diagnostics. Human Markdown remains
 full output; prose parsing is never result authority for reviewer delegations. The
 submission contract is injected by TermAl for every reviewer-mode delegation,
 after repository-owned task text, so repositories do not need to modify their
-own review commands. Read-only policy remains a workspace boundary; this single
-child-owned result submission is an authenticated control-plane capability.
+own review commands. Read-only policy remains a workspace boundary; result
+submission is an authenticated control-plane capability. A second narrow
+reviewer capability, [`termal_review_freeze_check`](features/review-freeze-verification.md),
+verifies Engram schema-1 frozen inputs using compiled host code and an observed
+subprocess, without permitting Node or execution of repository helpers.
 Reviewer mode is currently limited to Claude and Codex because their native
 permission protocols expose an identity that TermAl can authenticate. ACP v1
 permission requests do not expose a portable authenticated MCP tool origin, so
@@ -379,6 +388,9 @@ All routes are under `/api`. The backend serves JSON, and the frontend proxies r
 | GET | `/api/sessions/{id}/mailboxes` | List neutral mailbox summaries for a participant, including peer display names, latest sequence, and unread count. Unknown session ids return `404`. |
 | POST | `/api/sessions/{id}/mailboxes/send` | Atomically append a routine message from `{id}` to a target root session. Requires a sender-scoped idempotency key; returns the durable receipt before/beside a best-effort metadata wake-up. Writer-admission exhaustion returns a typed `503` before this operation commits; bridge transport loss instead reports an unknown outcome and requires retrying the same key. |
 | POST | `/api/sessions/{id}/delegation-review-result` | Child-only submission for the current structured `/review-code` result. The backend derives the linked parent, topic, state stamp, and idempotency key; validates the complete schema; appends without waking the parent; and rejects root, explorer, unrelated, stale, or malformed callers. |
+| POST | `/api/sessions/{id}/delegation-review-freeze` | Active local read-only reviewer only. Body: `manifestPath`, independently supplied `expectedFingerprint`. Host derives cwd and runs its compiled Engram schema-1 checker; returns `verified` and separate-stream subprocess `observer`. A false result is HTTP 200 and a failed MCP tool call. 400 invalid request values; 422 unknown fields/type errors; 404 linked child record missing; 409 no delegation, inactive/non-read-only/changed review or capacity limit; 500 checker transport/deadline failure. Unlike Work reads, busy verification returns 409. See [verification contract](features/review-freeze-verification.md). |
+| GET | `/api/projects/{id}/work` | Read-only source detection and Engram list via established host binding. Optional `search`, `label`, `availability`, `after`, `readerSessionId`; continuation requires reader identity. Returns source statuses and nullable page. 400 invalid query/argv, 404 missing project, 409 stale cursor/binding, 429 bounded read admission exhausted, 502 CLI/receipt failure. See [Work HTTP contract](features/work-visualizer.md#http-read-api). |
+| GET | `/api/projects/{id}/work/engram/{work_ref}` | Read-only detail and notes window; required `readerSessionId`, optional `after`. 400 invalid query/reference/argv, 404 missing project, 409 unavailable or changed binding/cursor, 429 busy, 502 CLI/receipt failure. See [Work HTTP contract](features/work-visualizer.md#http-read-api). |
 | POST | `/api/sessions/{id}/mailboxes/{mailbox_id}/read` | Read a FIFO page without advancing the participant cursor. Default UI preview is read-only and issues no receipt. Agent MCP/CLI transport sets `issueReceipt: true`, committing participant-bound page issuance and returning `receipt`, `hasMore`, `nextAfterSequence` plus cursor metadata. Each message exposes mutable `notificationState`; immutable send outcome remains `notificationDisposition`. |
 | POST | `/api/sessions/{id}/mailboxes/{mailbox_id}/acknowledge` | Acknowledge a fully processed page by unchanged `receipt`, or use legacy numeric `expectedProcessedThrough`/`processedThrough` CAS; mixing forms is rejected. Newly covered visible messages require issuance, and receipts cannot skip visible unacknowledged gaps (`409`). Replays are idempotent without moving backwards. The summary is prepared inside the cursor transaction. See [agent mailboxes](features/agent-mailboxes.md) for own-reply paging and bridge upgrade requirements. |
 | GET | `/api/sessions/{id}/mailbox-messages/{message_id}` | Read one exact durable mailbox message after participant authorization, including its current mutable `notificationState`. |
