@@ -626,7 +626,9 @@ describe("SessionPaneView composer delegation click-through", () => {
     });
     await settleAsyncUi();
 
-    expect(screen.getByRole("button", { name: "Find" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Find" })).not.toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    expect(screen.getByRole("search", { name: "Find in session" })).toBeInTheDocument();
     expect(screen.queryByLabelText(`Message ${session.name}`)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Delegate" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Send" })).not.toBeInTheDocument();
@@ -658,7 +660,9 @@ describe("SessionPaneView composer delegation click-through", () => {
     });
     await settleAsyncUi();
 
-    expect(screen.getByRole("button", { name: "Find" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Find" })).not.toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    expect(screen.getByRole("search", { name: "Find in session" })).toBeInTheDocument();
     const footer = document.querySelector<HTMLElement>(".delegated-child-footer")!;
     const footerStatus = within(footer).getByRole("status");
     expect(footerStatus).toHaveTextContent("Codex is running");

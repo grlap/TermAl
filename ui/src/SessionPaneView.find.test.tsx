@@ -193,7 +193,12 @@ describe("SessionPaneView find navigation", () => {
       rendered = render(<SessionPaneView {...makeSessionPaneViewProps(session)} />);
     });
 
-    fireEvent.click(rendered!.getByRole("button", { name: "Find" }));
+    expect(rendered!.queryByRole("button", { name: "Find" })).not.toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    const overlay = rendered!.getByRole("search", { name: "Find in session" });
+    expect(overlay.closest(".session-find-overlay")).not.toBeNull();
+    expect(overlay.closest(".pane-view-strip")).toBeNull();
+    expect(overlay.closest(".message-stack")).toBeNull();
     const input = rendered!.getByPlaceholderText("Find in session");
     await act(async () => {
       fireEvent.change(input, { target: { value: "alpha" } });
@@ -212,6 +217,13 @@ describe("SessionPaneView find navigation", () => {
       await Promise.resolve();
     });
     expect(rendered!.getByText("1 of 2")).toBeInTheDocument();
+
+    fireEvent.keyDown(rendered!.getByRole("button", { name: "Next" }), { key: "Escape" });
+    expect(rendered!.queryByRole("search", { name: "Find in session" })).not.toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "f", metaKey: true });
+    expect(rendered!.getByPlaceholderText("Find in session")).toHaveValue("");
+    fireEvent.click(rendered!.getByRole("button", { name: "Close" }));
+    expect(rendered!.queryByRole("search", { name: "Find in session" })).not.toBeInTheDocument();
 
     act(() => {
       rendered?.unmount();

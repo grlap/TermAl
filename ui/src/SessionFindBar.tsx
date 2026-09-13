@@ -1,4 +1,4 @@
-// The Find-in-session toolbar rendered above the session transcript.
+// The Find-in-session controls rendered in a floating transcript overlay.
 //
 // What this file owns:
 //   - The `<div class="session-find-bar">` element, its ARIA
@@ -73,6 +73,15 @@ export function SessionFindBar({
       className="session-find-bar"
       role="search"
       aria-label="Find in session"
+      onKeyDown={(event) => {
+        // Close from the input or any navigation button without letting the
+        // same Escape reach the pane's unrelated keyboard handlers.
+        if (event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+          onClose();
+        }
+      }}
     >
       <input
         ref={inputRef}
@@ -91,11 +100,6 @@ export function SessionFindBar({
               onNext();
             }
             return;
-          }
-
-          if (event.key === "Escape") {
-            event.preventDefault();
-            onClose();
           }
         }}
       />

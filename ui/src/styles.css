@@ -2537,6 +2537,7 @@ textarea {
 }
 
 .pane-top {
+  position: relative;
   display: grid;
   flex: none;
   min-width: 0;
@@ -4445,20 +4446,33 @@ textarea {
   white-space: nowrap;
 }
 
+.session-find-overlay {
+  /* Anchor below the pane chrome, outside both tab-row and transcript flow. */
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  right: 0.7rem;
+  width: min(42rem, calc(100% - 1.4rem));
+  z-index: 20;
+  border-radius: calc(var(--control-radius-tight) + 0.15rem);
+  box-shadow: var(--shadow);
+}
+
 .session-find-bar {
   display: flex;
   align-items: center;
   gap: 0.45rem;
-  min-width: min(24rem, 100%);
+  min-width: 0;
+  width: 100%;
+  flex-wrap: wrap;
   max-width: 100%;
   padding: 0.28rem 0.36rem;
   border: 1px solid var(--line);
   border-radius: calc(var(--control-radius-tight) + 0.15rem);
-  background: var(--surface-white-strong);
+  background: var(--panel-strong);
 }
 
 .session-find-input {
-  min-width: 8rem;
+  min-width: min(8rem, 100%);
   width: 100%;
   flex: 1 1 10rem;
   border: none;
@@ -4478,7 +4492,7 @@ textarea {
 .session-find-count {
   color: var(--muted);
   font-size: 0.82rem;
-  white-space: nowrap;
+  max-width: 100%;
 }
 
 .session-find-button {

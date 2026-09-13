@@ -96,7 +96,6 @@ import {
   isMonacoEditorEventTarget,
   isPointerWithinPaneTopArea,
   labelForPaneViewMode,
-  primaryModifierLabel,
   resolvePaneDropPlacementFromPointer,
   type DraftImageAttachment,
 } from "./app-utils";
@@ -983,7 +982,7 @@ export function SessionPaneView({
         return;
       }
 
-      input.focus();
+      input.focus({ preventScroll: true });
       if (sessionFindFocusRequest.selectAll) {
         input.select();
       }
@@ -1344,34 +1343,27 @@ export function SessionPaneView({
               >
                 Canvas
               </button>
-              {canFindInSession ? (
-                <button
-                  className={`pane-view-button${isSessionFindOpen ? " selected" : ""}`}
-                  type="button"
-                  onClick={() => openSessionFind(!isSessionFindOpen)}
-                  title={`Find in session (${primaryModifierLabel()}+F)`}
-                >
-                  Find
-                </button>
-              ) : null}
             </div>
           ) : null}
-          <div className="pane-view-strip-right">
-            {canFindInSession && isSessionFindOpen ? (
-              <SessionFindBar
-                inputRef={sessionFindInputRef}
-                query={sessionFindQuery}
-                activeIndex={activeSessionSearchMatchIndex}
-                matches={sessionSearchMatches}
-                isPartial={isSessionSearchPartial}
-                onChange={(nextValue) => setSessionFindQuery(nextValue)}
-                onNext={() => stepSessionFind(1)}
-                onPrevious={() => stepSessionFind(-1)}
-                onClose={closeSessionFind}
-              />
-            ) : null}
-          </div>
         </div>
+        {canFindInSession && isSessionFindOpen ? (
+          <div className="session-find-overlay">
+            <SessionFindBar
+              inputRef={sessionFindInputRef}
+              query={sessionFindQuery}
+              activeIndex={activeSessionSearchMatchIndex}
+              matches={sessionSearchMatches}
+              isPartial={isSessionSearchPartial}
+              onChange={(nextValue) => setSessionFindQuery(nextValue)}
+              onNext={() => stepSessionFind(1)}
+              onPrevious={() => stepSessionFind(-1)}
+              onClose={() => {
+                closeSessionFind();
+                messageStackRef.current?.focus({ preventScroll: true });
+              }}
+            />
+          </div>
+        ) : null}
       </div>
 
       <section
