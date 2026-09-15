@@ -360,6 +360,10 @@ fn app_router(state: AppState) -> Router {
             get(get_project_work_detail),
         )
         .route(
+            "/api/projects/{id}/work/beads/{issue_id}",
+            get(get_project_work_beads_detail),
+        )
+        .route(
             "/api/projects/{id}/actions/{action_id}",
             post(dispatch_project_action),
         )
@@ -698,6 +702,7 @@ include!("work_visualizer_types.rs");
 include!("work_visualizer_process.rs");
 include!("work_visualizer.rs");
 include!("work_visualizer_detail.rs");
+include!("work_visualizer_beads.rs");
 include!("session_runtime.rs");
 include!("session_interaction.rs");
 include!("messages.rs");

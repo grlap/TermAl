@@ -353,7 +353,119 @@ async fn review_freeze_route_rejects_invalid_json_requests_and_busy_reads() {
             .unwrap(),
     )
     .await;
-    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+}
+
+#[tokio::test]
+async fn review_freeze_http_rejects_identity_mismatch_before_running_checker() {
+    for invalid in ["workdir", "hidden", "remote"] {
+        let state = test_app_state();
+        let parent = test_session_id(&state, Agent::Codex);
+        let (_, child) =
+            super::delegation_support::install_required_review_delegation(&state, &parent);
+        assert!(state.delegation_control_plane_capability_allowed(
+            &child,
+            DelegationControlPlaneCapability::ReviewFreeze
+        ));
+        {
+            let mut inner = state.inner.lock().unwrap();
+            let index = inner.find_session_index(&child).unwrap();
+            let record = &mut inner.sessions[index];
+            match invalid {
+                "workdir" => record.session.workdir.push_str("/different"),
+                "hidden" => record.hidden = true,
+                "remote" => {
+                    record.remote_id = Some("remote-host".to_owned());
+                    record.remote_session_id = Some("remote-child".to_owned());
+                }
+                _ => unreachable!(),
+            }
+        }
+        assert!(
+            !state.delegation_control_plane_capability_allowed(
+                &child,
+                DelegationControlPlaneCapability::ReviewFreeze
+            ),
+            "{invalid}"
+        );
+        let app = freeze_fixture_router(
+            state,
+            Arc::new(|_| panic!("unauthorized checker must not run")),
+        );
+        let (status, body): (StatusCode, Value) = request_json(
+            &app,
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/sessions/{child}/delegation-review-freeze"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({"manifestPath":"x", "expectedFingerprint":"a".repeat(64)}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT, "{invalid}: {body}");
+        assert!(body.get("verified").is_none());
+    }
+}
+
+#[tokio::test]
+async fn review_freeze_http_transport_failures_are_not_observed_verifications() {
+    for failure in ["deadline", "output limit"] {
+        let state = test_app_state();
+        let parent = test_session_id(&state, Agent::Codex);
+        let (_, child) =
+            super::delegation_support::install_required_review_delegation(&state, &parent);
+        let runner = Arc::new(move |_: &mut Command| {
+            if failure == "output limit" {
+                // Exercise the production observer's 4096-byte bound with a
+                // real fixture process, not a fabricated transport error.
+                return freeze_fixture_output(&"a".repeat(4097), 0);
+            }
+            #[cfg(windows)]
+            let mut command = {
+                let mut command = Command::new("powershell.exe");
+                command.args([
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    "Start-Sleep -Seconds 60",
+                ]);
+                command
+            };
+            #[cfg(unix)]
+            let mut command = {
+                let mut command = Command::new("sh");
+                command.args(["-c", "sleep 60"]);
+                command
+            };
+            // Already expired: no timing race or long test sleep. The owned
+            // child/group is killed by the same observer used in production.
+            run_bounded_read_process(&mut command, std::time::Instant::now(), 4096, true)
+        });
+        let app = freeze_fixture_router(state, runner);
+        let (status, body): (StatusCode, Value) = request_json(
+            &app,
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/sessions/{child}/delegation-review-freeze"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({"manifestPath":"x", "expectedFingerprint":"a".repeat(64)}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "{failure}: {body}"
+        );
+        assert!(body.to_string().contains("review checker did not complete"));
+        assert!(body.to_string().contains(failure), "{body}");
+        assert!(body.get("verified").is_none());
+        assert!(body.get("observer").is_none());
+    }
 }
 
 #[test]

@@ -1193,6 +1193,7 @@ export default function App() {
     handleOpenMailboxTab,
     handleOpenResponseBoardTab,
     handleSetResponseBoardWorkspaceState,
+    handleOpenWorkTab,
     handleOpenDiffPreviewTab,
     handleOpenGitStatusDiffPreviewTab,
     handleOpenFilesystemTab,
@@ -2024,6 +2025,7 @@ export default function App() {
         handleOpenSessionListTab={handleOpenSessionListTab}
         handleOpenCanvasTab={handleOpenCanvasTab}
         handleOpenResponseBoardTab={handleOpenResponseBoardTab}
+        handleOpenWorkTab={handleOpenWorkTab}
         openCreateProjectDialog={openCreateProjectDialog}
         openCreateSessionDialog={openCreateSessionDialog}
         handleOpenSourceTab={handleOpenSourceTab}

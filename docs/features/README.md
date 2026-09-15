@@ -33,6 +33,7 @@ design decisions, and future plans.
 - [Shared Live Events](./shared-live-events.md)
 - [Workspace Terminal](./workspace-terminal.md)
 - [Session Virtualized Transcript](./session-virtualized-transcript.md)
+- [Work Visualizer](./work-visualizer.md)
 
 ## Planned Or Exploratory Briefs
 

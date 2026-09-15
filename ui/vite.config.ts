@@ -183,9 +183,12 @@ export default defineConfig({
       "/api": {
         target: "http://127.0.0.1:8787",
         changeOrigin: true,
-        // Allow large image attachments (base64-encoded PNGs can exceed 2 MB in the JSON body).
-        timeout: 120_000,
-        proxyTimeout: 120_000,
+        // Allow large image attachments (base64-encoded PNGs can exceed 2 MB in the JSON body)
+        // and the backend's longest bounded request: Engram enablement runs the store doctor
+        // under a 300 s deadline, and a multi-GB store takes about two minutes. Cutting the
+        // proxy earlier turns a successful Verify into a spurious "backend is unavailable".
+        timeout: 360_000,
+        proxyTimeout: 360_000,
         configure: configureBackendUnavailableProxy,
       },
     },

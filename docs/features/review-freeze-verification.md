@@ -40,6 +40,8 @@ stdout, timeout, and unsupported inputs cannot become a clean verification.
 An observed failed check returns HTTP 200 with `verified: false` and MCP
 `isError: true`; transport failures use HTTP 500. Request/role/capacity errors
 are documented in the architecture endpoint table. Only two checks run at once.
+Capacity exhaustion returns HTTP 429: retry the same read. HTTP 409 is reserved
+for reviewer authority or attempt conflicts, not a busy checker.
 
 ## Algorithm and safety boundaries
 

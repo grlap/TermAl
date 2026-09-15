@@ -25,6 +25,7 @@ const PANE_VIEW_MODES: readonly PaneViewMode[] = [
   "terminal",
   "mailbox",
   "responseBoard",
+  "work",
   "instructionDebugger",
   "diffPreview",
 ];
@@ -83,6 +84,12 @@ export function isWorkspaceTab(value: unknown): value is WorkspaceTab {
         isOptionalNullableString(value.originProjectId) &&
         isOptionalNullableString(value.activeBoardTabId) &&
         isOptionalResponseBoardViews(value.boardViews)
+      );
+    case "work":
+      return (
+        isNullableString(value.originSessionId) &&
+        isString(value.refreshToken) &&
+        isOptionalNullableString(value.originProjectId)
       );
     case "controlPanel":
       return (

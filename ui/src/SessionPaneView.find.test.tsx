@@ -1,4 +1,4 @@
-import { act, fireEvent, render } from "@testing-library/react";
+import { act, fireEvent, render, waitFor } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -189,11 +189,20 @@ describe("SessionPaneView find navigation", () => {
     });
 
     let rendered: ReturnType<typeof render> | null = null;
+    const props = makeSessionPaneViewProps(session);
     await act(async () => {
-      rendered = render(<SessionPaneView {...makeSessionPaneViewProps(session)} />);
+      rendered = render(<SessionPaneView {...props} />);
     });
 
     expect(rendered!.queryByRole("button", { name: "Find" })).not.toBeInTheDocument();
+    const findButton = rendered!.getByRole("button", { name: "Find in session" });
+    expect(findButton.closest(".pane-view-strip")).toBeNull();
+    fireEvent.click(findButton);
+    expect(findButton).toHaveAttribute("aria-expanded", "true");
+    await waitFor(() => expect(rendered!.getByPlaceholderText("Find in session")).toHaveFocus());
+    fireEvent.click(rendered!.getByRole("button", { name: "Close" }));
+    expect(findButton).toHaveAttribute("aria-expanded", "false");
+    expect(props.onPaneViewModeChange).not.toHaveBeenCalled();
     fireEvent.keyDown(window, { key: "f", ctrlKey: true });
     const overlay = rendered!.getByRole("search", { name: "Find in session" });
     expect(overlay.closest(".session-find-overlay")).not.toBeNull();

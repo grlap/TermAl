@@ -22,40 +22,48 @@ struct ReviewFreezeResponse {
     observer: ReviewFreezeObservation,
 }
 
+// One locked authority boundary for both permission admission and execution.
+fn review_freeze_authority_locked(
+    inner: &StateInner,
+    child: &str,
+) -> Result<(String, String, u32), ApiError> {
+    let index = inner
+        .find_delegation_index_by_child_session_id(child)
+        .ok_or_else(|| {
+            ApiError::conflict("freeze verification requires an active reviewer child")
+        })?;
+    let delegation = &inner.delegations[index];
+    let record = inner
+        .find_session_index(child)
+        .map(|i| &inner.sessions[i])
+        .ok_or_else(|| ApiError::not_found("review child no longer exists"))?;
+    if delegation.mode != DelegationMode::Reviewer
+        || delegation.status != DelegationStatus::Running
+        || !matches!(delegation.write_policy, DelegationWritePolicy::ReadOnly)
+        || record.hidden
+        || !record.is_local_session()
+        || record.session.parent_delegation_id.as_deref() != Some(delegation.id.as_str())
+    {
+        return Err(ApiError::conflict(
+            "freeze verification requires an active local read-only reviewer",
+        ));
+    }
+    if record.session.workdir != delegation.cwd {
+        return Err(ApiError::conflict(
+            "review child directory differs from the admitted review directory",
+        ));
+    }
+    Ok((
+        record.session.workdir.clone(),
+        delegation.id.clone(),
+        delegation.review_result_submission_attempt,
+    ))
+}
+
 impl AppState {
     fn review_freeze_child_identity(&self, child: &str) -> Result<(String, String, u32), ApiError> {
         let inner = self.inner.lock().expect("state mutex poisoned");
-        let index = inner
-            .find_delegation_index_by_child_session_id(child)
-            .ok_or_else(|| {
-                ApiError::conflict("freeze verification requires an active reviewer child")
-            })?;
-        let delegation = &inner.delegations[index];
-        let record = inner
-            .find_session_index(child)
-            .map(|i| &inner.sessions[i])
-            .ok_or_else(|| ApiError::not_found("review child no longer exists"))?;
-        if delegation.mode != DelegationMode::Reviewer
-            || delegation.status != DelegationStatus::Running
-            || !matches!(delegation.write_policy, DelegationWritePolicy::ReadOnly)
-            || record.hidden
-            || !record.is_local_session()
-            || record.session.parent_delegation_id.as_deref() != Some(delegation.id.as_str())
-        {
-            return Err(ApiError::conflict(
-                "freeze verification requires an active local read-only reviewer",
-            ));
-        }
-        if record.session.workdir != delegation.cwd {
-            return Err(ApiError::conflict(
-                "review child directory differs from the admitted review directory",
-            ));
-        }
-        Ok((
-            record.session.workdir.clone(),
-            delegation.id.clone(),
-            delegation.review_result_submission_attempt,
-        ))
+        review_freeze_authority_locked(&inner, child)
     }
 
     fn verify_review_freeze(
@@ -142,9 +150,12 @@ async fn run_review_freeze_request(
     + 'static,
 ) -> Result<Json<ReviewFreezeResponse>, ApiError> {
     let Json(request) = request.map_err(|e| api_json_rejection("review freeze", e))?;
-    let permit = permits
-        .try_acquire_owned()
-        .map_err(|_| ApiError::conflict("review verification busy; retry the same read"))?;
+    let permit = permits.try_acquire_owned().map_err(|_| {
+        ApiError::from_status(
+            StatusCode::TOO_MANY_REQUESTS,
+            "review verification busy; retry the same read",
+        )
+    })?;
     // The owned permit stays with the blocking operation, even if HTTP drops.
     run_blocking_api(move || {
         let _permit = permit;

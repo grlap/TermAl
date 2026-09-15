@@ -283,6 +283,7 @@ export function resolveControlSurfaceSectionIdForWorkspaceTab(
     case "terminal":
     case "mailbox":
     case "responseBoard":
+    case "work":
     case "instructionDebugger":
     case "diffPreview":
       return null;

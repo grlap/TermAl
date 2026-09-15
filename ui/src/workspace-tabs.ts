@@ -39,6 +39,7 @@ import {
   type WorkspaceSourceFocus,
   type WorkspaceSourceTab,
   type WorkspaceTerminalTab,
+  type WorkspaceWorkTab,
 } from "./workspace-types";
 
 export function createSessionTab(
@@ -153,6 +154,19 @@ export function createResponseBoardTab(
     refreshToken: crypto.randomUUID(),
     activeBoardTabId: normalizeWorkspaceIdentifier(activeBoardTabId),
     boardViews: {},
+    ...projectOriginProps(normalizeWorkspaceIdentifier(originProjectId)),
+  };
+}
+
+export function createWorkTab(
+  originSessionId: string | null = null,
+  originProjectId: string | null = null,
+): WorkspaceWorkTab {
+  return {
+    id: crypto.randomUUID(),
+    kind: "work",
+    originSessionId: normalizeWorkspaceIdentifier(originSessionId),
+    refreshToken: crypto.randomUUID(),
     ...projectOriginProps(normalizeWorkspaceIdentifier(originProjectId)),
   };
 }

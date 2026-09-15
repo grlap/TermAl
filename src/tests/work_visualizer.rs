@@ -1,6 +1,17 @@
-// New Work read tests: metadata refusal, receipt normalization and argv-only
-// transport. All stores and bindings below are isolated fixtures, never live.
+// New Work read tests: metadata refusal, the host reader identity, receipt
+// normalization and argv-only transport. All stores below are isolated
+// fixtures, never live.
 use super::*;
+
+/// The reader key the host reader currently serves for `project`.
+fn host_reader_key(state: &AppState, project: &str) -> String {
+    state
+        .work_read_snapshot(project, None)
+        .unwrap()
+        .1
+        .unwrap()
+        .reader_key
+}
 
 #[tokio::test]
 async fn work_routes_validate_and_detect_without_available_cli_permits() {
@@ -16,7 +27,7 @@ async fn work_routes_validate_and_detect_without_available_cli_permits() {
         ),
         ("/engram/w-one".to_owned(), StatusCode::BAD_REQUEST),
         (
-            "/engram/w-one?readerSessionId=missing".to_owned(),
+            "/engram/w-one?readerId=missing".to_owned(),
             StatusCode::CONFLICT,
         ),
     ] {
@@ -38,14 +49,12 @@ async fn work_routes_validate_and_detect_without_available_cli_permits() {
 
 #[tokio::test]
 async fn work_ready_http_routes_use_blocking_admission_and_release_private_permits() {
-    let (state, project, session, root) = fixture();
-    install_binding(&state, &project, &session, &root);
+    let (state, project, _, root) = fixture();
+    install_store(&state, &project, &root);
+    let reader = host_reader_key(&state, &project);
     let limiter = Arc::new(tokio::sync::Semaphore::new(1));
     let app = app_router(state).layer(axum::Extension(WorkReadLimiter(limiter.clone())));
-    for suffix in [
-        String::new(),
-        format!("/engram/w-test?readerSessionId={session}"),
-    ] {
+    for suffix in [String::new(), format!("/engram/w-test?readerId={reader}")] {
         let (status, response): (StatusCode, Value) = request_json(
             &app,
             Request::builder()
@@ -57,7 +66,7 @@ async fn work_ready_http_routes_use_blocking_admission_and_release_private_permi
         assert_eq!(status, StatusCode::OK, "{response}");
         if suffix.is_empty() {
             assert_eq!(response["page"]["items"][0]["shortRef"], "w-test");
-            assert_eq!(response["readerSessionId"], session);
+            assert_eq!(response["readerId"], reader);
         } else {
             assert_eq!(response["status"]["work"]["shortRef"], "w-test");
         }
@@ -66,10 +75,7 @@ async fn work_ready_http_routes_use_blocking_admission_and_release_private_permi
     // Closing only this router's limiter proves ready requests actually use
     // the admission dependency (and cannot silently bypass block_on).
     limiter.close();
-    for suffix in [
-        String::new(),
-        format!("/engram/w-test?readerSessionId={session}"),
-    ] {
+    for suffix in [String::new(), format!("/engram/w-test?readerId={reader}")] {
         let (status, response): (StatusCode, Value) = request_json(
             &app,
             Request::builder()
@@ -89,7 +95,12 @@ fn work_detection_and_invalid_requests_do_not_request_cli_capacity() {
     let never_admit =
         || -> Result<(), ApiError> { panic!("metadata-only request asked for a CLI permit") };
     let response = state
-        .list_project_work_with_admission(&project, WorkListQuery::default(), never_admit)
+        .list_project_work_with_admission(
+            &project,
+            WorkListQuery::default(),
+            never_admit,
+            never_admit,
+        )
         .unwrap();
     assert!(response.page.is_none());
     let error = state
@@ -100,6 +111,7 @@ fn work_detection_and_invalid_requests_do_not_request_cli_capacity() {
                 ..Default::default()
             },
             never_admit,
+            never_admit,
         )
         .unwrap_err();
     assert_eq!(error.status, StatusCode::BAD_REQUEST);
@@ -108,7 +120,7 @@ fn work_detection_and_invalid_requests_do_not_request_cli_capacity() {
             &project,
             "-invalid",
             WorkDetailQuery {
-                reader_session_id: "reader".into(),
+                reader_id: "reader".into(),
                 after: None,
             },
             never_admit,
@@ -120,7 +132,7 @@ fn work_detection_and_invalid_requests_do_not_request_cli_capacity() {
             &project,
             "w-one",
             WorkDetailQuery {
-                reader_session_id: "reader".into(),
+                reader_id: "reader".into(),
                 after: None,
             },
             never_admit,
@@ -153,8 +165,8 @@ async fn work_replacement_read_waits_for_an_existing_read_to_release_capacity() 
 
 #[test]
 fn work_rejects_redirected_home_before_launching_a_read() {
-    let (state, project, session, root) = fixture();
-    install_binding(&state, &project, &session, &root);
+    let (state, project, _, root) = fixture();
+    install_store(&state, &project, &root);
     let mut target = state.work_read_snapshot(&project, None).unwrap().1.unwrap();
     let alias = root.parent().unwrap().join("work-home-alias");
     let other = root.parent().unwrap().join("different-work-home");
@@ -210,8 +222,8 @@ fn work_rejects_redirected_home_before_launching_a_read() {
 
 #[test]
 fn work_shims_are_unavailable_and_oversized_combined_arguments_are_client_errors() {
-    let (state, project, session, root) = fixture();
-    install_binding(&state, &project, &session, &root);
+    let (state, project, _, root) = fixture();
+    install_store(&state, &project, &root);
     let mut target = state.work_read_snapshot(&project, None).unwrap().1.unwrap();
     let error = run_work_read_command(
         &target.connection,
@@ -231,26 +243,21 @@ fn work_shims_are_unavailable_and_oversized_combined_arguments_are_client_errors
             StatusCode::CONFLICT
         );
     }
-    {
-        let mut inner = state.inner.lock().unwrap();
-        inner
-            .projects
-            .iter_mut()
-            .find(|p| p.id == project)
-            .unwrap()
-            .engram
-            .as_mut()
-            .unwrap()
-            .binary_path = Some(target.connection.binary_path.to_string_lossy().into_owned());
-        let installed = engram_mcp_runtime_config_for_session_locked(&inner, &session)
-            .unwrap()
-            .installed;
-        let index = inner.find_session_index(&session).unwrap();
-        inner
-            .session_mut_by_index(index)
-            .unwrap()
-            .engram_mcp_installed = Some(installed);
-    }
+    // The host reader follows the project settings directly: a shim
+    // configured there is unavailable on the next read, with no runtime
+    // descriptor to refresh.
+    state
+        .inner
+        .lock()
+        .unwrap()
+        .projects
+        .iter_mut()
+        .find(|p| p.id == project)
+        .unwrap()
+        .engram
+        .as_mut()
+        .unwrap()
+        .binary_path = Some(target.connection.binary_path.to_string_lossy().into_owned());
     let response = state
         .list_project_work(&project, WorkListQuery::default())
         .unwrap();
@@ -275,8 +282,22 @@ fn work_receipt_keeps_lifecycle_availability_and_assignment_separate() {
     assert_eq!(row.lifecycle, "open");
     assert_eq!(row.availability, "blocked");
     assert_eq!(row.assigned_to.as_deref(), Some("actor-not-holder"));
+    // `blocked_by` becomes the row's prerequisites, unsatisfied (Engram lists
+    // only the still-blocking ones) and with the ids passed through as
+    // listed: the tree matches them against row ids, which Engram reports as
+    // work ids in both fields.
+    assert_eq!(
+        row.prerequisites,
+        vec![WorkPrerequisiteView {
+            id: "prerequisite".into(),
+            satisfied: false
+        }]
+    );
+    assert_eq!(row.blocked_by, vec!["prerequisite".to_owned()]);
     let wire = serde_json::to_value(page).unwrap();
     assert_eq!(wire["items"][0]["shortRef"], "w-one");
+    assert_eq!(wire["items"][0]["prerequisites"][0]["id"], "prerequisite");
+    assert_eq!(wire["items"][0]["prerequisites"][0]["satisfied"], false);
     assert!(wire.get("next").is_none());
     assert!(wire["items"][0].get("holder").is_none());
 }
@@ -323,6 +344,21 @@ fn work_arguments_keep_filters_as_data_and_validate_continuations() {
             .contains(&"--search=--init; $(claim) 'quoted' &".to_owned())
     );
     assert_eq!(query.arguments()[0], "ls");
+    // Open work only, on the first page and on every continuation: `--all`
+    // never enters the argv, so automatic reading ahead stays consistent.
+    assert!(!query.arguments().iter().any(|arg| arg == "--all"));
+    let continuation = WorkListQuery {
+        after: Some("cursor".into()),
+        reader_id: Some("host:reader".into()),
+        ..Default::default()
+    };
+    continuation.validate().unwrap();
+    assert!(
+        continuation
+            .arguments()
+            .contains(&"--after=cursor".to_owned())
+    );
+    assert!(!continuation.arguments().iter().any(|arg| arg == "--all"));
     assert!(
         WorkListQuery {
             after: Some("opaque".into()),
@@ -406,7 +442,7 @@ fn work_notes_preserve_status_provenance_and_inert_references() {
     }
 }
 
-fn fixture() -> (AppState, String, String, PathBuf) {
+pub(super) fn fixture() -> (AppState, String, String, PathBuf) {
     let state = test_app_state();
     let root = state
         .persistence_path
@@ -419,7 +455,10 @@ fn fixture() -> (AppState, String, String, PathBuf) {
     (state, project, session, root)
 }
 
-fn install_binding(state: &AppState, project: &str, session: &str, root: &FsPath) {
+/// Establishes what the operator's enablement leaves behind and nothing else:
+/// the declaration, the validated store identity and the project settings.
+/// No session, binding or runtime descriptor takes part.
+pub(super) fn install_store(state: &AppState, project: &str, root: &FsPath) {
     fs::write(root.join(".engram-project"), "established-project\n").unwrap();
     // A metadata-only stand-in: no test opens this as a SQLite database.
     let database = work_database_path(root, "established-project");
@@ -432,8 +471,10 @@ fn install_binding(state: &AppState, project: &str, session: &str, root: &FsPath
         } else {
             "work-reader.sh"
         });
-    let mut inner = state.inner.lock().unwrap();
-    inner
+    state
+        .inner
+        .lock()
+        .unwrap()
         .projects
         .iter_mut()
         .find(|p| p.id == project)
@@ -448,20 +489,11 @@ fn install_binding(state: &AppState, project: &str, session: &str, root: &FsPath
         }),
         ..Default::default()
     });
-    inner.engram_declared_project_ids.insert(project.into());
-    let descriptor = engram_mcp_runtime_config_for_session_locked(&inner, session)
-        .unwrap()
-        .installed;
-    let index = inner.find_session_index(session).unwrap();
-    inner
-        .session_mut_by_index(index)
-        .unwrap()
-        .engram_mcp_installed = Some(descriptor);
 }
 
 #[test]
 fn work_detection_never_creates_store_or_binding_or_enables_engram() {
-    let (state, project, session, root) = fixture();
+    let (state, project, _, root) = fixture();
     let empty = state
         .list_project_work(&project, WorkListQuery::default())
         .unwrap();
@@ -473,14 +505,8 @@ fn work_detection_never_creates_store_or_binding_or_enables_engram() {
             .any(|s| s.source == "engram" && s.state == "absent")
     );
     assert!(!root.join("engram.db").exists());
-    assert!(
-        state
-            .work_read_snapshot(&project, None)
-            .unwrap()
-            .1
-            .is_none()
-    );
-    install_binding(&state, &project, &session, &root);
+    assert!(state.work_read_snapshot(&project, None).unwrap().1.is_err());
+    install_store(&state, &project, &root);
     let database = work_database_path(&root, "established-project");
     fs::remove_file(&database).unwrap();
     let missing = state
@@ -502,15 +528,128 @@ fn work_detection_never_creates_store_or_binding_or_enables_engram() {
             .is_none()
     );
     assert!(!root.join("work-read-args.txt").exists());
+    // Without a validated store identity or a developer name there is no
+    // host reader: the source says why, and nothing is spawned or created.
+    let unavailable = |state: &AppState| -> String {
+        let response = state
+            .list_project_work(&project, WorkListQuery::default())
+            .unwrap();
+        assert!(response.page.is_none() && response.reader_id.is_none());
+        let engram = response
+            .sources
+            .iter()
+            .find(|s| s.source == "engram")
+            .unwrap();
+        assert_eq!(engram.state, "unavailable", "{}", engram.message);
+        assert!(!root.join("work-read-args.txt").exists());
+        engram.message.clone()
+    };
+    install_store(&state, &project, &root);
+    state
+        .inner
+        .lock()
+        .unwrap()
+        .projects
+        .iter_mut()
+        .find(|p| p.id == project)
+        .unwrap()
+        .engram
+        .as_mut()
+        .unwrap()
+        .authority_store_key = None;
+    assert!(unavailable(&state).contains("verify the integration first"));
+    install_store(&state, &project, &root);
+    let developer = std::mem::replace(
+        &mut state
+            .inner
+            .lock()
+            .unwrap()
+            .preferences
+            .engram
+            .developer_name,
+        " ".to_owned(),
+    );
+    assert!(unavailable(&state).contains("developer name"));
+    state
+        .inner
+        .lock()
+        .unwrap()
+        .preferences
+        .engram
+        .developer_name = developer;
+    // A project whose Engram settings are being reset has no reader either.
+    let generation = state
+        .inner
+        .lock()
+        .unwrap()
+        .engram_project_resets
+        .claim(&project)
+        .unwrap();
+    assert!(unavailable(&state).contains("reset"));
+    assert!(
+        state
+            .inner
+            .lock()
+            .unwrap()
+            .engram_project_resets
+            .release(&project, generation)
+    );
+    assert!(
+        state
+            .list_project_work(&project, WorkListQuery::default())
+            .unwrap()
+            .page
+            .is_some()
+    );
 }
 
 #[test]
-fn work_reader_uses_established_identity_and_rejects_disabled_or_changed_binding() {
-    let (state, project, session, root) = fixture();
-    install_binding(&state, &project, &session, &root);
+fn work_reader_is_the_host_identity_and_rejects_disabled_or_changed_configuration() {
+    let (state, project, _, root) = fixture();
+    install_store(&state, &project, &root);
     let target = state.work_read_snapshot(&project, None).unwrap().1.unwrap();
-    assert_eq!(target.connection.session_id, session);
+    let developer = state
+        .inner
+        .lock()
+        .unwrap()
+        .preferences
+        .engram
+        .developer_name
+        .clone();
+    assert_eq!(target.connection.actor_id, format!("{developer}/termal"));
+    assert_eq!(target.connection.session_id, "termal-work-view");
+    assert!(target.connection.actor_context.is_none());
+    assert!(target.reader_key.starts_with("host:"));
     validate_work_read_target(&target).unwrap();
+    state
+        .validate_work_read_still_current(&project, &target)
+        .unwrap();
+    let set_home = |home: &FsPath| {
+        state
+            .inner
+            .lock()
+            .unwrap()
+            .projects
+            .iter_mut()
+            .find(|p| p.id == project)
+            .unwrap()
+            .engram
+            .as_mut()
+            .unwrap()
+            .home = Some(home.to_string_lossy().into_owned());
+    };
+    // Another home is another reader: the key changes and the pages read
+    // under the old one are refused, even though the old store still exists.
+    set_home(&root.join("other-home"));
+    let changed = host_reader_key(&state, &project);
+    assert_ne!(changed, target.reader_key);
+    assert!(changed.starts_with("host:"));
+    let error = state
+        .validate_work_read_still_current(&project, &target)
+        .unwrap_err();
+    assert_eq!(error.status, StatusCode::CONFLICT);
+    set_home(&root);
+    assert_eq!(host_reader_key(&state, &project), target.reader_key);
     {
         let mut inner = state.inner.lock().unwrap();
         inner
@@ -536,9 +675,80 @@ fn work_reader_uses_established_identity_and_rejects_disabled_or_changed_binding
 }
 
 #[test]
+fn work_reads_need_no_agent_session_and_pin_the_host_identity() {
+    // Exactly what an operator's enablement leaves behind after a host
+    // restart: project settings and a store, no session of any kind.
+    let state = test_app_state();
+    let root = state
+        .persistence_path
+        .parent()
+        .unwrap()
+        .join("work-project");
+    fs::create_dir_all(&root).unwrap();
+    let project = create_test_project(&state, &root, "Work fixture");
+    install_store(&state, &project, &root);
+    assert!(state.inner.lock().unwrap().sessions.is_empty());
+    let developer = state
+        .inner
+        .lock()
+        .unwrap()
+        .preferences
+        .engram
+        .developer_name
+        .clone();
+    let result = state
+        .list_project_work(&project, WorkListQuery::default())
+        .unwrap();
+    assert_eq!(result.page.unwrap().items.len(), 1);
+    let reader = result.reader_id.unwrap();
+    assert_eq!(reader, host_reader_key(&state, &project));
+    let argv = fs::read_to_string(root.join("work-read-args.txt")).unwrap();
+    let args = argv.lines().collect::<Vec<_>>();
+    let start = args.iter().position(|arg| *arg == "work").unwrap();
+    let actor = format!("{developer}/termal");
+    assert_eq!(
+        &args[start..start + 6],
+        vec![
+            "work",
+            "--actor-id",
+            actor.as_str(),
+            "--session-id",
+            "termal-work-view",
+            "ls"
+        ]
+    );
+    // The same key opens details and continuations; a session id never does.
+    let detail = state
+        .read_project_work_detail(
+            &project,
+            "w-test",
+            WorkDetailQuery {
+                reader_id: reader.clone(),
+                after: None,
+            },
+        )
+        .unwrap();
+    assert!(detail.status.is_some());
+    assert_eq!(
+        state
+            .read_project_work_detail(
+                &project,
+                "w-test",
+                WorkDetailQuery {
+                    reader_id: "session-1".into(),
+                    after: None,
+                },
+            )
+            .unwrap_err()
+            .status,
+        StatusCode::CONFLICT
+    );
+}
+
+#[test]
 fn work_list_process_returns_real_json_and_surfaces_stale_and_malformed_failures() {
-    let (state, project, session, root) = fixture();
-    install_binding(&state, &project, &session, &root);
+    let (state, project, _, root) = fixture();
+    install_store(&state, &project, &root);
     let result = state
         .list_project_work(
             &project,
@@ -549,19 +759,47 @@ fn work_list_process_returns_real_json_and_surfaces_stale_and_malformed_failures
         )
         .unwrap();
     assert_eq!(result.page.unwrap().items.len(), 1);
-    assert_eq!(result.reader_session_id.as_deref(), Some(session.as_str()));
+    let reader = result.reader_id.unwrap();
+    assert_eq!(reader, host_reader_key(&state, &project));
     let argv = fs::read_to_string(root.join("work-read-args.txt")).unwrap();
     assert!(argv.lines().any(|line| line == "--search=quoted ' & data"));
-    assert!(argv.contains(&session));
+    assert!(argv.lines().any(|line| line == "termal-work-view"));
     for (filter, status) in [
         ("stale", StatusCode::CONFLICT),
         ("malformed", StatusCode::BAD_GATEWAY),
     ] {
+        // A first page keeps serving the other source: the failure is an
+        // explicit Engram source error, never a hidden page.
+        let response = state
+            .list_project_work(
+                &project,
+                WorkListQuery {
+                    search: Some(filter.into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let engram = response
+            .sources
+            .iter()
+            .find(|s| s.source == "engram")
+            .unwrap();
+        assert_eq!(engram.state, "error");
+        assert!(
+            engram.message.contains("engram work ls"),
+            "{}",
+            engram.message
+        );
+        assert!(response.page.is_none() && response.reader_id.is_none());
+        // A continuation serves only the Engram page: the same failure stays
+        // a hard error with its original status.
         let error = state
             .list_project_work(
                 &project,
                 WorkListQuery {
                     search: Some(filter.into()),
+                    after: Some("cursor".into()),
+                    reader_id: Some(reader.clone()),
                     ..Default::default()
                 },
             )
@@ -573,15 +811,16 @@ fn work_list_process_returns_real_json_and_surfaces_stale_and_malformed_failures
 
 #[test]
 fn work_detail_process_passes_exact_arguments_and_rejects_stale_reader_or_cursor() {
-    let (state, project, session, root) = fixture();
-    install_binding(&state, &project, &session, &root);
+    let (state, project, _, root) = fixture();
+    install_store(&state, &project, &root);
+    let reader = host_reader_key(&state, &project);
     for after in [None, Some("older")] {
         let result = state
             .read_project_work_detail(
                 &project,
                 "w-test",
                 WorkDetailQuery {
-                    reader_session_id: session.clone(),
+                    reader_id: reader.clone(),
                     after: after.map(str::to_owned),
                 },
             )
@@ -601,7 +840,7 @@ fn work_detail_process_passes_exact_arguments_and_rejects_stale_reader_or_cursor
             &project,
             "w-test",
             WorkDetailQuery {
-                reader_session_id: session.clone(),
+                reader_id: reader.clone(),
                 after: Some("stale".into()),
             },
         )
@@ -620,7 +859,7 @@ fn work_detail_process_passes_exact_arguments_and_rejects_stale_reader_or_cursor
                     &project,
                     &reference,
                     WorkDetailQuery {
-                        reader_session_id: session.clone(),
+                        reader_id: reader.clone(),
                         after: None,
                     }
                 )
@@ -635,7 +874,7 @@ fn work_detail_process_passes_exact_arguments_and_rejects_stale_reader_or_cursor
                 &project,
                 "w-test",
                 WorkDetailQuery {
-                    reader_session_id: "missing-reader".into(),
+                    reader_id: "missing-reader".into(),
                     after: Some("older".into()),
                 }
             )
@@ -648,7 +887,7 @@ fn work_detail_process_passes_exact_arguments_and_rejects_stale_reader_or_cursor
             .list_project_work(
                 &project,
                 WorkListQuery {
-                    reader_session_id: Some("missing-reader".into()),
+                    reader_id: Some("missing-reader".into()),
                     after: Some("older".into()),
                     ..Default::default()
                 }

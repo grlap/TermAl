@@ -1,4 +1,7 @@
-.work-panel { display: flex; flex-direction: column; gap: 0.65rem; padding: 0.75rem; min-width: 0; overflow: auto; }
+/* The panel is a size container so the details layout follows the pane, not the viewport. */
+.work-panel { display: flex; flex-direction: column; gap: 0.65rem; padding: 0.75rem; min-width: 0; overflow: auto; container-type: inline-size; }
+.message-stack.work-panel-stack { padding: 0; overflow: hidden; }
+.message-stack.work-panel-stack > .work-panel { flex: 1 1 0; min-height: 0; width: 100%; }
 .work-panel p { margin: 0; overflow-wrap: anywhere; }
 .work-panel label { display: flex; flex-direction: column; gap: 0.2rem; min-width: 0; }
 .work-panel input, .work-panel select, .work-panel button { font: inherit; color: var(--ink); background: var(--paper-strong); border: 1px solid var(--line); border-radius: var(--button-radius-tight); padding: 0.35rem 0.5rem; }
@@ -12,14 +15,59 @@
 .work-panel-caption { font-size: 0.8rem; color: var(--muted); }
 .work-source-status { font-size: 0.85rem; }
 .work-source-status[data-state="ready"] strong { color: var(--signal-green); }
+.work-source-status[data-state="error"] strong { color: var(--signal-red); }
 .work-panel [role="alert"] { color: var(--signal-red); }
+
+/* View switch: one selected tab, no section semantics. */
+.work-view-switch { display: flex; gap: 0.25rem; }
+.work-view-switch button { border-radius: 999px; padding: 0.3rem 0.75rem; color: var(--muted); }
+.work-view-switch button[aria-pressed="true"] { color: var(--ink); background: var(--surface-white); border-color: var(--ink); font-weight: 600; }
+
+/* List on the left, details beside it when the pane is wide enough; the
+   drawer stacks below the list in a narrow split pane. */
+.work-panel-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.75rem; align-items: start; }
+@container (min-width: 56rem) { .work-panel-body[data-details="open"] { grid-template-columns: minmax(0, 1fr) minmax(18rem, 24rem); } }
+.work-item-details { min-width: 0; }
+.work-panel-list { min-width: 0; display: flex; flex-direction: column; gap: 0.5rem; }
+
+/* Rows shared by the tree and the table. */
+.work-row-title { text-align: left; white-space: normal; }
+.work-row-title[aria-current="true"] { border-color: var(--signal-blue); box-shadow: inset 0 0 0 1px var(--signal-blue); }
+.work-chip { font-size: 0.75rem; border: 1px solid var(--line); border-radius: 999px; padding: 0.05rem 0.45rem; color: var(--muted); white-space: nowrap; }
+.work-chip[data-state="blocked"] { color: var(--signal-red); border-color: var(--signal-red); }
+.work-chip[data-state="ready"] { color: var(--signal-green); border-color: var(--signal-green); }
+.work-chip[data-state="active"], .work-chip[data-state="claimed"] { color: var(--signal-blue); border-color: var(--signal-blue); }
+.work-chip[data-satisfied="true"] { color: var(--signal-green); }
+.work-chip-source { text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.68rem; }
+
+/* Trees: solid rail = waits for, dashed rail = subtask of. */
+.work-tree ul { list-style: none; margin: 0; padding: 0; }
+.work-tree ul ul { margin-left: 0.7rem; padding-left: 0.7rem; border-left: 2px solid var(--line); }
+.work-tree ul[data-relation="hierarchy"] ul, .work-tree > ul[data-relation="hierarchy"] li > ul { border-left-style: dashed; }
+.work-tree ul[data-relation="dependencies"][data-satisfied="true"] { border-left-color: var(--signal-green); }
+.work-tree-group { font-size: 0.78rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 0.35rem; }
+.work-tree-relation { font-size: 0.75rem; color: var(--muted); font-style: italic; }
+p.work-tree-relation { margin-left: 2rem; }
+.work-tree-relation[data-satisfied="true"] { color: var(--signal-green); }
+/* A repeated reference is a control: it reveals the row it points at. */
+button.work-tree-relation { background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline dotted; }
+.work-node-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; padding: 0.2rem 0; }
+.work-node-toggle { width: 1.5rem; height: 1.5rem; padding: 0; line-height: 1; text-align: center; display: inline-flex; align-items: center; justify-content: center; }
+.work-node-toggle[aria-expanded="false"] { transform: rotate(-90deg); }
+.work-node-leaf { border-color: transparent; background: transparent; }
+.work-node.is-completed > .work-node-row .work-row-title { opacity: 0.65; }
+
 .work-table-scroll { overflow: auto; max-width: 100%; }
 .work-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
 .work-table th, .work-table td { text-align: left; vertical-align: top; padding: 0.4rem; border-bottom: 1px solid var(--line); }
 .work-table th { white-space: nowrap; }
+/* A header is a real button (keyboard reachable, focus ring kept); the sorted column is marked. */
+.work-table-sort { background: none; border: 0; padding: 0; margin: 0; font: inherit; font-weight: inherit; color: inherit; cursor: pointer; text-align: left; }
+.work-table th[aria-sort="ascending"] .work-table-sort, .work-table th[aria-sort="descending"] .work-table-sort { text-decoration: underline; text-underline-offset: 0.2em; }
+.work-sort-direction { align-self: end; }
+.work-table-time { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .work-table td:nth-child(2) { min-width: 14rem; overflow-wrap: anywhere; }
 .work-table small { display: block; }
-.work-table button { text-align: left; white-space: normal; }
 .work-item-details { border: 1px solid var(--line); background: var(--surface-card); border-radius: 0.4rem; padding: 0.65rem; overflow-wrap: anywhere; }
 .work-item-details li { margin-bottom: 0.65rem; }
 .work-inert-text { white-space: pre-wrap; }

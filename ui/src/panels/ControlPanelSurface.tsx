@@ -18,7 +18,6 @@ import {
 import type { WorkspaceTab } from "../workspace-types";
 
 export type ControlPanelSectionId =
-  | "work"
   | "workspaces"
   | "files"
   | "sessions"
@@ -29,7 +28,6 @@ export type ControlPanelSectionId =
 const DEFAULT_CONTROL_PANEL_SECTION_ORDER: readonly ControlPanelSectionId[] = [
   "workspaces",
   "projects",
-  "work",
   "sessions",
   "orchestrators",
   "files",
@@ -42,6 +40,7 @@ type ControlPanelSurfaceProps = {
   gitStatusCount: number;
   isPreferencesOpen: boolean;
   onOpenResponseBoard?: () => void;
+  onOpenWork?: () => void;
   onOpenPreferences: () => void;
   onSectionTabDragEnd?: () => void;
   onSectionTabDragStart?: (
@@ -90,10 +89,13 @@ const RESPONSE_BOARD_ACTION: ControlPanelActionDefinition = {
   icon: <BoardIcon />,
 };
 
+const WORK_ACTION: ControlPanelActionDefinition = {
+  label: "Open Work",
+  icon: <WorkIcon />,
+};
+
 export function ControlPanelSectionIcon({ sectionId }: { sectionId: ControlPanelSectionId }) {
   switch (sectionId) {
-    case "work":
-      return <BoardIcon />;
     case "workspaces":
       return <WorkspacesIcon />;
     case "files":
@@ -114,6 +116,7 @@ export const ControlPanelSurface = forwardRef<ControlPanelSurfaceHandle, Control
   gitStatusCount,
   isPreferencesOpen,
   onOpenResponseBoard,
+  onOpenWork,
   onOpenPreferences,
   onSectionTabDragEnd,
   onSectionTabDragStart,
@@ -131,7 +134,6 @@ export const ControlPanelSurface = forwardRef<ControlPanelSurfaceHandle, Control
   const [dropTarget, setDropTarget] = useState<DockDropTarget | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const sectionDefinitionLookup: Record<ControlPanelSectionId, ControlPanelSectionDefinition> = {
-    work: { id: "work", label: "Work", icon: <ControlPanelSectionIcon sectionId="work" /> },
     workspaces: {
       id: "workspaces",
       label: "Workspaces",
@@ -281,6 +283,12 @@ export const ControlPanelSurface = forwardRef<ControlPanelSurfaceHandle, Control
               <ControlPanelActionButton
                 definition={RESPONSE_BOARD_ACTION}
                 onClick={onOpenResponseBoard}
+              />
+            ) : null}
+            {onOpenWork ? (
+              <ControlPanelActionButton
+                definition={WORK_ACTION}
+                onClick={onOpenWork}
               />
             ) : null}
             <ControlPanelActionButton
@@ -645,6 +653,24 @@ function BoardIcon() {
       <rect x="11.25" y="3.25" width="5.5" height="5.5" rx="1" fill="none" stroke="currentColor" strokeWidth="1.5" />
       <rect x="3.25" y="11.25" width="5.5" height="5.5" rx="1" fill="none" stroke="currentColor" strokeWidth="1.5" />
       <rect x="11.25" y="11.25" width="5.5" height="5.5" rx="1" fill="none" stroke="currentColor" strokeWidth="1.5" />
+    </svg>
+  );
+}
+
+function WorkIcon() {
+  // Dependency chain for the Work visualizer: a goal fed by two prerequisites.
+  return (
+    <svg viewBox="0 0 20 20" focusable="false" aria-hidden="true">
+      <circle cx="5" cy="5.5" r="2" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <circle cx="5" cy="14.5" r="2" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <circle cx="15" cy="10" r="2" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <path
+        d="M7 5.5h2.5a2 2 0 0 1 2 2V8a2 2 0 0 0 2 2M7 14.5h2.5a2 2 0 0 0 2-2V12a2 2 0 0 1 2-2"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeWidth="1.5"
+      />
     </svg>
   );
 }

@@ -97,9 +97,6 @@ export function createControlPanelSectionLauncherTab(
   const { filesystemRoot, gitWorkdir, originProjectId, originSessionId } =
     options;
   switch (sectionId) {
-    case "work":
-      // Project-scoped dock view; board pins and standalone tabs are later slices.
-      return null;
     case "workspaces":
       // No standalone tab: only one Workspaces view mounts, so
       // App can own one rename-editor mounted flag and remount focus.

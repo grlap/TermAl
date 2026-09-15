@@ -48,6 +48,7 @@ export function useSessionPaneActiveContext({
   const activeMailboxTab = activeTab?.kind === "mailbox" ? activeTab : null;
   const activeResponseBoardTab =
     activeTab?.kind === "responseBoard" ? activeTab : null;
+  const activeWorkTab = activeTab?.kind === "work" ? activeTab : null;
   const activeInstructionDebuggerTab =
     activeTab?.kind === "instructionDebugger" ? activeTab : null;
   const activeDiffPreviewTab =
@@ -231,6 +232,7 @@ export function useSessionPaneActiveContext({
     activeTerminalTab,
     activeMailboxTab,
     activeResponseBoardTab,
+    activeWorkTab,
     activeInstructionDebuggerTab,
     activeDiffPreviewTab,
     activeSourceOriginSessionId,

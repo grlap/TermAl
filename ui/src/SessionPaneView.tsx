@@ -63,6 +63,7 @@ import { GitStatusPanel } from "./panels/GitStatusPanel";
 import { InstructionDebuggerPanel } from "./panels/InstructionDebuggerPanel";
 import { MailboxPanel } from "./panels/MailboxPanel";
 import { ResponseBoardPanel } from "./panels/ResponseBoardPanel";
+import { WorkPanel } from "./panels/WorkPanel";
 import { PaneTabs } from "./panels/PaneTabs";
 import { OrchestratorTemplatesPanel } from "./panels/OrchestratorTemplatesPanel";
 import { SessionCanvasPanel } from "./panels/SessionCanvasPanel";
@@ -325,6 +326,7 @@ export function SessionPaneView({
     activeTerminalTab,
     activeMailboxTab,
     activeResponseBoardTab,
+    activeWorkTab,
     activeInstructionDebuggerTab,
     activeDiffPreviewTab,
     activeSourceOriginSessionId,
@@ -1235,6 +1237,21 @@ export function SessionPaneView({
               {renderControlPanelPaneBarActions()}
             </div>
           ) : null}
+          {canFindInSession ? (
+            <button
+              className="pane-view-button"
+              type="button"
+              aria-label="Find in session"
+              title="Find in session (Ctrl/Cmd+F)"
+              aria-expanded={isSessionFindOpen}
+              onClick={() => openSessionFind()}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                <circle cx="10" cy="10" r="6" />
+                <path d="m15 15 5 5" />
+              </svg>
+            </button>
+          ) : null}
         </div>
 
         <div className="pane-view-strip">
@@ -1368,7 +1385,7 @@ export function SessionPaneView({
 
       <section
         ref={messageStackRef}
-        className={`message-stack${activeTab?.kind === "session" && pane.viewMode === "session" && liveTailPinned ? " is-tail-following" : ""}${activeControlSurfaceTab || activeOrchestratorCanvasTab ? " control-panel-stack" : ""}${activeSourceTab || activeDiffPreviewTab ? " editor-panel-stack" : ""}${activeTerminalTab ? " terminal-panel-stack" : ""}${activeMailboxTab ? " mailbox-panel-stack" : ""}${activeResponseBoardTab ? " response-board-panel-stack" : ""}`}
+        className={`message-stack${activeTab?.kind === "session" && pane.viewMode === "session" && liveTailPinned ? " is-tail-following" : ""}${activeControlSurfaceTab || activeOrchestratorCanvasTab ? " control-panel-stack" : ""}${activeSourceTab || activeDiffPreviewTab ? " editor-panel-stack" : ""}${activeTerminalTab ? " terminal-panel-stack" : ""}${activeMailboxTab ? " mailbox-panel-stack" : ""}${activeResponseBoardTab ? " response-board-panel-stack" : ""}${activeWorkTab ? " work-panel-stack" : ""}`}
         tabIndex={
           activeTab?.kind === "session" && pane.viewMode === "session"
             ? 0
@@ -1673,6 +1690,18 @@ export function SessionPaneView({
             onWorkspaceStateChange={onSetResponseBoardWorkspaceState}
             onOpenSource={handleOpenResponseBoardSource}
           />
+        ) : activeWorkTab ? (
+          <WorkPanel
+            key={`${activeWorkTab.id}:${activeWorkTab.refreshToken}`}
+            projects={Array.from(projectLookup.values())}
+            focusedProjectId={
+              activeWorkTab.originProjectId ??
+              (activeWorkTab.originSessionId
+                ? (sessionLookup.get(activeWorkTab.originSessionId)?.projectId ??
+                  null)
+                : null)
+            }
+          />
         ) : activeTerminalTab ? (
           <section
             className="control-panel-section-stack terminal-section-stack"
@@ -1973,6 +2002,7 @@ export function SessionPaneView({
         activeTerminalTab ||
         activeMailboxTab ||
         activeResponseBoardTab ||
+        activeWorkTab ||
         activeInstructionDebuggerTab ||
         activeDiffPreviewTab ||
         isDelegatedChildSession ? null : (

@@ -5,7 +5,7 @@
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct WorkDetailQuery {
-    reader_session_id: String,
+    reader_id: String,
     after: Option<String>,
 }
 
@@ -106,7 +106,7 @@ impl AppState {
         admit: impl FnOnce() -> Result<P, ApiError>,
     ) -> Result<WorkDetailResponse, ApiError> {
         WorkListQuery {
-            reader_session_id: Some(query.reader_session_id.clone()),
+            reader_id: Some(query.reader_id.clone()),
             after: query.after.clone(),
             ..Default::default()
         }
@@ -118,9 +118,11 @@ impl AppState {
         {
             return Err(ApiError::bad_request("Invalid Work reference"));
         }
-        let (_, target) = self.work_read_snapshot(project_id, Some(&query.reader_session_id))?;
-        let target = target.ok_or_else(|| {
-            ApiError::conflict("Established Work reader unavailable; refresh the list")
+        let (_, target) = self.work_read_snapshot(project_id, Some(&query.reader_id))?;
+        let target = target.map_err(|reason| {
+            ApiError::conflict(format!(
+                "Work reader unavailable; refresh the list: {reason}"
+            ))
         })?;
         validate_work_read_target(&target)?;
         let mut args = vec![

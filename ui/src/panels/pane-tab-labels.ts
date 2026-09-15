@@ -84,6 +84,10 @@ export function formatTabLabel(
     return "Response board";
   }
 
+  if (tab.kind === "work") {
+    return "Work";
+  }
+
   if (tab.kind === "controlPanel") {
     return "Control panel";
   }

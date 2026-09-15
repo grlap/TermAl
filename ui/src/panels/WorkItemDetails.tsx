@@ -3,9 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 import { ApiRequestError } from "../api-request";
 import { readWorkDetail, type WorkDetailResponse } from "../work-visualizer-api";
+import { WorkTime } from "./work-time";
 
-export function WorkItemDetails({ projectId, workRef, readerSessionId, onClose }: {
-  projectId: string; workRef: string; readerSessionId: string; onClose: () => void;
+export function WorkItemDetails({ projectId, workRef, readerId, onClose }: {
+  projectId: string; workRef: string; readerId: string; onClose: () => void;
 }) {
   const [data, setData] = useState<WorkDetailResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -19,7 +20,7 @@ export function WorkItemDetails({ projectId, workRef, readerSessionId, onClose }
   useEffect(() => {
     panel.current?.focus();
     panel.current?.scrollIntoView?.({ block: "nearest" });
-  }, [projectId, workRef, readerSessionId]);
+  }, [projectId, workRef, readerId]);
 
   async function load(controller: AbortController, more: boolean) {
     if (locked.current || controller.signal.aborted) return;
@@ -28,7 +29,7 @@ export function WorkItemDetails({ projectId, workRef, readerSessionId, onClose }
     if (more && !after) return;
     locked.current = true; setBusy(true); setError(null);
     try {
-      const next = await readWorkDetail(projectId, workRef, readerSessionId, controller.signal, after ?? undefined);
+      const next = await readWorkDetail(projectId, workRef, readerId, controller.signal, after ?? undefined);
       if (lifetime.current !== controller || controller.signal.aborted) return;
       if (more && previous) {
         const old = previous.notesWindow;
@@ -61,7 +62,7 @@ export function WorkItemDetails({ projectId, workRef, readerSessionId, onClose }
     return () => { controller.abort(); };
     // Each identity owns its async callback; stale replies are fenced above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, workRef, readerSessionId, revision]);
+  }, [projectId, workRef, readerId, revision]);
 
   return <aside ref={panel} tabIndex={-1} className="work-item-details" aria-label="Work item details" aria-busy={busy} onKeyDown={event => {
     if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onClose(); }
@@ -73,16 +74,16 @@ export function WorkItemDetails({ projectId, workRef, readerSessionId, onClose }
     {data?.status && <>
       <h3>{data.status.work.title}</h3>
       <p>P{data.status.work.priority} · {data.status.work.kind} · {data.status.work.lifecycle} / {data.status.availability}</p>
-      <p>Holder: {data.holder ?? "Not reported"}{data.heldUntil ? ` · until ${data.heldUntil}` : ""}</p>
+      <p>Holder: {data.holder ?? "Not reported"}{data.heldUntil && <> · until <WorkTime value={data.heldUntil} /></>}</p>
       <p className="work-inert-text">{data.status.work.outcome}</p>
       <h4>Acceptance</h4><ul>{data.status.work.acceptance.map((text, i) => <li key={i}>{text}</li>)}</ul>
       {!!data.status.work.acceptanceOmitted && <p>{data.status.work.acceptanceOmitted} acceptance entries omitted by source.</p>}
     </>}
     {data && <>
       <h4>Notes and gate evidence ({data.notes.length} of {data.notesWindow.total})</h4>
-      <p>Snapshot: {data.notesWindow.readCut.observedAt}. Detail and list are separate reads.</p>
+      <p>Snapshot: <WorkTime value={data.notesWindow.readCut.observedAt} />. Detail and list are separate reads.</p>
       <ol>{[...data.notes].reverse().map(note => <li key={note.locator}>
-        <small>{note.family} / {note.kind} · {note.by ?? "Unknown author"} · {note.createdAt}</small>
+        <small>{note.family} / {note.kind} · {note.by ?? "Unknown author"} · <WorkTime value={note.createdAt} /></small>
         {note.statusOwner === false ? <p>Peer status observation, no commitment.</p>
           : note.statusOwner === true ? <p>Owner status commitment.</p>
             : note.kind === "status" ? <p>Status ownership not reported by source.</p> : null}

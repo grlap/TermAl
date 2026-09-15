@@ -33,6 +33,7 @@ import {
   createSessionTab,
   createSourceTab,
   createTerminalTab,
+  createWorkTab,
 } from "./workspace-tabs";
 import {
   selectActiveTabAfterRemoval,
@@ -71,6 +72,7 @@ import {
   type WorkspaceState,
   type WorkspaceTab,
   type WorkspaceTerminalTab,
+  type WorkspaceWorkTab,
 } from "./workspace-types";
 
 const DEFAULT_ADJACENT_PANE_SPLIT_RATIO = 0.5;
@@ -357,6 +359,20 @@ export function reconcileWorkspaceState(
               tab.activeBoardTabId,
             ),
             boardViews: normalizeResponseBoardViews(tab.boardViews),
+          },
+        ];
+      }
+
+      if (tab.kind === "work") {
+        const {
+          originProjectId: _ignoredOriginProjectId,
+          ...tabWithoutOriginProjectId
+        } = tab;
+        return [
+          {
+            ...tabWithoutOriginProjectId,
+            originSessionId,
+            ...projectOriginProps(originProjectId),
           },
         ];
       }
@@ -913,6 +929,81 @@ export function openResponseBoardInWorkspaceState(
     ),
     preferredPaneId,
   );
+}
+
+// At most one Work tab per pane, like the Response Board: reopening in a pane
+// that already has one activates it and refreshes its origin; without a
+// preferred pane the first Work tab anywhere is reused.
+export function openWorkInWorkspaceState(
+  workspace: WorkspaceState,
+  preferredPaneId: string | null,
+  originSessionId: string | null,
+  originProjectId: string | null = null,
+): WorkspaceState {
+  // The opener may be the dock, which can never hold a Work tab: look for
+  // the existing tab where a new one would actually be placed, and when the
+  // opener is not a content pane at all, anywhere in the workspace.
+  const destinationPaneId = preferredPaneId
+    ? (resolveWorkspaceOpenTargetPaneId(
+        workspace,
+        preferredPaneId,
+        originSessionId,
+      ) ?? preferredPaneId)
+    : null;
+  const destinationPane = destinationPaneId
+    ? workspace.panes.find((pane) => pane.id === destinationPaneId)
+    : null;
+  const destinationExisting = destinationPane?.tabs.find(
+    (tab): tab is WorkspaceWorkTab => tab.kind === "work",
+  );
+  const existing = destinationExisting
+    ? { paneId: destinationPane!.id, tab: destinationExisting }
+    : !preferredPaneId || destinationPaneId !== preferredPaneId
+      ? findWorkTab(workspace)
+      : null;
+  if (existing) {
+    const panes = workspace.panes.map((pane) =>
+      pane.id === existing.paneId
+        ? syncPaneState(
+            withActivatedPaneTab(
+              pane,
+              existing.tab.id,
+              pane.tabs.map((tab) =>
+                tab.id === existing.tab.id && tab.kind === "work"
+                  ? refreshWorkTabOrigin(tab, originSessionId, originProjectId)
+                  : tab,
+              ),
+            ),
+          )
+        : pane,
+    );
+    return withActivePaneRoutingState(workspace, panes, existing.paneId);
+  }
+
+  return openTabInWorkspaceState(
+    workspace,
+    createWorkTab(originSessionId, originProjectId),
+    preferredPaneId,
+  );
+}
+
+// The new origin replaces the old one entirely: a reopen without a project
+// origin must not keep the previous project as the panel's fallback.
+function refreshWorkTabOrigin(
+  tab: WorkspaceWorkTab,
+  originSessionId: string | null,
+  originProjectId: string | null,
+): WorkspaceWorkTab {
+  const {
+    originProjectId: _ignoredOriginProjectId,
+    ...tabWithoutOriginProjectId
+  } = tab;
+  return {
+    ...tabWithoutOriginProjectId,
+    originSessionId: normalizeWorkspaceIdentifier(originSessionId),
+    ...projectOriginProps(normalizeWorkspaceIdentifier(originProjectId)),
+    refreshToken: crypto.randomUUID(),
+  };
 }
 
 export function setResponseBoardWorkspaceState(
@@ -1528,6 +1619,10 @@ export function placeDraggedTab(
   }
 
   if (placement === "tabs") {
+    // Refuse before removing the source; a rejected transfer must be atomic.
+    if (!canInsertWorkspaceTab(targetPane, draggedTab)) {
+      return workspace;
+    }
     const requestedTabIndex = tabIndex ?? targetPane.tabs.length;
     if (sourcePaneId === targetPaneId) {
       const sourceTabIndex = sourcePane.tabs.findIndex(
@@ -1856,6 +1951,10 @@ export function addWorkspaceTabToPane(
   tab: WorkspaceTab,
   tabIndex?: number,
 ): WorkspaceState {
+  const targetPane = workspace.panes.find((pane) => pane.id === paneId);
+  if (!targetPane || !canInsertWorkspaceTab(targetPane, tab)) {
+    return workspace;
+  }
   const panes = workspace.panes.map((pane) => {
     if (pane.id !== paneId) {
       return pane;
@@ -1917,6 +2016,9 @@ function moveWorkspaceTabToPane(
   const targetPane = workspace.panes.find((pane) => pane.id === targetPaneId);
   const tab = sourcePane?.tabs.find((candidate) => candidate.id === tabId);
   if (!sourcePane || !targetPane || !tab) {
+    return workspace;
+  }
+  if (!canInsertWorkspaceTab(targetPane, tab)) {
     return workspace;
   }
 
@@ -2344,6 +2446,20 @@ function syncPaneState(pane: WorkspacePane): WorkspacePane {
     };
   }
 
+  if (activeTab.kind === "work") {
+    return {
+      ...paneWithVisitHistory,
+      activeTabId: activeTab.id,
+      activeSessionId: resolveOriginSessionId(
+        activeTab.originSessionId,
+        pane.activeSessionId,
+        pane.tabs,
+      ),
+      viewMode: "work",
+      sourcePath: null,
+    };
+  }
+
   return {
     ...paneWithVisitHistory,
     activeTabId: activeTab.id,
@@ -2490,6 +2606,18 @@ function findResponseBoardTab(workspace: WorkspaceState) {
     const tab = pane.tabs.find(
       (candidate): candidate is WorkspaceResponseBoardTab =>
         candidate.kind === "responseBoard",
+    );
+    if (tab) {
+      return { paneId: pane.id, tab };
+    }
+  }
+  return null;
+}
+
+function findWorkTab(workspace: WorkspaceState) {
+  for (const pane of workspace.panes) {
+    const tab = pane.tabs.find(
+      (candidate): candidate is WorkspaceWorkTab => candidate.kind === "work",
     );
     if (tab) {
       return { paneId: pane.id, tab };
@@ -3342,6 +3470,14 @@ function updateCanvasTab(
   });
 
   return hasChanged ? { ...workspace, panes } : workspace;
+}
+
+// Work is a per-pane singleton. Reordering the existing tab is allowed;
+// a different Work tab must remain at its source instead of replacing it.
+function canInsertWorkspaceTab(pane: WorkspacePane, tab: WorkspaceTab) {
+  return tab.kind !== "work" || !pane.tabs.some(
+    (candidate) => candidate.kind === "work" && candidate.id !== tab.id,
+  );
 }
 
 function insertTabAtIndex(

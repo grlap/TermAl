@@ -2190,19 +2190,7 @@ impl AppState {
         let delegation = &inner.delegations[delegation_index];
         match capability {
             DelegationControlPlaneCapability::ReviewFreeze => {
-                delegation.child_session_id == child_session_id
-                    && delegation.mode == DelegationMode::Reviewer
-                    && delegation.status == DelegationStatus::Running
-                    && matches!(delegation.write_policy, DelegationWritePolicy::ReadOnly)
-                    && inner
-                        .find_session_index(child_session_id)
-                        .is_some_and(|index| {
-                            let child = &inner.sessions[index];
-                            !child.hidden
-                                && child.is_local_session()
-                                && child.session.parent_delegation_id.as_deref()
-                                    == Some(delegation.id.as_str())
-                        })
+                review_freeze_authority_locked(&inner, child_session_id).is_ok()
             }
             DelegationControlPlaneCapability::SubmitReviewResult => {
                 delegation.child_session_id == child_session_id

@@ -26,7 +26,6 @@ import {
 } from "./panels/ControlPanelSurface";
 import { FileSystemPanel } from "./panels/FileSystemPanel";
 import { GitStatusPanel } from "./panels/GitStatusPanel";
-import { WorkPanel } from "./panels/WorkPanel";
 import { OrchestratorTemplateLibraryPanel } from "./panels/OrchestratorTemplateLibraryPanel";
 import {
   WorkspacesPanel,
@@ -147,6 +146,11 @@ type AppControlSurfaceProps = {
     originProjectId: string | null,
     activeBoardTabId?: string | null,
   ) => void;
+  handleOpenWorkTab: (
+    paneId: string,
+    originSessionId: string | null,
+    originProjectId: string | null,
+  ) => void;
   openCreateProjectDialog: () => void;
   openCreateSessionDialog: (preferredPaneId?: string | null, defaultProjectSelectionId?: string | null) => void;
   handleOpenSourceTab: (paneId: string, path: string | null, originSessionId: string | null, originProjectId: string | null, options?: OpenPathOptions) => void;
@@ -235,6 +239,7 @@ export function AppControlSurface({
   handleOpenSessionListTab,
   handleOpenCanvasTab,
   handleOpenResponseBoardTab,
+  handleOpenWorkTab,
   openCreateProjectDialog,
   openCreateSessionDialog,
   handleOpenSourceTab,
@@ -893,8 +898,6 @@ export function AppControlSurface({
 
     function renderControlPanelSection(sectionId: ControlPanelSectionId) {
       switch (sectionId) {
-        case "work":
-          return <WorkPanel projects={projects} focusedProjectId={activeSession?.projectId ?? null} />;
         case "workspaces":
           return (
             <WorkspacesPanel
@@ -1340,6 +1343,13 @@ export function AppControlSurface({
           isPreferencesOpen={isSettingsOpen}
           onOpenResponseBoard={() =>
             handleOpenResponseBoardTab(
+              paneId,
+              controlPanelLauncherOriginSessionId,
+              controlPanelLauncherOriginProjectId,
+            )
+          }
+          onOpenWork={() =>
+            handleOpenWorkTab(
               paneId,
               controlPanelLauncherOriginSessionId,
               controlPanelLauncherOriginProjectId,

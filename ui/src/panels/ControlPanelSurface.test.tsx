@@ -36,10 +36,6 @@ describe("ControlPanelSurface", () => {
     expect(screen.getByRole("heading", { level: 2, name: "Orchestrators" })).toBeInTheDocument();
     expect(screen.getByTestId("section-body")).toHaveTextContent("orchestrators");
 
-    fireEvent.click(screen.getByRole("button", { name: "Work" }));
-    expect(screen.getByRole("heading", { level: 2, name: "Work" })).toBeInTheDocument();
-    expect(screen.getByTestId("section-body")).toHaveTextContent("work");
-
     fireEvent.click(screen.getByRole("button", { name: "Git status" }));
 
     expect(screen.getByRole("heading", { level: 2, name: "Git status" })).toBeInTheDocument();
@@ -69,8 +65,20 @@ describe("ControlPanelSurface", () => {
       "Projects",
       "Sessions",
       "Orchestrators",
-      "Work",
     ]);
+  });
+
+  it("opens the Work tab from the persistent dock action without a Work section", () => {
+    const onOpenWork = vi.fn();
+    renderSurface({ onOpenWork });
+
+    expect(screen.queryByRole("button", { name: "Work" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Open Work" }));
+
+    expect(onOpenWork).toHaveBeenCalledOnce();
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Sessions" }),
+    ).toBeInTheDocument();
   });
 
   it("opens the real Response Board from the persistent dock action", () => {
@@ -148,13 +156,12 @@ describe("ControlPanelSurface", () => {
     expect(screen.getByTestId("section-body")).toHaveTextContent("sessions");
   });
 
-  it("includes Work after Projects in the default dock order", () => {
+  it("uses the default dock order", () => {
     renderSurface();
 
     expect(getDockSectionLabels()).toEqual([
       "Workspaces",
       "Projects",
-      "Work",
       "Sessions",
       "Orchestrators",
       "Files",
@@ -173,7 +180,6 @@ describe("ControlPanelSurface", () => {
     expect(getDockSectionLabels()).toEqual([
       "Workspaces",
       "Projects",
-      "Work",
       "Sessions",
       "Orchestrators",
       "Files",
@@ -195,7 +201,6 @@ describe("ControlPanelSurface", () => {
       "projects",
       "sessions",
       "orchestrators",
-      "work",
     ]);
     expect(normalizeControlPanelSectionOrder([
       "sessions",
@@ -207,7 +212,6 @@ describe("ControlPanelSurface", () => {
       "projects",
       "workspaces",
       "files",
-      "work",
       "orchestrators",
       "git",
     ]);
@@ -216,12 +220,12 @@ describe("ControlPanelSurface", () => {
       "projects",
       "workspaces",
       "board" as never,
+      "work" as never,
       "sessions",
     ])).toEqual([
       "workspaces",
       "projects",
       "sessions",
-      "work",
       "orchestrators",
       "files",
       "git",
@@ -240,7 +244,6 @@ describe("ControlPanelSurface", () => {
       "orchestrators",
       "files",
       "git",
-      "work",
     ]);
 
     window.localStorage.setItem(
@@ -255,7 +258,6 @@ describe("ControlPanelSurface", () => {
       "Projects",
       "Sessions",
       "Orchestrators",
-      "Work",
     ]);
     unmount();
 
@@ -271,7 +273,6 @@ describe("ControlPanelSurface", () => {
       "Files",
       "Git status",
       "Orchestrators",
-      "Work",
     ]);
   });
 
@@ -292,7 +293,6 @@ describe("ControlPanelSurface", () => {
       "Workspaces",
       "Projects",
       "Git status",
-      "Work",
       "Sessions",
       "Orchestrators",
       "Files",
@@ -305,7 +305,6 @@ describe("ControlPanelSurface", () => {
       "Workspaces",
       "Projects",
       "Git status",
-      "Work",
       "Sessions",
       "Orchestrators",
       "Files",
@@ -375,6 +374,7 @@ function renderSurface(
       isPreferencesOpen={false}
       launcherPaneId="pane-1"
       onOpenResponseBoard={() => {}}
+      onOpenWork={() => {}}
       onOpenPreferences={() => {}}
       projectCount={3}
       sessionCount={7}
@@ -395,6 +395,7 @@ function getDockSectionLabels() {
       (label): label is string =>
         label !== null &&
         label !== "Open Response Board" &&
+        label !== "Open Work" &&
         label !== "Open preferences",
     );
 }

@@ -19,8 +19,10 @@ Project-scoped remote access remains a separate contract in
 
 ## Configuration authority
 
-The [Work visualizer](work-visualizer.md) consumes established bindings for
-semantic read-only inspection; opening that panel never enables either tier.
+The [Work visualizer](work-visualizer.md) reads the store this authority
+established (binary, home and validated store identity in the project
+settings) as its own host reader, independent of any agent session binding;
+opening that panel never enables either tier.
 
 The repository declares the project and the host supplies non-secret runtime
 context:

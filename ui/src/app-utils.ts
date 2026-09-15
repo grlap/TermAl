@@ -96,6 +96,8 @@ export function labelForPaneViewMode(viewMode: PaneViewMode) {
       return "Mailbox";
     case "responseBoard":
       return "Response board";
+    case "work":
+      return "Work";
     case "instructionDebugger":
       return "Instructions";
     case "diffPreview":

@@ -110,6 +110,8 @@ function formatWorkspaceTabDragLabel(drag: WorkspaceTabDrag) {
       return `TermAl mailbox ${drag.tab.mailboxId}`;
     case "responseBoard":
       return "TermAl response board";
+    case "work":
+      return "TermAl work";
     case "controlPanel":
       return "TermAl control panel";
     case "orchestratorList":

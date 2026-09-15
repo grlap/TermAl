@@ -99,6 +99,7 @@ mod telegram_support;
 mod terminal;
 mod turns;
 mod work_visualizer;
+mod work_visualizer_beads;
 mod workspace;
 mod workspace_labels;
 

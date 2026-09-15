@@ -24,6 +24,7 @@ export type PaneViewMode =
   | "terminal"
   | "mailbox"
   | "responseBoard"
+  | "work"
   | "instructionDebugger"
   | "diffPreview";
 
@@ -91,6 +92,19 @@ export type WorkspaceResponseBoardView = {
   panX: number;
   panY: number;
   zoom: number;
+};
+
+/**
+ * Read-only Work tab (Engram + Beads visualizer). Like the Response Board,
+ * a pane holds at most one. The origin project is only the mount-time
+ * fallback for the panel's own project selector.
+ */
+export type WorkspaceWorkTab = {
+  id: string;
+  kind: "work";
+  originSessionId: string | null;
+  originProjectId?: string | null;
+  refreshToken: string;
 };
 
 export type WorkspaceControlPanelTab = {
@@ -183,6 +197,7 @@ export type WorkspaceTab =
   | WorkspaceTerminalTab
   | WorkspaceMailboxTab
   | WorkspaceResponseBoardTab
+  | WorkspaceWorkTab
   | WorkspaceControlPanelTab
   | WorkspaceOrchestratorListTab
   | WorkspaceCanvasTab
