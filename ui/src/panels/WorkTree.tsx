@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { WorkItem } from "../work-visualizer-api";
 import { MAX_TREE_DEPTH, buildDependencyForest, buildHierarchyForest, type WorkTreeNode } from "./work-tree";
-import { WorkRowButton, WorkRowChips, isSelectedWorkItem, type WorkSelection } from "./WorkRow";
+import { WorkRowButton, WorkRowChips, WorkRowLead, isSelectedWorkItem, type WorkSelection } from "./WorkRow";
 
 export type WorkTreeMode = "dependencies" | "hierarchy";
 
@@ -18,6 +18,9 @@ export function WorkTree({ rows, universe, mode, selection, onSelect }: {
     () => (mode === "dependencies" ? buildDependencyForest(rows, universe) : buildHierarchyForest(rows, universe)),
     [rows, universe, mode],
   );
+  // The source is worth a glyph only when the loaded rows come from more
+  // than one tracker.
+  const mixedSources = useMemo(() => new Set(universe.map(row => row.source)).size > 1, [universe]);
   const toggle = (key: string) => setCollapsed(current => {
     const next = new Set(current);
     if (next.has(key)) next.delete(key); else next.add(key);
@@ -59,8 +62,9 @@ export function WorkTree({ rows, universe, mode, selection, onSelect }: {
           ? <button type="button" className="work-node-toggle" aria-expanded={open}
             aria-label={`${open ? "Collapse" : "Expand"} ${node.item.shortRef}`} onClick={() => toggle(node.key)}>▾</button>
           : <span className="work-node-toggle work-node-leaf" aria-hidden="true" />}
+        <WorkRowLead item={node.item} />
         <WorkRowButton item={node.item} selected={isSelectedWorkItem(selection, node.item)} onSelect={onSelect} />
-        <WorkRowChips item={node.item} />
+        <WorkRowChips item={node.item} mixedSources={mixedSources} />
         {mode === "dependencies" && node.satisfied === true && <span className="work-chip" data-satisfied="true">satisfied</span>}
         {node.repeatedCount > 0 && <button type="button" className="work-tree-relation" data-repeated="true"
           title="Reveal that row (expanding its branch) and move focus to it" onClick={() => reveal(node.repeatedItems)}>

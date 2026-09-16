@@ -71,6 +71,13 @@ snapshot), all read-only:
   the two relations are deliberately separate trees.
   Neither tree is virtualised; the Beads cap and Engram paging bound the
   rendered size.
+In both trees a row reads as priority, then reference and title: the priority
+chip's colour is the availability (green ready, red blocked, blue claimed or
+active, gold deferred or waiting, grey closed), with the word kept on hover and
+as hidden text for assistive technology. The source appears as a small glyph
+(three beads; a cell for Engram) only when the loaded rows come from both
+trackers; a single-source project shows none. Assignment stays a text chip.
+
 - **Table**: the flat row table with source, lifecycle, availability, waits-for
   and assignment columns. Every column header is a button that sorts the
   loaded rows by that column (a second click reverses it; Updated starts

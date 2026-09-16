@@ -34,11 +34,17 @@
 .work-row-title { text-align: left; white-space: normal; }
 .work-row-title[aria-current="true"] { border-color: var(--signal-blue); box-shadow: inset 0 0 0 1px var(--signal-blue); }
 .work-chip { font-size: 0.75rem; border: 1px solid var(--line); border-radius: 999px; padding: 0.05rem 0.45rem; color: var(--muted); white-space: nowrap; }
-.work-chip[data-state="blocked"] { color: var(--signal-red); border-color: var(--signal-red); }
-.work-chip[data-state="ready"] { color: var(--signal-green); border-color: var(--signal-green); }
-.work-chip[data-state="active"], .work-chip[data-state="claimed"] { color: var(--signal-blue); border-color: var(--signal-blue); }
+/* The priority chip's colour is the availability: green ready, red blocked, blue held/active, gold parked, grey closed. */
+.work-priority { font-variant-numeric: tabular-nums; }
+.work-priority[data-state="blocked"] { color: var(--signal-red); border-color: var(--signal-red); }
+.work-priority[data-state="ready"] { color: var(--signal-green); border-color: var(--signal-green); }
+.work-priority[data-state="active"], .work-priority[data-state="claimed"] { color: var(--signal-blue); border-color: var(--signal-blue); }
+.work-priority[data-state="deferred"], .work-priority[data-state="waiting"] { color: var(--signal-gold); border-color: var(--signal-gold); }
 .work-chip[data-satisfied="true"] { color: var(--signal-green); }
 .work-chip-source { text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.68rem; }
+.work-source { display: inline-flex; align-items: center; color: var(--muted); }
+.work-source svg { width: 1rem; height: 1rem; }
+.work-visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 
 /* Trees: solid rail = waits for, dashed rail = subtask of. */
 .work-tree ul { list-style: none; margin: 0; padding: 0; }
@@ -52,6 +58,10 @@ p.work-tree-relation { margin-left: 2rem; }
 /* A repeated reference is a control: it reveals the row it points at. */
 button.work-tree-relation { background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline dotted; }
 .work-node-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; padding: 0.2rem 0; }
+/* The title never wraps to its own line away from the priority chip: a zero basis keeps it on
+   the chip's line, it grows into the remaining width and wraps its text there; the content cap
+   keeps short titles content-sized. Trailing chips wrap below when they do not fit. */
+.work-node-row > .work-row-title { flex: 1 1 0; min-width: 0; max-width: max-content; }
 .work-node-toggle { width: 1.5rem; height: 1.5rem; padding: 0; line-height: 1; text-align: center; display: inline-flex; align-items: center; justify-content: center; }
 .work-node-toggle[aria-expanded="false"] { transform: rotate(-90deg); }
 .work-node-leaf { border-color: transparent; background: transparent; }

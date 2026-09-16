@@ -101,6 +101,36 @@ describe("WorkPanel", () => {
     expect(header("Updated")).toHaveAttribute("aria-sort", "none");
   });
 
+  it("leads each tree row with the priority coloured by availability and shows a source glyph only for mixed sources", async () => {
+    const mixed = page("Engram row"); mixed.beads = beadsPage();
+    mixed.sources.push({ source: "beads", state: "ready", message: "Beads reads use the native bd binary" });
+    vi.mocked(readProjectWork).mockResolvedValueOnce(mixed);
+    const view = render(<WorkPanel projects={projects} focusedProjectId="p-one" />);
+    const engramRow = await screen.findByRole("button", { name: "w-one — Engram row" });
+    // The lead precedes the title in reading order; the availability word is
+    // there for assistive technology and on hover, the colour comes from it.
+    const lead = engramRow.previousElementSibling as HTMLElement;
+    expect(lead).toHaveClass("work-priority");
+    expect(lead).toHaveAttribute("data-state", "blocked");
+    expect(lead).toHaveAttribute("title", "blocked");
+    expect(lead).toHaveTextContent("P1, blocked");
+    expect(lead.compareDocumentPosition(engramRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const freeRow = screen.getByRole("button", { name: "tm-free — Ready bug" });
+    expect(freeRow.previousElementSibling).toHaveAttribute("data-state", "ready");
+    // Both trackers are loaded, so every row names its source with a glyph.
+    expect(screen.getAllByRole("img", { name: "Source: Engram" })).toHaveLength(1);
+    expect(screen.getAllByRole("img", { name: "Source: Beads" })).toHaveLength(3);
+    expect(screen.queryByText("engram")).not.toBeInTheDocument();
+    expect(screen.queryByText("ready")).not.toBeInTheDocument();
+    view.unmount();
+    // A single-source project has nothing to tell apart: no glyphs at all.
+    vi.mocked(readProjectWork).mockResolvedValueOnce({ sources: [{ source: "beads", state: "ready", message: "bd" }], readerId: null, observedAt: "now", page: null, beads: beadsPage() });
+    render(<WorkPanel projects={projects} focusedProjectId="p-one" />);
+    await screen.findByRole("button", { name: "tm-free — Ready bug" });
+    expect(screen.queryByRole("img", { name: /^Source: / })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "tm-root.1 — Blocked child" }).previousElementSibling).toHaveAttribute("data-state", "blocked");
+  });
+
   it("aborts and ignores a late response after switching projects", async () => {
     const old = deferred<WorkListResponse>();
     vi.mocked(readProjectWork).mockReturnValueOnce(old.promise).mockResolvedValueOnce(page("New project"));
