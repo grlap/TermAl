@@ -383,6 +383,7 @@ All routes are under `/api`. The backend serves JSON, and the frontend proxies r
 | POST | `/api/sessions/{id}/codex/thread/compact` | Request Codex thread compaction |
 | POST | `/api/sessions/{id}/codex/thread/rollback` | Roll back the live Codex thread |
 | GET | `/api/sessions/{id}/agent-commands` | Read local agent-command shortcuts |
+| GET | `/api/projects/{id}/work-memories/{source}` | Read project memories from `engram` or `beads`, with source-local search and on-demand full text. Engram continuation/detail requires readerId; initial source failures are explicit states. 400 invalid query, 404 missing project/Beads key, 409 stale reader, 429 busy follow-up, 502 read failure. See [memory contract](features/work-visualizer.md#project-memories). |
 | GET | `/api/sessions/{id}/markers` | List conversation markers anchored to messages in the session transcript. Local sessions read from the local record; remote-proxy sessions are read-only unless routed through the remote marker mutation endpoints below. |
 | POST | `/api/sessions/{id}/markers` | Create a conversation marker and publish `ConversationMarkerCreated`. Returns `201` with `ConversationMarkerResponse`; malformed JSON uses the standard `ApiError` envelope. |
 | PATCH | `/api/sessions/{id}/markers/{marker_id}` | Patch marker kind/name/body/color/message anchors. Nullable `body` and `endMessageId` clear those fields. Publishes `ConversationMarkerUpdated`. |

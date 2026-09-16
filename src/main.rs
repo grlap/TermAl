@@ -355,6 +355,7 @@ fn app_router(state: AppState) -> Router {
         )
         .route("/api/projects/{id}/digest", get(get_project_digest))
         .route("/api/projects/{id}/work", get(get_project_work))
+        .route("/api/projects/{id}/work-memories/{source}", get(get_project_work_memories))
         .route(
             "/api/projects/{id}/work/engram/{work_ref}",
             get(get_project_work_detail),
@@ -703,6 +704,7 @@ include!("work_visualizer_process.rs");
 include!("work_visualizer.rs");
 include!("work_visualizer_detail.rs");
 include!("work_visualizer_beads.rs");
+include!("work_memories.rs");
 include!("session_runtime.rs");
 include!("session_interaction.rs");
 include!("messages.rs");

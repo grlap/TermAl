@@ -12,6 +12,10 @@ import { WORK_SORT_COLUMNS, defaultWorkSortDirection, sortWorkRows, type WorkSor
 import { WorkTime } from "./work-time";
 import { WorkTable } from "./WorkTable";
 import { WorkTree } from "./WorkTree";
+import { WorkLabels } from "./WorkLabels";
+import { WorkMemories } from "./WorkMemories";
+import { WorkLabelPicker } from "./WorkLabelPicker";
+import { matchesWorkLabels, type WorkLabelMode } from "./work-labels";
 import "./work-panel.css";
 
 const PROJECT_KEY = "termal-work-project";
@@ -37,9 +41,10 @@ export function WorkPanel({ projects, focusedProjectId }: { projects: readonly P
   </section>;
 }
 
-type WorkView = "dependencies" | "hierarchy" | "table";
+type WorkView = "dependencies" | "hierarchy" | "labels" | "table" | "memories";
 const VIEWS: { id: WorkView; label: string }[] = [
-  { id: "dependencies", label: "Dependencies" }, { id: "hierarchy", label: "Hierarchy" }, { id: "table", label: "Table" },
+  { id: "dependencies", label: "Dependencies" }, { id: "hierarchy", label: "Hierarchy" }, { id: "labels", label: "Labels" }, { id: "table", label: "Table" },
+  { id: "memories", label: "Memories" },
 ];
 const DEFAULT_KINDS = ["task", "bug", "feature", "epic", "chore", "research"];
 
@@ -53,27 +58,35 @@ function WorkProjectView({ projectId }: { projectId: string }) {
   const [sort, setSort] = useState<WorkSort | null>(null);
   function submit(event: FormEvent) { event.preventDefault(); setFilters({ ...draft }); setSubmission(value => value + 1); }
   return <>
+    <div className="work-view-switch" role="group" aria-label="Work view">
+      {VIEWS.map(option => <button key={option.id} type="button" aria-pressed={view === option.id} onClick={() => setView(option.id)}>{option.label}</button>)}
+    </div>
+    {view === "memories" ? <WorkMemories projectId={projectId} /> : <>
     <form className="work-panel-filters" onSubmit={submit}>
       <label>Search <input value={draft.search} onChange={e => setDraft({ ...draft, search: e.target.value })} /></label>
-      <label>Label <input value={draft.label} onChange={e => setDraft({ ...draft, label: e.target.value })} /></label>
+      <label>Label (source filter) <input value={draft.label} onChange={e => setDraft({ ...draft, label: e.target.value })} /></label>
       <label>Availability <select value={draft.availability} onChange={e => setDraft({ ...draft, availability: e.target.value })}>
         <option value="">All</option><option value="ready">Ready</option><option value="blocked">Blocked</option>
       </select></label>
       <button type="submit">Apply filters</button>
     </form>
     <WorkResults key={`${submission}:${JSON.stringify(filters)}`} projectId={projectId} filters={filters}
-      view={view} onViewChange={setView} sort={sort} onSortChange={setSort} />
+      view={view} sort={sort} onSortChange={setSort} />
+    </>}
   </>;
 }
 
-function WorkResults({ projectId, filters, view, onViewChange, sort, onSortChange }: {
-  projectId: string; filters: WorkFilters; view: WorkView; onViewChange: (view: WorkView) => void;
+function WorkResults({ projectId, filters, view, sort, onSortChange }: {
+  projectId: string; filters: WorkFilters; view: Exclude<WorkView, "memories">;
   sort: WorkSort | null; onSortChange: (sort: WorkSort | null) => void;
 }) {
   const { result, busy, error, reload, more } = useWorkList(projectId, filters);
   // The kind filter is per read generation: its options come from the loaded
   // rows, which a new generation replaces.
   const [kind, setKind] = useState("");
+  const [labels, setLabels] = useState<string[]>([]);
+  const [labelMode, setLabelMode] = useState<WorkLabelMode>("any");
+  const filterLabel = (label: string) => { setLabels([label]); setLabelMode("any"); };
   const [selection, setSelection] = useState<WorkSelection | null>(null);
   const detailTrigger = useRef<HTMLButtonElement | null>(null);
   const listContainer = useRef<HTMLDivElement | null>(null);
@@ -91,7 +104,7 @@ function WorkResults({ projectId, filters, view, onViewChange, sort, onSortChang
   );
   // One sort model serves the control below and the table headers; it orders
   // loaded rows only and never touches the sources' pages or identities.
-  const rows = useMemo(() => sortWorkRows(loaded.filter(row => !kind || row.kind === kind), sort), [loaded, kind, sort]);
+  const rows = useMemo(() => sortWorkRows(loaded.filter(row => (!kind || row.kind === kind) && matchesWorkLabels(row, labels, labelMode)), sort), [loaded, kind, labels, labelMode, sort]);
   const total = (page?.total ?? 0) + (beads?.total ?? 0);
   const loadedSummary = [
     page && `${page.items.length} of ${page.total} Engram items loaded`,
@@ -124,9 +137,6 @@ function WorkResults({ projectId, filters, view, onViewChange, sort, onSortChang
         : null;
   return <>
     <div className="work-panel-actions">
-      <div className="work-view-switch" role="group" aria-label="Work view">
-        {VIEWS.map(option => <button key={option.id} type="button" aria-pressed={view === option.id} onClick={() => onViewChange(option.id)}>{option.label}</button>)}
-      </div>
       <button type="button" disabled={busy} onClick={() => { setSelection(null); reload(); }}>Refresh work</button>
       {busy && <span role="status">Reading work…{page?.more ? ` ${page.items.length} of ${page.total} Engram items so far` : ""}</span>}</div>
     {error && <p role="alert">{error} Use Refresh work for a new snapshot.</p>}
@@ -135,6 +145,7 @@ function WorkResults({ projectId, filters, view, onViewChange, sort, onSortChang
     </p>)}
     {(page || beads) && result && <>
       <div className="work-panel-filters">
+        <WorkLabelPicker rows={loaded} selected={labels} onChange={setLabels} mode={labelMode} onModeChange={setLabelMode} />
         <label>Kind (loaded rows) <select value={kind} onChange={e => setKind(e.target.value)}><option value="">All</option>
           {kinds.map(value => <option key={value}>{value}</option>)}</select></label>
         <label>Sort (loaded rows) <select value={sort?.key ?? ""} onChange={e => {
@@ -154,8 +165,9 @@ function WorkResults({ projectId, filters, view, onViewChange, sort, onSortChang
       <div className="work-panel-body" data-details={details ? "open" : "closed"}>
         <div className="work-panel-list" ref={listContainer} tabIndex={-1}>
           {view === "table"
-            ? <WorkTable rows={rows} selection={selection} onSelect={select} sort={sort} onSortChange={onSortChange} />
-            : <WorkTree key={view} rows={rows} universe={loaded} mode={view} selection={selection} onSelect={select} />}
+            ? <WorkTable rows={rows} selection={selection} onSelect={select} sort={sort} onSortChange={onSortChange} onLabel={filterLabel} />
+            : view === "labels" ? <WorkLabels rows={rows} mixedSources={new Set(loaded.map(row => row.source)).size > 1} selection={selection} onSelect={select} onLabel={filterLabel} />
+              : <WorkTree key={view} rows={rows} universe={loaded} mode={view} selection={selection} onSelect={select} onLabel={filterLabel} />}
           {rows.length === 0 && <p>{result.sources.some(source => source.state === "error")
             ? "No rows from the readable sources. A source failed (see its status above), so this is not a complete tracker view."
             : total === 0 ? "No work items match the source filters." : "No matching rows in the loaded page(s). More source items may exist."}</p>}

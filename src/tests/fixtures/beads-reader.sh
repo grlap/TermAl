@@ -8,6 +8,8 @@ printf '%s\n' "$*" >> beads-read-args-log.txt
 printf '%s|%s\n' "${BEADS_DIR:-}" "${BEADS_DB:-}" > beads-read-env.txt
 if [ "$1" != "--readonly" ] || [ "$2" != "--json" ]; then echo 'fixture requires --readonly --json first' >&2; exit 9; fi
 shift 2
+if [ "$1" = memories ]; then printf '%s\n' '{"schema_version":1,"guide":"Summary\nFull body"}'; exit 0; fi
+if [ "$1" = recall ]; then printf '%s\n' '{"schema_version":1,"key":"guide","found":true,"value":"Summary\nFull body"}'; exit 0; fi
 has() { needle="$1"; shift; for a in "$@"; do [ "$a" = "$needle" ] && return 0; done; return 1; }
 root_row='{"id":"tm-root","title":"Root epic <script> inert","description":"Epic","status":"in_progress","priority":2,"issue_type":"feature","assignee":"Termal::Codex","owner":"Greg","created_at":"2026-09-01T00:00:00Z","created_by":"Greg","updated_at":"2026-09-13T00:00:00Z","started_at":null,"dependency_count":0,"dependent_count":1,"comment_count":2}'
 case "$1" in

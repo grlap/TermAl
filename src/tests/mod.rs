@@ -21,6 +21,7 @@ mod acp_tool_status;
 mod agent_commands;
 mod agent_readiness;
 mod bounded_read_process;
+mod work_memories;
 mod claude;
 mod claude_permission_boundary;
 mod cli;

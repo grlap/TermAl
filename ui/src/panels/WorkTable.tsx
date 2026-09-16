@@ -7,11 +7,13 @@ import type { WorkItem } from "../work-visualizer-api";
 import { WORK_SORT_COLUMNS, nextWorkSort, type WorkSort } from "./work-sort";
 import { WorkTime } from "./work-time";
 import { WorkRowButton, isSelectedWorkItem, type WorkSelection } from "./WorkRow";
+import { WorkLabelChips } from "./WorkLabels";
 
-export function WorkTable({ rows, selection, onSelect, sort, onSortChange }: {
+export function WorkTable({ rows, selection, onSelect, sort, onSortChange, onLabel }: {
   rows: readonly WorkItem[]; selection: WorkSelection | null;
   onSelect: (item: WorkItem, trigger: HTMLButtonElement) => void;
   sort: WorkSort | null; onSortChange: (sort: WorkSort) => void;
+  onLabel?: (label: string) => void;
 }) {
   return <div className="work-table-scroll" role="region" tabIndex={0} aria-label="Work table scroll area">
     <table className="work-table"><caption>Work items</caption><thead><tr>
@@ -27,7 +29,7 @@ export function WorkTable({ rows, selection, onSelect, sort, onSortChange }: {
     </tr></thead><tbody>{rows.map(row => <tr key={`${row.source}:${row.id}`}>
       <td>P{row.priority}</td>
       <td><WorkRowButton item={row} selected={isSelectedWorkItem(selection, row)} onSelect={onSelect} />
-        {!!row.labels.length && <small>{row.labels.join(", ")}</small>}
+        <WorkLabelChips item={row} onLabel={onLabel} />
         {row.parentId && <small>in {row.parentId}</small>}</td>
       <td>{row.source}</td><td>{row.kind}</td><td>{row.lifecycle}</td><td>{row.availability}</td>
       <td>{row.prerequisites.length ? row.prerequisites.map(p => `${p.id}${p.satisfied ? " (satisfied)" : ""}`).join(", ") : "—"}</td>

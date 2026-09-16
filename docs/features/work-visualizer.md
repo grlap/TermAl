@@ -30,7 +30,8 @@ from 2, all with **explicit refresh**, not a live activity subscription. Project
 changes and submitted filters start fresh reads; source markers and integration
 settings are rechecked on every read. Automatic refresh on file/activity
 changes, the decision/live-holder badge, Response Board pins, holder-to-session
-navigation and project memories remain follow-ups. Details show holder labels
+navigation remain follow-ups. The Memories view reads retained project memories
+from both trackers (see below). Details show holder labels
 without navigation; rows show assignment, not an inferred executing session.
 Full note bodies are not fetched yet.
 
@@ -58,26 +59,26 @@ snapshot), all read-only:
   prerequisite that is not visible is disclosed as a count, never invented:
   "waits for N not loaded" (unsatisfied), "N satisfied · not loaded" (e.g.
   closed Beads blockers, which the open list never contains) and "N hidden by
-  filter" (loaded but excluded by the kind filter). Satisfied prerequisites
+  filter" (loaded but excluded by a kind or label filter). Satisfied prerequisites
   are marked. Rows with no visible blocking relation, including rows whose
   only prerequisites are not visible, are listed flat under "No visible
   dependency links". Edges come only from the source receipts (Engram
   `blocked_by`, Beads `blocks` dependencies) and never cross sources.
 - **Hierarchy**: parent on top, subtasks nested (Engram `parent_id`, Beads
   `parent-child` edges — never the dotted id spelling). A child whose parent
-  is loaded but hidden by the Kind filter is shown as a root with "parent
+  is loaded but hidden by a kind or label filter is shown as a root with "parent
   hidden by filter"; a parent that was never loaded is not disclosed, the
   same rule as the dependency counts. Blocking relations never appear here;
   the two relations are deliberately separate trees.
   Neither tree is virtualised; the Beads cap and Engram paging bound the
   rendered size.
-In both trees a row reads as priority, then reference and title: the priority
-chip's colour is the availability (green ready, red blocked, blue claimed or
-active, gold deferred or waiting, grey closed), with the word kept on hover and
-as hidden text for assistive technology. The source appears as a small glyph
-(three beads; a cell for Engram) only when the loaded rows come from both
-trackers; a single-source project shows none. Assignment stays a text chip.
-
+- **Labels**: collapsible, flat groups for each label, followed by Unlabelled.
+  A multi-label item appears in each matching group, but the visible count
+  counts items only once. Groups do not imply hierarchy or dependencies.
+  The current sort applies inside each group; group headings sort by label.
+- **Memories**: separate project-memory browser with source badges, search,
+  manual refresh, Engram continuation and on-demand full text. Task filters,
+  labels, hierarchy and dependency edges do not apply to memories.
 - **Table**: the flat row table with source, lifecycle, availability, waits-for
   and assignment columns. Every column header is a button that sorts the
   loaded rows by that column (a second click reverses it; Updated starts
@@ -85,7 +86,28 @@ trackers; a single-source project shows none. Assignment stays a text chip.
   id). The headers and the "Sort (loaded rows)" control drive the same single
   sort state, which also orders the tree views' children.
 
-Kind filtering and sorting apply to loaded rows only. Selecting a row opens its
+In both trees a row reads as priority, then reference and title: the priority
+chip's colour is the availability (green ready, red blocked, blue claimed or
+active, gold deferred or waiting, grey closed), with the word kept on hover and
+as hidden text for assistive technology. The source appears as a small glyph
+(three beads; a cell for Engram) only when the loaded rows come from both
+trackers; a single-source project shows none. Assignment stays a text chip.
+The toggle, priority and title stay together; long titles wrap within the
+available row width, with trailing metadata wrapping below when necessary.
+
+Labels appear as clickable chips in all four views. Clicking a chip selects
+that exact label in the **Labels (loaded rows)** picker. Its searchable
+checkboxes support **Any label** (union) and **All labels** (intersection),
+removable selections and Clear labels. Counts describe the loaded snapshot
+before local kind/label filtering, not the entire tracker. Selection remains
+visible at zero count after refresh; a project or source-filter change resets
+it. Labels are exact, case-sensitive strings, including commas. The separate
+**Label (source filter)** input still queries beyond the loaded pages and
+retains each source's CLI semantics. Paging adds matching rows and label
+options; no local label action starts a source read. Empty labels, if emitted,
+are displayed explicitly as `(empty label)`, not treated as Unlabelled.
+
+Kind/label filtering and sorting apply to loaded rows only. Selecting a row opens its
 details beside the list: Engram details need the list's reader key; Beads
 details are a separate `show` + `comments` read and need no Engram reader.
 Only the active pane tab is mounted, so activating the Work tab again after
@@ -93,6 +115,67 @@ another tab is a refresh: it starts fresh reads and resets filters, selection
 and collapse state (tracked follow-up: keep that state per workspace tab).
 
 ## Source and identity boundary
+
+### Project memories
+
+The Memories view starts independent reads for Engram and Beads only when
+opened. Source errors/unavailability are shown separately from a successful
+empty listing. Search is submitted to each source, not silently restricted to
+already loaded rows. Changing project/search, refreshing, or leaving the view
+aborts client requests and fences late results. Unfiltered Engram pages load
+automatically and sequentially until no continuation remains, displaying each
+page as it arrives. A failed read stops loading without automatic retries;
+transport failures retain the partial list, while stale readers, duplicate
+keys, and non-progressing cursors discard the incompatible listing. Source
+search limits and Beads' listing cap remain explicitly disclosed.
+Each memory expands in place using its chevron/key button; multiple memories
+can stay open independently. Collapsing cancels the full-body request; Escape
+collapses the focused row and returns focus to its toggle. Opening reads the
+current full body. Engram's `rememberedAt` is the current version's creation
+time, shown as **Revision date**, not the memory's original creation date.
+Revision and author are displayed when supplied; Beads supplies no dates or
+revision/author metadata. Text is inert, not rendered HTML,
+executed, or injected into an agent context. Switching between Memories and
+task views remounts their results and resets local selection/filter state.
+
+`GET /api/projects/{id}/work-memories/{source}` accepts `engram` or `beads`.
+Query: optional `search`, or `key` for full text, or Engram `after` for the next
+unfiltered key-ordered page. Engram full/continuation reads require the list's
+`readerId`. These combinations are mutually exclusive; query text is capped
+at 2048 UTF-8 bytes with no controls or blank values. Unknown source/fields or
+invalid combinations return 400, missing project or Beads memory 404, stale
+Engram reader 409, busy follow-ups 429, and CLI/receipt failures 502. Initial
+source conditions return 200 with `state: unavailable|error` and `message`,
+not a misleading empty success. Internal errors remain HTTP failures.
+
+Response: `source`, `state`, `message`, `items`, nullable `nextAfter`, `omitted`,
+`exhausted`, nullable `readerId`, `observedAt`. Items contain `key`, `summary`,
+nullable `body`, `revision`, `rememberedAt`, `actor`. Lists omit bodies. Paging
+is a live key-ordered listing, not a frozen snapshot: refresh to see earlier
+keys added/changed since the first page. Reader identity fences configuration
+changes, not memory revisions. Duplicate/repeating continuations are refused.
+
+- Engram: established host reader, `work memories --json [-- SEARCH]`,
+  `--after=KEY`, or `--full -- KEY`. Only retained project memories, never the
+  generic recall/session-private context API, and no restricted-disclosure
+  override. Store/configuration is checked before and after every read.
+  Filtered searches disclose `omitted_count`; unfiltered lists expose
+  `next_after`. Bodies are fetched only on request. Contract inspected in
+  Engram's project-memory service and CLI handlers; fixtures cover HTTP wiring.
+- Beads: native argv-only `--readonly --json memories [-- SEARCH]` and
+  `--readonly --json recall -- KEY`, under the selected project root with
+  Beads store environment overrides removed. Verified on installed 1.2.2:
+  listing is a key/body object plus numeric `schema_version: 1`; recall is
+  `{found,key,value,schema_version}`. The host strips schema metadata, returns
+  only first-line previews (500 characters), caps the result at 2000 keys and
+  discloses omitted rows. bd itself reads full values for listing; this is not
+  an on-demand store read even though the browser receives summaries only.
+  No direct Dolt access. Existing Beads output/deadline/admission bounds apply.
+
+Live acceptance against the newly built host is still required; fixture tests
+do not establish that the running host serves these endpoints.
+
+### Established Work stores
 
 Detection uses metadata, never a trial `ls`, `init`, `doctor`, or enablement.
 Engram requires a local project, a declared `.engram-project`, operator-enabled
@@ -249,8 +332,12 @@ issue, since bd resolves prefixes and aliases.
 
 Beads rows are one snapshot per list request: no continuation, no reader
 identity. `search` and `availability` filters apply to the snapshot in the
-host; `label` is passed to bd (`--label=`), because `bd list --json` rows carry
-no labels field on bd 1.2.2. bd parses that flag as a comma-separated list
+host; `label` is passed to bd (`--label=`) before the display cap. Normal list
+receipts carry labels when present (verified 2026-09-16 on bd 1.2.2 build
+`6c124203e771` with `list --limit 0`, including an issue with two labels;
+this corrects the earlier claim that list receipts omitted labels).
+The adapter preserves these labels and treats an omitted empty field as `[]`;
+it never requests `--skip-labels`. bd parses the source flag as a comma-separated list
 with AND semantics, so `a,b` means "both labels" for Beads while Engram treats
 it as one label. The `ready` rule (open, no unsatisfied `blocks` edge) was
 checked against bd's own `ready --limit 0` on this store: 250 of 250 rows
@@ -348,8 +435,7 @@ provide it. Mere membership, assignment or availability is not proof. Each
 reader has its own read cut; conflicting observations mean unknown. Until
 proven, render a label without a link.
 
-Response Board pins of a Work table query, verified holder-to-session jumps and
-retained **project** memories (not another session's private context) are the
-remaining 1b items. Closed items are not listed by default from either source
+Response Board pins of a Work table query and verified holder-to-session jumps
+are the remaining 1b items. Closed items are not listed by default from either source
 (Engram `ls` without `--all`, `bd list` default); an explicit closed-history
 view would be a separate read with its own cap, for both sources at once.

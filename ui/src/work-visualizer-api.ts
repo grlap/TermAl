@@ -12,6 +12,17 @@ export type WorkItem = {
   source: string; prerequisites: WorkPrerequisite[];
 };
 export type WorkFilters = { search: string; label: string; availability: string };
+export type WorkMemorySource = "engram" | "beads";
+export type WorkMemory = { key: string; summary: string; body: string | null; revision: number | null; rememberedAt: string | null; actor: string | null };
+export type WorkMemoryResponse = {
+  source: WorkMemorySource; state: string; message: string; items: WorkMemory[];
+  nextAfter: string | null; omitted: number; exhausted: boolean; readerId: string | null; observedAt: string;
+};
+export function readWorkMemories(projectId: string, source: WorkMemorySource, query: { search?: string; after?: string; key?: string; readerId?: string }, signal: AbortSignal) {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) if (value) params.set(key, value);
+  return request<WorkMemoryResponse>(`/api/projects/${encodeURIComponent(projectId)}/work-memories/${source}?${params}`, { signal }, { preserveGatewayErrorBody: true });
+}
 export type WorkPage = { items: WorkItem[]; total: number; shownBefore: number; more: boolean; after: string | null; hint: string | null };
 export type WorkListResponse = {
   sources: { source: string; state: string; message: string }[];

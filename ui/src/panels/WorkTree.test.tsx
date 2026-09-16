@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { WorkItem } from "../work-visualizer-api";
 import { WorkTree } from "./WorkTree";
@@ -8,6 +8,37 @@ function waits(id: string, on: string[]): WorkItem {
 }
 
 describe("WorkTree", () => {
+  it.each(["dependencies", "hierarchy"] as const)("keeps the leading group together and discloses unknown sources and deferred availability in %s", mode => {
+    const deferred = { ...waits("later", []), availability: "deferred", assignedTo: "Long assignment", source: "beads" };
+    const unknown = { ...waits("other", []), source: "future-tracker" };
+    const rows = [deferred, unknown];
+    const view = render(<WorkTree rows={rows} universe={rows} mode={mode} selection={null} onSelect={() => {}} />);
+    const title = screen.getByRole("button", { name: "later — later" });
+    const main = title.parentElement!;
+    expect(main).toHaveClass("work-node-main");
+    expect(main.querySelector(".work-node-toggle")).toBeInTheDocument();
+    const lead = title.previousElementSibling!;
+    expect(lead).toHaveClass("work-priority");
+    expect(lead).toHaveAttribute("data-state", "deferred");
+    expect(lead).toHaveAttribute("title", "deferred");
+    expect(lead).toHaveTextContent("P2, deferred");
+    expect(lead.querySelector(".visually-hidden")).toHaveTextContent(", deferred");
+    // Metadata is outside the content-sized leading group, so the outer
+    // flex line can wrap it independently. Real layout is checked in a browser.
+    expect(within(main).queryByText("Long assignment")).not.toBeInTheDocument();
+    expect(within(main.parentElement!).getByText("Long assignment")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Source: Beads" })).toBeInTheDocument();
+    const fallback = screen.getByText("future-tracker");
+    expect(fallback).toHaveClass("work-chip-source");
+    expect(fallback).toHaveAttribute("data-source", "future-tracker");
+    expect(fallback.querySelector("svg")).toBeNull();
+
+    view.rerender(<WorkTree rows={[unknown]} universe={[unknown]} mode={mode} selection={null} onSelect={() => {}} />);
+    expect(screen.queryByText("future-tracker")).not.toBeInTheDocument();
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "other — other" })).toBeInTheDocument();
+  });
+
   it("renders a 4,000-row linear chain without exhausting the stack", () => {
     const rows = Array.from({ length: 4000 }, (_, index) => waits(`c${index}`, index ? [`c${index - 1}`] : []));
     const { container } = render(<WorkTree rows={rows} universe={rows} mode="dependencies" selection={null} onSelect={() => {}} />);

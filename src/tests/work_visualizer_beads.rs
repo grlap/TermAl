@@ -60,6 +60,26 @@ fn beads_status(response: &WorkListResponse) -> &WorkSourceStatus {
         .expect("beads source status")
 }
 
+#[tokio::test]
+async fn memory_beads_http_lists_and_recalls_only_readonly_project_entries() {
+    let binary = beads_fixture_binary();
+    let _binary = with_beads_binary(Some(&binary));
+    let (state, project, root) = beads_fixture("memories");
+    let app = app_router(state)
+        .layer(axum::Extension(BeadsReadLimiter(Arc::new(tokio::sync::Semaphore::new(1)))))
+        .layer(axum::Extension(BeadsReadOptions::for_tests()));
+    for suffix in ["", "?key=guide"] {
+        let (status, response): (StatusCode, Value) = request_json(&app, Request::builder()
+            .uri(format!("/api/projects/{project}/work-memories/beads{suffix}"))
+            .body(Body::empty()).unwrap()).await;
+        assert_eq!(status, StatusCode::OK, "{response}");
+        assert_eq!(response["items"][0]["key"], "guide");
+        assert_eq!(response["items"][0]["body"].is_null(), suffix.is_empty());
+    }
+    let commands = fs::read_to_string(root.join("beads-read-args-log.txt")).unwrap();
+    assert_eq!(commands.lines().collect::<Vec<_>>(), ["--readonly --json memories", "--readonly --json recall -- guide"]);
+}
+
 #[test]
 fn beads_detection_is_metadata_only_and_names_the_missing_binary() {
     // A runnable fixture is configured, so a read would leave its argv file:
@@ -389,6 +409,28 @@ fn beads_label_beyond_the_launch_bound_is_a_source_error_not_a_failed_request() 
         !root.join("beads-read-args.txt").exists(),
         "nothing launched past the bound"
     );
+}
+
+#[test]
+fn beads_list_preserves_labels_for_loaded_row_browsing() {
+    // Normal bd 1.2.2 list receipts hydrate labels; empty labels are omitted.
+    // This pins the adapter boundary without per-issue label subprocesses.
+    let rows: Vec<BeadsListRow> = serde_json::from_value(serde_json::json!([
+        {"id":"tm-labelled","title":"Labelled","status":"open","priority":2,"issue_type":"task","dependency_count":0,"labels":["engram","lifecycle","a,b"]},
+        {"id":"tm-empty","title":"Unlabelled","status":"open","priority":2,"issue_type":"task","dependency_count":0}
+    ]))
+    .unwrap();
+    let page = normalize_beads_work_page(
+        rows,
+        vec![],
+        &HashMap::new(),
+        &BeadsSnapshotCoverage::default(),
+        &WorkListQuery::default(),
+        10,
+    )
+    .unwrap();
+    assert_eq!(page.items[0].labels, ["engram", "lifecycle", "a,b"]);
+    assert!(page.items[1].labels.is_empty());
 }
 
 #[test]

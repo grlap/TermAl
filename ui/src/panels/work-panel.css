@@ -19,7 +19,7 @@
 .work-panel [role="alert"] { color: var(--signal-red); }
 
 /* View switch: one selected tab, no section semantics. */
-.work-view-switch { display: flex; gap: 0.25rem; }
+.work-view-switch { display: flex; flex-wrap: wrap; gap: 0.25rem; }
 .work-view-switch button { border-radius: 999px; padding: 0.3rem 0.75rem; color: var(--muted); }
 .work-view-switch button[aria-pressed="true"] { color: var(--ink); background: var(--surface-white); border-color: var(--ink); font-weight: 600; }
 
@@ -44,7 +44,6 @@
 .work-chip-source { text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.68rem; }
 .work-source { display: inline-flex; align-items: center; color: var(--muted); }
 .work-source svg { width: 1rem; height: 1rem; }
-.work-visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 
 /* Trees: solid rail = waits for, dashed rail = subtask of. */
 .work-tree ul { list-style: none; margin: 0; padding: 0; }
@@ -58,10 +57,13 @@ p.work-tree-relation { margin-left: 2rem; }
 /* A repeated reference is a control: it reveals the row it points at. */
 button.work-tree-relation { background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline dotted; }
 .work-node-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; padding: 0.2rem 0; }
-/* The title never wraps to its own line away from the priority chip: a zero basis keeps it on
-   the chip's line, it grows into the remaining width and wraps its text there; the content cap
-   keeps short titles content-sized. Trailing chips wrap below when they do not fit. */
-.work-node-row > .work-row-title { flex: 1 1 0; min-width: 0; max-width: max-content; }
+/* Size the leading group from its content before collecting the outer flex line.
+   Long titles get the available row width; trailing metadata wraps instead of
+   stealing title width. Short titles still leave room for inline metadata. */
+.work-node-main { display: flex; align-items: center; gap: 0.35rem; flex: 0 1 auto; min-width: 0; max-width: 100%; }
+.work-node-main > .work-node-toggle, .work-node-main > .work-priority { flex: none; }
+.work-node-main > .work-row-title { flex: 0 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.work-node-row > .work-chip, .work-node-row > .work-tree-relation { max-width: 100%; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
 .work-node-toggle { width: 1.5rem; height: 1.5rem; padding: 0; line-height: 1; text-align: center; display: inline-flex; align-items: center; justify-content: center; }
 .work-node-toggle[aria-expanded="false"] { transform: rotate(-90deg); }
 .work-node-leaf { border-color: transparent; background: transparent; }
@@ -81,3 +83,33 @@ button.work-tree-relation { background: none; border: 0; padding: 0; cursor: poi
 .work-item-details { border: 1px solid var(--line); background: var(--surface-card); border-radius: 0.4rem; padding: 0.65rem; overflow-wrap: anywhere; }
 .work-item-details li { margin-bottom: 0.65rem; }
 .work-inert-text { white-space: pre-wrap; }
+
+/* Label colours are neutral: availability keeps ownership of status colours. */
+.work-label-chips { display: flex; flex-wrap: wrap; gap: 0.3rem; min-width: 0; margin: 0.2rem 0; }
+.work-panel .work-label-chip { font-size: 0.75rem; border: 1px solid var(--line); border-radius: 999px; padding: 0.1rem 0.5rem; color: var(--muted); background: var(--paper-strong); overflow-wrap: anywhere; min-width: 0; max-width: 100%; text-align: left; }
+.work-node > .work-label-chips { margin-left: 1.85rem; }
+.work-label-filter { flex: 1 1 14rem; min-width: 0; position: relative; }
+.work-label-filter > button { width: 100%; text-align: left; overflow-wrap: anywhere; }
+.work-label-picker { position: absolute; z-index: 5; top: 100%; left: 0; width: 100%; min-width: 0; box-sizing: border-box; padding: 0.65rem; display: flex; flex-direction: column; gap: 0.5rem; border: 1px solid var(--line); border-radius: 0.4rem; background: var(--paper-strong); box-shadow: 0 0.4rem 1rem #0004; }
+.work-label-picker label { flex: none; }
+.work-label-options { max-height: 16rem; overflow: auto; }
+.work-label-options label { display: flex; flex-direction: row; align-items: center; gap: 0.5rem; padding: 0.3rem 0; overflow-wrap: anywhere; }
+.work-label-options input { flex: none; }
+.work-label-count { margin-left: auto; font-size: 0.8rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.work-label-picker button[aria-pressed="true"] { border-color: var(--signal-blue); }
+.work-label-groups { display: flex; flex-direction: column; gap: 0.65rem; }
+.work-label-group { border: 1px solid var(--line); border-radius: 0.4rem; min-width: 0; }
+.work-label-group h3 { margin: 0; font-size: 0.9rem; }
+.work-label-group h3 button { display: flex; align-items: center; gap: 0.4rem; text-align: left; width: 100%; border: 0; overflow-wrap: anywhere; }
+.work-label-group ul { list-style: none; margin: 0; padding: 0 0.5rem; }
+.work-label-group li { padding: 0.35rem 0; border-top: 1px solid var(--line); }
+.work-memories { display: flex; flex-direction: column; gap: 0.75rem; min-width: 0; }
+.work-memory-source { border: 1px solid var(--line); border-radius: 0.4rem; padding: 0.65rem; min-width: 0; }
+.work-memory-source h3 { margin: 0 0 0.5rem; font-size: 1rem; overflow-wrap: anywhere; }
+.work-memory-list { list-style: none; padding: 0; margin: 0.5rem 0; }
+.work-memory-list li { padding: 0.65rem 0; border-top: 1px solid var(--line); }
+.work-panel .work-memory-key { display: inline-flex; align-items: baseline; gap: 0.45rem; max-width: 100%; overflow-wrap: anywhere; text-align: left; margin-bottom: 0.35rem; }
+.work-memory-key > span:last-child { min-width: 0; }
+.work-memory-chevron { flex: none; font-size: 0.8em; }
+.work-memory-key[aria-expanded="true"] { border-color: var(--signal-blue); }
+.work-memory-body { min-width: 0; }

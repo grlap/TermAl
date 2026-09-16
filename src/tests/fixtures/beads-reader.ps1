@@ -8,6 +8,8 @@ Add-Content -LiteralPath (Join-Path (Get-Location) 'beads-read-args-log.txt') -V
 "$env:BEADS_DIR|$env:BEADS_DB" | Set-Content -LiteralPath (Join-Path (Get-Location) 'beads-read-env.txt')
 if (($args[0] -ne '--readonly') -or ($args[1] -ne '--json')) { [Console]::Error.WriteLine('fixture requires --readonly --json first'); exit 9 }
 $rest = @($args | Select-Object -Skip 2)
+if ($rest[0] -eq 'memories') { [Console]::WriteLine('{"schema_version":1,"guide":"Summary\nFull body"}'); exit 0 }
+if ($rest[0] -eq 'recall') { [Console]::WriteLine('{"schema_version":1,"key":"guide","found":true,"value":"Summary\nFull body"}'); exit 0 }
 $rootRow = '{"id":"tm-root","title":"Root epic <script> inert","description":"Epic","status":"in_progress","priority":2,"issue_type":"feature","assignee":"Termal::Codex","owner":"Greg","created_at":"2026-09-01T00:00:00Z","created_by":"Greg","updated_at":"2026-09-13T00:00:00Z","started_at":null,"dependency_count":0,"dependent_count":1,"comment_count":2}'
 if ($rest[0] -eq 'list') {
   if (Test-Path -LiteralPath 'beads-fixture-fail') { [Console]::Error.WriteLine('Error: database is locked'); exit 1 }

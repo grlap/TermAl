@@ -26,7 +26,7 @@ export function WorkRowButton({ item, selected, onSelect }: {
 // hidden text, so colour is never the only carrier.
 export function WorkRowLead({ item }: { item: WorkItem }) {
   return <span className="work-chip work-priority" data-priority={item.priority} data-state={item.availability} title={item.availability}>
-    P{item.priority}<span className="work-visually-hidden">, {item.availability}</span>
+    P{item.priority}<span className="visually-hidden">, {item.availability}</span>
   </span>;
 }
 

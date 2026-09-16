@@ -6,12 +6,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { WorkItem } from "../work-visualizer-api";
 import { MAX_TREE_DEPTH, buildDependencyForest, buildHierarchyForest, type WorkTreeNode } from "./work-tree";
 import { WorkRowButton, WorkRowChips, WorkRowLead, isSelectedWorkItem, type WorkSelection } from "./WorkRow";
+import { WorkLabelChips } from "./WorkLabels";
 
 export type WorkTreeMode = "dependencies" | "hierarchy";
 
-export function WorkTree({ rows, universe, mode, selection, onSelect }: {
+export function WorkTree({ rows, universe, mode, selection, onSelect, onLabel }: {
   rows: readonly WorkItem[]; universe: readonly WorkItem[]; mode: WorkTreeMode; selection: WorkSelection | null;
   onSelect: (item: WorkItem, trigger: HTMLButtonElement) => void;
+  onLabel?: (label: string) => void;
 }) {
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
   const forest = useMemo(
@@ -46,7 +48,7 @@ export function WorkTree({ rows, universe, mode, selection, onSelect }: {
     for (const row of section.current?.querySelectorAll<HTMLLIElement>("li[data-node-key]") ?? []) {
       if (row.getAttribute("data-node-key") !== pendingReveal) continue;
       // The first row div inside the node is its own; nested nodes follow it.
-      const title = row.querySelector<HTMLButtonElement>(".work-node-row > .work-row-title");
+      const title = row.querySelector<HTMLButtonElement>(".work-node-row > .work-node-main > .work-row-title");
       title?.focus();
       title?.scrollIntoView?.({ block: "nearest" });
       break;
@@ -58,12 +60,14 @@ export function WorkTree({ rows, universe, mode, selection, onSelect }: {
     const allSatisfied = node.children.length > 0 && node.children.every(child => child.satisfied === true);
     return <li key={node.key} data-node-key={node.key} className={`work-node${node.item.lifecycle === "completed" ? " is-completed" : ""}`}>
       <div className="work-node-row">
-        {node.children.length > 0
-          ? <button type="button" className="work-node-toggle" aria-expanded={open}
-            aria-label={`${open ? "Collapse" : "Expand"} ${node.item.shortRef}`} onClick={() => toggle(node.key)}>▾</button>
-          : <span className="work-node-toggle work-node-leaf" aria-hidden="true" />}
-        <WorkRowLead item={node.item} />
-        <WorkRowButton item={node.item} selected={isSelectedWorkItem(selection, node.item)} onSelect={onSelect} />
+        <div className="work-node-main">
+          {node.children.length > 0
+            ? <button type="button" className="work-node-toggle" aria-expanded={open}
+              aria-label={`${open ? "Collapse" : "Expand"} ${node.item.shortRef}`} onClick={() => toggle(node.key)}>▾</button>
+            : <span className="work-node-toggle work-node-leaf" aria-hidden="true" />}
+          <WorkRowLead item={node.item} />
+          <WorkRowButton item={node.item} selected={isSelectedWorkItem(selection, node.item)} onSelect={onSelect} />
+        </div>
         <WorkRowChips item={node.item} mixedSources={mixedSources} />
         {mode === "dependencies" && node.satisfied === true && <span className="work-chip" data-satisfied="true">satisfied</span>}
         {node.repeatedCount > 0 && <button type="button" className="work-tree-relation" data-repeated="true"
@@ -83,6 +87,7 @@ export function WorkTree({ rows, universe, mode, selection, onSelect }: {
           {mode === "dependencies" ? `${node.hiddenByFilter} hidden by filter` : "parent hidden by filter"}
         </span>}
       </div>
+      <WorkLabelChips item={node.item} onLabel={onLabel} />
       {node.children.length > 0 && open && <>
         {mode === "dependencies" && <p className="work-tree-relation">{allSatisfied ? "all prerequisites satisfied" : "waits for"}</p>}
         <ul data-relation={mode} data-satisfied={allSatisfied ? "true" : undefined}>{node.children.map(renderNode)}</ul>

@@ -294,6 +294,8 @@ fn run_beads_read_process(
         Some("list") => "bd list",
         Some("show") => "bd show",
         Some("comments") => "bd comments",
+        Some("memories") => "bd memories",
+        Some("recall") => "bd recall",
         _ => return Err(ApiError::bad_request("Unsupported Beads read operation")),
     };
     // A deadline that has already passed launches nothing: the process could
@@ -897,7 +899,8 @@ fn read_beads_work_page_until(
         .map(str::trim)
         .filter(|label| !label.is_empty())
     {
-        // bd filters labels itself; its JSON list rows carry no labels field.
+        // Keep source filtering in bd before the display cap. Labels returned
+        // in list receipts also support independent loaded-row UI filtering.
         list_args.push(format!("--label={label}"));
     }
     let listed = run_beads_read_command(target, &list_args, deadline)?;

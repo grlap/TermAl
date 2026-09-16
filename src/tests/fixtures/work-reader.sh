@@ -10,6 +10,17 @@ for arg in "$@"; do
   previous="$arg"
 done
 printf '%s\n' "$@" > "$fixture_home/work-read-args.txt"
+fixture_memories=false
+fixture_full=false
+for arg in "$@"; do
+  [ "$arg" = memories ] && fixture_memories=true
+  [ "$arg" = --full ] && fixture_full=true
+done
+if [ "$fixture_memories" = true ]; then
+  if [ "$fixture_full" = true ]; then printf '%s\n' '{"key":"guide","revision":2,"body":"<script>inert</script>","remembered_at":"2026-09-16T00:00:00Z","actor_id":"test/termal"}'; exit 0; fi
+  if [ "$fixture_after" = guide ]; then printf '%s\n' '{"memories":[{"key":"later","revision":1,"first_line":"Later memory","remembered_at":"2026-09-16T00:00:00Z","actor_id":"test/termal"}],"omitted_count":0,"exhausted":true}'; exit 0; fi
+  printf '%s\n' '{"memories":[{"key":"guide","revision":2,"first_line":"Summary","remembered_at":"2026-09-16T00:00:00Z","actor_id":"test/termal"}],"next_after":"guide","omitted_count":0,"exhausted":false}'; exit 0
+fi
 for arg in "$@"; do
   case "$arg" in
     --search=stale) printf '%s\n' 'work_catalog_cursor_invalid: fixture changed' >&2; exit 1 ;;

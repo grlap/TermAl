@@ -29,6 +29,7 @@ fn run_work_read_command(
     let operation = match args.first().map(String::as_str) {
         Some("ls") => "engram work ls",
         Some("show") => "engram work show",
+        Some("memories") => "engram work memories",
         _ => return Err(ApiError::bad_request("Unsupported Work read operation")),
     };
     let mut command = engram_command(&connection.binary_path);
