@@ -23,18 +23,16 @@ const ENGRAM_DISPATCH_BUDGET_MS: u64 = 600;
 // Five minutes is about two and a half times the largest measured run; being
 // wrong high costs a longer wait before failure. Expiry attempts process-tree
 // termination; failed cleanup does not block the response.
-// THIS BOUND EXPIRES AS EVIDENCE, and the moment it expires is predictable
-// rather than random. The audit's cost has a FROZEN part (re-reading the
-// archive preserved at the last migration, which does not grow by a byte until
-// the next one) and a GROWING part (verifying current objects). So the bound
-// holds until THE NEXT MIGRATION, when the frozen part steps up by the size of
-// whatever is migrated then - possibly containing today's archive whole, since
-// the export is generic over persistent tables. Someone meeting a refusal after
-// a future migration is looking at a foreseen step, not a new defect.
-// Re-measure then, and raise this from a measurement rather than a guess.
-// (Scaling with preserved history rests on the four labelled samples above,
-// not on the frozen/growing split, which is measured in BYTES; how the audit's
-// TIME divides between the two parts has never been measured.)
+// THIS BOUND EXPIRES AS EVIDENCE. Engram build 7c773f62c50f (2026-09-17) keeps
+// no archive of pre-migration records: a store changes format by a plain JSON
+// export and import, and nothing of the old format stays behind. Measured on
+// the same store after that conversion (2,288 MiB -> 174 MiB, the preserved
+// archive gone): 84.5 s, against 3.9 s for a 70 MiB store. Removing 94% of the
+// bytes took only about a quarter off the time, so the audit's cost is
+// dominated by verifying CURRENT records and grows with them; the earlier
+// guess that a frozen archive drove it was wrong. There is no longer a step at
+// each migration. Re-measure when a store's record count has grown severalfold,
+// and raise this from a measurement rather than a guess.
 #[cfg(not(test))]
 const ENGRAM_ENABLEMENT_DOCTOR_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 // The Windows fixture launches through powershell.exe, and the full Rust suite
@@ -1259,7 +1257,9 @@ impl EngramControlTransport for StatefulEngramControlTransport {
                     "receipt": {
                         "obligation_id": obligation_id,
                         "definition": expected_definition,
-                        "resolution": "b".repeat(64),
+                        // The resolution is a record id in the same form as
+                        // the definition the request named.
+                        "resolution": "b".repeat(expected_definition.len()),
                         "state": "waived",
                         "waived_by": waived_by,
                         "waived_at": "2026-09-02T00:00:00Z"
@@ -2977,11 +2977,21 @@ fn engram_project_for_session_locked<'a>(
     }
 }
 
+fn is_lowercase_hex(value: &str) -> bool {
+    value
+        .bytes()
+        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+/// A content fingerprint, such as the review-freeze fingerprint.
 fn is_lowercase_sha256(value: &str) -> bool {
-    value.len() == 64
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    value.len() == 64 && is_lowercase_hex(value)
+}
+
+/// An Engram record id. Engram mints a record's id as a random UUID written as
+/// 32 hex digits; ids stored before that are 64 hex digits. Both are opaque.
+fn is_engram_record_id(value: &str) -> bool {
+    matches!(value.len(), 32 | 64) && is_lowercase_hex(value)
 }
 
 fn validate_engram_obligation_waiver_decision(
@@ -2994,7 +3004,7 @@ fn validate_engram_obligation_waiver_decision(
         EngramObligationWaiverDecisionResponse::Waived { receipt } => {
             receipt.obligation_id == obligation_id
                 && receipt.definition == expected_definition
-                && is_lowercase_sha256(&receipt.resolution)
+                && is_engram_record_id(&receipt.resolution)
                 && receipt.state == "waived"
                 && receipt.waived_by.trim() == waived_by
                 && chrono::DateTime::parse_from_rfc3339(&receipt.waived_at).is_ok()
@@ -3010,7 +3020,7 @@ fn validate_engram_obligation_waiver_decision(
                 && !remedy.trim().is_empty()
                 && current_definition
                     .as_deref()
-                    .is_none_or(is_lowercase_sha256)
+                    .is_none_or(is_engram_record_id)
         }
     };
     if valid {
@@ -3183,9 +3193,9 @@ impl AppState {
         let obligation_id = Uuid::parse_str(obligation_id)
             .map_err(|_| ApiError::bad_request("obligationId must be a UUID"))?
             .to_string();
-        if !is_lowercase_sha256(expected_definition) {
+        if !is_engram_record_id(expected_definition) {
             return Err(ApiError::bad_request(
-                "expectedDefinition must be a lowercase 64-character SHA-256 hash",
+                "expectedDefinition must be an Engram record id: 32 or 64 lowercase hex digits",
             ));
         }
         if waived_by.is_empty() {

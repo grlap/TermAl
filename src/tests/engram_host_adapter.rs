@@ -173,6 +173,65 @@ fn obligation_waiver_response_must_correlate_to_the_request() {
 }
 
 #[test]
+fn obligation_waiver_response_accepts_engram_record_ids_in_both_forms() {
+    let obligation = "00000000-0000-0000-0000-000000000000";
+    let waived = |definition: String, resolution: String| {
+        validate_engram_obligation_waiver_decision(
+            EngramObligationWaiverDecisionResponse::Waived {
+                receipt: EngramObligationWaiverReceipt {
+                    obligation_id: obligation.to_owned(),
+                    definition: definition.clone(),
+                    resolution,
+                    state: "waived".to_owned(),
+                    waived_by: "human-operator".to_owned(),
+                    waived_at: "2026-09-02T00:00:00Z".to_owned(),
+                },
+            },
+            obligation,
+            &definition,
+            "human-operator",
+        )
+    };
+    // Engram mints a record id as 32 hex digits; earlier ids are 64.
+    for length in [32, 64] {
+        waived("a".repeat(length), "b".repeat(length)).expect("a record id in either form");
+    }
+    waived("a".repeat(32), "b".repeat(64)).expect("the two ids need not share a form");
+    for resolution in [
+        "b".repeat(31),
+        "b".repeat(40),
+        "B".repeat(32),
+        "g".repeat(32),
+    ] {
+        let error = waived("a".repeat(32), resolution.clone())
+            .expect_err("a resolution that is not a record id must be rejected");
+        assert_eq!(
+            error.kind,
+            EngramTransportErrorKind::Protocol,
+            "{resolution}"
+        );
+    }
+
+    let refused = |current_definition: Option<String>| {
+        validate_engram_obligation_waiver_decision(
+            EngramObligationWaiverDecisionResponse::Refused {
+                code: "waiver_not_admitted".to_owned(),
+                obligation_id: obligation.to_owned(),
+                current_definition,
+                remedy: "complete the required verification".to_owned(),
+            },
+            obligation,
+            &"a".repeat(32),
+            "human-operator",
+        )
+    };
+    refused(None).expect("a refusal may name no definition");
+    refused(Some("c".repeat(32))).expect("a minted definition id");
+    refused(Some("c".repeat(64))).expect("an earlier definition id");
+    assert!(refused(Some("c".repeat(33))).is_err());
+}
+
+#[test]
 fn engram_context_nudge_truncation_preserves_utf8_boundaries() {
     let mut context = "a".repeat(ENGRAM_CONTEXT_NUDGE_MAX_BYTES - 1);
     context.push('🦀');
@@ -324,6 +383,55 @@ fn bound_session_submits_human_waiver_and_returns_redacted_receipt() {
         )
         .expect_err("invalid obligation UUID should be rejected locally");
     assert_eq!(invalid_uuid.status, StatusCode::BAD_REQUEST);
+
+    // Engram mints record ids as 32 hex digits: the definition a human waives
+    // and the resolution in the receipt both arrive in that form.
+    let minted = state
+        .waive_engram_obligation(
+            &session_id,
+            WaiveEngramObligationRequest {
+                obligation_id: "00000000-0000-0000-0000-000000000004".to_owned(),
+                expected_definition: "d".repeat(32),
+                waived_by: "human-operator".to_owned(),
+                reason: "Accepted without the requested check".to_owned(),
+                idempotency_key: "termal-waiver-minted-id".to_owned(),
+            },
+        )
+        .expect("a minted record id should be accepted end to end");
+    let minted = serde_json::to_value(minted).expect("waiver response should serialize");
+    assert_eq!(minted["decision"], "waived");
+    assert_eq!(minted["receipt"]["definition"], "d".repeat(32));
+    assert_eq!(minted["receipt"]["resolution"], "b".repeat(32));
+
+    let requests_before_invalid_definition = transport.requests().len();
+    for definition in [
+        "d".repeat(31),
+        "d".repeat(40),
+        "D".repeat(32),
+        "z".repeat(64),
+    ] {
+        let invalid_definition = state
+            .waive_engram_obligation(
+                &session_id,
+                WaiveEngramObligationRequest {
+                    obligation_id: "00000000-0000-0000-0000-000000000005".to_owned(),
+                    expected_definition: definition.clone(),
+                    waived_by: "human-operator".to_owned(),
+                    reason: "invalid definition".to_owned(),
+                    idempotency_key: "termal-waiver-invalid-definition".to_owned(),
+                },
+            )
+            .expect_err("a definition that is not a record id should be rejected locally");
+        assert_eq!(
+            invalid_definition.status,
+            StatusCode::BAD_REQUEST,
+            "{definition}"
+        );
+    }
+    assert_eq!(
+        transport.requests().len(),
+        requests_before_invalid_definition
+    );
 
     let missing_session = state
         .waive_engram_obligation(
