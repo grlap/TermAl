@@ -16,6 +16,7 @@ import type {
   ConversationMarker,
   ConversationMarkerKind,
   CursorMode,
+  DelegationAcceptanceEvaluation,
   DelegationRecord,
   DelegationResult,
   DelegationSummary,
@@ -78,7 +79,7 @@ export type StateResponse = {
 export type DelegationStateSummary = Pick<
   DelegationSummary,
   "id" | "childSessionId" | "mode" | "reviewResultRequired"
-> & { reviewFreezeAllowed?: boolean };
+> & { reviewFreezeAllowed?: boolean; acceptanceEvaluationAllowed?: boolean };
 
 export type CreateSessionResponse = {
   sessionId: string;
@@ -205,6 +206,7 @@ export type DelegationStatusResponse = {
 export type DelegationResultResponse = {
   revision: number;
   result: DelegationResult;
+  acceptanceEvaluation?: DelegationAcceptanceEvaluation | null;
   serverInstanceId: string;
 };
 

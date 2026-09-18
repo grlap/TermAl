@@ -522,6 +522,7 @@ fn acp_permission_does_not_infer_control_plane_identity_from_a_tool_name() {
             review_result_schema_version: None,
             queued_followup_prompt_id: None,
             review_result_submission_attempt: 1,
+            acceptance_evaluation: None,
         });
         let delegation_index = inner.delegations.len() - 1;
         inner.mark_delegation_mutated(delegation_index);
@@ -609,6 +610,7 @@ fn acp_reviewer_does_not_auto_approve_an_unscoped_colliding_tool_name() {
             review_result_schema_version: None,
             queued_followup_prompt_id: None,
             review_result_submission_attempt: 1,
+            acceptance_evaluation: None,
         });
         let delegation_index = inner.delegations.len() - 1;
         inner.mark_delegation_mutated(delegation_index);

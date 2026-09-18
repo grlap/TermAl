@@ -459,7 +459,28 @@ export type CodexMcpServerStatus = {
   tools: CodexMcpToolSummary[];
 };
 
-export type DelegationMode = "reviewer" | "explorer" | "worker";
+// "evaluator" children are created only by the backend's acceptance-evaluation
+// request; the UI renders them and never asks for one through create.
+export type DelegationMode = "reviewer" | "explorer" | "worker" | "evaluator";
+
+export type AcceptanceEvaluationMode =
+  | "same_session"
+  | "sub_agent"
+  | "independent_session";
+
+/** What an evaluator delegation judges and, once recorded, the tracker's receipt. */
+export type DelegationAcceptanceEvaluation = {
+  workRef: string;
+  mode: AcceptanceEvaluationMode;
+  acceptanceBasis: number;
+  evidenceBasis: number;
+  criteriaCount: number;
+  attemptKey: string;
+  outcome?: {
+    receipt: JsonValue;
+    recordedAt: string;
+  } | null;
+};
 export type DelegationStatus =
   | "queued"
   | "running"
@@ -525,6 +546,7 @@ export type DelegationRecord = {
   reviewResultRequired: boolean;
   postSubmissionTransportError?: string | null;
   reviewResultRecoveryError?: string | null;
+  acceptanceEvaluation?: DelegationAcceptanceEvaluation | null;
 };
 
 export type DelegationSummary = Omit<

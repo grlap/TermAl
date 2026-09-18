@@ -2631,6 +2631,7 @@ fn remote_delegation_delta_advances_revision_without_local_record() {
         post_submission_transport_error: None,
         review_result_recovery_error: None,
         result: None,
+        acceptance_evaluation: None,
     };
     let result = DelegationResultSummary {
         delegation_id: delegation.id.clone(),

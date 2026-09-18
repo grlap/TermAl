@@ -1075,6 +1075,9 @@ enum DelegationMode {
     Reviewer,
     Explorer,
     Worker,
+    /// Host-created acceptance evaluator. Only the acceptance-evaluation
+    /// request path creates one; the public create route refuses the mode.
+    Evaluator,
 }
 
 /// Delegated child session lifecycle status.
@@ -1273,6 +1276,41 @@ struct DelegationCommandResult {
     status: String,
 }
 
+/// Who may judge a task's acceptance criteria, in Engram's own words.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum AcceptanceEvaluationMode {
+    SameSession,
+    SubAgent,
+    IndependentSession,
+}
+
+/// What an evaluator delegation judges. The bases are the revisions the host
+/// read before spawning; the evaluator submits against exactly those, so a
+/// task that moved on is refused by the tracker instead of silently covered.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DelegationAcceptanceEvaluation {
+    work_ref: String,
+    mode: AcceptanceEvaluationMode,
+    acceptance_basis: i64,
+    evidence_basis: i64,
+    criteria_count: usize,
+    /// One key per spawn (the delegation id): the tracker replays an identical
+    /// resend and refuses different content once one is recorded.
+    attempt_key: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    outcome: Option<DelegationAcceptanceEvaluationOutcome>,
+}
+
+/// The tracker's success receipt for a recorded evaluation.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DelegationAcceptanceEvaluationOutcome {
+    receipt: Value,
+    recorded_at: String,
+}
+
 /// Persisted parent-child delegation metadata.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1334,6 +1372,9 @@ struct DelegationRecord {
     /// The value advances whenever a completed review is rearmed.
     #[serde(default)]
     review_result_submission_attempt: u32,
+    /// Evaluation target and recorded outcome; present only in evaluator mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    acceptance_evaluation: Option<DelegationAcceptanceEvaluation>,
 }
 
 /// Determines when a delegation wait resumes its parent session.
@@ -1388,6 +1429,9 @@ struct DelegationSummary {
     review_result_recovery_error: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     result: Option<DelegationResultSummary>,
+    /// What an evaluator delegation judged and what the tracker recorded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    acceptance_evaluation: Option<DelegationAcceptanceEvaluation>,
 }
 
 /// Minimal delegation identity and MCP capability metadata carried by broad
@@ -1409,6 +1453,11 @@ struct DelegationStateSummary {
     /// Static policy capability; the endpoint separately checks live authority.
     #[serde(default)]
     review_freeze_allowed: bool,
+    /// Static policy capability for the evaluator-only submission tool; the
+    /// endpoint separately checks live authority. Written only when true, so
+    /// every other delegation's broad-state link keeps its shape.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    acceptance_evaluation_allowed: bool,
 }
 
 /// Request payload for creating a Phase 1 read-only delegation.
@@ -1466,6 +1515,10 @@ struct DelegationListResponse {
 struct DelegationResultResponse {
     revision: u64,
     result: DelegationResult,
+    /// Evaluator delegations only: the target and the recorded outcome, so a
+    /// completed child that recorded nothing is visible as exactly that.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    acceptance_evaluation: Option<DelegationAcceptanceEvaluation>,
     #[serde(deserialize_with = "deserialize_nonempty_server_instance_id")]
     server_instance_id: String,
 }

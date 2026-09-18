@@ -443,6 +443,43 @@ The packet is a summary for resumption, not a replacement for the child
 transcript. Structured review submissions accept only terminal command status
 labels: `success` or `error`.
 
+### Evaluator delegations
+
+`mode: evaluator` is a host-created delegation that judges an Engram task's
+acceptance criteria. The host side of that contract, including how the mode is
+selected and what is recorded, is described in the
+[Engram host adapter](engram-host-adapter.md#acceptance-evaluation).
+
+- **Creation.** Only the acceptance-evaluation request creates one:
+  `termal_evaluate_acceptance`, or
+  `POST /api/sessions/{id}/acceptance-evaluations` with
+  `{ "workRef", "agent"?, "model"? }`. A delegation create request with
+  `mode: evaluator` is refused, `termal_spawn_session` does not offer the mode,
+  and agent-command delegation metadata may not declare it. The caller supplies
+  no prompt: the session whose work is judged does not brief its judge.
+- **Shape.** Always `writePolicy: readOnly`, in the parent's working directory,
+  Claude or Codex only (the same reason as reviewer mode: the submission tool is
+  admitted by authenticated MCP tool identity). A Claude evaluator runs under
+  the same read-only, unattended permission overlay as a read-only reviewer.
+- **Not a reviewer.** An evaluator gets no structured review-result protocol,
+  no `reviewResultRequired`, and no freeze tool. Its compact result is the
+  ordinary one, synthesized from its final answer like an explorer's.
+- **Target and outcome.** The record carries `acceptanceEvaluation`: `workRef`,
+  `mode`, `acceptanceBasis`, `evidenceBasis`, `criteriaCount`, `attemptKey` (the
+  delegation id) and, once the tracker accepted a submission, `outcome`
+  (`receipt`, `recordedAt`). It is part of the status packet
+  (`termal_get_session_status`), the result packet
+  (`termal_get_session_result`), the delegation summary in lists and deltas,
+  and the fan-in prompt, which says in one line whether anything was recorded.
+  A completed evaluator with no `outcome` recorded nothing.
+- **Submission.** The child-only `termal_submit_acceptance_evaluation` tool
+  (`POST /api/sessions/{childId}/acceptance-evaluation`) takes
+  `{ "schemaVersion": 1, "verdicts": [{ "criterion", "verdict", "basis"?,
+  "rationale", "evidence"? }] }`. It is listed only for an evaluator child and
+  admitted only for the visible local child of a running read-only evaluator
+  delegation that has a target and no recorded outcome. One evaluation is
+  recorded per evaluator; a follow-up turn cannot record a second one.
+
 ## Lifecycle
 
 ### 1. Spawn
@@ -915,7 +952,9 @@ termal_cancel_session
 termal_wait_delegations
 termal_resume_after_delegations
 termal_followup_session
+termal_evaluate_acceptance
 termal_submit_review_result
+termal_submit_acceptance_evaluation
 termal_send_to_session
 termal_list_sessions
 termal_list_mailboxes
@@ -937,6 +976,8 @@ termal_wait_delegations({ delegationIds, pollIntervalMs?, timeoutMs? }) -> WaitD
 termal_resume_after_delegations({ delegationIds, mode?, title? }) -> DelegationWaitResponse
 termal_followup_session({ delegationId, message }) -> DelegationStatusResponse
 termal_submit_review_result({ schemaVersion, status, summary, findings, commandsRun, filesInspected, notes, suggestedTrackerUpdates }) -> MailboxAppendReceipt
+termal_evaluate_acceptance({ workRef, agent?, model? }) -> DelegationResponse & { mode, workRef } | { mode: "same_session", workRef, acceptanceBasis, evidenceBasis, brief }
+termal_submit_acceptance_evaluation({ schemaVersion, verdicts: [{ criterion, verdict, basis?, rationale, evidence? }] }) -> { schemaVersion, delegationId, workRef, mode, attemptKey, recordedAt, receipt }
 termal_send_to_session({ sessionId, message, idempotencyKey, topic?, stateStamp?, class? }) -> { sessionId, resolvedFrom, mailboxId, messageId, sequence, unreadDepth, notificationDisposition, duplicate }
 termal_list_sessions() -> { sessions: [{ sessionId, name, agent, status, workdir, preview }] }
 termal_list_mailboxes() -> { mailboxes: [{ id, participants, latestSequence, unreadCount, latestMessagePreview, latestMessageAt }] }
@@ -1178,7 +1219,8 @@ type SessionStatus = "active" | "idle" | "approval" | "stopping" | "error";
 // behavior matters.
 type ApiRequestErrorKind = "backend-unavailable" | "request-failed";
 
-type DelegationMode = "reviewer" | "explorer" | "worker";
+// "evaluator" is host-created; see "Evaluator delegations".
+type DelegationMode = "reviewer" | "explorer" | "worker" | "evaluator";
 type DelegationStatus =
   | "queued"
   | "running"
@@ -1218,6 +1260,16 @@ type DelegationRecord = {
   startedAt?: string | null;
   completedAt?: string | null;
   result?: DelegationResult | null;
+  // Evaluator delegations only.
+  acceptanceEvaluation?: {
+    workRef: string;
+    mode: "same_session" | "sub_agent" | "independent_session";
+    acceptanceBasis: number;
+    evidenceBasis: number;
+    criteriaCount: number;
+    attemptKey: string;
+    outcome?: { receipt: JsonValue; recordedAt: string } | null;
+  } | null;
 };
 
 type DelegationResult = {

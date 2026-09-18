@@ -1655,6 +1655,7 @@ fn read_engram_work_binding_from_cli(
         connection,
         &next_args,
         timeout,
+        ENGRAM_WORK_BINDING_READER_LABEL,
     );
     if trace_boot_recovery {
         log_engram_boot_recovery_phase(
@@ -1691,6 +1692,7 @@ fn read_engram_work_binding_from_cli(
         connection,
         &focus_args,
         timeout,
+        ENGRAM_WORK_BINDING_READER_LABEL,
     );
     if trace_boot_recovery {
         log_engram_boot_recovery_phase(
@@ -1714,12 +1716,16 @@ fn read_engram_work_binding_from_cli(
         })
 }
 
+/// Names the caller in every failure message of a one-shot Engram CLI call.
+const ENGRAM_WORK_BINDING_READER_LABEL: &str = "work-binding reader";
+
 fn run_engram_json_command_with_lock_retry(
     connection: &EngramConnectionConfig,
     args: &[&str],
     timeout: Duration,
+    label: &str,
 ) -> std::result::Result<Value, EngramTransportError> {
-    let first = run_engram_json_command(connection, args, timeout);
+    let first = run_engram_json_command(connection, args, timeout, label);
     match first {
         Err(error)
             if error.kind == EngramTransportErrorKind::Transport
@@ -1729,10 +1735,59 @@ fn run_engram_json_command_with_lock_retry(
                     .contains("database is locked") =>
         {
             std::thread::sleep(ENGRAM_WORK_BINDING_LOCK_RETRY_DELAY);
-            run_engram_json_command(connection, args, timeout)
+            run_engram_json_command(connection, args, timeout, label)
         }
         result => result,
     }
+}
+
+/// Exit status and captured streams of one bounded Engram CLI call. A non-zero
+/// exit is an observation here, not a transport failure: a caller that relays
+/// Engram's refusal needs the text, and one that only wants JSON folds it into
+/// an error itself.
+#[derive(Clone, Debug)]
+struct EngramCliOutput {
+    success: bool,
+    status: String,
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+}
+
+impl EngramCliOutput {
+    /// What the process said about a failure: stderr, else stdout.
+    fn failure_detail(&self) -> String {
+        let detail = String::from_utf8_lossy(&self.stderr).trim().to_owned();
+        if detail.is_empty() {
+            String::from_utf8_lossy(&self.stdout).trim().to_owned()
+        } else {
+            detail
+        }
+    }
+
+    fn reports_locked_store(&self) -> bool {
+        !self.success
+            && self
+                .failure_detail()
+                .to_ascii_lowercase()
+                .contains("database is locked")
+    }
+}
+
+/// The same one-retry SQLite lock policy as the JSON reader, for a caller that
+/// keeps the exit observation. Only safe for reads and for writes Engram
+/// replays under an idempotency key.
+fn run_engram_cli_command_with_lock_retry(
+    connection: &EngramConnectionConfig,
+    args: &[&str],
+    timeout: Duration,
+    label: &str,
+) -> std::result::Result<EngramCliOutput, EngramTransportError> {
+    let first = run_engram_cli_command(connection, args, timeout, label)?;
+    if first.reports_locked_store() {
+        std::thread::sleep(ENGRAM_WORK_BINDING_LOCK_RETRY_DELAY);
+        return run_engram_cli_command(connection, args, timeout, label);
+    }
+    Ok(first)
 }
 
 /// Irreversibly revokes a project work-authority grant through Engram's CLI.
@@ -1884,7 +1939,28 @@ fn run_engram_json_command(
     connection: &EngramConnectionConfig,
     args: &[&str],
     timeout: Duration,
+    label: &str,
 ) -> std::result::Result<Value, EngramTransportError> {
+    let output = run_engram_cli_command(connection, args, timeout, label)?;
+    if !output.success {
+        let detail = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        return Err(EngramTransportError::transport(if detail.is_empty() {
+            format!("Engram {label} exited with {}", output.status)
+        } else {
+            format!("Engram {label} failed: {detail}")
+        }));
+    }
+    serde_json::from_slice(&output.stdout).map_err(|error| {
+        EngramTransportError::protocol(format!("invalid Engram {label} response: {error}"))
+    })
+}
+
+fn run_engram_cli_command(
+    connection: &EngramConnectionConfig,
+    args: &[&str],
+    timeout: Duration,
+    label: &str,
+) -> std::result::Result<EngramCliOutput, EngramTransportError> {
     let mut command = engram_command(&connection.binary_path);
     configure_terminal_process_tree(&mut command);
     apply_engram_connection_environment(&mut command, connection);
@@ -1900,34 +1976,29 @@ fn run_engram_json_command(
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|error| {
-            EngramTransportError::transport(format!(
-                "failed spawning Engram work-binding reader: {error}"
-            ))
+            EngramTransportError::transport(format!("failed spawning Engram {label}: {error}"))
         })?;
     let stdout = child.stdout.take().ok_or_else(|| {
-        EngramTransportError::transport("Engram work-binding reader stdout is unavailable")
+        EngramTransportError::transport(format!("Engram {label} stdout is unavailable"))
     })?;
     let stderr = child.stderr.take().ok_or_else(|| {
-        EngramTransportError::transport("Engram work-binding reader stderr is unavailable")
+        EngramTransportError::transport(format!("Engram {label} stderr is unavailable"))
     })?;
     let process = Arc::new(SharedChild::new(child).map_err(|error| {
-        EngramTransportError::transport(format!(
-            "failed sharing Engram work-binding reader: {error}"
-        ))
+        EngramTransportError::transport(format!("failed sharing Engram {label}: {error}"))
     })?);
+    let kill_label = format!("Engram {label}");
     let process_tree = EngramProcessTree::attach(&process).map_err(|error| {
-        let _ = kill_child_process(&process, "Engram work-binding reader");
+        let _ = kill_child_process(&process, &kill_label);
         let _ = process.wait();
         EngramTransportError::transport(format!(
-            "failed preparing Engram work-binding reader process tree: {error:#}"
+            "failed preparing Engram {label} process tree: {error:#}"
         ))
     })?;
     process_tree.resume_after_attach(&process).map_err(|error| {
         let _ = process_tree.terminate(&process);
         let _ = process.wait();
-        EngramTransportError::transport(format!(
-            "failed resuming Engram work-binding reader: {error:#}"
-        ))
+        EngramTransportError::transport(format!("failed resuming Engram {label}: {error:#}"))
     })?;
     let stdout_reader = std::thread::spawn(move || read_engram_cli_output(stdout));
     let stderr_reader = std::thread::spawn(move || read_engram_cli_output(stderr));
@@ -1942,7 +2013,7 @@ fn run_engram_json_command(
                 let _ = process_tree.terminate(&process);
                 let _ = process.wait();
                 break Err(EngramTransportError::deadline(format!(
-                    "Engram work-binding read exceeded {} ms",
+                    "Engram {label} exceeded {} ms",
                     timeout.as_millis()
                 )));
             }
@@ -1950,7 +2021,7 @@ fn run_engram_json_command(
                 let _ = process_tree.terminate(&process);
                 let _ = process.wait();
                 break Err(EngramTransportError::transport(format!(
-                    "failed waiting for Engram work-binding reader: {error}"
+                    "failed waiting for Engram {label}: {error}"
                 )));
             }
         }
@@ -1958,18 +2029,11 @@ fn run_engram_json_command(
     let stdout = join_engram_cli_output(stdout_reader, "stdout")?;
     let stderr = join_engram_cli_output(stderr_reader, "stderr")?;
     let status = status?;
-    if !status.success() {
-        let detail = String::from_utf8_lossy(&stderr).trim().to_owned();
-        return Err(EngramTransportError::transport(if detail.is_empty() {
-            format!("Engram work-binding reader exited with {status}")
-        } else {
-            format!("Engram work-binding reader failed: {detail}")
-        }));
-    }
-    serde_json::from_slice(&stdout).map_err(|error| {
-        EngramTransportError::protocol(format!(
-            "invalid Engram work-binding response: {error}"
-        ))
+    Ok(EngramCliOutput {
+        success: status.success(),
+        status: status.to_string(),
+        stdout,
+        stderr,
     })
 }
 

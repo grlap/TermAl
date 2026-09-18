@@ -116,6 +116,7 @@ fn reviewer_delegation_prompt_injects_termal_owned_result_protocol() {
         review_result_schema_version: None,
         queued_followup_prompt_id: None,
         review_result_submission_attempt: 1,
+        acceptance_evaluation: None,
     };
     let prompt = build_delegation_prompt(&record);
 
@@ -162,6 +163,7 @@ fn non_reviewer_delegation_prompt_does_not_inject_review_result_protocol() {
         review_result_schema_version: None,
         queued_followup_prompt_id: None,
         review_result_submission_attempt: 0,
+        acceptance_evaluation: None,
     };
 
     let prompt = build_delegation_prompt(&record);

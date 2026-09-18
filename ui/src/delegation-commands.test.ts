@@ -1754,6 +1754,36 @@ describe("delegation command surface", () => {
     );
   });
 
+  it("keeps an evaluator's target and recorded outcome in the status summary", async () => {
+    const acceptanceEvaluation = {
+      workRef: "w-task",
+      mode: "independent_session" as const,
+      acceptanceBasis: 7,
+      evidenceBasis: 42,
+      criteriaCount: 2,
+      attemptKey: "delegation-1",
+      outcome: {
+        receipt: { passed: true },
+        recordedAt: "2026-09-18 10:10:00",
+      },
+    };
+    stubFetchResponses({
+      revision: 3,
+      serverInstanceId: "server-a",
+      delegation: makeDelegation({ mode: "evaluator", acceptanceEvaluation }),
+    });
+
+    const statusResult = await getDelegationStatusCommand(
+      "parent-1",
+      "delegation-1",
+    );
+    expect(statusResult.delegation.mode).toBe("evaluator");
+    expect(statusResult.delegation.acceptanceEvaluation).toEqual(
+      acceptanceEvaluation,
+    );
+    expectRedactedDelegationSummary(statusResult.delegation);
+  });
+
   it("normalizes compact result packets without deriving failed checks", async () => {
     stubFetchResponses({
       revision: 4,

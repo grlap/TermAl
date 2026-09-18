@@ -1056,6 +1056,9 @@ function delegationSummary(record: DelegationRecord): DelegationSummary {
     completedAt: record.completedAt ?? null,
     reviewResultRequired: record.reviewResultRequired,
   };
+  if (record.acceptanceEvaluation) {
+    summary.acceptanceEvaluation = record.acceptanceEvaluation;
+  }
   if (record.result) {
     summary.result = {
       delegationId: record.result.delegationId,

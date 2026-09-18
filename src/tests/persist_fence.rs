@@ -201,6 +201,7 @@ fn delegation(id: &str) -> DelegationRecord {
         review_result_schema_version: None,
         queued_followup_prompt_id: None,
         review_result_submission_attempt: 2,
+        acceptance_evaluation: None,
     }
 }
 

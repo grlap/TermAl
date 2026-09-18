@@ -121,6 +121,7 @@ fn serialized_delegation_child_state(child_session_id: &str, mode: DelegationMod
         review_result_schema_version: None,
         queued_followup_prompt_id: None,
         review_result_submission_attempt: u32::from(mode == DelegationMode::Reviewer),
+        acceptance_evaluation: None,
     };
     let delegation = serde_json::to_value(delegation_state_summary_from_record(&record))
         .expect("broad-state delegation capability should serialize");
@@ -417,8 +418,10 @@ fn delegation_mcp_base_tools_list_includes_role_scoped_tools() {
             "termal_wait_delegations",
             "termal_resume_after_delegations",
             "termal_followup_session",
+            "termal_evaluate_acceptance",
             "termal_review_freeze_check",
             "termal_submit_review_result",
+            "termal_submit_acceptance_evaluation",
             "termal_send_to_session",
             "termal_list_sessions",
             "termal_list_mailboxes",
@@ -1017,6 +1020,131 @@ fn delegation_mcp_hides_and_rejects_review_submission_for_non_reviewer_child() {
             .join()
             .unwrap_or_else(|_| panic!("{mode:?} test server should join"));
     }
+}
+
+#[test]
+fn delegation_mcp_acceptance_submission_tool_is_scoped_to_evaluator_children() {
+    // (mode, the broad-state capability bit, whether the tool is offered)
+    for (mode, capability, offered) in [
+        (DelegationMode::Evaluator, Some(true), true),
+        (DelegationMode::Evaluator, Some(false), false),
+        (DelegationMode::Evaluator, None, false),
+        (DelegationMode::Reviewer, Some(true), false),
+        (DelegationMode::Explorer, None, false),
+    ] {
+        let mut snapshot = serialized_delegation_child_state("evaluator-child", mode);
+        let delegation = snapshot["delegations"][0].as_object_mut().unwrap();
+        delegation.remove("acceptanceEvaluationAllowed");
+        if let Some(value) = capability {
+            delegation.insert("acceptanceEvaluationAllowed".to_owned(), json!(value));
+        }
+        let (base_url, _, server) =
+            spawn_test_mcp_http_server(if offered { 2 } else { 1 }, move |request| {
+                if request.method == "GET" {
+                    assert_eq!(request.path, "/api/state");
+                    (200, snapshot.clone())
+                } else {
+                    assert!(offered, "unauthorized submission reached the backend");
+                    assert_eq!(
+                        request.path,
+                        "/api/sessions/evaluator-child/acceptance-evaluation"
+                    );
+                    let body: Value = serde_json::from_str(&request.body).unwrap();
+                    assert_eq!(body["verdicts"][0]["criterion"], 1);
+                    (200, json!({"recordedAt": "now"}))
+                }
+            });
+        let bridge = TermalDelegationMcpBridge::new("evaluator-child".into(), base_url).unwrap();
+        let names = bridge.tools_list_for_caller()["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|tool| tool["name"].as_str().map(str::to_owned))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            names
+                .iter()
+                .any(|name| name == TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_TOOL_NAME),
+            offered,
+            "{mode:?} {capability:?}"
+        );
+        if mode == DelegationMode::Evaluator {
+            assert!(
+                !names
+                    .iter()
+                    .any(|name| name == TERMAL_SUBMIT_REVIEW_RESULT_TOOL_NAME
+                        || name == TERMAL_REVIEW_FREEZE_TOOL_NAME),
+                "an evaluator never receives the reviewer-only tools"
+            );
+        }
+        let result = bridge.handle_tool_call(json!({
+            "name": TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_TOOL_NAME,
+            "arguments": {"schemaVersion": 1, "verdicts": [{
+                "criterion": 1, "verdict": "fail", "rationale": "Checked and found it missing."
+            }]}
+        }));
+        assert_eq!(result.is_ok(), offered, "{mode:?} {capability:?}");
+        if let Err(error) = result {
+            assert!(error.to_string().contains("acceptance evaluator child"));
+        }
+        server.join().unwrap();
+    }
+}
+
+#[test]
+fn delegation_mcp_evaluate_acceptance_is_listed_and_forwards_to_the_caller_endpoint() {
+    let tools = mcp_tools_list_result();
+    let tool = tools["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|tool| tool["name"] == TERMAL_EVALUATE_ACCEPTANCE_TOOL_NAME)
+        .expect("the request tool should be advertised");
+    assert_eq!(tool["description"], TERMAL_EVALUATE_ACCEPTANCE_TOOL_DESCRIPTION);
+    assert_eq!(tool["inputSchema"]["required"], json!(["workRef"]));
+    assert_eq!(
+        tool["inputSchema"]["properties"]["agent"]["enum"],
+        json!(["Codex", "Claude"])
+    );
+    // Agents never spawn evaluators through the general spawn tool.
+    let spawn = tools["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|tool| tool["name"] == "termal_spawn_session")
+        .unwrap();
+    assert_eq!(
+        spawn["inputSchema"]["properties"]["mode"]["enum"],
+        json!(["reviewer", "explorer", "worker"])
+    );
+
+    let (base_url, requests, server) = spawn_test_mcp_http_server(1, move |request| {
+        assert_eq!(request.method, "POST");
+        assert_eq!(
+            request.path,
+            "/api/sessions/session-root/acceptance-evaluations"
+        );
+        let body: Value = serde_json::from_str(&request.body).unwrap();
+        assert_eq!(body, json!({"workRef": "w-task", "agent": "Claude"}));
+        (201, json!({"mode": "independent_session", "workRef": "w-task"}))
+    });
+    let bridge = TermalDelegationMcpBridge::new("session-root".to_owned(), base_url).unwrap();
+    let result = bridge
+        .handle_tool_call(json!({
+            "name": TERMAL_EVALUATE_ACCEPTANCE_TOOL_NAME,
+            "arguments": {"workRef": "w-task", "agent": "Claude"}
+        }))
+        .expect("the request should reach the caller's endpoint");
+    assert_eq!(result["isError"], false);
+    server.join().unwrap();
+    assert_eq!(requests.lock().unwrap().len(), 1);
+    assert!(
+        bridge
+            .handle_tool_call(json!({"name": TERMAL_EVALUATE_ACCEPTANCE_TOOL_NAME, "arguments": {}}))
+            .unwrap_err()
+            .to_string()
+            .contains("workRef is required")
+    );
 }
 
 #[test]

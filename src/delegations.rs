@@ -361,6 +361,8 @@ fn running_read_only_delegation_index_entry(
 
 const OPENCODE_READ_ONLY_DELEGATION_ERROR: &str = "OpenCode delegations do not support writePolicy `readOnly`; use `isolatedWorktree` for bounded writable work";
 const ACP_REVIEWER_DELEGATION_ERROR: &str = "reviewer mode requires Claude or Codex because ACP permission requests do not provide an authenticated MCP tool identity; for Cursor, Gemini, or OpenCode pass mode `explorer` with a supported write policy";
+const ACP_EVALUATOR_DELEGATION_ERROR: &str = "acceptance evaluators require Claude or Codex because ACP permission requests do not provide an authenticated MCP tool identity; pass agent `Claude` or `Codex`";
+const EVALUATOR_DELEGATION_HOST_ONLY_ERROR: &str = "evaluator delegations are created only by an acceptance evaluation request (`termal_evaluate_acceptance` or POST /api/sessions/{id}/acceptance-evaluations), never by a delegation create request";
 
 fn find_parent_delegation_index_locked(
     inner: &StateInner,
@@ -390,6 +392,18 @@ impl AppState {
         &self,
         parent_session_id: &str,
         request: CreateDelegationRequest,
+    ) -> Result<DelegationResponse, ApiError> {
+        self.create_delegation_with_evaluation_target(parent_session_id, request, None)
+    }
+
+    /// The one creation path. `evaluation` is supplied only by the host's
+    /// acceptance-evaluation request; a caller-built request can never carry
+    /// one, which is what keeps evaluator mode host-created.
+    fn create_delegation_with_evaluation_target(
+        &self,
+        parent_session_id: &str,
+        request: CreateDelegationRequest,
+        evaluation: Option<AcceptanceEvaluationTargetSeed>,
     ) -> Result<DelegationResponse, ApiError> {
         let parent_session_id = normalize_optional_identifier(Some(parent_session_id))
             .ok_or_else(|| ApiError::bad_request("parent session id is required"))?
@@ -442,6 +456,21 @@ impl AppState {
         let requested_write_policy = request
             .write_policy
             .unwrap_or(DelegationWritePolicy::ReadOnly);
+        if mode == DelegationMode::Evaluator && evaluation.is_none() {
+            return Err(ApiError::bad_request(EVALUATOR_DELEGATION_HOST_ONLY_ERROR));
+        }
+        if mode != DelegationMode::Evaluator && evaluation.is_some() {
+            return Err(ApiError::internal(
+                "an evaluation target was supplied for a non-evaluator delegation",
+            ));
+        }
+        if mode == DelegationMode::Evaluator
+            && requested_write_policy != DelegationWritePolicy::ReadOnly
+        {
+            return Err(ApiError::bad_request(
+                "evaluator delegations are always writePolicy `readOnly`",
+            ));
+        }
         if matches!(
             requested_write_policy,
             DelegationWritePolicy::SharedWorktree { .. }
@@ -511,6 +540,11 @@ impl AppState {
         let agent = request.agent.unwrap_or(parent_agent);
         if mode == DelegationMode::Reviewer && !agent.supports_structured_review_results() {
             return Err(ApiError::bad_request(ACP_REVIEWER_DELEGATION_ERROR));
+        }
+        // Same reason as reviewer mode: the submission tool is admitted by
+        // authenticated MCP tool identity, which only these agents provide.
+        if mode == DelegationMode::Evaluator && !agent.supports_structured_review_results() {
+            return Err(ApiError::bad_request(ACP_EVALUATOR_DELEGATION_ERROR));
         }
         if agent == Agent::OpenCode && requested_write_policy == DelegationWritePolicy::ReadOnly {
             return Err(ApiError::bad_request(OPENCODE_READ_ONLY_DELEGATION_ERROR));
@@ -667,6 +701,8 @@ impl AppState {
             } else {
                 0
             },
+            acceptance_evaluation: evaluation
+                .map(|seed| seed.into_target(delegation_id.clone())),
         };
         let delegation_index = inner.delegations.len();
         inner.delegations.push(record.clone());
@@ -896,7 +932,14 @@ impl AppState {
             inner.delegations[index].child_session_id.clone()
         };
         self.recover_durable_delegation_review_submission(&child_session_id)?;
-        let (revision, result, lifecycle_delta, detached_child, wait_refresh) = {
+        let (
+            revision,
+            result,
+            acceptance_evaluation,
+            lifecycle_delta,
+            detached_child,
+            wait_refresh,
+        ) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index =
                 find_parent_delegation_index_locked(&inner, parent_session_id, delegation_id)?;
@@ -920,9 +963,11 @@ impl AppState {
                 inner.revision
             };
             let result = inner.delegations[index].result.clone();
+            let acceptance_evaluation = inner.delegations[index].acceptance_evaluation.clone();
             (
                 revision,
                 result,
+                acceptance_evaluation,
                 lifecycle_delta,
                 detached_child,
                 wait_refresh,
@@ -939,6 +984,7 @@ impl AppState {
         Ok(DelegationResultResponse {
             revision,
             result,
+            acceptance_evaluation,
             server_instance_id: self.server_instance_id.clone(),
         })
     }
@@ -2192,6 +2238,9 @@ impl AppState {
             DelegationControlPlaneCapability::ReviewFreeze => {
                 review_freeze_authority_locked(&inner, child_session_id).is_ok()
             }
+            DelegationControlPlaneCapability::SubmitAcceptanceEvaluation => {
+                acceptance_evaluation_submit_authority_locked(&inner, child_session_id).is_ok()
+            }
             DelegationControlPlaneCapability::SubmitReviewResult => {
                 delegation.child_session_id == child_session_id
                     && delegation.mode == DelegationMode::Reviewer
@@ -2221,7 +2270,7 @@ fn configure_delegation_child_prompt_settings(
         child_record.session.approval_policy = Some(CodexApprovalPolicy::Never);
         child_record.session.sandbox_mode = Some(child_record.codex_sandbox_mode);
     } else if child_record.session.agent.supports_claude_approval_mode()
-        && mode == DelegationMode::Reviewer
+        && matches!(mode, DelegationMode::Reviewer | DelegationMode::Evaluator)
         && matches!(write_policy, DelegationWritePolicy::ReadOnly)
     {
         child_record.session.claude_approval_mode = Some(ClaudeApprovalMode::ReadOnlyAutoApprove);
@@ -2599,7 +2648,7 @@ fn delegation_wait_result_section(delegation: &DelegationRecord) -> String {
         notes.join("\n")
     };
 
-    format!(
+    let mut section = format!(
         "### {} (`{}`)\n\nStatus: {}\nChild session: `{}`\nFull output: call `termal_get_session_result` with `{{\"delegationId\":\"{}\",\"outputOffset\":0,\"outputLimit\":4096}}`; use each `nextOffsetBytes` value as the next `outputOffset` until `complete` is true.\n\nSummary:\n{}\n\nFindings:\n{}\n\nChanged files:\n{}\n\nCommands run:\n{}\n\nNotes:\n{}",
         delegation.title,
         delegation.id,
@@ -2611,7 +2660,13 @@ fn delegation_wait_result_section(delegation: &DelegationRecord) -> String {
         changed_files,
         commands,
         notes
-    )
+    );
+    // The child's prose is not the record: say what the tracker accepted.
+    if let Some(evaluation) = delegation.acceptance_evaluation.as_ref() {
+        section.push_str("\n\n");
+        section.push_str(&acceptance_evaluation_outcome_line(evaluation));
+    }
+    section
 }
 
 fn format_delegation_finding(finding: &DelegationFinding) -> String {
@@ -4451,6 +4506,7 @@ fn delegation_summary_from_record(record: &DelegationRecord) -> DelegationSummar
         post_submission_transport_error: record.post_submission_transport_error.clone(),
         review_result_recovery_error: record.review_result_recovery_error.clone(),
         result: record.result.as_ref().map(delegation_result_summary),
+        acceptance_evaluation: record.acceptance_evaluation.clone(),
     }
 }
 
@@ -4462,6 +4518,9 @@ fn delegation_state_summary_from_record(record: &DelegationRecord) -> Delegation
         review_result_required: record.mode == DelegationMode::Reviewer,
         review_freeze_allowed: record.mode == DelegationMode::Reviewer
             && matches!(record.write_policy, DelegationWritePolicy::ReadOnly),
+        acceptance_evaluation_allowed: record.mode == DelegationMode::Evaluator
+            && matches!(record.write_policy, DelegationWritePolicy::ReadOnly)
+            && record.acceptance_evaluation.is_some(),
     }
 }
 

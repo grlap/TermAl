@@ -1124,6 +1124,11 @@ fn parse_agent_command_delegation_mode(value: String) -> Result<DelegationMode, 
         "worker" => Err(ApiError::bad_request(
             "metadata.termal.delegation.mode `worker` is not supported yet",
         )),
+        // The delegation create route refuses the mode; refusing it here keeps
+        // a command from resolving to defaults that can never be spawned.
+        "evaluator" => Err(ApiError::bad_request(
+            "metadata.termal.delegation.mode `evaluator` is reserved for host-created acceptance evaluations",
+        )),
         other => Err(ApiError::bad_request(format!(
             "unsupported metadata.termal.delegation.mode `{}`",
             frontmatter_error_value(other)

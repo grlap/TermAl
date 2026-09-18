@@ -64,6 +64,7 @@ const TERMAL_DELEGATION_SAFE_REPLAY_MIN_REPLAY_BUDGET: Duration = Duration::from
 enum DelegationControlPlaneCapability {
     SubmitReviewResult,
     ReviewFreeze,
+    SubmitAcceptanceEvaluation,
 }
 
 fn delegation_control_plane_capability_for_claude_tool_name(
@@ -82,6 +83,9 @@ fn delegation_control_plane_capability_for_claude_tool_name(
         }
         TERMAL_REVIEW_FREEZE_QUALIFIED_TOOL_NAME => {
             Some(DelegationControlPlaneCapability::ReviewFreeze)
+        }
+        TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_QUALIFIED_TOOL_NAME => {
+            Some(DelegationControlPlaneCapability::SubmitAcceptanceEvaluation)
         }
         _ => None,
     }
@@ -109,6 +113,16 @@ fn delegation_control_plane_capability_for_codex_elicitation(
         })
     {
         return Some(DelegationControlPlaneCapability::ReviewFreeze);
+    }
+    if metadata.get("codex_approval_kind").and_then(Value::as_str) == Some("mcp_tool_call")
+        && metadata.get("tool_description").and_then(Value::as_str)
+            == Some(TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_TOOL_DESCRIPTION)
+        && metadata.get("tool_params").is_some_and(|value| {
+            serde_json::from_value::<SubmitAcceptanceEvaluationRequest>(value.clone())
+                .is_ok_and(|request| request.validate_shape().is_ok())
+        })
+    {
+        return Some(DelegationControlPlaneCapability::SubmitAcceptanceEvaluation);
     }
     (metadata.get("codex_approval_kind").and_then(Value::as_str) == Some("mcp_tool_call")
         && metadata.get("tool_description").and_then(Value::as_str)
@@ -656,6 +670,8 @@ struct TermalDelegationMcpBridge {
     /// worker children never receive the reviewer-only submission tool.
     caller_requires_structured_review_result: OnceLock<bool>,
     caller_allows_review_freeze: OnceLock<bool>,
+    /// Same snapshot again: only an evaluator child sees the submission tool.
+    caller_allows_acceptance_evaluation: OnceLock<bool>,
     // Sleep hook for explicit safe-replay retries. Production uses
     // `std::thread::sleep`; tests inject a recording no-op so retry cadence is
     // asserted without real waiting (no-flaky-tests law: no timing
@@ -752,6 +768,7 @@ impl TermalDelegationMcpBridge {
             caller_is_delegation_child: OnceLock::new(),
             caller_requires_structured_review_result: OnceLock::new(),
             caller_allows_review_freeze: OnceLock::new(),
+            caller_allows_acceptance_evaluation: OnceLock::new(),
             safe_replay_retry_sleeper: std::thread::sleep,
         })
     }
@@ -848,6 +865,11 @@ impl TermalDelegationMcpBridge {
         if name == TERMAL_REVIEW_FREEZE_TOOL_NAME && !self.caller_allows_review_freeze() {
             bail!("`{name}` is available only to a read-only reviewer child");
         }
+        if name == TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_TOOL_NAME
+            && !self.caller_allows_acceptance_evaluation()
+        {
+            bail!("`{name}` is available only to an acceptance evaluator child");
+        }
         let result = match name.as_str() {
             "termal_spawn_session" => self.tool_spawn_session(arguments),
             "termal_list_delegations" => self.tool_list_delegations(arguments),
@@ -859,6 +881,16 @@ impl TermalDelegationMcpBridge {
             "termal_review_freeze_check" => self.post_json(
                 &format!(
                     "/api/sessions/{}/delegation-review-freeze",
+                    self.serving_session_id
+                ),
+                &arguments,
+            ),
+            "termal_evaluate_acceptance" => self.tool_evaluate_acceptance(arguments),
+            // Single attempt: the tracker's attempt key, not this bridge,
+            // makes the evaluator's own resend safe.
+            "termal_submit_acceptance_evaluation" => self.post_json(
+                &format!(
+                    "/api/sessions/{}/acceptance-evaluation",
                     self.serving_session_id
                 ),
                 &arguments,
@@ -922,6 +954,50 @@ impl TermalDelegationMcpBridge {
             "/api/sessions/{}/delegations",
             self.serving_session_id
         ))
+    }
+
+    fn tool_evaluate_acceptance(&self, arguments: Value) -> Result<Value> {
+        let mut body = serde_json::Map::new();
+        body.insert(
+            "workRef".to_owned(),
+            Value::String(required_string(arguments.get("workRef"), "workRef")?),
+        );
+        insert_optional_string(&mut body, "agent", arguments.get("agent"));
+        insert_optional_string(&mut body, "model", arguments.get("model"));
+        let path = format!(
+            "/api/sessions/{}/acceptance-evaluations",
+            self.serving_session_id
+        );
+        // Single attempt: a replay could spawn a second evaluator. The backend
+        // runs bounded tracker reads (two task reads and one policy read, each
+        // retried once on a locked store, plus the evidence continuation
+        // pages) before the ordinary creation work, so the HTTP allowance
+        // covers those on top of the normal budget.
+        let tracker_reads = ENGRAM_WORK_BINDING_COMMAND_TIMEOUT
+            * (4 + MAX_ACCEPTANCE_EVIDENCE_PAGES as u32)
+            + ACCEPTANCE_EVALUATION_POLICY_READ_TIMEOUT * 2;
+        self.decode_response(
+            "POST",
+            &path,
+            self.client
+                .post(self.url(&path))
+                .timeout(tracker_reads + self.request_timeout)
+                .json(&Value::Object(body))
+                .send(),
+        )
+        .map(|response| compact_acceptance_evaluation_request_result(&response))
+        .map_err(|err| {
+            if err
+                .downcast_ref::<TermalDelegationTransportError>()
+                .is_some()
+            {
+                return anyhow!(
+                    "the acceptance evaluation request outcome is unknown: an evaluator may \
+                     already be running. Call termal_list_delegations before asking again: {err}"
+                );
+            }
+            err
+        })
     }
 
     fn resolve_spawn_prompt_if_agent_command(
@@ -1627,7 +1703,23 @@ impl TermalDelegationMcpBridge {
                         == Some(self.serving_session_id.as_str())
                         && d.get("reviewFreezeAllowed").and_then(Value::as_bool) == Some(true)
                 });
+        let allows_acceptance_evaluation = is_child
+            && state
+                .get("delegations")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .any(|d| {
+                    d.get("childSessionId").and_then(Value::as_str)
+                        == Some(self.serving_session_id.as_str())
+                        && d.get("mode").and_then(Value::as_str) == Some("evaluator")
+                        && d.get("acceptanceEvaluationAllowed").and_then(Value::as_bool)
+                            == Some(true)
+                });
         let _ = self.caller_allows_review_freeze.set(allows_review_freeze);
+        let _ = self
+            .caller_allows_acceptance_evaluation
+            .set(allows_acceptance_evaluation);
         let _ = self.caller_is_delegation_child.set(is_child);
         let _ = self
             .caller_requires_structured_review_result
@@ -1653,6 +1745,14 @@ impl TermalDelegationMcpBridge {
             .unwrap_or(false)
     }
 
+    fn caller_allows_acceptance_evaluation(&self) -> bool {
+        let _ = self.caller_is_delegation_child();
+        self.caller_allows_acceptance_evaluation
+            .get()
+            .copied()
+            .unwrap_or(false)
+    }
+
     /// The advertised tool list for this bridge's caller. Root sessions do not
     /// see child-only submission tools; delegation children do not see peer or
     /// board tools.
@@ -1666,6 +1766,9 @@ impl TermalDelegationMcpBridge {
                 };
                 if name == TERMAL_REVIEW_FREEZE_TOOL_NAME {
                     return caller_is_child && self.caller_allows_review_freeze();
+                }
+                if name == TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_TOOL_NAME {
+                    return caller_is_child && self.caller_allows_acceptance_evaluation();
                 }
                 if caller_is_child {
                     !tool_requires_root_session(name)
@@ -2505,6 +2608,18 @@ fn mcp_tools_list_result() -> Value {
             }
         ]
     });
+    // Spliced in rather than written above: that literal already sits at the
+    // `json!` recursion limit, and these definitions belong to their module.
+    insert_mcp_tool_after(
+        &mut result,
+        "termal_followup_session",
+        acceptance_evaluation_request_tool_definition(),
+    );
+    insert_mcp_tool_after(
+        &mut result,
+        TERMAL_SUBMIT_REVIEW_RESULT_TOOL_NAME,
+        acceptance_evaluation_submit_tool_definition(),
+    );
     // Keep one bootstrap body in tools/list; the other mailbox entry points
     // point to the read tool while retaining their tool-specific contracts.
     for tool in result["tools"]
@@ -2534,6 +2649,17 @@ fn mcp_tools_list_result() -> Value {
         }
     }
     result
+}
+
+fn insert_mcp_tool_after(result: &mut Value, after_name: &str, tool: Value) {
+    let tools = result["tools"]
+        .as_array_mut()
+        .expect("static MCP tools array");
+    let index = tools
+        .iter()
+        .position(|candidate| candidate["name"] == after_name)
+        .expect("static MCP tool anchor");
+    tools.insert(index + 1, tool);
 }
 
 fn mcp_json_rpc_result(id: Value, result: Value) -> Value {

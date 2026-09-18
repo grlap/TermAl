@@ -261,6 +261,93 @@ parked behind that fence when it releases, honors the adapter circuit breaker,
 and rejects any receipt or refusal that does not correlate to the submitted
 obligation.
 
+## Acceptance evaluation
+
+An Engram project whose policy evaluates acceptance refuses `done` until a
+per-criterion evaluation is recorded. TermAl produces that evaluation for the
+Base tier and up; it needs no premium control session. The delegation side is
+described under
+[evaluator delegations](agent-delegation-sessions.md#evaluator-delegations).
+
+**Request.** `termal_evaluate_acceptance`, or
+`POST /api/sessions/{id}/acceptance-evaluations` with
+`{ "workRef", "agent"?, "model"? }`. TermAl:
+
+1. builds the [Work view](work-visualizer.md)'s host reader for the session's
+   project, so both reads run under the operator-validated binary, home and
+   store, and neither registers the requesting session in the tracker. A
+   project without an enabled, verified integration is refused with the
+   reader's reason;
+2. reads the task in two calls, because the tracker's CLI refuses `--full`
+   together with the evidence windows: `engram work show REF --notes --gates
+   --json` for the acceptance and evidence bases, the evidence window, the
+   lifecycle and the task's pinned mode when it has one, and `engram work show
+   REF --full --json` for the complete title, outcome and criteria in order
+   (the windowed read clips long ones). The complete contract must be at the
+   revision the acceptance basis names; otherwise the task was revised between
+   the reads and the request is refused. A task that is not open, has no
+   criteria, or reports no bases is refused. The tracker's evidence window is
+   byte-bounded, so long notes leave older evidence behind the first page; the
+   host follows `notes_window.after` (at most eight pages, until the brief's
+   40-entry cap) and lists everything it collected oldest first. A failed
+   continuation only shortens the brief;
+3. reads the admitted modes from `engram control-policy show`
+   (`acceptance_evaluation.allowed_modes`), which reads the policy head only.
+   `engram doctor --json` carries the same key but audits the whole store
+   first, over a minute on a large one, so it is never the per-request read.
+   An empty list is refused: that store does not evaluate acceptance. A
+   missing key, or a read that fails (an older binary has no `show`) or
+   exceeds its 10-second bound, leaves the set unknown and refuses nothing:
+   the tracker enforces its policy when the evaluation is recorded;
+4. selects the mode: the task's pin, else `independent_session` when admitted
+   or unknown, else the first admitted of `sub_agent`, `same_session`. A pin
+   the policy does not admit is refused naming both.
+
+`independent_session` spawns an evaluator delegation and returns the ordinary
+creation response plus `mode` and `workRef`; the parent waits with
+`termal_resume_after_delegations`. `same_session` spawns nothing and returns
+`{ mode, workRef, acceptanceBasis, evidenceBasis, brief }`, where the brief
+tells the caller to record the evaluation with its own tracker tool.
+`sub_agent` returns `501`.
+
+**Brief.** The evaluator's prompt is built by the host from those reads and is
+never supplied by the caller. Every interpolated field is one bounded line with
+control characters removed; the evidence list keeps the newest 40 entries and
+states how many older ones are not shown; an entry the tracker would refuse as
+a citation (a non-holder observation, a restored-record member) is marked as
+context only.
+
+**Submission.** The evaluator is read-only and cannot reach the tracker's own
+`evaluate` tool, so it calls `termal_submit_acceptance_evaluation`
+(`POST /api/sessions/{childId}/acceptance-evaluation`). Before any process
+runs TermAl checks authority and shape: exactly one verdict per criterion;
+`pass`, `fail`, `insufficient-evidence` or `needs-human`; an optional basis of
+`observed`, `asserted`, `judgment` or `human-required`; a single-line
+rationale of at most 2 000 characters; at most 8 evidence locators per
+criterion, each 8 to 64 lowercase hex characters; and at least one locator on
+every pass. TermAl then runs, as the evaluator:
+
+```text
+engram work --actor-id <child seat> --session-id <child session> [--actor-context …]
+  evaluate REF --mode … --acceptance-basis N --evidence-basis M
+  --verdict P=VERDICT:BASIS --rationale P=TEXT [--evidence P=LOCATOR]…
+  [--model anthropic/<model> | openai/<model>] --attempt <delegation id> --json
+```
+
+The session id, seat and actor context are the child's own, the bases are the
+ones read at request time, and the attempt key is the delegation id, so the
+tracker replays an identical resend and refuses different content once an
+evaluation is recorded. A success stores the receipt as the delegation's
+`acceptanceEvaluation.outcome` and returns it. A non-zero exit returns the
+tracker's own text as `409` so the evaluator can correct and resubmit. A
+deadline, transport failure, locked store or unreadable receipt is `502` and
+records nothing.
+
+Not delivered yet: `sub_agent` mode with a host-attested parent and execution
+identity; a source fingerprint at evaluation and completion; observed build
+evidence through the control checkpoint; per-project settings for the default
+mode, evaluator agent and model; and any settings or Work-panel UI.
+
 ## Premium boot recovery and lazy retry
 
 Boot recovery applies only to premium control sessions. TermAl publishes

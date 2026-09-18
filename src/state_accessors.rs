@@ -435,6 +435,7 @@ mod visible_session_hydration_error_tests {
             review_result_schema_version: None,
             queued_followup_prompt_id: None,
             review_result_submission_attempt: 1,
+            acceptance_evaluation: None,
         };
         let mut explorer_record = record.clone();
         explorer_record.id = "delegation-2".to_owned();

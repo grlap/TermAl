@@ -105,7 +105,7 @@ fn reserve_claude_unattended_question_self_resolution(state: &mut ClaudeTurnStat
 /// Attendedness policy for `AskUserQuestion` permission requests.
 ///
 /// Unattended means: the internal `ReadOnlyAutoApprove` mode (currently
-/// assigned only to read-only reviewer delegations), or a delegation child
+/// assigned only to read-only reviewer and evaluator delegations), or a delegation child
 /// running under AutoApprove or Plan — those modes otherwise make progress
 /// without an operator answering ordinary approval prompts, so a question
 /// card would unexpectedly park the child under the fan-in. Everything else

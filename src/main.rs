@@ -465,6 +465,14 @@ fn app_router(state: AppState) -> Router {
             post(verify_delegation_review_freeze),
         )
         .route(
+            "/api/sessions/{id}/acceptance-evaluations",
+            post(request_session_acceptance_evaluation),
+        )
+        .route(
+            "/api/sessions/{id}/acceptance-evaluation",
+            post(submit_session_acceptance_evaluation),
+        )
+        .route(
             "/api/sessions/{id}/mailboxes/{mailbox_id}/read",
             post(read_mailbox),
         )
@@ -697,6 +705,8 @@ include!("review_freeze.rs");
 include!("bounded_read_process.rs");
 include!("review_freeze_process.rs");
 include!("review_freeze_api.rs");
+include!("acceptance_evaluation.rs");
+include!("acceptance_evaluation_api.rs");
 include!("coordination_cli.rs");
 include!("engram_mcp_config.rs");
 include!("work_visualizer_types.rs");
