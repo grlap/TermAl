@@ -1,6 +1,7 @@
 // Acceptance-evaluation host logic that needs no state and no process: mode
 // selection, the task snapshot read from `engram work show`, the evaluator
-// brief, and the evaluator's submission shape and CLI arguments. Does not own
+// brief, the evaluator's submission shape and CLI arguments, what one run of
+// them told the host, and the bounded extract kept of a receipt. Does not own
 // authority, persistence, process transport or HTTP; those live in
 // acceptance_evaluation_api.rs.
 
@@ -11,11 +12,21 @@ const MAX_ACCEPTANCE_EVALUATION_RATIONALE_CHARS: usize = 2_000;
 const MAX_ACCEPTANCE_EVALUATION_EVIDENCE_PER_CRITERION: usize = 8;
 const MAX_ACCEPTANCE_EVALUATION_MODEL_SEGMENT_BYTES: usize = 128;
 // The brief is model input built from tracker text other sessions wrote, so
-// every interpolated field is one bounded line.
+// every interpolated field is one line. Criteria are the contract the verdicts
+// answer and are never cut; the rest is context and is bounded.
+// One byte bound for both briefs: the evaluator's prompt must fit a delegation
+// prompt, and the same-session brief is held to the same so that a contract is
+// refused or briefed alike whichever mode is selected.
+const MAX_ACCEPTANCE_BRIEF_BYTES: usize = MAX_DELEGATION_PROMPT_BYTES;
 const MAX_ACCEPTANCE_BRIEF_TITLE_CHARS: usize = 300;
-const MAX_ACCEPTANCE_BRIEF_OUTCOME_CHARS: usize = 4_000;
-const MAX_ACCEPTANCE_BRIEF_CRITERION_CHARS: usize = 2_000;
+const MAX_ACCEPTANCE_BRIEF_OUTCOME_BYTES: usize = 16_000;
+const ACCEPTANCE_BRIEF_OUTCOME_TRUNCATION_MARKER: &str = "[outcome truncated by the host]";
 const MAX_ACCEPTANCE_BRIEF_SUMMARY_CHARS: usize = 600;
+// Bounds of the stored receipt extract.
+const MAX_ACCEPTANCE_RECEIPT_HASH_CHARS: usize = 128;
+const MAX_ACCEPTANCE_RECEIPT_WORD_CHARS: usize = 64;
+// The evaluator is handed the raw receipt once, cut to this.
+const MAX_ACCEPTANCE_SUBMIT_RESPONSE_RECEIPT_BYTES: usize = 16 * 1024;
 const MAX_ACCEPTANCE_BRIEF_LABEL_CHARS: usize = 120;
 const MAX_ACCEPTANCE_BRIEF_EVIDENCE_ENTRIES: usize = 40;
 
@@ -125,6 +136,8 @@ struct AcceptanceEvaluationTargetSeed {
     acceptance_basis: i64,
     evidence_basis: i64,
     criteria_count: usize,
+    /// The store the reads above ran against.
+    store: EngramAuthorityStoreKey,
 }
 
 impl AcceptanceEvaluationTargetSeed {
@@ -136,18 +149,24 @@ impl AcceptanceEvaluationTargetSeed {
             evidence_basis: self.evidence_basis,
             criteria_count: self.criteria_count,
             attempt_key,
-            outcome: None,
+            store: Some(self.store),
+            submission: AcceptanceEvaluationSubmission::None,
         }
     }
 }
 
+/// A positional CLI argument: it must never read as a flag. The one rule for
+/// the caller's ref and for the ref the tracker answers with, which is the one
+/// that is persisted and later passed to `evaluate`.
+fn is_acceptance_evaluation_work_ref(work_ref: &str) -> bool {
+    !work_ref.is_empty()
+        && work_ref.chars().count() <= MAX_ACCEPTANCE_EVALUATION_WORK_REF_CHARS
+        && !work_ref.starts_with('-')
+        && !work_ref.chars().any(|c| c.is_control() || c.is_whitespace())
+}
+
 fn validate_acceptance_evaluation_work_ref(work_ref: &str) -> std::result::Result<(), ApiError> {
-    // A positional CLI argument: it must never read as a flag.
-    if work_ref.is_empty()
-        || work_ref.chars().count() > MAX_ACCEPTANCE_EVALUATION_WORK_REF_CHARS
-        || work_ref.starts_with('-')
-        || work_ref.chars().any(|c| c.is_control() || c.is_whitespace())
-    {
+    if !is_acceptance_evaluation_work_ref(work_ref) {
         return Err(ApiError::bad_request("invalid workRef"));
     }
     Ok(())
@@ -254,6 +273,13 @@ fn parse_acceptance_evaluation_task(
         ApiError::bad_gateway(format!("engram work show --full: invalid receipt: {e}"))
     })?;
     let work = show.status.work;
+    // This ref, not the caller's, is persisted and becomes `evaluate`'s
+    // positional argument.
+    if !is_acceptance_evaluation_work_ref(&work.short_ref) {
+        return Err(ApiError::bad_gateway(
+            "engram work show: the receipt names a work ref that cannot be passed back to the tracker",
+        ));
+    }
     let work_ref = acceptance_brief_text(&work.short_ref, MAX_ACCEPTANCE_BRIEF_LABEL_CHARS);
     if work.lifecycle != "open" {
         return Err(ApiError::conflict(format!(
@@ -311,43 +337,68 @@ fn parse_acceptance_evaluation_task(
 }
 
 impl AcceptanceEvaluationTask {
-    fn target_seed(&self, mode: AcceptanceEvaluationMode) -> AcceptanceEvaluationTargetSeed {
+    fn target_seed(
+        &self,
+        mode: AcceptanceEvaluationMode,
+        store: EngramAuthorityStoreKey,
+    ) -> AcceptanceEvaluationTargetSeed {
         AcceptanceEvaluationTargetSeed {
             work_ref: self.work_ref.clone(),
             mode,
             acceptance_basis: self.acceptance_basis,
             evidence_basis: self.evidence_basis,
             criteria_count: self.criteria.len(),
+            store,
         }
     }
 }
 
-/// One bounded line: control characters (newlines included) become spaces, so
-/// tracker text can never add lines or sections to a host-built brief.
-fn acceptance_brief_text(value: &str, max_chars: usize) -> String {
+/// One line: control characters (newlines included) become spaces, so tracker
+/// text can never add lines or sections to a host-built brief.
+fn acceptance_brief_line(value: &str) -> String {
     let flattened = value
         .chars()
         .map(|c| if c.is_control() { ' ' } else { c })
         .collect::<String>();
-    let collapsed = flattened.split_whitespace().collect::<Vec<_>>().join(" ");
-    truncate_chars(&collapsed, max_chars)
+    flattened.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// One bounded line.
+fn acceptance_brief_text(value: &str, max_chars: usize) -> String {
+    truncate_chars(&acceptance_brief_line(value), max_chars)
+}
+
+/// The outcome is context, not the contract: bounded, and the cut is said.
+/// The bound is in UTF-8 bytes, the unit of the prompt cap it competes for:
+/// at most `max_bytes` of the text are kept, the marker comes on top.
+fn acceptance_brief_outcome(value: &str, max_bytes: usize) -> String {
+    let line = acceptance_brief_line(value);
+    // Never replace an outcome by a marker that is longer than the outcome.
+    if line.len() <= max_bytes.max(ACCEPTANCE_BRIEF_OUTCOME_TRUNCATION_MARKER.len()) {
+        return line;
+    }
+    let mut end = max_bytes;
+    while !line.is_char_boundary(end) {
+        end -= 1;
+    }
+    let kept = line[..end].trim_end();
+    if kept.is_empty() {
+        return ACCEPTANCE_BRIEF_OUTCOME_TRUNCATION_MARKER.to_owned();
+    }
+    format!("{kept} {ACCEPTANCE_BRIEF_OUTCOME_TRUNCATION_MARKER}")
 }
 
 fn is_citable_acceptance_locator(locator: &str) -> bool {
     (8..=64).contains(&locator.len()) && is_lowercase_hex(locator)
 }
 
+/// Every criterion, complete: a verdict covers the whole criterion, so a
+/// requirement the evaluator never saw would be judged unread.
 fn acceptance_brief_criteria(task: &AcceptanceEvaluationTask) -> String {
     task.criteria
         .iter()
         .enumerate()
-        .map(|(index, criterion)| {
-            format!(
-                "  {}. {}",
-                index + 1,
-                acceptance_brief_text(criterion, MAX_ACCEPTANCE_BRIEF_CRITERION_CHARS)
-            )
-        })
+        .map(|(index, criterion)| format!("  {}. {}", index + 1, acceptance_brief_line(criterion)))
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -385,33 +436,50 @@ fn acceptance_brief_evidence_line(evidence: &AcceptanceEvaluationEvidence) -> St
 
 /// The evaluator's task text. Built only from tracker reads, never from the
 /// requesting session: the session whose work is judged does not get to brief
-/// its judge. Keeps the newest evidence and drops the oldest first when the
-/// whole must fit `max_bytes`.
+/// its judge. To fit `max_bytes` it drops the oldest evidence first and then
+/// shortens the outcome; it never drops or cuts a criterion, and refuses only
+/// when the criteria do not fit with no context left to give up.
 fn build_acceptance_evaluator_prompt(
     task: &AcceptanceEvaluationTask,
     cwd: &str,
     max_bytes: usize,
 ) -> std::result::Result<String, ApiError> {
+    // Context shrinks before anything is said about the criteria: evidence,
+    // oldest first, down to none with the outcome still at its own bound; only
+    // then the outcome, down to its marker.
     let mut shown = task.evidence.len().min(MAX_ACCEPTANCE_BRIEF_EVIDENCE_ENTRIES);
     loop {
-        let prompt = render_acceptance_evaluator_prompt(task, cwd, shown);
+        let prompt = render_acceptance_evaluator_prompt(
+            task,
+            cwd,
+            shown,
+            MAX_ACCEPTANCE_BRIEF_OUTCOME_BYTES,
+        );
         if prompt.len() <= max_bytes {
             return Ok(prompt);
         }
         if shown == 0 {
-            return Err(ApiError::conflict(format!(
-                "`{}` does not fit an evaluator brief: its outcome and criteria exceed {max_bytes} bytes",
-                acceptance_brief_text(&task.work_ref, MAX_ACCEPTANCE_BRIEF_LABEL_CHARS)
-            )));
+            break;
         }
         shown -= 1;
     }
+    let floor = render_acceptance_evaluator_prompt(task, cwd, 0, 0);
+    if floor.len() > max_bytes {
+        // True only now: no context is left to give up.
+        return Err(acceptance_contract_too_large(task, floor.len(), max_bytes));
+    }
+    // One byte joins the kept text to the marker the floor already carries.
+    let outcome_bytes = (max_bytes - floor.len())
+        .saturating_sub(1)
+        .min(MAX_ACCEPTANCE_BRIEF_OUTCOME_BYTES);
+    Ok(render_acceptance_evaluator_prompt(task, cwd, 0, outcome_bytes))
 }
 
 fn render_acceptance_evaluator_prompt(
     task: &AcceptanceEvaluationTask,
     cwd: &str,
     shown: usize,
+    outcome_bytes: usize,
 ) -> String {
     let omitted = task.evidence_omitted + (task.evidence.len() - shown);
     let mut evidence = task.evidence[task.evidence.len() - shown..]
@@ -455,7 +523,7 @@ tracker tool.\n\
 of the result packet described below.",
         work_ref = acceptance_brief_text(&task.work_ref, MAX_ACCEPTANCE_BRIEF_LABEL_CHARS),
         title = acceptance_brief_text(&task.title, MAX_ACCEPTANCE_BRIEF_TITLE_CHARS),
-        outcome = acceptance_brief_text(&task.outcome, MAX_ACCEPTANCE_BRIEF_OUTCOME_CHARS),
+        outcome = acceptance_brief_outcome(&task.outcome, outcome_bytes),
         criteria = acceptance_brief_criteria(task),
         evidence = evidence.join("\n"),
         cwd = acceptance_brief_text(cwd, MAX_DELEGATION_CWD_CHARS),
@@ -463,9 +531,37 @@ of the result packet described below.",
     )
 }
 
+/// The one refusal both briefs give when the complete criteria do not fit
+/// with no context left to give up. `smallest` is the brief at that point.
+fn acceptance_contract_too_large(
+    task: &AcceptanceEvaluationTask,
+    smallest: usize,
+    max_bytes: usize,
+) -> ApiError {
+    ApiError::conflict(format!(
+        "`{}`: the acceptance contract is too large to brief an evaluator: its {} complete criteria take {} bytes, and with the host's instructions alone the brief is {smallest} bytes against a limit of {max_bytes}",
+        acceptance_brief_text(&task.work_ref, MAX_ACCEPTANCE_BRIEF_LABEL_CHARS),
+        task.criteria.len(),
+        acceptance_brief_criteria(task).len(),
+    ))
+}
+
 /// `same_session` spawns nothing: the caller judges its own work and records
-/// it through its own tracker tool, against the bases read here.
-fn build_same_session_acceptance_brief(task: &AcceptanceEvaluationTask) -> String {
+/// it through its own tracker tool, against the bases read here. It carries no
+/// context to shrink, so it holds the complete criteria within the same byte
+/// bound as the evaluator's brief or is refused the same way.
+fn build_same_session_acceptance_brief(
+    task: &AcceptanceEvaluationTask,
+    max_bytes: usize,
+) -> std::result::Result<String, ApiError> {
+    let brief = render_same_session_acceptance_brief(task);
+    if brief.len() > max_bytes {
+        return Err(acceptance_contract_too_large(task, brief.len(), max_bytes));
+    }
+    Ok(brief)
+}
+
+fn render_same_session_acceptance_brief(task: &AcceptanceEvaluationTask) -> String {
     format!(
         "Acceptance evaluation of {work_ref} runs in this session (mode same_session); no \
 evaluator was spawned.\n\
@@ -653,7 +749,14 @@ fn acceptance_evaluation_cli_args(
     target: &DelegationAcceptanceEvaluation,
     request: &SubmitAcceptanceEvaluationRequest,
     model: Option<&str>,
-) -> Vec<String> {
+) -> std::result::Result<Vec<String>, ApiError> {
+    // The stored ref is a positional argument: checked again where it is used,
+    // whatever wrote the record.
+    if !is_acceptance_evaluation_work_ref(&target.work_ref) {
+        return Err(ApiError::conflict(
+            "this evaluation's stored work ref cannot be passed to the tracker; request a new evaluation",
+        ));
+    }
     let mut args = vec![
         "work".to_owned(),
         "--actor-id".to_owned(),
@@ -674,6 +777,24 @@ fn acceptance_evaluation_cli_args(
         "--evidence-basis".to_owned(),
         target.evidence_basis.to_string(),
     ]);
+    args.extend(acceptance_evaluation_verdict_args(request));
+    if let Some(model) = model {
+        args.extend(["--model".to_owned(), model.to_owned()]);
+    }
+    args.extend([
+        "--attempt".to_owned(),
+        target.attempt_key.clone(),
+        "--json".to_owned(),
+    ]);
+    Ok(args)
+}
+
+/// The evaluator's own part of the command: its verdicts, normalized and in
+/// criterion order. Everything else in the list is the host's, and the host's
+/// part can drift (a renamed developer, another model) while a write is open;
+/// "the same verdicts" is decided on this part alone.
+fn acceptance_evaluation_verdict_args(request: &SubmitAcceptanceEvaluationRequest) -> Vec<String> {
+    let mut args = Vec::new();
     let mut verdicts = request.verdicts.iter().collect::<Vec<_>>();
     verdicts.sort_by_key(|entry| entry.criterion);
     for entry in verdicts {
@@ -694,15 +815,145 @@ fn acceptance_evaluation_cli_args(
             args.extend(["--evidence".to_owned(), format!("{position}={locator}")]);
         }
     }
-    if let Some(model) = model {
-        args.extend(["--model".to_owned(), model.to_owned()]);
-    }
-    args.extend([
-        "--attempt".to_owned(),
-        target.attempt_key.clone(),
-        "--json".to_owned(),
-    ]);
     args
+}
+
+/// The actor id and context a stored argument list was built under, read back
+/// from the layout `acceptance_evaluation_cli_args` writes. A resend of an open
+/// write runs that list verbatim, so its environment must name the same actor.
+fn acceptance_evaluation_args_identity(args: &[String]) -> Option<(String, Option<String>)> {
+    let word = |index: usize| args.get(index).map(String::as_str);
+    if (word(0), word(1), word(3)) != (Some("work"), Some("--actor-id"), Some("--session-id")) {
+        return None;
+    }
+    let actor_id = args.get(2)?.clone();
+    match (word(5), word(7)) {
+        (Some("evaluate"), _) => Some((actor_id, None)),
+        (Some("--actor-context"), Some("evaluate")) => Some((actor_id, Some(args.get(6)?.clone()))),
+        _ => None,
+    }
+}
+
+/// Names one exact argument list. While a write's outcome is open, only the
+/// list with this digest may be sent again: the tracker replays it, and would
+/// refuse or double-record anything else.
+fn acceptance_evaluation_payload_digest(args: &[String]) -> String {
+    let mut digest = Sha256::new();
+    for arg in args {
+        digest.update(arg.as_bytes());
+        digest.update([0]);
+    }
+    format!("{:x}", digest.finalize())
+}
+
+/// What one `engram work evaluate` run told the host about its write.
+#[derive(Clone, Debug, PartialEq)]
+enum AcceptanceEvaluationRunOutcome {
+    /// Exit 0 with a JSON receipt: recorded (or replayed).
+    Receipt(Value),
+    /// Positive evidence that this run recorded nothing, which takes the exit
+    /// code and the shape together: exit 1 with the tracker's error envelope
+    /// (emitted only when the operation's transaction did not commit), or
+    /// exit 2 with the argument parser's usage error (raised before any store
+    /// is opened). Carries those words.
+    Refused(String),
+    /// The store stayed locked through the runner's retry: nothing recorded.
+    Locked(String),
+    /// The process never started, so this run sent nothing.
+    NeverStarted(String),
+    /// Everything else: a deadline, a transport failure after the process
+    /// started, an unreadable receipt, a process that was killed or crashed,
+    /// or a failure that does not say the transaction did not commit. The
+    /// write may have landed.
+    Unknown(String),
+}
+
+fn classify_acceptance_evaluation_run(
+    result: std::result::Result<EngramCliOutput, EngramTransportError>,
+) -> AcceptanceEvaluationRunOutcome {
+    let output = match result {
+        Ok(output) => output,
+        Err(error) if error.process_never_started => {
+            return AcceptanceEvaluationRunOutcome::NeverStarted(format!(
+                "engram work evaluate: {error}"
+            ));
+        }
+        Err(error) => {
+            return AcceptanceEvaluationRunOutcome::Unknown(format!("engram work evaluate: {error}"));
+        }
+    };
+    if output.success {
+        return match serde_json::from_slice::<Value>(&output.stdout) {
+            Ok(receipt) => AcceptanceEvaluationRunOutcome::Receipt(receipt),
+            Err(error) => AcceptanceEvaluationRunOutcome::Unknown(format!(
+                "engram work evaluate: the receipt was unreadable ({error})"
+            )),
+        };
+    }
+    let detail = truncate_chars(&output.failure_detail(), 4_000);
+    // A process that was killed or crashed may have stopped after its commit.
+    let Some(code) = output.exit.code() else {
+        return AcceptanceEvaluationRunOutcome::Unknown(format!(
+            "engram work evaluate ended abnormally ({}){}",
+            output.status,
+            if detail.is_empty() {
+                String::new()
+            } else {
+                format!(": {detail}")
+            }
+        ));
+    };
+    if output.reports_locked_store() {
+        return AcceptanceEvaluationRunOutcome::Locked(detail);
+    }
+    // Code and shape together, never one alone: a panic exits 101, and the
+    // tracker's generic failure code also covers errors after the commit,
+    // such as failing to print the receipt.
+    match code {
+        ACCEPTANCE_EVALUATION_REFUSAL_EXIT_CODE => {
+            if let Some(message) = acceptance_evaluation_error_envelope_message(&output.stderr) {
+                return AcceptanceEvaluationRunOutcome::Refused(truncate_chars(&message, 4_000));
+            }
+        }
+        ACCEPTANCE_EVALUATION_USAGE_EXIT_CODE => {
+            if is_acceptance_evaluation_usage_error(&output.stderr) {
+                return AcceptanceEvaluationRunOutcome::Refused(detail);
+            }
+        }
+        _ => {}
+    }
+    AcceptanceEvaluationRunOutcome::Unknown(if detail.is_empty() {
+        format!("engram work evaluate exited with code {code} and said nothing")
+    } else {
+        format!(
+            "engram work evaluate exited with code {code} without saying that nothing was recorded: {detail}"
+        )
+    })
+}
+
+/// The exit code Engram ends with when it prints its error envelope.
+const ACCEPTANCE_EVALUATION_REFUSAL_EXIT_CODE: u8 = 1;
+/// The exit code the argument parser ends with on a usage error.
+const ACCEPTANCE_EVALUATION_USAGE_EXIT_CODE: u8 = 2;
+
+/// Engram's refusal: `{"error":{"code":<word>,"message":…}}` on stderr, which
+/// it prints only when the operation's transaction did not commit.
+fn acceptance_evaluation_error_envelope_message(stderr: &[u8]) -> Option<String> {
+    let envelope = serde_json::from_slice::<Value>(stderr).ok()?;
+    let error = envelope.get("error")?;
+    error
+        .get("code")?
+        .as_str()
+        .filter(|code| !code.trim().is_empty())?;
+    error.get("message")?.as_str().map(str::to_owned)
+}
+
+/// The argument parser's usage error (`error: …` then `Usage: …`), raised
+/// before the tracker opens any store. The caller checks the exit code.
+fn is_acceptance_evaluation_usage_error(stderr: &[u8]) -> bool {
+    let text = String::from_utf8_lossy(stderr);
+    let text = text.trim_start();
+    text.starts_with("error:") && text.lines().any(|line| line.starts_with("Usage:"))
 }
 
 /// The tracker's evidence window is byte-bounded, so long notes leave most of a
@@ -764,76 +1015,121 @@ fn compact_acceptance_evaluation_request_result(response: &Value) -> Value {
         "model": delegation.get("model"),
         "status": delegation.get("status"),
         "acceptanceEvaluation": delegation.get("acceptanceEvaluation"),
+        "notice": response.get("notice"),
         "next": "Wait with termal_resume_after_delegations for this delegationId; the fan-in says what the tracker recorded. Do not request another evaluation of the same task while this one runs.",
     })
 }
 
+const ACCEPTANCE_EVALUATION_UNKNOWN_OUTCOME_TEXT: &str = "the write outcome is unknown: the tracker may hold this evaluator's verdict; read the task before requesting another evaluation";
+
 /// One line for the parent's fan-in: what the tracker accepted, which the
-/// child's prose cannot stand in for.
+/// child's prose cannot stand in for. An open write is never reported as
+/// "nothing": the tracker may hold it.
 fn acceptance_evaluation_outcome_line(evaluation: &DelegationAcceptanceEvaluation) -> String {
     let subject = format!(
         "Acceptance evaluation of `{}` ({})",
         acceptance_brief_text(&evaluation.work_ref, MAX_ACCEPTANCE_BRIEF_LABEL_CHARS),
         evaluation.mode.word()
     );
-    match evaluation.outcome.as_ref() {
-        None => format!(
+    match &evaluation.submission {
+        AcceptanceEvaluationSubmission::None => format!(
             "{subject}: nothing was recorded; the tracker has no verdict from this evaluator."
         ),
-        Some(outcome) => {
-            format!(
-                "{subject}: recorded at {}{}. Read the task in the tracker for the verdicts.",
-                outcome.recorded_at,
-                acceptance_evaluation_receipt_summary(&outcome.receipt)
-            )
+        AcceptanceEvaluationSubmission::Pending { .. } => {
+            format!("{subject}: {ACCEPTANCE_EVALUATION_UNKNOWN_OUTCOME_TEXT}.")
         }
+        // Only a receipt ends the uncertainty, so whatever was last learned
+        // (a refused resend included) is shown, not acted on.
+        AcceptanceEvaluationSubmission::Unconfirmed { reason, .. } => format!(
+            "{subject}: {ACCEPTANCE_EVALUATION_UNKNOWN_OUTCOME_TEXT}. Last learned: {}",
+            acceptance_brief_text(reason, MAX_ACCEPTANCE_BRIEF_SUMMARY_CHARS)
+        ),
+        AcceptanceEvaluationSubmission::Recorded {
+            receipt,
+            recorded_at,
+        } => format!(
+            "{subject}: recorded at {recorded_at}{}. Read the task in the tracker for the verdicts.",
+            acceptance_evaluation_receipt_summary(receipt)
+        ),
     }
 }
 
-/// The tracker's receipt nests the evaluation: `passed` counts passing
-/// criteria out of `verdicts_total`, and `blocking` names the first criterion
-/// that keeps the task from completing. An unfamiliar receipt says nothing.
-fn acceptance_evaluation_receipt_summary(receipt: &Value) -> String {
-    let Some(evaluation) = receipt.get("evaluation") else {
-        return String::new();
-    };
-    let (Some(passed), Some(total)) = (
-        evaluation.get("passed").and_then(Value::as_u64),
-        evaluation.get("verdicts_total").and_then(Value::as_u64),
-    ) else {
+/// `passed` counts passing criteria out of `verdicts_total`, and `blocking`
+/// names the first criterion that keeps the task from completing. An extract
+/// of an unfamiliar receipt says nothing.
+fn acceptance_evaluation_receipt_summary(receipt: &AcceptanceEvaluationReceiptExtract) -> String {
+    let (Some(passed), Some(total)) = (receipt.passed, receipt.verdicts_total) else {
         return String::new();
     };
     if passed == total {
         return format!("; all {total} criteria passed");
     }
-    let blocking = evaluation
-        .get("blocking")
-        .and_then(|blocking| {
-            Some((
-                blocking.get("position")?.as_u64()?,
-                blocking.get("verdict")?.as_str()?,
-            ))
-        })
-        .map(|(position, verdict)| {
+    let blocking = receipt
+        .blocking
+        .as_ref()
+        .map(|blocking| {
             format!(
-                "; criterion {position} is {}",
-                acceptance_brief_text(verdict, MAX_ACCEPTANCE_BRIEF_LABEL_CHARS)
+                "; criterion {} is {}",
+                blocking.position,
+                acceptance_brief_text(&blocking.verdict, MAX_ACCEPTANCE_BRIEF_LABEL_CHARS)
             )
         })
         .unwrap_or_default();
     format!("; {passed} of {total} criteria passed{blocking}, so the task cannot complete on it")
 }
 
-/// Engram reports a refusal as a JSON error object on stderr; the evaluator
-/// needs its message, not the envelope. Anything else is passed through.
-fn acceptance_evaluation_refusal_text(detail: &str) -> String {
-    serde_json::from_str::<Value>(detail)
-        .ok()
-        .and_then(|value| {
-            value
-                .pointer("/error/message")
-                .and_then(Value::as_str)
-                .map(str::to_owned)
-        })
-        .unwrap_or_else(|| detail.to_owned())
+/// What is kept of the tracker's receipt, which nests the evaluation. Every
+/// string is one bounded line; a field of an unfamiliar shape is left out.
+fn acceptance_evaluation_receipt_extract(receipt: &Value) -> AcceptanceEvaluationReceiptExtract {
+    let Some(evaluation) = receipt.get("evaluation") else {
+        return AcceptanceEvaluationReceiptExtract::default();
+    };
+    // A hard cut with no marker: these are identifiers and words, not prose.
+    let bounded = |value: &str, max_chars: usize| {
+        acceptance_brief_line(value)
+            .chars()
+            .take(max_chars)
+            .collect::<String>()
+    };
+    let word = |key: &str, max_chars: usize| {
+        evaluation
+            .get(key)
+            .and_then(Value::as_str)
+            .map(|value| bounded(value, max_chars))
+    };
+    AcceptanceEvaluationReceiptExtract {
+        evaluation_hash: word("hash", MAX_ACCEPTANCE_RECEIPT_HASH_CHARS),
+        mode: word("mode", MAX_ACCEPTANCE_RECEIPT_WORD_CHARS),
+        passed: evaluation.get("passed").and_then(Value::as_u64),
+        verdicts_total: evaluation.get("verdicts_total").and_then(Value::as_u64),
+        blocking: evaluation.get("blocking").and_then(|blocking| {
+            Some(AcceptanceEvaluationBlockingVerdict {
+                position: blocking.get("position")?.as_u64()?,
+                verdict: bounded(
+                    blocking.get("verdict")?.as_str()?,
+                    MAX_ACCEPTANCE_RECEIPT_WORD_CHARS,
+                ),
+            })
+        }),
+        replayed: evaluation
+            .get("replayed")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        work_revision: evaluation.get("work_revision").and_then(Value::as_i64),
+        evaluated_cut: evaluation.get("evaluated_cut").and_then(Value::as_i64),
+    }
+}
+
+/// The raw receipt for the evaluator's own response: whole when it is small,
+/// otherwise its leading bytes as text, with the cut said.
+fn bounded_acceptance_evaluation_receipt(receipt: Value) -> (Value, bool) {
+    let encoded = receipt.to_string();
+    if encoded.len() <= MAX_ACCEPTANCE_SUBMIT_RESPONSE_RECEIPT_BYTES {
+        return (receipt, false);
+    }
+    let mut end = MAX_ACCEPTANCE_SUBMIT_RESPONSE_RECEIPT_BYTES;
+    while !encoded.is_char_boundary(end) {
+        end -= 1;
+    }
+    (Value::String(encoded[..end].to_owned()), true)
 }

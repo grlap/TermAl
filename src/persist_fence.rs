@@ -166,6 +166,44 @@ impl PersistFenceWaiter {
                 .expect("persist fence mutex poisoned");
         }
     }
+
+    /// Like `wait`, but no later than `until`: `None` means still unresolved
+    /// at that moment. The fence stays live up to its own deadline, so the
+    /// caller may look at its state and wait again. Same blocking boundary.
+    fn wait_until(&self, until: std::time::Instant) -> Option<PersistFenceResult> {
+        let mut slot = self
+            .completion
+            .result
+            .lock()
+            .expect("persist fence mutex poisoned");
+        loop {
+            if let Some(result) = slot.as_ref() {
+                return Some(result.clone());
+            }
+            let now = std::time::Instant::now();
+            if now >= self.completion.deadline {
+                *slot = Some(Err(PersistFenceError::Deadline));
+                self.completion.changed.notify_all();
+                return Some(Err(PersistFenceError::Deadline));
+            }
+            let limit = until.min(self.completion.deadline);
+            if now >= limit {
+                return None;
+            }
+            (slot, _) = self
+                .completion
+                .changed
+                .wait_timeout(slot, limit - now)
+                .expect("persist fence mutex poisoned");
+        }
+    }
+
+    /// The content this fence names was superseded, so nobody waits for it
+    /// any more: resolve it, and the worker stops retrying on its behalf.
+    fn abandon(self) {
+        self.completion
+            .resolve_at(Err(PersistFenceError::Deadline), std::time::Instant::now());
+    }
 }
 
 #[derive(Default)]

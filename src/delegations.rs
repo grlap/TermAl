@@ -652,6 +652,11 @@ impl AppState {
                 "delegation nesting depth is limited to {MAX_DELEGATION_DEPTH}"
             )));
         }
+        // Same lock as the insert below: the store the brief was read from is
+        // still the project's, and no other evaluator of the task is active.
+        if let Some(seed) = evaluation.as_ref() {
+            acceptance_evaluation_spawn_admission_locked(&inner, &parent_session_id, seed)?;
+        }
         let now = stamp_now();
         let child_record = inner.create_session(
             agent,
@@ -963,7 +968,10 @@ impl AppState {
                 inner.revision
             };
             let result = inner.delegations[index].result.clone();
-            let acceptance_evaluation = inner.delegations[index].acceptance_evaluation.clone();
+            let acceptance_evaluation = inner.delegations[index]
+                .acceptance_evaluation
+                .as_ref()
+                .map(DelegationAcceptanceEvaluation::client_view);
             (
                 revision,
                 result,
@@ -1389,7 +1397,10 @@ impl AppState {
                     "delegation child session no longer exists and cannot be resumed",
                 ))
             } else {
-                None
+                // Early answer only: prompt admission repeats this under the
+                // lock that rearms, where a concurrent request cannot pass it.
+                acceptance_evaluation_followup_admission_locked(&inner, &inner.delegations[index])
+                    .err()
             };
 
             if let Some(gate_error) = gate_error {
@@ -4506,7 +4517,10 @@ fn delegation_summary_from_record(record: &DelegationRecord) -> DelegationSummar
         post_submission_transport_error: record.post_submission_transport_error.clone(),
         review_result_recovery_error: record.review_result_recovery_error.clone(),
         result: record.result.as_ref().map(delegation_result_summary),
-        acceptance_evaluation: record.acceptance_evaluation.clone(),
+        acceptance_evaluation: record
+            .acceptance_evaluation
+            .as_ref()
+            .map(DelegationAcceptanceEvaluation::client_view),
     }
 }
 

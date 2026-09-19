@@ -24,6 +24,7 @@ const ENGRAM_REQUIRED_AGENT_PROCESS_ENV_NAMES: [&str; 3] = [
     ENGRAM_SESSION_ID_ENV,
 ];
 const ENGRAM_CONTEXT_NUDGE_MAX_BYTES: usize = 32 * 1024;
+const ENGRAM_CONTEXT_NUDGE_READER_LABEL: &str = "context nudge";
 
 struct EngramMcpRuntimeConfig {
     stdio: TermalDelegationMcpStdioConfig,
@@ -490,8 +491,8 @@ fn run_engram_context_nudge(
         let _ = process.wait();
         format!("failed resuming `engram work next`: {error:#}")
     })?;
-    let stdout_reader = std::thread::spawn(move || read_engram_cli_output(stdout));
-    let stderr_reader = std::thread::spawn(move || read_engram_cli_output(stderr));
+    let stdout_reader = spawn_engram_cli_output_reader(stdout, ENGRAM_CONTEXT_NUDGE_READER_LABEL);
+    let stderr_reader = spawn_engram_cli_output_reader(stderr, ENGRAM_CONTEXT_NUDGE_READER_LABEL);
     let timeout = target.timeout;
     let deadline = std::time::Instant::now() + timeout;
     let status = loop {
@@ -515,10 +516,12 @@ fn run_engram_context_nudge(
             }
         }
     };
-    let stdout = join_engram_cli_output(stdout_reader, "stdout")
-        .map_err(|error| error.message)?;
-    let stderr = join_engram_cli_output(stderr_reader, "stderr")
-        .map_err(|error| error.message)?;
+    let stdout =
+        join_engram_cli_output(stdout_reader, ENGRAM_CONTEXT_NUDGE_READER_LABEL, "stdout")
+            .map_err(|error| error.message)?;
+    let stderr =
+        join_engram_cli_output(stderr_reader, ENGRAM_CONTEXT_NUDGE_READER_LABEL, "stderr")
+            .map_err(|error| error.message)?;
     let status = status?;
     if !status.success() {
         let stderr = String::from_utf8_lossy(&stderr).trim().to_owned();

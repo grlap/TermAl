@@ -573,6 +573,50 @@ fn fence_backoff_is_independent_and_a_new_fence_wakes_and_resets_it() {
 }
 
 #[test]
+fn a_bounded_wait_leaves_the_fence_live_and_an_abandoned_fence_stops_the_retry() {
+    let mut fixture = FenceFixture::new();
+    let expected = fixture.wait_record("bounded-wait");
+    let waiter = fixture.enqueue(PersistFenceTarget::WaitRegistration(expected));
+    fixture.receive(false);
+    // Unresolved at the limit is `None`, not a deadline: the fence stays live.
+    assert_eq!(waiter.wait_until(std::time::Instant::now()), None);
+    assert_eq!(poll(&waiter), None);
+    let delta = fixture.collect();
+    fixture.write(&delta).unwrap();
+    assert_eq!(
+        waiter.wait_until(std::time::Instant::now() + phase_sync::DEADLOCK_GUARD),
+        Some(Ok(()))
+    );
+
+    // Past its own deadline a bounded wait resolves the fence like `wait`.
+    let expired = fixture.wait_record("bounded-wait-expired");
+    let (fence, waiter) = PersistFence::new(
+        PersistFenceTarget::WaitRegistration(expired),
+        std::time::Instant::now(),
+    );
+    assert_eq!(
+        waiter.wait_until(std::time::Instant::now() + phase_sync::DEADLOCK_GUARD),
+        Some(Err(PersistFenceError::Deadline))
+    );
+    drop(fence);
+
+    // Superseded content: nobody waits for it, so the worker must not keep
+    // retrying on its behalf.
+    let superseded = fixture.wait_record("superseded");
+    let waiter = fixture.enqueue(PersistFenceTarget::WaitRegistration(superseded));
+    fixture.receive(false);
+    fixture.inner.lock().unwrap().delegation_waits.clear();
+    assert!(fixture.batch.has_pending());
+    waiter.abandon();
+    let delta = fixture.collect();
+    fixture.write(&delta).unwrap();
+    let mut retry = PersistWorkerRetryState::default();
+    assert!(!retry.finish_fenced_tick(&Ok(()), false, &mut fixture.batch));
+    assert!(!fixture.batch.has_pending());
+    assert_eq!(retry.next_tick_delay(), None);
+}
+
+#[test]
 fn a_late_wait_registration_is_proven_by_metadata_without_a_new_mutation() {
     let mut fixture = FenceFixture::new();
     let expected = fixture.wait_record("late-wait");

@@ -1091,6 +1091,28 @@ fn delegation_mcp_acceptance_submission_tool_is_scoped_to_evaluator_children() {
     }
 }
 
+// A lost HTTP response leaves the tracker write unknown: the evaluator is told
+// the one thing that is safe, never to try other verdicts.
+#[test]
+fn delegation_mcp_acceptance_submission_transport_failure_prescribes_the_same_verdicts() {
+    let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let base_url = format!("http://{}", closed.local_addr().unwrap());
+    drop(closed);
+    let bridge = TermalDelegationMcpBridge::new("evaluator-child".into(), base_url).unwrap();
+    let message = bridge
+        .tool_submit_acceptance_evaluation(json!({"schemaVersion": 1, "verdicts": [{
+            "criterion": 1, "verdict": "fail", "rationale": "Checked and found it missing."
+        }]}))
+        .expect_err("nothing is listening")
+        .to_string();
+    assert!(
+        message.contains("outcome is unknown")
+            && message.contains("Submit exactly the same verdicts again")
+            && message.contains("/api/sessions/evaluator-child/acceptance-evaluation"),
+        "{message}"
+    );
+}
+
 #[test]
 fn delegation_mcp_evaluate_acceptance_is_listed_and_forwards_to_the_caller_endpoint() {
     let tools = mcp_tools_list_result();

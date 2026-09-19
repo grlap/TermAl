@@ -457,6 +457,18 @@ selected and what is recorded, is described in the
   `mode: evaluator` is refused, `termal_spawn_session` does not offer the mode,
   and agent-command delegation metadata may not declare it. The caller supplies
   no prompt: the session whose work is judged does not brief its judge.
+- **One active evaluator per task.** Each spawn has its own attempt key, so the
+  tracker cannot tell a second evaluator of the same task from a new intent.
+  While a queued or running evaluator exists for the same work ref in the same
+  tracker store, a request is refused with `409` naming that delegation and its
+  parent session: wait on it or ask that session. The check runs under the lock
+  that creates the delegation, so two racing requests yield one evaluator. A
+  follow-up that would rearm a finished evaluator takes the same check, early
+  at reservation and again under the lock that rearms, and is refused with
+  `409` while another evaluator of the task is active; a request racing a
+  follow-up still leaves exactly one. A finished evaluator whose write outcome
+  is unknown does not block, but the new request's answer carries a `notice`
+  naming it.
 - **Shape.** Always `writePolicy: readOnly`, in the parent's working directory,
   Claude or Codex only (the same reason as reviewer mode: the submission tool is
   admitted by authenticated MCP tool identity). A Claude evaluator runs under
@@ -464,21 +476,32 @@ selected and what is recorded, is described in the
 - **Not a reviewer.** An evaluator gets no structured review-result protocol,
   no `reviewResultRequired`, and no freeze tool. Its compact result is the
   ordinary one, synthesized from its final answer like an explorer's.
-- **Target and outcome.** The record carries `acceptanceEvaluation`: `workRef`,
-  `mode`, `acceptanceBasis`, `evidenceBasis`, `criteriaCount`, `attemptKey` (the
-  delegation id) and, once the tracker accepted a submission, `outcome`
-  (`receipt`, `recordedAt`). It is part of the status packet
-  (`termal_get_session_status`), the result packet
-  (`termal_get_session_result`), the delegation summary in lists and deltas,
-  and the fan-in prompt, which says in one line whether anything was recorded.
-  A completed evaluator with no `outcome` recorded nothing.
+- **Target and submission.** The record carries `acceptanceEvaluation`:
+  `workRef`, `mode`, `acceptanceBasis`, `evidenceBasis`, `criteriaCount`,
+  `attemptKey` (the delegation id), `store` (the tracker store the brief was
+  read from) and `submission`, the state of the evaluator's one tracker write:
+  absent (nothing is recorded or open), `pending` (acknowledged durable before
+  the tracker runs), `recorded` (a bounded extract of the receipt and
+  `recordedAt`, acknowledged durable before success is answered) or
+  `unconfirmed` (the host could not learn whether the write landed; only a
+  receipt ends that, never a refused resend). It is part
+  of the status packet (`termal_get_session_status`), the result packet
+  (`termal_get_session_result`, and the browser's `get_delegation_result`
+  packet), the delegation summary in lists and deltas, and the fan-in prompt,
+  which says it in one line: nothing was recorded; recorded, with the count of
+  passing criteria; or, for `pending` and `unconfirmed`, that the write outcome
+  is unknown and the tracker may hold this evaluator's verdict, so the parent
+  reads the task before requesting another evaluation. The child's summary is
+  prose and never stands in for this.
 - **Submission.** The child-only `termal_submit_acceptance_evaluation` tool
   (`POST /api/sessions/{childId}/acceptance-evaluation`) takes
   `{ "schemaVersion": 1, "verdicts": [{ "criterion", "verdict", "basis"?,
   "rationale", "evidence"? }] }`. It is listed only for an evaluator child and
   admitted only for the visible local child of a running read-only evaluator
-  delegation that has a target and no recorded outcome. One evaluation is
-  recorded per evaluator; a follow-up turn cannot record a second one.
+  delegation that has a target and no recorded submission; a `pending` or
+  `unconfirmed` one still admits the child, because sending the same verdicts
+  again is how it is resolved. One evaluation is recorded per evaluator; a
+  follow-up turn cannot record a second one.
 
 ## Lifecycle
 
@@ -976,8 +999,8 @@ termal_wait_delegations({ delegationIds, pollIntervalMs?, timeoutMs? }) -> WaitD
 termal_resume_after_delegations({ delegationIds, mode?, title? }) -> DelegationWaitResponse
 termal_followup_session({ delegationId, message }) -> DelegationStatusResponse
 termal_submit_review_result({ schemaVersion, status, summary, findings, commandsRun, filesInspected, notes, suggestedTrackerUpdates }) -> MailboxAppendReceipt
-termal_evaluate_acceptance({ workRef, agent?, model? }) -> DelegationResponse & { mode, workRef } | { mode: "same_session", workRef, acceptanceBasis, evidenceBasis, brief }
-termal_submit_acceptance_evaluation({ schemaVersion, verdicts: [{ criterion, verdict, basis?, rationale, evidence? }] }) -> { schemaVersion, delegationId, workRef, mode, attemptKey, recordedAt, receipt }
+termal_evaluate_acceptance({ workRef, agent?, model? }) -> DelegationResponse & { mode, workRef, notice? } | { mode: "same_session", workRef, acceptanceBasis, evidenceBasis, brief, notice? }
+termal_submit_acceptance_evaluation({ schemaVersion, verdicts: [{ criterion, verdict, basis?, rationale, evidence? }] }) -> { schemaVersion, delegationId, workRef, mode, attemptKey, recordedAt, receipt, receiptTruncated? }
 termal_send_to_session({ sessionId, message, idempotencyKey, topic?, stateStamp?, class? }) -> { sessionId, resolvedFrom, mailboxId, messageId, sequence, unreadDepth, notificationDisposition, duplicate }
 termal_list_sessions() -> { sessions: [{ sessionId, name, agent, status, workdir, preview }] }
 termal_list_mailboxes() -> { mailboxes: [{ id, participants, latestSequence, unreadCount, latestMessagePreview, latestMessageAt }] }
@@ -1268,8 +1291,29 @@ type DelegationRecord = {
     evidenceBasis: number;
     criteriaCount: number;
     attemptKey: string;
-    outcome?: { receipt: JsonValue; recordedAt: string } | null;
+    // The tracker store the brief was read from.
+    store?: { projectId: string; databasePath: string } | null;
+    // Absent: nothing was sent. `pending`/`unconfirmed`: the outcome is unknown.
+    submission?:
+      // The host also keeps an open write's original argument list; that is
+      // host-private and never served.
+      | { state: "pending"; payloadDigest: string; verdictsDigest?: string; startedAt: string }
+      | { state: "recorded"; receipt: AcceptanceEvaluationReceiptExtract; recordedAt: string }
+      | { state: "unconfirmed"; payloadDigest: string; verdictsDigest?: string; reason: string; at: string }
+      | null;
   } | null;
+};
+
+// The bounded part of the tracker's receipt; the raw receipt is not kept.
+type AcceptanceEvaluationReceiptExtract = {
+  evaluationHash?: string | null; // at most 128 characters
+  mode?: string | null; // at most 64 characters
+  passed?: number | null;
+  verdictsTotal?: number | null;
+  blocking?: { position: number; verdict: string } | null;
+  replayed: boolean;
+  workRevision?: number | null;
+  evaluatedCut?: number | null;
 };
 
 type DelegationResult = {

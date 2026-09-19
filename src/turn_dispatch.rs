@@ -1494,6 +1494,12 @@ impl AppState {
                     "delegation changed during follow-up admission",
                 ));
             }
+            // This lock is held until the delegation is rearmed below, so an
+            // evaluator request cannot create a second active evaluator of the
+            // same task in between, nor can this rearm follow one.
+            if let Some(previous) = followup {
+                acceptance_evaluation_followup_admission_locked(&inner, previous)?;
+            }
             // Keep the previous result until a prompt is started or queued.
             // Runtime creation below is fallible, even with this lock held.
         }

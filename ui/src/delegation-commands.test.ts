@@ -1762,8 +1762,9 @@ describe("delegation command surface", () => {
       evidenceBasis: 42,
       criteriaCount: 2,
       attemptKey: "delegation-1",
-      outcome: {
-        receipt: { passed: true },
+      submission: {
+        state: "recorded" as const,
+        receipt: { passed: 1, verdictsTotal: 2, replayed: false },
         recordedAt: "2026-09-18 10:10:00",
       },
     };
@@ -1813,6 +1814,81 @@ describe("delegation command surface", () => {
       revision: 4,
     });
     expect(result).not.toHaveProperty("failedChecks");
+    // Not an evaluator: the packet carries no evaluation at all.
+    expect(result).not.toHaveProperty("acceptanceEvaluation");
+  });
+
+  it("forwards an evaluator's target and submission in the result packet", async () => {
+    const target = {
+      workRef: "w-task",
+      mode: "independent_session" as const,
+      acceptanceBasis: 7,
+      evidenceBasis: 42,
+      criteriaCount: 2,
+      attemptKey: "delegation-1",
+    };
+    const recorded = {
+      ...target,
+      submission: {
+        state: "recorded" as const,
+        receipt: {
+          evaluationHash: "8ac55175f2ea4ecebc6d04de68517aa0",
+          passed: 1,
+          verdictsTotal: 2,
+          blocking: { position: 2, verdict: "fail" },
+          replayed: false,
+        },
+        recordedAt: "2026-09-18 10:10:00",
+      },
+    };
+    const summary = "Criterion 1 passed; criterion 2 failed.";
+    stubFetchResponses(
+      {
+        revision: 5,
+        serverInstanceId: "server-a",
+        result: makeResult({ summary }),
+        acceptanceEvaluation: recorded,
+      },
+      // The same prose with nothing recorded: only the metadata tells them apart.
+      {
+        revision: 6,
+        serverInstanceId: "server-a",
+        result: makeResult({ summary }),
+        acceptanceEvaluation: target,
+      },
+      {
+        revision: 7,
+        serverInstanceId: "server-a",
+        result: makeResult({ summary }),
+        acceptanceEvaluation: {
+          ...target,
+          submission: {
+            state: "unconfirmed" as const,
+            payloadDigest: "d1",
+            reason: "the response was lost",
+            at: "2026-09-18 10:11:00",
+          },
+        },
+      },
+    );
+
+    const withOutcome = await getDelegationResultCommand(
+      "parent-1",
+      "delegation-1",
+    );
+    expect(withOutcome.summary).toBe(summary);
+    expect(withOutcome.acceptanceEvaluation).toEqual(recorded);
+
+    const withoutOutcome = await getDelegationResultCommand(
+      "parent-1",
+      "delegation-1",
+    );
+    expect(withoutOutcome.summary).toBe(summary);
+    expect(withoutOutcome.acceptanceEvaluation).toEqual(target);
+    expect(withoutOutcome.acceptanceEvaluation).not.toHaveProperty("submission");
+
+    const unknown = await getDelegationResultCommand("parent-1", "delegation-1");
+    expect(unknown.acceptanceEvaluation?.submission?.state).toBe("unconfirmed");
   });
 
   it("waits for multiple delegations and returns when all are terminal", async () => {

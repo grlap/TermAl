@@ -1426,6 +1426,11 @@ struct StateInner {
     /// ownership until release. A new user boundary or queue entry transfers
     /// ownership from pre-prompt archive compensation to the new attempt.
     delegation_followup_admissions: HashMap<String, FollowupAdmissionReservation>,
+    /// Evaluator delegations with an acceptance submission in progress, from
+    /// its admission to its last durability acknowledgement. Memory only: a
+    /// restart has no request in flight, and the persisted `pending` already
+    /// carries what such a request left open.
+    acceptance_evaluation_submissions_in_flight: HashSet<String>,
     /// Durable delegation rows isolated during startup validation. See
     /// `quarantined_persisted_session_ids` for the preservation contract.
     quarantined_persisted_delegation_ids: BTreeSet<String>,
@@ -1487,6 +1492,7 @@ impl StateInner {
             orchestrator_instances: Vec::new(),
             delegations: Vec::new(),
             delegation_followup_admissions: HashMap::new(),
+            acceptance_evaluation_submissions_in_flight: HashSet::new(),
             quarantined_persisted_delegation_ids: BTreeSet::new(),
             delegation_waits: Vec::new(),
             delegation_mutation_stamps: BTreeMap::new(),

@@ -193,6 +193,7 @@ impl PersistedState {
             orchestrator_instances: self.orchestrator_instances,
             delegations: self.delegations,
             delegation_followup_admissions: HashMap::new(),
+            acceptance_evaluation_submissions_in_flight: HashSet::new(),
             delegation_waits: self.delegation_waits,
             delegation_mutation_stamps: BTreeMap::new(),
             removed_delegation_ids: BTreeMap::new(),

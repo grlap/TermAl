@@ -35,6 +35,7 @@ import {
   type WaitDelegationErrorPacket,
 } from "./delegation-error-packets";
 import type {
+  DelegationAcceptanceEvaluation,
   DelegationRecord,
   DelegationResult,
   DelegationSummary,
@@ -661,6 +662,7 @@ async function getDelegationResultWithTransport(
   return delegationResultPacket(response.result, {
     revision: response.revision,
     serverInstanceId: response.serverInstanceId,
+    acceptanceEvaluation: response.acceptanceEvaluation,
   });
 }
 
@@ -1024,9 +1026,13 @@ function delegationStatusCommandResult(response: {
 
 function delegationResultPacket(
   result: DelegationResult,
-  metadata: { revision: number; serverInstanceId: string },
+  metadata: {
+    revision: number;
+    serverInstanceId: string;
+    acceptanceEvaluation?: DelegationAcceptanceEvaluation | null;
+  },
 ): DelegationResultPacket {
-  return {
+  const packet: DelegationResultPacket = {
     delegationId: result.delegationId,
     childSessionId: result.childSessionId,
     status: result.status,
@@ -1038,6 +1044,11 @@ function delegationResultPacket(
     revision: metadata.revision,
     serverInstanceId: metadata.serverInstanceId,
   };
+  // Same rule as the status summary: present only for an evaluator.
+  if (metadata.acceptanceEvaluation) {
+    packet.acceptanceEvaluation = metadata.acceptanceEvaluation;
+  }
+  return packet;
 }
 
 function delegationSummary(record: DelegationRecord): DelegationSummary {

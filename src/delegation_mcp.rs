@@ -886,15 +886,9 @@ impl TermalDelegationMcpBridge {
                 &arguments,
             ),
             "termal_evaluate_acceptance" => self.tool_evaluate_acceptance(arguments),
-            // Single attempt: the tracker's attempt key, not this bridge,
-            // makes the evaluator's own resend safe.
-            "termal_submit_acceptance_evaluation" => self.post_json(
-                &format!(
-                    "/api/sessions/{}/acceptance-evaluation",
-                    self.serving_session_id
-                ),
-                &arguments,
-            ),
+            "termal_submit_acceptance_evaluation" => {
+                self.tool_submit_acceptance_evaluation(arguments)
+            }
             "termal_send_to_session" => self.tool_send_to_session(arguments),
             "termal_list_sessions" => self.tool_list_sessions(arguments),
             "termal_list_mailboxes" => self.tool_list_mailboxes(arguments),
@@ -968,20 +962,17 @@ impl TermalDelegationMcpBridge {
             "/api/sessions/{}/acceptance-evaluations",
             self.serving_session_id
         );
-        // Single attempt: a replay could spawn a second evaluator. The backend
-        // runs bounded tracker reads (two task reads and one policy read, each
-        // retried once on a locked store, plus the evidence continuation
-        // pages) before the ordinary creation work, so the HTTP allowance
-        // covers those on top of the normal budget.
-        let tracker_reads = ENGRAM_WORK_BINDING_COMMAND_TIMEOUT
-            * (4 + MAX_ACCEPTANCE_EVIDENCE_PAGES as u32)
-            + ACCEPTANCE_EVALUATION_POLICY_READ_TIMEOUT * 2;
+        // Single attempt: the host refuses a second active evaluator, but a
+        // replay after the first one finished would still spawn another. The
+        // backend bounds its tracker reads by the same budget before the
+        // ordinary creation work, so the HTTP allowance is that budget on top
+        // of the normal one.
         self.decode_response(
             "POST",
             &path,
             self.client
                 .post(self.url(&path))
-                .timeout(tracker_reads + self.request_timeout)
+                .timeout(acceptance_evaluation_request_tracker_budget() + self.request_timeout)
                 .json(&Value::Object(body))
                 .send(),
         )
@@ -994,6 +985,38 @@ impl TermalDelegationMcpBridge {
                 return anyhow!(
                     "the acceptance evaluation request outcome is unknown: an evaluator may \
                      already be running. Call termal_list_delegations before asking again: {err}"
+                );
+            }
+            err
+        })
+    }
+
+    fn tool_submit_acceptance_evaluation(&self, arguments: Value) -> Result<Value> {
+        let path = format!(
+            "/api/sessions/{}/acceptance-evaluation",
+            self.serving_session_id
+        );
+        // Single attempt: the tracker's attempt key, not this bridge, makes
+        // the evaluator's own resend safe. The backend may run the tracker
+        // twice to resolve an unknown outcome and waits for the writer to
+        // acknowledge its state before and after, so the allowance covers that.
+        self.decode_response(
+            "POST",
+            &path,
+            self.client
+                .post(self.url(&path))
+                .timeout(acceptance_evaluation_submit_budget() + self.request_timeout)
+                .json(&arguments)
+                .send(),
+        )
+        .map_err(|err| {
+            if err
+                .downcast_ref::<TermalDelegationTransportError>()
+                .is_some()
+            {
+                return anyhow!(
+                    "the submission's outcome is unknown: the tracker may hold it. Submit exactly \
+                     the same verdicts again; the tracker replays them: {err}"
                 );
             }
             err

@@ -269,6 +269,19 @@ Base tier and up; it needs no premium control session. The delegation side is
 described under
 [evaluator delegations](agent-delegation-sessions.md#evaluator-delegations).
 
+**Two routes, two callers.** The paths differ by one letter on purpose and are
+not interchangeable:
+
+| Route | Caller | Meaning |
+| --- | --- | --- |
+| `POST /api/sessions/{id}/acceptance-evaluations` (plural) | the parent session whose task needs judging | a request that *may create* an evaluation: it reads the tracker and either spawns an evaluator or answers with a same-session brief. Body `{ workRef, agent?, model? }` |
+| `POST /api/sessions/{id}/acceptance-evaluation` (singular) | the evaluator child itself | the *one* evaluation that child owns: `{id}` is the child, and the task, mode, bases and attempt key are the host's. Body `{ schemaVersion, verdicts }` |
+
+The plural route is a collection the parent adds to; the singular route is the
+single resource an evaluator child has. Neither accepts the other's body
+(unknown fields are `422`), and a parent calling the singular route is refused
+for want of evaluator authority.
+
 **Request.** `termal_evaluate_acceptance`, or
 `POST /api/sessions/{id}/acceptance-evaluations` with
 `{ "workRef", "agent"?, "model"? }`. TermAl:
@@ -290,7 +303,11 @@ described under
    byte-bounded, so long notes leave older evidence behind the first page; the
    host follows `notes_window.after` (at most eight pages, until the brief's
    40-entry cap) and lists everything it collected oldest first. A failed
-   continuation only shortens the brief;
+   continuation only shortens the brief. The work ref the tracker answers
+   with, not the caller's spelling, is what the host keeps and later passes to
+   `evaluate`; it is held to the same rule as the caller's (non-empty, at most
+   128 characters, no leading `-`, no whitespace or control character) and a
+   receipt that breaks it is a `502`;
 3. reads the admitted modes from `engram control-policy show`
    (`acceptance_evaluation.allowed_modes`), which reads the policy head only.
    `engram doctor --json` carries the same key but audits the whole store
@@ -300,8 +317,10 @@ described under
    exceeds its 10-second bound, leaves the set unknown and refuses nothing:
    the tracker enforces its policy when the evaluation is recorded;
 4. selects the mode: the task's pin, else `independent_session` when admitted
-   or unknown, else the first admitted of `sub_agent`, `same_session`. A pin
-   the policy does not admit is refused naming both.
+   or unknown, else the host's next preference among the admitted modes,
+   `sub_agent` then `same_session`. The order is the host's, not the order in
+   which the policy lists them. A pin the policy does not admit is refused
+   naming both.
 
 `independent_session` spawns an evaluator delegation and returns the ordinary
 creation response plus `mode` and `workRef`; the parent waits with
@@ -310,12 +329,68 @@ creation response plus `mode` and `workRef`; the parent waits with
 tells the caller to record the evaluation with its own tracker tool.
 `sub_agent` returns `501`.
 
+**Read budget.** Every tracker call runs through the one-retry lock policy, so
+it can cost two command timeouts plus the retry delay. One function computes
+the worst case of a request (the two task reads, up to seven continuation
+pages and the policy read) and both sides use it: the MCP bridge adds it to
+its HTTP allowance, and the request path takes it as its own deadline. Before
+each continuation page the host checks that the deadline still funds that page
+and the two reads that decide the request; when it does not, paging stops and
+the brief lists the evidence read so far. The bridge therefore never gives up
+on a request the backend is still serving.
+
+**Store identity.** The bases and the work ref mean something only in the store
+they were read from. The host keeps that store (the project id and database
+path the operator established) on the evaluator's target. The reads run
+without the state lock, so under the lock that creates the delegation the
+parent's project is resolved again and the spawn is refused with `409` if its
+store is no longer the one that was read. At submission the *child's* project
+is resolved and the write is refused with `409` ("the project's tracker store
+changed since this evaluation was requested; request a new evaluation") if its
+store differs, whether the operator re-pointed the project or the child
+resolves to another project than the parent did. A target persisted before the
+store was kept cannot submit and asks for a new evaluation.
+
+**One active evaluation per task.** At most one evaluator per store and work
+ref is queued or running, whichever way it would become active:
+
+- a request is refused with `409` while one exists; the refusal names that
+  delegation and its parent session. The check shares the creating lock with
+  the store check, so concurrent requests produce one evaluator;
+- a follow-up (`termal_followup_session`) that would rearm a finished evaluator
+  is refused with `409` while another evaluator of the same store and work ref
+  is active, naming it. The reservation step answers early, and prompt
+  admission repeats the check under the lock that rearms, so a request racing
+  a follow-up still leaves exactly one. A rearmed evaluator in turn blocks a
+  new request.
+
+A finished evaluator does not block. If its write outcome is unknown (below),
+the new request's answer carries a `notice` saying so: the tracker may already
+hold that evaluator's verdict.
+
 **Brief.** The evaluator's prompt is built by the host from those reads and is
-never supplied by the caller. Every interpolated field is one bounded line with
-control characters removed; the evidence list keeps the newest 40 entries and
-states how many older ones are not shown; an entry the tracker would refuse as
-a citation (a non-holder observation, a restored-record member) is marked as
-context only.
+never supplied by the caller. Every interpolated field is one line with control
+characters removed. The acceptance criteria are the contract the verdicts
+answer, so they are never truncated and never dropped. The rest is context, and
+it is measured in UTF-8 bytes, the unit of the 65 536-byte prompt cap it
+competes for: the outcome is kept to 16 000 bytes, cut on a character boundary
+with an explicit `[outcome truncated by the host]` marker; the evidence list
+keeps the newest 40 entries and states how many older ones are not shown; an
+entry the tracker would refuse as a citation (a non-holder observation, a
+restored-record member) is marked as context only. When the brief must shrink,
+context gives way first and in this order: evidence entries, oldest first, down
+to none with the outcome still at its own bound; only then the outcome, down to
+its marker alone (an outcome shorter than the marker is never traded for it).
+Only when the complete criteria do not fit with no context left is the request
+refused, with `409` "the acceptance contract is too large to brief an
+evaluator", which states the bytes the criteria take and the limit. Non-ASCII
+context therefore shortens the brief; it never produces that refusal for small
+criteria.
+
+The `same_session` brief is held to the same 65 536-byte bound and the same
+refusal. It carries the complete criteria and the bases and no context that
+could shrink, so a contract is briefed whole or refused alike whichever mode is
+selected.
 
 **Submission.** The evaluator is read-only and cannot reach the tracker's own
 `evaluate` tool, so it calls `termal_submit_acceptance_evaluation`
@@ -336,12 +411,141 @@ engram work --actor-id <child seat> --session-id <child session> [--actor-contex
 
 The session id, seat and actor context are the child's own, the bases are the
 ones read at request time, and the attempt key is the delegation id, so the
-tracker replays an identical resend and refuses different content once an
-evaluation is recorded. A success stores the receipt as the delegation's
-`acceptanceEvaluation.outcome` and returns it. A non-zero exit returns the
-tracker's own text as `409` so the evaluator can correct and resubmit. A
-deadline, transport failure, locked store or unreadable receipt is `502` and
-records nothing.
+tracker replays an identical resend (its receipt says `replayed: true`) and
+refuses different content once an evaluation is recorded. The command is also
+bounded as a whole: an argument list past the conservative Windows command-line
+limit is a `400` before anything runs.
+
+**One outcome model.** The tracker's write and the host's record of it can come
+apart (a lost response, a failed persist), so the target carries an explicit
+`submission` state and the host never infers "nothing was recorded" from
+silence:
+
+| State | Meaning | How it is entered |
+| --- | --- | --- |
+| absent (`none`) | nothing is recorded by this evaluator | initially; and, only for the request that itself entered from `none`, after a first send with positive evidence that it recorded nothing: a tracker refusal (below), a store that stayed locked, or a tracker process that never started |
+| `pending` | a write was started and its outcome is not yet known | set, with a digest of the exact argument list and that list itself, and acknowledged durable *before* the tracker runs |
+| `recorded` | the tracker holds the evaluation | a success receipt, acknowledged durable before the success answer. The record keeps a bounded extract (`evaluationHash`, `mode`, `passed`, `verdictsTotal`, `blocking`, `replayed`, `workRevision`, `evaluatedCut`), never the raw receipt, which can be a whole control frame; the child's answer carries the raw receipt, cut to 16 KiB on a character boundary with `receiptTruncated: true` when it is larger |
+| `unconfirmed` | the host could not learn whether the write landed | see below; its `reason` leads with the latest thing learned |
+
+*One submission at a time.* At most one submission per evaluator delegation is
+in progress, from its admission through the tracker run to its last durability
+acknowledgement. The marker is taken under the state lock in the critical
+section that admits the submission and released by a guard on every way out, a
+panicking tracker runner included; it lives in memory only, because after a
+restart no request is in flight and the persisted `pending` already carries
+what one left open. A second submission meanwhile, with the same verdicts or
+others, is refused with `409` "a submission for this evaluator is already in
+progress; submit the same verdicts again when it has answered": it runs nothing
+and changes nothing, and it is answered before the record is even read, so an
+unacknowledged `recorded` in memory never decides another caller's answer.
+Settlement also never moves backwards: `recorded` is final, and an open write
+returns to `none` only by the request that wrote it as its own `pending`.
+
+*Durable means acknowledged.* A commit only wakes the persistence writer, so
+the host asks that writer, through the content fence it already has for
+delegation records, to acknowledge that SQLite holds exactly this record, and
+waits for the answer without holding the state lock. The acknowledgement names
+an exact record, so a record that moved on for an unrelated reason (a cancel, a
+status refresh) would never match; while the submission state in it is still
+the one this request wrote, the host asks again about the record as it now
+stands, at most three records within the one deadline. A submission state that
+is no longer the one written ends the wait as a failure. The acknowledgement is
+never skipped:
+
+- no acknowledgement of `pending` (a failed write, a deadline, a stopped
+  writer): the tracker is not run, memory returns to the prior state and the
+  answer is `500` "nothing was sent". A restart can therefore never find an
+  absent state beside a tracker write;
+- no acknowledgement of `recorded`: memory returns to `pending`, so memory never
+  says recorded while disk may not, and the answer is `500` telling the
+  evaluator to submit the same verdicts again; the tracker replays them and the
+  receipt is recovered without a second write;
+- `unconfirmed` is acknowledged the same way; when that fails it stays in
+  memory and is logged, because disk still holds the acknowledged `pending`,
+  which reads the same to the parent. `none` is not waited for: a restart that
+  still finds `pending` errs on the safe side.
+
+Each wait is bounded (five seconds), and the MCP bridge's HTTP allowance for a
+submission covers two tracker sends and two acknowledgements on top of its
+ordinary budget.
+
+*A refusal needs positive evidence.* The host believes that a run recorded
+nothing only from a process that ended on its own with the expected exit code
+*and* the known shape, both together:
+
+- exit code `1` with stderr that parses as Engram's error envelope,
+  `{"error":{"code":<word>,"message":…}}`, which Engram prints only when the
+  operation's transaction did not commit; or
+- exit code `2` with the argument parser's usage error (`error:` … `Usage:`),
+  raised before any store is opened.
+
+Every other ending leaves the write unknown: a process killed by a signal, a
+Windows crash status (an NTSTATUS value such as `0xC0000005`), exit `101` with
+a panic message, exit `1` with free text (failing to print the receipt happens
+*after* the commit), an envelope with another exit code, empty or unparseable
+stderr. The exit is kept as data (a code, or "did not end on its own"), never
+read back from a formatted status string. A locked-store diagnostic is believed
+only with Engram's ordinary failure exit code 1, never a panic or another exit
+code. This write-outcome classification does not change the separate JSON-read
+lock retry policy.
+
+*Uncertainty is erased only by a receipt.*
+
+- A deadline, a transport failure after the tracker process started, a success
+  exit whose stdout cannot be read, or any failure that is not a refusal as
+  defined above leaves the write unknown. The host immediately sends the
+  identical argument list once more, which is replay-safe. A receipt settles
+  it: `recorded`.
+- A `pending` or `unconfirmed` state found at the start of a request (an
+  earlier request's write is open, same verdicts) counts exactly like an
+  unknown first send of this request: this request's one send is already the
+  identical resend.
+- *The resend is the original.* The argument list names things the host
+  derives (the actor id from the developer name, the actor context, the model),
+  and those can change while a write is open. So the open write keeps the exact
+  argument list it was sent as, beside the digest of the whole list and a
+  digest of the evaluator's own part, its normalized verdicts. A later
+  submission is recognised by that part: the same verdicts run the *stored*
+  list verbatim, under the actor it names, whatever the settings say now, so
+  the tracker sees the identical attempt; other verdicts get the `409` below.
+  The stored list is host-private: it is persisted with the record and left out
+  of every status, result, list and delta the host serves. If it can no longer
+  be run from this host (it cannot be read back, or no longer fits the command
+  line), the answer is a `409` that says so and sends the evaluator to report,
+  not to retry.
+- While a send is unknown, nothing but a receipt settles it. A locked store, a
+  process that never started, another unknown result *and a tracker refusal of
+  the resend* all keep `unconfirmed`. A refusal then answers `409` with the
+  tracker's text plus: an earlier send's outcome is unknown, so these verdicts
+  cannot be changed; the evaluator finishes and reports, and the parent reads
+  the task. The others answer `502` "the write outcome is unknown; submit the
+  same verdicts again".
+- *Why a refused resend proves nothing (the run caveat).* Engram replays an
+  exact resend before any revision or lifecycle check, but the attempt identity
+  is bound to the item's active (or latest) run. If the run changed between the
+  two sends, the resend is not recognised as a replay and is judged as a new
+  write; its refusal then says nothing about whether the first send landed. The
+  host cannot see runs, so it never reads a refusal as "never landed".
+- With nothing open, a run that recorded nothing leaves nothing open: a clean
+  refusal is relayed as `409` and the evaluator may correct its verdicts (that
+  is what lets it add a missing citation), a store that stayed locked is `502`
+  "nothing was recorded", and a tracker process that never started is `502`
+  "nothing was sent". Never-started is a typed signal from the process runner
+  (a failed spawn), not a reading of message text.
+- While the state is `pending` or `unconfirmed`, a submission with other
+  verdicts is refused with `409` ("an earlier submission's outcome is unknown;
+  submit exactly the same verdicts to resolve it"): the tracker may hold the
+  open write, and only its replay is safe. The evaluator child stays admitted
+  in both states.
+- `recorded` refuses every further submission.
+
+The parent reads the state in the status and result packets and in the fan-in
+line: `none` is "nothing was recorded"; `pending` and `unconfirmed` are "the
+write outcome is unknown: the tracker may hold this evaluator's verdict; read
+the task before requesting another evaluation", and `unconfirmed` adds what was
+last learned (a refused resend included), to be read, not acted on; `recorded`
+names the time and how many criteria passed.
 
 Not delivered yet: `sub_agent` mode with a host-attested parent and execution
 identity; a source fingerprint at evaluation and completion; observed build

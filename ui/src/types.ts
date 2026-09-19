@@ -468,7 +468,47 @@ export type AcceptanceEvaluationMode =
   | "sub_agent"
   | "independent_session";
 
-/** What an evaluator delegation judges and, once recorded, the tracker's receipt. */
+/** The bounded part of the tracker's receipt the host keeps. */
+export type AcceptanceEvaluationReceiptExtract = {
+  evaluationHash?: string | null;
+  mode?: string | null;
+  passed?: number | null;
+  verdictsTotal?: number | null;
+  blocking?: { position: number; verdict: string } | null;
+  replayed: boolean;
+  workRevision?: number | null;
+  evaluatedCut?: number | null;
+};
+
+/**
+ * What the host knows about an evaluator's one tracker write. `pending` and
+ * `unconfirmed` mean the outcome is unknown: the tracker may hold the verdict.
+ * Absent means nothing was sent.
+ */
+export type AcceptanceEvaluationSubmission =
+  | { state: "none" }
+  | {
+      state: "pending";
+      payloadDigest: string;
+      startedAt: string;
+      // Names the evaluator's own verdicts; the host keeps the original
+      // argument list beside it and never serves that.
+      verdictsDigest?: string;
+    }
+  | {
+      state: "recorded";
+      receipt: AcceptanceEvaluationReceiptExtract;
+      recordedAt: string;
+    }
+  | {
+      state: "unconfirmed";
+      payloadDigest: string;
+      reason: string;
+      at: string;
+      verdictsDigest?: string;
+    };
+
+/** What an evaluator delegation judges and what became of its submission. */
 export type DelegationAcceptanceEvaluation = {
   workRef: string;
   mode: AcceptanceEvaluationMode;
@@ -476,10 +516,9 @@ export type DelegationAcceptanceEvaluation = {
   evidenceBasis: number;
   criteriaCount: number;
   attemptKey: string;
-  outcome?: {
-    receipt: JsonValue;
-    recordedAt: string;
-  } | null;
+  /** The tracker store the brief was read from. */
+  store?: { projectId: string; databasePath: string } | null;
+  submission?: AcceptanceEvaluationSubmission | null;
 };
 export type DelegationStatus =
   | "queued"

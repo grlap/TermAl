@@ -1289,7 +1289,7 @@ enum AcceptanceEvaluationMode {
 /// read before spawning; the evaluator submits against exactly those, so a
 /// task that moved on is refused by the tracker instead of silently covered.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", from = "PersistedDelegationAcceptanceEvaluation")]
 struct DelegationAcceptanceEvaluation {
     work_ref: String,
     mode: AcceptanceEvaluationMode,
@@ -1299,16 +1299,166 @@ struct DelegationAcceptanceEvaluation {
     /// One key per spawn (the delegation id): the tracker replays an identical
     /// resend and refuses different content once one is recorded.
     attempt_key: String,
+    /// The tracker store the brief was read from; the bases mean nothing in
+    /// another one. Absent only on a record persisted before it was kept,
+    /// which can no longer submit.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    outcome: Option<DelegationAcceptanceEvaluationOutcome>,
+    store: Option<EngramAuthorityStoreKey>,
+    #[serde(default, skip_serializing_if = "AcceptanceEvaluationSubmission::is_none")]
+    submission: AcceptanceEvaluationSubmission,
 }
 
-/// The tracker's success receipt for a recorded evaluation.
+/// What the host knows about this evaluator's one tracker write. `pending` is
+/// persisted before the tracker runs, so a crash or a lost response never
+/// reads as "nothing was recorded".
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(tag = "state", rename_all = "camelCase", rename_all_fields = "camelCase")]
+enum AcceptanceEvaluationSubmission {
+    #[default]
+    None,
+    /// `payload_digest` names the exact argument list, which is the only
+    /// thing that may be sent again while the outcome is open.
+    Pending {
+        payload_digest: String,
+        started_at: String,
+        #[serde(flatten)]
+        original: AcceptanceEvaluationOpenWrite,
+    },
+    Recorded {
+        receipt: AcceptanceEvaluationReceiptExtract,
+        recorded_at: String,
+    },
+    Unconfirmed {
+        payload_digest: String,
+        reason: String,
+        at: String,
+        #[serde(flatten)]
+        original: AcceptanceEvaluationOpenWrite,
+    },
+}
+
+/// What an open write was sent as, kept so that its resend is the original
+/// whatever the host's settings have become since (a renamed developer,
+/// another model): the host's part of the command may drift, the write it must
+/// replay may not.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AcceptanceEvaluationOpenWrite {
+    /// Names the evaluator's own part of the command, its normalized verdicts:
+    /// what "the same verdicts" is decided on.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    verdicts_digest: String,
+    /// The exact argument list, within the command-line guard. Host-private:
+    /// it names the actor and is persisted only, never served.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    args: Vec<String>,
+}
+
+impl AcceptanceEvaluationSubmission {
+    fn is_none(&self) -> bool {
+        matches!(self, Self::None)
+    }
+
+    fn open_write(&self) -> Option<&AcceptanceEvaluationOpenWrite> {
+        match self {
+            Self::Pending { original, .. } | Self::Unconfirmed { original, .. } => Some(original),
+            Self::None | Self::Recorded { .. } => None,
+        }
+    }
+}
+
+impl DelegationAcceptanceEvaluation {
+    /// What a client may see: everything but the host-private argument list.
+    fn client_view(&self) -> Self {
+        let mut view = self.clone();
+        if let AcceptanceEvaluationSubmission::Pending { original, .. }
+        | AcceptanceEvaluationSubmission::Unconfirmed { original, .. } = &mut view.submission
+        {
+            original.args.clear();
+        }
+        view
+    }
+}
+
+/// The bounded part of the tracker's receipt a parent needs. The raw receipt
+/// (up to a whole control frame) goes to the evaluator once and is not kept.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AcceptanceEvaluationReceiptExtract {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    evaluation_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    passed: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    verdicts_total: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    blocking: Option<AcceptanceEvaluationBlockingVerdict>,
+    #[serde(default)]
+    replayed: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    work_revision: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    evaluated_cut: Option<i64>,
+}
+
+/// The first criterion that keeps the task from completing.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct DelegationAcceptanceEvaluationOutcome {
+struct AcceptanceEvaluationBlockingVerdict {
+    position: u64,
+    verdict: String,
+}
+
+/// The persisted shape, which still accepts the raw `outcome.receipt` the
+/// first build stored and folds it into the bounded extract.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PersistedDelegationAcceptanceEvaluation {
+    work_ref: String,
+    mode: AcceptanceEvaluationMode,
+    acceptance_basis: i64,
+    evidence_basis: i64,
+    criteria_count: usize,
+    attempt_key: String,
+    #[serde(default)]
+    store: Option<EngramAuthorityStoreKey>,
+    #[serde(default)]
+    submission: AcceptanceEvaluationSubmission,
+    #[serde(default)]
+    outcome: Option<PersistedRawAcceptanceEvaluationOutcome>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PersistedRawAcceptanceEvaluationOutcome {
     receipt: Value,
     recorded_at: String,
+}
+
+impl From<PersistedDelegationAcceptanceEvaluation> for DelegationAcceptanceEvaluation {
+    fn from(persisted: PersistedDelegationAcceptanceEvaluation) -> Self {
+        let submission = match (persisted.submission, persisted.outcome) {
+            (AcceptanceEvaluationSubmission::None, Some(outcome)) => {
+                AcceptanceEvaluationSubmission::Recorded {
+                    receipt: acceptance_evaluation_receipt_extract(&outcome.receipt),
+                    recorded_at: outcome.recorded_at,
+                }
+            }
+            (submission, _) => submission,
+        };
+        Self {
+            work_ref: persisted.work_ref,
+            mode: persisted.mode,
+            acceptance_basis: persisted.acceptance_basis,
+            evidence_basis: persisted.evidence_basis,
+            criteria_count: persisted.criteria_count,
+            attempt_key: persisted.attempt_key,
+            store: persisted.store,
+            submission,
+        }
+    }
 }
 
 /// Persisted parent-child delegation metadata.
@@ -1935,8 +2085,23 @@ where
         review_result_required: bool,
     }
 
+    // The record as persisted carries an open acceptance write's argument
+    // list, which is host-private; a client gets the record without it.
+    let client_record = record
+        .acceptance_evaluation
+        .as_ref()
+        .filter(|target| {
+            target
+                .submission
+                .open_write()
+                .is_some_and(|original| !original.args.is_empty())
+        })
+        .map(|target| DelegationRecord {
+            acceptance_evaluation: Some(target.client_view()),
+            ..record.clone()
+        });
     ApiDelegationRecord {
-        record,
+        record: client_record.as_ref().unwrap_or(record),
         review_result_required: record.mode == DelegationMode::Reviewer,
     }
     .serialize(serializer)

@@ -757,6 +757,10 @@ struct EngramTransportError {
     kind: EngramTransportErrorKind,
     code: Option<String>,
     message: String,
+    /// The process this call meant to run never started, so it cannot have
+    /// written anything. Only a failed spawn says so: every later failure
+    /// leaves a write's outcome open.
+    process_never_started: bool,
 }
 
 impl EngramTransportError {
@@ -765,6 +769,7 @@ impl EngramTransportError {
             kind: EngramTransportErrorKind::Deadline,
             code: Some("deadline_exceeded".to_owned()),
             message: message.into(),
+            process_never_started: false,
         }
     }
 
@@ -773,6 +778,15 @@ impl EngramTransportError {
             kind: EngramTransportErrorKind::Transport,
             code: Some("control_unavailable".to_owned()),
             message: message.into(),
+            process_never_started: false,
+        }
+    }
+
+    /// A transport failure before any process existed.
+    fn spawn_failed(message: impl Into<String>) -> Self {
+        Self {
+            process_never_started: true,
+            ..Self::transport(message)
         }
     }
 
@@ -781,6 +795,7 @@ impl EngramTransportError {
             kind: EngramTransportErrorKind::Protocol,
             code: Some("unknown_control_schema".to_owned()),
             message: message.into(),
+            process_never_started: false,
         }
     }
 
@@ -789,6 +804,7 @@ impl EngramTransportError {
             kind: EngramTransportErrorKind::Remote,
             code: Some(error.code),
             message: error.message,
+            process_never_started: false,
         }
     }
 
@@ -797,6 +813,7 @@ impl EngramTransportError {
             kind: EngramTransportErrorKind::Backoff,
             code: Some("control_unavailable".to_owned()),
             message: message.into(),
+            process_never_started: false,
         }
     }
 
@@ -1748,9 +1765,41 @@ fn run_engram_json_command_with_lock_retry(
 #[derive(Clone, Debug)]
 struct EngramCliOutput {
     success: bool,
+    /// How the process ended, as data. `status` below is only for messages.
+    exit: EngramCliExit,
     status: String,
     stdout: Vec<u8>,
     stderr: Vec<u8>,
+}
+
+/// How a CLI process ended. Only a process that ran to its own exit can be
+/// taken at its word about what it did; one that was killed or crashed may
+/// have stopped anywhere, a committed write included.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EngramCliExit {
+    /// A byte-sized exit code; this includes runtime failures such as panic
+    /// code 101 and does not by itself prove a transactional refusal.
+    Code(u8),
+    /// A signal, or a status outside the exit codes a program returns on its
+    /// own (on Windows a crash reports an NTSTATUS value such as 0xC0000005).
+    Abnormal,
+}
+
+impl EngramCliExit {
+    fn from_status(status: &std::process::ExitStatus) -> Self {
+        // `code()` is `None` for a Unix signal; a crash status does not fit a byte.
+        status
+            .code()
+            .and_then(|code| u8::try_from(code).ok())
+            .map_or(Self::Abnormal, Self::Code)
+    }
+
+    fn code(self) -> Option<u8> {
+        match self {
+            Self::Code(code) => Some(code),
+            Self::Abnormal => None,
+        }
+    }
 }
 
 impl EngramCliOutput {
@@ -1764,8 +1813,12 @@ impl EngramCliOutput {
         }
     }
 
+    /// A lock diagnostic is eligible for retry only with Engram's ordinary
+    /// failure exit. Runtime failures (including Rust panic code 101) can
+    /// mention a lock after a write and must not imply that nothing ran.
     fn reports_locked_store(&self) -> bool {
         !self.success
+            && self.exit.code() == Some(1)
             && self
                 .failure_detail()
                 .to_ascii_lowercase()
@@ -1782,10 +1835,23 @@ fn run_engram_cli_command_with_lock_retry(
     timeout: Duration,
     label: &str,
 ) -> std::result::Result<EngramCliOutput, EngramTransportError> {
-    let first = run_engram_cli_command(connection, args, timeout, label)?;
+    retry_engram_cli_command_on_locked_store(
+        || run_engram_cli_command(connection, args, timeout, label),
+        std::thread::sleep,
+    )
+}
+
+/// The retry policy apart from the process it runs: exactly one more attempt,
+/// after the delay, and only when the first reported a locked store. The
+/// second result stands whatever it is.
+fn retry_engram_cli_command_on_locked_store(
+    mut run: impl FnMut() -> std::result::Result<EngramCliOutput, EngramTransportError>,
+    sleep: impl FnOnce(Duration),
+) -> std::result::Result<EngramCliOutput, EngramTransportError> {
+    let first = run()?;
     if first.reports_locked_store() {
-        std::thread::sleep(ENGRAM_WORK_BINDING_LOCK_RETRY_DELAY);
-        return run_engram_cli_command(connection, args, timeout, label);
+        sleep(ENGRAM_WORK_BINDING_LOCK_RETRY_DELAY);
+        return run();
     }
     Ok(first)
 }
@@ -1892,8 +1958,8 @@ fn run_engram_authority_revoke_command(
             "failed resuming Engram authority revocation: {error:#}"
         ))
     })?;
-    let stdout_reader = std::thread::spawn(move || read_engram_cli_output(stdout));
-    let stderr_reader = std::thread::spawn(move || read_engram_cli_output(stderr));
+    let stdout_reader = spawn_engram_cli_output_reader(stdout, "authority revocation");
+    let stderr_reader = spawn_engram_cli_output_reader(stderr, "authority revocation");
     let deadline = std::time::Instant::now() + timeout;
     let status = loop {
         match process.try_wait() {
@@ -1918,8 +1984,8 @@ fn run_engram_authority_revoke_command(
             }
         }
     };
-    let stdout = join_engram_cli_output(stdout_reader, "stdout")?;
-    let stderr = join_engram_cli_output(stderr_reader, "stderr")?;
+    let stdout = join_engram_cli_output(stdout_reader, "authority revocation", "stdout")?;
+    let stderr = join_engram_cli_output(stderr_reader, "authority revocation", "stderr")?;
     let status = status?;
     if status.success() {
         return Ok(());
@@ -1976,7 +2042,7 @@ fn run_engram_cli_command(
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|error| {
-            EngramTransportError::transport(format!("failed spawning Engram {label}: {error}"))
+            EngramTransportError::spawn_failed(format!("failed spawning Engram {label}: {error}"))
         })?;
     let stdout = child.stdout.take().ok_or_else(|| {
         EngramTransportError::transport(format!("Engram {label} stdout is unavailable"))
@@ -2000,8 +2066,8 @@ fn run_engram_cli_command(
         let _ = process.wait();
         EngramTransportError::transport(format!("failed resuming Engram {label}: {error:#}"))
     })?;
-    let stdout_reader = std::thread::spawn(move || read_engram_cli_output(stdout));
-    let stderr_reader = std::thread::spawn(move || read_engram_cli_output(stderr));
+    let stdout_reader = spawn_engram_cli_output_reader(stdout, label);
+    let stderr_reader = spawn_engram_cli_output_reader(stderr, label);
     let deadline = std::time::Instant::now() + timeout;
     let status = loop {
         match process.try_wait() {
@@ -2026,11 +2092,12 @@ fn run_engram_cli_command(
             }
         }
     };
-    let stdout = join_engram_cli_output(stdout_reader, "stdout")?;
-    let stderr = join_engram_cli_output(stderr_reader, "stderr")?;
+    let stdout = join_engram_cli_output(stdout_reader, label, "stdout")?;
+    let stderr = join_engram_cli_output(stderr_reader, label, "stderr")?;
     let status = status?;
     Ok(EngramCliOutput {
         success: status.success(),
+        exit: EngramCliExit::from_status(&status),
         status: status.to_string(),
         stdout,
         stderr,
@@ -2111,8 +2178,11 @@ fn collect_engram_doctor_output(
     }
 }
 
+/// `label` names the operation in the overflow diagnostic, as it does in every
+/// other failure of the same call.
 fn read_engram_cli_output(
     reader: impl std::io::Read,
+    label: &str,
 ) -> std::io::Result<Vec<u8>> {
     let mut output = Vec::new();
     std::io::Read::take(reader, (ENGRAM_CONTROL_MAX_FRAME_BYTES + 1) as u64)
@@ -2120,26 +2190,33 @@ fn read_engram_cli_output(
     if output.len() > ENGRAM_CONTROL_MAX_FRAME_BYTES {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
-            "Engram command output exceeds the maximum control frame",
+            format!("Engram {label} output exceeds the maximum control frame"),
         ));
     }
     Ok(output)
 }
 
+fn spawn_engram_cli_output_reader(
+    reader: impl std::io::Read + Send + 'static,
+    label: &str,
+) -> std::thread::JoinHandle<std::io::Result<Vec<u8>>> {
+    let label = label.to_owned();
+    std::thread::spawn(move || read_engram_cli_output(reader, &label))
+}
+
 fn join_engram_cli_output(
     reader: std::thread::JoinHandle<std::io::Result<Vec<u8>>>,
+    label: &str,
     stream: &str,
 ) -> std::result::Result<Vec<u8>, EngramTransportError> {
     reader
         .join()
         .map_err(|_| {
-            EngramTransportError::transport(format!(
-                "Engram work-binding {stream} reader panicked"
-            ))
+            EngramTransportError::transport(format!("Engram {label} {stream} reader panicked"))
         })?
         .map_err(|error| {
             EngramTransportError::transport(format!(
-                "failed reading Engram work-binding {stream}: {error}"
+                "failed reading Engram {label} {stream}: {error}"
             ))
         })
 }
