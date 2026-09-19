@@ -31,6 +31,7 @@ fn fixture(gated: bool) -> (AppState, String, PathBuf) {
             .find(|p| p.id == project_id)
             .expect("project");
         project.engram = Some(EngramProjectSettings {
+            acceptance_evaluation: None,
             enabled: true,
             turn_gated_control: false,
             binary_path: Some(

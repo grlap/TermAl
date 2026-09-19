@@ -26,6 +26,7 @@ fn create_test_engram_codex_session(state: &AppState, suffix: &str) -> String {
         .find(|project| project.id == project_id)
         .expect("Engram test project should exist")
         .engram = Some(EngramProjectSettings {
+        acceptance_evaluation: None,
         enabled: true,
         turn_gated_control: false,
         binary_path: Some("engram".to_owned()),

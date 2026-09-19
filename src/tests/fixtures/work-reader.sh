@@ -4,11 +4,13 @@ previous=''
 fixture_show=false
 fixture_after=''
 for arg in "$@"; do
+  if [ "$arg" = 'control-policy' ]; then cat "$(dirname "$0")/engram-control-policy-show.json"; exit 0; fi
   if [ "$previous" = '--home' ]; then fixture_home="$arg"; fi
   if [ "$arg" = 'show' ]; then fixture_show=true; fi
   case "$arg" in --after=*) fixture_after="${arg#--after=}" ;; esac
   previous="$arg"
 done
+[ -n "$fixture_home" ] || { printf '%s\n' 'fixture requires --home' >&2; exit 2; }
 printf '%s\n' "$@" > "$fixture_home/work-read-args.txt"
 fixture_memories=false
 fixture_full=false

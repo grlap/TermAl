@@ -1,5 +1,5 @@
 // Agent readiness probing — for each locally probed agent (Codex, Cursor,
-// Gemini, OpenCode) asks: is the CLI installed, reachable on PATH, and
+// Claude, Gemini, OpenCode) asks: is the CLI installed, reachable on PATH, and
 // configured correctly for the current workdir? Produces an `AgentReadiness` record
 // carrying a Ready/Warning/Unavailable status plus an optional
 // warning-detail string surfaced in the UI.
@@ -14,12 +14,23 @@
 
 /// Collects agent readiness.
 fn collect_agent_readiness(default_workdir: &str) -> Vec<AgentReadiness> {
-    vec![
-        agent_readiness_for(Agent::Codex, default_workdir),
-        agent_readiness_for(Agent::Cursor, default_workdir),
-        agent_readiness_for(Agent::Gemini, default_workdir),
-        agent_readiness_for(Agent::OpenCode, default_workdir),
+    collect_agent_readiness_with(default_workdir, agent_readiness_for)
+}
+
+fn collect_agent_readiness_with(
+    workdir: &str,
+    probe: impl Fn(Agent, &str) -> AgentReadiness,
+) -> Vec<AgentReadiness> {
+    [
+        Agent::Codex,
+        Agent::Claude,
+        Agent::Cursor,
+        Agent::Gemini,
+        Agent::OpenCode,
     ]
+    .into_iter()
+    .map(|agent| probe(agent, workdir))
+    .collect()
 }
 
 /// Validates agent session setup.
@@ -74,17 +85,39 @@ impl AppState {
 fn agent_readiness_for(agent: Agent, workdir: &str) -> AgentReadiness {
     match agent {
         Agent::Codex => codex_agent_readiness(),
+        Agent::Claude => claude_agent_readiness_with(resolve_claude_executable),
         Agent::Cursor => cursor_agent_readiness(),
         Agent::Gemini => gemini_agent_readiness(workdir),
         Agent::OpenCode => opencode_agent_readiness(),
-        _ => AgentReadiness {
-            agent,
-            status: AgentReadinessStatus::Ready,
-            blocking: false,
-            detail: format!("{} is managed by its local CLI runtime.", agent.name()),
-            warning_detail: None,
-            command_path: None,
+    }
+}
+
+fn claude_agent_readiness_with(resolve: impl FnOnce() -> Option<PathBuf>) -> AgentReadiness {
+    let path = resolve().map(|path| display_path_for_user(&normalize_user_facing_path(&path)));
+    AgentReadiness {
+        agent: Agent::Claude,
+        status: if path.is_some() {
+            AgentReadinessStatus::Ready
+        } else {
+            AgentReadinessStatus::Missing
         },
+        blocking: path.is_none(),
+        detail: path
+            .as_ref()
+            .map(|path| {
+                format!(
+                    "Claude CLI is available at `{path}`; authentication is checked by its runtime."
+                )
+            })
+            .unwrap_or_else(|| {
+                if cfg!(windows) {
+                    "Install the `claude` CLI native claude.exe on PATH; .cmd/.bat shims are not supported by this runtime."
+                } else {
+                    "Install the `claude` CLI and make sure it is executable on PATH."
+                }.to_owned()
+            }),
+        warning_detail: None,
+        command_path: path,
     }
 }
 

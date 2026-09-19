@@ -1,8 +1,12 @@
 // Shared per-project Engram editor. Repository declaration comes from
 // `.engram-project`; this surface enables the base MCP/context tier and keeps
 // premium turn-gated control as a separate explicit opt-in.
+// Owns independent connection/defaults drafts; hosts the policy editor owned by
+// AcceptanceEvaluationSettings.tsx without borrowing its save-and-close lifecycle.
 
 import { useEffect, useState } from "react";
+import { AcceptanceEvaluationSettings } from "./AcceptanceEvaluationSettings";
+import type { EvaluatorDefaults } from "./acceptance-settings-api";
 
 import {
   updateProjectEngramSettings,
@@ -56,6 +60,7 @@ export function EngramProjectSettingsPanel({
   idPrefix,
   onCancel,
   onSaved,
+  onDefaultsSaved,
   onVerified,
   onBusyChange,
 }: {
@@ -63,6 +68,8 @@ export function EngramProjectSettingsPanel({
   idPrefix: string;
   onCancel?: () => void;
   onSaved: (state: StateResponse) => void;
+  // Preference saves update state but must not trigger connection save-and-close.
+  onDefaultsSaved: (state: StateResponse) => void;
   onVerified: (
     projectId: string,
     state: ProjectEngramVerificationState,
@@ -78,7 +85,9 @@ export function EngramProjectSettingsPanel({
   const [isVerifying, setIsVerifying] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isDisabling, setIsDisabling] = useState(false);
-  const busy = isVerifying || isSaving || isDisabling;
+  const [acceptanceBusy, setAcceptanceBusy] = useState(false);
+  const [defaults, setDefaults] = useState<EvaluatorDefaults>(project.engram?.acceptanceEvaluation ?? {});
+  const busy = isVerifying || isSaving || isDisabling || acceptanceBusy;
 
   useEffect(() => {
     onBusyChange?.(busy);
@@ -90,6 +99,13 @@ export function EngramProjectSettingsPanel({
     setVerification(null);
     setError(null);
   }, [project.id, project.engram?.turnGatedControl]);
+
+  // Independent preference saves/SSE updates must not reset the connection
+  // draft or its verification; connection updates must not reset this draft.
+  useEffect(() => {
+    setDefaults(project.engram?.acceptanceEvaluation ?? {});
+  }, [project.id, project.engram?.acceptanceEvaluation?.defaultMode,
+    project.engram?.acceptanceEvaluation?.evaluatorAgent, project.engram?.acceptanceEvaluation?.evaluatorModel]);
 
   function invalidateVerification() {
     setVerification(null);
@@ -243,6 +259,10 @@ export function EngramProjectSettingsPanel({
           </small>
         </span>
       </label>
+
+      <AcceptanceEvaluationSettings projectId={project.id} enabled={project.engram?.enabled === true}
+        value={defaults} onChange={setDefaults} busy={busy}
+        onBusyChange={setAcceptanceBusy} onSaved={onDefaultsSaved} />
 
       {verification ? (
         <section

@@ -316,7 +316,8 @@ for want of evaluator authority.
    missing key, or a read that fails (an older binary has no `show`) or
    exceeds its 10-second bound, leaves the set unknown and refuses nothing:
    the tracker enforces its policy when the evaluation is recorded;
-4. selects the mode: the task's pin, else `independent_session` when admitted
+4. selects the mode: the task's pin, else the project's default when explicitly admitted,
+   else `independent_session` when admitted
    or unknown, else the host's next preference among the admitted modes,
    `sub_agent` then `same_session`. The order is the host's, not the order in
    which the policy lists them. A pin the policy does not admit is refused
@@ -547,10 +548,96 @@ the task before requesting another evaluation", and `unconfirmed` adds what was
 last learned (a refused resend included), to be read, not acted on; `recorded`
 names the time and how many criteria passed.
 
+### Operator acceptance settings
+
+The project's Engram settings show the current store policy using
+`control-policy show`, never doctor. An empty mode list is **off / self-asserted**;
+an unavailable or older binary is **unknown**, not off. Evaluator defaults are
+stored separately in `engram.acceptanceEvaluation`: `defaultMode`, `evaluatorAgent`
+(Claude or Codex), and `evaluatorModel`. Saving defaults does not audit the store,
+reset sessions, or change policy. Task pins win; a default mode is used only when
+the current policy explicitly admits it. Unsupported `sub_agent` defaults are
+rejected server-side; defaults require an existing Engram configuration and do
+not turn an unconfigured project into an operator veto. Explicit request agent/model win over
+project defaults. With no agent preference, choose the other Claude/Codex vendor
+when its readiness check is ready. A request-provided `model` requires an explicit
+`agent` (otherwise HTTP 400), so Auto cannot choose a different model vendor;
+without a ready alternate vendor, use the parent's agent. With no model
+override the selected agent uses its normal default. A saved model override
+requires a concrete evaluator agent and is applied only when that agent is
+selected; an explicit request selecting another agent cannot inherit it. Model
+names are trimmed on ingest. The UI clears the model when its agent changes.
+See the shared [Claude launch and readiness contract](../architecture.md#claude-code),
+which applies to every Claude session, not only evaluators.
+Claude readiness and runtime launch share one PATH resolver. Windows requires
+native `claude.exe`, not `.cmd`/`.bat` shims; Unix requires an executable `claude`.
+A missing launchable CLI blocks new Claude sessions with installation guidance
+(authentication remains a runtime check). GUI-launched hosts must have the CLI
+directory on their PATH. Evaluator defaults are saved only by their dedicated
+button: editing them does not invalidate connection verification, and saving
+them does not discard an unsaved turn-gating draft (or vice versa). Switching
+projects releases the old acceptance form's busy state; late completions cannot
+unlock a newer project's in-flight operation.
+
+Changing store policy is a separate, confirmed operator action with a reason.
+The form sends the complete replacement policy, the displayed opaque policy ID
+(`expectedPolicy`), the host reader identity, and a stable idempotency key.
+`control-policy set-acceptance-evaluation` uses the policy ID as its CAS guard;
+other policy dimensions are not changed. No modes means off. The form retains
+the exact payload/key in tab-local session storage before sending and offers
+identical retry across dialog closure, project switches and page reloads in that
+tab. Recovery is not shared between tabs: another tab can advance the policy
+head while this tab retains an unresolved attempt. A later conflict does not
+prove whether that earlier write landed; reconcile the original store before
+discarding recovery data. The write slot serializes active calls, not unresolved
+attempts across tabs. Closing the browser tab clears this recovery state. An unreadable saved
+attempt explains that remedy and asks the operator to reconcile the store before
+discarding recovery data. Unavailable storage must be restored. Storage failure blocks
+a new write. Refreshing policy never replaces an open draft's original CAS base.
+Beginning a policy write cancels older reads so they cannot overwrite its result.
+A definitive first-attempt parser refusal leaves the form editable; free-form
+reasons, including leading hyphens, use unambiguous `--reason=<value>` argv.
+A first-attempt 409 reloads policy for a new explicit decision, never retries
+against the new head automatically. Once an earlier attempt is uncertain, a
+later 409 (including reset, reader or policy conflicts) cannot establish its
+outcome: the exact payload/key remains retained for original-store recovery.
+A successful command returns `writeApplied: true`, even when a following read
+fails or the project settings change; an unavailable snapshot explains that the
+change applied to the selected store and disables further editing until refresh.
+Read and write process calls have a ten-second
+bound (policy reads retain the existing lock retry). Each router has two
+nonwaiting display-read slots and one separate policy-write slot. Aborted display
+reads may finish their bounded CLI work, but cannot consume the write slot.
+Each pool returns 429 when its own capacity is occupied.
+The complete-replacement editor fails closed on unknown modes or receipt shapes,
+rather than silently dropping policy fields it cannot represent. Unknown fields
+inside `acceptance_evaluation` are rejected; unrelated top-level policy dimensions
+are allowed because this setter does not replace them. The captured isolated-store
+receipt's informational `epoch` and `required_assurance` may be absent; the CAS
+policy ID and replaceable policy dimensions still must validate. The captured
+`control-policy show` fixture pins the editor's schema-1 receipt contract separately
+from the evaluation reader's intentionally lenient mode-only interpretation.
+
+The policy mutation route is not exposed as an agent MCP tool. It requires the
+browser's same-origin Fetch Metadata and an explicit operator-action header.
+This is an intent/cross-site guard, **not authentication** against privileged
+local programs that can forge HTTP headers in this local single-user product.
+The defaults PATCH is an ordinary local preference endpoint, without that
+browser-intent header: it changes future selection, not the store's acceptance
+policy. Privileged local code can change those preferences just as it can forge
+the policy headers. Independent-session isolation means a separate evaluator
+execution/context, not a guaranteed different vendor; explicit same-vendor
+selection is supported. Neither endpoint is an authentication boundary against
+local code.
+
+Parent evaluator cards show the task/mode and receipt-backed passed-criteria
+count independently of the child transcript. Completion without a submission
+is not a pass; pending/unconfirmed writes remain unknown. A recorded value still
+waiting on its persistence acknowledgement is shown as submission in progress.
+
 Not delivered yet: `sub_agent` mode with a host-attested parent and execution
 identity; a source fingerprint at evaluation and completion; observed build
-evidence through the control checkpoint; per-project settings for the default
-mode, evaluator agent and model; and any settings or Work-panel UI.
+evidence through the control checkpoint; and Work-panel evaluation actions.
 
 ## Premium boot recovery and lazy retry
 

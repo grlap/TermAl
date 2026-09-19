@@ -15,6 +15,67 @@
 
 use super::*;
 
+#[test]
+#[cfg(windows)]
+fn claude_readiness_displays_drive_and_unc_paths_without_verbatim_prefixes() {
+    for (canonical, display) in [
+        (r"\\?\Z:\fixture\claude.exe", r"Z:\fixture\claude.exe"),
+        (
+            r"\\?\UNC\fixture-server\cli\claude.exe",
+            r"\\fixture-server\cli\claude.exe",
+        ),
+    ] {
+        let readiness = claude_agent_readiness_with(|| Some(PathBuf::from(canonical)));
+        assert_eq!(readiness.command_path.as_deref(), Some(display));
+        assert!(readiness.detail.contains(display));
+        assert!(!readiness.detail.contains(r"\\?\"));
+    }
+}
+
+#[test]
+fn claude_resolver_and_readiness_reject_shims_and_find_a_later_native_binary() {
+    let root = TestTempRoot::create("claude-readiness");
+    let shim_dir = root.path().join("shims");
+    let native_dir = root.path().join("native");
+    fs::create_dir_all(&shim_dir).unwrap();
+    fs::create_dir_all(&native_dir).unwrap();
+    for name in ["claude.cmd", "claude.bat", "claude.ps1"] {
+        fs::write(shim_dir.join(name), "fixture shim, never executed").unwrap();
+    }
+    let only_shims = std::env::join_paths([&shim_dir]).unwrap();
+    let missing = claude_agent_readiness_with(|| resolve_claude_executable_on_path(&only_shims));
+    assert_eq!(missing.status, AgentReadinessStatus::Missing);
+    assert!(missing.blocking);
+    assert_eq!(
+        auto_acceptance_evaluator_agent(Agent::Codex, &[missing]),
+        Agent::Codex
+    );
+
+    let native = native_dir.join(if cfg!(windows) {
+        "claude.exe"
+    } else {
+        "claude"
+    });
+    fs::write(&native, "fixture native path, never executed").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&native, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let path = std::env::join_paths([&shim_dir, &native_dir]).unwrap();
+    assert_eq!(
+        resolve_claude_executable_on_path(&path),
+        Some(fs::canonicalize(&native).unwrap())
+    );
+    let ready = claude_agent_readiness_with(|| resolve_claude_executable_on_path(&path));
+    assert_eq!(ready.status, AgentReadinessStatus::Ready);
+    assert!(!ready.blocking);
+    assert_eq!(
+        auto_acceptance_evaluator_agent(Agent::Codex, &[ready]),
+        Agent::Claude
+    );
+}
+
 // Pins codex_windows_shell_warning() to the current platform: Some(_) mentioning
 // "WSL" on Windows, None elsewhere. Guards against accidentally surfacing the
 // warning on non-Windows builds or dropping the WSL hint on Windows.

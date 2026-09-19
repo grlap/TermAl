@@ -101,6 +101,7 @@ export function EngramProjectSettingsDialog({
                 idPrefix="project-engram"
                 onBusyChange={setBusy}
                 onCancel={onClose}
+                onDefaultsSaved={onSaved}
                 onSaved={(state) => {
                   onSaved(state);
                   onClose();

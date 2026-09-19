@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -8,6 +9,12 @@ import {
 } from "./api";
 import { EngramProjectSettingsDialog } from "./EngramProjectSettingsDialog";
 import type { EngramProjectVerification, Project } from "./types";
+import { getAcceptancePolicy, saveEvaluatorDefaults } from "./acceptance-settings-api";
+
+vi.mock("./acceptance-settings-api", () => ({
+  getAcceptancePolicy: vi.fn().mockResolvedValue({ available: false, readerKey: "test", error: "Policy unavailable" }),
+  saveEvaluatorDefaults: vi.fn(), changeAcceptancePolicy: vi.fn(),
+}));
 
 vi.mock("./api", async (importOriginal) => {
   const original = await importOriginal<typeof import("./api")>();
@@ -46,7 +53,7 @@ const successfulVerification: EngramProjectVerification = {
   healthy: true,
 };
 
-function renderDialog(overrides: Partial<Project> = {}) {
+async function renderDialog(overrides: Partial<Project> = {}) {
   const onClose = vi.fn();
   const onSaved = vi.fn();
   const onVerified = vi.fn();
@@ -58,6 +65,7 @@ function renderDialog(overrides: Partial<Project> = {}) {
       onVerified={onVerified}
     />,
   );
+  await screen.findByText("Policy unknown — Policy unavailable");
   return { onClose, onSaved, onVerified };
 }
 
@@ -68,8 +76,41 @@ beforeEach(() => {
 });
 
 describe("EngramProjectSettingsDialog", () => {
+  it("saves defaults without closing the dialog or discarding connection and policy drafts", async () => {
+    const onClose = vi.fn();
+    vi.mocked(getAcceptancePolicy).mockResolvedValueOnce({
+      available: true, readerKey: "reader", policy: "a".repeat(32),
+      acceptanceEvaluation: { modes: [], mechanicalBasis: "asserted", requireSourceFreshness: false },
+    });
+    vi.mocked(saveEvaluatorDefaults).mockImplementationOnce(async (_, defaults) => ({
+      projects: [{ ...project, engram: { ...project.engram!, acceptanceEvaluation: defaults } }],
+    }) as StateResponse);
+    function Harness() {
+      const [current, setCurrent] = useState(project);
+      const [open, setOpen] = useState(true);
+      return open ? <EngramProjectSettingsDialog project={current} onVerified={vi.fn()}
+        onSaved={state => setCurrent(state.projects[0])}
+        onClose={() => { onClose(); setOpen(false); }} /> : null;
+    }
+    render(<Harness />);
+    await screen.findByText("Off — completion is self-asserted.");
+    fireEvent.click(screen.getByLabelText("Turn-gated control"));
+    fireEvent.click(screen.getByRole("button", { name: "Change store policy…" }));
+    fireEvent.change(screen.getByLabelText("Policy change reason"), { target: { value: "Unsaved policy draft" } });
+    fireEvent.change(screen.getByLabelText("Evaluator agent"), { target: { value: "Claude" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save evaluator defaults" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save evaluator defaults" })).toBeEnabled());
+    expect(saveEvaluatorDefaults).toHaveBeenCalledWith("project-1", { evaluatorAgent: "Claude" });
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByLabelText("Turn-gated control")).toBeChecked();
+    expect(screen.getByLabelText("Policy change reason")).toHaveValue("Unsaved policy draft");
+    expect(screen.getByLabelText("Evaluator agent")).toHaveValue("Claude");
+    expect(updateProjectEngramSettings).not.toHaveBeenCalled();
+  });
+
   it("requires Verify before enabling the base tier", async () => {
-    const callbacks = renderDialog();
+    const callbacks = await renderDialog();
     const saveButton = screen.getByRole("button", { name: "Save & enable" });
 
     expect(saveButton).toBeDisabled();
@@ -104,7 +145,7 @@ describe("EngramProjectSettingsDialog", () => {
   });
 
   it("keeps premium turn-gated control as an explicit opt-in", async () => {
-    renderDialog();
+    await renderDialog();
     fireEvent.click(screen.getByLabelText("Turn-gated control"));
 
     fireEvent.click(screen.getByRole("button", { name: "Verify" }));
@@ -130,7 +171,7 @@ describe("EngramProjectSettingsDialog", () => {
       verified: false,
       errors: ["cannot enable Engram: doctor reported an unhealthy store"],
     });
-    renderDialog();
+    await renderDialog();
 
     fireEvent.click(screen.getByRole("button", { name: "Verify" }));
 
@@ -142,7 +183,7 @@ describe("EngramProjectSettingsDialog", () => {
   });
 
   it("allows disabling without Verify as a recovery action", async () => {
-    const callbacks = renderDialog();
+    const callbacks = await renderDialog();
     const disableButton = screen.getByRole("button", {
       name: "Disable Engram",
     });
@@ -176,7 +217,7 @@ describe("EngramProjectSettingsDialog", () => {
         },
       ],
     } as StateResponse);
-    renderDialog({
+    await renderDialog({
       engram: {
         ...project.engram!,
         turnGatedControl: true,
@@ -190,7 +231,7 @@ describe("EngramProjectSettingsDialog", () => {
     await waitFor(() => expect(premiumToggle).not.toBeChecked());
   });
 
-  it("resynchronizes the premium draft when persisted project state changes", () => {
+  it("resynchronizes the premium draft when persisted project state changes", async () => {
     const props = {
       onClose: vi.fn(),
       onSaved: vi.fn(),
@@ -199,6 +240,7 @@ describe("EngramProjectSettingsDialog", () => {
     const view = render(
       <EngramProjectSettingsDialog project={project} {...props} />,
     );
+    await screen.findByText("Policy unknown — Policy unavailable");
     const premiumToggle = screen.getByLabelText("Turn-gated control");
     expect(premiumToggle).not.toBeChecked();
 
@@ -213,5 +255,6 @@ describe("EngramProjectSettingsDialog", () => {
     );
 
     expect(premiumToggle).toBeChecked();
+    await screen.findByText("Policy unknown — Policy unavailable");
   });
 });

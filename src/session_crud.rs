@@ -676,6 +676,7 @@ fn normalize_engram_host_settings(
         expand_engram_home_path(raw_home)?
     };
     let project_settings = EngramProjectSettings {
+        acceptance_evaluation: None,
         enabled: true,
         turn_gated_control: false,
         binary_path: Some(binary_path.clone()),
@@ -1744,6 +1745,7 @@ impl AppState {
         }
 
         let mut settings = request.into_settings();
+        if let Some(defaults) = &mut settings.acceptance_evaluation { defaults.normalize()?; }
         settings.binary_path = Some(host_settings.binary_path.clone());
         settings.home = Some(host_settings.home.clone());
         settings.deadline_ms = None;
@@ -1840,6 +1842,7 @@ impl AppState {
         work_authority_grant_update: Option<Option<String>>,
         expected_host_settings: Option<EngramHostSettings>,
     ) -> Result<StateResponse, ApiError> {
+        if let Some(defaults) = &mut settings.acceptance_evaluation { defaults.normalize()?; }
         settings.binary_path = settings.binary_path.and_then(|binary_path| {
             let binary_path = binary_path.trim().to_owned();
             (!binary_path.is_empty()).then_some(binary_path)
@@ -1880,6 +1883,12 @@ impl AppState {
                 .engram
                 .as_ref()
                 .and_then(|current| current.work_authority_grant.clone());
+        }
+        // Connection edits from older clients must not erase evaluator defaults.
+        // The dedicated defaults endpoint accepts {} to reset them explicitly.
+        if settings.acceptance_evaluation.is_none() {
+            settings.acceptance_evaluation = project_snapshot.engram.as_ref()
+                .and_then(|current| current.acceptance_evaluation.clone());
         }
         if !settings.enabled
             && let Some(current) = project_snapshot.engram.as_ref()

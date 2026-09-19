@@ -17,6 +17,7 @@ use std::io::Read as _;
 use tower::util::ServiceExt;
 
 mod acceptance_evaluation;
+mod acceptance_settings;
 mod acp_gemini;
 mod acp_tool_status;
 mod agent_commands;

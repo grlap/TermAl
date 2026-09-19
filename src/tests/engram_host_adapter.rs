@@ -650,6 +650,7 @@ fn failed_engram_context_refresh_stays_pending_for_retry() {
             .find(|project| project.id == project_id)
             .expect("project should exist");
         project.engram = Some(EngramProjectSettings {
+            acceptance_evaluation: None,
             enabled: true,
             turn_gated_control: false,
             binary_path: Some(root.join("missing-engram").to_string_lossy().into_owned()),
@@ -1857,6 +1858,7 @@ pub(super) fn enable_test_project_engram(state: &AppState, project_id: &str, roo
         )
         .expect("Engram MCP test project should be declared");
         project.engram = Some(EngramProjectSettings {
+            acceptance_evaluation: None,
             enabled: true,
             turn_gated_control: true,
             binary_path: Some(root.join("engram-fixture").to_string_lossy().into_owned()),
@@ -2849,6 +2851,7 @@ fn live_engram_store_turn_gated_bind_evaluate_begin_checkpoint_e2e() {
         .update_project_engram_settings(
             &project_id,
             EngramProjectSettings {
+                acceptance_evaluation: None,
                 enabled: true,
                 turn_gated_control: true,
                 binary_path: Some(binary_path.to_string_lossy().into_owned()),
@@ -5180,6 +5183,7 @@ fn real_process_fixture_transport() -> ProcessEngramControlTransport {
 
 fn real_fixture_engram_settings(root: &FsPath) -> EngramProjectSettings {
     EngramProjectSettings {
+        acceptance_evaluation: None,
         enabled: true,
         turn_gated_control: true,
         binary_path: Some(
@@ -5244,6 +5248,7 @@ fn project_engram_verification_is_redacted_and_does_not_mutate_settings() {
         .verify_project_engram_settings(
             &project_id,
             UpdateProjectEngramSettingsRequest {
+                acceptance_evaluation: None,
                 enabled: true,
                 turn_gated_control: true,
                 binary_path: Some(
@@ -5303,6 +5308,7 @@ fn project_engram_verification_and_save_require_no_grant() {
         .verify_project_engram_settings(
             &project_id,
             UpdateProjectEngramSettingsRequest {
+                acceptance_evaluation: None,
                 enabled: true,
                 turn_gated_control: false,
                 binary_path: None,
@@ -5317,6 +5323,7 @@ fn project_engram_verification_and_save_require_no_grant() {
         .patch_project_engram_settings(
             &project_id,
             UpdateProjectEngramSettingsRequest {
+                acceptance_evaluation: None,
                 enabled: true,
                 turn_gated_control: false,
                 binary_path: None,
@@ -5530,6 +5537,7 @@ fn project_engram_connection_accepts_the_default_path_command() {
         .expect("project should remain")
         .clone();
     let settings = EngramProjectSettings {
+        acceptance_evaluation: None,
         enabled: true,
         turn_gated_control: true,
         binary_path: Some("engram".to_owned()),
@@ -8560,6 +8568,7 @@ fn engram_mcp_reconfigure_binds_fresh_connection_before_resuming_queued_prompt()
         update_state.update_project_engram_settings(
             &update_project_id,
             EngramProjectSettings {
+                acceptance_evaluation: None,
                 enabled: true,
                 turn_gated_control: true,
                 binary_path: enabled.binary_path,
@@ -11630,6 +11639,7 @@ fn changing_connection_settings_checkpoints_old_grant_then_reaps_and_fresh_binds
         .update_project_engram_settings(
             &project_id,
             EngramProjectSettings {
+                acceptance_evaluation: None,
                 enabled: true,
                 turn_gated_control: true,
                 binary_path: Some(fresh_binary_path.to_string_lossy().into_owned()),
@@ -13964,6 +13974,7 @@ async fn background_boot_recovery_serves_state_and_gates_only_pending_sessions()
             .find(|project| project.id == project_id)
             .expect("project should exist")
             .engram = Some(EngramProjectSettings {
+            acceptance_evaluation: None,
             enabled: true,
             turn_gated_control: true,
             binary_path: Some(root.join("engram-fixture").to_string_lossy().into_owned()),
@@ -14130,6 +14141,7 @@ fn boot_recovery_budget_exhaustion_accepts_late_success_without_lazy_retry() {
             .find(|project| project.id == project_id)
             .expect("project should exist")
             .engram = Some(EngramProjectSettings {
+            acceptance_evaluation: None,
             enabled: true,
             turn_gated_control: true,
             binary_path: Some(root.join("engram-fixture").to_string_lossy().into_owned()),
@@ -14264,6 +14276,7 @@ fn unstarted_boot_recovery_target_retries_lazily_on_first_use() {
             .find(|project| project.id == project_id)
             .expect("project should exist")
             .engram = Some(EngramProjectSettings {
+            acceptance_evaluation: None,
             enabled: true,
             turn_gated_control: true,
             binary_path: Some(root.join("engram-fixture").to_string_lossy().into_owned()),
@@ -14407,6 +14420,7 @@ fn boot_recovery_bounds_worker_concurrency_across_many_targets() {
         child_session_ids.push(created.delegation.child_session_id);
     }
     let settings = EngramProjectSettings {
+        acceptance_evaluation: None,
         enabled: true,
         turn_gated_control: true,
         binary_path: Some(root.join("engram-fixture").to_string_lossy().into_owned()),
@@ -14500,6 +14514,7 @@ fn boot_recovery_rebinds_after_issued_checkpoint_refusal_decision() {
     let child_id = created.delegation.child_session_id;
     let stale_token = format!("stale-{child_id}");
     let settings = EngramProjectSettings {
+        acceptance_evaluation: None,
         enabled: true,
         turn_gated_control: true,
         binary_path: Some(root.join("engram-fixture").to_string_lossy().into_owned()),
@@ -14992,6 +15007,7 @@ fn state_snapshot_and_persistence_omit_removed_work_authority_grant() {
             .find(|project| project.id == project_id)
             .expect("project should exist");
         let settings = EngramProjectSettings {
+            acceptance_evaluation: None,
             enabled: true,
             turn_gated_control: true,
             binary_path: Some("C:/tools/engram".to_owned()),
@@ -15070,6 +15086,7 @@ fn set_test_project_engram_mcp_settings(
         )
         .expect("Engram MCP test project should be declared");
         project.engram = Some(EngramProjectSettings {
+            acceptance_evaluation: None,
             enabled,
             turn_gated_control: enabled,
             binary_path: Some("C:/tools/engram.exe".to_owned()),
@@ -15613,6 +15630,7 @@ fn base_only_engram_injects_mcp_and_refreshes_start_and_compaction_context() {
             .find(|project| project.id == project_id)
             .expect("project should exist");
         project.engram = Some(EngramProjectSettings {
+            acceptance_evaluation: None,
             enabled: true,
             turn_gated_control: false,
             binary_path: Some(
@@ -15800,6 +15818,7 @@ fn settings_reset_supersedes_an_inflight_engram_context_refresh() {
             .find(|project| project.id == project_id)
             .expect("project should exist");
         project.engram = Some(EngramProjectSettings {
+            acceptance_evaluation: None,
             enabled: true,
             turn_gated_control: false,
             binary_path: Some(
@@ -16317,6 +16336,7 @@ fn project_deletion_without_an_engram_binary_still_persists_the_unconfirmed_gran
             .find(|project| project.id == project_id)
             .expect("project should exist");
         project.engram = Some(EngramProjectSettings {
+            acceptance_evaluation: None,
             enabled: false,
             turn_gated_control: false,
             binary_path: None,

@@ -289,6 +289,7 @@ export function EngramPreferencesPanel({
             project={selectedProject}
             idPrefix="settings-engram"
             onSaved={onStateUpdated}
+            onDefaultsSaved={onStateUpdated}
             onVerified={(projectId, nextVerification) =>
               setVerificationByProjectId((current) => ({
                 ...current,

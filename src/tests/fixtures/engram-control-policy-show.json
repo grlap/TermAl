@@ -1,0 +1,13 @@
+{
+  "acceptance_evaluation": {
+    "allowed_modes": ["same_session", "independent_session"],
+    "mechanical_basis": "asserted",
+    "require_source_freshness": false
+  },
+  "epoch": 2,
+  "obligation_rules": "b09f8a0f6fc248d5b5b7daf41dc018a9",
+  "policy": "8e70dd4dce50484285c271d139381f21",
+  "required_assurance": "advisory",
+  "schema_version": 1,
+  "supported_effects": ["observe", "communicate", "coordinate", "mutate_local"]
+}

@@ -32,6 +32,33 @@ const CLAUDE_TRANSIENT_API_RETRY_ATTEMPTS: u32 = 5;
 const CLAUDE_TRANSIENT_API_RETRY_BASE_DELAY: Duration = Duration::from_millis(200);
 const CLAUDE_RATE_LIMIT_RETRY_BASE_DELAY: Duration = Duration::from_secs(1);
 
+// Readiness and spawning share this resolver. In particular, Windows batch
+// shims are not native executables and this runtime does not launch a shell.
+// Unlike find_command_on_path (Codex's shim-capable adapter), this deliberately
+// requires native/executable files and canonicalizes before changing cwd.
+fn resolve_claude_executable() -> Option<PathBuf> {
+    resolve_claude_executable_on_path(&std::env::var_os("PATH")?)
+}
+
+fn resolve_claude_executable_on_path(path: &std::ffi::OsStr) -> Option<PathBuf> {
+    let name = if cfg!(windows) { "claude.exe" } else { "claude" };
+    std::env::split_paths(path).find_map(|dir| {
+        let candidate = dir.join(name);
+        if !candidate.is_file() {
+            return None;
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if candidate.metadata().ok()?.permissions().mode() & 0o111 == 0 {
+                return None;
+            }
+        }
+        // Pin the discovered path before setting the child's working directory.
+        fs::canonicalize(candidate).ok()
+    })
+}
+
 /// Numeric status codes Claude Code reports for API failures that are safe to
 /// retry without changing the request.
 ///
@@ -381,7 +408,9 @@ fn spawn_claude_runtime(
         &runtime_id,
         &delegation_mcp_config,
     )?;
-    let mut command = Command::new("claude");
+    let executable = resolve_claude_executable()
+        .ok_or_else(|| anyhow!("a launchable Claude CLI was not found on PATH"))?;
+    let mut command = Command::new(executable);
     command.current_dir(&cwd);
     command.args(claude_cli_persistent_args(
         &model,

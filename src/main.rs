@@ -261,6 +261,16 @@ async fn shutdown_signal() {
 
 /// Builds the application router.
 fn app_router(state: AppState) -> Router {
+    app_router_with_acceptance_policy_limiter(
+        state,
+        AcceptancePolicyLimiter::new(2, 1),
+    )
+}
+
+fn app_router_with_acceptance_policy_limiter(
+    state: AppState,
+    policy_limiter: AcceptancePolicyLimiter,
+) -> Router {
     let cors = CorsLayer::new()
         .allow_origin([
             HeaderValue::from_static("http://127.0.0.1:8787"),
@@ -354,6 +364,9 @@ fn app_router(state: AppState) -> Router {
             post(verify_project_engram_settings),
         )
         .route("/api/projects/{id}/digest", get(get_project_digest))
+        .route("/api/projects/{id}/engram/control-policy", get(get_project_acceptance_policy))
+        .route("/api/projects/{id}/engram/acceptance-evaluation-defaults", patch(patch_project_acceptance_defaults))
+        .route("/api/projects/{id}/engram/acceptance-evaluation-policy", post(post_project_acceptance_policy))
         .route("/api/projects/{id}/work", get(get_project_work))
         .route("/api/projects/{id}/work-memories/{source}", get(get_project_work_memories))
         .route(
@@ -542,6 +555,7 @@ fn app_router(state: AppState) -> Router {
             post(submit_codex_app_request),
         )
         .with_state(state)
+        .layer(axum::Extension(policy_limiter))
         // One 10 MiB image expands to about 13.4 MiB when base64-encoded.
         .layer(DefaultBodyLimit::max(MAX_JSON_REQUEST_BODY_BYTES))
         // The bounded conversation overview intentionally favors a stable,
@@ -707,6 +721,8 @@ include!("review_freeze_process.rs");
 include!("review_freeze_api.rs");
 include!("acceptance_evaluation.rs");
 include!("acceptance_evaluation_api.rs");
+include!("acceptance_settings.rs");
+include!("acceptance_evaluation_cards.rs");
 include!("coordination_cli.rs");
 include!("engram_mcp_config.rs");
 include!("work_visualizer_types.rs");

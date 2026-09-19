@@ -1455,6 +1455,119 @@ fn acceptance_request_returns_a_same_session_brief_without_spawning() {
 }
 
 #[test]
+fn acceptance_project_defaults_are_used_only_when_admitted_and_never_override_task_pins() {
+    let (state, project, parent, root) = fixture();
+    install_store(&state, &project, &root);
+    state.update_acceptance_defaults(&project, AcceptanceEvaluatorDefaults {
+        default_mode: Some(AcceptanceEvaluationMode::SameSession), ..Default::default()
+    }).unwrap();
+    let response = state.request_acceptance_evaluation_with_runner(&parent, evaluation_request(None),
+        fixture_reader(Arc::default(), show_receipt(None), Ok(policy_receipt(Some(&["same_session", "independent_session"]))))).unwrap();
+    assert_eq!(serde_json::to_value(response).unwrap()["mode"], "same_session");
+    // A pinned unsupported mode is refused, never silently changed to the default.
+    let error = state.request_acceptance_evaluation_with_runner(&parent, evaluation_request(None),
+        fixture_reader(Arc::default(), show_receipt(Some("sub_agent")), Ok(policy_receipt(Some(&["same_session", "sub_agent"]))))).err().expect("pinned unsupported mode must fail");
+    assert_eq!(error.status, StatusCode::NOT_IMPLEMENTED);
+    state.update_acceptance_defaults(&project, AcceptanceEvaluatorDefaults {
+        default_mode: Some(AcceptanceEvaluationMode::IndependentSession), ..Default::default()
+    }).unwrap();
+    let response = state.request_acceptance_evaluation_with_runner(&parent, evaluation_request(None),
+        fixture_reader(Arc::default(), show_receipt(None), Ok(policy_receipt(Some(&["same_session"]))))).unwrap();
+    assert_eq!(serde_json::to_value(response).unwrap()["mode"], "same_session");
+}
+
+#[test]
+fn acceptance_parent_card_uses_receipt_not_agent_prose_and_waits_for_acknowledgement() {
+    let state = test_app_state();
+    let parent = test_session_id(&state, Agent::Claude);
+    let (id, child) = install_evaluator_delegation(&state, &parent, None, "/tmp", 2);
+    {
+        let mut inner = state.inner.lock().unwrap();
+        let index = inner.find_delegation_index(&id).unwrap();
+        let mut delegation = inner.delegations[index].clone();
+        add_parent_delegation_card_locked(&mut inner, &delegation).unwrap();
+        assert!(acceptance_card_detail(&inner, &delegation, "all good", true).contains("nothing was recorded"));
+        delegation.acceptance_evaluation.as_mut().unwrap().submission = AcceptanceEvaluationSubmission::Recorded {
+            receipt: AcceptanceEvaluationReceiptExtract { passed: Some(1), verdicts_total: Some(2), ..Default::default() }, recorded_at: "now".into(),
+        };
+        inner.delegations[index] = delegation.clone();
+        inner.acceptance_evaluation_submissions_in_flight.insert(id.clone());
+        let pending = acceptance_card_detail(&inner, &delegation, "all good", false);
+        assert!(pending.contains("awaiting confirmation"));
+        assert!(!pending.contains("criteria passed"));
+        inner.acceptance_evaluation_submissions_in_flight.remove(&id);
+        let child_index = inner.find_session_index(&child).unwrap();
+        inner.sessions[child_index].session.messages.push(Message::Approval {
+            id: "approval-test".into(), timestamp: stamp_now(), author: Author::Assistant,
+            title: "Approval needed".into(), command: "Edit src/main.rs".into(),
+            command_language: None, detail: "Allow editing src/main.rs?".into(),
+            decision: ApprovalDecision::Pending, supported_decisions: None,
+        });
+    }
+    state.refresh_acceptance_evaluation_card(&child);
+    let inner = state.inner.lock().unwrap();
+    let parent = &inner.sessions[inner.find_session_index(&parent).unwrap()];
+    let Message::ParallelAgents { agents, .. } = parent.session.messages.last().unwrap() else { panic!("missing card") };
+    assert!(agents[0].detail.as_ref().unwrap().contains("1 of 2 criteria passed"));
+    assert!(agents[0].detail.as_ref().unwrap().contains("task cannot complete"));
+    assert!(agents[0].detail.as_ref().unwrap().contains("Allow editing src/main.rs?"));
+}
+
+#[test]
+fn acceptance_request_applies_request_defaults_and_real_provider_precedence() {
+    for (request_agent, default_agent, expected, request_model, default_model, expected_model) in [
+        (Some(Agent::Codex), Some(Agent::Claude), Agent::Codex, Some("request-model"), Some("default-model"), Some("request-model")),
+        (None, Some(Agent::Codex), Agent::Codex, None, Some("default-model"), Some("default-model")),
+        (None, None, Agent::Claude, None, None, None),
+        (Some(Agent::Codex), Some(Agent::Claude), Agent::Codex, None, Some("claude-only"), None),
+        (None, None, Agent::Claude, None, Some("legacy-codex-only"), None),
+        (None, Some(Agent::Gemini), Agent::Claude, None, Some("gemini-only"), None),
+    ] {
+        let (state, project, parent, root) = fixture();
+        install_store(&state, &project, &root);
+        super::delegation_support::install_delegation_codex_runtime(&state, "acceptance-precedence-runtime");
+        {
+            let mut inner = state.inner.lock().unwrap();
+            let parent_index = inner.find_session_index(&parent).unwrap();
+            inner.sessions[parent_index].session.agent = Agent::Codex;
+            inner.projects.iter_mut().find(|p| p.id == project).unwrap().engram.as_mut().unwrap().acceptance_evaluation = Some(AcceptanceEvaluatorDefaults {
+                default_mode: Some(AcceptanceEvaluationMode::SubAgent), // old persisted unsupported defaults are ignored
+                evaluator_agent: default_agent, evaluator_model: default_model.map(str::to_owned),
+            });
+        }
+        *state.agent_readiness_cache.write().unwrap() = AgentReadinessCache::fresh(
+            collect_agent_readiness_with("fixture", |agent, _| AgentReadiness {
+                agent, status: AgentReadinessStatus::Ready, blocking: false,
+                detail: String::new(), warning_detail: None, command_path: Some("fixture".into()),
+            }));
+        let mut request = evaluation_request(request_agent);
+        request.model = request_model.map(str::to_owned);
+        let response = state.request_acceptance_evaluation_with_runner(&parent, request,
+            fixture_reader(Arc::default(), show_receipt(None), Ok(policy_receipt(Some(&["independent_session", "sub_agent"]))))).unwrap();
+        let AcceptanceEvaluationRequestResponse::Spawned { delegation, .. } = response else { panic!("must spawn") };
+        assert_eq!(delegation.delegation.agent, expected);
+        let expected_model = expected_model.map(str::to_owned).unwrap_or_else(||
+            state.inner.lock().unwrap().preferences.default_model_for_agent(expected));
+        assert_eq!(delegation.delegation.model.as_deref(), Some(expected_model.as_str()));
+    }
+}
+
+#[test]
+fn acceptance_request_model_requires_explicit_agent_before_any_tracker_read() {
+    let (state, _, parent, _) = fixture();
+    let mut request = evaluation_request(None);
+    request.model = Some("vendor-specific-model".into());
+    let error = state.request_acceptance_evaluation_with_runner(
+        &parent, request, |_, _, _| panic!("ambiguous model must be refused before tracker I/O"),
+    ).err().expect("model without agent must fail");
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert!(error.message.contains("requires an explicit agent"));
+    assert!(state.inner.lock().unwrap().delegations.is_empty());
+    assert!(acceptance_evaluation_request_tool_definition()["inputSchema"]["properties"]["model"]["description"]
+        .as_str().unwrap().contains("Requires an explicit agent"));
+}
+
+#[test]
 fn acceptance_request_pages_older_evidence_into_the_brief() {
     let (state, project, parent, root) = fixture();
     install_store(&state, &project, &root);

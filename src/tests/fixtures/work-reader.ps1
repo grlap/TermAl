@@ -1,5 +1,12 @@
 $ErrorActionPreference = 'Stop'
+if ($args -contains 'control-policy') {
+  [Console]::WriteLine((Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot 'engram-control-policy-show.json')))
+  exit 0
+}
 $fixtureHomeIndex = [Array]::IndexOf($args, '--home')
+if ($fixtureHomeIndex -lt 0 -or $fixtureHomeIndex + 1 -ge $args.Length) {
+  [Console]::Error.WriteLine('fixture requires --home'); exit 2
+}
 $fixtureHome = $args[$fixtureHomeIndex + 1]
 $args | Set-Content -LiteralPath (Join-Path $fixtureHome 'work-read-args.txt')
 if ($args -contains 'memories') {

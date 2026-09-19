@@ -21,6 +21,11 @@ import {
 } from "./themes";
 import type { ClaudeEffortLevel, CodexReasoningEffort } from "./types";
 
+vi.mock("./acceptance-settings-api", () => ({
+  getAcceptancePolicy: vi.fn().mockResolvedValue({ available: false, readerKey: "test", error: "Policy unavailable" }),
+  saveEvaluatorDefaults: vi.fn(), changeAcceptancePolicy: vi.fn(),
+}));
+
 type NavigatorWithUserAgentData = Navigator & {
   userAgentData?: { platform?: string };
 };
@@ -443,7 +448,7 @@ describe("AppDialogs create-dialog backdrop dismissal", () => {
 });
 
 describe("AppDialogs settings agent defaults", () => {
-  it("renders Engram as a visible settings tab with a project selector", () => {
+  it("renders Engram as a visible settings tab with a project selector", async () => {
     renderSettingsDialog("engram", {
       projects: [
         {
@@ -473,6 +478,7 @@ describe("AppDialogs settings agent defaults", () => {
       "C:\\Users\\greg\\.engram",
     );
     expect(screen.getByLabelText("Turn-gated control")).not.toBeChecked();
+    await screen.findByText("Policy unknown — Policy unavailable");
   });
 
   it("closes a settings combobox before the settings dialog", async () => {

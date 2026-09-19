@@ -250,6 +250,7 @@ export type Project = {
 };
 
 export type EngramProjectSettings = {
+  acceptanceEvaluation?: EvaluatorDefaults;
   enabled: boolean;
   turnGatedControl?: boolean;
   binaryPath?: string | null;
@@ -467,6 +468,12 @@ export type AcceptanceEvaluationMode =
   | "same_session"
   | "sub_agent"
   | "independent_session";
+
+export type EvaluatorDefaults = {
+  defaultMode?: AcceptanceEvaluationMode;
+  evaluatorAgent?: "Claude" | "Codex";
+  evaluatorModel?: string;
+};
 
 /** The bounded part of the tracker's receipt the host keeps. */
 export type AcceptanceEvaluationReceiptExtract = {

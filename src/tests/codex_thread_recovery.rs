@@ -278,6 +278,7 @@ impl ResumeRecoveryFixture {
                 .find(|p| p.id == project_id)
                 .unwrap()
                 .engram = Some(EngramProjectSettings {
+                acceptance_evaluation: None,
                 enabled: true,
                 turn_gated_control: false,
                 binary_path: Some("engram".to_owned()),

@@ -8,7 +8,7 @@
 // than that evaluate call.
 
 const TERMAL_EVALUATE_ACCEPTANCE_TOOL_NAME: &str = "termal_evaluate_acceptance";
-const TERMAL_EVALUATE_ACCEPTANCE_TOOL_DESCRIPTION: &str = "Ask TermAl to produce the acceptance evaluation an Engram task needs before it can be completed. Call this when the tracker refuses completion for a missing acceptance evaluation, or before `done` on a task that has acceptance criteria. Supply the task's workRef; agent (Claude or Codex) and model choose the evaluator and default to this session's agent. TermAl reads the task and the project policy, selects the evaluation mode, and for an independent evaluation spawns a read-only evaluator child that records its verdicts in the tracker under its own identity: wait for it with termal_resume_after_delegations, then read the status or result for what was recorded. One evaluator runs per task: a request made while one is running is refused and names that delegation and its parent session, so wait on it or ask that session. When the mode is same_session nothing is spawned and the returned brief tells you how to record the evaluation yourself.";
+const TERMAL_EVALUATE_ACCEPTANCE_TOOL_DESCRIPTION: &str = "Ask TermAl to produce the acceptance evaluation an Engram task needs before it can be completed. Call this when the tracker refuses completion for a missing acceptance evaluation, or before `done` on a task that has acceptance criteria. Supply the task's workRef; agent (Claude or Codex) and model override the project's evaluator defaults. Supplying model requires an explicit agent; otherwise the request is refused before any tracker read. Without an agent default, TermAl prefers the other ready Claude/Codex vendor, otherwise this session's agent. TermAl reads the task and the project policy, selects the evaluation mode, and for an independent evaluation spawns a read-only evaluator child that records its verdicts in the tracker under its own identity: wait for it with termal_resume_after_delegations, then read the status or result for what was recorded. One evaluator runs per task: a request made while one is running is refused and names that delegation and its parent session, so wait on it or ask that session. When the mode is same_session nothing is spawned and the returned brief tells you how to record the evaluation yourself.";
 const TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_TOOL_NAME: &str = "termal_submit_acceptance_evaluation";
 const TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_QUALIFIED_TOOL_NAME: &str =
     "mcp__termal-delegation__termal_submit_acceptance_evaluation";
@@ -88,9 +88,9 @@ fn acceptance_evaluation_request_tool_definition() -> Value {
                 "agent": {
                     "type": "string",
                     "enum": ["Codex", "Claude"],
-                    "description": "Evaluator agent. Defaults to this session's agent, which must then be Claude or Codex."
+                    "description": "Evaluator agent. Overrides the project default; Auto prefers the other ready Claude/Codex vendor, otherwise this session's agent."
                 },
-                "model": { "type": "string" }
+                "model": { "type": "string", "description": "Evaluator model override. Requires an explicit agent so Auto cannot send a vendor-specific model to another vendor." }
             }
         }
     })
@@ -547,7 +547,12 @@ impl AppState {
     ) -> Result<AcceptanceEvaluationRequestResponse, ApiError> {
         let work_ref = request.work_ref.trim().to_owned();
         validate_acceptance_evaluation_work_ref(&work_ref)?;
-        let (target, parent_workdir) = {
+        if request.model.is_some() && request.agent.is_none() {
+            return Err(ApiError::bad_request(
+                "An evaluator model override requires an explicit agent (Claude or Codex)",
+            ));
+        }
+        let (target, parent_workdir, parent_agent, defaults) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_visible_session_index(parent_session_id)
@@ -555,6 +560,10 @@ impl AppState {
             (
                 acceptance_evaluation_host_target_locked(&inner, parent_session_id)?,
                 inner.sessions[index].session.workdir.clone(),
+                inner.sessions[index].session.agent,
+                engram_project_for_session_locked(&inner, parent_session_id)
+                    .and_then(|project| project.engram.as_ref())
+                    .and_then(|settings| settings.acceptance_evaluation.clone()).unwrap_or_default(),
             )
         };
         // The ref is caller text: never hand it to a shell shim or to a store
@@ -621,12 +630,7 @@ impl AppState {
             .map_err(|e| acceptance_evaluation_transport_error("engram work show --full", e))?;
         let task = parse_acceptance_evaluation_task(show, full)?;
 
-        let policy_args = ["control-policy", "show"].map(str::to_owned);
-        let admitted = match read(
-            connection,
-            &policy_args,
-            ACCEPTANCE_EVALUATION_POLICY_READ_TIMEOUT,
-        ) {
+        let admitted = match read_acceptance_control_policy(connection, &read) {
             Ok(policy) => acceptance_evaluation_admitted_modes(&policy),
             Err(error) => {
                 eprintln!(
@@ -635,11 +639,26 @@ impl AppState {
                 None
             }
         };
-        let mode = select_acceptance_evaluation_mode(task.pinned_mode.as_deref(), admitted.as_deref())
+        let preferred_mode = defaults.default_mode.filter(|mode| {
+            *mode != AcceptanceEvaluationMode::SubAgent && admitted.as_ref().is_some_and(|modes| modes.iter().any(|word| AcceptanceEvaluationMode::parse(word) == Some(*mode)))
+        });
+        let mode = select_acceptance_evaluation_mode(task.pinned_mode.as_deref().or(preferred_mode.map(AcceptanceEvaluationMode::word)), admitted.as_deref())
             .map_err(ApiError::conflict)?;
 
         match mode {
             AcceptanceEvaluationMode::IndependentSession => {
+                let default_agent = defaults.evaluator_agent.filter(|agent| matches!(agent, Agent::Claude | Agent::Codex));
+                let agent = request.agent.or(default_agent).unwrap_or_else(|| {
+                    auto_acceptance_evaluator_agent(parent_agent, &self.agent_readiness_snapshot())
+                });
+                // Persisted legacy Auto/model pairs and explicit agent overrides
+                // must not carry a model to a different vendor.
+                let model = request.model.or_else(|| {
+                    (default_agent == Some(agent))
+                        .then_some(defaults.evaluator_model)
+                        .flatten()
+                        .map(|model| model.trim().to_owned())
+                });
                 let prompt = build_acceptance_evaluator_prompt(
                     &task,
                     &parent_workdir,
@@ -651,8 +670,8 @@ impl AppState {
                         prompt,
                         title: Some(format!("Acceptance evaluation: {}", task.work_ref)),
                         cwd: None,
-                        agent: request.agent,
-                        model: request.model,
+                        agent: Some(agent),
+                        model,
                         mode: Some(DelegationMode::Evaluator),
                         write_policy: Some(DelegationWritePolicy::ReadOnly),
                     },
@@ -774,11 +793,15 @@ impl AppState {
         child: &str,
         request: SubmitAcceptanceEvaluationRequest,
     ) -> Result<AcceptanceEvaluationSubmitResponse, ApiError> {
-        self.submit_acceptance_evaluation_with_runner(
+        let result = self.submit_acceptance_evaluation_with_runner(
             child,
             request,
             run_acceptance_evaluation_submit,
-        )
+        );
+        // The single-flight guard has been released and the acknowledged
+        // state (or conservative failure state) is now safe to show.
+        self.refresh_acceptance_evaluation_card(child);
+        result
     }
 
     // Internal executor boundary for deterministic identity and refusal tests.

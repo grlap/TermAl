@@ -2733,6 +2733,7 @@ fn delegation_prompt_write_policy(write_policy: &DelegationWritePolicy) -> Strin
     }
 }
 
+// New cards use the same raw-detail, decorate-once boundary as updates.
 fn add_parent_delegation_card_locked(
     inner: &mut StateInner,
     delegation: &DelegationRecord,
@@ -2742,7 +2743,7 @@ fn add_parent_delegation_card_locked(
     };
     let message_id = inner.next_message_id();
     let agent = ParallelAgentProgress {
-        detail: Some(delegation_default_running_detail(delegation)),
+        detail: Some(acceptance_card_detail(inner, delegation, &delegation_default_running_detail(delegation), false)),
         id: delegation.id.clone(),
         source: ParallelAgentSource::Delegation,
         status: ParallelAgentStatus::Running,
@@ -2779,12 +2780,14 @@ fn add_parent_delegation_card_locked(
 /// Tool-sourced rows can share the same visible id shape, but delegation
 /// lifecycle updates only own rows whose source is `ParallelAgentSource::Delegation`.
 /// See docs/features/agent-delegation-sessions.md and docs/architecture.md.
+// `detail` is the raw run description; acceptance decoration is applied here exactly once.
 fn update_parent_delegation_card_locked(
     inner: &mut StateInner,
     delegation: &DelegationRecord,
     status: ParallelAgentStatus,
     detail: String,
 ) -> Option<ParentDelegationCardDelta> {
+    let detail = acceptance_card_detail(inner, delegation, &detail, matches!(status, ParallelAgentStatus::Completed | ParallelAgentStatus::Error));
     let Some(parent_index) = inner.find_session_index(&delegation.parent_session_id) else {
         return None;
     };
@@ -3133,12 +3136,14 @@ fn delegation_child_cancel_reason_locked(
         .map(|detail| format!("Delegation canceled. Last child state: {detail}"))
 }
 
+// `detail` is raw, matching the card writer's single acceptance-decoration boundary.
 fn parent_delegation_card_matches_locked(
     inner: &StateInner,
     delegation: &DelegationRecord,
     status: ParallelAgentStatus,
     detail: &str,
 ) -> bool {
+    let detail = acceptance_card_detail(inner, delegation, detail, matches!(status, ParallelAgentStatus::Completed | ParallelAgentStatus::Error));
     let Some(parent_index) = inner.find_session_index(&delegation.parent_session_id) else {
         return false;
     };
@@ -3153,7 +3158,7 @@ fn parent_delegation_card_matches_locked(
             agent.id == delegation.id
                 && agent.source == ParallelAgentSource::Delegation
                 && agent.status == status
-                && agent.detail.as_deref() == Some(detail)
+                && agent.detail.as_deref() == Some(detail.as_str())
         })
     })
 }

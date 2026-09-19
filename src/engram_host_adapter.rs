@@ -112,6 +112,8 @@ impl std::fmt::Debug for EngramRetiredWorkAuthorityGrant {
 #[derive(Clone, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct EngramProjectSettings {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    acceptance_evaluation: Option<AcceptanceEvaluatorDefaults>,
     #[serde(default)]
     enabled: bool,
     /// Premium host-private turn gating. Base MCP/context integration remains
@@ -139,6 +141,7 @@ impl std::fmt::Debug for EngramProjectSettings {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("EngramProjectSettings")
+            .field("acceptance_evaluation", &self.acceptance_evaluation)
             .field("enabled", &self.enabled)
             .field("turn_gated_control", &self.turn_gated_control)
             .field("binary_path", &self.binary_path)
@@ -159,6 +162,7 @@ impl std::fmt::Debug for EngramProjectSettings {
 impl Default for EngramProjectSettings {
     fn default() -> Self {
         Self {
+            acceptance_evaluation: None,
             enabled: false,
             turn_gated_control: false,
             binary_path: None,

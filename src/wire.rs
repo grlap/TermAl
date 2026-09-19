@@ -1753,6 +1753,8 @@ struct CreateProjectRequest {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct UpdateProjectEngramSettingsRequest {
     #[serde(default)]
+    acceptance_evaluation: Option<AcceptanceEvaluatorDefaults>,
+    #[serde(default)]
     enabled: bool,
     #[serde(default)]
     turn_gated_control: bool,
@@ -1809,6 +1811,7 @@ struct WaiveEngramObligationRequest {
 impl UpdateProjectEngramSettingsRequest {
     fn into_settings(self) -> EngramProjectSettings {
         EngramProjectSettings {
+            acceptance_evaluation: self.acceptance_evaluation,
             enabled: self.enabled,
             turn_gated_control: self.turn_gated_control,
             binary_path: self.binary_path,

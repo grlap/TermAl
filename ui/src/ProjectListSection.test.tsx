@@ -4,6 +4,11 @@ import { describe, expect, it, vi } from "vitest";
 import { ProjectListSection } from "./ProjectListSection";
 import type { Project } from "./types";
 
+vi.mock("./acceptance-settings-api", () => ({
+  getAcceptancePolicy: vi.fn().mockResolvedValue({ available: false, readerKey: "test", error: "Policy unavailable" }),
+  saveEvaluatorDefaults: vi.fn(), changeAcceptancePolicy: vi.fn(),
+}));
+
 const project: Project = {
   id: "project-1",
   name: "TermAl",
@@ -19,7 +24,7 @@ const project: Project = {
 };
 
 describe("ProjectListSection Engram settings", () => {
-  it("shows project Engram status and opens the settings tab from the context menu", () => {
+  it("shows project Engram status and opens the settings tab from the context menu", async () => {
     render(
       <ProjectListSection
         paneId="pane-1"
@@ -46,6 +51,7 @@ describe("ProjectListSection Engram settings", () => {
       screen.getByRole("tab", { name: "Engram", selected: true }),
     ).toBeInTheDocument();
     expect(screen.getByLabelText("Turn-gated control")).not.toBeChecked();
+    await screen.findByText("Policy unknown — Policy unavailable");
   });
 
   it("does not expose Engram controls for an undeclared repository", () => {
