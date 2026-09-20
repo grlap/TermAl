@@ -2698,6 +2698,8 @@ impl AppState {
             );
         checkpoint_failures.append(&mut timed_out_failures);
         checkpoint_recovery.append(&mut timed_out_recovery);
+        let mut absent_session_evidence = Vec::new();
+        let mut absence_budget = EngramAbsenceInspectionBudget::default();
         for target in &reset_targets {
             let checkpoint_started_at = std::time::Instant::now();
             match target.checkpoint_for_project_reset_off_lock() {
@@ -2709,7 +2711,20 @@ impl AppState {
                         .expect("reset target should carry an active grant"),
                 )),
                 Err(error) => {
-                    let failure = format!("session {}: {}", target.connection.session_id, error);
+                    let mut failure = format!("session {}: {}", target.connection.session_id, error);
+                    if !best_effort_checkpoint_cleanup
+                        && engram_checkpoint_can_inspect_absence(&error)
+                    {
+                        match self.inspect_absent_engram_reset_session(target, absence_budget.start_or_continue()) {
+                            Ok(evidence) => {
+                                absent_session_evidence.push(evidence);
+                                continue;
+                            }
+                            Err(refusal) => {
+                                failure.push_str(&format!("; absence recovery refused: {}", refusal.message));
+                            }
+                        }
+                    }
                     if best_effort_checkpoint_cleanup {
                         // Disable is the operator escape hatch. Preserve a
                         // visible record that the begun grant could not be
@@ -2759,6 +2774,20 @@ impl AppState {
 
         #[cfg(test)]
         apply_engram_quarantine_precommit_transition(self, &project_id);
+        // Filesystem routing observations must not hold the global state lock.
+        // They are snapshots, not a filesystem lock: the commit section below
+        // fences the corresponding persisted identity and local ownership again.
+        for evidence in &absent_session_evidence {
+            if let Err(error) = evidence.validate_store_off_lock().and_then(|()| absence_budget.validate()) {
+                self.abort_engram_project_reset(
+                    &project_id,
+                    project_reset_generation,
+                    &session_ids,
+                    &checkpointed,
+                )?;
+                return Err(error);
+            }
+        }
         let (adapter, final_session_ids, revocation_batch) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let reset_still_in_progress = inner
@@ -2824,6 +2853,20 @@ impl AppState {
                     &checkpointed,
                 )?;
                 return Err(error);
+            }
+            // Inspection is one-snapshot evidence, not a store lock. Recheck
+            // exact local ownership/generations and persisted routing identity
+            // under the atomic settings/session commit lock, with no filesystem
+            // work here. Unlike checkpoints,
+            // this recovery does not clear anything on a failed Save.
+            for evidence in &absent_session_evidence {
+                if let Err(error) = evidence.validate_locked(&inner).and_then(|()| absence_budget.validate()) {
+                    drop(inner);
+                    self.abort_engram_project_reset(
+                        &project_id, project_reset_generation, &session_ids, &checkpointed,
+                    )?;
+                    return Err(error);
+                }
             }
             // Runtime cleanup state can change while validation and checkpoint
             // RPCs run off-lock. Re-plan the teardown under the final commit

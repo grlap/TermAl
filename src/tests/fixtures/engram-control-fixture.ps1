@@ -27,6 +27,20 @@ if (-not $projectFile -or -not $engramHome) {
 }
 
 $workIndex = [Array]::IndexOf($args, "work")
+if ($args -contains "control-session-inspect") {
+    [IO.File]::WriteAllText((Join-Path $engramHome 'session-inspection-args.txt'), ($args -join ' '))
+    [IO.File]::WriteAllLines((Join-Path $engramHome 'session-inspection-argv.txt'), [string[]]$args)
+    $targetSession = ($args | Where-Object { $_.StartsWith('--target-session-id=') } | Select-Object -First 1).Substring(20)
+    [IO.File]::AppendAllText((Join-Path $engramHome 'session-inspection-targets.txt'), "$targetSession`n")
+    $receiptFile = Join-Path $engramHome "session-inspection-$targetSession.json"
+    if (-not (Test-Path -LiteralPath $receiptFile)) { $receiptFile = Join-Path $engramHome 'session-inspection.json' }
+    [Console]::Out.WriteLine([IO.File]::ReadAllText($receiptFile))
+    $rewrite = Join-Path $engramHome 'session-inspection-rewrite-marker'
+    if (Test-Path -LiteralPath $rewrite) { [IO.File]::WriteAllText($projectFile, [IO.File]::ReadAllText($rewrite)) }
+    if (Test-Path -LiteralPath (Join-Path $engramHome 'session-inspection-exit')) { exit 7 }
+    exit 0
+}
+
 if ($workIndex -ge 0 -and ($args -contains "next")) {
     if (-not $env:ENGRAM_HOME -or -not $env:ENGRAM_ACTOR_ID -or -not $env:ENGRAM_ACTOR_CONTEXT -or -not $env:ENGRAM_SESSION_ID) {
         [Console]::Error.WriteLine("missing Engram base context environment")

@@ -1,5 +1,8 @@
 //! Turn-gated Engram host-adapter conformance at the real TermAl choke points.
 
+#[path = "engram_session_reconciliation.rs"]
+mod session_reconciliation;
+
 use super::delegation_support::test_app_state_with_delegation_codex_runtime;
 use super::phase_sync::{DEADLOCK_GUARD, receive};
 use super::*;

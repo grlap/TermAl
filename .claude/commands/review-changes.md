@@ -43,6 +43,63 @@ If there are no staged, unstaged, or untracked changes, tell the user there is n
 
 This parent session is the only session in this workflow allowed to run quality gates. Run every command in this step before spawning reviewers; delegated `/review-code` children inspect code only and must not repeat these commands.
 
+### Run gates once; do not babysit them or read successful logs
+
+- Launch the ordered gates below as one parent-owned, fail-fast run. Capture
+  stdout/stderr in separate per-gate logs under a unique, gitignored run directory
+  (for example `.git/review-gates/<run-id>/`). Record each command, exit code and
+  the reviewed input fingerprint. Stop at the first nonzero exit; in PowerShell,
+  explicitly check `$LASTEXITCODE` after every native command rather than assuming
+  it throws. Do not launch competing full Rust and UI suites.
+- Keep full output on disk, not in the conversation: redirect it rather than
+  streaming it through the tool response or `tee`. Have the runner produce a
+  separate compact result report: each gate's completion state and exit code,
+  plus extracted errors and warnings with their source log paths. A successful
+  gate with no diagnostics needs only one `PASS` line, not its passing-test list.
+  Extract diagnostics mechanically from structured reporter output where
+  available, otherwise from bounded log searches with surrounding context.
+  Test names containing "error" or expected stderr are not automatically failures;
+  preserve the actual process exit code independently of any output filter.
+- Announce the run once. Use the execution tool's completion notification/resume
+  mechanism when available, and yield until it completes. If that mechanism is
+  unavailable, use a supported blocking wait with a substantial timeout within
+  the host's limits; if it yields before completion, resume the same execution.
+  Do not create a short-interval polling loop, repeatedly tail logs, count passing
+  tests, or narrate unchanged "still running" status. Do not promise an automatic
+  resume unless one was actually registered.
+- A tool yielding, a quiet log, an unrelated mailbox message, or a user asking
+  for status is not a reason to restart tests. Keep the existing run identifier;
+  never launch a duplicate just to regain visibility. Do not edit the tested input
+  while gates are running. If it changes externally, disclose the drift rather
+  than treating those results as verification of the new input.
+- On completion, read only the compact result report and its errors/warnings.
+  Do not open, tail, or dump successful logs just to confirm success. Warnings
+  from successful gates still belong in the report. Open a bounded excerpt of a
+  full log only when a reported failure/warning needs diagnosis, or a nonzero
+  exit has no extracted diagnostic; expand around that evidence only as needed.
+  Cap diagnostic excerpts and disclose truncation with the retained log path;
+  never flood context with a massive log or silently discard excess diagnostics.
+  Missing completion/exit-code evidence means unknown, not PASS. Follow the
+  failure protocol below when a gate fails.
+  A log file existing or containing some passing tests does not prove completion.
+  During an unchanged-input review/adjudication, reuse the completed gate evidence
+  instead of rerunning it for a status report. Changed code still requires gates.
+
+On Windows, use native Git Bash for the Rust wrapper, not a `bash` that resolves
+to WSL. Resolve the native Cargo executable before invoking the wrapper:
+
+```powershell
+$reviewCargo = rustup which cargo
+if ($LASTEXITCODE -ne 0) { throw 'Cannot resolve native Cargo; stop the gate sequence' }
+$env:TERMAL_TEST_CARGO = $reviewCargo.Trim().Replace('\', '/')
+& 'C:/Program Files/Git/bin/bash.exe' scripts/test-rust.sh
+if ($LASTEXITCODE -ne 0) { throw 'Rust gate failed; stop the gate sequence' }
+```
+
+Verify the Git Bash path on the host and adjust it if installed elsewhere. Apply
+the per-gate logging and exit-code checks above to the entire sequence. This is
+execution guidance, not permission to delegate gates or skip any gate below.
+
 If any quality gate in this step produces a failure or error, stop the remaining
 gate sequence and do not spawn reviewers, but do not stop at merely presenting
 the raw output. Immediately investigate the failing path in this parent session
@@ -52,8 +109,9 @@ symptom is never resolved by labeling it "flaky." Search Beads for existing work
 and create or update the matching item with the failure evidence and next action.
 This pre-review gate-failure record is an explicit exception to the Step 5
 tracker-timing rule; it must cover only the failed gate, not unreviewed code
-findings. Present the original output together with the diagnosis and tracker
-action. Do not resume the gate sequence or spawn reviewers until the original
+findings. Present the relevant original failure excerpt and full-log path together
+with the diagnosis and tracker action, not the entire run's output. Do not resume
+the gate sequence or spawn reviewers until the original
 required gate succeeds.
 
 Run `cargo check` in the parent session before spawning reviewers.

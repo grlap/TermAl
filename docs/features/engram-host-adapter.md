@@ -268,6 +268,56 @@ control card. Turning the premium flag off fences the transition, checkpoints
 open control state, clears the binding, and resumes ordinary Base-only
 dispatch.
 
+### Strict Save and absent control sessions
+
+A strict settings Save still refuses uncertain checkpoint failures. The only
+absence recovery is an exact `control_session_not_bound` refusal for an errored
+session with no attached runtime, while TermAl owns its project-reset and
+checkpoint fences. That error alone is **not** proof: Engram also uses it for a
+binding belonging to another project, and `session_status` is not read-only.
+
+TermAl asks the old configured binary/store for a separate read-only snapshot:
+
+```text
+engram --project-file <marker> --home <home> control-session-inspect \
+  --target-session-id=<session> --retained-grant-id=<grant> --json
+```
+
+Only an exit-0 v1 `control_session_inspect` receipt with mutation disabled,
+matched host-path policy, exact project/canonical database/session/grant identity,
+and all three presence flags false is admitted. The producer checks the session
+row, **all** grant rows for that session, and the retained grant anywhere in the
+store, including project mismatches and orphan rows. Missing/older commands,
+malformed or oversized receipts, nonzero exits and unresolved identity refuse
+recovery. A Save shares one ten-second inspection deadline, starting at the
+first eligible probe. Every later probe, pipe collection and evidence admission
+uses that same deadline; exhausted budgets refuse the Save and retain authority.
+The 16 KiB receipt limit applies per probe. This is not a bound on the whole
+Save: checkpoint RPCs before the first probe and post-commit rebinding have
+their own budgets. OS filesystem calls are not cancellable, so they can return
+late, but late evidence is refused and no further probe is launched.
+
+On Windows, absence inspection refuses configured `.cmd`/`.bat` wrappers before
+launch: their `cmd.exe` argument reparsing cannot safely transport arbitrary
+producer selectors. Configure the native Engram executable instead. Native
+executables and supported PowerShell scripts keep the producer selector grammar;
+selectors use `--flag=value` to keep leading hyphens literal. Other diagnostic
+commands and the disable/authority-retirement escape paths are unchanged.
+
+The receipt is snapshot evidence, not a store lock or authority to repair it.
+TermAl checks the old project/canonical-path routing identity before and after
+the probe and again off-lock just before acquiring the commit lock. Under that
+lock it rechecks the persisted identity, reset ownership, exact
+connection/token/grant and session generations using only in-memory state.
+Filesystem reads and canonicalization never run under that final state lock.
+These observations do not lock external filesystem routing or authenticate a
+copied/replaced database at the same path. Only the atomic settings Save clears
+the stale local state; rollback retains it and a retry requires fresh evidence.
+No session deletion,
+policy-floor reduction, rebinding or grant expiration is part of inspection.
+This does not cover active/attached sessions or arbitrary checkpoint refusals.
+See the [settings API](../architecture.md#http-api).
+
 ## Human obligation waiver
 
 `POST /api/sessions/{id}/engram/obligations/waive` is a host-private operator

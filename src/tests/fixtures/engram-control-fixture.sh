@@ -10,7 +10,10 @@ is_doctor=0
 is_readiness=0
 is_peek=0
 original_args=$*
+original_arg_lines=$(printf '%s\n' "$@")
+target_session_id=""
 while [ "$#" -gt 0 ]; do
+  case "$1" in --target-session-id=*) target_session_id=${1#--target-session-id=} ;; esac
   if [ "$1" = "--project-file" ]; then
     project_file="$2"
     shift 2
@@ -49,6 +52,22 @@ while [ "$#" -gt 0 ]; do
 done
 [ -n "$project_file" ] || exit 2
 [ -n "$engram_home" ] || exit 2
+
+case " $original_args " in
+  *" control-session-inspect "*)
+    printf '%s\n' "$original_args" > "$engram_home/session-inspection-args.txt"
+    printf '%s\n' "$original_arg_lines" > "$engram_home/session-inspection-argv.txt"
+    printf '%s\n' "$target_session_id" >> "$engram_home/session-inspection-targets.txt"
+    receipt_file="$engram_home/session-inspection-$target_session_id.json"
+    if [ ! -f "$receipt_file" ]; then receipt_file="$engram_home/session-inspection.json"; fi
+    cat "$receipt_file"
+    if [ -f "$engram_home/session-inspection-rewrite-marker" ]; then
+      cat "$engram_home/session-inspection-rewrite-marker" > "$project_file"
+    fi
+    if [ -f "$engram_home/session-inspection-exit" ]; then exit 7; fi
+    exit 0
+    ;;
+esac
 
 case " $original_args " in
   *" work "*" next "*)

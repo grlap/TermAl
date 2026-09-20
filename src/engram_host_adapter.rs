@@ -303,6 +303,44 @@ fn run_engram_diagnostic_within(
     diagnostic: &str,
     doctor_timeout: Duration,
 ) -> std::result::Result<std::process::Output, ApiError> {
+    run_engram_diagnostic_args_within(
+        binary_path, project_file, home, project_root, diagnostic, &[], doctor_timeout,
+    )
+}
+
+fn run_engram_diagnostic_args_within(
+    binary_path: &FsPath,
+    project_file: &FsPath,
+    home: &FsPath,
+    project_root: &FsPath,
+    diagnostic: &str,
+    args: &[&str],
+    doctor_timeout: Duration,
+) -> std::result::Result<std::process::Output, ApiError> {
+    run_engram_diagnostic_args_until(
+        binary_path, project_file, home, project_root, diagnostic, args,
+        std::time::Instant::now() + doctor_timeout, doctor_timeout,
+    )
+}
+
+// The absolute deadline includes process startup and pipe collection. Callers
+// sharing a budget across subprocesses must not restart it for each child.
+fn run_engram_diagnostic_args_until(
+    binary_path: &FsPath,
+    project_file: &FsPath,
+    home: &FsPath,
+    project_root: &FsPath,
+    diagnostic: &str,
+    args: &[&str],
+    deadline: std::time::Instant,
+    doctor_timeout: Duration,
+) -> std::result::Result<std::process::Output, ApiError> {
+    if std::time::Instant::now() >= deadline {
+        return Err(ApiError::bad_request(format!(
+            "Engram {diagnostic} exceeded the {} second enablement deadline before process launch",
+            doctor_timeout.as_secs()
+        )));
+    }
     // Drain both streams on their own threads and terminate the whole process
     // tree, exactly as the authority-revocation path below does. Neither is
     // optional here. Waiting for exit before reading DEADLOCKS a doctor whose
@@ -313,14 +351,22 @@ fn run_engram_diagnostic_within(
     // `.cmd`/`.bat` and `.ps1` shims in an interpreter, leaving the real doctor
     // a grandchild that keeps auditing and holding the store after we returned.
     let mut command = engram_command(binary_path);
-    configure_terminal_process_tree(&mut command);
-    let mut child = command
+    command
         .arg("--project-file")
         .arg(project_file)
         .arg("--home")
         .arg(home)
         .arg(diagnostic)
-        .arg("--json")
+        .args(args)
+        .arg("--json");
+    #[cfg(windows)]
+    if diagnostic == "control-session-inspect"
+        && binary_path.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("ps1"))
+    {
+        command = engram_absence_powershell_command(binary_path, project_file, home, args)?;
+    }
+    configure_terminal_process_tree(&mut command);
+    let mut child = command
         .current_dir(project_root)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -353,7 +399,6 @@ fn run_engram_diagnostic_within(
     })?;
     let stdout_reader = start_engram_doctor_reader(stdout, "stdout");
     let stderr_reader = start_engram_doctor_reader(stderr, "stderr");
-    let deadline = std::time::Instant::now() + doctor_timeout;
     let status = loop {
         match process.try_wait() {
             Ok(Some(status)) => break status,
