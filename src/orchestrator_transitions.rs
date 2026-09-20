@@ -48,6 +48,10 @@ fn apply_orchestrator_template_session_settings(
     }
 
     match record.session.agent {
+        Agent::Kimi => {
+            // Template admission rejects Auto for Kimi. Every ACP prompt also
+            // requires the manual-mode ACK; no host auto-approval field exists.
+        }
         Agent::OpenCode => {
             record.session.opencode_approval_mode = Some(if template_session.auto_approve {
                 OpenCodeApprovalMode::AutoApprove

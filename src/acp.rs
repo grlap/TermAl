@@ -434,14 +434,19 @@ fn maybe_authenticate_acp_runtime(
         return Ok(());
     };
 
-    send_acp_json_rpc_request(
+    let authentication = send_acp_json_rpc_request(
         writer,
         pending_requests,
         "authenticate",
         json!({ "methodId": method_id }),
         Duration::from_secs(30),
         agent,
-    )?;
+    );
+    if agent == AcpAgent::Kimi {
+        authentication.context("Kimi authentication failed; run `kimi login` in a terminal, then retry")?;
+    } else {
+        authentication?;
+    }
     Ok(())
 }
 
@@ -511,6 +516,9 @@ fn select_acp_auth_method(
                 None
             }
         }
+        // Kimi's terminal login is operator-owned; ACP authenticate only checks
+        // existing credentials. Never execute advertised auth commands here.
+        AcpAgent::Kimi => has_method("login").then_some("login".to_owned()),
         AcpAgent::OpenCode => None,
     }
 }
@@ -560,6 +568,17 @@ fn handle_acp_prompt_command(
             return Err(err);
         }
     };
+
+    // Kimi can retain an Auto/YOLO mode across continuation. Establish manual
+    // approvals before every prompt, including already-running sessions.
+    if agent == AcpAgent::Kimi {
+        if let Err(err) = configure_kimi_manual_approvals(
+            writer, pending_requests, &external_session_id,
+        ) {
+            set_acp_turn_active(turn_lifecycle, false);
+            return Err(err);
+        }
+    }
 
     // Direct test/runtime callers may not pass through `deliver_turn_dispatch`;
     // publishing here is idempotent. Production publishes before channel
@@ -768,9 +787,9 @@ fn handle_acp_session_config_refresh_inner(
         .current_session_id
         .is_some()
     {
-        if agent != AcpAgent::OpenCode {
+        if !matches!(agent, AcpAgent::OpenCode | AcpAgent::Kimi) {
             // Cursor and Gemini do not expose a live config-query method.
-            // Preserve their historical successful no-op; OpenCode uses the
+            // Preserve their historical successful no-op; OpenCode and Kimi use the
             // controlled restart path in `refresh_session_model_options`.
             return Ok(());
         }
@@ -972,7 +991,20 @@ fn ensure_acp_session_ready_inner(
             .expect("ACP runtime state mutex poisoned")
             .current_session_id = Some(external_session_id.clone());
     }
-    if agent == AcpAgent::OpenCode {
+    if agent == AcpAgent::Kimi && purpose == AcpSessionPurpose::ConfigRefresh {
+        // Discovery must work even when a saved model was removed or mistyped.
+        // Keep the external conversation, but do not mark its configuration as
+        // admitted for prompts. The next prompt resumes and validates the latest
+        // requested selection; catalog discovery never applies an older selection.
+        runtime_state.lock().expect("ACP runtime state mutex poisoned")
+            .current_session_id = None;
+        if !has_acp_config_option_list(&session_config, "model") {
+            bail!("Kimi did not advertise a model catalog; use a CLI compatible with the verified 2.0.2 ACP contract and refresh again");
+        }
+        state.sync_session_model_options(
+            session_id, None, acp_model_options(&session_config, agent),
+        )?;
+    } else if agent == AcpAgent::OpenCode {
         reconcile_opencode_config(
             writer,
             pending_requests,
@@ -992,7 +1024,15 @@ fn ensure_acp_session_ready_inner(
             &command.model,
             command.cursor_mode,
             &session_config,
-        )?;
+        ).map_err(|error| {
+            if agent == AcpAgent::Kimi {
+                // A refused model must not turn into an unchecked prompt on
+                // retry through the already-ready runtime fast path.
+                runtime_state.lock().expect("ACP runtime state mutex poisoned")
+                    .current_session_id = None;
+            }
+            error
+        })?;
         state.sync_session_model_options(
             session_id,
             configured_model.or_else(|| {
@@ -1071,6 +1111,12 @@ fn configure_acp_session(
     config_result: &Value,
 ) -> Result<Option<String>> {
     let mut configured_model = current_acp_config_option_value(config_result, "model");
+    if agent == AcpAgent::Kimi
+        && !matches!(requested_model.trim(), "" | "auto" | "default")
+        && matching_acp_config_option_value(config_result, "model", requested_model).is_none()
+    {
+        bail!("Kimi did not advertise requested model `{requested_model}`; refresh its model choices before retrying");
+    }
     if let Some(model_value) =
         matching_acp_config_option_value(config_result, "model", requested_model)
     {
@@ -1092,8 +1138,11 @@ fn configure_acp_session(
                 Duration::from_secs(15),
                 agent,
             )?;
-            configured_model = current_acp_config_option_value(&result, "model")
-                .or(Some(model_value));
+            let acknowledged_model = current_acp_config_option_value(&result, "model");
+            if agent == AcpAgent::Kimi && acknowledged_model.as_deref() != Some(model_value.as_str()) {
+                bail!("Kimi did not acknowledge requested model `{model_value}`; refusing to prompt with a different model");
+            }
+            configured_model = acknowledged_model.or(Some(model_value));
         }
     }
 
@@ -1330,7 +1379,7 @@ fn acp_permission_response_option_id(
             let allowed = opencode_auto_approval_allowed_locked(&inner, session_id);
             Ok(if allowed { approval.allow_once_option_id.clone() } else { None })
         }
-        AcpAgent::Gemini => Ok(None),
+        AcpAgent::Gemini | AcpAgent::Kimi => Ok(None),
     }
 }
 
@@ -1378,7 +1427,7 @@ fn handle_acp_notification(
                 && update
                     .get("sessionUpdate")
                     .and_then(Value::as_str)
-                    .is_some_and(is_acp_config_update_kind)
+                    .is_some_and(|kind| is_acp_config_update_kind(kind, agent))
             {
                 record_opencode_config_notification(runtime_state, update);
             }
@@ -1414,8 +1463,10 @@ fn handle_acp_notification(
 /// Both the reader-side OpenCode wake-up path and the writer-side dispatcher
 /// must use this predicate so a newly supported protocol spelling cannot wake
 /// only one half of the model-dependent config flow.
-fn is_acp_config_update_kind(kind: &str) -> bool {
+/// Kimi's singular spelling is scoped to Kimi, not added to other adapters.
+fn is_acp_config_update_kind(kind: &str, agent: AcpAgent) -> bool {
     matches!(kind, "config_options_update" | "config_update")
+        || (agent == AcpAgent::Kimi && kind == "config_option_update")
 }
 
 /// Handles ACP session update.
@@ -1478,7 +1529,7 @@ fn handle_acp_session_update(
                 }
             }
         }
-        kind if is_acp_config_update_kind(kind) => {
+        kind if is_acp_config_update_kind(kind, agent) => {
             if agent == AcpAgent::OpenCode {
                 input_tx
                     .send(AcpRuntimeCommand::ReconcileOpenCodeConfig {
@@ -1488,17 +1539,25 @@ fn handle_acp_session_update(
                         anyhow!("failed to queue OpenCode config reconciliation: {err}")
                     })?;
             } else {
-                state.sync_session_model_options(
-                    session_id,
-                    current_acp_config_option_value(update, "model"),
-                    acp_model_options(update, agent),
-                )?;
+                // Kimi partial notifications are not evidence that its catalog
+                // disappeared. Preserve other adapters' existing behavior.
+                if agent != AcpAgent::Kimi || has_acp_config_option_list(update, "model") {
+                    state.sync_session_model_options(
+                        session_id,
+                        current_acp_config_option_value(update, "model"),
+                        acp_model_options(update, agent),
+                    )?;
+                }
                 if agent == AcpAgent::Cursor {
                     state.sync_session_cursor_mode(session_id, acp_cursor_mode(update))?;
                 }
             }
         }
         "available_commands_update" => {}
+        "current_mode_update" if agent == AcpAgent::Kimi => {
+            // Kimi mode is enforced by the pre-prompt manual approval ACK,
+            // never adopted as a TermAl auto-approval policy.
+        }
         "mode_update" => {
             if agent == AcpAgent::Cursor {
                 state.sync_session_cursor_mode(session_id, acp_cursor_mode(update))?;

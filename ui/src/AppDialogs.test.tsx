@@ -110,6 +110,8 @@ function createBaseProps(
     onChangeDefaultCursorMode: vi.fn(),
     defaultGeminiModel: "default",
     handleDefaultGeminiModelChange: vi.fn(),
+    defaultKimiModel: "default",
+    handleDefaultKimiModelChange: vi.fn(),
     defaultGeminiApprovalMode: GEMINI_APPROVAL_OPTIONS[0].value,
     onChangeDefaultGeminiApprovalMode: vi.fn(),
     defaultOpenCodeModel: "default",
@@ -559,6 +561,13 @@ describe("AppDialogs settings agent defaults", () => {
     );
     expect(screen.getByLabelText("Default Cursor mode")).toBeInTheDocument();
     expect(screen.queryByLabelText("Default Gemini approvals")).toBeNull();
+  });
+
+  it("renders the Kimi settings tab with model-only defaults", () => {
+    renderSettingsDialog("kimi");
+    expect(screen.getByRole("heading", { name: "Kimi startup settings" })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Kimi default model" })).toBeInTheDocument();
+    expect(screen.getByText("kimi login")).toBeInTheDocument();
   });
 
   it("renders the Gemini settings tab", () => {

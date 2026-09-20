@@ -3650,6 +3650,19 @@ impl AppState {
         if request.opencode_approval_mode.is_some() && agent != Agent::OpenCode {
             return Err(ApiError::bad_request("opencodeApprovalMode is only supported by OpenCode"));
         }
+        if agent == Agent::Kimi
+            && (request.sandbox_mode.is_some()
+                || request.approval_policy.is_some()
+                || request.reasoning_effort.is_some()
+                || request.claude_approval_mode.is_some()
+                || request.claude_effort.is_some()
+                || request.cursor_mode.is_some()
+                || request.gemini_approval_mode.is_some())
+        {
+            return Err(ApiError::bad_request(
+                "Kimi sessions only support model settings; tool approvals remain manual",
+            ));
+        }
         let has_explicit_project = request.project_id.is_some();
         let requested_workdir = request
             .workdir
@@ -3962,6 +3975,13 @@ impl AppState {
             request.default_gemini_model,
             Agent::Gemini,
             |preferences| &mut preferences.default_gemini_model,
+        )?;
+        set_agent_default_model_if_present(
+            &mut inner.preferences,
+            &mut changed,
+            request.default_kimi_model,
+            Agent::Kimi,
+            |preferences| &mut preferences.default_kimi_model,
         )?;
         set_agent_default_model_if_present(
             &mut inner.preferences,

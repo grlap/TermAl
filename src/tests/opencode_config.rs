@@ -2527,9 +2527,12 @@ fn opencode_post_model_options_accumulate_across_repeated_model_notifications() 
 
 #[test]
 fn acp_config_update_kinds_share_one_classification() {
-    assert!(is_acp_config_update_kind("config_options_update"));
-    assert!(is_acp_config_update_kind("config_update"));
-    assert!(!is_acp_config_update_kind("mode_update"));
+    for agent in [AcpAgent::OpenCode, AcpAgent::Cursor, AcpAgent::Gemini, AcpAgent::Kimi] {
+        assert!(is_acp_config_update_kind("config_options_update", agent));
+        assert!(is_acp_config_update_kind("config_update", agent));
+        assert!(!is_acp_config_update_kind("mode_update", agent));
+        assert_eq!(is_acp_config_update_kind("config_option_update", agent), agent == AcpAgent::Kimi);
+    }
 }
 
 #[test]

@@ -194,6 +194,7 @@ enum Agent {
     Cursor,
     Gemini,
     OpenCode,
+    Kimi,
 }
 
 impl Agent {
@@ -214,6 +215,7 @@ impl Agent {
                 "cursor" | "cursor-agent" => return Ok(Self::Cursor),
                 "gemini" | "gemini-cli" => return Ok(Self::Gemini),
                 "opencode" | "open-code" => return Ok(Self::OpenCode),
+                "kimi" | "kimi-code" => return Ok(Self::Kimi),
                 other => bail!("unknown argument `{other}`"),
             }
         }
@@ -229,9 +231,10 @@ impl Agent {
             "cursor" | "cursor-agent" => Ok(Self::Cursor),
             "gemini" | "gemini-cli" => Ok(Self::Gemini),
             "opencode" | "open-code" => Ok(Self::OpenCode),
+            "kimi" | "kimi-code" => Ok(Self::Kimi),
             other => {
                 bail!(
-                    "unknown agent `{other}`; expected `codex`, `claude`, `cursor`, `gemini`, or `opencode`"
+                    "unknown agent `{other}`; expected `codex`, `claude`, `cursor`, `gemini`, `opencode`, or `kimi`"
                 )
             }
         }
@@ -244,6 +247,7 @@ impl Agent {
             Self::Cursor => "Cursor",
             Self::Gemini => "Gemini",
             Self::OpenCode => "OpenCode",
+            Self::Kimi => "Kimi",
         }
     }
 
@@ -254,6 +258,7 @@ impl Agent {
             Self::Cursor => "CR",
             Self::Gemini => "GM",
             Self::OpenCode => "OC",
+            Self::Kimi => "KM",
         }
     }
 
@@ -262,7 +267,7 @@ impl Agent {
         match self {
             Self::Codex => "gpt-5.4",
             Self::Claude => "default",
-            Self::Cursor | Self::Gemini | Self::OpenCode => "auto",
+            Self::Cursor | Self::Gemini | Self::OpenCode | Self::Kimi => "auto",
         }
     }
 
@@ -297,6 +302,7 @@ impl Agent {
             Self::Cursor => Some(AcpAgent::Cursor),
             Self::Gemini => Some(AcpAgent::Gemini),
             Self::OpenCode => Some(AcpAgent::OpenCode),
+            Self::Kimi => Some(AcpAgent::Kimi),
             _ => None,
         }
     }
@@ -1838,6 +1844,7 @@ struct UpdateAppSettingsRequest {
     default_claude_model: Option<String>,
     default_cursor_model: Option<String>,
     default_gemini_model: Option<String>,
+    default_kimi_model: Option<String>,
     #[serde(rename = "defaultOpenCodeModel")]
     default_opencode_model: Option<String>,
     default_codex_reasoning_effort: Option<CodexReasoningEffort>,

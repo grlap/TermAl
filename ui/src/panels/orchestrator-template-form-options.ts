@@ -41,6 +41,7 @@ export const AGENT_OPTIONS = [
   { label: "Cursor", value: "Cursor" },
   { label: "Gemini", value: "Gemini" },
   { label: "OpenCode", value: "OpenCode" },
+  { label: "Kimi", value: "Kimi" },
 ] as const satisfies ReadonlyArray<{ label: string; value: AgentType }>;
 
 export const AGENT_OPTIONS_EXHAUSTIVE: ExhaustiveValueCoverage<

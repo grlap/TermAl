@@ -1,5 +1,20 @@
 # Current Agent Integration Contracts
 
+## Kimi Code CLI 2.0.2 (2026-09-20)
+
+The installed native Windows CLI completed `kimi acp` / `initialize` with
+`protocolVersion: 1`, `agentCapabilities.loadSession: true`,
+`sessionCapabilities.resume: {}`, and auth method `login` of type `terminal`.
+A second disposable probe authenticated with existing credentials, created a
+session, obtained live model/config options (K3 selected; Default/Plan/Auto/YOLO
+modes), and closed the session. A config probe also acknowledged mode `default`
+and emitted `current_mode_update` plus `config_option_update` notifications.
+No login flow or model prompt was sent. This
+establishes session/config discovery, not provider/tool/cancel/resume acceptance.
+See [Kimi integration](kimi-cli-integration.md) for setup and limitations and the
+[official ACP reference](https://www.kimi.com/code/docs/en/kimi-code-cli/reference/kimi-acp)
+for the external method contract.
+
 This is the supported protocol boundary for the adapters described in
 [Agent Integration](../architecture.md#agent-integration). It is a capability
 contract, not a promise to support every past or future build of an upstream

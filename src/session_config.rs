@@ -39,7 +39,7 @@
 // `refresh_session_model_options` takes three distinct handshake paths:
 // Codex paginated `model/list` JSON-RPC (see
 // `src/codex_rpc.rs::fire_codex_model_list_page`); ACP agents
-// (Cursor, Gemini, OpenCode) re-trigger the session setup that emits
+// (Cursor, Gemini, OpenCode, Kimi) re-trigger the session setup that emits
 // model options on first session creation via
 // `AcpRuntimeCommand::RefreshSessionConfig`; Claude CLI re-spawns and
 // parses the initialize NDJSON response through `claude_model_options`
@@ -88,6 +88,11 @@ impl AppState {
             .ok_or_else(|| ApiError::not_found("session not found"))?;
         let engram_developer_name = inner.preferences.engram.developer_name.clone();
         let record = &inner.sessions[index];
+        if record.session.agent == Agent::Kimi && request.model.is_some()
+            && matches!(record.session.status, SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping)
+        {
+            return Err(ApiError::conflict("Stop the Kimi turn before changing its model"));
+        }
         if request.opencode_approval_mode.is_some() && record.session.agent != Agent::OpenCode {
             return Err(ApiError::bad_request("opencodeApprovalMode is only supported by OpenCode"));
         }
@@ -207,6 +212,21 @@ impl AppState {
                     return Err(ApiError::bad_request(
                         "Gemini sessions only support model and approval mode settings",
                     ));
+                }
+            }
+            Agent::Kimi => {
+                if request.sandbox_mode.is_some()
+                    || request.approval_policy.is_some()
+                    || request.reasoning_effort.is_some()
+                    || request.codex_fast_mode.is_some()
+                    || request.claude_approval_mode.is_some()
+                    || request.claude_effort.is_some()
+                    || request.cursor_mode.is_some()
+                    || request.gemini_approval_mode.is_some()
+                    || request.opencode_effort.is_some()
+                    || request.opencode_mode.is_some()
+                {
+                    return Err(ApiError::bad_request("Kimi sessions only support model settings"));
                 }
             }
             agent => {
@@ -597,6 +617,16 @@ impl AppState {
                     record.session.gemini_approval_mode = Some(gemini_approval_mode);
                 }
             }
+            Agent::Kimi => {
+                if let Some(model) = requested_model.as_deref() {
+                    if record.session.model != model {
+                        record.session.model = model.to_owned();
+                        // Resume the same conversation in a fresh runtime, then
+                        // require the model setter ACK before the next prompt.
+                        record.runtime_reset_required = true;
+                    }
+                }
+            }
             _ => {}
         }
 
@@ -723,17 +753,18 @@ impl AppState {
     ///   with a response channel so the initialize NDJSON's
     ///   `response.response.models` array is parsed by
     ///   `claude_model_options` and forwarded back.
-    /// - ACP agents (Claude-ACP / Cursor / Gemini): reuses the existing
-    ///   ACP runtime (or spawns one) and sends
+    /// - ACP agents: Cursor/Gemini reuse the existing runtime (or spawn one);
+    ///   OpenCode/Kimi reconnect to obtain an authoritative catalog. Each sends
     ///   `AcpRuntimeCommand::RefreshSessionConfig`, which re-triggers
     ///   the session-setup path that emits model options on first
-    ///   creation.
+    ///   creation. Kimi discovery does not apply saved model intent; prompt
+    ///   admission validates that separately after resume.
     ///
     /// All three paths honour `runtime_reset_required` by tearing down
     /// the current runtime before refreshing. Remote-hosted sessions
     /// proxy the entire call unchanged. Local sessions return `409 Conflict`
-    /// while Active/Approval or while a Stop/revocation owner holds the runtime
-    /// fence, preventing refresh from replacing a runtime being torn down.
+    /// while Active/Approval/Stopping or while a Stop/revocation owner holds
+    /// the runtime fence, preventing replacement during teardown.
     fn refresh_session_model_options(
         &self,
         session_id: &str,
@@ -749,7 +780,7 @@ impl AppState {
         if inner.sessions[index].runtime_stop_in_progress
             || matches!(
                 inner.sessions[index].session.status,
-                SessionStatus::Active | SessionStatus::Approval
+                SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
             )
         {
             return Err(ApiError::conflict(
@@ -957,17 +988,6 @@ impl AppState {
             ))
         })?;
 
-        if agent == Agent::OpenCode
-            && matches!(
-                record.session.status,
-                SessionStatus::Active | SessionStatus::Approval
-            )
-        {
-            return Err(ApiError::conflict(
-                "OpenCode model options cannot be refreshed during an active interaction",
-            ));
-        }
-
         if record.runtime_reset_required {
             if let SessionRuntime::Acp(handle) = &record.runtime {
                 handle.kill().map_err(|err| {
@@ -983,18 +1003,19 @@ impl AppState {
             record.clear_runtime_reset();
         }
 
-        // ACP has no standalone "get config options" request. For OpenCode,
+        // ACP has no standalone "get config options" request. For OpenCode and Kimi,
         // refresh therefore performs a controlled runtime restart and resumes
         // the persisted external session on the new connection. That fresh
         // handshake is the authoritative source of configOptions; queueing the
         // setup command on an already-ready runtime would be a false-success
         // no-op because `ensure_acp_session_ready` returns immediately.
-        if agent == Agent::OpenCode {
+        if matches!(agent, Agent::OpenCode | Agent::Kimi) {
             match &record.runtime {
                 SessionRuntime::Acp(handle) if handle.agent == expected_acp_agent => {
                     handle.kill().map_err(|err| {
                         ApiError::internal(format!(
-                            "failed to restart OpenCode session runtime for model refresh: {err:#}"
+                            "failed to restart {} session runtime for model refresh: {err:#}",
+                            agent.name()
                         ))
                     })?;
                     record.clear_runtime();
@@ -1002,14 +1023,14 @@ impl AppState {
                     record.pending_acp_approval_order.clear();
                 }
                 SessionRuntime::Acp(_) => {
-                    return Err(ApiError::internal(
-                        "unexpected ACP runtime attached to OpenCode session",
-                    ));
+                    return Err(ApiError::internal(format!(
+                        "unexpected ACP runtime attached to {} session", agent.name()
+                    )));
                 }
                 SessionRuntime::Claude(_) | SessionRuntime::Codex(_) => {
-                    return Err(ApiError::internal(
-                        "unexpected non-ACP runtime attached to OpenCode session",
-                    ));
+                    return Err(ApiError::internal(format!(
+                        "unexpected non-ACP runtime attached to {} session", agent.name()
+                    )));
                 }
                 SessionRuntime::None => {}
             }

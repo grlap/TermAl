@@ -22,6 +22,7 @@ import {
   remoteDisplayName,
 } from "./remotes";
 import type { OpenCodeApprovalMode } from "./types";
+import { KimiPreferencesPanel } from "./preferences/kimi-preferences-panel";
 import {
   ThemePreferencesPanel,
   AppearancePreferencesPanel,
@@ -120,7 +121,9 @@ type AppDialogsProps = {
   defaultCursorMode: CursorMode;
   onChangeDefaultCursorMode: (nextValue: CursorMode) => void;
   defaultGeminiModel: string;
+  defaultKimiModel: string;
   handleDefaultGeminiModelChange: (nextValue: string) => void;
+  handleDefaultKimiModelChange: (nextValue: string) => void;
   defaultGeminiApprovalMode: GeminiApprovalMode;
   onChangeDefaultGeminiApprovalMode: (nextValue: GeminiApprovalMode) => void;
   defaultOpenCodeModel: string;
@@ -406,7 +409,9 @@ export function AppDialogs({
   defaultCursorMode,
   onChangeDefaultCursorMode,
   defaultGeminiModel,
+  defaultKimiModel,
   handleDefaultGeminiModelChange,
+  handleDefaultKimiModelChange,
   defaultGeminiApprovalMode,
   onChangeDefaultGeminiApprovalMode,
   defaultOpenCodeModel,
@@ -1213,6 +1218,12 @@ export function AppDialogs({
                   defaultGeminiModel={defaultGeminiModel}
                   onSelectApprovalMode={onChangeDefaultGeminiApprovalMode}
                   onSelectModel={handleDefaultGeminiModelChange}
+                  sessions={sessions}
+                />
+              ) : settingsTab === "kimi" ? (
+                <KimiPreferencesPanel
+                  model={defaultKimiModel}
+                  onSelectModel={handleDefaultKimiModelChange}
                   sessions={sessions}
                 />
               ) : settingsTab === "opencode" ? (

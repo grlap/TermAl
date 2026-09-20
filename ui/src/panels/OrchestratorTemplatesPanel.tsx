@@ -539,6 +539,7 @@ export function OrchestratorTemplatesPanel({
           ? {
               ...session,
               agent: nextAgent,
+              autoApprove: nextAgent === "Kimi" ? false : session.autoApprove,
               model: session.agent === nextAgent ? session.model : "",
             }
           : session,
@@ -1690,6 +1691,7 @@ export function OrchestratorTemplatesPanel({
                               id={`session-auto-approve-${session.id}`}
                               type="checkbox"
                               checked={session.autoApprove}
+                              disabled={session.agent === "Kimi"}
                               onChange={(event) =>
                                 setSessionField(
                                   session.id,
@@ -1699,7 +1701,9 @@ export function OrchestratorTemplatesPanel({
                               }
                             />
                             <span>
-                              Auto-approve this session's tool calls
+                              {session.agent === "Kimi"
+                                ? "Kimi requires manual tool approvals"
+                                : "Auto-approve this session's tool calls"}
                             </span>
                           </label>
                         </div>

@@ -155,6 +155,7 @@ export type UseAppLiveStatePreferenceSetters = {
   setDefaultClaudeModel: Dispatch<SetStateAction<string>>;
   setDefaultCursorModel: Dispatch<SetStateAction<string>>;
   setDefaultGeminiModel: Dispatch<SetStateAction<string>>;
+  setDefaultKimiModel: Dispatch<SetStateAction<string>>;
   setDefaultOpenCodeModel: Dispatch<SetStateAction<string>>;
   setDefaultOpenCodeApprovalMode: Dispatch<SetStateAction<OpenCodeApprovalMode>>;
   setDefaultCodexReasoningEffort: Dispatch<

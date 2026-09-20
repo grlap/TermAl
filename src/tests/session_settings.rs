@@ -216,7 +216,7 @@ fn opencode_model_refresh_restarts_ready_runtime_before_handshake() {
 }
 
 #[test]
-fn model_refresh_rejects_active_or_runtime_stop_owned_sessions_without_replacing_runtime() {
+fn model_refresh_rejects_busy_or_runtime_stop_owned_sessions_without_replacing_runtime() {
     for (agent, runtime) in [
         {
             let (runtime, _rx) = test_claude_runtime_handle("refresh-fence-claude");
@@ -229,6 +229,18 @@ fn model_refresh_rejects_active_or_runtime_stop_owned_sessions_without_replacing
         {
             let (runtime, _rx) = test_acp_runtime_handle(AcpAgent::Cursor, "refresh-fence-cursor");
             (Agent::Cursor, SessionRuntime::Acp(runtime))
+        },
+        {
+            let (runtime, _rx) = test_acp_runtime_handle(AcpAgent::Kimi, "refresh-fence-kimi");
+            (Agent::Kimi, SessionRuntime::Acp(runtime))
+        },
+        {
+            let (runtime, _rx) = test_acp_runtime_handle(AcpAgent::Gemini, "refresh-fence-gemini");
+            (Agent::Gemini, SessionRuntime::Acp(runtime))
+        },
+        {
+            let (runtime, _rx) = test_acp_runtime_handle(AcpAgent::OpenCode, "refresh-fence-opencode");
+            (Agent::OpenCode, SessionRuntime::Acp(runtime))
         },
     ] {
         let state = test_app_state();
@@ -248,11 +260,20 @@ fn model_refresh_rejects_active_or_runtime_stop_owned_sessions_without_replacing
             record.session.status = SessionStatus::Active;
         }
 
-        let active_error = match state.refresh_session_model_options(&session_id) {
-            Ok(_) => panic!("active refresh must not replace a live runtime"),
-            Err(error) => error,
-        };
-        assert_eq!(active_error.status, StatusCode::CONFLICT, "{agent:?}");
+        for status in [SessionStatus::Active, SessionStatus::Approval, SessionStatus::Stopping] {
+            {
+                let mut inner = state.inner.lock().expect("state mutex poisoned");
+                let index = inner.find_session_index(&session_id).unwrap();
+                inner.sessions[index].session.status = status;
+                assert!(!inner.sessions[index].runtime_stop_in_progress,
+                    "status alone must fence refresh before a stop owner is attached");
+            }
+            let error = match state.refresh_session_model_options(&session_id) {
+                Ok(_) => panic!("busy refresh must not replace a live runtime"),
+                Err(error) => error,
+            };
+            assert_eq!(error.status, StatusCode::CONFLICT, "{agent:?} {status:?}");
+        }
         {
             let mut inner = state.inner.lock().expect("state mutex poisoned");
             let index = inner
@@ -618,6 +639,7 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
             default_claude_model: Some("claude-sonnet-4-5".to_owned()),
             default_cursor_model: Some("cursor-premium".to_owned()),
             default_gemini_model: Some("gemini-2.5-pro".to_owned()),
+            default_kimi_model: None,
             default_opencode_model: None,
             default_codex_reasoning_effort: Some(CodexReasoningEffort::High),
             default_codex_sandbox_mode: Some(CodexSandboxMode::DangerFullAccess),
@@ -878,6 +900,7 @@ fn default_model_preference_canonicalizes_default_sentinel_case() {
             default_claude_model: None,
             default_cursor_model: None,
             default_gemini_model: None,
+            default_kimi_model: None,
             default_opencode_model: None,
             default_codex_reasoning_effort: None,
             default_codex_sandbox_mode: None,
@@ -895,6 +918,7 @@ fn default_model_preference_canonicalizes_default_sentinel_case() {
             default_claude_model: None,
             default_cursor_model: None,
             default_gemini_model: None,
+            default_kimi_model: None,
             default_opencode_model: None,
             default_codex_reasoning_effort: None,
             default_codex_sandbox_mode: None,
@@ -936,7 +960,7 @@ fn default_model_preference_canonicalizes_default_sentinel_case() {
 
 #[test]
 fn default_model_preference_validation_covers_agents_and_boundaries() {
-    for agent in [Agent::Codex, Agent::Claude, Agent::Cursor, Agent::Gemini] {
+    for agent in [Agent::Codex, Agent::Claude, Agent::Cursor, Agent::Gemini, Agent::Kimi] {
         let state = test_app_state();
         let boundary_model = "m".repeat(MAX_DEFAULT_MODEL_CHARS);
         let updated = state
@@ -1068,6 +1092,7 @@ fn update_app_settings_request_for_agent_model(
         default_claude_model: (agent == Agent::Claude).then(|| model.clone()),
         default_cursor_model: (agent == Agent::Cursor).then(|| model.clone()),
         default_gemini_model: (agent == Agent::Gemini).then(|| model.clone()),
+        default_kimi_model: (agent == Agent::Kimi).then(|| model.clone()),
         default_opencode_model: (agent == Agent::OpenCode).then_some(model),
         default_codex_reasoning_effort: None,
         default_codex_sandbox_mode: None,
@@ -1084,6 +1109,7 @@ fn default_model_preference_for_agent(preferences: &AppPreferences, agent: Agent
         Agent::Claude => &preferences.default_claude_model,
         Agent::Cursor => &preferences.default_cursor_model,
         Agent::Gemini => &preferences.default_gemini_model,
+        Agent::Kimi => &preferences.default_kimi_model,
         Agent::OpenCode => &preferences.default_opencode_model,
     }
 }
@@ -1096,6 +1122,7 @@ fn oversized_persisted_default_model_falls_back_to_agent_default() {
         Agent::Cursor,
         Agent::Gemini,
         Agent::OpenCode,
+        Agent::Kimi,
     ] {
         let state = test_app_state();
         {
@@ -1119,6 +1146,9 @@ fn oversized_persisted_default_model_falls_back_to_agent_default() {
                 Agent::OpenCode => {
                     inner.preferences.default_opencode_model =
                         "x".repeat(MAX_DEFAULT_MODEL_CHARS + 1);
+                }
+                Agent::Kimi => {
+                    inner.preferences.default_kimi_model = "x".repeat(MAX_DEFAULT_MODEL_CHARS + 1);
                 }
             }
             state.commit_locked(&mut inner).unwrap();

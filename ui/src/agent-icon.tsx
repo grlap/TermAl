@@ -40,6 +40,8 @@ function renderAgentIcon(agent: AgentType) {
       return <MonogramIcon label="G" />;
     case "OpenCode":
       return <MonogramIcon label="OC" />;
+    case "Kimi":
+      return <MonogramIcon label="K" />;
   }
 
   const unknownAgent: never = agent;

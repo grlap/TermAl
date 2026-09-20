@@ -37,6 +37,7 @@ export const NEW_SESSION_MODEL_OPTIONS: Readonly<Record<AgentType, readonly Comb
   Cursor: [{ label: "Auto", value: "auto" }],
   Gemini: [{ label: "Auto", value: "auto" }],
   OpenCode: [{ label: "Auto", value: "auto" }],
+  Kimi: [{ label: "Auto", value: "auto" }],
 };
 
 export const CODEX_REASONING_EFFORT_OPTIONS = [
@@ -82,6 +83,8 @@ export function isDefaultModelPreference(model: string): boolean {
 
 export function createSessionModelHint(agent: AgentType): string {
   switch (agent) {
+    case "Kimi":
+      return "Kimi uses its configured model by default. Live model choices arrive over ACP after connecting; sign in with `kimi login` in a terminal first. Tool approvals remain manual.";
     case "Claude":
       return "Claude model selection lives on the session itself. TermAl asks Claude for its live model list after the session opens, and you can always enter a full Claude model id manually. New Claude sessions use the configured app default model; set it to default to let Claude choose.";
     case "Codex":
@@ -158,6 +161,7 @@ export function resolveAppPreferences(preferences?: AppPreferences | null) {
     defaultClaudeModel: preferences?.defaultClaudeModel ?? DEFAULT_MODEL_PREFERENCE,
     defaultCursorModel: preferences?.defaultCursorModel ?? DEFAULT_MODEL_PREFERENCE,
     defaultGeminiModel: preferences?.defaultGeminiModel ?? DEFAULT_MODEL_PREFERENCE,
+    defaultKimiModel: preferences?.defaultKimiModel ?? DEFAULT_MODEL_PREFERENCE,
     defaultOpenCodeModel: preferences?.defaultOpenCodeModel ?? DEFAULT_MODEL_PREFERENCE,
     defaultOpenCodeApprovalMode: preferences?.defaultOpenCodeApprovalMode ?? "ask",
     defaultCodexReasoningEffort:
@@ -471,6 +475,8 @@ export function manualSessionModelPlaceholder(agent: AgentType): string {
     case "OpenCode":
       return "openai/gpt-5.6-sol";
   }
+  // Kimi's Prompt card intentionally uses advertised catalog choices only.
+  return "Model ID";
 }
 
 export function unknownSessionModelConfirmationKey(sessionId: string, model: string) {
@@ -531,6 +537,21 @@ export function describeSessionModelRefreshError(
   }
 
   const normalizedError = rawError.toLowerCase();
+  if (agent === "Kimi") {
+    if (normalizedError.includes("is active or stopping")) {
+      return "Wait for the Kimi session to finish or stop before refreshing its models.";
+    }
+    if (normalizedError.includes("timed out")) {
+      return "Kimi did not return its live model list in time. Try Refresh models again when the session is idle.";
+    }
+    if (normalizedError.includes("did not return a result")) {
+      return "Kimi disconnected before returning its live model list. Try Refresh models again.";
+    }
+    if (normalizedError.includes("auth") || normalizedError.includes("login")) {
+      return "Kimi needs authentication. Run `kimi login` in a terminal, then try Refresh models again.";
+    }
+    return `Kimi could not refresh its live model list: ${rawError}`;
+  }
   if (agent === "Cursor") {
     if (normalizedError.includes("timed out")) {
       return "Cursor did not return its live model list in time. Try Refresh models again, or send a prompt to warm up the session.";

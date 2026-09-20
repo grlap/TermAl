@@ -50,6 +50,7 @@ export type UseAppSessionActionsDefaults = {
   defaultCursorMode: CursorMode;
   defaultGeminiApprovalMode: GeminiApprovalMode;
   defaultGeminiModel: string;
+  defaultKimiModel: string;
   defaultOpenCodeModel: string;
   defaultOpenCodeApprovalMode: OpenCodeApprovalMode;
 };

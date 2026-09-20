@@ -167,7 +167,10 @@ impl AppState {
     /// Records the set of models a live Claude/ACP runtime knows about
     /// plus which one it's actively using, so the UI's model-picker
     /// dropdown matches what the runtime will actually accept. Noop
-    /// when nothing changed.
+    /// when nothing changed. Kimi's `model` is the user's requested selection
+    /// (including Auto), not a runtime report: delayed refresh/notification
+    /// results must never overwrite a newer settings PATCH. Only its catalog
+    /// is adopted here; prompt admission checks the request against that runtime.
     fn sync_session_model_options(
         &self,
         session_id: &str,
@@ -186,6 +189,7 @@ impl AppState {
         if let Some(current_model) = current_model
             .map(|value| value.trim().to_owned())
             .filter(|value| !value.is_empty())
+            .filter(|_| record.session.agent != Agent::Kimi)
         {
             if record.session.model != current_model {
                 record.session.model = current_model;

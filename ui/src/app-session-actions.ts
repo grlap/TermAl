@@ -213,6 +213,7 @@ export function useAppSessionActions(
       defaultCursorMode,
       defaultGeminiApprovalMode,
       defaultGeminiModel,
+      defaultKimiModel,
       defaultOpenCodeModel,
       defaultOpenCodeApprovalMode,
     },
@@ -798,6 +799,7 @@ export function useAppSessionActions(
         Codex: defaultCodexModel,
         Cursor: defaultCursorModel,
         Gemini: defaultGeminiModel,
+        Kimi: defaultKimiModel,
         OpenCode: defaultOpenCodeModel,
       });
       const created = await createSession({

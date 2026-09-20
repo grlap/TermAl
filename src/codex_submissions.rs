@@ -444,7 +444,7 @@ impl AppState {
             codex_runtime_action = Some((handle, pending));
         } else if matches!(
             record.session.agent,
-            Agent::Cursor | Agent::Gemini | Agent::OpenCode
+            Agent::Cursor | Agent::Gemini | Agent::OpenCode | Agent::Kimi
         )
             && matches!(
                 decision,
@@ -707,7 +707,7 @@ impl AppState {
                         Some(display_answers),
                     )
                 }
-                Agent::Cursor | Agent::Gemini | Agent::OpenCode => {
+                Agent::Cursor | Agent::Gemini | Agent::OpenCode | Agent::Kimi => {
                     return Err(ApiError::conflict(
                         "this agent does not support structured user input",
                     ));

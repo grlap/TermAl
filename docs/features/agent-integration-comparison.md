@@ -196,23 +196,21 @@ See individual feature briefs for full protocol details:
 - [`cursor-cli-integration.md`](./cursor-cli-integration.md)
 - [`gemini-cli-integration.md`](./gemini-cli-integration.md)
 
-## Future candidate: Kimi CLI
+## Kimi Code CLI
 
-Kimi is not currently a supported TermAl agent, but it is a strong future-work
-candidate because Kimi CLI now documents ACP support through `kimi --acp`.
-The preferred path is to extend the shared ACP adapter with `AcpAgent::Kimi`
-rather than adding a separate OpenAI-compatible chat runtime.
+Kimi uses the shared ACP adapter (`AcpAgent::Kimi`), not a separate
+OpenAI-compatible chat runtime. The installed Windows 2.0.2 handshake was checked
+on 2026-09-20; live provider acceptance is separate.
 
 | Concern | Kimi CLI |
 |---------|----------|
-| Status in TermAl | Future work |
+| Status in TermAl | ACP adapter; live acceptance pending |
 | Executable | `kimi` |
-| Subcommand | `--acp` |
+| Subcommand | `acp` |
 | Protocol | ACP over stdio |
-| Default model candidate | `kimi-k2.6` |
-| Auth/API key | Moonshot/Kimi API key, usually `MOONSHOT_API_KEY` |
-| Platform caveat | Kimi CLI is currently documented for macOS and Linux only |
-| Main risk | Technical-preview CLI and provider-specific ACP behavior |
+| Default model | CLI-configured model (Auto) |
+| Authentication | Operator runs `kimi login`; ACP checks existing login |
+| Platforms | Native Windows, macOS and Linux CLI |
+| Boundaries | Manual approvals; no structured reviewers or read-only delegations |
 
-See [`kimi-cli-integration.md`](./kimi-cli-integration.md) for the future-work
-brief.
+See [`kimi-cli-integration.md`](./kimi-cli-integration.md) for setup and scope.

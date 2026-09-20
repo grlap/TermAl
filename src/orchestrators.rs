@@ -581,6 +581,7 @@ fn orchestrator_template_to_draft(template: &OrchestratorTemplate) -> Orchestrat
 fn normalize_orchestrator_session_template(
     template: OrchestratorSessionTemplate,
 ) -> Result<OrchestratorSessionTemplate, ApiError> {
+    validate_orchestrator_manual_approval_policy(&template)?;
     let model = normalize_optional_orchestrator_text(template.model);
     let model = if template.agent.supports_opencode_settings() {
         model
@@ -601,6 +602,18 @@ fn normalize_orchestrator_session_template(
         input_mode: template.input_mode,
         position: normalize_orchestrator_position(template.position)?,
     })
+}
+
+/// Enforces the same approval boundary for edited and previously saved templates.
+fn validate_orchestrator_manual_approval_policy(
+    template: &OrchestratorSessionTemplate,
+) -> Result<(), ApiError> {
+    if template.agent == Agent::Kimi && template.auto_approve {
+        return Err(ApiError::bad_request(
+            "Kimi orchestrator sessions require manual tool approvals; disable autoApprove",
+        ));
+    }
+    Ok(())
 }
 
 /// Normalizes orchestrator transition.
@@ -1007,6 +1020,9 @@ impl AppState {
                 .find(|template| template.id == template_id)
                 .ok_or_else(|| ApiError::not_found("orchestrator template not found"))?
         };
+        for session in &template.sessions {
+            validate_orchestrator_manual_approval_policy(session)?;
+        }
         let project_id = request
             .project_id
             .as_deref()

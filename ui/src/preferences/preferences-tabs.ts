@@ -30,7 +30,8 @@ export type PreferencesTabId =
   | "claude-approvals"
   | "cursor"
   | "gemini"
-  | "opencode";
+  | "opencode"
+  | "kimi";
 
 export const PREFERENCES_TABS: ReadonlyArray<{
   id: PreferencesTabId;
@@ -48,4 +49,5 @@ export const PREFERENCES_TABS: ReadonlyArray<{
   { id: "cursor", label: "Cursor" },
   { id: "gemini", label: "Gemini" },
   { id: "opencode", label: "OpenCode" },
+  { id: "kimi", label: "Kimi" },
 ];

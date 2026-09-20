@@ -87,7 +87,7 @@ Browser UI
        -> AppState / StateInner / persistence
        -> shared Codex app-server
        -> per-session Claude runtime
-       -> per-session ACP runtimes (Cursor / Gemini / OpenCode)
+       -> per-session ACP runtimes (Cursor / Gemini / OpenCode / Kimi)
        -> RemoteRegistry (SSH tunnels + remote event bridges)
        -> in-process Telegram relay (optional)
 
@@ -124,7 +124,7 @@ subprocess, without permitting Node or execution of repository helpers.
 Reviewer mode is currently limited to Claude and Codex because their native
 permission protocols expose an identity that TermAl can authenticate. ACP v1
 permission requests do not expose a portable authenticated MCP tool origin, so
-Cursor, Gemini, and OpenCode reviewer requests fail before child creation rather
+Cursor, Gemini, OpenCode, and Kimi reviewer requests fail before child creation rather
 than relying on presentation-name heuristics; those agents remain available for
 explorer delegations where their write policy is supported.
 Malformed durable review artifacts are quarantined per submission attempt and
@@ -1082,6 +1082,13 @@ cursor-agent acp
 ```
 
 **Protocol:** ACP over stdio. One process per session.
+
+[Kimi Code CLI](features/kimi-cli-integration.md) also uses this runtime through
+`kimi acp`, with native CLI discovery and operator-owned terminal login. Kimi
+defaults to its configured model and manual tool approvals. Its read-only and
+structured-reviewer delegations are refused; an isolated worktree is not an OS
+sandbox. The [contract register](features/current-agent-contracts.md) distinguishes
+the observed initialize handshake from pending live provider acceptance.
 
 **Behavior:** Cursor emits ACP session updates for thinking, assistant text, tool calls, and config updates. TermAl maps Cursor's permission options onto the session `cursor_mode` (`agent`, `plan`, or `ask`) before deciding whether to auto-answer or show an approval card.
 

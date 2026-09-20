@@ -415,7 +415,9 @@ export default function App() {
     defaultCursorModel,
     setDefaultCursorModel,
     defaultGeminiModel,
+    defaultKimiModel,
     setDefaultGeminiModel,
+    setDefaultKimiModel,
     defaultOpenCodeModel,
     defaultOpenCodeApprovalMode,
     setDefaultOpenCodeApprovalMode,
@@ -946,6 +948,7 @@ export default function App() {
       setDefaultClaudeModel,
       setDefaultCursorModel,
       setDefaultGeminiModel,
+      setDefaultKimiModel,
       setDefaultOpenCodeModel,
       setDefaultOpenCodeApprovalMode,
       setDefaultCodexReasoningEffort,
@@ -1017,6 +1020,7 @@ export default function App() {
       defaultCursorMode,
       defaultGeminiApprovalMode,
       defaultGeminiModel,
+      defaultKimiModel,
       defaultOpenCodeModel,
       defaultOpenCodeApprovalMode,
     },
@@ -1321,6 +1325,7 @@ export default function App() {
     defaultClaudeModel?: string;
     defaultCursorModel?: string;
     defaultGeminiModel?: string;
+    defaultKimiModel?: string;
     defaultOpenCodeModel?: string;
     defaultOpenCodeApprovalMode?: OpenCodeApprovalMode;
     defaultCodexReasoningEffort?: CodexReasoningEffort;
@@ -1434,6 +1439,12 @@ export default function App() {
 
     setDefaultOpenCodeModel(nextValue);
     void persistAppPreferences({ defaultOpenCodeModel: nextValue });
+  }
+
+  function handleDefaultKimiModelChange(nextValue: string) {
+    if (nextValue === defaultKimiModel) return;
+    setDefaultKimiModel(nextValue);
+    void persistAppPreferences({ defaultKimiModel: nextValue });
   }
 
   function handleDefaultOpenCodeApprovalModeChange(nextValue: OpenCodeApprovalMode) {
@@ -2276,7 +2287,9 @@ export default function App() {
         defaultCursorMode={defaultCursorMode}
         onChangeDefaultCursorMode={setDefaultCursorMode}
         defaultGeminiModel={defaultGeminiModel}
+        defaultKimiModel={defaultKimiModel}
         handleDefaultGeminiModelChange={handleDefaultGeminiModelChange}
+        handleDefaultKimiModelChange={handleDefaultKimiModelChange}
         defaultGeminiApprovalMode={defaultGeminiApprovalMode}
         onChangeDefaultGeminiApprovalMode={setDefaultGeminiApprovalMode}
         defaultOpenCodeModel={defaultOpenCodeModel}

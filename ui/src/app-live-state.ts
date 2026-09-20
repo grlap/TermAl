@@ -267,6 +267,7 @@ export function useAppLiveState(
     setDefaultClaudeModel,
     setDefaultCursorModel,
     setDefaultGeminiModel,
+    setDefaultKimiModel,
     setDefaultOpenCodeModel,
     setDefaultOpenCodeApprovalMode,
     setDefaultCodexReasoningEffort,
@@ -1480,6 +1481,7 @@ export function useAppLiveState(
     setDefaultClaudeModel(preferences.defaultClaudeModel);
     setDefaultCursorModel(preferences.defaultCursorModel);
     setDefaultGeminiModel(preferences.defaultGeminiModel);
+    setDefaultKimiModel(preferences.defaultKimiModel);
     setDefaultOpenCodeModel(preferences.defaultOpenCodeModel);
     setDefaultOpenCodeApprovalMode(preferences.defaultOpenCodeApprovalMode);
     setDefaultCodexReasoningEffort(preferences.defaultCodexReasoningEffort);

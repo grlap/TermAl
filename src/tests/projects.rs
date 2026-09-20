@@ -78,6 +78,7 @@ fn creates_sessions_for_remote_projects_over_ssh() {
             default_claude_model: None,
             default_cursor_model: None,
             default_gemini_model: None,
+            default_kimi_model: None,
             default_opencode_model: None,
             default_codex_reasoning_effort: None,
             default_codex_sandbox_mode: None,

@@ -117,6 +117,7 @@ export function useAppPreferencesState(
   const [defaultClaudeModel, setDefaultClaudeModel] = useState("default");
   const [defaultCursorModel, setDefaultCursorModel] = useState("default");
   const [defaultGeminiModel, setDefaultGeminiModel] = useState("default");
+  const [defaultKimiModel, setDefaultKimiModel] = useState("default");
   const [defaultOpenCodeModel, setDefaultOpenCodeModel] = useState("default");
   const [defaultOpenCodeApprovalMode, setDefaultOpenCodeApprovalMode] =
     useState<OpenCodeApprovalMode>("ask");
@@ -214,7 +215,9 @@ export function useAppPreferencesState(
     defaultCursorModel,
     setDefaultCursorModel,
     defaultGeminiModel,
+    defaultKimiModel,
     setDefaultGeminiModel,
+    setDefaultKimiModel,
     defaultOpenCodeModel,
     defaultOpenCodeApprovalMode,
     setDefaultOpenCodeApprovalMode,

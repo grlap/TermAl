@@ -269,6 +269,52 @@ function renderMultiDelegationCard(hook: {
   render(element);
 }
 
+describe("Kimi Prompt view", () => {
+  function renderKimiSettings(overrides: Partial<Session> = {}) {
+    const session: Session = {
+      ...makeSession("idle", []), agent: "Kimi", model: "kimi-code/k3",
+      modelOptions: [
+        { value: "kimi-code/k3", label: "K3" },
+        { value: "other", label: "Other Kimi model" },
+      ],
+      ...overrides,
+    };
+    const onChange = vi.fn();
+    const { hook, params } = renderCallbacks({ activeSession: session });
+    render(hook.result.current.renderSessionPromptSettings("pane-1", session, false, onChange));
+    return { session, onChange, params };
+  }
+
+  it("renders model-only settings and applies an advertised model", () => {
+    const { session, onChange } = renderKimiSettings();
+    expect(screen.getByRole("heading", { name: "Kimi session" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("combobox", { name: "Kimi model" }));
+    fireEvent.click(screen.getByRole("option", { name: "Other Kimi model" }));
+    expect(onChange).toHaveBeenCalledWith(session.id, "model", "other");
+  });
+
+  it("refreshes the current session catalog", () => {
+    const { session, params } = renderKimiSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Refresh models" }));
+    expect(params.onRefreshSessionModelOptions).toHaveBeenCalledWith(session.id);
+  });
+
+  it.each(["active", "approval", "stopping"] as const)("fences controls while %s", (status) => {
+    renderKimiSettings({ status });
+    expect(screen.getByRole("combobox", { name: "Kimi model" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Refresh models" })).toBeDisabled();
+  });
+
+  it("explains catalog-only recovery for an unavailable saved model", () => {
+    const { session, params } = renderKimiSettings({ model: "removed-model", modelOptions: [] });
+    expect(screen.getByRole("combobox", { name: "Kimi model" })).toBeDisabled();
+    expect(screen.getByText(/Kimi model selection is catalog-only/)).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Manual model id" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Refresh models" })).toBeEnabled();
+    expect(params.onRefreshSessionModelOptions).toHaveBeenCalledWith(session.id);
+  });
+});
+
 describe("SessionPaneView render callbacks", () => {
   it("routes mailbox cards into the owning workspace pane", () => {
     const onOpenMailboxTab = vi.fn();

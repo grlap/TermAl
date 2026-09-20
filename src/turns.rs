@@ -57,6 +57,14 @@ fn run_turn_blocking(config: TurnConfig, recorder: &mut dyn TurnRecorder) -> Res
             &config.prompt,
             recorder,
         ),
+        Agent::Kimi => run_acp_turn(
+            AcpAgent::Kimi,
+            &config.cwd,
+            config.external_session_id.as_deref(),
+            &config.model,
+            &config.prompt,
+            recorder,
+        ),
     }
 }
 
@@ -400,6 +408,8 @@ struct AppPreferences {
     default_cursor_model: String,
     #[serde(default = "default_model_preference")]
     default_gemini_model: String,
+    #[serde(default = "default_model_preference")]
+    default_kimi_model: String,
     #[serde(
         default = "default_model_preference",
         rename = "defaultOpenCodeModel"
@@ -485,6 +495,7 @@ impl Default for AppPreferences {
             default_claude_model: default_model_preference(),
             default_cursor_model: default_model_preference(),
             default_gemini_model: default_model_preference(),
+            default_kimi_model: default_model_preference(),
             default_opencode_model: default_model_preference(),
             default_opencode_approval_mode: OpenCodeApprovalMode::Ask,
             default_codex_reasoning_effort: default_codex_reasoning_effort(),
@@ -506,6 +517,7 @@ impl AppPreferences {
             Agent::Claude => &self.default_claude_model,
             Agent::Cursor => &self.default_cursor_model,
             Agent::Gemini => &self.default_gemini_model,
+            Agent::Kimi => &self.default_kimi_model,
             Agent::OpenCode => &self.default_opencode_model,
         };
         let trimmed = preference.trim();

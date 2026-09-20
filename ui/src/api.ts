@@ -818,6 +818,7 @@ export function updateAppSettings(payload: {
   defaultClaudeModel?: string;
   defaultCursorModel?: string;
   defaultGeminiModel?: string;
+  defaultKimiModel?: string;
   defaultOpenCodeModel?: string;
   defaultOpenCodeApprovalMode?: OpenCodeApprovalMode;
   defaultCodexReasoningEffort?: CodexReasoningEffort;

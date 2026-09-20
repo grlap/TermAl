@@ -616,7 +616,7 @@ impl AppState {
                     session_id: record.session.id.clone(),
                 }
             }
-            agent @ (Agent::Cursor | Agent::Gemini | Agent::OpenCode) => {
+            agent @ (Agent::Cursor | Agent::Gemini | Agent::OpenCode | Agent::Kimi) => {
                 if !attachments.is_empty() {
                     return Err(ApiError::bad_request(format!(
                         "{} sessions do not support image attachments yet",

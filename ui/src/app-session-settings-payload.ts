@@ -107,6 +107,8 @@ export function buildSessionSettingsPayload(
         return { geminiApprovalMode: value as GeminiApprovalMode };
       }
       return null;
+    case "Kimi":
+      return field === "model" ? { model: normalizedModelValue ?? (value as string) } : null;
     case "OpenCode":
       if (field === "opencodeApprovalMode") {
         return { opencodeApprovalMode: value as OpenCodeApprovalMode };

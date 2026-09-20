@@ -27,6 +27,7 @@ fn collect_agent_readiness_with(
         Agent::Cursor,
         Agent::Gemini,
         Agent::OpenCode,
+        Agent::Kimi,
     ]
     .into_iter()
     .map(|agent| probe(agent, workdir))
@@ -89,6 +90,7 @@ fn agent_readiness_for(agent: Agent, workdir: &str) -> AgentReadiness {
         Agent::Cursor => cursor_agent_readiness(),
         Agent::Gemini => gemini_agent_readiness(workdir),
         Agent::OpenCode => opencode_agent_readiness(),
+        Agent::Kimi => kimi_agent_readiness_with(resolve_kimi_executable),
     }
 }
 

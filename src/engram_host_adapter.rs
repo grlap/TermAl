@@ -2882,6 +2882,7 @@ fn engram_agent_context_kind(agent: Agent) -> &'static str {
         Agent::Cursor => "cursor",
         Agent::Gemini => "gemini",
         Agent::OpenCode => "opencode",
+        Agent::Kimi => "kimi",
     }
 }
 
@@ -2948,7 +2949,7 @@ fn engram_actor_context(session: &Session) -> Option<String> {
             .as_deref()
             .map(str::trim)
             .filter(|value| !value.is_empty() && *value != OPENCODE_CONFIG_AUTO),
-        Agent::Cursor | Agent::Gemini => None,
+        Agent::Cursor | Agent::Gemini | Agent::Kimi => None,
     };
     if let Some(reasoning) = reasoning {
         append_engram_actor_context_field(&mut context, "reasoning", reasoning);

@@ -90,6 +90,7 @@ export const STATIC_MODEL_OPTIONS: Readonly<Record<Session["agent"], readonly Se
   Cursor: [{ detail: "Auto", label: "Auto", value: "auto" }],
   Gemini: [{ detail: "Auto", label: "Auto", value: "auto" }],
   OpenCode: [{ detail: "Auto", label: "Auto", value: "auto" }],
+  Kimi: [{ detail: "Kimi configured model", label: "Auto", value: "auto" }],
 };
 export const SANDBOX_SLASH_OPTIONS = [
   { detail: "Write inside the workspace", label: "workspace-write", value: "workspace-write" },
@@ -159,7 +160,7 @@ export const SLASH_COMMANDS: ReadonlyArray<{
     detail: "Change the model for this session",
     id: "model",
     label: "/model",
-    supports: ["Claude", "Codex", "Cursor", "Gemini", "OpenCode"],
+    supports: ["Claude", "Codex", "Cursor", "Gemini", "OpenCode", "Kimi"],
   },
   {
     command: "/mode",
@@ -510,7 +511,8 @@ export function supportsLiveSessionModelOptions(session: SlashPaletteSession): b
     session.agent === "Codex" ||
     session.agent === "Cursor" ||
     session.agent === "Gemini" ||
-    session.agent === "OpenCode"
+    session.agent === "OpenCode" ||
+    session.agent === "Kimi"
   );
 }
 
@@ -538,7 +540,8 @@ export function sessionModelChoicesForSlashCommand(session: SlashPaletteSession)
     session.agent === "Codex" ||
     session.agent === "Cursor" ||
     session.agent === "Gemini" ||
-    session.agent === "OpenCode"
+    session.agent === "OpenCode" ||
+    session.agent === "Kimi"
       ? session.modelOptions?.length
         ? session.modelOptions.map((option) => ({
             detail: sessionModelChoiceDetail(option),
@@ -690,6 +693,7 @@ export function sessionModeSlashState(session: SlashPaletteSession, query: strin
       };
     }
     case "Codex":
+    case "Kimi": // Kimi mode/thinking controls are not exposed by this slice.
       return null;
   }
 }

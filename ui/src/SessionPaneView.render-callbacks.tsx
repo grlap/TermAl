@@ -14,6 +14,7 @@ import {
   formatDelegationResultPrompt,
 } from "./delegation-result-prompt";
 import type { DelegationResultPacket } from "./delegation-result-types";
+import { KimiPromptSettingsCard } from "./kimi-prompt-settings-card";
 import {
   CodexPromptSettingsCard,
   ClaudePromptSettingsCard,
@@ -638,6 +639,21 @@ export function useSessionRenderCallbacks({
       if (session.agent === "Gemini") {
         return (
           <GeminiPromptSettingsCard
+            paneId={panelPaneId}
+            session={session}
+            isUpdating={panelIsUpdating}
+            isRefreshingModelOptions={isRefreshingModelOptions}
+            isEngramMcpRevocationPending={isEngramMcpRevocationPending}
+            modelOptionsError={modelOptionsError}
+            onRequestModelOptions={onRefreshSessionModelOptions}
+            onSessionSettingsChange={handleSettingsChange}
+          />
+        );
+      }
+
+      if (session.agent === "Kimi") {
+        return (
+          <KimiPromptSettingsCard
             paneId={panelPaneId}
             session={session}
             isUpdating={panelIsUpdating}

@@ -1,4 +1,4 @@
-export type AgentType = "Claude" | "Codex" | "Cursor" | "Gemini" | "OpenCode";
+export type AgentType = "Claude" | "Codex" | "Cursor" | "Gemini" | "OpenCode" | "Kimi";
 export type ExhaustiveValueCoverage<
   Union extends string,
   Options extends ReadonlyArray<{ value: Union }>,
@@ -213,6 +213,7 @@ export type AppPreferences = {
   defaultClaudeModel: string;
   defaultCursorModel: string;
   defaultGeminiModel: string;
+  defaultKimiModel?: string;
   defaultOpenCodeModel?: string;
   defaultOpenCodeApprovalMode?: OpenCodeApprovalMode;
   defaultCodexReasoningEffort: CodexReasoningEffort;

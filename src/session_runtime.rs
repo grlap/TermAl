@@ -262,6 +262,7 @@ enum AcpAgent {
     Cursor,
     Gemini,
     OpenCode,
+    Kimi,
 }
 
 impl AcpAgent {
@@ -270,6 +271,7 @@ impl AcpAgent {
             Self::Cursor => Agent::Cursor,
             Self::Gemini => Agent::Gemini,
             Self::OpenCode => Agent::OpenCode,
+            Self::Kimi => Agent::Kimi,
         }
     }
 
@@ -280,6 +282,7 @@ impl AcpAgent {
     /// rather than a cryptic "No such file" from the OS.
     fn command(self, launch_options: AcpLaunchOptions) -> Result<Command> {
         match self {
+            Self::Kimi => kimi_acp_command(resolve_kimi_executable()),
             Self::Cursor => {
                 let exe = find_command_on_path("cursor-agent")
                     .ok_or_else(|| anyhow!("`cursor-agent` was not found on PATH"))?;
@@ -430,12 +433,13 @@ fn shutdown_removed_runtime(runtime: KillableRuntime, context: &str) -> Result<(
     }
 }
 
-/// Stops a user-visible runtime. OpenCode gets a bounded graceful ACP cancel
-/// so its resumable session can settle before local process teardown; the
+/// Stops a user-visible runtime. OpenCode and Kimi get a bounded graceful ACP
+/// cancel so their resumable sessions can settle before local process teardown; the
 /// existing Cursor and Gemini stop contract remains immediate termination.
 fn shutdown_stopped_runtime(runtime: KillableRuntime, context: &str) -> Result<()> {
     match runtime {
-        KillableRuntime::Acp(handle) if handle.agent == AcpAgent::OpenCode => {
+        KillableRuntime::Acp(handle)
+            if matches!(handle.agent, AcpAgent::OpenCode | AcpAgent::Kimi) => {
             handle.stop().with_context(|| {
                 format!(
                     "failed to stop {} runtime for {context}",

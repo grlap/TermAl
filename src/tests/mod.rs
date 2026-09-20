@@ -23,6 +23,7 @@ mod acp_gemini;
 mod acp_tool_status;
 mod agent_commands;
 mod agent_readiness;
+mod kimi;
 mod bounded_read_process;
 mod work_memories;
 mod claude;

@@ -46,6 +46,7 @@ function makeStateResponse(revision: number): StateResponse {
       defaultClaudeModel: "default",
       defaultCursorModel: "default",
       defaultGeminiModel: "default",
+      defaultKimiModel: "default",
       defaultOpenCodeModel: "default",
       defaultOpenCodeApprovalMode: "ask",
       defaultCodexReasoningEffort: "medium",
@@ -154,6 +155,7 @@ function makeSessionActionsParams(
       defaultCursorMode: "agent",
       defaultGeminiApprovalMode: "default",
       defaultGeminiModel: "default",
+      defaultKimiModel: "default",
       defaultOpenCodeModel: "default",
       defaultOpenCodeApprovalMode: "ask",
     },
@@ -219,9 +221,15 @@ type DefaultModelKey =
   | "defaultCodexModel"
   | "defaultCursorModel"
   | "defaultGeminiModel"
+  | "defaultKimiModel"
   | "defaultOpenCodeModel";
 
 const MODEL_PICKER_AGENT_CASES = [
+  {
+    agent: "Kimi",
+    defaultModelKey: "defaultKimiModel",
+    customModel: "configured-kimi-model",
+  },
   {
     agent: "Claude",
     defaultModelKey: "defaultClaudeModel",

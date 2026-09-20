@@ -15386,7 +15386,7 @@ fn engram_mcp_and_agent_process_identity_match_for_every_agent_kind() {
                 Agent::Codex => record.session.reasoning_effort = Some(CodexReasoningEffort::XHigh),
                 Agent::Claude => record.session.claude_effort = Some(ClaudeEffortLevel::High),
                 Agent::OpenCode => record.session.opencode_effort = reasoning.map(str::to_owned),
-                Agent::Cursor | Agent::Gemini => {}
+                Agent::Cursor | Agent::Gemini | Agent::Kimi => {}
             }
             engram_mcp_runtime_config_for_session_locked(&inner, &session_id)
                 .expect("eligible agent should receive Engram MCP")

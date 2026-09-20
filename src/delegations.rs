@@ -360,7 +360,7 @@ fn running_read_only_delegation_index_entry(
 }
 
 const OPENCODE_READ_ONLY_DELEGATION_ERROR: &str = "OpenCode delegations do not support writePolicy `readOnly`; use `isolatedWorktree` for bounded writable work";
-const ACP_REVIEWER_DELEGATION_ERROR: &str = "reviewer mode requires Claude or Codex because ACP permission requests do not provide an authenticated MCP tool identity; for Cursor, Gemini, or OpenCode pass mode `explorer` with a supported write policy";
+const ACP_REVIEWER_DELEGATION_ERROR: &str = "reviewer mode requires Claude or Codex because ACP permission requests do not provide an authenticated MCP tool identity; for Cursor, Gemini, OpenCode, or Kimi pass mode `explorer` with a supported write policy";
 const ACP_EVALUATOR_DELEGATION_ERROR: &str = "acceptance evaluators require Claude or Codex because ACP permission requests do not provide an authenticated MCP tool identity; pass agent `Claude` or `Codex`";
 const EVALUATOR_DELEGATION_HOST_ONLY_ERROR: &str = "evaluator delegations are created only by an acceptance evaluation request (`termal_evaluate_acceptance` or POST /api/sessions/{id}/acceptance-evaluations), never by a delegation create request";
 
@@ -548,6 +548,11 @@ impl AppState {
         }
         if agent == Agent::OpenCode && requested_write_policy == DelegationWritePolicy::ReadOnly {
             return Err(ApiError::bad_request(OPENCODE_READ_ONLY_DELEGATION_ERROR));
+        }
+        if agent == Agent::Kimi && requested_write_policy == DelegationWritePolicy::ReadOnly {
+            return Err(ApiError::bad_request(
+                "Kimi delegations do not support writePolicy `readOnly`; use `isolatedWorktree` for bounded writable work",
+            ));
         }
         // OpenCode model ingress: the generic delegation length check above
         // runs before `agent` is known, so it cannot apply the agent-specific

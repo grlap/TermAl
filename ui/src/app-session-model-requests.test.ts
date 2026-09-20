@@ -11,6 +11,7 @@ const defaultModels: AppSessionDefaultModels = {
   Cursor: "cursor-fast",
   Gemini: "gemini-2.5-pro",
   OpenCode: "openai/gpt-5.6-sol",
+  Kimi: "kimi-code/k3",
 };
 
 describe("app session model request helpers", () => {

@@ -319,7 +319,7 @@ export function defaultComposerDelegationMode(
 export function defaultComposerDelegationWritePolicy(
   agent: Session["agent"],
 ): NonNullable<CreateDelegationRequest["writePolicy"]> {
-  return agent === "OpenCode"
+  return agent === "OpenCode" || agent === "Kimi"
     ? { kind: "isolatedWorktree", ownedPaths: [] }
     : { kind: "readOnly" };
 }

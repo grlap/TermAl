@@ -306,7 +306,7 @@ fn acp_session_resume_loads_when_explicitly_advertised() {
 // A missing capability must not replace an existing conversation.
 #[test]
 fn acp_session_resume_without_advertised_capability_preserves_saved_id() {
-    for agent in [Agent::Cursor, Agent::Gemini, Agent::OpenCode] {
+    for agent in [Agent::Cursor, Agent::Gemini, Agent::OpenCode, Agent::Kimi] {
         for capabilities in [
             None,
             Some(AcpCapabilities::default()),

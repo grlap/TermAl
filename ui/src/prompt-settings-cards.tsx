@@ -480,7 +480,7 @@ export function ClaudePromptSettingsCard({
   );
 }
 
-function useSessionModelOptionsAutoRefresh({
+export function useSessionModelOptionsAutoRefresh({
   isEngramMcpRevocationPending,
   isRefreshingModelOptions,
   onRequestModelOptions,
@@ -619,7 +619,7 @@ function useSessionModelOptionsAutoRefresh({
   ]);
 }
 
-function SessionModelRefreshAction({
+export function SessionModelRefreshAction({
   disabled,
   isRefreshing,
   sessionId,
@@ -642,7 +642,7 @@ function SessionModelRefreshAction({
   );
 }
 
-function SessionModelRefreshFeedback({
+export function SessionModelRefreshFeedback({
   agent,
   isRefreshing,
   modelOptionsError,

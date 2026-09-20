@@ -73,6 +73,7 @@ export const SUPPORTED_PERSISTED_TEMPLATE_AGENTS = {
   Cursor: true,
   Gemini: true,
   OpenCode: true,
+  Kimi: true,
 } satisfies Record<AgentType, true>;
 
 export function objectHasOwnWithFallback(target: object, key: PropertyKey) {

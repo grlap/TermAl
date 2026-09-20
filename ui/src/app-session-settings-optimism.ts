@@ -135,6 +135,10 @@ export function buildOptimisticSessionSettingsUpdate(
         geminiApprovalMode: nextGeminiApprovalMode,
       };
     }
+    case "Kimi": {
+      const model = normalizedModelValue ?? session.model;
+      return model === session.model ? session : { ...session, model };
+    }
     case "OpenCode": {
       if (field === "opencodeApprovalMode") {
         return { ...session, opencodeApprovalMode: value as OpenCodeApprovalMode };
@@ -288,6 +292,7 @@ export function sessionSupportsModelRefresh(agent: AgentType) {
     agent === "Codex" ||
     agent === "Cursor" ||
     agent === "Gemini" ||
+    agent === "Kimi" ||
     agent === "OpenCode"
   );
 }

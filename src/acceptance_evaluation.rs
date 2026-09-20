@@ -729,7 +729,7 @@ fn acceptance_evaluator_model_flag(agent: Agent, model: &str) -> Option<String> 
     let provider = match agent {
         Agent::Claude => "anthropic",
         Agent::Codex => "openai",
-        Agent::Cursor | Agent::Gemini | Agent::OpenCode => return None,
+        Agent::Cursor | Agent::Gemini | Agent::OpenCode | Agent::Kimi => return None,
     };
     let model = model
         .chars()

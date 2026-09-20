@@ -12,6 +12,7 @@ export type AppSessionDefaultModels = {
   Cursor: string;
   Gemini: string;
   OpenCode: string;
+  Kimi: string;
 };
 
 export function configuredDefaultModelForAgent(
@@ -19,6 +20,8 @@ export function configuredDefaultModelForAgent(
   defaultModels: AppSessionDefaultModels,
 ): string {
   switch (agent) {
+    case "Kimi":
+      return defaultModels.Kimi;
     case "Claude":
       return defaultModels.Claude;
     case "Codex":
