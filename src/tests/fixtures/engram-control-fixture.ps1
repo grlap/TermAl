@@ -85,8 +85,21 @@ if (($args -contains "authority") -and ($args -contains "revoke")) {
     exit 0
 }
 
-if ($args -contains "doctor") {
+if (($args -contains "doctor") -or ($args -contains "readiness")) {
+    $diagnostic = if ($args -contains 'readiness') { 'readiness' } else { 'doctor' }
+    [IO.File]::AppendAllText((Join-Path $engramHome 'diagnostic-commands'), "$diagnostic`n")
     $mode = (Get-Content -LiteralPath $projectFile -Raw).Trim()
+    if ($mode -eq 'fixture-diagnostic-large-refusal') {
+        [Console]::Out.WriteLine('invalid-json-' + ('x' * 100000))
+        [Console]::Error.WriteLine('warning-' + ('y' * 100000))
+        exit 1
+    }
+    if ($mode -eq 'fixture-diagnostic-marker-oversized') {
+        [IO.File]::WriteAllText($projectFile, ('x' * 4097))
+    }
+    if (($args -contains 'readiness') -and $mode -eq 'fixture-readiness-old') { [Console]::Error.WriteLine('unknown subcommand readiness'); exit 2 }
+    if (($args -contains 'readiness') -and $mode -eq 'fixture-readiness-malformed') { [Console]::Out.WriteLine('{}'); exit 0 }
+    if (($args -contains 'readiness') -and $mode -eq 'fixture-readiness-refusal') { [Console]::Out.WriteLine('{"ready":true}'); exit 1 }
     $requiredAssurance = "turn_gated"
     $control = @{
         required_assurance = $requiredAssurance
@@ -100,13 +113,40 @@ if ($args -contains "doctor") {
             $control = $null
         }
     }
-    $database = [System.IO.Path]::GetFullPath((Join-Path $engramHome "fixture-engram.db"))
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    $hash = [BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($mode))).Replace('-', '').ToLowerInvariant()
+    $sha.Dispose()
+    $database = [System.IO.Path]::GetFullPath((Join-Path $engramHome "projects/$hash/engram.db"))
+    # Hashed store paths can exceed Windows PowerShell's legacy 248-character
+    # directory limit inside the contained test run root. Match native Rust
+    # filesystem handling without shortening or changing the store identity.
+    $ioDatabase = if ($database.StartsWith('\\?\')) { $database } elseif ($database.StartsWith('\\')) { '\\?\UNC\' + $database.Substring(2) } else { '\\?\' + $database }
+    [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($ioDatabase)) | Out-Null
+    if (-not [IO.File]::Exists($ioDatabase)) { [IO.File]::WriteAllText($ioDatabase, 'fixture database') }
+    if ($mode -eq 'fixture-diagnostic-large-report') {
+        [Console]::Error.WriteLine('warning-' + ('y' * 100000))
+        [Console]::Out.WriteLine((@{
+            healthy = $true; database = $database; project_id = $mode
+            detail = ('x' * 100000)
+        } | ConvertTo-Json -Compress))
+        exit 0
+    }
+    if ($args -contains "readiness") {
+        [Console]::Out.WriteLine((@{
+            schema_version = 1; scope = 'readiness'; ready = $true
+            full_audit = 'not_run'; mutation_enabled = $false; work_schema_version = 1
+            host_path_policy = @{ stored = 'fixture'; resolved = 'fixture'; status = 'matched' }
+            control = $control; database = $database; project_id = $mode
+        } | ConvertTo-Json -Compress -Depth 10))
+        exit 0
+    }
     [Console]::Out.WriteLine((@{
-        healthy = $true
+        healthy = ($mode -ne 'fixture-audit-unhealthy')
         control = $control
         database = $database
         project_id = $mode
     } | ConvertTo-Json -Compress -Depth 10))
+    if ($mode -eq 'fixture-audit-unhealthy') { [Console]::Error.WriteLine('development redactor provides no protection'); exit 1 }
     exit 0
 }
 

@@ -6,6 +6,7 @@
 
 import { useEffect, useState } from "react";
 import { AcceptanceEvaluationSettings } from "./AcceptanceEvaluationSettings";
+import { EngramFullAuditPanel } from "./EngramFullAuditPanel";
 import type { EvaluatorDefaults } from "./acceptance-settings-api";
 
 import {
@@ -294,8 +295,20 @@ export function EngramProjectSettingsPanel({
               <dd>{formatOptionalStatus(verification.requiredAssurance)}</dd>
             </div>
             <div>
-              <dt>Healthy</dt>
-              <dd>{verification.healthy ? "Yes" : "No"}</dd>
+              <dt>Selected host tier</dt>
+              <dd>{turnGatedControl ? "Turn-gated control" : "Base · advisory / unmediated (does not satisfy a turn-gated control floor)"}</dd>
+            </div>
+            <div>
+              <dt>Readiness</dt>
+              <dd>{verification.ready ? "Ready" : "Not ready"} · {verification.elapsedMs}ms</dd>
+            </div>
+            <div>
+              <dt>Host path policy</dt>
+              <dd>{verification.hostPathStatus}</dd>
+            </div>
+            <div>
+              <dt>Full Audit</dt>
+              <dd>Not run by Verify</dd>
             </div>
           </dl>
           {verification.errors?.length ? (
@@ -307,6 +320,8 @@ export function EngramProjectSettingsPanel({
           ) : null}
         </section>
       ) : null}
+
+      <EngramFullAuditPanel key={project.id} projectId={project.id} />
 
       {project.engramCleanupWarning ? (
         <p className="inline-error" role="status">

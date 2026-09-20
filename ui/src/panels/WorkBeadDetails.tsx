@@ -4,6 +4,7 @@
 import { useEffect, useRef, useState } from "react";
 import { readWorkBeadsDetail, type WorkBeadsDetailResponse } from "../work-visualizer-api";
 import { WorkTime } from "./work-time";
+import { WorkDetailsHeader } from "./WorkDetailsHeader";
 
 export function WorkBeadDetails({ projectId, issueId, onClose }: {
   projectId: string; issueId: string; onClose: () => void;
@@ -32,8 +33,7 @@ export function WorkBeadDetails({ projectId, issueId, onClose }: {
   return <aside ref={panel} tabIndex={-1} className="work-item-details" aria-label="Work item details" aria-busy={busy} onKeyDown={event => {
     if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onClose(); }
   }}>
-    <div className="work-panel-actions"><strong>{issueId}</strong><button type="button" onClick={onClose}>Close details</button>
-      <button type="button" onClick={() => setRevision(v => v + 1)}>Reload details</button></div>
+    <WorkDetailsHeader workRef={issueId} onClose={onClose} onReload={() => setRevision(v => v + 1)} />
     {error && <p role="alert">{error}</p>}
     {busy && <p role="status">Reading Beads details…</p>}
     {data && <>

@@ -16,15 +16,18 @@ describe("WorkTree", () => {
     const title = screen.getByRole("button", { name: "later — later" });
     const main = title.parentElement!;
     expect(main).toHaveClass("work-node-main");
-    expect(main.querySelector(".work-node-toggle")).toBeInTheDocument();
-    const lead = title.previousElementSibling!;
+    const heading = main.closest(".work-node-heading")!;
+    expect(heading.querySelector(":scope > .work-node-toggle")).toBeInTheDocument();
+    const lead = heading.querySelector(":scope > .work-priority")!;
+    expect(title.previousElementSibling).toHaveClass("work-row-ref");
+    expect(title.previousElementSibling?.tagName).toBe("STRONG");
     expect(lead).toHaveClass("work-priority");
     expect(lead).toHaveAttribute("data-state", "deferred");
     expect(lead).toHaveAttribute("title", "deferred");
     expect(lead).toHaveTextContent("P2, deferred");
     expect(lead.querySelector(".visually-hidden")).toHaveTextContent(", deferred");
-    // Metadata is outside the content-sized leading group, so the outer
-    // flex line can wrap it independently. Real layout is checked in a browser.
+    // Metadata is outside the content-sized ID/title group, on a separate
+    // grid row. Priority and ID share the heading row; geometry needs a browser.
     expect(within(main).queryByText("Long assignment")).not.toBeInTheDocument();
     expect(within(main.parentElement!).getByText("Long assignment")).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Source: Beads" })).toBeInTheDocument();

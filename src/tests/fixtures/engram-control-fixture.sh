@@ -7,6 +7,7 @@ actor_id=""
 actor_context=""
 session_id=""
 is_doctor=0
+is_readiness=0
 is_peek=0
 original_args=$*
 while [ "$#" -gt 0 ]; do
@@ -37,6 +38,9 @@ while [ "$#" -gt 0 ]; do
   fi
   if [ "$1" = "doctor" ]; then
     is_doctor=1
+  fi
+  if [ "$1" = "readiness" ]; then
+    is_readiness=1
   fi
   if [ "$1" = "--peek" ]; then
     is_peek=1
@@ -106,8 +110,25 @@ case " $original_args " in
     ;;
 esac
 
-if [ "$is_doctor" -eq 1 ]; then
+if [ "$is_doctor" -eq 1 ] || [ "$is_readiness" -eq 1 ]; then
+  if [ "$is_readiness" -eq 1 ]; then diagnostic=readiness; else diagnostic=doctor; fi
+  printf '%s\n' "$diagnostic" >> "$engram_home/diagnostic-commands"
   mode=$(tr -d '\r\n' < "$project_file")
+  if [ "$mode" = 'fixture-diagnostic-large-refusal' ]; then
+    awk 'BEGIN { printf "invalid-json-"; for (i = 0; i < 100000; i++) printf "x"; print "" }'
+    awk 'BEGIN { printf "warning-"; for (i = 0; i < 100000; i++) printf "y"; print "" }' >&2
+    exit 1
+  fi
+  if [ "$mode" = 'fixture-diagnostic-marker-oversized' ]; then
+    awk 'BEGIN { for (i = 0; i < 4097; i++) printf "x" }' > "$project_file"
+  fi
+  if [ "$is_readiness" -eq 1 ]; then
+    case "$mode" in
+      fixture-readiness-old) printf 'unknown subcommand readiness\n' >&2; exit 2 ;;
+      fixture-readiness-malformed) printf '{}\n'; exit 0 ;;
+      fixture-readiness-refusal) printf '{"ready":true}\n'; exit 1 ;;
+    esac
+  fi
   control='{"required_assurance":"turn_gated"}'
   case "$mode" in
     fixture-doctor-advisory)
@@ -120,7 +141,30 @@ if [ "$is_doctor" -eq 1 ]; then
       control=null
       ;;
   esac
-  database="$engram_home/fixture-engram.db"
+  if command -v sha256sum >/dev/null 2>&1; then
+    hash=$(printf '%s' "$mode" | sha256sum | cut -d ' ' -f 1)
+  else
+    hash=$(printf '%s' "$mode" | shasum -a 256 | cut -d ' ' -f 1)
+  fi
+  database="$engram_home/projects/$hash/engram.db"
+  mkdir -p "$(dirname "$database")"
+  [ -f "$database" ] || printf 'fixture database' > "$database"
+  if [ "$mode" = 'fixture-diagnostic-large-report' ]; then
+    awk 'BEGIN { printf "warning-"; for (i = 0; i < 100000; i++) printf "y"; print "" }' >&2
+    printf '{"healthy":true,"database":"%s","project_id":"%s","detail":"' "$database" "$mode"
+    awk 'BEGIN { for (i = 0; i < 100000; i++) printf "x" }'
+    printf '"}\n'
+    exit 0
+  fi
+  if [ "$is_readiness" -eq 1 ]; then
+    printf '{"schema_version":1,"scope":"readiness","ready":true,"full_audit":"not_run","mutation_enabled":false,"work_schema_version":1,"host_path_policy":{"stored":"fixture","resolved":"fixture","status":"matched"},"control":%s,"database":"%s","project_id":"%s"}\n' "$control" "$database" "$mode"
+    exit 0
+  fi
+  if [ "$mode" = 'fixture-audit-unhealthy' ]; then
+    printf '{"healthy":false,"control":%s,"database":"%s","project_id":"%s"}\n' "$control" "$database" "$mode"
+    printf 'development redactor provides no protection\n' >&2
+    exit 1
+  fi
   printf '{"healthy":true,"control":%s,"database":"%s","project_id":"%s"}\n' "$control" "$database" "$mode"
   exit 0
 fi

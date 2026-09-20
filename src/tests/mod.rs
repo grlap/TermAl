@@ -18,6 +18,7 @@ use tower::util::ServiceExt;
 
 mod acceptance_evaluation;
 mod acceptance_settings;
+mod engram_readiness;
 mod acp_gemini;
 mod acp_tool_status;
 mod agent_commands;

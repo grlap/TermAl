@@ -267,7 +267,10 @@ export type EngramProjectVerification = {
   projectId: string;
   database: string;
   requiredAssurance: string;
-  healthy: boolean;
+  ready: boolean;
+  fullAudit: "not_run";
+  hostPathStatus: string;
+  elapsedMs: number;
   errors?: string[];
 };
 
@@ -473,6 +476,18 @@ export type EvaluatorDefaults = {
   defaultMode?: AcceptanceEvaluationMode;
   evaluatorAgent?: "Claude" | "Codex";
   evaluatorModel?: string;
+};
+
+export type EngramFullAudit = {
+  healthy: boolean;
+  projectId: string;
+  database: string;
+  checkedAt: string;
+  elapsedMs: number;
+  warnings: string;
+  /** Bounded raw JSON text; may be incomplete when reportTruncated is true. */
+  reportPreview: string;
+  reportTruncated: boolean;
 };
 
 /** The bounded part of the tracker's receipt the host keeps. */

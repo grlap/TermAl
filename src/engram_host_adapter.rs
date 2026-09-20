@@ -13,7 +13,7 @@ const ENGRAM_DEFAULT_CALL_TIMEOUT_MS: u64 = 250;
 /// one additional second for the owning callback to publish its terminal state.
 const ENGRAM_CONTROL_SETTLE_TIMEOUT: Duration = Duration::from_secs(11);
 const ENGRAM_DISPATCH_BUDGET_MS: u64 = 600;
-// Enablement and Verify both run `engram doctor --json`, and that audit is the
+// Only explicit Full Audit runs `engram doctor --json`; that audit is the
 // only consumer of this bound — it is not an ordinary Engram call timeout and
 // must not be confused with one. The value comes from measurement, not taste.
 // Runs reported on Engram build 304edbce2b18 (2026-09-09): 122.441 s and
@@ -212,8 +212,8 @@ fn validate_engram_project_enablement(
     let (binary_path, project_file, home) =
         validate_engram_project_connection_paths(project, settings)?;
     let project_root = FsPath::new(&project.root_path);
-    let result = run_engram_doctor_result(&binary_path, &project_file, &home, project_root)?;
-    validate_engram_doctor_result(&result, settings.turn_gated_control)
+    let result = run_engram_readiness(&binary_path, &project_file, &home, project_root)?;
+    validate_engram_readiness(&result, &project_file, &home, settings.turn_gated_control)
 }
 
 fn validate_engram_project_connection_paths(
@@ -271,24 +271,10 @@ fn validate_engram_host_connection_paths(
     Ok((binary_path, home))
 }
 
-fn run_engram_doctor_result(
-    binary_path: &FsPath,
-    project_file: &FsPath,
-    home: &FsPath,
-    project_root: &FsPath,
-) -> std::result::Result<EngramDoctorResult, ApiError> {
-    run_engram_doctor_result_within(
-        binary_path,
-        project_file,
-        home,
-        project_root,
-        ENGRAM_ENABLEMENT_DOCTOR_TIMEOUT,
-    )
-}
-
 /// The deadline is a parameter so the expiry branch is reachable in a test
 /// without waiting out the production window. Callers outside tests always pass
 /// [`ENGRAM_ENABLEMENT_DOCTOR_TIMEOUT`].
+#[cfg(test)]
 fn run_engram_doctor_result_within(
     binary_path: &FsPath,
     project_file: &FsPath,
@@ -296,6 +282,27 @@ fn run_engram_doctor_result_within(
     project_root: &FsPath,
     doctor_timeout: Duration,
 ) -> std::result::Result<EngramDoctorResult, ApiError> {
+    let output = run_engram_diagnostic_within(
+        binary_path, project_file, home, project_root, "doctor", doctor_timeout,
+    )?;
+    if output.status.success() {
+        let result: EngramDoctorResult = serde_json::from_slice(&output.stdout)
+            .map_err(|error| ApiError::bad_request(format!("Engram doctor returned invalid JSON: {error}")))?;
+        return Ok(result);
+    }
+    Err(ApiError::bad_request(format!("Engram doctor failed ({}): {} {}",
+        output.status, String::from_utf8_lossy(&output.stderr), String::from_utf8_lossy(&output.stdout))))
+}
+
+// Shared bounded process transport; callers retain distinct admission contracts.
+fn run_engram_diagnostic_within(
+    binary_path: &FsPath,
+    project_file: &FsPath,
+    home: &FsPath,
+    project_root: &FsPath,
+    diagnostic: &str,
+    doctor_timeout: Duration,
+) -> std::result::Result<std::process::Output, ApiError> {
     // Drain both streams on their own threads and terminate the whole process
     // tree, exactly as the authority-revocation path below does. Neither is
     // optional here. Waiting for exit before reading DEADLOCKS a doctor whose
@@ -312,14 +319,14 @@ fn run_engram_doctor_result_within(
         .arg(project_file)
         .arg("--home")
         .arg(home)
-        .arg("doctor")
+        .arg(diagnostic)
         .arg("--json")
         .current_dir(project_root)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|err| ApiError::bad_request(format!("Engram doctor failed to start: {err}")))?;
+        .map_err(|err| ApiError::bad_request(format!("Engram {diagnostic} failed to start: {err}")))?;
     let stdout = child
         .stdout
         .take()
@@ -359,7 +366,7 @@ fn run_engram_doctor_result_within(
                 stop_engram_doctor_before_reap(&process_tree, &process);
                 return Err(ApiError::bad_request(match outcome {
                     Ok(None) => format!(
-                        "Engram doctor exceeded the {} second enablement deadline",
+                        "Engram {diagnostic} exceeded the {} second enablement deadline",
                         doctor_timeout.as_secs()
                     ),
                     Err(error) => format!("failed waiting for Engram doctor: {error}"),
@@ -385,19 +392,7 @@ fn run_engram_doctor_result_within(
         eprintln!("engram warning> doctor post-exit cleanup failed: {error:#}");
     }
     let (collected_stdout, collected_stderr) = output?;
-    if status.success() {
-        return serde_json::from_slice::<EngramDoctorResult>(&collected_stdout).map_err(|error| {
-            ApiError::bad_request(format!(
-                "cannot enable Engram: doctor returned invalid JSON: {error}"
-            ))
-        });
-    }
-    let detail = String::from_utf8_lossy(&collected_stderr).trim().to_owned();
-    Err(ApiError::bad_request(if detail.is_empty() {
-        format!("Engram doctor exited with {status}")
-    } else {
-        format!("Engram doctor failed: {detail}")
-    }))
+    Ok(std::process::Output { status, stdout: collected_stdout, stderr: collected_stderr })
 }
 
 #[derive(Clone, Deserialize)]
@@ -405,57 +400,12 @@ struct EngramDoctorControl {
     required_assurance: String,
 }
 
+#[cfg(test)]
 #[derive(Clone, Deserialize)]
 struct EngramDoctorResult {
     healthy: bool,
-    control: Option<EngramDoctorControl>,
     database: PathBuf,
     project_id: String,
-}
-
-fn validate_engram_doctor_result(
-    result: &EngramDoctorResult,
-    require_turn_gated_control: bool,
-) -> std::result::Result<EngramAuthorityStoreKey, ApiError> {
-    if !result.healthy {
-        return Err(ApiError::bad_request(
-            "cannot enable Engram: doctor reported an unhealthy store",
-        ));
-    }
-    if require_turn_gated_control {
-        let control = result.control.as_ref().ok_or_else(|| {
-            ApiError::bad_request(
-                "cannot enable Engram turn-gated control: doctor did not return a control policy",
-            )
-        })?;
-        let normalized = control
-            .required_assurance
-            .chars()
-            .filter(|character| character.is_ascii_alphanumeric())
-            .flat_map(char::to_lowercase)
-            .collect::<String>();
-        if normalized != "turngated" {
-            return Err(ApiError::bad_request(format!(
-                "cannot enable Engram turn-gated control: doctor requires `{}`, but TermAl provides `{ENGRAM_CONTROL_ASSURANCE}`",
-                control.required_assurance
-            )));
-        }
-    }
-    let project_id = result.project_id.trim().to_owned();
-    if project_id.is_empty() {
-        return Err(ApiError::bad_request(
-            "cannot enable Engram: doctor returned an empty project_id",
-        ));
-    }
-    if !result.database.is_absolute() {
-        return Err(ApiError::bad_request(
-            "cannot enable Engram: doctor returned a non-absolute database path",
-        ));
-    }
-    Ok(EngramAuthorityStoreKey {
-        database_path: normalize_user_facing_path(&result.database),
-        project_id,
-    })
 }
 
 fn engram_command(binary_path: &FsPath) -> Command {

@@ -1759,11 +1759,13 @@ impl AppState {
         let (binary_path, project_file, home) =
             validate_engram_project_connection_paths(&project, &settings)?;
         let project_root = PathBuf::from(&project.root_path);
-        let doctor =
-            run_engram_doctor_result(&binary_path, &project_file, &home, &project_root)?;
+        self.validate_engram_diagnostic_snapshot(&project, &host_settings)?;
+        let started = std::time::Instant::now();
+        let readiness =
+            run_engram_readiness(&binary_path, &project_file, &home, &project_root)?;
         let mut errors = Vec::new();
-        let store_key = match validate_engram_doctor_result(
-            &doctor,
+        let store_key = match validate_engram_readiness(
+            &readiness, &project_file, &home,
             settings.turn_gated_control,
         ) {
             Ok(store_key) => Some(store_key),
@@ -1773,28 +1775,28 @@ impl AppState {
             }
         };
         settings.authority_store_key = store_key;
-        let required_assurance = doctor
-            .control
-            .as_ref()
-            .map(|control| control.required_assurance.clone())
-            .unwrap_or_default();
+        self.validate_engram_diagnostic_snapshot(&project, &host_settings)?;
+        let required_assurance = readiness.control.required_assurance;
         let verified = errors.is_empty();
         Ok(VerifyProjectEngramSettingsResponse {
             verified,
             binary_path: settings.binary_path.unwrap_or_default(),
             home: settings.home.unwrap_or_default(),
-            project_id: doctor.project_id,
-            database: normalize_user_facing_path(&doctor.database)
+            project_id: readiness.project_id,
+            database: normalize_user_facing_path(&readiness.database)
                 .to_string_lossy()
                 .into_owned(),
             required_assurance,
-            healthy: doctor.healthy,
+            ready: verified,
+            full_audit: "not_run",
+            host_path_status: readiness.host_path_policy.status,
+            elapsed_ms: started.elapsed().as_millis() as u64,
             errors,
         })
     }
 
     /// Updates the optional Engram adapter for one local project. Filesystem
-    /// checks and `engram doctor` run off-lock; the project identity/root are
+    /// checks and `engram readiness` run off-lock; the project identity/root are
     /// fenced before the validated settings are committed.
     #[cfg(test)]
     fn update_project_engram_settings(

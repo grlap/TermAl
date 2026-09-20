@@ -45,7 +45,8 @@ beforeEach(() => {
   sessionStorage.clear();
   vi.resetAllMocks();
   vi.mocked(getAcceptancePolicy).mockResolvedValue(policy);
-  vi.mocked(verifyProjectEngramSettings).mockResolvedValue({ verified: true, projectId: "engram-one", healthy: true,
+  vi.mocked(verifyProjectEngramSettings).mockResolvedValue({ verified: true, projectId: "engram-one", ready: true,
+    fullAudit: "not_run", hostPathStatus: "matched", elapsedMs: 12,
     binaryPath: "/bin/engram", home: "/one/.engram", database: "/one/.engram/store.db", requiredAssurance: "asserted" });
   vi.mocked(saveEvaluatorDefaults).mockImplementation(async (_, defaults) => state({ ...project, engram: { ...project.engram!, acceptanceEvaluation: defaults } }));
   vi.mocked(updateProjectEngramSettings).mockResolvedValue(state(project));

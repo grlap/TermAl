@@ -59,15 +59,19 @@ export function WorkTree({ rows, universe, mode, selection, onSelect, onLabel }:
     const open = !collapsed.has(node.key);
     const allSatisfied = node.children.length > 0 && node.children.every(child => child.satisfied === true);
     return <li key={node.key} data-node-key={node.key} className={`work-node${node.item.lifecycle === "completed" ? " is-completed" : ""}`}>
-      <div className="work-node-row">
-        <div className="work-node-main">
+      <div className="work-node-heading">
           {node.children.length > 0
             ? <button type="button" className="work-node-toggle" aria-expanded={open}
               aria-label={`${open ? "Collapse" : "Expand"} ${node.item.shortRef}`} onClick={() => toggle(node.key)}>▾</button>
             : <span className="work-node-toggle work-node-leaf" aria-hidden="true" />}
           <WorkRowLead item={node.item} />
-          <WorkRowButton item={node.item} selected={isSelectedWorkItem(selection, node.item)} onSelect={onSelect} />
+        <div className="work-node-content">
+        <div className="work-node-row">
+        <div className="work-node-main">
+          <strong className="work-row-ref">{node.item.shortRef}</strong>
+          <WorkRowButton item={node.item} selected={isSelectedWorkItem(selection, node.item)} onSelect={onSelect} showRef={false} />
         </div>
+        <div className="work-node-metadata">
         <WorkRowChips item={node.item} mixedSources={mixedSources} />
         {mode === "dependencies" && node.satisfied === true && <span className="work-chip" data-satisfied="true">satisfied</span>}
         {node.repeatedCount > 0 && <button type="button" className="work-tree-relation" data-repeated="true"
@@ -86,8 +90,11 @@ export function WorkTree({ rows, universe, mode, selection, onSelect, onLabel }:
         {node.hiddenByFilter > 0 && <span className="work-tree-relation" data-hidden-by-filter="true">
           {mode === "dependencies" ? `${node.hiddenByFilter} hidden by filter` : "parent hidden by filter"}
         </span>}
+        </div>
       </div>
       <WorkLabelChips item={node.item} onLabel={onLabel} />
+        </div>
+      </div>
       {node.children.length > 0 && open && <>
         {mode === "dependencies" && <p className="work-tree-relation">{allSatisfied ? "all prerequisites satisfied" : "waits for"}</p>}
         <ul data-relation={mode} data-satisfied={allSatisfied ? "true" : undefined}>{node.children.map(renderNode)}</ul>

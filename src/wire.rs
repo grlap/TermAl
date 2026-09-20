@@ -1777,7 +1777,10 @@ struct VerifyProjectEngramSettingsResponse {
     project_id: String,
     database: String,
     required_assurance: String,
-    healthy: bool,
+    ready: bool,
+    full_audit: &'static str,
+    host_path_status: String,
+    elapsed_ms: u64,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     errors: Vec<String>,
 }

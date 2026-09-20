@@ -5221,7 +5221,8 @@ fn materialize_fixture_engram_store(
         .expect("fixture project id should exist")
         .trim()
         .to_owned();
-    let database_path = home.join("fixture-engram.db");
+    let database_path = work_database_path(home, &project_id);
+    fs::create_dir_all(database_path.parent().unwrap()).unwrap();
     fs::write(&database_path, b"fixture database").expect("fixture database should exist");
     EngramAuthorityStoreKey {
         database_path: normalize_user_facing_path(
@@ -5263,7 +5264,8 @@ fn project_engram_verification_is_redacted_and_does_not_mutate_settings() {
         .expect("fixture settings should verify");
 
     assert!(verification.verified);
-    assert!(verification.healthy);
+    assert!(verification.ready);
+    assert_eq!(verification.full_audit, "not_run");
     assert_eq!(verification.project_id, "fixture-ready");
     assert_eq!(verification.required_assurance, "turn_gated");
     assert_eq!(
@@ -10395,7 +10397,7 @@ fn enablement_accepts_real_doctor_required_turn_gated_and_adopts_identity() {
     assert_eq!(
         settings.authority_store_key,
         Some(EngramAuthorityStoreKey {
-            database_path: normalize_user_facing_path(&root.join("fixture-engram.db")),
+            database_path: normalize_user_facing_path(&work_database_path(&root, "fixture-doctor-turn-gated")),
             project_id: "fixture-doctor-turn-gated".to_owned(),
         })
     );
@@ -10430,7 +10432,7 @@ fn enablement_rejects_real_doctor_requirements_other_than_turn_gated() {
         assert_eq!(
             error.message,
             format!(
-                "cannot enable Engram turn-gated control: doctor requires `{required}`, but TermAl provides `turn_gated`"
+                "cannot enable Engram: readiness requires `{required}`, incompatible with the selected TermAl tier"
             )
         );
         let inner = state.inner.lock().expect("state mutex poisoned");
@@ -10469,10 +10471,7 @@ fn enablement_rejects_real_doctor_output_without_required_assurance() {
         Err(error) => error,
     };
     assert_eq!(error.status, StatusCode::BAD_REQUEST);
-    assert_eq!(
-        error.message,
-        "cannot enable Engram turn-gated control: doctor did not return a control policy"
-    );
+    assert!(error.message.contains("unsupported or invalid receipt"));
     let inner = state.inner.lock().expect("state mutex poisoned");
     assert!(
         inner

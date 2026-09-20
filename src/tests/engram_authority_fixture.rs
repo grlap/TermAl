@@ -62,11 +62,16 @@ fn authority_command() {
     assert_eq!(FsPath::new(&args[1]), root.join(".engram-project"));
     let mode = fs::read_to_string(&args[1]).expect("fixture project declaration");
     assert_eq!(mode.trim(), "fixture-ready");
-    if args[4..] == ["doctor", "--json"] {
+    if args[4..] == ["readiness", "--json"] {
+        let database = work_database_path(root, mode.trim());
+        fs::create_dir_all(database.parent().unwrap()).unwrap();
+        if !database.exists() { fs::write(&database, "fixture database").unwrap(); }
         let response = serde_json::json!({
-            "healthy": true,
+            "schema_version": 1, "scope": "readiness", "ready": true,
+            "full_audit": "not_run", "mutation_enabled": false, "work_schema_version": 1,
+            "host_path_policy": {"stored":"fixture", "resolved":"fixture", "status":"matched"},
             "control": { "required_assurance": "turn_gated" },
-            "database": root.join("fixture-engram.db"),
+            "database": database,
             "project_id": mode.trim(),
         });
         fs::write(output, serde_json::to_vec(&response).unwrap()).unwrap();

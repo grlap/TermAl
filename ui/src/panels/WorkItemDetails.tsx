@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { ApiRequestError } from "../api-request";
 import { readWorkDetail, type WorkDetailResponse } from "../work-visualizer-api";
 import { WorkTime } from "./work-time";
+import { WorkDetailsHeader } from "./WorkDetailsHeader";
 
 export function WorkItemDetails({ projectId, workRef, readerId, onClose }: {
   projectId: string; workRef: string; readerId: string; onClose: () => void;
@@ -67,8 +68,7 @@ export function WorkItemDetails({ projectId, workRef, readerId, onClose }: {
   return <aside ref={panel} tabIndex={-1} className="work-item-details" aria-label="Work item details" aria-busy={busy} onKeyDown={event => {
     if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onClose(); }
   }}>
-    <div className="work-panel-actions"><strong>{workRef}</strong><button type="button" onClick={onClose}>Close details</button>
-      <button type="button" onClick={() => setRevision(v => v + 1)}>Reload details</button></div>
+    <WorkDetailsHeader workRef={workRef} onClose={onClose} onReload={() => setRevision(v => v + 1)} />
     {error && <p role="alert">{error}</p>}
     {busy && <p role="status">Reading Engram details…</p>}
     {data?.status && <>

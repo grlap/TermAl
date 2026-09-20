@@ -12,12 +12,13 @@ export function isSelectedWorkItem(selection: WorkSelection | null, item: WorkIt
   return !!selection && selection.source === item.source && selection.ref === item.shortRef;
 }
 
-export function WorkRowButton({ item, selected, onSelect }: {
-  item: WorkItem; selected: boolean; onSelect: (item: WorkItem, trigger: HTMLButtonElement) => void;
+export function WorkRowButton({ item, selected, onSelect, showRef = true }: {
+  item: WorkItem; selected: boolean; onSelect: (item: WorkItem, trigger: HTMLButtonElement) => void; showRef?: boolean;
 }) {
   return <button type="button" className="work-row-title" aria-current={selected ? "true" : undefined}
+    aria-label={showRef ? undefined : `${item.shortRef} — ${item.title}`}
     onClick={(event: MouseEvent<HTMLButtonElement>) => onSelect(item, event.currentTarget)}>
-    {item.shortRef} — {item.title}
+    {showRef ? `${item.shortRef} — ${item.title}` : item.title}
   </button>;
 }
 

@@ -1256,11 +1256,15 @@ async fn delete_project(
 async fn update_project_engram_settings(
     AxumPath(project_id): AxumPath<String>,
     State(state): State<AppState>,
+    axum::Extension(limiter): axum::Extension<EngramReadinessLimiter>,
     request: Result<Json<UpdateProjectEngramSettingsRequest>, JsonRejection>,
 ) -> Result<Json<StateResponse>, ApiError> {
     let Json(request) =
         request.map_err(|rejection| api_json_rejection("Engram project settings", rejection))?;
+    // Disable remains an unconditional recovery path, including under load.
+    let permit = if request.enabled { Some(acquire_engram_readiness(limiter)?) } else { None };
     let response = run_blocking_api(move || {
+        let _permit = permit;
         state.patch_project_engram_settings(&project_id, request)
     })
     .await?;
@@ -1272,11 +1276,14 @@ async fn update_project_engram_settings(
 async fn verify_project_engram_settings(
     AxumPath(project_id): AxumPath<String>,
     State(state): State<AppState>,
+    axum::Extension(limiter): axum::Extension<EngramReadinessLimiter>,
     request: Result<Json<UpdateProjectEngramSettingsRequest>, JsonRejection>,
 ) -> Result<Json<VerifyProjectEngramSettingsResponse>, ApiError> {
     let Json(request) = request
         .map_err(|rejection| api_json_rejection("Engram settings verification", rejection))?;
+    let permit = acquire_engram_readiness(limiter)?;
     let response = run_blocking_api(move || {
+        let _permit = permit;
         state.verify_project_engram_settings(&project_id, request)
     })
     .await?;

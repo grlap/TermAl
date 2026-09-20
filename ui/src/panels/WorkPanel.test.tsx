@@ -5,6 +5,7 @@ import { ApiRequestError } from "../api-request";
 import { readProjectWork, readWorkBeadsDetail, readWorkDetail, type WorkItem, type WorkListResponse, type WorkDetailResponse, type WorkPage } from "../work-visualizer-api";
 import { WORK_AUTO_LOAD_TARGET_ROWS } from "./use-work-list";
 import { WorkPanel } from "./WorkPanel";
+import { WorkDetailsHeader } from "./WorkDetailsHeader";
 
 vi.mock("../work-visualizer-api", () => ({ readProjectWork: vi.fn(), readWorkDetail: vi.fn(), readWorkBeadsDetail: vi.fn() }));
 const projects = [
@@ -34,6 +35,20 @@ function showTable() { fireEvent.click(screen.getByRole("button", { name: "Table
 describe("WorkPanel", () => {
   beforeEach(() => { vi.resetAllMocks(); localStorage.clear(); });
 
+  it("keeps the compact detail icons named and wired to their actions", () => {
+    const onClose = vi.fn();
+    const onReload = vi.fn();
+    render(<WorkDetailsHeader workRef="w-one" onClose={onClose} onReload={onReload} />);
+    for (const [name, callback] of [["Reload details", onReload], ["Close details", onClose]] as const) {
+      const button = screen.getByRole("button", { name });
+      expect(button).toHaveAttribute("title", name);
+      expect(button).toHaveTextContent("");
+      expect(button.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+      fireEvent.click(button);
+      expect(callback).toHaveBeenCalledTimes(1);
+    }
+  });
+
   it("uses the focused project and renders independent lifecycle, availability and assignment", async () => {
     vi.mocked(readProjectWork).mockResolvedValue(page());
     render(<WorkPanel projects={projects} focusedProjectId="p-two" />);
@@ -47,6 +62,30 @@ describe("WorkPanel", () => {
     expect(screen.getByRole("cell", { name: "open" })).toBeInTheDocument();
     expect(screen.getByRole("cell", { name: "blocked" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Assignment" })).toBeInTheDocument();
+  });
+
+  it("boxes the bold ID after priority and starts labels in the same content column", async () => {
+    const response = page();
+    response.page!.items[0]!.shortRef = "w-94643039d5a7";
+    vi.mocked(readProjectWork).mockResolvedValue(response);
+    render(<WorkPanel projects={projects} focusedProjectId="p-one" />);
+    await screen.findByRole("button", { name: "w-94643039d5a7 — Visible task" });
+    for (const view of ["Dependencies", "Hierarchy"]) {
+      fireEvent.click(screen.getByRole("button", { name: view }));
+      const title = screen.getByRole("button", { name: "w-94643039d5a7 — Visible task" });
+      expect(title).toHaveTextContent(/^Visible task$/);
+      const ref = title.previousElementSibling!;
+      expect(ref.tagName).toBe("STRONG");
+      expect(ref).toHaveClass("work-row-ref");
+      expect(ref.textContent).toBe("w-94643039d5a7");
+      const content = title.closest(".work-node-content")!;
+      expect(content.previousElementSibling).toHaveClass("work-priority");
+      expect(content.children[0]).toHaveClass("work-node-row");
+      expect(content.children[1]).toHaveClass("work-label-chips");
+      expect(within(content as HTMLElement).getByRole("button", { name: "Filter by label decision" })).toBeInTheDocument();
+    }
+    showTable();
+    expect(screen.getByRole("button", { name: "w-94643039d5a7 — Visible task" })).toHaveTextContent("w-94643039d5a7 — Visible task");
   });
 
   it("keeps the chosen view and sort across source-filter submissions", async () => {
@@ -109,14 +148,14 @@ describe("WorkPanel", () => {
     const engramRow = await screen.findByRole("button", { name: "w-one — Engram row" });
     // The lead precedes the title in reading order; the availability word is
     // there for assistive technology and on hover, the colour comes from it.
-    const lead = engramRow.previousElementSibling as HTMLElement;
+    const lead = engramRow.closest(".work-node-heading")!.querySelector(".work-priority")!;
     expect(lead).toHaveClass("work-priority");
     expect(lead).toHaveAttribute("data-state", "blocked");
     expect(lead).toHaveAttribute("title", "blocked");
     expect(lead).toHaveTextContent("P1, blocked");
     expect(lead.compareDocumentPosition(engramRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     const freeRow = screen.getByRole("button", { name: "tm-free — Ready bug" });
-    expect(freeRow.previousElementSibling).toHaveAttribute("data-state", "ready");
+    expect(freeRow.closest(".work-node-heading")!.querySelector(".work-priority")).toHaveAttribute("data-state", "ready");
     // Both trackers are loaded, so every row names its source with a glyph.
     expect(screen.getAllByRole("img", { name: "Source: Engram" })).toHaveLength(1);
     expect(screen.getAllByRole("img", { name: "Source: Beads" })).toHaveLength(3);
@@ -128,7 +167,7 @@ describe("WorkPanel", () => {
     render(<WorkPanel projects={projects} focusedProjectId="p-one" />);
     await screen.findByRole("button", { name: "tm-free — Ready bug" });
     expect(screen.queryByRole("img", { name: /^Source: / })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "tm-root.1 — Blocked child" }).previousElementSibling).toHaveAttribute("data-state", "blocked");
+    expect(screen.getByRole("button", { name: "tm-root.1 — Blocked child" }).closest(".work-node-heading")!.querySelector(".work-priority")).toHaveAttribute("data-state", "blocked");
   });
 
   it("aborts and ignores a late response after switching projects", async () => {

@@ -191,7 +191,10 @@ describe("verifyProjectEngramSettings", () => {
       projectId: "engram-project-1",
       database: "C:\\Users\\greg\\.engram\\engram.db",
       requiredAssurance: "turn_gated",
-      healthy: true,
+      ready: true,
+      fullAudit: "not_run",
+      hostPathStatus: "matched",
+      elapsedMs: 12,
     };
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify(result), {

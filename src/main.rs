@@ -363,6 +363,7 @@ fn app_router_with_acceptance_policy_limiter(
             "/api/projects/{id}/engram/verify",
             post(verify_project_engram_settings),
         )
+        .route("/api/projects/{id}/engram/audit", post(full_audit_project_engram))
         .route("/api/projects/{id}/digest", get(get_project_digest))
         .route("/api/projects/{id}/engram/control-policy", get(get_project_acceptance_policy))
         .route("/api/projects/{id}/engram/acceptance-evaluation-defaults", patch(patch_project_acceptance_defaults))
@@ -556,6 +557,8 @@ fn app_router_with_acceptance_policy_limiter(
         )
         .with_state(state)
         .layer(axum::Extension(policy_limiter))
+        .layer(axum::Extension(EngramAuditLimiter(Arc::new(tokio::sync::Semaphore::new(1)))))
+        .layer(axum::Extension(EngramReadinessLimiter(Arc::new(tokio::sync::Semaphore::new(2)))))
         // One 10 MiB image expands to about 13.4 MiB when base64-encoded.
         .layer(DefaultBodyLimit::max(MAX_JSON_REQUEST_BODY_BYTES))
         // The bounded conversation overview intentionally favors a stable,
@@ -713,6 +716,7 @@ include!("test_temp_paths.rs");
 include!("test_temp_root.rs");
 include!("state.rs");
 include!("engram_host_adapter.rs");
+include!("engram_readiness.rs");
 include!("coordination_instructions.rs");
 include!("delegation_mcp.rs");
 include!("review_freeze.rs");

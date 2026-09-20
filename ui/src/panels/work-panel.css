@@ -47,6 +47,7 @@
 
 /* Trees: solid rail = waits for, dashed rail = subtask of. */
 .work-tree ul { list-style: none; margin: 0; padding: 0; }
+.work-tree .work-node + .work-node { margin-top: 6px; }
 .work-tree ul ul { margin-left: 0.7rem; padding-left: 0.7rem; border-left: 2px solid var(--line); }
 .work-tree ul[data-relation="hierarchy"] ul, .work-tree > ul[data-relation="hierarchy"] li > ul { border-left-style: dashed; }
 .work-tree ul[data-relation="dependencies"][data-satisfied="true"] { border-left-color: var(--signal-green); }
@@ -62,12 +63,22 @@ button.work-tree-relation { background: none; border: 0; padding: 0; cursor: poi
    stealing title width. Short titles still leave room for inline metadata. */
 .work-node-main { display: flex; align-items: center; gap: 0.35rem; flex: 0 1 auto; min-width: 0; max-width: 100%; }
 .work-node-main > .work-node-toggle, .work-node-main > .work-priority { flex: none; }
+/* Labels share the ID/title column, leaving the priority gutter clear. */
+.work-node-heading { display: grid; grid-template-columns: 1.5rem max-content minmax(0, 1fr); align-items: center; column-gap: 0.35rem; padding: 0.2rem 0; }
+.work-node-heading > .work-node-toggle { grid-column: 1; grid-row: 1; }
+.work-node-heading > .work-priority { grid-column: 2; grid-row: 1; justify-self: start; }
+.work-node-content, .work-node-content > .work-node-row { display: contents; }
+.work-node-content > .work-node-row > .work-node-main { grid-column: 3; grid-row: 1; }
+.work-node-metadata { grid-column: 3; grid-row: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; min-width: 0; }
+.work-node-content > .work-label-chips { grid-column: 3; grid-row: 3; }
+.work-node-main > .work-row-ref { flex: none; padding: 0.35rem 0.5rem; border: 1px solid var(--line); border-radius: var(--button-radius-tight); background: var(--paper-strong); font-weight: 700; white-space: nowrap; }
 .work-node-main > .work-row-title { flex: 0 1 auto; min-width: 0; overflow-wrap: anywhere; }
-.work-node-row > .work-chip, .work-node-row > .work-tree-relation { max-width: 100%; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+.work-node-row > .work-chip, .work-node-row > .work-tree-relation,
+.work-node-metadata > .work-chip, .work-node-metadata > .work-tree-relation { max-width: 100%; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
 .work-node-toggle { width: 1.5rem; height: 1.5rem; padding: 0; line-height: 1; text-align: center; display: inline-flex; align-items: center; justify-content: center; }
 .work-node-toggle[aria-expanded="false"] { transform: rotate(-90deg); }
 .work-node-leaf { border-color: transparent; background: transparent; }
-.work-node.is-completed > .work-node-row .work-row-title { opacity: 0.65; }
+.work-node.is-completed > .work-node-heading .work-row-title { opacity: 0.65; }
 
 .work-table-scroll { overflow: auto; max-width: 100%; }
 .work-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
@@ -81,13 +92,16 @@ button.work-tree-relation { background: none; border: 0; padding: 0; cursor: poi
 .work-table td:nth-child(2) { min-width: 14rem; overflow-wrap: anywhere; }
 .work-table small { display: block; }
 .work-item-details { border: 1px solid var(--line); background: var(--surface-card); border-radius: 0.4rem; padding: 0.65rem; overflow-wrap: anywhere; }
+.work-details-header { display: flex; align-items: center; gap: 0.35rem; }
+.work-details-header > strong { flex: 1; min-width: 0; }
+.work-panel .work-details-icon { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 2rem; height: 2rem; padding: 0.35rem; }
+.work-details-icon svg { width: 1rem; height: 1rem; }
 .work-item-details li { margin-bottom: 0.65rem; }
 .work-inert-text { white-space: pre-wrap; }
 
 /* Label colours are neutral: availability keeps ownership of status colours. */
 .work-label-chips { display: flex; flex-wrap: wrap; gap: 0.3rem; min-width: 0; margin: 0.2rem 0; }
 .work-panel .work-label-chip { font-size: 0.75rem; border: 1px solid var(--line); border-radius: 999px; padding: 0.1rem 0.5rem; color: var(--muted); background: var(--paper-strong); overflow-wrap: anywhere; min-width: 0; max-width: 100%; text-align: left; }
-.work-node > .work-label-chips { margin-left: 1.85rem; }
 .work-label-filter { flex: 1 1 14rem; min-width: 0; position: relative; }
 .work-label-filter > button { width: 100%; text-align: left; overflow-wrap: anywhere; }
 .work-label-picker { position: absolute; z-index: 5; top: 100%; left: 0; width: 100%; min-width: 0; box-sizing: border-box; padding: 0.65rem; display: flex; flex-direction: column; gap: 0.5rem; border: 1px solid var(--line); border-radius: 0.4rem; background: var(--paper-strong); box-shadow: 0 0.4rem 1rem #0004; }

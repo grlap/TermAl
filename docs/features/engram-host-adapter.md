@@ -45,23 +45,58 @@ binary, home, and boot recovery budget. Declared local projects expose
 
 - the Base Enabled/Disable switch;
 - a separate **Turn-gated control** checkbox;
-- **Verify**, which is non-mutating; and
-- **Save & enable**.
+- **Verify**, which checks scoped readiness without changing settings;
+- **Save & enable**, which repeats readiness before persistence; and
+- **Run Full Audit**, an explicit, separate whole-store doctor action.
 
 `POST /api/projects/{id}/engram/verify` and the final
 `PATCH /api/projects/{id}/engram` both run:
 
 ```text
-engram --project-file <project>/.engram-project --home <home> doctor --json
+engram --project-file <project>/.engram-project --home <home> readiness --json
 ```
 
-Doctor must report a healthy store, a non-empty project id, and an absolute
-database path. Only the premium toggle additionally requires
-`control.required_assurance == "turn_gated"`. Base mode requires no additional
-installation step. There is no TermAl authority-grant setting, grant file,
+Readiness must return an exit-0 v1 receipt with `scope: readiness`, `ready: true`,
+`full_audit: not_run`, and `mutation_enabled: false`. The host compares the
+project id with `.engram-project` and the canonical database with the expected
+SHA-256 project path under the selected home. Matched stored/resolved host-path
+policy is required; unresolved or unbound reads do not authorize enablement.
+Verify/Save have a ten-second process budget; unsupported older binaries,
+malformed receipts, nonzero exits and timeouts fail closed, never falling back
+to doctor or silently initializing/repairing a store. Engram may probe the
+checkout with a temporary file to resolve filesystem identity.
+
+Only the premium toggle requires `control.required_assurance == "turn_gated"`.
+Base access accepts advisory or turn-gated stores but remains explicitly
+advisory/unmediated: it does not satisfy a turn-gated control floor. Unknown or
+action-gated requirements are refused. There is no authority-grant setting, grant file,
 grant environment variable, or grant-installing verification step; obsolete
 persisted grant fields from development builds are ignored and are not written
 again.
+
+`POST /api/projects/{id}/engram/audit` runs `doctor --json` only after the
+operator chooses Full Audit. The UI shows elapsed progress, a bounded report
+preview and stderr disclosures, and retains that audit result across readiness checks.
+The API returns `reportPreview` (at most 16 KiB of UTF-8 text before JSON
+escaping) and `reportTruncated`, not the entire parsed report object. This
+display-only prefix may be incomplete JSON; health and store identity are
+validated against the complete captured receipt before projecting the preview.
+Warnings and each error-output excerpt are limited to 4 KiB, including an
+explicit truncation marker. The UI also clamps previews defensively, renders
+report text only when expanded, and does not serialize it on progress ticks.
+Omitted output is not copied into logs; these previews provide no redaction.
+Audits open the store writable and may perform SQLite recovery; they do not
+save TermAl settings or silently retry readiness. Readiness is not a full
+health pass. Quiet readiness stderr proves neither redaction nor enforcement:
+the development redactor provides no secret/PII protection, and action gating,
+organizational-authority mediation and action-outcome tracking are unavailable.
+
+The router admits two nonwaiting readiness checks and one separate Full Audit;
+busy pools return 429 without starting a process. Disable bypasses readiness
+admission. The audit POST requires same-origin Fetch Metadata and
+`X-TermAl-Operator-Action: engram-full-audit` as browser intent, not authentication
+against privileged local programs. An aborted browser request does not cancel
+the bounded server audit. See the [architecture route table](../architecture.md#http-api).
 
 Doctor execution and stdout/stderr collection share one five-minute deadline
 after process setup. A direct child exiting does not end output collection:
@@ -75,7 +110,10 @@ until their pipes close.
 Each doctor stream has a separate 8 MiB host capture budget, independent of
 control-protocol frame limits. This is a resource policy, not a measured maximum
 valid report size: a valid larger report is refused with a budget diagnostic.
-Partial reports are never parsed or accepted.
+Partial transport captures are never parsed or accepted. Separately, readiness
+receipts have a 16 KiB admission limit and fail closed above it without a doctor
+fallback. These admission and capture limits are distinct from the smaller
+display previews described above.
 
 ## Base MCP composition
 
