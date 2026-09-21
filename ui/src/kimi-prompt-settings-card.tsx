@@ -1,4 +1,4 @@
-// Model-only session controls for Kimi. Approval/mode policy belongs to the
+// Model and reasoning-effort controls for Kimi. Approval/mode policy belongs to the
 // host ACP admission path, not to this card or the app-default preferences.
 import { ThemedCombobox } from "./preferences/themed-combobox";
 import {
@@ -45,6 +45,15 @@ export function KimiPromptSettingsCard({
   });
   const busy = ["active", "approval", "stopping"].includes(session.status);
   const disabled = isUpdating || busy || isEngramMcpRevocationPending || isRefreshingModelOptions;
+  const effort = session.kimiEffort ?? "auto";
+  const advertisedEfforts = (session.kimiEffortOptions ?? []).filter(option => option.value !== "auto");
+  const unavailableEffort = effort !== "auto" && !advertisedEfforts.some(option => option.value === effort);
+  const effortOptions = [
+    { value: "auto", label: session.kimiCurrentEffort
+      ? `CLI current (${session.kimiCurrentEffort})` : "CLI current" },
+    ...(unavailableEffort ? [{ value: effort, label: `${effort} (unavailable)` }] : []),
+    ...advertisedEfforts,
+  ];
   return (
     <article className="message-card prompt-settings-card">
       <div className="card-label">Session Settings</div>
@@ -80,6 +89,32 @@ export function KimiPromptSettingsCard({
               If the CLI cannot supply a catalog, resolve its setup error first.
             </p>
           ) : null}
+        </div>
+        <div className="session-control-group">
+          <label className="session-control-label" htmlFor={`kimi-effort-${paneId}`}>
+            Reasoning effort
+          </label>
+          <ThemedCombobox
+            id={`kimi-effort-${paneId}`}
+            className="prompt-settings-select"
+            value={effort}
+            options={sessionModelComboboxOptions(effortOptions, effort)}
+            disabled={disabled}
+            onChange={(value) => {
+              if (value === "auto" || advertisedEfforts.some(option => option.value === value)) {
+                onSessionSettingsChange(session.id, "kimiEffort", value);
+              }
+            }}
+          />
+          {unavailableEffort ? <p className="session-control-hint" role="status">
+            Saved effort {effort} is unavailable. Choose a supported replacement or
+            CLI current to clear it before prompting.
+          </p> : null}
+          <p className="session-control-hint">
+            Choices come from Kimi's live thinking catalog. Refresh models to
+            discover them. Your selection is verified before every prompt;
+            CLI current clears your explicit choice without resetting the CLI value.
+          </p>
         </div>
         <p className="session-control-hint">
           Choose an advertised model while the session is idle. Model changes restart

@@ -389,6 +389,9 @@ export type Session = {
   opencodeModel?: string | null;
   opencodeApprovalMode?: OpenCodeApprovalMode | null;
   opencodeEffort?: string | null;
+  kimiEffort?: string | null;
+  kimiCurrentEffort?: string | null;
+  kimiEffortOptions?: SessionModelOption[];
   opencodeCurrentEffort?: string | null;
   opencodeEffortOptions?: SessionModelOption[];
   opencodeMode?: string | null;
@@ -1258,6 +1261,7 @@ export type SessionSettingsField =
   | "cursorMode"
   | "geminiApprovalMode"
   | "opencodeEffort"
+  | "kimiEffort"
   | "opencodeMode";
 export type SessionSettingsValue =
   | string

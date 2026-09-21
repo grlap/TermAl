@@ -229,6 +229,7 @@ export function useAppSessionActions(
       activePromptPollCancelRef,
       activePromptPollSessionIdRef,
       refreshingSessionModelOptionIdsRef,
+      configuringClonedSessionIdsRef,
       refreshingAgentCommandSessionIdsRef,
     },
     setters: {
@@ -488,6 +489,7 @@ export function useAppSessionActions(
     created: Awaited<ReturnType<typeof createSession>>,
     paneId: string | null,
     agent: AgentType,
+    awaitModelRefresh = false,
   ) {
     const canOpenStaleCreatedSession = () => {
       if (
@@ -517,9 +519,11 @@ export function useAppSessionActions(
       );
     }
     if (canUseCreatedSession && sessionSupportsModelRefresh(agent)) {
-      void handleRefreshSessionModelOptions(created.sessionId, {
+      const refresh = handleRefreshSessionModelOptions(created.sessionId, {
         reportGlobalError: false,
-      });
+      }, awaitModelRefresh);
+      if (awaitModelRefresh) return refresh;
+      void refresh;
     }
   }
 
@@ -528,6 +532,10 @@ export function useAppSessionActions(
     draftTextOverride?: string,
     expandedTextOverride?: string | null,
   ) {
+    if (configuringClonedSessionIdsRef.current[sessionId]) {
+      setRequestError("Wait for the clone's reasoning effort to finish configuring before sending.");
+      return false;
+    }
     const session = sessionLookup.get(sessionId);
     if (!session) {
       return false;
@@ -850,6 +858,7 @@ export function useAppSessionActions(
       return false;
     }
 
+    let configuringCloneId: string | null = null;
     setIsCreating(true);
     try {
       const targetPaneId =
@@ -901,7 +910,34 @@ export function useAppSessionActions(
         return false;
       }
 
-      await openCreatedSession(created, targetPaneId, session.agent);
+      const preserveKimiEffort = session.agent === "Kimi" && !!session.kimiEffort;
+      if (preserveKimiEffort) {
+        // Set the synchronous action fence before adoption can expose a composer.
+        configuringCloneId = created.sessionId;
+        configuringClonedSessionIdsRef.current = setSessionFlag(
+          configuringClonedSessionIdsRef.current, created.sessionId, true,
+        );
+        setUpdatingSessionIds(current => setSessionFlag(current, created.sessionId, true));
+      }
+      const refreshOutcome = await openCreatedSession(created, targetPaneId, session.agent, preserveKimiEffort);
+      if (session.agent === "Kimi" && session.kimiEffort) {
+        // A clone is a new provider session: discover its catalog instead of
+        // trusting the source's cached options. Surface any failure, never
+        // claim a successful clone that silently lost the explicit request.
+        try {
+          if (!isMountedRef.current) return false;
+          if (refreshOutcome !== "refreshed") {
+            throw new Error("Model discovery did not complete; refresh the clone's models while idle and retry its effort setting.");
+          }
+          const configured = await updateSessionSettings(created.sessionId, {
+            kimiEffort: session.kimiEffort,
+          });
+          if (!isMountedRef.current) return false;
+          adoptSessionActionState(created.sessionId, configured);
+        } catch (error) {
+          throw new Error(`Clone created, but its reasoning effort could not be preserved: ${getErrorMessage(error)}`);
+        }
+      }
       const clonedOpenCodeSettings =
         session.agent === "OpenCode"
           ? {
@@ -933,6 +969,15 @@ export function useAppSessionActions(
       reportRequestError(error);
       return false;
     } finally {
+      if (configuringCloneId) {
+        const cloneId = configuringCloneId;
+        configuringClonedSessionIdsRef.current = setSessionFlag(
+          configuringClonedSessionIdsRef.current, cloneId, false,
+        );
+        if (isMountedRef.current) {
+          setUpdatingSessionIds(current => setSessionFlag(current, cloneId, false));
+        }
+      }
       if (isMountedRef.current) {
         setIsCreating(false);
       }
@@ -1350,6 +1395,10 @@ export function useAppSessionActions(
     field: SessionSettingsField,
     value: SessionSettingsValue,
   ) {
+    if (configuringClonedSessionIdsRef.current[sessionId]) {
+      setRequestError("Wait for the clone's reasoning effort to finish configuring before changing settings.");
+      return;
+    }
     const session = sessionLookup.get(sessionId);
     if (!session) {
       return;
@@ -1433,10 +1482,12 @@ export function useAppSessionActions(
   async function handleRefreshSessionModelOptions(
     sessionId: string,
     options?: SessionModelOptionsRefreshOptions,
+    ownsCloneConfiguration = false,
   ): Promise<SessionModelOptionsRefreshOutcome> {
     if (!isMountedRef.current) {
       return "skipped";
     }
+    if (configuringClonedSessionIdsRef.current[sessionId] && !ownsCloneConfiguration) return "skipped";
     const previousSession =
       sessionsRef.current.find((entry) => entry.id === sessionId) ?? null;
     if (refreshingSessionModelOptionIdsRef.current[sessionId]) {

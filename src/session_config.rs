@@ -69,6 +69,11 @@ impl AppState {
     ///   ACP writer.
     /// - Gemini (ACP): model updates in place; approval-mode changes
     ///   flip `runtime_reset_required` for the next send.
+    /// - Kimi (ACP): model changes restart the runtime; effort changes only
+    ///   require rotation when an installed Engram actor context changes.
+    ///   Both are idle-only. Explicit effort survives model changes and is
+    ///   revalidated/acknowledged before every prompt; `auto` clears the request
+    ///   without requiring a catalog, leaving the CLI's current effort alone.
     /// Remote-hosted sessions proxy the entire call unchanged.
     fn update_session_settings(
         &self,
@@ -88,10 +93,27 @@ impl AppState {
             .ok_or_else(|| ApiError::not_found("session not found"))?;
         let engram_developer_name = inner.preferences.engram.developer_name.clone();
         let record = &inner.sessions[index];
-        if record.session.agent == Agent::Kimi && request.model.is_some()
+        let requested_model = request.model.as_deref().map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| matching_session_model_option_value(value, &record.session.model_options)
+                .unwrap_or_else(|| value.to_owned()));
+        if request.kimi_effort.is_some() && record.session.agent != Agent::Kimi {
+            return Err(ApiError::bad_request("kimiEffort is only supported by Kimi"));
+        }
+        if record.session.agent == Agent::Kimi && (request.model.is_some() || request.kimi_effort.is_some())
             && matches!(record.session.status, SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping)
         {
-            return Err(ApiError::conflict("Stop the Kimi turn before changing its model"));
+            return Err(ApiError::conflict("Stop the Kimi turn before changing its model or reasoning effort"));
+        }
+        if let Some(effort) = request.kimi_effort.as_deref() {
+            if effort != "auto" {
+                if requested_model.as_deref().is_some_and(|model| model != record.session.model) {
+                    return Err(ApiError::bad_request("Change the Kimi model first, then refresh its reasoning choices before selecting an effort"));
+                }
+                if !record.session.kimi_effort_options.iter().any(|option| option.value == effort) {
+                    return Err(ApiError::bad_request("Kimi did not advertise this reasoning effort; refresh its choices first"));
+                }
+            }
         }
         if request.opencode_approval_mode.is_some() && record.session.agent != Agent::OpenCode {
             return Err(ApiError::bad_request("opencodeApprovalMode is only supported by OpenCode"));
@@ -226,7 +248,7 @@ impl AppState {
                     || request.opencode_effort.is_some()
                     || request.opencode_mode.is_some()
                 {
-                    return Err(ApiError::bad_request("Kimi sessions only support model settings"));
+                    return Err(ApiError::bad_request("Kimi sessions only support model and reasoning effort settings"));
                 }
             }
             agent => {
@@ -264,15 +286,6 @@ impl AppState {
                 return Err(ApiError::bad_request("session model cannot be empty"));
             }
         }
-        let requested_model = request
-            .model
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(|value| {
-                matching_session_model_option_value(value, &record.session.model_options)
-                    .unwrap_or_else(|| value.to_owned())
-            });
         let requested_opencode_model = if record.session.agent.supports_opencode_settings() {
             request
                 .model
@@ -621,10 +634,20 @@ impl AppState {
                 if let Some(model) = requested_model.as_deref() {
                     if record.session.model != model {
                         record.session.model = model.to_owned();
+                        // Thinking choices belong to the selected model. Keep
+                        // explicit intent, but never validate against the old catalog.
+                        record.session.kimi_effort_options.clear();
+                        record.session.kimi_current_effort = None;
                         // Resume the same conversation in a fresh runtime, then
                         // require the model setter ACK before the next prompt.
                         record.runtime_reset_required = true;
                     }
+                }
+                if let Some(effort) = request.kimi_effort {
+                    // Applied and acknowledged before every prompt. Unlike model
+                    // changes this needs no restart unless an installed Engram
+                    // descriptor's immutable actor context changes below.
+                    record.session.kimi_effort = (effort != "auto").then_some(effort);
                 }
             }
             _ => {}
@@ -1103,7 +1126,12 @@ impl AppState {
                 ))
             })?;
 
-        match response_rx.recv_timeout(Duration::from_secs(30)) {
+        let refresh_timeout = if agent == Agent::Kimi {
+            KIMI_MODEL_REFRESH_TIMEOUT
+        } else {
+            Duration::from_secs(30)
+        };
+        match response_rx.recv_timeout(refresh_timeout) {
             Ok(Ok(())) => Ok(self.snapshot()),
             Ok(Err(detail)) => Err(ApiError::internal(format!(
                 "failed to refresh {} model options: {detail}",

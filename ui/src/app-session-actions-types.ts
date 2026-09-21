@@ -81,6 +81,7 @@ export type UseAppSessionActionsRefs = {
   activePromptPollCancelRef: MutableRefObject<(() => void) | null>;
   activePromptPollSessionIdRef: MutableRefObject<string | null>;
   refreshingSessionModelOptionIdsRef: MutableRefObject<SessionFlagMap>;
+  configuringClonedSessionIdsRef: MutableRefObject<SessionFlagMap>;
   refreshingAgentCommandSessionIdsRef: MutableRefObject<SessionFlagMap>;
 };
 

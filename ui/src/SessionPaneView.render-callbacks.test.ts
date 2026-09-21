@@ -299,9 +299,52 @@ describe("Kimi Prompt view", () => {
     expect(params.onRefreshSessionModelOptions).toHaveBeenCalledWith(session.id);
   });
 
+  it("selects advertised Kimi reasoning effort independently of its model", () => {
+    const { session, onChange } = renderKimiSettings({
+      kimiCurrentEffort: "high",
+      kimiEffortOptions: [
+        { value: "low", label: "Thinking Low" },
+        { value: "high", label: "Thinking High" },
+        { value: "max", label: "Thinking Max" },
+      ],
+    });
+    fireEvent.click(screen.getByRole("combobox", { name: "Reasoning effort" }));
+    fireEvent.click(screen.getByRole("option", { name: "Thinking Max" }));
+    expect(onChange).toHaveBeenCalledWith(session.id, "kimiEffort", "max");
+  });
+
+  it("shows a removed requested effort and allows clearing without a catalog", () => {
+    const { session, onChange } = renderKimiSettings({ kimiEffort: "max", kimiEffortOptions: [] });
+    const control = screen.getByRole("combobox", { name: "Reasoning effort" });
+    expect(control).toHaveTextContent("max (unavailable)");
+    expect(screen.getByRole("status")).toHaveTextContent("Saved effort max is unavailable");
+    fireEvent.click(control);
+    fireEvent.click(screen.getByRole("option", { name: "max (unavailable)" }));
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent.click(control);
+    fireEvent.click(screen.getByRole("option", { name: "CLI current" }));
+    expect(onChange).toHaveBeenCalledWith(session.id, "kimiEffort", "auto");
+  });
+
+  it("does not disguise an unavailable effort as the first advertised option", () => {
+    const { session, onChange } = renderKimiSettings({ kimiEffort: "max", kimiCurrentEffort: "high",
+      kimiEffortOptions: [{ value: "low", label: "Thinking Low" }, { value: "high", label: "Thinking High" }] });
+    const control = screen.getByRole("combobox", { name: "Reasoning effort" });
+    expect(control).toHaveTextContent("max (unavailable)");
+    fireEvent.click(control);
+    fireEvent.click(screen.getByRole("option", { name: "Thinking Low" }));
+    expect(onChange).toHaveBeenCalledWith(session.id, "kimiEffort", "low");
+  });
+
+  it("shows CLI current rather than the first option when no effort was reported", () => {
+    renderKimiSettings({ kimiEffortOptions: [{ value: "low", label: "Thinking Low" }] });
+    expect(screen.getByRole("combobox", { name: "Reasoning effort" })).toHaveTextContent("CLI current");
+  });
+
   it.each(["active", "approval", "stopping"] as const)("fences controls while %s", (status) => {
-    renderKimiSettings({ status });
+    renderKimiSettings({ status, kimiCurrentEffort: "high", kimiEffortOptions: [{ value: "high", label: "Thinking High" }] });
     expect(screen.getByRole("combobox", { name: "Kimi model" })).toBeDisabled();
+    expect(screen.getByRole("combobox", { name: "Reasoning effort" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Refresh models" })).toBeDisabled();
   });
 

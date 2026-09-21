@@ -38,6 +38,14 @@
 //   proxies that don't mutate remote state (pure GETs, no
 //   sync_remote_state_for_target call).
 
+fn remote_model_refresh_timeout(agent: Agent) -> Duration {
+    if agent == Agent::Kimi {
+        KIMI_MODEL_REFRESH_TIMEOUT + Duration::from_secs(5)
+    } else {
+        REMOTE_REQUEST_TIMEOUT
+    }
+}
+
 impl AppState {
 
     fn proxy_remote_session_settings(
@@ -77,9 +85,15 @@ impl AppState {
         let Some(target) = self.remote_session_target(session_id)? else {
             return Err(ApiError::bad_request("session is not assigned to a remote"));
         };
+        let timeout = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            let index = inner.find_session_index(session_id)
+                .ok_or_else(ApiError::local_session_missing)?;
+            remote_model_refresh_timeout(inner.sessions[index].session.agent)
+        };
         let (remote_state, response_lease): (StateResponse, RemoteRequestLease) = self
             .remote_registry
-            .request_json_with_lease(
+            .request_json_with_timeout_and_lease(
             &target.remote,
             Method::POST,
             &format!(
@@ -88,6 +102,7 @@ impl AppState {
             ),
             &[],
             None,
+            timeout,
         )?;
         self.sync_remote_state_for_target(&target, remote_state, &response_lease)?;
         Ok(self.snapshot())

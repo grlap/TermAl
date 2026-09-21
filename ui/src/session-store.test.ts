@@ -58,6 +58,47 @@ function createDraftAttachment(
 }
 
 describe("session-store composer snapshots", () => {
+  it("reuses the Kimi catalog when unrelated snapshot fields change", () => {
+    const initial = createSession({
+      agent: "Kimi",
+      kimiEffortOptions: [{ value: "high", label: "Thinking High" }],
+    });
+    const sync = (session: Session) => syncComposerSessionsStore({
+      sessions: [session], draftsBySessionId: {}, draftAttachmentsBySessionId: {},
+    });
+    sync(initial);
+    const composer = getComposerSessionSnapshotForTesting(initial.id);
+    const summary = getSessionSummarySnapshotForTesting(initial.id);
+    sync({
+      ...initial,
+      status: "active",
+      kimiEffortOptions: [{ value: "high", label: "Thinking High" }],
+    });
+    const nextComposer = getComposerSessionSnapshotForTesting(initial.id);
+    const nextSummary = getSessionSummarySnapshotForTesting(initial.id);
+    expect(nextComposer).not.toBe(composer);
+    expect(nextSummary).not.toBe(summary);
+    expect(nextComposer?.kimiEffortOptions).toBe(composer?.kimiEffortOptions);
+    expect(nextSummary?.kimiEffortOptions).toBe(summary?.kimiEffortOptions);
+  });
+
+  it("publishes Kimi effort selection and live catalog changes to both snapshots", () => {
+    const initial = createSession({ agent: "Kimi", kimiEffort: "low", kimiCurrentEffort: "high",
+      kimiEffortOptions: [{ value: "low", label: "Thinking Low" }] });
+    const sync = (session: Session) => syncComposerSessionsStore({
+      sessions: [session], draftsBySessionId: {}, draftAttachmentsBySessionId: {},
+    });
+    sync(initial);
+    const composer = getComposerSessionSnapshotForTesting(initial.id);
+    const summary = getSessionSummarySnapshotForTesting(initial.id);
+    sync({ ...initial, kimiEffort: "max", kimiCurrentEffort: "low",
+      kimiEffortOptions: [{ value: "max", label: "Thinking Max" }] });
+    expect(getComposerSessionSnapshotForTesting(initial.id)).not.toBe(composer);
+    expect(getSessionSummarySnapshotForTesting(initial.id)).not.toBe(summary);
+    expect(getComposerSessionSnapshotForTesting(initial.id)?.kimiEffort).toBe("max");
+    expect(getSessionSummarySnapshotForTesting(initial.id)?.kimiCurrentEffort).toBe("low");
+    expect(getSessionSummarySnapshotForTesting(initial.id)?.kimiEffortOptions?.[0].value).toBe("max");
+  });
   it("updates the OpenCode slash composer when the session becomes busy", () => {
     const initial = createSession({ agent: "OpenCode", status: "idle" });
     const sync = (session: Session) => syncComposerSessionsStore({

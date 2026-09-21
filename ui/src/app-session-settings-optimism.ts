@@ -137,7 +137,14 @@ export function buildOptimisticSessionSettingsUpdate(
     }
     case "Kimi": {
       const model = normalizedModelValue ?? session.model;
-      return model === session.model ? session : { ...session, model };
+      const kimiEffort = field === "kimiEffort"
+        ? (value === "auto" ? null : value as string)
+        : session.kimiEffort;
+      return model === session.model && kimiEffort === session.kimiEffort
+        ? session : {
+            ...session, model, kimiEffort,
+            ...(model !== session.model ? { kimiEffortOptions: [], kimiCurrentEffort: null } : {}),
+          };
     }
     case "OpenCode": {
       if (field === "opencodeApprovalMode") {
@@ -178,6 +185,23 @@ export function rollbackOptimisticSessionSettingsUpdate(
 ) {
   let changed = false;
   const nextSession = { ...currentSession };
+  if (optimisticSession.agent === "Kimi" &&
+      currentSession.model === optimisticSession.model &&
+      previousSession.model !== optimisticSession.model) {
+    if (currentSession.kimiEffortOptions === optimisticSession.kimiEffortOptions) {
+      nextSession.kimiEffortOptions = previousSession.kimiEffortOptions;
+      changed = true;
+    }
+    if (currentSession.kimiCurrentEffort === optimisticSession.kimiCurrentEffort) {
+      nextSession.kimiCurrentEffort = previousSession.kimiCurrentEffort;
+      changed = true;
+    }
+  }
+  if (currentSession.kimiEffort === optimisticSession.kimiEffort &&
+      currentSession.kimiEffort !== previousSession.kimiEffort) {
+    nextSession.kimiEffort = previousSession.kimiEffort;
+    changed = true;
+  }
   if (currentSession.opencodeApprovalMode === optimisticSession.opencodeApprovalMode &&
       currentSession.opencodeApprovalMode !== previousSession.opencodeApprovalMode) {
     nextSession.opencodeApprovalMode = previousSession.opencodeApprovalMode;

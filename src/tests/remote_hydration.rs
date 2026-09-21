@@ -13,6 +13,21 @@ use super::remote_delta_replay::local_replay_test_remote;
 use super::*;
 
 #[test]
+fn remote_kimi_summary_preserves_requested_and_observed_thinking() {
+    let state = test_app_state();
+    let id = test_session_id(&state, Agent::Kimi);
+    let mut summary = state.snapshot().sessions.into_iter().find(|s| s.id == id).unwrap();
+    summary.kimi_effort = Some("max".to_owned());
+    summary.kimi_current_effort = Some("high".to_owned());
+    summary.kimi_effort_options = vec![SessionModelOption::plain("Max", "max")];
+    let localized = localize_remote_session_summary("remote-kimi", "local-kimi", None, &summary);
+    assert_eq!(localized.id, "local-kimi");
+    assert_eq!(localized.kimi_effort, summary.kimi_effort);
+    assert_eq!(localized.kimi_current_effort, summary.kimi_current_effort);
+    assert_eq!(localized.kimi_effort_options, summary.kimi_effort_options);
+}
+
+#[test]
 fn exact_bounded_tail_replay_retries_dirty_persistence() {
     let mut state = test_app_state();
     let original_persistence_path = state.persistence_path.clone();
@@ -2478,6 +2493,9 @@ fn remote_session_create_forwards_configured_default_model() {
         opencode_effort: None,
         opencode_current_effort: None,
         opencode_effort_options: Vec::new(),
+        kimi_effort: None,
+        kimi_current_effort: None,
+        kimi_effort_options: Vec::new(),
         opencode_mode: None,
         opencode_current_mode: None,
         opencode_mode_options: Vec::new(),

@@ -63,6 +63,9 @@ export type ComposerSessionSnapshot = Readonly<{
   opencodeEffort?: string | null;
   opencodeCurrentEffort?: string | null;
   opencodeEffortOptions?: readonly SessionModelOption[];
+  kimiEffort?: string | null;
+  kimiCurrentEffort?: string | null;
+  kimiEffortOptions?: readonly SessionModelOption[];
   opencodeMode?: string | null;
   opencodeCurrentMode?: string | null;
   opencodeModeOptions?: readonly SessionModelOption[];
@@ -93,6 +96,9 @@ export type SessionSummarySnapshot = Readonly<{
   opencodeEffort?: string | null;
   opencodeCurrentEffort?: string | null;
   opencodeEffortOptions?: readonly SessionModelOption[];
+  kimiEffort?: string | null;
+  kimiCurrentEffort?: string | null;
+  kimiEffortOptions?: readonly SessionModelOption[];
   opencodeMode?: string | null;
   opencodeCurrentMode?: string | null;
   opencodeModeOptions?: readonly SessionModelOption[];
@@ -473,6 +479,10 @@ function buildComposerSessionSnapshot(
     sameSessionModelOptions(previous.opencodeModeOptions, session.opencodeModeOptions)
       ? previous.opencodeModeOptions
       : session.opencodeModeOptions;
+  const nextKimiEffortOptions =
+    previous && sameSessionModelOptions(previous.kimiEffortOptions, session.kimiEffortOptions)
+      ? previous.kimiEffortOptions
+      : session.kimiEffortOptions;
   const nextOpenCodeEffortOptions =
     previous &&
     sameSessionModelOptions(previous.opencodeEffortOptions, session.opencodeEffortOptions)
@@ -503,6 +513,9 @@ function buildComposerSessionSnapshot(
     previous.opencodeModel === session.opencodeModel &&
     previous.opencodeApprovalMode === session.opencodeApprovalMode &&
     previous.opencodeEffort === session.opencodeEffort &&
+    previous.kimiEffort === session.kimiEffort &&
+    previous.kimiCurrentEffort === session.kimiCurrentEffort &&
+    previous.kimiEffortOptions === nextKimiEffortOptions &&
     previous.opencodeCurrentEffort === session.opencodeCurrentEffort &&
     previous.opencodeEffortOptions === nextOpenCodeEffortOptions &&
     previous.opencodeMode === session.opencodeMode &&
@@ -532,6 +545,9 @@ function buildComposerSessionSnapshot(
     opencodeModel: session.opencodeModel,
     opencodeApprovalMode: session.opencodeApprovalMode,
     opencodeEffort: session.opencodeEffort,
+    kimiEffort: session.kimiEffort,
+    kimiCurrentEffort: session.kimiCurrentEffort,
+    kimiEffortOptions: nextKimiEffortOptions,
     opencodeCurrentEffort: session.opencodeCurrentEffort,
     opencodeEffortOptions: nextOpenCodeEffortOptions,
     opencodeMode: session.opencodeMode,
@@ -652,6 +668,10 @@ function buildSessionSummarySnapshot(
     sameSessionModelOptions(previous.opencodeModeOptions, session.opencodeModeOptions)
       ? previous.opencodeModeOptions
       : session.opencodeModeOptions;
+  const nextKimiEffortOptions =
+    previous && sameSessionModelOptions(previous.kimiEffortOptions, session.kimiEffortOptions)
+      ? previous.kimiEffortOptions
+      : session.kimiEffortOptions;
   const nextOpenCodeEffortOptions =
     previous &&
     sameSessionModelOptions(previous.opencodeEffortOptions, session.opencodeEffortOptions)
@@ -681,6 +701,9 @@ function buildSessionSummarySnapshot(
     previous.opencodeModel === session.opencodeModel &&
     previous.opencodeApprovalMode === session.opencodeApprovalMode &&
     previous.opencodeEffort === session.opencodeEffort &&
+    previous.kimiEffort === session.kimiEffort &&
+    previous.kimiCurrentEffort === session.kimiCurrentEffort &&
+    previous.kimiEffortOptions === nextKimiEffortOptions &&
     previous.opencodeCurrentEffort === session.opencodeCurrentEffort &&
     previous.opencodeEffortOptions === nextOpenCodeEffortOptions &&
     previous.opencodeMode === session.opencodeMode &&
@@ -709,6 +732,9 @@ function buildSessionSummarySnapshot(
     opencodeModel: session.opencodeModel,
     opencodeApprovalMode: session.opencodeApprovalMode,
     opencodeEffort: session.opencodeEffort,
+    kimiEffort: session.kimiEffort,
+    kimiCurrentEffort: session.kimiCurrentEffort,
+    kimiEffortOptions: nextKimiEffortOptions,
     opencodeCurrentEffort: session.opencodeCurrentEffort,
     opencodeEffortOptions: nextOpenCodeEffortOptions,
     opencodeMode: session.opencodeMode,

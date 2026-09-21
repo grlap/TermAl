@@ -44,6 +44,7 @@ fn test_engram_mcp_installed_descriptor(session: &Session) -> EngramMcpInstalled
 #[test]
 fn remote_session_settings_payload_includes_agent_dependents_and_timeout_slack() {
     let payload = serde_json::to_value(UpdateSessionSettingsRequest {
+        kimi_effort: None,
         opencode_approval_mode: None,
         name: None,
         model: Some("provider/model".to_owned()),
@@ -64,6 +65,10 @@ fn remote_session_settings_payload_includes_agent_dependents_and_timeout_slack()
     assert_eq!(payload["opencodeMode"], "build");
     assert_eq!(payload["codexFastMode"], true);
     assert!(REMOTE_SESSION_SETTINGS_TIMEOUT > Duration::from_secs(55));
+    for effort in ["max", "auto"] {
+        let request: UpdateSessionSettingsRequest = serde_json::from_value(json!({"kimiEffort":effort})).unwrap();
+        assert_eq!(serde_json::to_value(request).unwrap()["kimiEffort"], effort);
+    }
 }
 
 // Pins the cross-language app-preference key. `OpenCode` contains an internal
@@ -124,6 +129,7 @@ fn non_opencode_sessions_reject_opencode_effort() {
         let error = match state.update_session_settings(
             &session_id,
             UpdateSessionSettingsRequest {
+                kimi_effort: None,
                 opencode_approval_mode: None,
                 name: None,
                 model: None,
@@ -408,6 +414,7 @@ fn offline_opencode_effort_and_mode_changes_do_not_claim_agent_effective_state()
         .update_session_settings(
             &session_id,
             UpdateSessionSettingsRequest {
+                kimi_effort: None,
                 opencode_approval_mode: None,
                 name: None,
                 model: None,
@@ -473,6 +480,7 @@ fn offline_opencode_model_and_effort_change_defers_effort_membership_validation(
         .update_session_settings(
             &session_id,
             UpdateSessionSettingsRequest {
+                kimi_effort: None,
                 opencode_approval_mode: None,
                 name: None,
                 model: Some("openai/new-model".to_owned()),
@@ -1276,6 +1284,7 @@ fn updates_cursor_session_model_settings() {
         .update_session_settings(
             &created.session_id,
             UpdateSessionSettingsRequest {
+                kimi_effort: None,
                 opencode_approval_mode: None,
                 name: None,
                 model: Some("gpt-5.3-codex".to_owned()),
@@ -1331,6 +1340,7 @@ fn updates_codex_session_model_settings_without_restarting_runtime() {
         .update_session_settings(
             &created.session_id,
             UpdateSessionSettingsRequest {
+                kimi_effort: None,
                 opencode_approval_mode: None,
                 name: None,
                 model: Some("gpt-5-mini".to_owned()),
@@ -1394,6 +1404,7 @@ fn updates_codex_reasoning_effort_without_restarting_runtime() {
         .update_session_settings(
             &created.session_id,
             UpdateSessionSettingsRequest {
+                kimi_effort: None,
                 opencode_approval_mode: None,
                 name: None,
                 model: None,
@@ -1498,6 +1509,7 @@ fn normalizes_codex_reasoning_effort_when_switching_models() {
         .update_session_settings(
             &created.session_id,
             UpdateSessionSettingsRequest {
+                kimi_effort: None,
                 opencode_approval_mode: None,
                 name: None,
                 model: Some("gpt-5-codex-mini".to_owned()),
@@ -1584,6 +1596,7 @@ fn rejects_unsupported_codex_reasoning_effort_for_selected_model() {
     let error = match state.update_session_settings(
         &created.session_id,
         UpdateSessionSettingsRequest {
+            kimi_effort: None,
             opencode_approval_mode: None,
             name: None,
             model: None,
@@ -1666,6 +1679,7 @@ fn accepts_codex_max_and_ultra_reasoning_efforts_for_supporting_model() {
             .update_session_settings(
                 &created.session_id,
                 UpdateSessionSettingsRequest {
+                    kimi_effort: None,
                     opencode_approval_mode: None,
                     name: None,
                     model: None,
@@ -1814,6 +1828,7 @@ fn codex_fast_mode_is_catalog_gated_and_clears_on_unsupported_model_switch() {
     let empty_catalog_error = match state.update_session_settings(
         &created.session_id,
         UpdateSessionSettingsRequest {
+            kimi_effort: None,
             opencode_approval_mode: None,
             name: None,
             model: None,
@@ -1869,6 +1884,7 @@ fn codex_fast_mode_is_catalog_gated_and_clears_on_unsupported_model_switch() {
         .update_session_settings(
             &created.session_id,
             UpdateSessionSettingsRequest {
+                kimi_effort: None,
                 opencode_approval_mode: None,
                 name: None,
                 model: None,
@@ -1900,6 +1916,7 @@ fn codex_fast_mode_is_catalog_gated_and_clears_on_unsupported_model_switch() {
         .update_session_settings(
             &created.session_id,
             UpdateSessionSettingsRequest {
+                kimi_effort: None,
                 opencode_approval_mode: None,
                 name: None,
                 model: None,
@@ -1935,6 +1952,7 @@ fn codex_fast_mode_is_catalog_gated_and_clears_on_unsupported_model_switch() {
         .update_session_settings(
             &created.session_id,
             UpdateSessionSettingsRequest {
+                kimi_effort: None,
                 opencode_approval_mode: None,
                 name: None,
                 model: Some("gpt-5.4-mini".to_owned()),
@@ -1965,6 +1983,7 @@ fn codex_fast_mode_is_catalog_gated_and_clears_on_unsupported_model_switch() {
         .update_session_settings(
             &created.session_id,
             UpdateSessionSettingsRequest {
+                kimi_effort: None,
                 opencode_approval_mode: None,
                 name: None,
                 model: Some("gpt-5.5".to_owned()),
@@ -1986,6 +2005,7 @@ fn codex_fast_mode_is_catalog_gated_and_clears_on_unsupported_model_switch() {
         .update_session_settings(
             &created.session_id,
             UpdateSessionSettingsRequest {
+                kimi_effort: None,
                 opencode_approval_mode: None,
                 name: None,
                 model: Some("gpt-5.4-mini".to_owned()),
@@ -2014,6 +2034,7 @@ fn codex_fast_mode_is_catalog_gated_and_clears_on_unsupported_model_switch() {
     let error = match state.update_session_settings(
         &created.session_id,
         UpdateSessionSettingsRequest {
+            kimi_effort: None,
             opencode_approval_mode: None,
             name: None,
             model: None,
@@ -2083,6 +2104,7 @@ fn updates_claude_session_model_settings_without_restarting_runtime() {
         .update_session_settings(
             &created.session_id,
             UpdateSessionSettingsRequest {
+                kimi_effort: None,
                 opencode_approval_mode: None,
                 name: None,
                 model: Some("opus".to_owned()),
@@ -2168,6 +2190,7 @@ fn installed_engram_agent_runtimes_rotate_on_identity_changes() {
         .update_session_settings(
             &claude.session_id,
             UpdateSessionSettingsRequest {
+                kimi_effort: None,
                 opencode_approval_mode: None,
                 name: None,
                 model: Some("claude-sonnet-4-1".to_owned()),
@@ -2244,6 +2267,7 @@ fn installed_engram_agent_runtimes_rotate_on_identity_changes() {
         .update_session_settings(
             &cursor.session_id,
             UpdateSessionSettingsRequest {
+                kimi_effort: None,
                 opencode_approval_mode: None,
                 name: None,
                 model: Some("cursor-next".to_owned()),
@@ -2299,6 +2323,7 @@ fn installed_engram_agent_runtimes_rotate_on_identity_changes() {
         .update_session_settings(
             &opencode_id,
             UpdateSessionSettingsRequest {
+                kimi_effort: None,
                 opencode_approval_mode: None,
                 name: None,
                 model: None,
@@ -2354,6 +2379,7 @@ fn installed_engram_agent_runtimes_rotate_on_identity_changes() {
         .update_session_settings(
             &codex_id,
             UpdateSessionSettingsRequest {
+                kimi_effort: None,
                 opencode_approval_mode: None,
                 name: None,
                 model: Some("gpt-5.5".to_owned()),
@@ -2415,6 +2441,7 @@ fn installed_engram_agent_runtimes_rotate_on_identity_changes() {
         .update_session_settings(
             &gemini_id,
             UpdateSessionSettingsRequest {
+                kimi_effort: None,
                 opencode_approval_mode: None,
                 name: None,
                 model: Some("gemini-new".to_owned()),
@@ -2444,6 +2471,47 @@ fn installed_engram_agent_runtimes_rotate_on_identity_changes() {
         gemini_rx.try_recv(),
         Err(mpsc::TryRecvError::Empty)
     ));
+}
+
+#[test]
+fn kimi_effort_changes_rotate_only_an_installed_engram_identity() {
+    for installed in [false, true] {
+        for requested in ["max", "auto", "high"] {
+            let state = test_app_state();
+            let id = test_session_id(&state, Agent::Kimi);
+            let (runtime, _rx) = test_acp_runtime_handle(AcpAgent::Kimi, "kimi-engram-effort");
+            {
+                let mut inner = state.inner.lock().unwrap();
+                let index = inner.find_session_index(&id).unwrap();
+                let record = &mut inner.sessions[index];
+                record.session.kimi_effort = Some("high".to_owned());
+                record.session.kimi_effort_options = vec![
+                    SessionModelOption::plain("High", "high"), SessionModelOption::plain("Max", "max"),
+                ];
+                record.runtime = SessionRuntime::Acp(runtime);
+                if installed {
+                    record.engram_mcp_installed = Some(test_engram_mcp_installed_descriptor(&record.session));
+                }
+                record.runtime_reset_required = false;
+            }
+            state.update_session_settings(&id,
+                serde_json::from_value(json!({"kimiEffort":requested})).unwrap()).unwrap();
+            let inner = state.inner.lock().unwrap();
+            let record = &inner.sessions[inner.find_session_index(&id).unwrap()];
+            assert_eq!(record.runtime_reset_required, installed && requested != "high");
+            let context = engram_actor_context(&record.session).unwrap();
+            if requested == "auto" {
+                assert!(!context.contains("reasoning="));
+                assert!(record.session.kimi_effort.is_none());
+            } else {
+                assert!(context.contains(&format!("reasoning={requested}")));
+            }
+            if let Some(descriptor) = &record.engram_mcp_installed {
+                assert!(descriptor.actor_context.as_deref().unwrap().contains("reasoning=high"),
+                    "installed context stays immutable until next-turn rotation");
+            }
+        }
+    }
 }
 
 // ACP handshakes may replace a configured model alias with the runtime's
@@ -2491,6 +2559,7 @@ fn runtime_model_sync_preserves_the_installed_engram_actor_identity() {
         .update_session_settings(
             &session_id,
             UpdateSessionSettingsRequest {
+                kimi_effort: None,
                 opencode_approval_mode: None,
                 name: None,
                 model: None,
@@ -2557,6 +2626,7 @@ fn runtime_model_sync_preserves_the_installed_engram_actor_identity() {
         .update_session_settings(
             &session_id,
             UpdateSessionSettingsRequest {
+                kimi_effort: None,
                 opencode_approval_mode: None,
                 name: None,
                 model: Some("cursor-user-model".to_owned()),
@@ -2637,6 +2707,7 @@ fn updating_running_claude_session_to_default_model_requires_restart() {
         .update_session_settings(
             &created.session_id,
             UpdateSessionSettingsRequest {
+                kimi_effort: None,
                 opencode_approval_mode: None,
                 name: None,
                 model: Some("default".to_owned()),
@@ -2724,6 +2795,7 @@ fn updates_claude_effort_and_marks_runtime_for_restart() {
         .update_session_settings(
             &created.session_id,
             UpdateSessionSettingsRequest {
+                kimi_effort: None,
                 opencode_approval_mode: None,
                 name: None,
                 model: None,

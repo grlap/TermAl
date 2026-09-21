@@ -339,6 +339,17 @@ export function buildSessionTooltipRows(
     }
   }
 
+  if (session.agent === "Kimi") {
+    rows.push({
+      key: "Reasoning",
+      value: session.kimiEffort
+        ? formatTooltipEnumLabel(session.kimiEffort)
+        : session.kimiCurrentEffort
+          ? `CLI current (${formatTooltipEnumLabel(session.kimiCurrentEffort)})`
+          : "CLI current",
+    });
+  }
+
   return rows;
 }
 

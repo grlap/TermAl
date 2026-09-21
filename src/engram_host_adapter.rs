@@ -2949,7 +2949,10 @@ fn engram_actor_context(session: &Session) -> Option<String> {
             .as_deref()
             .map(str::trim)
             .filter(|value| !value.is_empty() && *value != OPENCODE_CONFIG_AUTO),
-        Agent::Cursor | Agent::Gemini | Agent::Kimi => None,
+        Agent::Kimi => session.kimi_effort.as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty() && *value != "auto"),
+        Agent::Cursor | Agent::Gemini => None,
     };
     if let Some(reasoning) = reasoning {
         append_engram_actor_context_field(&mut context, "reasoning", reasoning);

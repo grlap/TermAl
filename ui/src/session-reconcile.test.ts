@@ -101,6 +101,22 @@ function expectStableMessageReference(message: Session["messages"][number]) {
 }
 
 describe("reconcileSessions", () => {
+  it.each<Partial<Session>>([
+    { kimiEffort: "max" },
+    { kimiCurrentEffort: "low" },
+    { kimiEffortOptions: [{ value: "max", label: "Thinking Max" }] },
+  ])("publishes an independent Kimi effort change %j", (change) => {
+    const previous = [makeSession("kimi", {
+      agent: "Kimi", kimiEffort: "high", kimiCurrentEffort: "high",
+      kimiEffortOptions: [{ value: "high", label: "Thinking High" }],
+    })];
+    const next = [{ ...previous[0], ...change }];
+    const reconciled = reconcileSessions(previous, next);
+    expect(reconciled[0]).not.toBe(previous[0]);
+    expect(reconciled[0]).toMatchObject(change);
+    expect(reconcileSessions(reconciled, structuredClone(next))[0]).toBe(reconciled[0]);
+  });
+
   it("detects model service-tier catalog changes", () => {
     const previous = [
       makeSession("session-a", {

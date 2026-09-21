@@ -132,6 +132,7 @@ function makeSessionActionsParams(
     activePromptPollCancelRef: { current: null },
     activePromptPollSessionIdRef: { current: null },
     refreshingSessionModelOptionIdsRef: { current: {} },
+    configuringClonedSessionIdsRef: { current: {} },
     refreshingAgentCommandSessionIdsRef: { current: {} },
   };
 
@@ -461,6 +462,74 @@ describe("useAppSessionActions", () => {
       opencodeEffort: "high",
       opencodeMode: "plan",
     });
+  });
+
+  it.each([true, false])("discovers and preserves explicit Kimi effort on clone (accepted=%s)", async (accepted) => {
+    const source = makeSession("kimi-source", { agent: "Kimi", kimiEffort: "max" });
+    const clone = makeSession("kimi-clone", { agent: "Kimi" });
+    vi.spyOn(api, "createSession").mockResolvedValue({
+      revision: 6, serverInstanceId: "server-a", session: clone, sessionId: clone.id,
+    });
+    const refresh = vi.spyOn(api, "refreshSessionModelOptions").mockResolvedValue({
+      ...makeStateResponse(7), sessions: [{ ...clone, kimiEffortOptions: accepted ? [{ value: "max", label: "Max" }] : [] }],
+    });
+    const patch = vi.spyOn(api, "updateSessionSettings");
+    if (accepted) patch.mockResolvedValue({ ...makeStateResponse(8), sessions: [{ ...clone, kimiEffort: "max" }] });
+    else patch.mockRejectedValue(new Error("Kimi did not advertise this reasoning effort"));
+    const params = makeSessionActionsParams({ adoptState: vi.fn(() => true) });
+    params.lookups.sessionLookup = new Map([[source.id, source]]);
+    params.refs.sessionsRef.current = [source];
+    const actions = useAppSessionActions(params);
+    await expect(actions.handleCloneSessionFromExisting(source.id)).resolves.toBe(accepted);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(refresh).toHaveBeenCalledWith(clone.id);
+    expect(patch).toHaveBeenCalledWith(clone.id, { kimiEffort: "max" });
+    expect(refresh.mock.invocationCallOrder[0]).toBeLessThan(patch.mock.invocationCallOrder[0]!);
+    if (!accepted) expect(params.reportRequestError).toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.stringContaining("Clone created, but its reasoning effort could not be preserved") }),
+    );
+  });
+
+  it.each([true, false])("awaits one guarded refresh while cloning Kimi effort (adopted=%s)", async (adopted) => {
+    const source = makeSession("kimi-source", { agent: "Kimi", model: "model-b", kimiEffort: "max" });
+    const clone = makeSession("kimi-clone", { agent: "Kimi", model: "model-b" });
+    vi.spyOn(api, "createSession").mockResolvedValue({
+      revision: 6, serverInstanceId: "server-a", session: clone, sessionId: clone.id,
+    });
+    let resolveRefresh!: (state: StateResponse) => void;
+    const refresh = vi.spyOn(api, "refreshSessionModelOptions").mockReturnValue(
+      new Promise<StateResponse>((resolve) => { resolveRefresh = resolve; }),
+    );
+    const patch = vi.spyOn(api, "updateSessionSettings").mockResolvedValue({
+      ...makeStateResponse(8), sessions: [{ ...clone, kimiEffort: "max" }],
+    });
+    const params = makeSessionActionsParams({ adoptState: vi.fn(() => adopted) });
+    params.lookups.sessionLookup = new Map([[source.id, source]]);
+    params.refs.sessionsRef.current = [source];
+    const actions = useAppSessionActions(params);
+    const cloning = actions.handleCloneSessionFromExisting(source.id);
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+    expect(patch).not.toHaveBeenCalled();
+    expect(params.refs.configuringClonedSessionIdsRef.current[clone.id]).toBe(true);
+    expect(actions.handleSend(clone.id, "do not send before effort is saved")).toBe(false);
+    await actions.handleSessionSettingsChange(clone.id, "kimiEffort", "low");
+    expect(params.setters.setRequestError).toHaveBeenCalledWith(
+      "Wait for the clone's reasoning effort to finish configuring before changing settings.",
+    );
+    expect(patch).not.toHaveBeenCalled();
+    await expect(actions.handleRefreshSessionModelOptions(clone.id)).resolves.toBe("skipped");
+    expect(refresh).toHaveBeenCalledTimes(1);
+    resolveRefresh({ ...makeStateResponse(7), sessions: [
+      { ...clone, kimiEffortOptions: [{ value: "max", label: "Max" }] },
+    ] });
+    await expect(cloning).resolves.toBe(adopted);
+    expect(params.refs.configuringClonedSessionIdsRef.current[clone.id]).toBeUndefined();
+    expect(refresh).toHaveBeenCalledTimes(1);
+    if (adopted) expect(patch).toHaveBeenCalledWith(clone.id, { kimiEffort: "max" });
+    else {
+      expect(patch).not.toHaveBeenCalled();
+      expect(params.requestActionRecoveryResync).toHaveBeenCalled();
+    }
   });
 
   it("clears the acted session hydration mismatch on stale same-instance action success", async () => {

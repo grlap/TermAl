@@ -1366,6 +1366,7 @@ export function updateSessionSettings(
     geminiApprovalMode?: GeminiApprovalMode;
     opencodeApprovalMode?: OpenCodeApprovalMode;
     opencodeEffort?: string;
+    kimiEffort?: string;
     opencodeMode?: string;
   },
 ) {

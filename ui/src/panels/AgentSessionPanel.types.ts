@@ -72,6 +72,7 @@ export type SessionSettingsField =
   | "cursorMode"
   | "geminiApprovalMode"
   | "opencodeEffort"
+  | "kimiEffort"
   | "opencodeMode";
 
 export type SessionSettingsValue =

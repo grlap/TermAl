@@ -568,6 +568,13 @@ struct DeleteConversationMarkerResponse {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Session {
+    /// Requested Kimi thinking value; None leaves the CLI's current choice alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    kimi_effort: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    kimi_current_effort: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    kimi_effort_options: Vec<SessionModelOption>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     opencode_approval_mode: Option<OpenCodeApprovalMode>,
     id: String,
@@ -680,6 +687,12 @@ struct Session {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct StateSessionSummary {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    kimi_effort: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    kimi_current_effort: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    kimi_effort_options: Vec<SessionModelOption>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     opencode_approval_mode: Option<OpenCodeApprovalMode>,
     id: String,
@@ -2160,6 +2173,7 @@ struct FollowupDelegationRequest {
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct UpdateSessionSettingsRequest {
+    kimi_effort: Option<String>,
     opencode_approval_mode: Option<OpenCodeApprovalMode>,
     name: Option<String>,
     model: Option<String>,

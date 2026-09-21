@@ -201,6 +201,9 @@ impl StateInner {
                     .then(|| OPENCODE_CONFIG_AUTO.to_owned()),
                 opencode_current_effort: None,
                 opencode_effort_options: Vec::new(),
+                kimi_effort: None,
+                kimi_current_effort: None,
+                kimi_effort_options: Vec::new(),
                 opencode_mode: agent
                     .supports_opencode_settings()
                     .then(|| OPENCODE_CONFIG_AUTO.to_owned()),

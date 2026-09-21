@@ -72,6 +72,9 @@ export type SlashPaletteSession = Pick<
   | "opencodeCurrentMode"
   | "opencodeEffort"
   | "opencodeEffortOptions"
+  | "kimiEffort"
+  | "kimiCurrentEffort"
+  | "kimiEffortOptions"
   | "opencodeMode"
   | "opencodeModeOptions"
   | "opencodeModel"
@@ -188,7 +191,7 @@ export const SLASH_COMMANDS: ReadonlyArray<{
     detail: "Change the effort for the next prompt",
     id: "effort",
     label: "/effort",
-    supports: ["Claude", "Codex", "OpenCode"],
+    supports: ["Claude", "Codex", "OpenCode", "Kimi"],
   },
   {
     command: "/fast",
@@ -926,6 +929,27 @@ export function opencodeEffortSlashState(
   };
 }
 
+export function kimiEffortSlashState(session: SlashPaletteSession, query: string): SlashChoiceState {
+  const busy = session.status === "active" || session.status === "approval" || session.status === "stopping";
+  const unavailable = session.kimiEffort && !(session.kimiEffortOptions ?? [])
+    .some(option => option.value === session.kimiEffort);
+  const currentLabel = session.kimiCurrentEffort ? `CLI current (${session.kimiCurrentEffort})` : "CLI current";
+  return {
+    title: "Kimi reasoning effort",
+    emptyMessage: busy ? "Stop the Kimi turn before changing reasoning effort."
+      : `No Kimi reasoning efforts match "${query}". Refresh models in Prompt settings for new choices.`,
+    hint: unavailable
+      ? `Saved effort "${session.kimiEffort}" is unavailable. Choose a supported effort or CLI current before prompting.`
+      : "Choose an advertised thinking effort for the next prompt. Tool approvals stay manual.",
+    items: busy ? [] : makeSlashChoices(
+      [{ value: "auto", label: currentLabel, detail: "Clear the explicit request; keep the CLI's current effort" },
+      ...(session.kimiEffortOptions ?? []).filter(option => option.value !== "auto").map(option => ({
+        value: option.value, label: option.label, detail: option.description ?? option.label,
+      }))], "kimiEffort", session.kimiEffort ?? "auto", query,
+    ),
+  };
+}
+
 export function sessionModelSlashState(
   session: SlashPaletteSession,
   query: string,
@@ -1136,7 +1160,9 @@ export function buildSlashPaletteState(
                   ? claudeEffortSlashState(session, rawOptionQuery)
                   : session.agent === "OpenCode"
                     ? opencodeEffortSlashState(session, rawOptionQuery)
-                    : null
+                    : session.agent === "Kimi"
+                      ? kimiEffortSlashState(session, rawOptionQuery)
+                      : null
               : activeCommand.id === "fast"
                 ? session.agent === "Codex"
                   ? codexFastSlashState(

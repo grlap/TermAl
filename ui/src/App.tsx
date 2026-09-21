@@ -509,6 +509,7 @@ export default function App() {
   const sessionListSearchInputRef = useRef<HTMLInputElement>(null);
   const confirmedUnknownModelSendsRef = useRef<Set<string>>(new Set());
   const refreshingSessionModelOptionIdsRef = useRef<SessionFlagMap>({});
+  const configuringClonedSessionIdsRef = useRef<SessionFlagMap>({});
   const refreshingAgentCommandSessionIdsRef = useRef<SessionFlagMap>({});
   const controlPanelSurfaceRef = useRef<ControlPanelSurfaceHandle | null>(null);
   const lastDerivedControlPanelFilesystemRootRef = useRef<string | null>(null);
@@ -1036,6 +1037,7 @@ export default function App() {
       activePromptPollCancelRef,
       activePromptPollSessionIdRef,
       refreshingSessionModelOptionIdsRef,
+      configuringClonedSessionIdsRef,
       refreshingAgentCommandSessionIdsRef,
     },
     setters: {

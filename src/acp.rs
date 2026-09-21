@@ -73,6 +73,9 @@
 const ACP_CANCEL_GRACE: Duration = Duration::from_secs(2);
 const MAX_ACP_OPTION_LABEL_CHARS: usize = 200;
 const MAX_ACP_OPTION_DESCRIPTION_CHARS: usize = 1_000;
+const ACP_INITIALIZE_TIMEOUT: Duration = Duration::from_secs(15);
+const ACP_AUTH_TIMEOUT: Duration = Duration::from_secs(30);
+const ACP_SESSION_SETUP_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Spawns ACP runtime.
 fn spawn_acp_runtime(
@@ -157,7 +160,7 @@ fn spawn_acp_runtime(
                     },
                     "clientCapabilities": {},
                 }),
-                Duration::from_secs(15),
+                ACP_INITIALIZE_TIMEOUT,
                 agent,
             )
             .and_then(|result| {
@@ -439,7 +442,7 @@ fn maybe_authenticate_acp_runtime(
         pending_requests,
         "authenticate",
         json!({ "methodId": method_id }),
-        Duration::from_secs(30),
+        ACP_AUTH_TIMEOUT,
         agent,
     );
     if agent == AcpAgent::Kimi {
@@ -574,7 +577,10 @@ fn handle_acp_prompt_command(
     if agent == AcpAgent::Kimi {
         if let Err(err) = configure_kimi_manual_approvals(
             writer, pending_requests, &external_session_id,
-        ) {
+        ).and_then(|config| state.admit_kimi_thinking(
+            writer, pending_requests, session_id, &external_session_id, &config,
+            Some(runtime_token),
+        )) {
             set_acp_turn_active(turn_lifecycle, false);
             return Err(err);
         }
@@ -892,6 +898,13 @@ fn ensure_acp_session_ready_inner(
     if let Some(existing_session_id) = existing_session_id {
         return Ok(existing_session_id);
     }
+    // The runtime snapshot carries identity even when Engram is disabled;
+    // only the test shim can publish without a runtime token.
+    let source_runtime = match &engram_mcp_source {
+        AcpEngramMcpSource::Runtime { token, .. } => Some(*token),
+        #[cfg(test)]
+        AcpEngramMcpSource::LiveState => None,
+    };
     let mcp_servers = match engram_mcp_source {
         AcpEngramMcpSource::Runtime { token, engram } => state
             .termal_delegation_mcp_acp_servers_for_runtime_snapshot(
@@ -922,7 +935,7 @@ fn ensure_acp_session_ready_inner(
                 "cwd": command.cwd,
                 "mcpServers": mcp_servers.clone(),
             }),
-            Duration::from_secs(30),
+            ACP_SESSION_SETUP_TIMEOUT,
             agent,
         );
         match result {
@@ -947,7 +960,7 @@ fn ensure_acp_session_ready_inner(
                 "cwd": command.cwd,
                 "mcpServers": mcp_servers.clone(),
             }),
-            Duration::from_secs(30),
+            ACP_SESSION_SETUP_TIMEOUT,
             agent,
         );
         {
@@ -995,15 +1008,32 @@ fn ensure_acp_session_ready_inner(
         // Discovery must work even when a saved model was removed or mistyped.
         // Keep the external conversation, but do not mark its configuration as
         // admitted for prompts. The next prompt resumes and validates the latest
-        // requested selection; catalog discovery never applies an older selection.
+        // requested selection. Thinking discovery may set a valid snapshot of
+        // the requested model, but cannot overwrite newer local selection intent.
         runtime_state.lock().expect("ACP runtime state mutex poisoned")
             .current_session_id = None;
+        // Continuity is already durable; a failed config publication cannot
+        // orphan the conversation or mark unvalidated settings prompt-ready.
         if !has_acp_config_option_list(&session_config, "model") {
             bail!("Kimi did not advertise a model catalog; use a CLI compatible with the verified 2.0.2 ACP contract and refresh again");
         }
-        state.sync_session_model_options(
-            session_id, None, acp_model_options(&session_config, agent),
+        state.sync_kimi_config_observation(
+            session_id, &session_config, Some(&command.model), source_runtime, true,
         )?;
+        if let Some(config) = discover_kimi_thinking_config(
+            writer, pending_requests, &external_session_id, &command.model, &session_config,
+        )? {
+            state.sync_kimi_config_observation(
+                session_id, &config, Some(&command.model), source_runtime, false,
+            )?;
+        } else {
+            // The saved model is no longer advertised. Preserve requested
+            // effort, but do not offer another model's cached thinking choices.
+            state.sync_kimi_config_observation(
+                session_id, &json!({"configOptions":[{"id":"thinking", "options":[]}]}),
+                Some(&command.model), source_runtime, false,
+            )?;
+        }
     } else if agent == AcpAgent::OpenCode {
         reconcile_opencode_config(
             writer,
@@ -1082,7 +1112,7 @@ fn start_acp_session(
             "cwd": cwd,
             "mcpServers": mcp_servers,
         }),
-        Duration::from_secs(30),
+        ACP_SESSION_SETUP_TIMEOUT,
         agent,
     )?;
     let created_session_id = result
@@ -1423,6 +1453,14 @@ fn handle_acp_notification(
                 log_unhandled_acp_event(agent, "ACP session/update missing params.update", message);
                 return Ok(());
             };
+            if agent == AcpAgent::Kimi
+                && update.get("sessionUpdate").and_then(Value::as_str)
+                    .is_some_and(|kind| is_acp_config_update_kind(kind, agent))
+            {
+                return state.sync_kimi_config_observation(
+                    session_id, update, None, Some(runtime_token), true,
+                );
+            }
             if agent == AcpAgent::OpenCode
                 && update
                     .get("sessionUpdate")
@@ -1530,6 +1568,9 @@ fn handle_acp_session_update(
             }
         }
         kind if is_acp_config_update_kind(kind, agent) => {
+            if agent == AcpAgent::Kimi {
+                bail!("Kimi config notifications require runtime identity");
+            }
             if agent == AcpAgent::OpenCode {
                 input_tx
                     .send(AcpRuntimeCommand::ReconcileOpenCodeConfig {
@@ -1539,15 +1580,13 @@ fn handle_acp_session_update(
                         anyhow!("failed to queue OpenCode config reconciliation: {err}")
                     })?;
             } else {
-                // Kimi partial notifications are not evidence that its catalog
-                // disappeared. Preserve other adapters' existing behavior.
-                if agent != AcpAgent::Kimi || has_acp_config_option_list(update, "model") {
-                    state.sync_session_model_options(
-                        session_id,
-                        current_acp_config_option_value(update, "model"),
-                        acp_model_options(update, agent),
-                    )?;
-                }
+                // Kimi uses the runtime-fenced notification path above. Keep
+                // the other adapters' existing full-replacement semantics.
+                state.sync_session_model_options(
+                    session_id,
+                    current_acp_config_option_value(update, "model"),
+                    acp_model_options(update, agent),
+                )?;
                 if agent == AcpAgent::Cursor {
                     state.sync_session_cursor_mode(session_id, acp_cursor_mode(update))?;
                 }

@@ -259,6 +259,9 @@ mod visible_session_hydration_error_tests {
             opencode_effort: None,
             opencode_current_effort: None,
             opencode_effort_options: Vec::new(),
+            kimi_effort: None,
+            kimi_current_effort: None,
+            kimi_effort_options: Vec::new(),
             opencode_mode: None,
             opencode_approval_mode: None,
             opencode_current_mode: None,
@@ -677,6 +680,9 @@ impl AppState {
             opencode_effort: session.opencode_effort.clone(),
             opencode_current_effort: session.opencode_current_effort.clone(),
             opencode_effort_options: session.opencode_effort_options.clone(),
+            kimi_effort: session.kimi_effort.clone(),
+            kimi_current_effort: session.kimi_current_effort.clone(),
+            kimi_effort_options: session.kimi_effort_options.clone(),
             opencode_mode: session.opencode_mode.clone(),
             opencode_approval_mode: session.opencode_approval_mode,
             opencode_current_mode: session.opencode_current_mode.clone(),
@@ -732,6 +738,9 @@ impl AppState {
         debug_assert_eq!(summary.gemini_approval_mode, full.gemini_approval_mode);
         debug_assert_eq!(summary.opencode_model, full.opencode_model);
         debug_assert_eq!(summary.opencode_effort, full.opencode_effort);
+        debug_assert_eq!(summary.kimi_effort, full.kimi_effort);
+        debug_assert_eq!(summary.kimi_current_effort, full.kimi_current_effort);
+        debug_assert_eq!(summary.kimi_effort_options, full.kimi_effort_options);
         debug_assert_eq!(
             summary.opencode_current_effort,
             full.opencode_current_effort

@@ -1183,6 +1183,9 @@ fn sample_remote_orchestrator_state(
                     .then(|| OPENCODE_CONFIG_AUTO.to_owned()),
                 opencode_current_effort: None,
                 opencode_effort_options: Vec::new(),
+                kimi_effort: None,
+                kimi_current_effort: None,
+                kimi_effort_options: Vec::new(),
                 opencode_mode: agent
                     .supports_opencode_settings()
                     .then(|| OPENCODE_CONFIG_AUTO.to_owned()),
@@ -1307,6 +1310,9 @@ fn test_state_session_summary_from_session(session: &Session) -> StateSessionSum
         opencode_effort: session.opencode_effort.clone(),
         opencode_current_effort: session.opencode_current_effort.clone(),
         opencode_effort_options: session.opencode_effort_options.clone(),
+        kimi_effort: session.kimi_effort.clone(),
+        kimi_current_effort: session.kimi_current_effort.clone(),
+        kimi_effort_options: session.kimi_effort_options.clone(),
         opencode_mode: session.opencode_mode.clone(),
         opencode_current_mode: session.opencode_current_mode.clone(),
         opencode_mode_options: session.opencode_mode_options.clone(),
@@ -2384,6 +2390,7 @@ fn canonicalizes_session_model_updates_from_live_model_labels() {
         .update_session_settings(
             &created.session_id,
             UpdateSessionSettingsRequest {
+                kimi_effort: None,
                 opencode_approval_mode: None,
                 name: None,
                 model: Some("GPT-5.4".to_owned()),
@@ -2437,6 +2444,7 @@ fn revisions_increase_for_visible_state_changes() {
         .update_session_settings(
             &created.session_id,
             UpdateSessionSettingsRequest {
+                kimi_effort: None,
                 opencode_approval_mode: None,
                 name: None,
                 model: None,
@@ -2459,6 +2467,7 @@ fn revisions_increase_for_visible_state_changes() {
         .update_session_settings(
             &created.session_id,
             UpdateSessionSettingsRequest {
+                kimi_effort: None,
                 opencode_approval_mode: None,
                 name: Some("Revision Test Renamed".to_owned()),
                 model: None,
@@ -2505,6 +2514,7 @@ fn renames_sessions_via_settings_updates() {
         .update_session_settings(
             &created.session_id,
             UpdateSessionSettingsRequest {
+                kimi_effort: None,
                 opencode_approval_mode: None,
                 name: Some("New Name".to_owned()),
                 model: None,

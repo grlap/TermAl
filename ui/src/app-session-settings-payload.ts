@@ -33,6 +33,7 @@ export type SessionSettingsPayload = {
   claudeApprovalMode?: ClaudeApprovalMode;
   geminiApprovalMode?: GeminiApprovalMode;
   opencodeEffort?: string;
+  kimiEffort?: string;
   opencodeMode?: string;
   opencodeApprovalMode?: OpenCodeApprovalMode;
 };
@@ -108,6 +109,7 @@ export function buildSessionSettingsPayload(
       }
       return null;
     case "Kimi":
+      if (field === "kimiEffort") return { kimiEffort: value as string };
       return field === "model" ? { model: normalizedModelValue ?? (value as string) } : null;
     case "OpenCode":
       if (field === "opencodeApprovalMode") {
