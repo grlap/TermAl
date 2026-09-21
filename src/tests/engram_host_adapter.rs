@@ -3,6 +3,9 @@
 #[path = "engram_session_reconciliation.rs"]
 mod session_reconciliation;
 
+#[path = "engram_root_dispatch.rs"]
+mod root_dispatch;
+
 use super::delegation_support::test_app_state_with_delegation_codex_runtime;
 use super::phase_sync::{DEADLOCK_GUARD, receive};
 use super::*;
@@ -2841,8 +2844,6 @@ fn live_engram_store_turn_gated_bind_evaluate_begin_checkpoint_e2e() {
             ENGRAM_CONTROL_ASSURANCE,
             "--authorized-by",
             "termal-e2e",
-            "--reason",
-            "TermAl live turn-gated acceptance test",
         ])
         .output()
         .expect("real Engram init should launch");
@@ -8461,6 +8462,8 @@ fn engram_mcp_revocation_reclaims_an_unowned_fence_for_the_same_runtime() {
 fn engram_mcp_grant_clear_dispatches_queued_prompt_with_fresh_runtime() {
     let (state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-mcp-revoke-queue");
+    let transport = StatefulEngramControlTransport::new();
+    state.install_control_test_transport(transport.clone());
     let root = state
         .test_temp_root
         .as_ref()
@@ -8517,6 +8520,10 @@ fn engram_mcp_grant_clear_dispatches_queued_prompt_with_fresh_runtime() {
     assert!(record.queued_prompts.is_empty());
     assert!(record.session.pending_prompts.is_empty());
     assert!(!record.runtime_stop_in_progress);
+    assert!(
+        record.engram.active_grant_id.is_some(),
+        "resumed root must have begun a grant"
+    );
 }
 
 #[test]
@@ -8563,7 +8570,11 @@ fn engram_mcp_reconfigure_binds_fresh_connection_before_resuming_queued_prompt()
 
     let (bind_step, bind_gate) =
         gated_engram_step("session_bind", bind_reply("fresh-reconfigure-token"));
-    let transport = GatedEngramControlTransport::new([bind_step]);
+    let transport = GatedEngramControlTransport::new([
+        bind_step,
+        immediate_engram_step("turn_evaluate", grant_reply("reconfigure-grant")),
+        immediate_engram_step("turn_begin", begin_reply("reconfigure-grant")),
+    ]);
     state.install_control_test_transport(transport.clone());
     let fresh_home = root.join("fresh-home");
     fs::create_dir_all(&fresh_home).expect("fresh Engram home should exist");
@@ -8605,7 +8616,12 @@ fn engram_mcp_reconfigure_binds_fresh_connection_before_resuming_queued_prompt()
             .expect("fresh runtime should receive resumed prompt"),
         CodexRuntimeCommand::Prompt { .. }
     ));
-    assert_eq!(transport.requests().len(), 1);
+    let operations = transport
+        .requests()
+        .iter()
+        .map(|r| r.request["operation"].as_str().unwrap().to_owned())
+        .collect::<Vec<_>>();
+    assert_eq!(operations, ["session_bind", "turn_evaluate", "turn_begin"]);
 }
 
 #[test]
@@ -8784,6 +8800,8 @@ fn engram_mcp_grant_clear_surfaces_shutdown_failure_and_blocks_resume() {
 #[test]
 fn engram_mcp_degraded_acp_runtime_is_replaced_by_an_explicit_prompt() {
     let state = test_app_state();
+    let transport = StatefulEngramControlTransport::new();
+    state.install_control_test_transport(transport.clone());
     let root = state
         .test_temp_root
         .as_ref()
@@ -8892,6 +8910,10 @@ fn engram_mcp_degraded_acp_runtime_is_replaced_by_an_explicit_prompt() {
         assert_eq!(record.session.status, SessionStatus::Active);
         assert!(!record.runtime_reset_required);
         assert!(!record.orchestrator_auto_dispatch_blocked);
+        assert!(
+            record.engram.active_grant_id.is_some(),
+            "recovered root must have begun a grant"
+        );
     }
     fresh_process
         .kill()
@@ -10750,7 +10772,7 @@ fn stop_then_identical_followup_gets_a_fresh_grant_without_rebind() {
     {
         let inner = state.inner.lock().expect("state mutex poisoned");
         assert!(
-            AppState::engram_child_is_enabled_locked(&inner, &child_id),
+            AppState::engram_session_is_enabled_locked(&inner, &child_id),
             "a resumable Stop must keep the Engram child eligible"
         );
     }
@@ -12834,7 +12856,7 @@ fn invalid_status_token_is_dropped_and_replaced_by_a_fresh_bind() {
     ]);
     state.install_control_test_transport(recovery_transport.clone());
     let rebound = state
-        .ensure_engram_child_bound_off_lock(&child_id)
+        .ensure_engram_session_bound_off_lock(&child_id)
         .expect("invalid status token should fall back to a fresh bind")
         .expect("child should remain in Engram scope");
     assert_eq!(rebound.routing_token.as_deref(), Some("fresh-child-token"));
@@ -12913,7 +12935,7 @@ fn status_without_open_grant_clears_stale_local_grant_without_checkpointing_it()
         ScriptedEngramControlTransport::new([status_reply("ready"), rebind_reply("rebound")]);
     state.install_control_test_transport(recovery_transport.clone());
     state
-        .ensure_engram_child_bound_off_lock(&child_id)
+        .ensure_engram_session_bound_off_lock(&child_id)
         .expect("authoritative clean status should rebind")
         .expect("child should remain in Engram scope");
     let requests = recovery_transport.requests();
@@ -13916,6 +13938,14 @@ impl EngramControlTransport for BlockingBootRecoveryTransport {
             Some("session_bind") => Ok(json!({
                 "routing_token": format!("recovered-{}", connection.session_id),
                 "status": { "phase": "sync_required" }
+            })),
+            Some("turn_evaluate") => Ok(json!({
+                "decision": "grant",
+                "grant": { "grant_id": format!("recovered-grant-{}", connection.session_id) }
+            })),
+            Some("turn_begin") => Ok(json!({
+                "decision": "begin",
+                "receipt": { "grant_id": request["grant_id"] }
             })),
             operation => Err(EngramTransportError::protocol(format!(
                 "unexpected blocking boot recovery operation: {operation:?}"
@@ -15652,7 +15682,7 @@ fn base_only_engram_injects_mcp_and_refreshes_start_and_compaction_context() {
     {
         let inner = state.inner.lock().expect("state mutex poisoned");
         assert!(engram_mcp_stdio_config_for_session_locked(&inner, &session_id).is_some());
-        assert!(!AppState::engram_child_requires_dispatch_card_locked(
+        assert!(!AppState::engram_session_requires_dispatch_card_locked(
             &inner,
             &session_id
         ));
@@ -16683,7 +16713,7 @@ fn circuit_breaker_and_fatal_protocol_errors_update_only_the_effective_child() {
         assert_eq!(child.engram.consecutive_transport_failures, 2);
         assert!(!child.engram.circuit_open);
         assert!(child.engram.next_bind_retry_at.is_some());
-        assert!(AppState::engram_child_is_enabled_locked(&inner, &child_id));
+        assert!(AppState::engram_session_is_enabled_locked(&inner, &child_id));
     }
     state.record_engram_transport_failure(&child_id, &deadline);
     {
@@ -16724,7 +16754,7 @@ fn circuit_breaker_and_fatal_protocol_errors_update_only_the_effective_child() {
         Some("unknown_control_schema")
     );
     assert!(child.engram.next_bind_retry_at.is_none());
-    assert!(!AppState::engram_child_is_enabled_locked(&inner, &child_id));
+    assert!(!AppState::engram_session_is_enabled_locked(&inner, &child_id));
     drop(inner);
     let pending = state
         .evaluate_engram_turn_off_lock(&EngramTurnIntentSnapshot {

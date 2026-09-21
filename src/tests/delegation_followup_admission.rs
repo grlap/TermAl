@@ -1628,7 +1628,7 @@ fn followup_engram_queue_start_failure_settles_instead_of_stranding_running() {
         // A disabled control adapter still uses the dispatch-card queue path,
         // recording the fallback without requiring an external Engram process.
         inner.sessions[index].engram.disabled_reason = Some("fixture unavailable".to_owned());
-        assert!(AppState::engram_child_requires_dispatch_card_locked(
+        assert!(AppState::engram_session_requires_dispatch_card_locked(
             &inner, &child
         ));
     }

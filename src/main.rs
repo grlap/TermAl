@@ -816,6 +816,9 @@ include!("git.rs");
 include!("terminal.rs");
 include!("review.rs");
 include!("paths.rs");
+// Isolated module owns COM lifetimes, pub(super) entry point and platform tests.
+#[cfg(windows)]
+mod windows_folder_picker;
 include!("orchestrators.rs");
 include!("orchestrator_lifecycle.rs");
 include!("orchestrator_transitions.rs");

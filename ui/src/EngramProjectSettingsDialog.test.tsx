@@ -99,7 +99,7 @@ describe("EngramProjectSettingsDialog", () => {
     await screen.findByText("Off — completion is self-asserted.");
     fireEvent.click(screen.getByLabelText("Turn-gated control"));
     fireEvent.click(screen.getByRole("button", { name: "Change store policy…" }));
-    fireEvent.change(screen.getByLabelText("Policy change reason"), { target: { value: "Unsaved policy draft" } });
+    fireEvent.click(screen.getByLabelText("Allow Independent session"));
     fireEvent.change(screen.getByLabelText("Evaluator agent"), { target: { value: "Claude" } });
     fireEvent.click(screen.getByRole("button", { name: "Save evaluator defaults" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Save evaluator defaults" })).toBeEnabled());
@@ -107,7 +107,8 @@ describe("EngramProjectSettingsDialog", () => {
     expect(onClose).not.toHaveBeenCalled();
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     expect(screen.getByLabelText("Turn-gated control")).toBeChecked();
-    expect(screen.getByLabelText("Policy change reason")).toHaveValue("Unsaved policy draft");
+    expect(screen.getByLabelText("Allow Independent session")).toBeChecked();
+    expect(screen.queryByLabelText("Policy change reason")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Evaluator agent")).toHaveValue("Claude");
     expect(updateProjectEngramSettings).not.toHaveBeenCalled();
   });

@@ -1,11 +1,11 @@
-Captured 2026-09-19 from engram 0.1.0 build 0d07a48880d2
-(exe 2a53a98d94d2, schema 6b6988ea16b7).
+Captured 2026-09-21T06:33:44.800Z from engram 0.1.0 build e364f61f49a4
+(exe 9901adc9123b, schema 025fb9bb102f).
 Command: engram control-policy set-acceptance-evaluation --help
 Read-only CLI usage query; no store was opened or mutated.
 
 Activate the acceptance-evaluation policy: which evaluator modes may record verdicts, what backs a mechanical pass, and whether completion must present a fresh host source fingerprint. An empty mode list restores legacy self-asserted completion through the same audited transition
 
-Usage: engram.exe control-policy set-acceptance-evaluation [OPTIONS] --authorized-by <AUTHORIZED_BY> --reason <REASON> --idempotency-key <IDEMPOTENCY_KEY>
+Usage: engram.exe control-policy set-acceptance-evaluation [OPTIONS] --authorized-by <AUTHORIZED_BY> --idempotency-key <IDEMPOTENCY_KEY>
 
 Options:
       --modes [<MODE[,MODE]>...]
@@ -25,9 +25,6 @@ Options:
 
       --authorized-by <AUTHORIZED_BY>
           Host/operator actor id attributed to the policy decision
-
-      --reason <REASON>
-          Auditable reason for selecting this policy
 
       --idempotency-key <IDEMPOTENCY_KEY>
           Durable caller key for exact receipt replay after an uncertain response

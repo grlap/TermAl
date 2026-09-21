@@ -38,9 +38,22 @@ fn acceptance_settings_auto_prefers_only_a_ready_other_vendor() {
 }
 
 fn change(reader: String) -> UpdateAcceptancePolicyRequest {
-    serde_json::from_value(json!({"modes":["independent_session"],"mechanicalBasis":"asserted",
+    serde_json::from_value(
+        json!({"modes":["independent_session"],"mechanicalBasis":"asserted",
         "requireSourceFreshness":false,"expectedPolicy":"915c51b89cd640f481a6e2c653bcfffd",
-        "readerKey":reader,"reason":"Require independent review","idempotencyKey":"termal-policy-test-1"})).unwrap()
+        "readerKey":reader,"idempotencyKey":"termal-policy-test-1"}),
+    )
+    .unwrap()
+}
+
+#[test]
+fn acceptance_settings_policy_request_rejects_removed_justification() {
+    let mut payload = json!({"modes":[],"mechanicalBasis":"asserted",
+        "requireSourceFreshness":false,"expectedPolicy":"915c51b89cd640f481a6e2c653bcfffd",
+        "readerKey":"reader","idempotencyKey":"termal-policy-test"});
+    assert!(serde_json::from_value::<UpdateAcceptancePolicyRequest>(payload.clone()).is_ok());
+    payload["reason"] = json!("obsolete justification");
+    assert!(serde_json::from_value::<UpdateAcceptancePolicyRequest>(payload).is_err());
 }
 
 #[test]
@@ -158,7 +171,6 @@ fn acceptance_settings_argv_replaces_whole_policy_with_cas_and_stable_key() {
             "--mechanical-basis",
             "asserted",
             "--authorized-by=operator/termal",
-            "--reason=Require independent review",
             "--idempotency-key",
             "termal-policy-test-1",
             "--expected-policy-hash",
@@ -181,20 +193,32 @@ fn acceptance_settings_argv_replaces_whole_policy_with_cas_and_stable_key() {
             .iter()
             .any(|a| a == "--require-source-freshness")
     );
-    request.reason = "-tighten review".into();
     assert!(
         request
             .args("-operator")
             .unwrap()
-            .contains(&"--reason=-tighten review".to_owned())
+            .contains(&"--authorized-by=-operator".to_owned())
     );
-    request.reason = "\n".into();
+    request.idempotency_key = "\n".into();
     assert!(request.args("operator").is_err());
 }
 
 #[test]
-fn acceptance_settings_setter_argv_matches_captured_real_binary_usage() {
+fn acceptance_settings_options_and_required_flags_match_captured_binary_usage() {
     let help = include_str!("fixtures/engram-acceptance-policy-set-help.txt");
+    let usage = help
+        .lines()
+        .find(|line| line.starts_with("Usage: "))
+        .unwrap();
+    let required_flags: Vec<_> = usage
+        .split_once("[OPTIONS]")
+        .unwrap()
+        .1
+        .split_whitespace()
+        .filter(|word| word.starts_with("--"))
+        .collect();
+    assert_eq!(required_flags, ["--authorized-by", "--idempotency-key"]);
+    assert!(!help.contains("--reason"));
     let mut request = change("reader".into());
     request.modes = vec![
         AcceptanceEvaluationMode::SameSession,
@@ -205,6 +229,13 @@ fn acceptance_settings_setter_argv_matches_captured_real_binary_usage() {
     for basis in ["asserted", "observed"] {
         request.mechanical_basis = basis.into();
         let args = request.args("operator/termal").unwrap();
+        for required in &required_flags {
+            assert!(
+                args.iter()
+                    .any(|arg| arg.split('=').next() == Some(*required)),
+                "missing required flag: {required}"
+            );
+        }
         assert!(help.contains(&format!("{} {} [OPTIONS]", args[0], args[1])));
         for arg in args.iter().filter(|arg| arg.starts_with("--")) {
             let flag = arg.split('=').next().unwrap();
@@ -228,6 +259,65 @@ fn acceptance_settings_setter_argv_matches_captured_real_binary_usage() {
         }
         assert!(help.contains(&format!("- {basis}:")));
     }
+}
+
+#[test]
+#[ignore = "requires TERMAL_TEST_LIVE_ENGRAM_BINARY; creates only a disposable store"]
+fn real_acceptance_policy_reason_free_init_write_and_replay_disposable_store() {
+    let binary = PathBuf::from(
+        std::env::var_os("TERMAL_TEST_LIVE_ENGRAM_BINARY").expect("candidate binary"),
+    );
+    assert!(binary.is_absolute() && binary.is_file());
+    let state = test_app_state();
+    let temp = state.test_temp_root.as_ref().expect("isolated test root");
+    let home = temp.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+    let marker = temp.path().join(".engram-project");
+    fs::write(&marker, "termal-reason-free-disposable\n").unwrap();
+    let run = |args: &[String]| {
+        let output = Command::new(&binary)
+            .arg("--project-file")
+            .arg(&marker)
+            .arg("--home")
+            .arg(&home)
+            .args(args)
+            .current_dir(temp.path())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "args={args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output.stdout
+    };
+    run(&[
+        "init".into(),
+        "--required-assurance".into(),
+        "turn_gated".into(),
+        "--authorized-by=termal-test".into(),
+    ]);
+    let read_policy = || {
+        serde_json::from_slice::<Value>(&run(&["control-policy".into(), "show".into()]))
+            .expect("policy JSON")
+    };
+    let before = read_policy();
+    let mut request = change("disposable".into());
+    request.expected_policy = before["policy"].as_str().unwrap().to_owned();
+    let args = request.args("termal-test").unwrap();
+    assert!(!args.iter().any(|arg| arg.starts_with("--reason")));
+    let first: Value = serde_json::from_slice(&run(&args)).expect("receipt JSON");
+    let replay: Value = serde_json::from_slice(&run(&args)).expect("replayed receipt JSON");
+    assert_eq!(
+        first, replay,
+        "uncertain-response retry replays the exact receipt"
+    );
+    let after = read_policy();
+    assert_ne!(before["policy"], after["policy"]);
+    assert_eq!(
+        after["acceptance_evaluation"]["allowed_modes"],
+        json!(["independent_session"])
+    );
 }
 
 #[test]
@@ -297,7 +387,7 @@ async fn acceptance_settings_policy_write_requires_operator_browser_intent() {
         .body(Body::from(
             serde_json::to_vec(&json!({"modes":[],"mechanicalBasis":"asserted",
             "requireSourceFreshness":false,"expectedPolicy":"915c51b89cd640f481a6e2c653bcfffd",
-            "readerKey":"reader","reason":"Test","idempotencyKey":"termal-policy-test"}))
+            "readerKey":"reader","idempotencyKey":"termal-policy-test"}))
             .unwrap(),
         ))
         .unwrap();
@@ -330,7 +420,7 @@ async fn acceptance_settings_private_limiter_refuses_reads_and_writes() {
             .body(Body::from(
                 json!({"modes":[],"mechanicalBasis":"asserted",
                 "requireSourceFreshness":false,"expectedPolicy":"915c51b89cd640f481a6e2c653bcfffd",
-                "readerKey":"reader","reason":"Test","idempotencyKey":"termal-policy-test"})
+                "readerKey":"reader","idempotencyKey":"termal-policy-test"})
                 .to_string(),
             ))
             .unwrap();
@@ -376,7 +466,7 @@ async fn acceptance_settings_read_and_write_admission_are_independent() {
             .body(Body::from(
                 json!({"modes":[],"mechanicalBasis":"asserted",
             "requireSourceFreshness":false,"expectedPolicy":"915c51b89cd640f481a6e2c653bcfffd",
-            "readerKey":"reader","reason":"Test","idempotencyKey":"termal-policy-test"})
+            "readerKey":"reader","idempotencyKey":"termal-policy-test"})
                 .to_string(),
             ))
             .unwrap()

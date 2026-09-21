@@ -11,6 +11,19 @@ The local Engram integration has two independent tiers:
   is enabled, the existing host-private bind/evaluate/begin/checkpoint protocol
   can withhold a prompt until Engram authorizes that exact turn.
 
+Premium admission covers both ordinary root sessions and delegation children,
+including direct sends and queued user, mailbox, and orchestrator turns. A root
+uses its session-shaped binding; a child retains its delegation-shaped effects
+and cannot fall back to root authority if its delegation metadata is missing.
+Evaluate grants do not dispatch a provider prompt until begin succeeds, and
+successful completion checkpoints the begun grant. Refusal, deferral, unavailable
+binding, and failed recovery withhold the prompt rather than bypassing control.
+Base-only and disabled projects retain ordinary ungated dispatch.
+Queue promotion rechecks the evaluated intent fingerprint, not just the queue
+entry ID: mailbox coalescing may change its sequence while evaluation is off-lock.
+An obsolete issued grant is repaired before fresh admission. Stop's successor
+path likewise leaves a changed head queued instead of using the old grant.
+
 Remote proxy sessions never enter either local tier. The global
 `TERMAL_ENGRAM_DISABLED` kill switch and the per-project Enabled switch stop
 both MCP and context injection; turning premium control off leaves Base intact.
@@ -667,7 +680,15 @@ them does not discard an unsaved turn-gating draft (or vice versa). Switching
 projects releases the old acceptance form's busy state; late completions cannot
 unlock a newer project's in-flight operation.
 
-Changing store policy is a separate, confirmed operator action with a reason.
+Changing store policy is a separate, confirmed operator action. No justification
+field is collected or sent; policy administration uses the reason-free Engram CLI.
+The captured setter help fixture records build `e364f61f49a4` (2026-09-21);
+default tests check both advertised and required flags. On 2026-09-21, isolated
+real-binary tests also passed against build `d7d8caddc923`, schema `025fb9bb102f`,
+SHA-256 `11c88b50b5602f226694e3da79e8ad5adde93d0c7f50690448d88084b6ccf444`:
+reason-free init, acceptance-policy write and exact receipt replay, readiness
+verify/save/audit, and bind/evaluate/begin/checkpoint with a fake provider.
+These tests use disposable stores, not the installed runtime or live projects.
 The form sends the complete replacement policy, the displayed opaque policy ID
 (`expectedPolicy`), the host reader identity, and a stable idempotency key.
 `control-policy set-acceptance-evaluation` uses the policy ID as its CAS guard;
@@ -683,8 +704,9 @@ attempt explains that remedy and asks the operator to reconcile the store before
 discarding recovery data. Unavailable storage must be restored. Storage failure blocks
 a new write. Refreshing policy never replaces an open draft's original CAS base.
 Beginning a policy write cancels older reads so they cannot overwrite its result.
-A definitive first-attempt parser refusal leaves the form editable; free-form
-reasons, including leading hyphens, use unambiguous `--reason=<value>` argv.
+A definitive first-attempt parser refusal leaves the form editable. There is no
+fallback to the removed CLI argument or migration of old saved request payloads;
+unrecognized saved payload fields fail closed using the recovery guidance above.
 A first-attempt 409 reloads policy for a new explicit decision, never retries
 against the new head automatically. Once an earlier attempt is uncertain, a
 later 409 (including reset, reader or policy conflicts) cannot establish its
@@ -729,7 +751,10 @@ evidence through the control checkpoint; and Work-panel evaluation actions.
 
 ## Premium boot recovery and lazy retry
 
-Boot recovery applies only to premium control sessions. TermAl publishes
+Boot recovery applies only to visible local premium control sessions with a
+routing token, an active grant or a rebind marker, including roots that have
+never created a delegation. Never-bound sessions are not eagerly bound or
+readiness-fenced: their first turn performs normal lazy admission. TermAl publishes
 `engramBootRecoveryPending` before recovering bindings, bounds the overall
 work by `bootRecoveryBudgetMs`, and retries an unfinished target lazily on the
 next targeted read or prompt. Base MCP/context injection does not bind a

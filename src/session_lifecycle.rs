@@ -1060,6 +1060,15 @@ impl AppState {
                             .front()
                             .is_some_and(|queued| {
                                 queued.pending_prompt.id == prepared.prompt_id
+                                    && prepared.pending_engram.as_ref().is_none_or(|pending| {
+                                        engram_turn_intent_fingerprint(
+                                            &queued.pending_prompt.text,
+                                            queued.pending_prompt.expanded_text.as_deref(),
+                                            &queued.attachments,
+                                            queued.pending_prompt.source.as_ref(),
+                                            queued.source,
+                                        ) == pending.intent_fingerprint
+                                    })
                             })
                 });
             let post_stop_record = should_dispatch_next.then(|| inner.sessions[index].clone());

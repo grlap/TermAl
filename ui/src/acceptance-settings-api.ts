@@ -21,7 +21,6 @@ export type AcceptancePolicySnapshot = {
 export type PolicyChange = StoreAcceptancePolicy & {
   expectedPolicy: string;
   readerKey: string;
-  reason: string;
   idempotencyKey: string;
 };
 const path = (id: string) => `/api/projects/${encodeURIComponent(id)}/engram`;

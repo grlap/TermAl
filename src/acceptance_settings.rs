@@ -185,7 +185,6 @@ struct UpdateAcceptancePolicyRequest {
     require_source_freshness: bool,
     expected_policy: String,
     reader_key: String,
-    reason: String,
     // Browser retains this key with the exact payload when the result is unknown.
     idempotency_key: String,
 }
@@ -200,9 +199,6 @@ impl UpdateAcceptancePolicyRequest {
                 .any(|(i, mode)| self.modes[..i].contains(mode))
             || !matches!(self.mechanical_basis.as_str(), "asserted" | "observed")
             || !acceptance_policy_hash_valid(&self.expected_policy)
-            || self.reason.trim().is_empty()
-            || self.reason.len() > 1024
-            || self.reason.chars().any(char::is_control)
             || !self.idempotency_key.starts_with("termal-policy-")
             || self.idempotency_key.len() > 100
             || !self
@@ -211,7 +207,7 @@ impl UpdateAcceptancePolicyRequest {
                 .all(|c| c.is_ascii_alphanumeric() || c == '-')
         {
             return Err(ApiError::bad_request(
-                "Invalid acceptance policy change; provide unique modes, a policy hash, a bounded reason and an idempotency key",
+                "Invalid acceptance policy change; provide unique modes, a policy hash and an idempotency key",
             ));
         }
         let mut args = vec![
@@ -237,7 +233,6 @@ impl UpdateAcceptancePolicyRequest {
         }
         args.extend([
             format!("--authorized-by={actor}"),
-            format!("--reason={}", self.reason),
             "--idempotency-key".to_owned(),
             self.idempotency_key.clone(),
             "--expected-policy-hash".to_owned(),

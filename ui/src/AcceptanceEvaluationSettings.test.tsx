@@ -56,7 +56,7 @@ async function confirmChange() {
   await screen.findByText("Off — completion is self-asserted.");
   fireEvent.click(screen.getByRole("button", { name: "Change store policy…" }));
   fireEvent.click(screen.getByLabelText("Allow Independent session"));
-  fireEvent.change(screen.getByLabelText("Policy change reason"), { target: { value: "Require review" } });
+  expect(screen.queryByLabelText("Policy change reason")).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Confirm policy change" })).toBeDisabled();
   fireEvent.click(screen.getByLabelText("I confirm this store-wide policy change"));
   await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Confirm policy change" })); });
@@ -67,13 +67,14 @@ it("requires explicit confirmation and replays the exact change/key after a lost
   setup();
   await confirmChange();
   await screen.findByText("Outcome unknown");
-  expect(screen.getByLabelText("Policy change reason")).toBeDisabled();
+  expect(screen.getByLabelText("Allow Independent session")).toBeDisabled();
   expect(screen.getByRole("button", { name: "Change store policy…" })).toBeDisabled();
   await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Retry identical policy change" })); });
   await waitFor(() => expect(changeAcceptancePolicy).toHaveBeenCalledTimes(2));
   const calls = vi.mocked(changeAcceptancePolicy).mock.calls;
   expect(calls[0]).toEqual(calls[1]);
-  expect(calls[0][1]).toMatchObject({ expectedPolicy: policy.policy, readerKey: "reader", modes: ["independent_session"], reason: "Require review" });
+  expect(calls[0][1]).toMatchObject({ expectedPolicy: policy.policy, readerKey: "reader", modes: ["independent_session"] });
+  expect(calls[0][1]).not.toHaveProperty("reason");
   expect(calls[0][1].idempotencyKey).toMatch(/^termal-policy-/);
 });
 
@@ -91,7 +92,6 @@ it("keeps an open draft tied to its original policy even after refresh", async (
   await screen.findByText("Off — completion is self-asserted.");
   fireEvent.click(screen.getByRole("button", { name: "Change store policy…" }));
   fireEvent.click(screen.getByLabelText("Allow Independent session"));
-  fireEvent.change(screen.getByLabelText("Policy change reason"), { target: { value: "Draft against original" } });
   fireEvent.click(screen.getByLabelText("I confirm this store-wide policy change"));
   vi.mocked(getAcceptancePolicy).mockResolvedValue({ ...policy, policy: "b".repeat(32), readerKey: "new-reader",
     acceptanceEvaluation: { ...policy.acceptanceEvaluation, requireSourceFreshness: true } });
@@ -118,7 +118,7 @@ it("keeps a definitive first parser refusal correctable", async () => {
   vi.mocked(changeAcceptancePolicy).mockRejectedValueOnce(new ApiRequestError("request-failed", "Command was not sent", { status: 400 }));
   setup();
   await confirmChange();
-  expect(screen.getByLabelText("Policy change reason")).toBeEnabled();
+  expect(screen.getByLabelText("Allow Independent session")).toBeEnabled();
   expect(screen.getByRole("button", { name: "Cancel policy change" })).toBeEnabled();
   expect(sessionStorage.length).toBe(0);
 });
@@ -132,7 +132,11 @@ it("refuses to send when recovery storage cannot retain the request", async () =
   write.mockRestore();
 });
 
-it.each(["{broken", JSON.stringify({ modes: [] })])("fails closed on corrupt recovery data %s and explains the tab remedy", async raw => {
+it.each(["{broken", JSON.stringify({ modes: [] }), JSON.stringify({
+  modes: [], mechanicalBasis: "asserted", requireSourceFreshness: false,
+  expectedPolicy: policy.policy, readerKey: "reader", idempotencyKey: "termal-policy-old",
+  reason: "Removed field must not be migrated or silently replayed",
+})])("fails closed on unrecognized recovery data %s and explains the tab remedy", async raw => {
   sessionStorage.setItem("termal.acceptance-policy.pending.v1:project", raw);
   setup();
   await screen.findByText("Off — completion is self-asserted.");
@@ -158,7 +162,6 @@ it("ignores a pre-write refresh that resolves after the newer policy write", asy
   await screen.findByText("Off — completion is self-asserted.");
   fireEvent.click(screen.getByRole("button", { name: "Change store policy…" }));
   fireEvent.click(screen.getByLabelText("Allow Independent session"));
-  fireEvent.change(screen.getByLabelText("Policy change reason"), { target: { value: "New policy" } });
   fireEvent.click(screen.getByLabelText("I confirm this store-wide policy change"));
   let resolveRead!: (snapshot: AcceptancePolicySnapshot) => void;
   vi.mocked(getAcceptancePolicy).mockImplementationOnce(() => new Promise(resolve => { resolveRead = resolve; }));
@@ -172,7 +175,6 @@ it("ignores a pre-write refresh that resolves after the newer policy write", asy
   await act(async () => resolveRead(policy)); // Deliberately ignores AbortSignal.
   expect(screen.queryByText("Off — completion is self-asserted.")).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Change store policy…" }));
-  fireEvent.change(screen.getByLabelText("Policy change reason"), { target: { value: "Next decision" } });
   fireEvent.click(screen.getByLabelText("I confirm this store-wide policy change"));
   await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Confirm policy change" })); });
   expect(vi.mocked(changeAcceptancePolicy).mock.calls[1][1].expectedPolicy).toBe(newer.policy);

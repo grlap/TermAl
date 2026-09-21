@@ -660,8 +660,6 @@ fn real_readiness_verify_save_audit_disposable_store() {
             "turn_gated",
             "--authorized-by",
             "termal-test",
-            "--reason",
-            "disposable integration test",
         ])
         .current_dir(&root)
         .output()

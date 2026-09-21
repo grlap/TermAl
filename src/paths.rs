@@ -427,7 +427,15 @@ fn pick_project_root_path(default_workdir: &str) -> Result<Option<String>, ApiEr
         return resolve_project_root_path(&selected).map(Some);
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(windows)]
+    {
+        return windows_folder_picker::pick(default_workdir)
+            .map_err(|err| ApiError::internal(format!("failed to open folder picker: {err}")))?
+            .map(|selected| resolve_project_root_path(&selected))
+            .transpose();
+    }
+
+    #[cfg(not(any(target_os = "macos", windows)))]
     {
         let _ = default_workdir;
         Err(ApiError::bad_request(

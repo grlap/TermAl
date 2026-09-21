@@ -744,6 +744,7 @@ struct EngramObligationWaiverReceipt {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum EngramTransportErrorKind {
+    LocalState,
     Deadline,
     Transport,
     Protocol,
@@ -763,6 +764,15 @@ struct EngramTransportError {
 }
 
 impl EngramTransportError {
+    fn local_state(message: impl Into<String>) -> Self {
+        Self {
+            kind: EngramTransportErrorKind::LocalState,
+            code: Some("control_binding_unavailable".to_owned()),
+            message: message.into(),
+            process_never_started: true,
+        }
+    }
+
     fn deadline(message: impl Into<String>) -> Self {
         Self {
             kind: EngramTransportErrorKind::Deadline,
@@ -3196,6 +3206,7 @@ fn engram_waiver_api_error(error: EngramTransportError) -> ApiError {
                         | "unknown_routing_token"
                 )
             ) => ApiError::conflict(detail),
+        EngramTransportErrorKind::LocalState => ApiError::conflict(detail),
         EngramTransportErrorKind::Deadline
         | EngramTransportErrorKind::Transport
         | EngramTransportErrorKind::Protocol
@@ -3219,12 +3230,12 @@ impl AppState {
     fn engram_binding_target_for_session_shape_locked(
         inner: &StateInner,
         session_id: &str,
-        require_child_runtime_enabled: bool,
+        require_runtime_enabled: bool,
     ) -> std::result::Result<Option<EngramBindingTarget>, String> {
         Self::engram_binding_target_for_session_shape_with_reset_access_locked(
             inner,
             session_id,
-            require_child_runtime_enabled,
+            require_runtime_enabled,
             None,
         )
     }
@@ -3236,13 +3247,13 @@ impl AppState {
     fn engram_binding_target_for_session_shape_during_project_reset_locked(
         inner: &StateInner,
         session_id: &str,
-        require_child_runtime_enabled: bool,
+        require_runtime_enabled: bool,
         owner_generation: u64,
     ) -> std::result::Result<Option<EngramBindingTarget>, String> {
         Self::engram_binding_target_for_session_shape_with_reset_access_locked(
             inner,
             session_id,
-            require_child_runtime_enabled,
+            require_runtime_enabled,
             Some(owner_generation),
         )
     }
@@ -3250,7 +3261,7 @@ impl AppState {
     fn engram_binding_target_for_session_shape_with_reset_access_locked(
         inner: &StateInner,
         session_id: &str,
-        require_child_runtime_enabled: bool,
+        require_runtime_enabled: bool,
         project_reset_owner_generation: Option<u64>,
     ) -> std::result::Result<Option<EngramBindingTarget>, String> {
         if Self::engram_session_has_child_binding_shape_locked(inner, session_id) {
@@ -3261,31 +3272,27 @@ impl AppState {
             Self::engram_binding_target_for_child_with_reset_access_locked(
                 inner,
                 session_id,
-                require_child_runtime_enabled,
+                require_runtime_enabled,
                 project_reset_owner_generation,
             )
         } else {
             Self::engram_binding_target_for_parent_with_reset_access_locked(
                 inner,
                 session_id,
+                require_runtime_enabled,
                 project_reset_owner_generation,
             )
         }
     }
 
-    fn engram_child_is_enabled_locked(inner: &StateInner, session_id: &str) -> bool {
-        let Some(_delegation) = inner
-            .delegations
-            .iter()
-            .find(|delegation| delegation.child_session_id == session_id)
-        else {
-            return false;
-        };
+    fn engram_session_is_enabled_locked(inner: &StateInner, session_id: &str) -> bool {
         let unavailable = inner
             .find_session_index(session_id)
             .and_then(|index| inner.sessions.get(index))
             .is_some_and(|record| {
-                record.engram.project_reset_in_progress || record.engram.disabled_reason.is_some()
+                !record.is_local_session()
+                    || record.engram.project_reset_in_progress
+                    || record.engram.disabled_reason.is_some()
             });
         if unavailable {
             return false;
@@ -3301,15 +3308,20 @@ impl AppState {
                 .is_some_and(EngramProjectSettings::is_control_enabled)
     }
 
-    fn engram_child_requires_dispatch_card_locked(inner: &StateInner, session_id: &str) -> bool {
-        if Self::engram_child_is_enabled_locked(inner, session_id) {
+    // Admission belongs to every enabled local session, not only delegation
+    // children. Target construction below still preserves each session's
+    // authority shape; a missing child binding must never become a root bind.
+    fn engram_session_requires_dispatch_card_locked(inner: &StateInner, session_id: &str) -> bool {
+        if Self::engram_session_is_enabled_locked(inner, session_id) {
             return true;
         }
         let disabled = inner
             .find_session_index(session_id)
             .and_then(|index| inner.sessions.get(index))
             .is_some_and(|record| {
-                !record.engram.project_reset_in_progress && record.engram.disabled_reason.is_some()
+                record.is_local_session()
+                    && !record.engram.project_reset_in_progress
+                    && record.engram.disabled_reason.is_some()
             });
         disabled
             && engram_project_for_session_locked(inner, session_id)
@@ -3550,26 +3562,26 @@ impl AppState {
     }
 
     fn engram_boot_recovery_targets_locked(inner: &StateInner) -> Vec<EngramBindingTarget> {
-        let mut targets = HashMap::<String, EngramBindingTarget>::new();
-        for delegation in &inner.delegations {
-            if let Ok(Some(target)) =
-                Self::engram_binding_target_for_parent_locked(inner, &delegation.parent_session_id)
-            {
-                targets
-                    .entry(target.connection.session_id.clone())
-                    .or_insert(target);
-            }
-            if let Ok(Some(target)) = Self::engram_binding_target_for_child_locked(
-                inner,
-                &delegation.child_session_id,
-                true,
-            ) {
-                targets
-                    .entry(target.connection.session_id.clone())
-                    .or_insert(target);
-            }
-        }
-        targets.into_values().collect()
+        // Roots can own begun grants without ever creating a delegation.
+        // Recover only existing control state. Never-used sessions bind lazily
+        // at admission instead of consuming boot workers and readiness fences.
+        // Retain child-shaped authority for children.
+        inner
+            .sessions
+            .iter()
+            .filter(|record| {
+                !record.hidden
+                    && record.is_local_session()
+                    && (record.engram.routing_token.is_some()
+                        || record.engram.active_grant_id.is_some()
+                        || record.engram.rebind_required)
+            })
+            .filter_map(|record| {
+                Self::engram_binding_target_for_session_shape_locked(inner, &record.session.id, true)
+                    .ok()
+                    .flatten()
+            })
+            .collect()
     }
 
     /// Publishes the exact per-session readiness fence before boot recovery
@@ -4038,7 +4050,7 @@ impl AppState {
             // it must not strand a grant that was already begun. Resolve the
             // captured old connection even while runtime enablement is off so a
             // terminal transition can checkpoint it exactly once.
-            let target = Self::engram_binding_target_for_child_with_reset_access_locked(
+            let target = Self::engram_binding_target_for_session_shape_with_reset_access_locked(
                 &inner,
                 session_id,
                 false,
@@ -4329,7 +4341,7 @@ impl AppState {
             if pending.dispatch_generation != dispatch_generation {
                 return EngramTurnDeliveryPreparation::Superseded;
             };
-            let target = Self::engram_binding_target_for_child_locked(&inner, session_id, true)
+            let target = Self::engram_binding_target_for_session_shape_locked(&inner, session_id, true)
                 .ok()
                 .flatten();
             (pending, target)
@@ -4434,7 +4446,7 @@ impl AppState {
                             issued_unbegun_grant_id = None;
                             let reevaluate_target = if code == "stale_fence" {
                                 self.mark_engram_rebind_required(session_id, Some(target));
-                                match self.ensure_engram_child_bound_off_lock(session_id) {
+                                match self.ensure_engram_session_bound_off_lock(session_id) {
                                     Ok(Some(refreshed)) => refreshed,
                                     Ok(None) => {
                                         break (
@@ -5056,6 +5068,7 @@ impl AppState {
         }))
     }
 
+    #[cfg(test)]
     fn engram_binding_target_for_parent_locked(
         inner: &StateInner,
         parent_session_id: &str,
@@ -5063,6 +5076,7 @@ impl AppState {
         Self::engram_binding_target_for_parent_with_reset_access_locked(
             inner,
             parent_session_id,
+            true,
             None,
         )
     }
@@ -5070,12 +5084,13 @@ impl AppState {
     fn engram_binding_target_for_parent_with_reset_access_locked(
         inner: &StateInner,
         parent_session_id: &str,
+        require_runtime_enabled: bool,
         project_reset_owner_generation: Option<u64>,
     ) -> std::result::Result<Option<EngramBindingTarget>, String> {
         let parent = inner
             .find_session_index(parent_session_id)
             .and_then(|index| inner.sessions.get(index))
-            .ok_or_else(|| format!("delegation parent session `{parent_session_id}` is missing"))?;
+            .ok_or_else(|| format!("session `{parent_session_id}` is missing"))?;
         if !parent.is_local_session() {
             return Ok(None);
         }
@@ -5084,7 +5099,7 @@ impl AppState {
         };
         let project = inner
             .find_project(project_id)
-            .ok_or_else(|| format!("delegation project `{project_id}` is missing"))?;
+            .ok_or_else(|| format!("project `{project_id}` is missing"))?;
         let Some(settings) = project.engram.as_ref() else {
             return Ok(None);
         };
@@ -5096,8 +5111,8 @@ impl AppState {
         };
         if !reset_access_allowed
             || project.remote_id != LOCAL_REMOTE_ID
-            || parent.engram.disabled_reason.is_some()
-            || !settings.is_control_enabled()
+            || (require_runtime_enabled && parent.engram.disabled_reason.is_some())
+            || (require_runtime_enabled && !settings.is_control_enabled())
         {
             return Ok(None);
         }
@@ -5626,14 +5641,22 @@ impl AppState {
         }
     }
 
-    fn ensure_engram_child_bound_off_lock(
+    fn ensure_engram_session_bound_off_lock(
         &self,
         session_id: &str,
     ) -> std::result::Result<Option<EngramBindingTarget>, EngramTransportError> {
         let target = {
             let inner = self.inner.lock().expect("state mutex poisoned");
-            Self::engram_binding_target_for_child_locked(&inner, session_id, true)
-                .map_err(EngramTransportError::transport)?
+            let target = Self::engram_binding_target_for_session_shape_locked(&inner, session_id, true)
+                .map_err(EngramTransportError::local_state)?;
+            if target.is_none()
+                && Self::engram_session_requires_dispatch_card_locked(&inner, session_id)
+            {
+                return Err(EngramTransportError::local_state(
+                    "Engram admission is required but the session binding is unavailable",
+                ));
+            }
+            target
         };
         let Some(mut target) = target else {
             return Ok(None);
@@ -5683,7 +5706,7 @@ impl AppState {
                 awaiting_runtime_stop_resolution: false,
             });
         }
-        let mut target = match self.ensure_engram_child_bound_off_lock(&intent.session_id) {
+        let mut target = match self.ensure_engram_session_bound_off_lock(&intent.session_id) {
             Ok(Some(target)) => target,
             Ok(None) => return None,
             Err(error) => {
@@ -5766,7 +5789,7 @@ impl AppState {
             {
                 self.record_engram_transport_success(&intent.session_id);
                 self.mark_engram_rebind_required(&intent.session_id, Some(&target));
-                match self.ensure_engram_child_bound_off_lock(&intent.session_id) {
+                match self.ensure_engram_session_bound_off_lock(&intent.session_id) {
                     Ok(Some(refreshed)) => {
                         target = refreshed;
                         // stale-fence recovery performs its bounded work-focus
@@ -5863,6 +5886,10 @@ impl AppState {
     }
 
     fn record_engram_transport_failure(&self, session_id: &str, error: &EngramTransportError) {
+        // Local binding integrity is not evidence about the transport's health.
+        if error.kind == EngramTransportErrorKind::LocalState {
+            return;
+        }
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         if let Some(index) = inner.find_session_index(session_id) {
             let runtime_enabled = engram_project_for_session_locked(&inner, session_id)

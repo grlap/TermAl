@@ -12,9 +12,10 @@ export function readPolicyAttempt(project: string): { attempt: PolicyChange | nu
   try {
     if (!raw) return { attempt: null, error: null };
     const value = JSON.parse(raw) as PolicyChange;
-    if (!value || !Array.isArray(value.modes) || !value.modes.every(mode => ["same_session", "sub_agent", "independent_session"].includes(mode))
+    if (!value || Object.keys(value).some(field => !["modes", "mechanicalBasis", "requireSourceFreshness", "readerKey", "expectedPolicy", "idempotencyKey"].includes(field))
+      || !Array.isArray(value.modes) || !value.modes.every(mode => ["same_session", "sub_agent", "independent_session"].includes(mode))
       || !["asserted", "observed"].includes(value.mechanicalBasis) || typeof value.requireSourceFreshness !== "boolean"
-      || ![value.reason, value.readerKey, value.expectedPolicy, value.idempotencyKey].every(v => typeof v === "string" && v.length > 0)) {
+      || ![value.readerKey, value.expectedPolicy, value.idempotencyKey].every(v => typeof v === "string" && v.length > 0)) {
       throw new Error("Invalid saved policy attempt");
     }
     return { attempt: value, error: null };

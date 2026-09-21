@@ -179,7 +179,7 @@ impl AppState {
             let index = inner.find_session_index(session_id)?;
             let queued = inner.sessions[index].queued_prompts.front()?;
             let dispatch_generation = inner.sessions[index].engram.dispatch_generation;
-            if !Self::engram_child_requires_dispatch_card_locked(&inner, session_id) {
+            if !Self::engram_session_requires_dispatch_card_locked(&inner, session_id) {
                 return Some(PreparedEngramQueuedTurn {
                     prompt_id: queued.pending_prompt.id.clone(),
                     dispatch_generation,
@@ -1103,7 +1103,7 @@ impl AppState {
                 // until the exact project-reset owner releases its fence.
                 return Ok(None);
             }
-            if !Self::engram_child_requires_dispatch_card_locked(&inner, session_id) {
+            if !Self::engram_session_requires_dispatch_card_locked(&inner, session_id) {
                 let record = &inner.sessions[index];
                 if record.runtime_stop_in_progress {
                     return Ok(None);
@@ -1266,7 +1266,18 @@ impl AppState {
                 && inner.sessions[index]
                     .queued_prompts
                     .front()
-                    .is_some_and(|queued| queued.pending_prompt.id == snapshot.0.pending_prompt.id)
+                    .is_some_and(|queued| {
+                        queued.pending_prompt.id == snapshot.0.pending_prompt.id
+                            // Mailbox coalescing retains the ID and generation
+                            // while replacing the admitted sequence in place.
+                            && engram_turn_intent_fingerprint(
+                                &queued.pending_prompt.text,
+                                queued.pending_prompt.expanded_text.as_deref(),
+                                &queued.attachments,
+                                queued.pending_prompt.source.as_ref(),
+                                queued.source,
+                            ) == intent.intent_fingerprint
+                    })
                 && !matches!(
                     inner.sessions[index].session.status,
                     SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
@@ -1564,9 +1575,10 @@ impl AppState {
         // S0 ("off means off") keeps the pre-adapter dispatch algorithm
         // intact. In particular, an unconfigured project must not pay the
         // extra queue commit needed to release the state mutex around Engram
-        // evaluation. The sole added hot-path decision is this Option-backed
-        // project setting check; every branch below is the legacy transition.
-        if !Self::engram_child_requires_dispatch_card_locked(&inner, session_id) {
+        // evaluation. This local check resolves the session's project (including
+        // inherited child scope); it performs no Engram I/O. The branches below
+        // retain the non-control dispatch transitions.
+        if !Self::engram_session_requires_dispatch_card_locked(&inner, session_id) {
             if session_is_busy || has_queued_prompts || blocked_automatic_prompt {
                 if let Some(mailbox_id) = source
                     .as_ref()

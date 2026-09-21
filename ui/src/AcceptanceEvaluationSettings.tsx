@@ -47,7 +47,6 @@ function AcceptanceEvaluationSettingsBody({ projectId, enabled, value, onChange,
   const [editing, setEditing] = useState(!!recovery.attempt);
   const [draft, setDraft] = useState<StoreAcceptancePolicy>(recovery.attempt ?? { modes: [], mechanicalBasis: "asserted", requireSourceFreshness: false });
   const [base, setBase] = useState<{ policy: string; readerKey: string } | null>(null);
-  const [reason, setReason] = useState(recovery.attempt?.reason ?? "");
   const [confirmed, setConfirmed] = useState(!!recovery.attempt);
   const [attempt, setAttempt] = useState<PolicyChange | null>(recovery.attempt);
   const [saving, setSaving] = useState(false);
@@ -82,12 +81,9 @@ function AcceptanceEvaluationSettingsBody({ projectId, enabled, value, onChange,
     finally { if (mounted.current) { setSaving(false); onBusyChange(false); } }
   }
   async function savePolicy() {
-    if (recoveryBlocked || (!attempt && (!base || !confirmed || !reason.trim()))) return;
-    if (!attempt && new TextEncoder().encode(reason).length > 1024) {
-      setError("Policy change reason must be at most 1024 UTF-8 bytes."); return;
-    }
+    if (recoveryBlocked || (!attempt && (!base || !confirmed))) return;
     const change = attempt ?? { ...draft, expectedPolicy: base!.policy, readerKey: base!.readerKey,
-      reason, idempotencyKey: `termal-policy-${crypto.randomUUID()}` };
+      idempotencyKey: `termal-policy-${crypto.randomUUID()}` };
     try { storePolicyAttempt(projectId, change); }
     catch { setError("Could not save recovery state. No policy change was sent."); return; }
     // An older GET must not overwrite a newer write result, even if its transport
@@ -102,7 +98,7 @@ function AcceptanceEvaluationSettingsBody({ projectId, enabled, value, onChange,
       setReadError(null);
       if (!cleared) setError("Policy change applied, but recovery storage could not be cleared. Restore storage and reopen this editor before another change.");
       else if (result.writeApplied && result.error) setError(`Policy change applied. ${result.error}`);
-      setAttempt(null); setEditing(false); setConfirmed(false); setReason("");
+      setAttempt(null); setEditing(false); setConfirmed(false);
     } catch (failure) {
       if (mounted.current) setError(describe(failure));
       if (!attempt && failure instanceof ApiRequestError && failure.status === 409) {
@@ -169,10 +165,9 @@ function AcceptanceEvaluationSettingsBody({ projectId, enabled, value, onChange,
         </select></label>
         <label><input type="checkbox" checked={draft.requireSourceFreshness} onChange={e => setDraft({ ...draft, requireSourceFreshness: e.target.checked })} />Require source freshness</label>
         <p>Sub-agent evaluations, observed build evidence and source fingerprints are not yet produced by this host. Requiring them can block completion until another capable host supplies them.</p>
-        <label>Reason<input aria-label="Policy change reason" maxLength={1024} value={reason} onChange={e => setReason(e.target.value)} /></label>
         <label><input type="checkbox" checked={confirmed} onChange={e => setConfirmed(e.target.checked)} />I confirm this store-wide policy change</label>
       </fieldset>
-      <button type="button" className="primary-button" disabled={busy || saving || !enabled || recoveryBlocked || !confirmed || !reason.trim()} onClick={() => void savePolicy()}>
+      <button type="button" className="primary-button" disabled={busy || saving || !enabled || recoveryBlocked || !confirmed} onClick={() => void savePolicy()}>
         {saving ? "Saving policy…" : attempt ? "Retry identical policy change" : "Confirm policy change"}
       </button>
       {!attempt && <button type="button" className="ghost-button" disabled={busy || saving} onClick={() => setEditing(false)}>Cancel policy change</button>}

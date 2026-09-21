@@ -93,7 +93,6 @@ it.each(["defaults", "policy"] as const)("releases %s busy ownership on a projec
     if (kind === "defaults") fireEvent.click(screen.getByRole("button", { name: "Save evaluator defaults" }));
     else {
       fireEvent.click(screen.getByRole("button", { name: "Change store policy…" }));
-      fireEvent.change(screen.getByLabelText("Policy change reason"), { target: { value: "Confirmed decision" } });
       fireEvent.click(screen.getByLabelText("I confirm this store-wide policy change"));
       fireEvent.click(screen.getByRole("button", { name: "Confirm policy change" }));
     }

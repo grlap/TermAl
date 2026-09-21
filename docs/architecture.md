@@ -95,6 +95,10 @@ Optional sidecar:
   TermAl MCP bridge -> parent-scoped delegation + root-peer tools -> same local TermAl server
 ```
 
+[Local folder selection](features/local-folder-picker.md) uses a native Windows
+dialog or macOS `osascript` on the backend host's desktop, with manual entry as
+the cross-platform fallback.
+
 **Frontend:** React 18 + TypeScript, served on `:4173` in dev with a Vite proxy to the backend.
 **Backend:** Rust + axum + tokio, bound to `127.0.0.1:8787` by default, overridable with `TERMAL_PORT`.
 **Persistence:** `~/.termal/termal.sqlite` stores sessions, projects, preferences, remote config, workspace layouts, orchestrator instances, and the visual Response Board. `~/.termal/coordination.sqlite` stores durable mailboxes and agent coordination boards in a separate SQLite writer domain. `~/.termal/orchestrators.json` stores reusable orchestrator templates.
