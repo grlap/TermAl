@@ -101,6 +101,7 @@ impl AppState {
             message,
             preview,
             status,
+            session_queue: None,
             session_mutation_stamp: Some(session_mutation_stamp),
         });
         if should_refresh_delegation {
@@ -185,6 +186,7 @@ impl AppState {
             message,
             preview,
             status,
+            session_queue: None,
             session_mutation_stamp: Some(session_mutation_stamp),
         });
         Ok(())
@@ -535,6 +537,7 @@ impl AppState {
                 message,
                 preview,
                 status: session_status,
+                session_queue: None,
                 session_mutation_stamp: Some(session_mutation_stamp),
             });
         } else {
@@ -670,6 +673,7 @@ impl AppState {
                 message,
                 preview,
                 status: session_status,
+                session_queue: None,
                 session_mutation_stamp: Some(session_mutation_stamp),
             });
         } else {

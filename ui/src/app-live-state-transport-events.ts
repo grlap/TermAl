@@ -291,6 +291,7 @@ export function createAppLiveStateTransportEventHandlers(
       }
 
       const force = forceStateEvent;
+      const previousSessions = sessionsRef.current;
       // SSE state events are always the first event on a new connection
       // (before any deltas), so there is no risk of a delta racing ahead
       // and being overwritten. Allow revision downgrade so a restarted
@@ -311,6 +312,30 @@ export function createAppLiveStateTransportEventHandlers(
         void confirmReconnectRecoveryFromStateEvent();
       }
       if (adopted) {
+        const previousById = new Map(
+          previousSessions.map((session) => [session.id, session]),
+        );
+        for (const summary of state.sessions) {
+          const previous = previousById.get(summary.id);
+          const mutationAdvanced =
+            previous != null &&
+            summary.sessionMutationStamp != null &&
+            previous.sessionMutationStamp !== summary.sessionMutationStamp;
+          const queueProjectionChanged =
+            summary.queueProjectionHash != null
+              ? previous?.queueProjectionHash !== summary.queueProjectionHash
+              : (previous?.pendingPrompts?.length ?? 0) > 0 ||
+                previous?.queuePaused !== summary.queuePaused;
+          if (mutationAdvanced && queueProjectionChanged) {
+            // Metadata-first snapshots intentionally omit pending prompt
+            // bodies. The opaque identity/disposition hash changes for queue
+            // additions, removals, replacements, retained-state changes and
+            // pause changes without exposing those bodies. Older remotes that
+            // omit the hash keep the bounded legacy fallback. Equal-revision
+            // private replay never reaches this branch.
+            startSessionHydration(summary.id, { queueAfterCurrent: true });
+          }
+        }
         cancelStaleSendResponseRecoveryPollForSessions(
           state.sessions.map((session) => session.id),
         );

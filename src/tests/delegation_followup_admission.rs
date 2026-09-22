@@ -9,6 +9,55 @@ use super::engram_host_adapter::enable_test_project_engram;
 use super::mailboxes::mailbox_test_state;
 use super::*;
 
+struct LostFollowupAdmissionTransport {
+    inner: Arc<ScriptedEngramControlTransport>,
+    operation: &'static str,
+    observed_tx: Mutex<Option<mpsc::Sender<Value>>>,
+    release_rx: Mutex<mpsc::Receiver<()>>,
+}
+
+impl EngramControlTransport for LostFollowupAdmissionTransport {
+    fn request(
+        &self,
+        connection: &EngramConnectionConfig,
+        request: &EngramControlRequest,
+        timeout: Duration,
+    ) -> std::result::Result<Value, EngramTransportError> {
+        let encoded = serde_json::to_value(request).unwrap();
+        if encoded["operation"] == self.operation
+            && let Some(observed) = self.observed_tx.lock().unwrap().take()
+        {
+            self.inner
+                .requests
+                .lock()
+                .unwrap()
+                .push(RecordedEngramControlRequest {
+                    connection: connection.clone(),
+                    request: encoded.clone(),
+                });
+            observed.send(encoded).unwrap();
+            self.release_rx.lock().unwrap().recv().unwrap();
+            return Err(EngramTransportError::deadline(format!(
+                "lost {} reply",
+                self.operation
+            )));
+        }
+        self.inner.request(connection, request, timeout)
+    }
+
+    fn read_work_binding(
+        &self,
+        connection: &EngramConnectionConfig,
+        timeout: Duration,
+    ) -> std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError> {
+        self.inner.read_work_binding(connection, timeout)
+    }
+
+    fn shutdown_session(&self, session_id: &str) {
+        self.inner.shutdown_session(session_id);
+    }
+}
+
 #[test]
 fn manual_unarchive_is_not_owned_by_a_later_canceled_or_rejected_followup() {
     for path in ["queue cancel", "parent cancel", "late rejection"] {
@@ -570,6 +619,8 @@ fn canceled_queued_followup_never_reuses_old_result_or_discards_successor() {
                 queue_prompt_on_record_with_source(
                     &mut inner.sessions[index],
                     PendingPrompt {
+                        engram_interrupted: false,
+                        is_engram_retained: false,
                         id: next.clone(),
                         timestamp: stamp_now(),
                         text: "Successor".to_owned(),
@@ -782,6 +833,8 @@ fn followup_admission_uses_allocated_prompt_id_after_queue_prioritization() {
         queue_prompt_on_record_with_source(
             &mut inner.sessions[index],
             PendingPrompt {
+                engram_interrupted: false,
+                is_engram_retained: false,
                 id,
                 timestamp: stamp_now(),
                 text: "Queued work".to_owned(),
@@ -958,6 +1011,8 @@ fn queued_followup_survives_project_reset_polling_and_dispatches_once() {
             queue_prompt_on_record_with_source(
                 &mut inner.sessions[index],
                 PendingPrompt {
+                    engram_interrupted: false,
+                    is_engram_retained: false,
                     id: queued_id,
                     timestamp: stamp_now(),
                     text: "Do not run after terminal result".to_owned(),
@@ -1669,6 +1724,376 @@ fn followup_engram_queue_start_failure_settles_instead_of_stranding_running() {
 }
 
 #[test]
+fn retained_followup_promotion_uncertainty_preserves_running_wait_and_exact_queue_owner() {
+    for live_reservation in [true, false] {
+        for lost_operation in ["session_bind", "turn_evaluate"] {
+            let (state, runtime_rx) = test_app_state_with_delegation_codex_runtime(
+                "retained-followup-promotion-uncertainty",
+            );
+            let root = state
+                .test_temp_root
+                .as_ref()
+                .unwrap()
+                .path()
+                .join(format!("retained-followup-{live_reservation}-{lost_operation}"));
+            fs::create_dir_all(&root).unwrap();
+            let project = create_test_project(&state, &root, "Retained follow-up");
+            let parent = create_test_project_session(&state, Agent::Codex, &project, &root);
+            let created = state
+                .create_read_only_delegation(
+                    &parent,
+                    CreateDelegationRequest {
+                        prompt: "Initial attempt".to_owned(),
+                        title: None,
+                        cwd: None,
+                        agent: Some(Agent::Codex),
+                        model: None,
+                        mode: Some(DelegationMode::Explorer),
+                        write_policy: Some(DelegationWritePolicy::ReadOnly),
+                    },
+                )
+                .unwrap();
+            assert!(matches!(
+                runtime_rx.try_recv().unwrap(),
+                CodexRuntimeCommand::Prompt { .. }
+            ));
+            let delegation = created.delegation.id;
+            let child = created.delegation.child_session_id;
+            finish_delegation_child_with_assistant_text(
+                &state,
+                &child,
+                "## Result\nStatus: completed\n\nSummary:\nOld result.",
+            );
+            state.refresh_delegation_for_child_session(&child).unwrap();
+            enable_test_project_engram(&state, &project, &root);
+            {
+                let mut inner = state.inner.lock().unwrap();
+                let index = inner.find_session_index(&child).unwrap();
+                inner.sessions[index].engram.context_nudge_pending = false;
+                if !live_reservation {
+                    inner.sessions[index].engram.project_reset_in_progress = true;
+                }
+            }
+
+            let scripted = ScriptedEngramControlTransport::new(
+                (lost_operation == "turn_evaluate")
+                    .then(|| {
+                        ScriptedEngramControlResponse::Reply(Ok(json!({
+                            "routing_token": "followup-token",
+                            "status": { "phase": "ready" }
+                        })))
+                    })
+                    .into_iter(),
+            );
+            let (observed_tx, observed_rx) = mpsc::channel();
+            let (release_tx, release_rx) = mpsc::channel();
+            state.inner.lock().unwrap().test_engram_dispatch_budget =
+                Some(phase_sync::DEADLOCK_GUARD);
+            state.install_test_engram_transport(Arc::new(LostFollowupAdmissionTransport {
+                inner: scripted,
+                operation: lost_operation,
+                observed_tx: Mutex::new(Some(observed_tx)),
+                release_rx: Mutex::new(release_rx),
+            }));
+
+            let live_worker = if live_reservation {
+                let worker_state = state.clone();
+                let worker_parent = parent.clone();
+                let worker_delegation = delegation.clone();
+                Some(std::thread::spawn(move || {
+                    worker_state.followup_delegation(
+                        &worker_parent,
+                        &worker_delegation,
+                        "Exact retained follow-up".to_owned(),
+                    )
+                }))
+            } else {
+                let admitted = state
+                    .followup_delegation(
+                        &parent,
+                        &delegation,
+                        "Exact retained follow-up".to_owned(),
+                    )
+                    .unwrap();
+                assert_eq!(admitted.delegation.status, DelegationStatus::Running);
+                None
+            };
+
+            let delayed_worker = if live_reservation {
+                None
+            } else {
+                {
+                    let mut inner = state.inner.lock().unwrap();
+                    let index = inner.find_session_index(&child).unwrap();
+                    inner.sessions[index].engram.project_reset_in_progress = false;
+                }
+                let worker_state = state.clone();
+                let worker_child = child.clone();
+                Some(std::thread::spawn(move || {
+                    worker_state.start_next_queued_turn_off_lock(&worker_child, true, false)
+                }))
+            };
+
+            let issued = phase_sync::receive(
+                &observed_rx,
+                "prepared delegated follow-up reaches the wire",
+            );
+            let (prompt_id, successor_id) = {
+                let mut inner = state.inner.lock().unwrap();
+                let delegation_index = inner.find_delegation_index(&delegation).unwrap();
+                assert_eq!(
+                    inner.delegations[delegation_index].status,
+                    DelegationStatus::Running
+                );
+                let prompt_id = inner.delegations[delegation_index]
+                    .queued_followup_prompt_id
+                    .clone()
+                    .unwrap();
+                assert_eq!(
+                    inner
+                        .delegation_followup_admissions
+                        .contains_key(&delegation),
+                    live_reservation
+                );
+                let successor_id = inner.next_message_id();
+                let child_index = inner.find_session_index(&child).unwrap();
+                queue_prompt_on_record_with_source(
+                    inner.session_mut_by_index(child_index).unwrap(),
+                    PendingPrompt {
+                        engram_interrupted: false,
+                        is_engram_retained: false,
+                        attachments: Vec::new(),
+                        id: successor_id.clone(),
+                        timestamp: stamp_now(),
+                        text: "FIFO successor".to_owned(),
+                        expanded_text: None,
+                        source: None,
+                    },
+                    Vec::new(),
+                    QueuedPromptSource::User,
+                );
+                state.commit_locked(&mut inner).unwrap();
+                (prompt_id, successor_id)
+            };
+            let wait = state
+                .create_delegation_wait(
+                    &parent,
+                    CreateDelegationWaitRequest {
+                        delegation_ids: vec![delegation.clone()],
+                        mode: DelegationWaitMode::All,
+                        title: None,
+                    },
+                )
+                .unwrap();
+            let connection = rusqlite::Connection::open(&*state.persistence_path).unwrap();
+            connection
+                .execute_batch(&format!(
+                    "CREATE TRIGGER reject_retained_followup_promotion BEFORE INSERT ON messages
+                     WHEN NEW.message_id = '{}'
+                     BEGIN SELECT RAISE(ABORT, 'injected-retained-followup-promotion-failure'); END;",
+                    prompt_id.replace('\'', "''"),
+                ))
+                .unwrap();
+            release_tx.send(()).unwrap();
+
+            if let Some(worker) = live_worker {
+                let error = worker
+                    .join()
+                    .unwrap()
+                    .err()
+                    .expect("live follow-up promotion must report persistence uncertainty");
+                assert_eq!(
+                    error.kind,
+                    Some(ApiErrorKind::RetainedQueuedPromotionPersistenceUnknown)
+                );
+            }
+            if let Some(worker) = delayed_worker {
+                let error = worker
+                    .join()
+                    .unwrap()
+                    .err()
+                    .expect("delayed follow-up promotion must report persistence uncertainty");
+                assert!(
+                    error
+                        .downcast_ref::<RetainedQueuedPromotionPersistenceUnknown>()
+                        .is_some(),
+                    "{error:#}"
+                );
+            }
+            assert!(runtime_rx.try_recv().is_err(), "provider handoff is forbidden");
+
+            let inner = state.inner.lock().unwrap();
+            let running = &inner.delegations[inner.find_delegation_index(&delegation).unwrap()];
+            assert_eq!(running.status, DelegationStatus::Running);
+            assert!(running.result.is_none());
+            assert_eq!(
+                running.queued_followup_prompt_id.as_deref(),
+                Some(prompt_id.as_str())
+            );
+            assert!(!inner.delegation_followup_admissions.contains_key(&delegation));
+            assert!(inner.delegation_waits.iter().any(|item| item.id == wait.wait.id));
+            let record = &inner.sessions[inner.find_session_index(&child).unwrap()];
+            assert_eq!(record.session.status, SessionStatus::Idle);
+            assert!(record.orchestrator_auto_dispatch_blocked);
+            assert!(record.session.queue_paused);
+            assert_eq!(record.queued_prompts[0].pending_prompt.id, prompt_id);
+            assert_eq!(record.queued_prompts[1].pending_prompt.id, successor_id);
+            let prepared = if lost_operation == "session_bind" {
+                &record.queued_prompts[0].engram_bind.as_ref().unwrap().request
+            } else {
+                &record.queued_prompts[0]
+                    .engram_evaluate
+                    .as_ref()
+                    .unwrap()
+                    .request
+            };
+            assert_eq!(serde_json::to_value(prepared).unwrap(), issued);
+            drop(inner);
+            let disk = load_state(&state.persistence_path).unwrap().unwrap();
+            let disk_delegation = &disk.delegations[disk
+                .delegations
+                .iter()
+                .position(|item| item.id == delegation)
+                .unwrap()];
+            assert_eq!(disk_delegation.status, DelegationStatus::Running);
+            let disk_child = &disk.sessions[disk.find_session_index(&child).unwrap()];
+            assert_eq!(disk_child.queued_prompts[0].pending_prompt.id, prompt_id);
+            assert_eq!(disk_child.queued_prompts[1].pending_prompt.id, successor_id);
+        }
+    }
+}
+
+#[test]
+fn disabled_no_intent_promotion_failure_uses_ordinary_followup_settlement() {
+    for live_reservation in [true, false] {
+        let (state, runtime_rx) = test_app_state_with_delegation_codex_runtime(
+            "ordinary-followup-promotion-failure",
+        );
+        let root = state
+            .test_temp_root
+            .as_ref()
+            .unwrap()
+            .path()
+            .join(format!("ordinary-followup-{live_reservation}"));
+        fs::create_dir_all(&root).unwrap();
+        let project = create_test_project(&state, &root, "Ordinary follow-up failure");
+        let parent = create_test_project_session(&state, Agent::Codex, &project, &root);
+        let created = state
+            .create_read_only_delegation(
+                &parent,
+                CreateDelegationRequest {
+                    prompt: "Initial attempt".to_owned(),
+                    title: None,
+                    cwd: None,
+                    agent: Some(Agent::Codex),
+                    model: None,
+                    mode: Some(DelegationMode::Explorer),
+                    write_policy: Some(DelegationWritePolicy::ReadOnly),
+                },
+            )
+            .unwrap();
+        assert!(matches!(
+            runtime_rx.try_recv().unwrap(),
+            CodexRuntimeCommand::Prompt { .. }
+        ));
+        let delegation = created.delegation.id;
+        let child = created.delegation.child_session_id;
+        finish_delegation_child_with_assistant_text(
+            &state,
+            &child,
+            "## Result\nStatus: completed\n\nSummary:\nOld result.",
+        );
+        state.refresh_delegation_for_child_session(&child).unwrap();
+        enable_test_project_engram(&state, &project, &root);
+        {
+            let mut inner = state.inner.lock().unwrap();
+            let index = inner.find_session_index(&child).unwrap();
+            let record = inner.session_mut_by_index(index).unwrap();
+            record.engram.context_nudge_pending = false;
+            record.engram.disabled_reason = Some("fixture-disabled".to_owned());
+            record.engram.project_reset_in_progress = !live_reservation;
+        }
+        let connection = rusqlite::Connection::open(&*state.persistence_path).unwrap();
+        let reject_promotion = format!(
+            "CREATE TRIGGER reject_ordinary_followup_promotion BEFORE INSERT ON messages
+             WHEN NEW.session_id = '{}'
+             BEGIN SELECT RAISE(ABORT, 'injected-ordinary-followup-promotion-failure'); END;",
+            child.replace('\'', "''"),
+        );
+
+        let mut wait_id = None;
+        if live_reservation {
+            connection.execute_batch(&reject_promotion).unwrap();
+            let error = state
+                .followup_delegation(&parent, &delegation, "Ordinary failure".to_owned())
+                .err()
+                .expect("live promotion must fail");
+            assert_ne!(
+                error.kind,
+                Some(ApiErrorKind::RetainedQueuedPromotionPersistenceUnknown)
+            );
+        } else {
+            state
+                .followup_delegation(&parent, &delegation, "Ordinary failure".to_owned())
+                .unwrap();
+            wait_id = Some(
+                state
+                    .create_delegation_wait(
+                        &parent,
+                        CreateDelegationWaitRequest {
+                            delegation_ids: vec![delegation.clone()],
+                            mode: DelegationWaitMode::All,
+                            title: None,
+                        },
+                    )
+                    .unwrap()
+                    .wait
+                    .id,
+            );
+            connection.execute_batch(&reject_promotion).unwrap();
+            {
+                let mut inner = state.inner.lock().unwrap();
+                let index = inner.find_session_index(&child).unwrap();
+                inner.sessions[index].engram.project_reset_in_progress = false;
+            }
+            let error = state
+                .start_next_queued_turn_off_lock(&child, true, false)
+                .err()
+                .expect("committed follow-up promotion must fail");
+            assert!(
+                error
+                    .downcast_ref::<RetainedQueuedPromotionPersistenceUnknown>()
+                    .is_none(),
+                "{error:#}"
+            );
+        }
+
+        let inner = state.inner.lock().unwrap();
+        let failed = &inner.delegations[inner.find_delegation_index(&delegation).unwrap()];
+        assert_eq!(
+            failed.status,
+            if live_reservation {
+                DelegationStatus::Completed
+            } else {
+                DelegationStatus::Failed
+            },
+            "an uncommitted live reservation rolls back to its prior terminal record; a committed first follow-up settles terminally"
+        );
+        assert!(failed.result.is_some());
+        assert!(!inner.delegation_followup_admissions.contains_key(&delegation));
+        assert!(inner.sessions[inner.find_session_index(&child).unwrap()]
+            .queued_prompts
+            .is_empty());
+        if let Some(wait_id) = wait_id {
+            assert!(
+                inner.delegation_waits.iter().any(|wait| wait.id == wait_id),
+                "the same injected storage failure must leave the parent wait retryable"
+            );
+        }
+    }
+}
+
+#[test]
 fn followup_wait_commit_failure_retains_idle_parent_wake_for_exactly_once_retry() {
     for terminal in [
         DelegationStatus::Completed,
@@ -1980,6 +2405,8 @@ fn followup_archive_compensation_rejects_attached_runtime_or_remaining_queue() {
                 queue_prompt_on_record_with_source(
                     record,
                     PendingPrompt {
+                        engram_interrupted: false,
+                        is_engram_retained: false,
                         id,
                         timestamp: stamp_now(),
                         text: "Retain this prompt".to_owned(),

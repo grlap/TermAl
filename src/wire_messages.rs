@@ -242,6 +242,13 @@ struct MailboxMessageSource {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PendingPrompt {
+    /// Derived queue recovery disposition, never part of the authorization input.
+    #[serde(default, skip_serializing_if = "session_flag_is_false")]
+    engram_interrupted: bool,
+    /// Exact derived retained-authorization fact. Queue pausing alone does not
+    /// imply Engram ownership of this prompt.
+    #[serde(default, skip_serializing_if = "session_flag_is_false")]
+    is_engram_retained: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     attachments: Vec<MessageImageAttachment>,
     id: String,

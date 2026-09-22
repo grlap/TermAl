@@ -313,9 +313,17 @@ fn stop_session_recovers_an_active_session_with_no_runtime() {
             inner.sessions[index]
                 .queued_prompts
                 .push_back(QueuedPromptRecord {
+                    engram_waiting: false,
+                    promoted_message_index: None,
+                    promotion_disposition_known: true,
+                    engram_bind: None,
+                    engram_evaluate: None,
+                    engram_interrupted: false,
                     source,
                     attachments: Vec::new(),
                     pending_prompt: PendingPrompt {
+                        engram_interrupted: false,
+                        is_engram_retained: false,
                         attachments: Vec::new(),
                         id: id.to_owned(),
                         timestamp: stamp_now(),
@@ -382,9 +390,17 @@ fn stop_projects_the_paused_queue_and_resume_clears_it() {
         inner.sessions[index]
             .queued_prompts
             .push_back(QueuedPromptRecord {
+                engram_waiting: false,
+                promoted_message_index: None,
+                promotion_disposition_known: true,
+                engram_bind: None,
+                engram_evaluate: None,
+                engram_interrupted: false,
                 source: QueuedPromptSource::Mailbox,
                 attachments: Vec::new(),
                 pending_prompt: PendingPrompt {
+                    engram_interrupted: false,
+                    is_engram_retained: false,
                     attachments: Vec::new(),
                     id: "mailbox-parked-by-stop".to_owned(),
                     timestamp: stamp_now(),
@@ -515,6 +531,8 @@ fn resume_promotes_the_paused_queue_head_and_delivers_it() {
         queue_prompt_on_record(
             record,
             PendingPrompt {
+                engram_interrupted: false,
+                is_engram_retained: false,
                 attachments: Vec::new(),
                 id: prompt_id,
                 timestamp: stamp_now(),
@@ -594,6 +612,8 @@ fn resume_persist_failure_rolls_back_the_promotion_and_keeps_the_queue_paused() 
         queue_prompt_on_record(
             record,
             PendingPrompt {
+                engram_interrupted: false,
+                is_engram_retained: false,
                 attachments: Vec::new(),
                 id: prompt_id,
                 timestamp: stamp_now(),

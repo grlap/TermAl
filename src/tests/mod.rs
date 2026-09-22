@@ -1206,6 +1206,7 @@ fn sample_remote_orchestrator_state(
                 markers: Vec::new(),
                 pending_prompts: Vec::new(),
                 queue_paused: false,
+                queue_projection_hash: None,
                 session_mutation_stamp: None,
                 parent_delegation_id: None,
             };
@@ -1326,6 +1327,7 @@ fn test_state_session_summary_from_session(session: &Session) -> StateSessionSum
         message_count: session.message_count,
         markers: session.markers.clone(),
         queue_paused: session.queue_paused,
+        queue_projection_hash: session.queue_projection_hash.clone(),
         session_mutation_stamp: session.session_mutation_stamp,
         parent_delegation_id: session.parent_delegation_id.clone(),
     }

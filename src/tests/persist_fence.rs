@@ -80,6 +80,57 @@ fn poll(waiter: &PersistFenceWaiter) -> Option<PersistFenceResult> {
 }
 
 #[test]
+fn engram_admission_fence_requires_exact_committed_session_content() {
+    let mut fixture = FenceFixture::new();
+    let (session_id, content) = {
+        let mut inner = fixture.inner.lock().expect("state mutex poisoned");
+        let created = inner.create_session(
+            Agent::Codex,
+            None,
+            fixture.root.path().to_string_lossy().into_owned(),
+            None,
+            None,
+        );
+        let index = inner.find_session_index(&created.session.id).unwrap();
+        let record = inner.session_mut_by_index(index).unwrap();
+        record.engram.dispatch_generation = 42;
+        record.engram.routing_token = Some("exact-routing-token".to_owned());
+        (
+            record.session.id.clone(),
+            engram_admission_persisted_content(&PersistedSessionRecord::from_record(record)),
+        )
+    };
+    let target = PersistFenceTarget::EngramAdmission {
+        session_id: session_id.clone(),
+        content: content.clone(),
+    };
+    let waiter = fixture.enqueue(target.clone());
+    fixture.receive(false);
+    let delta = fixture.collect();
+    assert!(
+        !target.is_in_delta(&delta),
+        "an in-memory row is not a durable receipt"
+    );
+    assert_eq!(poll(&waiter), None);
+    fixture.write(&delta).unwrap();
+    assert_eq!(poll(&waiter), Some(Ok(())));
+    let mut changed = content;
+    changed["generation"] = json!(43);
+    let mismatch = fixture.enqueue(PersistFenceTarget::EngramAdmission {
+        session_id,
+        content: changed,
+    });
+    fixture.receive(false);
+    fixture.write(&delta).unwrap();
+    assert_eq!(
+        poll(&mismatch),
+        None,
+        "row existence or another generation cannot acknowledge admission"
+    );
+    fixture.batch.fail(PersistFenceError::Shutdown);
+}
+
+#[test]
 fn held_fence_keeps_the_state_lock_free_and_completes_only_after_sql_write() {
     let mut fixture = FenceFixture::new();
     let expected = fixture.wait_record("held");

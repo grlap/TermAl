@@ -26,6 +26,7 @@ import { VirtualizedConversationMessageList } from "./VirtualizedConversationMes
 import { SessionActivityStrip } from "./session-activity-cards";
 import { notifyMessageStackScrollWrite } from "../message-stack-scroll-sync";
 import { MessageCard } from "../message-cards";
+import { applyDeltaToSessions } from "../live-updates";
 import {
   resetSessionStoreForTesting,
   syncComposerSessionsStore,
@@ -48,6 +49,7 @@ import {
 import type {
   CommandMessage,
   ConversationMarker,
+  DeltaEvent,
   DiffMessage,
   Message,
   Session,
@@ -550,6 +552,320 @@ describe("AgentSessionPanel conversation caching", () => {
     ).not.toBeInTheDocument();
   });
 
+  it.each(["Waiting/Unknown", "interrupted/unknown", "Defer", "store_corrupt"])(
+    "keeps recovery actions without duplicating a retained transcript prompt after %s",
+    (preview) => {
+      const interrupted = preview === "interrupted/unknown" || preview === "store_corrupt";
+      const onCancelQueuedPrompt = vi.fn();
+      const onResumeSessionQueue = vi.fn();
+      const activeSession = makeSession("session-held", {
+        status: "idle",
+        queuePaused: true,
+        preview,
+        messages: [{ id: "held", type: "text", author: "you", timestamp: "10:00", text: "Original exact prompt" }],
+        pendingPrompts: [{
+          id: "held",
+          timestamp: "10:00",
+          text: "Original exact prompt",
+          isEngramRetained: true,
+          engramInterrupted: interrupted,
+        }],
+      });
+      renderSessionPanelWithDefaults({
+        activeSession: preview === "Waiting/Unknown"
+          ? { ...activeSession, status: "active", queuePaused: false, pendingPrompts: [] }
+          : activeSession,
+        onCancelQueuedPrompt,
+        onResumeSessionQueue,
+        renderMessageCard: (message) => <article>{message.type === "text" ? message.text : message.id}</article>,
+      });
+      if (preview === "Waiting/Unknown") {
+        expect(screen.queryByRole("button", { name: "Cancel retained prompt" })).not.toBeInTheDocument();
+        act(() => syncComposerSessionsStore({
+          sessions: [activeSession], draftsBySessionId: {}, draftAttachmentsBySessionId: {},
+        }));
+      }
+      expect(screen.getAllByText("Original exact prompt")).toHaveLength(1);
+      expect(screen.getByText("Prompt retained")).toBeInTheDocument();
+      if (interrupted) {
+        expect(screen.queryByRole("button", { name: "Resume queued prompts" })).not.toBeInTheDocument();
+        expect(screen.getByText(/Cancel this retained prompt or reconcile/)).toBeInTheDocument();
+        expect(onResumeSessionQueue).not.toHaveBeenCalled();
+      } else {
+        fireEvent.click(screen.getByRole("button", { name: "Resume queued prompts" }));
+        expect(onResumeSessionQueue).toHaveBeenCalledWith("session-held");
+      }
+      fireEvent.click(screen.getByRole("button", { name: "Cancel retained prompt" }));
+      expect(onCancelQueuedPrompt).toHaveBeenCalledWith("session-held", "held");
+
+      // The next server snapshot after cancellation removes only the actions.
+      act(() => syncComposerSessionsStore({
+        sessions: [{ ...activeSession, pendingPrompts: [] }],
+        draftsBySessionId: {},
+        draftAttachmentsBySessionId: {},
+      }));
+      expect(screen.queryByRole("button", { name: "Cancel retained prompt" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Resume queued prompts" })).not.toBeInTheDocument();
+      expect(screen.getAllByText("Original exact prompt")).toHaveLength(1);
+    },
+  );
+
+  it("shows one retained prompt, one Defer card, and actionable Resume after the atomic SSE delta", () => {
+    const preDefer = makeSession("session-held", {
+      status: "active",
+      preview: "Authorize exact prompt",
+      queuePaused: false,
+      messageCount: 1,
+      sessionMutationStamp: 100,
+      messages: [{
+        id: "held",
+        type: "text",
+        author: "you",
+        timestamp: "10:00",
+        text: "Original exact prompt",
+      }],
+    });
+    const delta: DeltaEvent = {
+      type: "messageCreated",
+      revision: 7,
+      sessionId: "session-held",
+      messageId: "defer-card",
+      messageIndex: 1,
+      messageCount: 2,
+      message: {
+        id: "defer-card",
+        type: "engramControl",
+        author: "assistant",
+        timestamp: "10:01",
+        schemaVersion: 1,
+        stage: "dispatch",
+        assurance: "authoritative",
+        decision: "defer",
+        dispatch: "queued",
+        deferCode: "busy",
+        latencyMs: { total: 5 },
+        failMode: "enforced",
+      },
+      preview: "Engram deferred this prompt (busy). Prompt retained; resume to retry or cancel.",
+      status: "idle",
+      sessionQueue: {
+        queuePaused: true,
+        pendingPrompts: [{
+          id: "held",
+          timestamp: "10:00",
+          text: "Original exact prompt",
+          isEngramRetained: true,
+          engramInterrupted: false,
+        }],
+      },
+      sessionMutationStamp: 101,
+    };
+    const applied = applyDeltaToSessions([preDefer], delta);
+    if (applied.kind !== "applied") {
+      throw new Error(`expected applied Defer delta, received ${applied.kind}`);
+    }
+    const onResumeSessionQueue = vi.fn();
+
+    renderSessionPanelWithDefaults({
+      activeSession: applied.sessions[0],
+      onResumeSessionQueue,
+      renderMessageCard: (message) => (
+        <article>{message.type === "text" ? message.text : message.id}</article>
+      ),
+    });
+
+    expect(screen.getAllByText("Original exact prompt")).toHaveLength(1);
+    expect(screen.getAllByText("defer-card")).toHaveLength(1);
+    expect(screen.getByText("Prompt retained")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Resume queued prompts" }));
+    expect(onResumeSessionQueue).toHaveBeenCalledOnce();
+    expect(onResumeSessionQueue).toHaveBeenCalledWith("session-held");
+  });
+
+  it("keeps an unpromoted retained head before its optimistic successor", () => {
+    const onCancelQueuedPrompt = vi.fn();
+    renderSessionPanelWithDefaults({
+      activeSession: makeSession("session-unpromoted-retained", {
+        status: "idle",
+        queuePaused: true,
+        messages: [],
+        pendingPrompts: [
+          {
+            id: "unpromoted-retained",
+            timestamp: "10:00",
+            text: "Exact retained prompt without a transcript row",
+            isEngramRetained: true,
+            engramInterrupted: true,
+          },
+          {
+            id: "optimistic-successor",
+            timestamp: "10:01",
+            text: "Optimistic successor behind retained head",
+            localOnly: true,
+          },
+        ],
+      }),
+      onCancelQueuedPrompt,
+      onResumeSessionQueue: vi.fn(),
+    });
+
+    expect(screen.getByText("Prompt retained")).toBeInTheDocument();
+    expect(screen.getByText(/Cancel this retained prompt or reconcile/)).toBeInTheDocument();
+    const retainedHead = screen.getByText("Exact retained prompt without a transcript row");
+    const optimisticSuccessor = screen.getByText("Optimistic successor behind retained head");
+    expect(
+      retainedHead.compareDocumentPosition(optimisticSuccessor) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Resume queued prompts" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel queued prompt" }));
+    expect(onCancelQueuedPrompt).toHaveBeenCalledWith(
+      "session-unpromoted-retained",
+      "optimistic-successor",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Cancel retained prompt" }));
+    expect(onCancelQueuedPrompt).toHaveBeenCalledWith(
+      "session-unpromoted-retained",
+      "unpromoted-retained",
+    );
+  });
+
+  it("registers and highlights an unpromoted retained prompt for conversation search", () => {
+    const onConversationSearchItemMount = vi.fn();
+    renderSessionPanelWithDefaults({
+      activeSession: makeSession("session-search-retained", {
+        status: "idle",
+        queuePaused: true,
+        messages: [],
+        pendingPrompts: [{
+          id: "retained-search-target",
+          timestamp: "10:00",
+          text: "Searchable retained prompt",
+          isEngramRetained: true,
+          engramInterrupted: true,
+        }],
+      }),
+      conversationSearchQuery: "retained",
+      conversationSearchMatchedItemKeys: new Set([
+        "pendingPrompt:retained-search-target",
+      ]),
+      conversationSearchActiveItemKey: "pendingPrompt:retained-search-target",
+      onConversationSearchItemMount,
+    });
+
+    expect(onConversationSearchItemMount).toHaveBeenCalledWith(
+      "pendingPrompt:retained-search-target",
+      expect.any(HTMLElement),
+    );
+    const slot = document.querySelector(
+      '[data-session-search-item-key="pendingPrompt:retained-search-target"]',
+    );
+    expect(slot).toHaveClass("session-search-hit", "session-search-hit-active");
+    expect(slot?.querySelector("mark.search-highlight.is-active")).toHaveTextContent(
+      "retained",
+    );
+  });
+
+  it("suppresses a duplicate pending search slot when the retained body is in the transcript", () => {
+    const onConversationSearchItemMount = vi.fn();
+    renderSessionPanelWithDefaults({
+      activeSession: makeSession("session-search-retained-visible", {
+        status: "idle",
+        queuePaused: true,
+        messages: [{
+          id: "retained-search-target",
+          type: "text",
+          author: "you",
+          timestamp: "10:00",
+          text: "Searchable retained prompt",
+        }],
+        pendingPrompts: [{
+          id: "retained-search-target",
+          timestamp: "10:00",
+          text: "Searchable retained prompt",
+          isEngramRetained: true,
+        }],
+      }),
+      conversationSearchQuery: "retained",
+      conversationSearchMatchedItemKeys: new Set([
+        "message:retained-search-target",
+        "pendingPrompt:retained-search-target",
+      ]),
+      conversationSearchActiveItemKey: "message:retained-search-target",
+      onConversationSearchItemMount,
+      renderMessageCard: (message) => (
+        <article>{message.type === "text" ? message.text : message.id}</article>
+      ),
+    });
+
+    expect(
+      document.querySelector(
+        '[data-session-search-item-key="pendingPrompt:retained-search-target"]',
+      ),
+    ).not.toBeInTheDocument();
+    expect(onConversationSearchItemMount).not.toHaveBeenCalledWith(
+      "pendingPrompt:retained-search-target",
+      expect.anything(),
+    );
+    expect(screen.getAllByText("Searchable retained prompt")).toHaveLength(1);
+  });
+
+  it("keeps an evicted interrupted retained head before its queued successor", () => {
+    const onCancelQueuedPrompt = vi.fn();
+    renderSessionPanelWithDefaults({
+      activeSession: makeSession("session-evicted-retained", {
+        status: "idle",
+        queuePaused: true,
+        messages: [{
+          id: "resident-tail",
+          type: "text",
+          author: "assistant",
+          timestamp: "10:01",
+          text: "Resident transcript tail",
+        }],
+        pendingPrompts: [
+          {
+            id: "evicted-retained-head",
+            timestamp: "10:00",
+            text: "Evicted retained head",
+            isEngramRetained: true,
+            engramInterrupted: true,
+          },
+          {
+            id: "queued-successor",
+            timestamp: "10:02",
+            text: "Queued successor behind retained head",
+          },
+        ],
+      }),
+      onCancelQueuedPrompt,
+      onResumeSessionQueue: vi.fn(),
+    });
+
+    expect(screen.getByText("Prompt retained")).toBeInTheDocument();
+    const retainedHead = screen.getByText("Evicted retained head");
+    const queuedSuccessor = screen.getByText("Queued successor behind retained head");
+    expect(
+      retainedHead.compareDocumentPosition(queuedSuccessor) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: "Cancel retained prompt" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Cancel queued prompt" })).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "Resume queued prompts" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel retained prompt" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel queued prompt" }));
+    expect(onCancelQueuedPrompt).toHaveBeenNthCalledWith(
+      1,
+      "session-evicted-retained",
+      "evicted-retained-head",
+    );
+    expect(onCancelQueuedPrompt).toHaveBeenNthCalledWith(
+      2,
+      "session-evicted-retained",
+      "queued-successor",
+    );
+  });
+
   it("does not carry deferred transcript cards into an empty active session", async () => {
     const sessionA = makeSession("session-a", {
       messages: [
@@ -851,6 +1167,36 @@ describe("AgentSessionPanel conversation caching", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Resume queued prompts" }));
     expect(onResumeSessionQueue).toHaveBeenCalledWith("session-a");
+  });
+
+  it("does not render Engram recovery actions for an ordinary stopped queue prompt", () => {
+    renderSessionPanelWithDefaults({
+      activeSession: makeSession("session-a", {
+        status: "idle",
+        queuePaused: true,
+        messages: [
+          {
+            id: "ordinary-stopped-prompt",
+            type: "text",
+            timestamp: "10:00",
+            author: "you",
+            text: "Ordinary stopped prompt",
+          },
+        ],
+        pendingPrompts: [
+          {
+            id: "ordinary-stopped-prompt",
+            timestamp: "10:00",
+            text: "Ordinary stopped prompt",
+          },
+        ],
+      }),
+    });
+
+    expect(screen.queryByText("Prompt retained")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Cancel retained prompt" }),
+    ).not.toBeInTheDocument();
   });
 
   it("labels a queued peer prompt with its sender session name", () => {

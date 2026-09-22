@@ -58,11 +58,12 @@ it("keeps turn-gating edits and verification when evaluator defaults are edited 
   fireEvent.click(screen.getByLabelText("Turn-gated control"));
   fireEvent.click(screen.getByRole("button", { name: "Verify" }));
   await screen.findByText("engram-one");
-  fireEvent.change(screen.getByLabelText("Evaluator agent"), { target: { value: "Claude" } });
+  fireEvent.click(screen.getByRole("combobox", { name: "Evaluator agent" }));
+  fireEvent.click(screen.getByRole("option", { name: "Claude" }));
   expect(screen.getByRole("button", { name: "Save & enable" })).toBeEnabled();
   await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Save evaluator defaults" })); });
   expect(screen.getByLabelText("Turn-gated control")).toBeChecked();
-  expect(screen.getByLabelText("Evaluator agent")).toHaveValue("Claude");
+  expect(screen.getByLabelText("Evaluator agent")).toHaveTextContent("Claude");
   expect(screen.getByRole("button", { name: "Save & enable" })).toBeEnabled();
   await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Save & enable" })); });
   expect(updateProjectEngramSettings).toHaveBeenCalledWith("one", { enabled: true, turnGatedControl: true });
@@ -72,13 +73,14 @@ it("keeps turn-gating edits and verification when evaluator defaults are edited 
 it("keeps an unsaved evaluator draft through connection updates, resetting it only for another project", async () => {
   setup();
   await screen.findByText("Off — completion is self-asserted.");
-  fireEvent.change(screen.getByLabelText("Evaluator agent"), { target: { value: "Claude" } });
+  fireEvent.click(screen.getByRole("combobox", { name: "Evaluator agent" }));
+  fireEvent.click(screen.getByRole("option", { name: "Claude" }));
   fireEvent.click(screen.getByRole("button", { name: "Persist turn gating" }));
   expect(screen.getByLabelText("Turn-gated control")).toBeChecked();
-  expect(screen.getByLabelText("Evaluator agent")).toHaveValue("Claude");
+  expect(screen.getByLabelText("Evaluator agent")).toHaveTextContent("Claude");
   fireEvent.click(screen.getByRole("button", { name: "Switch project" }));
   await screen.findByText("Off — completion is self-asserted.");
-  expect(screen.getByLabelText("Evaluator agent")).toHaveValue("");
+  expect(screen.getByLabelText("Evaluator agent")).toHaveTextContent("Auto — other vendor when ready");
   expect(screen.getByLabelText("Turn-gated control")).not.toBeChecked();
 });
 
@@ -93,7 +95,6 @@ it.each(["defaults", "policy"] as const)("releases %s busy ownership on a projec
     if (kind === "defaults") fireEvent.click(screen.getByRole("button", { name: "Save evaluator defaults" }));
     else {
       fireEvent.click(screen.getByRole("button", { name: "Change store policy…" }));
-      fireEvent.click(screen.getByLabelText("I confirm this store-wide policy change"));
       fireEvent.click(screen.getByRole("button", { name: "Confirm policy change" }));
     }
     await waitFor(() => expect(screen.getByRole("button", { name: "Verify" })).toBeDisabled());

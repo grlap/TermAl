@@ -293,7 +293,7 @@ export function messageChangeMarker(message: Message) {
 }
 
 export function pendingPromptChangeMarker(prompt: PendingPrompt) {
-  return `${prompt.text.length}:${prompt.attachments?.length ?? 0}`;
+  return `${prompt.text.length}:${prompt.attachments?.length ?? 0}:${Boolean(prompt.isEngramRetained)}:${Boolean(prompt.engramInterrupted)}`;
 }
 
 export function removePendingPromptById(
@@ -314,11 +314,53 @@ export function removePendingPromptById(
   return nextPendingPrompts.length > 0 ? nextPendingPrompts : undefined;
 }
 
+function pendingPromptAttachmentsMatch(
+  left: PendingPrompt["attachments"],
+  right: PendingPrompt["attachments"],
+) {
+  const leftAttachments = left ?? [];
+  const rightAttachments = right ?? [];
+  return (
+    leftAttachments.length === rightAttachments.length &&
+    leftAttachments.every((attachment, index) => {
+      const candidate = rightAttachments[index];
+      return (
+        candidate?.fileName === attachment.fileName &&
+        candidate.mediaType === attachment.mediaType &&
+        candidate.byteSize === attachment.byteSize
+      );
+    })
+  );
+}
+
+export function pendingPromptContentsMatch(
+  left: PendingPrompt,
+  right: PendingPrompt,
+) {
+  return (
+    left.text === right.text &&
+    (left.expandedText ?? null) === (right.expandedText ?? null) &&
+    pendingPromptAttachmentsMatch(left.attachments, right.attachments)
+  );
+}
+
 export function removePendingPromptForCreatedMessage(
   pendingPrompts: PendingPrompt[] | undefined,
   message: Message,
   candidateGlobalIndex?: number | null,
 ) {
+  // An explicitly retained Engram entry may survive promotion into the
+  // transcript. Hydration is not evidence of delivery; only authoritative
+  // queue metadata can retire it. Ordinary paused and optimistic prompts still
+  // reconcile normally below.
+  if (pendingPrompts?.some(
+    (prompt) =>
+      prompt.id === message.id &&
+      !prompt.localOnly &&
+      prompt.isEngramRetained === true,
+  )) {
+    return pendingPrompts;
+  }
   const withoutMatchingServerId = removePendingPromptById(
     pendingPrompts,
     message.id,
@@ -340,6 +382,7 @@ export function removePendingPromptForCreatedMessage(
     (prompt) =>
       prompt.localOnly === true &&
       (prompt.text === message.text || prompt.expandedText === message.text) &&
+      pendingPromptAttachmentsMatch(prompt.attachments, message.attachments) &&
       (candidateGlobalIndex === undefined ||
         (candidateGlobalIndex !== null &&
           typeof prompt.transcriptEndIndexAtEnqueue === "number" &&

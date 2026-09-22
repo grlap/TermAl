@@ -118,6 +118,13 @@ enum AtomicTurnFailureMode<'a> {
     },
 }
 
+#[derive(Clone, Debug)]
+struct RejectedEngramDeliveryOwner {
+    dispatch_generation: u64,
+    grant_id: String,
+    intent_fingerprint: String,
+}
+
 impl<'a> AtomicTurnFailureMode<'a> {
     fn preserves_accepted_turn_state(self) -> bool {
         !matches!(self, Self::RejectedDelivery { .. })
@@ -185,10 +192,8 @@ fn claim_engram_mcp_runtime_revocations_locked(
             .session_mut_by_index(index)
             .expect("session index should be valid");
         debug_assert!(record.deferred_stop_callbacks.is_empty());
-        let owner_generation = record.claim_runtime_stop(
-            RuntimeStopOwnerKind::EngramMcpRevocation,
-            token.clone(),
-        );
+        let owner_generation =
+            record.claim_runtime_stop(RuntimeStopOwnerKind::EngramMcpRevocation, token.clone());
         record.engram_mcp_revocation_pending = false;
         batch.targets.push(EngramMcpRuntimeRevocationTarget {
             session_id: session_id.clone(),
@@ -211,7 +216,9 @@ fn rollback_engram_mcp_runtime_revocations_locked(
         let Some(index) = inner.find_session_index(&target.session_id) else {
             continue;
         };
-        if inner.sessions[index].runtime.matches_runtime_token(&target.token)
+        if inner.sessions[index]
+            .runtime
+            .matches_runtime_token(&target.token)
             && inner.sessions[index].runtime_stop_is_owned_by(
                 RuntimeStopOwnerKind::EngramMcpRevocation,
                 &target.token,
@@ -265,10 +272,8 @@ fn take_pending_engram_mcp_revocation_after_stop_failure_locked(
         .session_mut_by_index(index)
         .expect("session index should be valid");
     record.engram_mcp_revocation_pending = false;
-    let owner_generation = record.claim_runtime_stop(
-        RuntimeStopOwnerKind::EngramMcpRevocation,
-        token.clone(),
-    );
+    let owner_generation =
+        record.claim_runtime_stop(RuntimeStopOwnerKind::EngramMcpRevocation, token.clone());
     Some(EngramMcpRuntimeRevocationTarget {
         session_id,
         token,
@@ -350,48 +355,61 @@ impl AppState {
         token: &RuntimeToken,
         mut deferred_callbacks: Vec<DeferredStopCallback>,
     ) {
-        // Runtime exit must remain last: it removes the runtime handle that the
+        // Runtime exit follows turn terminal callbacks: it removes the handle that the
         // preceding turn terminal callbacks still need to match. Every replay
         // also validates the callback's original active-turn generation, so a
         // same-token successor cannot absorb a stale terminal transition after
-        // the stop fence has been released.
-        deferred_callbacks.sort_by_key(|deferred| {
-            matches!(deferred, DeferredStopCallback::RuntimeExited { .. })
+        // the stop fence has been released. Prepared handoff comes last, so a
+        // deferred terminal outcome wins before we consider delivering a prompt.
+        deferred_callbacks.sort_by_key(|deferred| match deferred {
+            DeferredStopCallback::EngramHandoff { .. } => 2,
+            DeferredStopCallback::RuntimeExited { .. } => 1,
+            _ => 0,
         });
         for deferred in deferred_callbacks {
             let active_turn_generation = deferred.active_turn_generation();
             let replay_result = match deferred {
-                DeferredStopCallback::TurnFailed { message, .. } => {
-                    self.fail_turn_if_runtime_and_generation_match(
+                DeferredStopCallback::EngramHandoff { dispatch, .. } => {
+                    let prepared = dispatch
+                        .0
+                        .lock()
+                        .expect("deferred handoff mutex poisoned")
+                        .take();
+                    if let Some(prepared) = prepared {
+                        handoff_prepared_turn_dispatch(self, prepared)
+                            .map(|_| ())
+                            .map_err(|error| anyhow!(error.message))
+                    } else {
+                        Ok(())
+                    }
+                }
+                DeferredStopCallback::TurnFailed { message, .. } => self
+                    .fail_turn_if_runtime_and_generation_match(
                         session_id,
                         token,
                         active_turn_generation,
                         &message,
-                    )
-                }
-                DeferredStopCallback::TurnError { message, .. } => {
-                    self.mark_turn_error_if_runtime_and_generation_match(
+                    ),
+                DeferredStopCallback::TurnError { message, .. } => self
+                    .mark_turn_error_if_runtime_and_generation_match(
                         session_id,
                         token,
                         active_turn_generation,
                         &message,
-                    )
-                }
-                DeferredStopCallback::TurnCompleted { .. } => {
-                    self.finish_turn_ok_if_runtime_and_generation_match(
+                    ),
+                DeferredStopCallback::TurnCompleted { .. } => self
+                    .finish_turn_ok_if_runtime_and_generation_match(
                         session_id,
                         token,
                         active_turn_generation,
-                    )
-                }
-                DeferredStopCallback::RuntimeExited { message, .. } => {
-                    self.handle_runtime_exit_if_runtime_and_generation_match(
+                    ),
+                DeferredStopCallback::RuntimeExited { message, .. } => self
+                    .handle_runtime_exit_if_runtime_and_generation_match(
                         session_id,
                         token,
                         active_turn_generation,
                         message.as_deref(),
-                    )
-                }
+                    ),
             };
             if let Err(error) = replay_result {
                 eprintln!(
@@ -476,10 +494,10 @@ impl AppState {
                 drop(inner);
                 let failure = self
                     .release_engram_mcp_revocation_fence_after_token_mismatch(
-                    session_id,
-                    token,
-                    owner_generation,
-                )
+                        session_id,
+                        token,
+                        owner_generation,
+                    )
                     .err()
                     .map(|error| format!("failed to release stale revocation fence: {error:#}"));
                 return EngramMcpRuntimeRevocationFinalization {
@@ -533,9 +551,8 @@ impl AppState {
                 .deferred_stop_callbacks
                 .iter()
                 .any(|callback| matches!(callback, DeferredStopCallback::RuntimeExited { .. }));
-            let buffered_exit_confirms_cleanup = retain_runtime_for_retry
-                && !is_shared_codex_runtime
-                && runtime_exit_was_buffered;
+            let buffered_exit_confirms_cleanup =
+                retain_runtime_for_retry && !is_shared_codex_runtime && runtime_exit_was_buffered;
             let retain_runtime_for_retry =
                 retain_runtime_for_retry && !buffered_exit_confirms_cleanup;
             let shutdown_error = if buffered_exit_confirms_cleanup {
@@ -556,10 +573,10 @@ impl AppState {
             let file_change_message_id =
                 (!inner.sessions[index].active_turn_file_changes.is_empty())
                     .then(|| inner.next_message_id());
-            let suppress_automatic_resume = stop_options
-                .is_some_and(|options| options.pause_automatic_resumes_on_success);
-            let dispatch_queued_prompts = stop_options
-                .map_or(true, |options| options.dispatch_queued_prompts_on_success);
+            let suppress_automatic_resume =
+                stop_options.is_some_and(|options| options.pause_automatic_resumes_on_success);
+            let dispatch_queued_prompts =
+                stop_options.map_or(true, |options| options.dispatch_queued_prompts_on_success);
             let mut thread_id_to_suppress = None;
             let (
                 has_queued_prompts,
@@ -570,8 +587,7 @@ impl AppState {
                 let record = inner
                     .session_mut_by_index(index)
                     .expect("session index should be valid");
-                let failed_mailbox_notification =
-                    record.active_turn_mailbox_notification.take();
+                let failed_mailbox_notification = record.active_turn_mailbox_notification.take();
                 take_and_abandon_engram_pending_dispatch(record);
                 if retain_runtime_for_retry {
                     // Termination failed and process exit was not confirmed.
@@ -636,10 +652,7 @@ impl AppState {
                 finish_active_turn_file_change_tracking(record);
                 (
                     !record.queued_prompts.is_empty(),
-                    message_updated_delta_parts_for_indices(
-                        record,
-                        pending_interaction_indices,
-                    ),
+                    message_updated_delta_parts_for_indices(record, pending_interaction_indices),
                     message_created_delta_parts_for_indices(record, created_message_indices),
                     failed_mailbox_notification,
                 )
@@ -659,8 +672,8 @@ impl AppState {
 
             let mut stopped_orchestrator_instance_index = None;
             let mut added_stopped_session_id = false;
-            if let Some(orchestrator_instance_id) = stop_options
-                .and_then(|options| options.orchestrator_stop_instance_id.as_deref())
+            if let Some(orchestrator_instance_id) =
+                stop_options.and_then(|options| options.orchestrator_stop_instance_id.as_deref())
             {
                 if let Some(instance_index) = inner
                     .orchestrator_instances
@@ -670,7 +683,10 @@ impl AppState {
                     stopped_orchestrator_instance_index = Some(instance_index);
                     let stopped_session_ids = &mut inner.orchestrator_instances[instance_index]
                         .stopped_session_ids_during_stop;
-                    if !stopped_session_ids.iter().any(|candidate| candidate == session_id) {
+                    if !stopped_session_ids
+                        .iter()
+                        .any(|candidate| candidate == session_id)
+                    {
                         stopped_session_ids.push(session_id.to_owned());
                         stopped_session_ids.sort();
                         added_stopped_session_id = true;
@@ -717,10 +733,10 @@ impl AppState {
                         None,
                         Vec::new(),
                         Vec::new(),
-                    false,
-                    false,
-                    failed_mailbox_notification,
-                    should_write_message && !preserve_delegation_for_rebind,
+                        false,
+                        false,
+                        failed_mailbox_notification,
+                        should_write_message && !preserve_delegation_for_rebind,
                         DelegationWaitRefresh::default(),
                         Some(detail),
                         shutdown_error.map(str::to_owned),
@@ -768,9 +784,8 @@ impl AppState {
                     || (mailbox_requeued && may_dispatch_requeued_mailbox),
                 should_refresh_delegation,
                 should_resume_orchestrator_transitions: persist_succeeded
-                    && stop_options.is_none_or(|options| {
-                        !options.pause_automatic_resumes_on_success
-                    }),
+                    && stop_options
+                        .is_none_or(|options| !options.pause_automatic_resumes_on_success),
                 orchestrator_stop_instance_id: stop_options
                     .and_then(|options| options.orchestrator_stop_instance_id.clone()),
             }),
@@ -790,12 +805,7 @@ impl AppState {
         token: &RuntimeToken,
         error_message: &str,
     ) -> Result<()> {
-        self.fail_turn_if_runtime_matches_and_report(
-            session_id,
-            token,
-            None,
-            error_message,
-        )
+        self.fail_turn_if_runtime_matches_and_report(session_id, token, None, error_message)
             .map(|_| ())
     }
 
@@ -845,9 +855,9 @@ impl AppState {
             if !record.runtime.matches_runtime_token(token) {
                 return Ok(false);
             }
-            if expected_active_turn_generation.is_some_and(|generation| {
-                record.active_turn_generation != generation
-            }) {
+            if expected_active_turn_generation
+                .is_some_and(|generation| record.active_turn_generation != generation)
+            {
                 return Ok(false);
             }
             if record.runtime_stop_in_progress {
@@ -860,8 +870,7 @@ impl AppState {
                 return Ok(false);
             }
             take_and_abandon_engram_pending_dispatch(record);
-            let failed_mailbox_notification =
-                record.active_turn_mailbox_notification.take();
+            let failed_mailbox_notification = record.active_turn_mailbox_notification.take();
             if failed_mailbox_notification.is_some() {
                 // Restore the durable wake below, but do not immediately run
                 // the same poisoned queue head again. An explicit resume can
@@ -920,7 +929,7 @@ impl AppState {
         if should_dispatch_next {
             self.resume_pending_orchestrator_transitions()?;
             if let Some(dispatch) = self.dispatch_next_queued_turn(session_id, false)? {
-                deliver_turn_dispatch(self, dispatch).map_err(|err| {
+                deliver_turn_dispatch(self, dispatch).into_background_result("turn completion queue drain").map_err(|err| {
                     anyhow!("failed to deliver queued turn dispatch: {}", err.message)
                 })?;
             }
@@ -940,15 +949,50 @@ impl AppState {
         session_id: &str,
         token: &RuntimeToken,
         active_turn_generation: u64,
+        engram_dispatch_generation: Option<u64>,
         error_message: &str,
     ) -> Result<bool> {
         let Some(owner_generation) = self.claim_turn_terminalization_if_runtime_matches(
             session_id,
             token,
             active_turn_generation,
-        )? else {
+        )?
+        else {
             return Ok(false);
         };
+        let rejected_engram_owner = engram_dispatch_generation.and_then(|dispatch_generation| {
+            self.capture_rejected_engram_delivery_owner(
+                session_id,
+                token,
+                active_turn_generation,
+                owner_generation,
+                dispatch_generation,
+            )
+        });
+        let rejected_engram_owner_durably_interrupted = rejected_engram_owner
+            .as_ref()
+            .is_some_and(|owner| {
+                match self.persist_rejected_engram_delivery_interruption(
+                    session_id,
+                    token,
+                    active_turn_generation,
+                    owner_generation,
+                    owner,
+                ) {
+                    Ok(interrupted) => interrupted,
+                    Err(error) => {
+                        // Do not checkpoint a remote grant unless the queued
+                        // owner is already durably non-replayable. The atomic
+                        // terminal transition below gets one more chance to
+                        // persist the interruption while leaving the grant
+                        // open on failure.
+                        eprintln!(
+                            "state warning> failed to persist rejected Engram delivery interruption for `{session_id}`: {error:#}"
+                        );
+                        false
+                    }
+                }
+            });
         self.fail_turn_and_clear_runtime_atomically(
             session_id,
             error_message,
@@ -957,7 +1001,109 @@ impl AppState {
                 active_turn_generation,
                 owner_generation,
             },
+            rejected_engram_owner,
+            rejected_engram_owner_durably_interrupted,
         )
+    }
+
+    fn capture_rejected_engram_delivery_owner(
+        &self,
+        session_id: &str,
+        token: &RuntimeToken,
+        active_turn_generation: u64,
+        owner_generation: u64,
+        dispatch_generation: u64,
+    ) -> Option<RejectedEngramDeliveryOwner> {
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        let index = inner.find_session_index(session_id)?;
+        let record = &inner.sessions[index];
+        if record.engram.dispatch_generation != dispatch_generation
+            || record.active_turn_generation != active_turn_generation
+            || !record.runtime.matches_runtime_token(token)
+            || !record.runtime_stop_is_owned_by(
+                RuntimeStopOwnerKind::LostRuntimeTerminalization,
+                token,
+                owner_generation,
+            )
+        {
+            return None;
+        }
+        let grant_id = record.engram.active_grant_id.clone()?;
+        let queued = record.queued_prompts.front()?;
+        if queued.promoted_message_index.is_none()
+            || queued
+                .engram_evaluate
+                .as_ref()
+                .and_then(|prepared| prepared.begun_grant_id.as_deref())
+                != Some(grant_id.as_str())
+        {
+            return None;
+        }
+        Some(RejectedEngramDeliveryOwner {
+            dispatch_generation,
+            grant_id,
+            intent_fingerprint: engram_turn_intent_fingerprint(
+                &queued.pending_prompt.text,
+                queued.pending_prompt.expanded_text.as_deref(),
+                &queued.attachments,
+                queued.pending_prompt.source.as_ref(),
+                queued.source,
+            ),
+        })
+    }
+
+    fn persist_rejected_engram_delivery_interruption(
+        &self,
+        session_id: &str,
+        token: &RuntimeToken,
+        active_turn_generation: u64,
+        owner_generation: u64,
+        owner: &RejectedEngramDeliveryOwner,
+    ) -> Result<bool> {
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let Some(index) = inner.find_session_index(session_id) else {
+            return Ok(false);
+        };
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
+        let owner_is_current = record.engram.dispatch_generation == owner.dispatch_generation
+            && record.active_turn_generation == active_turn_generation
+            && record.runtime.matches_runtime_token(token)
+            && record.runtime_stop_is_owned_by(
+                RuntimeStopOwnerKind::LostRuntimeTerminalization,
+                token,
+                owner_generation,
+            )
+            && record.engram.active_grant_id.as_deref() == Some(owner.grant_id.as_str())
+            && record.queued_prompts.front().is_some_and(|queued| {
+                queued.promoted_message_index.is_some()
+                    && queued
+                        .engram_evaluate
+                        .as_ref()
+                        .and_then(|prepared| prepared.begun_grant_id.as_deref())
+                        == Some(owner.grant_id.as_str())
+                    && engram_turn_intent_fingerprint(
+                        &queued.pending_prompt.text,
+                        queued.pending_prompt.expanded_text.as_deref(),
+                        &queued.attachments,
+                        queued.pending_prompt.source.as_ref(),
+                        queued.source,
+                    ) == owner.intent_fingerprint
+            });
+        if !owner_is_current {
+            return Ok(false);
+        }
+        let queued = record
+            .queued_prompts
+            .front_mut()
+            .expect("captured rejected Engram owner should remain queued");
+        queued.engram_interrupted = true;
+        queued.engram_waiting = false;
+        record.set_auto_dispatch_blocked(true);
+        sync_pending_prompts(record);
+        self.commit_locked(&mut inner)?;
+        Ok(true)
     }
 
     /// Terminalizes an Active/Approval turn only when its runtime has already
@@ -996,6 +1142,8 @@ impl AppState {
                 active_turn_generation,
                 owner_generation,
             },
+            None,
+            false,
         )
     }
 
@@ -1081,6 +1229,8 @@ impl AppState {
                 owner_generation,
                 retain_runtime: false,
             },
+            None,
+            false,
         )
     }
 
@@ -1101,6 +1251,8 @@ impl AppState {
                 owner_generation,
                 retain_runtime: true,
             },
+            None,
+            false,
         )
     }
 
@@ -1109,19 +1261,26 @@ impl AppState {
         session_id: &str,
         error_message: &str,
         mode: AtomicTurnFailureMode<'_>,
+        rejected_engram_owner: Option<RejectedEngramDeliveryOwner>,
+        rejected_engram_owner_durably_interrupted: bool,
     ) -> Result<bool> {
         // Deliberately omit the runtime token: MatchingRuntime already owns
         // the exact stop fence, while rejected delivery and missing-runtime
         // recovery have no live handle to match. Passing a token would make
         // the checkpoint helper refuse the owned stop-in-progress case.
         let checkpoint_token = None;
-        self.checkpoint_engram_turn_off_lock(
-            session_id,
-            checkpoint_token,
-            None,
-            EngramNextIntent::Wait,
-            None,
-        );
+        let checkpoint_outcome =
+            if rejected_engram_owner.is_some() && !rejected_engram_owner_durably_interrupted {
+                EngramCheckpointOutcome::Skipped
+            } else {
+                self.checkpoint_engram_turn_off_lock(
+                    session_id,
+                    checkpoint_token,
+                    None,
+                    EngramNextIntent::Wait,
+                    None,
+                )
+            };
         let cleaned = error_message.trim();
         let preserve_accepted_turn_state = mode.preserves_accepted_turn_state();
         let (
@@ -1143,16 +1302,16 @@ impl AppState {
                     owner_generation,
                 } => {
                     inner.sessions[index].runtime.matches_runtime_token(token)
-                        && inner.sessions[index].active_turn_generation
-                            == active_turn_generation
+                        && inner.sessions[index].active_turn_generation == active_turn_generation
                         && matches!(
-                        inner.sessions[index].session.status,
-                        SessionStatus::Active | SessionStatus::Approval
-                    ) && inner.sessions[index].runtime_stop_is_owned_by(
-                        RuntimeStopOwnerKind::LostRuntimeTerminalization,
-                        token,
-                        owner_generation,
-                    )
+                            inner.sessions[index].session.status,
+                            SessionStatus::Active | SessionStatus::Approval
+                        )
+                        && inner.sessions[index].runtime_stop_is_owned_by(
+                            RuntimeStopOwnerKind::LostRuntimeTerminalization,
+                            token,
+                            owner_generation,
+                        )
                 }
                 AtomicTurnFailureMode::MatchingRuntime {
                     token,
@@ -1161,8 +1320,7 @@ impl AppState {
                     ..
                 } => {
                     inner.sessions[index].runtime.matches_runtime_token(token)
-                        && inner.sessions[index].active_turn_generation
-                            == active_turn_generation
+                        && inner.sessions[index].active_turn_generation == active_turn_generation
                         && matches!(
                             inner.sessions[index].session.status,
                             SessionStatus::Active | SessionStatus::Approval
@@ -1181,8 +1339,7 @@ impl AppState {
                         inner.sessions[index].session.status,
                         SessionStatus::Active | SessionStatus::Approval
                     ) && matches!(inner.sessions[index].runtime, SessionRuntime::None)
-                        && inner.sessions[index].active_turn_generation
-                            == active_turn_generation
+                        && inner.sessions[index].active_turn_generation == active_turn_generation
                         && inner.sessions[index].missing_runtime_stop_is_owned_by(
                             RuntimeStopOwnerKind::LostRuntimeTerminalization,
                             owner_generation,
@@ -1194,9 +1351,9 @@ impl AppState {
                     AtomicTurnFailureMode::MissingRuntime {
                         owner_generation, ..
                     } => inner.sessions[index].missing_runtime_stop_is_owned_by(
-                            RuntimeStopOwnerKind::LostRuntimeTerminalization,
-                            owner_generation,
-                        ),
+                        RuntimeStopOwnerKind::LostRuntimeTerminalization,
+                        owner_generation,
+                    ),
                     AtomicTurnFailureMode::MatchingRuntime {
                         token,
                         owner_generation,
@@ -1262,13 +1419,47 @@ impl AppState {
                 // `record_rejected_turn_dispatch`, which still owns the exact
                 // dispatch metadata. Post-accept failures own the record-held
                 // delivery here.
-                let failed_mailbox_notification = (!matches!(
-                    mode,
-                    AtomicTurnFailureMode::RejectedDelivery { .. }
-                ))
-                .then_some(active_mailbox_notification)
-                .flatten();
-                take_and_abandon_engram_pending_dispatch(record);
+                let failed_mailbox_notification =
+                    (!matches!(mode, AtomicTurnFailureMode::RejectedDelivery { .. }))
+                        .then_some(active_mailbox_notification)
+                        .flatten();
+                if let Some(owner) = rejected_engram_owner.as_ref() {
+                    let owner_is_current = record.engram.dispatch_generation
+                        == owner.dispatch_generation
+                        && record.queued_prompts.front().is_some_and(|queued| {
+                            queued.promoted_message_index.is_some()
+                                && queued
+                                    .engram_evaluate
+                                    .as_ref()
+                                    .and_then(|prepared| prepared.begun_grant_id.as_deref())
+                                    == Some(owner.grant_id.as_str())
+                                && engram_turn_intent_fingerprint(
+                                    &queued.pending_prompt.text,
+                                    queued.pending_prompt.expanded_text.as_deref(),
+                                    &queued.attachments,
+                                    queued.pending_prompt.source.as_ref(),
+                                    queued.source,
+                                ) == owner.intent_fingerprint
+                        });
+                    if owner_is_current {
+                        if matches!(checkpoint_outcome, EngramCheckpointOutcome::Succeeded) {
+                            record.queued_prompts.pop_front();
+                            record.engram.dispatch_generation =
+                                record.engram.dispatch_generation.saturating_add(1);
+                        } else {
+                            let queued = record
+                                .queued_prompts
+                                .front_mut()
+                                .expect("captured rejected Engram owner should remain queued");
+                            queued.engram_interrupted = true;
+                            queued.engram_waiting = false;
+                            record.set_auto_dispatch_blocked(true);
+                        }
+                        sync_pending_prompts(record);
+                    }
+                } else {
+                    take_and_abandon_engram_pending_dispatch(record);
+                }
                 let deferred_stop_callbacks = if mode.retained_runtime_token().is_some() {
                     record.clear_runtime_stop();
                     std::mem::take(&mut record.deferred_stop_callbacks)
@@ -1315,10 +1506,7 @@ impl AppState {
                 }
                 (
                     message_created_delta_parts_for_indices(record, created_message_indices),
-                    message_updated_delta_parts_for_indices(
-                        record,
-                        pending_interaction_indices,
-                    ),
+                    message_updated_delta_parts_for_indices(record, pending_interaction_indices),
                     !record.queued_prompts.is_empty(),
                     failed_mailbox_notification,
                     deferred_stop_callbacks,
@@ -1348,11 +1536,7 @@ impl AppState {
         };
 
         if let Some(token) = mode.retained_runtime_token() {
-            self.replay_deferred_runtime_stop_callbacks(
-                session_id,
-                token,
-                deferred_stop_callbacks,
-            );
+            self.replay_deferred_runtime_stop_callbacks(session_id, token, deferred_stop_callbacks);
         }
         if let Some(notification) = failed_mailbox_notification.as_ref() {
             if let Err(error) = self.requeue_rejected_mailbox_notification(notification) {
@@ -1373,7 +1557,7 @@ impl AppState {
         self.resume_pending_orchestrator_transitions()?;
         if preserve_accepted_turn_state && has_queued_prompts {
             if let Some(dispatch) = self.dispatch_next_queued_turn(session_id, false)? {
-                deliver_turn_dispatch(self, dispatch).map_err(|error| {
+                deliver_turn_dispatch(self, dispatch).into_background_result("turn failure queue drain").map_err(|error| {
                     anyhow!("failed to deliver queued turn dispatch: {}", error.message)
                 })?;
             }
@@ -1404,11 +1588,7 @@ impl AppState {
                 error_message,
             );
         }
-        self.fail_active_turn_if_runtime_missing(
-            session_id,
-            active_turn_generation,
-            error_message,
-        )
+        self.fail_active_turn_if_runtime_missing(session_id, active_turn_generation, error_message)
     }
 
     /// Records a retry attempt on the transcript without ending the turn.
@@ -1560,9 +1740,9 @@ impl AppState {
             if !record.runtime.matches_runtime_token(token) {
                 return Ok(());
             }
-            if expected_active_turn_generation.is_some_and(|generation| {
-                record.active_turn_generation != generation
-            }) {
+            if expected_active_turn_generation
+                .is_some_and(|generation| record.active_turn_generation != generation)
+            {
                 return Ok(());
             }
             if record.runtime_stop_in_progress {
@@ -1615,7 +1795,7 @@ impl AppState {
         if should_dispatch_next {
             self.resume_pending_orchestrator_transitions()?;
             if let Some(dispatch) = self.dispatch_next_queued_turn(session_id, false)? {
-                deliver_turn_dispatch(self, dispatch).map_err(|err| {
+                deliver_turn_dispatch(self, dispatch).into_background_result("turn stop queue drain").map_err(|err| {
                     anyhow!("failed to deliver queued turn dispatch: {}", err.message)
                 })?;
             }
@@ -1691,9 +1871,9 @@ impl AppState {
                 }
                 return Ok(());
             }
-            if expected_active_turn_generation.is_some_and(|generation| {
-                record.active_turn_generation != generation
-            }) {
+            if expected_active_turn_generation
+                .is_some_and(|generation| record.active_turn_generation != generation)
+            {
                 return Ok(());
             }
             if record.runtime_stop_in_progress {
@@ -1778,7 +1958,7 @@ impl AppState {
         if should_dispatch_next {
             self.resume_pending_orchestrator_transitions()?;
             if let Some(dispatch) = self.dispatch_next_queued_turn(session_id, false)? {
-                deliver_turn_dispatch(self, dispatch).map_err(|err| {
+                deliver_turn_dispatch(self, dispatch).into_background_result("turn reset queue drain").map_err(|err| {
                     anyhow!("failed to deliver queued turn dispatch: {}", err.message)
                 })?;
             }
@@ -1833,9 +2013,8 @@ impl AppState {
                 .and_then(|index| inner.sessions.get(index))
                 .is_some_and(|record| {
                     record.runtime.matches_runtime_token(token)
-                        && expected_active_turn_generation.is_none_or(|generation| {
-                            record.active_turn_generation == generation
-                        })
+                        && expected_active_turn_generation
+                            .is_none_or(|generation| record.active_turn_generation == generation)
                         && record.engram_mcp_runtime_quarantined
                 })
         };
@@ -1885,9 +2064,9 @@ impl AppState {
                 inner.sessions[index].session.status,
                 SessionStatus::Active | SessionStatus::Approval
             );
-            let preserve_automatic_resume_block =
-                inner.sessions[index].engram_mcp_runtime_quarantined
-                    && inner.sessions[index].orchestrator_auto_dispatch_blocked;
+            let preserve_automatic_resume_block = inner.sessions[index]
+                .engram_mcp_runtime_quarantined
+                && inner.sessions[index].orchestrator_auto_dispatch_blocked;
             let quarantined_exit = inner.sessions[index].engram_mcp_runtime_quarantined;
             let message_id = (!quarantined_exit && (was_busy || !cleaned.is_empty()))
                 .then(|| inner.next_message_id());
@@ -1971,8 +2150,7 @@ impl AppState {
                 }
                 finish_active_turn_file_change_tracking(record);
                 (
-                    !record.orchestrator_auto_dispatch_blocked
-                        && !record.queued_prompts.is_empty(),
+                    !record.orchestrator_auto_dispatch_blocked && !record.queued_prompts.is_empty(),
                     message_updated_delta_parts_for_indices(record, pending_interaction_indices),
                     message_created_delta_parts_for_indices(record, created_message_indices),
                     exited_mailbox_notification,
@@ -1980,11 +2158,11 @@ impl AppState {
             };
             let commit_result = self.commit_locked(&mut inner);
             if commit_result.is_err() {
-                    let record = inner
-                        .session_mut_by_index(index)
-                        .expect("session index should be valid");
-                    record.set_auto_dispatch_blocked(true);
-                    clear_active_turn_file_change_tracking(record);
+                let record = inner
+                    .session_mut_by_index(index)
+                    .expect("session index should be valid");
+                record.set_auto_dispatch_blocked(true);
+                clear_active_turn_file_change_tracking(record);
             }
             (
                 has_queued_prompts,
@@ -2028,7 +2206,7 @@ impl AppState {
         if should_dispatch_next {
             self.resume_pending_orchestrator_transitions()?;
             if let Some(dispatch) = self.dispatch_next_queued_turn(session_id, false)? {
-                deliver_turn_dispatch(self, dispatch).map_err(|err| {
+                deliver_turn_dispatch(self, dispatch).into_background_result("turn recovery queue drain").map_err(|err| {
                     anyhow!("failed to deliver queued turn dispatch: {}", err.message)
                 })?;
             }

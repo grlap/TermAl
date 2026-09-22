@@ -36,18 +36,40 @@ export function ThemedCombobox({
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
   const [isOpen, setIsOpen] = useState(false);
-  const [activeIndex, setActiveIndex] = useState(() =>
-    Math.max(
-      options.findIndex((option) => option.value === value),
-      0,
-    ),
+  const firstEnabledIndex = options.findIndex((option) => !option.disabled);
+  const lastEnabledIndex = options.reduce(
+    (last, option, index) => (option.disabled ? last : index),
+    -1,
   );
+  const selectedIndex = options.findIndex((option) => option.value === value);
+  const initialActiveIndex =
+    selectedIndex >= 0 && !options[selectedIndex]?.disabled
+      ? selectedIndex
+      : firstEnabledIndex;
+  const [activeIndex, setActiveIndex] = useState(initialActiveIndex);
   const [menuStyle, setMenuStyle] = useState<CSSProperties | null>(null);
 
-  const selectedIndex = options.findIndex((option) => option.value === value);
-  const safeSelectedIndex = selectedIndex >= 0 ? selectedIndex : 0;
-  const selectedOption = options[safeSelectedIndex] ?? options[0];
+  const selectedOption = selectedIndex >= 0 ? options[selectedIndex] : undefined;
   const activeIndexRef = useRef(activeIndex);
+
+  function updateActiveIndex(next: number) {
+    activeIndexRef.current = next;
+    setActiveIndex(next);
+  }
+
+  function adjacentEnabledIndex(current: number, direction: 1 | -1) {
+    if (options.length === 0 || firstEnabledIndex < 0) return -1;
+    let next = current;
+    for (let visited = 0; visited < options.length; visited += 1) {
+      next = (next + direction + options.length) % options.length;
+      if (!options[next]?.disabled) return next;
+    }
+    return -1;
+  }
+
+  useEffect(() => {
+    if (disabled) setIsOpen(false);
+  }, [disabled]);
 
   useEffect(() => {
     activeIndexRef.current = activeIndex;
@@ -58,9 +80,8 @@ export function ThemedCombobox({
       return;
     }
 
-    setActiveIndex(safeSelectedIndex);
-    activeIndexRef.current = safeSelectedIndex;
-  }, [isOpen, safeSelectedIndex]);
+    updateActiveIndex(initialActiveIndex);
+  }, [isOpen, initialActiveIndex]);
 
   useLayoutEffect(() => {
     if (!isOpen || !menuStyle) {
@@ -145,6 +166,7 @@ export function ThemedCombobox({
     }
 
     function handleKeyDown(event: KeyboardEvent) {
+      if (disabled) return;
       if (event.key === "Escape") {
         event.preventDefault();
         setIsOpen(false);
@@ -159,43 +181,32 @@ export function ThemedCombobox({
 
       if (event.key === "ArrowDown") {
         event.preventDefault();
-        setActiveIndex((current) => {
-          const next = (current + 1) % options.length;
-          activeIndexRef.current = next;
-          return next;
-        });
+        updateActiveIndex(adjacentEnabledIndex(activeIndexRef.current, 1));
         return;
       }
 
       if (event.key === "ArrowUp") {
         event.preventDefault();
-        setActiveIndex((current) => {
-          const next = (current - 1 + options.length) % options.length;
-          activeIndexRef.current = next;
-          return next;
-        });
+        updateActiveIndex(adjacentEnabledIndex(activeIndexRef.current, -1));
         return;
       }
 
       if (event.key === "Home") {
         event.preventDefault();
-        activeIndexRef.current = 0;
-        setActiveIndex(0);
+        updateActiveIndex(firstEnabledIndex);
         return;
       }
 
       if (event.key === "End") {
         event.preventDefault();
-        const next = options.length - 1;
-        activeIndexRef.current = next;
-        setActiveIndex(next);
+        updateActiveIndex(lastEnabledIndex);
         return;
       }
 
       if (event.key === " " || event.key === "Enter") {
         event.preventDefault();
         const nextOption = options[activeIndexRef.current];
-        if (!nextOption) {
+        if (!nextOption || nextOption.disabled) {
           return;
         }
 
@@ -214,7 +225,7 @@ export function ThemedCombobox({
       document.removeEventListener("pointerdown", handlePointerDown);
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [isOpen, onChange, options]);
+  }, [disabled, isOpen, onChange, options]);
 
   function handleTriggerKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {
     if (disabled) {
@@ -223,15 +234,17 @@ export function ThemedCombobox({
 
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
-      setActiveIndex(safeSelectedIndex);
-      setIsOpen(true);
+      if (!isOpen && firstEnabledIndex >= 0) {
+        updateActiveIndex(initialActiveIndex);
+        setIsOpen(true);
+      }
       return;
     }
 
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
-      if (!isOpen) {
-        setActiveIndex(safeSelectedIndex);
+      if (!isOpen && firstEnabledIndex >= 0) {
+        updateActiveIndex(initialActiveIndex);
         setIsOpen(true);
       }
     }
@@ -250,11 +263,11 @@ export function ThemedCombobox({
         aria-expanded={isOpen}
         aria-haspopup="listbox"
         aria-labelledby={ariaLabelledBy}
-        aria-activedescendant={isOpen ? `${listboxId}-option-${activeIndex}` : undefined}
+        aria-activedescendant={isOpen && activeIndex >= 0 ? `${listboxId}-option-${activeIndex}` : undefined}
         disabled={disabled}
         onClick={() => {
           if (!disabled) {
-            setActiveIndex(safeSelectedIndex);
+            if (!isOpen) updateActiveIndex(initialActiveIndex);
             setIsOpen((current) => !current);
           }
         }}
@@ -266,7 +279,7 @@ export function ThemedCombobox({
         </span>
       </button>
 
-      {isOpen && menuStyle
+      {isOpen && !disabled && menuStyle
         ? createPortal(
             <div
               ref={listRef}
@@ -287,11 +300,14 @@ export function ThemedCombobox({
                     type="button"
                     role="option"
                     aria-selected={isSelected}
+                    aria-disabled={option.disabled || undefined}
+                    disabled={option.disabled}
                     data-option-index={index}
                     onMouseEnter={() => {
-                      setActiveIndex(index);
+                      if (!option.disabled) updateActiveIndex(index);
                     }}
                     onClick={() => {
+                      if (disabled || option.disabled) return;
                       onChange(option.value);
                       setIsOpen(false);
                       triggerRef.current?.focus();

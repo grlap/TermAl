@@ -538,9 +538,17 @@ fn stop_session_pauses_queued_prompt_after_shared_codex_interrupt_failure() {
         inner.sessions[index]
             .queued_prompts
             .push_back(QueuedPromptRecord {
+                engram_waiting: false,
+                promoted_message_index: None,
+                promotion_disposition_known: true,
+                engram_bind: None,
+                engram_evaluate: None,
+                engram_interrupted: false,
                 source: QueuedPromptSource::User,
                 attachments: Vec::new(),
                 pending_prompt: PendingPrompt {
+                    engram_interrupted: false,
+                    is_engram_retained: false,
                     attachments: Vec::new(),
                     id: "queued-shared-stop-fail".to_owned(),
                     timestamp: stamp_now(),
@@ -778,9 +786,17 @@ fn stop_session_losing_ownership_preserves_successor_runtime_and_queue() {
         record.runtime = SessionRuntime::Acp(original_runtime);
         record.session.status = SessionStatus::Active;
         record.queued_prompts.push_back(QueuedPromptRecord {
+            engram_waiting: false,
+            promoted_message_index: None,
+            promotion_disposition_known: true,
+            engram_bind: None,
+            engram_evaluate: None,
+            engram_interrupted: false,
             source: QueuedPromptSource::User,
             attachments: Vec::new(),
             pending_prompt: PendingPrompt {
+                engram_interrupted: false,
+                is_engram_retained: false,
                 attachments: Vec::new(),
                 id: "queued-after-stale-stop".to_owned(),
                 timestamp: stamp_now(),
@@ -902,9 +918,17 @@ fn stop_session_rolls_back_queued_successor_when_persist_fails() {
             inner.sessions[index]
                 .queued_prompts
                 .push_back(QueuedPromptRecord {
+                    engram_waiting: false,
+                    promoted_message_index: None,
+                    promotion_disposition_known: true,
+                    engram_bind: None,
+                    engram_evaluate: None,
+                    engram_interrupted: false,
                     source: QueuedPromptSource::User,
                     attachments: Vec::new(),
                     pending_prompt: PendingPrompt {
+                        engram_interrupted: false,
+                        is_engram_retained: false,
                         attachments: Vec::new(),
                         id: id.to_owned(),
                         timestamp: stamp_now(),
@@ -1152,12 +1176,20 @@ fn stop_session_keeps_queued_prompt_idle_when_successor_start_fails() {
         inner.sessions[index]
             .queued_prompts
             .push_back(QueuedPromptRecord {
+                engram_waiting: false,
+                promoted_message_index: None,
+                promotion_disposition_known: true,
+                engram_bind: None,
+                engram_evaluate: None,
+                engram_interrupted: false,
                 source: QueuedPromptSource::User,
                 attachments: vec![PromptImageAttachment {
                     data: "data".to_owned(),
                     metadata: image.clone(),
                 }],
                 pending_prompt: PendingPrompt {
+                    engram_interrupted: false,
+                    is_engram_retained: false,
                     attachments: vec![image],
                     id: "queued-cursor-stop-failure".to_owned(),
                     timestamp: stamp_now(),
@@ -1261,9 +1293,17 @@ fn stop_session_returns_an_error_when_a_dedicated_runtime_refuses_to_stop() {
         inner.sessions[index]
             .queued_prompts
             .push_back(QueuedPromptRecord {
+                engram_waiting: false,
+                promoted_message_index: None,
+                promotion_disposition_known: true,
+                engram_bind: None,
+                engram_evaluate: None,
+                engram_interrupted: false,
                 source: QueuedPromptSource::User,
                 attachments: Vec::new(),
                 pending_prompt: PendingPrompt {
+                    engram_interrupted: false,
+                    is_engram_retained: false,
                     attachments: Vec::new(),
                     id: "queued-stop-follow-up".to_owned(),
                     timestamp: stamp_now(),
@@ -1481,9 +1521,17 @@ fn runtime_turn_callbacks_are_suppressed_while_stop_is_in_progress() {
         inner.sessions[index]
             .queued_prompts
             .push_back(QueuedPromptRecord {
+                engram_waiting: false,
+                promoted_message_index: None,
+                promotion_disposition_known: true,
+                engram_bind: None,
+                engram_evaluate: None,
+                engram_interrupted: false,
                 source: QueuedPromptSource::User,
                 attachments: Vec::new(),
                 pending_prompt: PendingPrompt {
+                    engram_interrupted: false,
+                    is_engram_retained: false,
                     attachments: Vec::new(),
                     id: "queued-stop-callback-guard".to_owned(),
                     timestamp: stamp_now(),

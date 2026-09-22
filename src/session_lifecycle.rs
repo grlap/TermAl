@@ -146,6 +146,9 @@ fn wait_at_test_stop_fence_gate(state: &AppState, session_id: &str) {
 struct RequestedStopClaim {
     runtime_token: Option<RuntimeToken>,
     owner_generation: u64,
+    active_turn_generation: u64,
+    was_active: bool,
+    admission_owner: Option<EngramQueuedAdmissionOwner>,
 }
 
 impl AppState {
@@ -310,11 +313,27 @@ impl AppState {
             .session_mut_by_index(index)
             .expect("session index should be valid");
         let original_len = record.queued_prompts.len();
+        let cancel_admission = record.queued_prompts.front().is_some_and(|queued|
+            queued.pending_prompt.id == prompt_id && (queued.is_engram_retained() || record.engram.admission_in_progress.is_some()));
         record
             .queued_prompts
             .retain(|queued| queued.pending_prompt.id != prompt_id);
         if record.queued_prompts.len() == original_len {
             return Err(ApiError::not_found("queued prompt not found"));
+        }
+        if cancel_admission {
+            record.engram.dispatch_generation = record.engram.dispatch_generation.saturating_add(1);
+            record.engram.recovered_admission = false;
+            record.engram.pending_dispatch = None;
+            record.engram.rebind_required = true;
+            record.set_auto_dispatch_blocked(true);
+            record.session.status = SessionStatus::Idle;
+            record.session.live_activity = None;
+            // The retained head is canceled under the same lock that fences
+            // its late delivery. It must no longer own mailbox or file-change
+            // tracking, even when promotion happened before the control reply.
+            clear_active_turn_file_change_tracking(record);
+            record.session.preview = "Engram authorization canceled.".to_owned();
         }
         sync_pending_prompts(record);
 
@@ -417,7 +436,7 @@ impl AppState {
                 ))
             })?;
         if let Some(dispatch) = dispatch {
-            deliver_turn_dispatch(self, dispatch)?;
+            deliver_turn_dispatch(self, dispatch).into_public_result()?;
         }
         Ok(self.snapshot())
     }
@@ -445,6 +464,7 @@ impl AppState {
         if self.remote_session_target(session_id)?.is_some() {
             return self.proxy_remote_stop_session(session_id);
         }
+        if self.stop_waiting_engram_admission(session_id)? { return Ok(self.snapshot()); }
 
         let options = StopSessionOptions::default();
         let (response, claim) = self.begin_requested_stop_session(session_id, &options)?;
@@ -467,12 +487,13 @@ impl AppState {
                         &worker_session_id,
                         &worker_claim,
                         &error.message,
+                        false,
                     );
                 }
             })
         {
             let detail = format!("failed to start background Stop worker: {error}");
-            self.record_requested_stop_failure(session_id, &claim, &detail);
+            self.record_requested_stop_failure(session_id, &claim, &detail, true);
             return Err(ApiError::internal(detail));
         }
 
@@ -508,6 +529,7 @@ impl AppState {
         }
 
         let original = inner.sessions[index].clone();
+        let admission_owner = EngramQueuedAdmissionOwner::capture_promoted(&original);
         let runtime_token = inner.sessions[index].runtime.runtime_token();
         let owner_generation = {
             let record = inner
@@ -524,7 +546,15 @@ impl AppState {
             record.session.preview = SESSION_STOPPING_MESSAGE.to_owned();
             if options.pause_automatic_resumes_on_success {
                 record.set_auto_dispatch_blocked(true);
-                clear_queued_prompts_by_source(record, QueuedPromptSource::Orchestrator);
+                // The promoted head may already have a durable Engram begin
+                // receipt while its provider callback is racing this Stop.
+                // Keep that exact owner until shutdown commits or rolls back;
+                // ordinary Orchestrator successors retain Stop's drop policy.
+                clear_queued_prompts_by_source_except_admission_owner(
+                    record,
+                    QueuedPromptSource::Orchestrator,
+                    admission_owner.as_ref(),
+                );
             }
             owner_generation
         };
@@ -541,6 +571,9 @@ impl AppState {
             Some(RequestedStopClaim {
                 runtime_token,
                 owner_generation,
+                active_turn_generation: original.active_turn_generation,
+                was_active: original.session.status == SessionStatus::Active,
+                admission_owner,
             }),
         ))
     }
@@ -550,6 +583,7 @@ impl AppState {
         session_id: &str,
         claim: &RequestedStopClaim,
         detail: &str,
+        resume_admitted_turn: bool,
     ) {
         let cleaned = detail.trim();
         let failure_text = if cleaned.is_empty() {
@@ -587,13 +621,26 @@ impl AppState {
             let record = inner
                 .session_mut_by_index(index)
                 .expect("session index should be valid");
+            // Only a failed shutdown (or a worker that never started) may
+            // restore the original admitted turn. Other finalization failures
+            // may follow a successful kill and must never release its handoff.
+            let restore_admitted = resume_admitted_turn
+                && owns_stop
+                && claim.was_active
+                && record.active_turn_generation == claim.active_turn_generation
+                && claim.runtime_token.as_ref().is_some_and(|token| record.runtime.matches_runtime_token(token))
+                && claim.admission_owner.as_ref().is_some_and(|owner| owner.matches(record))
+                && record.queued_prompts.front()
+                    .and_then(|queued| queued.engram_evaluate.as_ref())
+                    .and_then(|prepared| prepared.begun_grant_id.as_ref())
+                    .is_some_and(|grant| record.engram.active_grant_id.as_ref() == Some(grant));
             let replay = owns_stop.then(|| {
                 let runtime_token = record.runtime.runtime_token();
                 record.clear_runtime_stop();
                 let callbacks = std::mem::take(&mut record.deferred_stop_callbacks);
                 (runtime_token, callbacks)
             });
-            record.session.status = SessionStatus::Error;
+            record.session.status = if restore_admitted { SessionStatus::Active } else { SessionStatus::Error };
             record.session.preview = make_preview(&failure_text);
             let message_index = push_message_on_record(
                 record,
@@ -668,7 +715,7 @@ impl AppState {
         requested_claim: Option<RequestedStopClaim>,
     ) -> std::result::Result<StateResponse, ApiError> {
         self.wait_for_engram_waiver_completion(session_id);
-        let (runtime_to_stop, stop_failure_is_best_effort, stop_token, stop_owner_generation) = {
+        let (runtime_to_stop, stop_failure_is_best_effort, stop_token, stop_owner_generation, admission_owner) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_visible_session_index(session_id)
@@ -739,6 +786,10 @@ impl AppState {
                 stop_failure_is_best_effort,
                 stop_token,
                 stop_owner_generation,
+                requested_claim.as_ref().map_or_else(
+                    || EngramQueuedAdmissionOwner::capture_promoted(record),
+                    |claim| claim.admission_owner.clone(),
+                ),
             )
         };
 
@@ -825,6 +876,17 @@ impl AppState {
                                     "failed to stop session `{session_id}` cleanly after stop ownership changed: {err:#}"
                                 )));
                             }
+                            if let Some(claim) = requested_claim.as_ref() {
+                                // Keep the fence and payload until the public
+                                // failure transition restores the original turn.
+                                drop(inner);
+                                self.record_requested_stop_failure(
+                                    session_id, claim, &format!("failed to stop session cleanly: {err:#}"), true,
+                                );
+                                return Err(ApiError::internal(format!(
+                                    "failed to stop session `{session_id}` cleanly: {err:#}"
+                                )));
+                            }
                             record.clear_runtime_stop();
                             let deferred_callbacks =
                                 std::mem::take(&mut record.deferred_stop_callbacks);
@@ -870,6 +932,29 @@ impl AppState {
         } else {
             false
         };
+        // A durable begin receipt consumes pending_dispatch before provider
+        // handoff. Retire the Stop-owned promoted head independently of that
+        // marker, before preparing any successor or closing the remote grant.
+        {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let index = inner.find_visible_session_index(session_id)
+                .ok_or_else(|| ApiError::not_found("session not found"))?;
+            let record = &mut inner.sessions[index];
+            let owns_stop = match stop_token.as_ref() {
+                Some(token) => record.runtime_stop_is_owned_by(RuntimeStopOwnerKind::UserStop, token, stop_owner_generation),
+                None => record.missing_runtime_stop_is_owned_by(RuntimeStopOwnerKind::UserStop, stop_owner_generation),
+            };
+            if !owns_stop {
+                return Ok(self.snapshot_from_inner(&inner));
+            }
+            if admission_owner.as_ref().is_some_and(|owner| owner.matches(record)) {
+                record.queued_prompts.pop_front();
+                sync_pending_prompts(record);
+                self.commit_locked(&mut inner).map_err(|error| ApiError::internal(format!(
+                    "failed to persist stopped admission retirement: {error:#}"
+                )))?;
+            }
+        }
         let checkpoint_failure = match self.checkpoint_engram_turn_off_lock(
             session_id,
             None,
@@ -1259,7 +1344,7 @@ impl AppState {
             return Err(self.finish_queued_followup_start_error(error));
         }
         if let Some(started) = queued_turn_result? {
-            deliver_turn_dispatch(self, started.dispatch)?;
+            deliver_turn_dispatch(self, started.dispatch).into_public_result()?;
         }
 
         Ok(self.snapshot())

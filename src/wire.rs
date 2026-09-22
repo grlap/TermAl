@@ -100,6 +100,10 @@ enum ApiErrorKind {
     GitDocumentTooLarge,
     /// A local session lookup or remote-session-target resolution missed.
     LocalSessionMissing,
+    /// A queued Engram operation is still durably anchored, but the host
+    /// could not establish whether its transcript promotion was persisted.
+    /// Callers must report the error without terminalizing delegated work.
+    RetainedQueuedPromotionPersistenceUnknown,
     RemoteConnectionUnavailable,
 }
 
@@ -675,6 +679,11 @@ struct Session {
     /// distinguish "paused, waiting for the user" from "about to start".
     #[serde(default)]
     queue_paused: bool,
+    /// Opaque identity/disposition fingerprint for the authoritative queued
+    /// prompt projection. Broad summaries carry this without prompt bodies so
+    /// clients can target hydration only when the queue actually changed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    queue_projection_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     session_mutation_stamp: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -751,6 +760,8 @@ struct StateSessionSummary {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     markers: Vec<ConversationMarker>,
     queue_paused: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    queue_projection_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     session_mutation_stamp: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2840,6 +2851,15 @@ struct PickProjectRootResponse {
 
 /// Defines the delta event variants.
 #[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionQueueDelta {
+    pending_prompts: Vec<PendingPrompt>,
+    queue_paused: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    queue_projection_hash: Option<String>,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(
     tag = "type",
     rename_all = "camelCase",
@@ -2865,6 +2885,8 @@ enum DeltaEvent {
         message: Message,
         preview: String,
         status: SessionStatus,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session_queue: Option<SessionQueueDelta>,
         #[serde(
             rename = "sessionMutationStamp",
             default,

@@ -122,6 +122,36 @@ describe("session find helpers", () => {
     expect(buildSessionSearchMatches(session, "turn-sub-1")).toHaveLength(1);
   });
 
+  it("does not index a transcript-visible retained prompt twice", () => {
+    const session = createSession({
+      messages: [
+        {
+          id: "retained-prompt",
+          type: "text",
+          author: "you",
+          timestamp: "09:00",
+          text: "Searchable retained request",
+        },
+      ],
+      pendingPrompts: [
+        {
+          id: "retained-prompt",
+          timestamp: "09:00",
+          text: "Searchable retained request",
+          isEngramRetained: true,
+        },
+      ],
+    });
+
+    expect(buildSessionSearchMatches(session, "retained request")).toEqual([
+      expect.objectContaining({
+        itemId: "retained-prompt",
+        itemKey: sessionSearchItemKey("message", "retained-prompt"),
+        itemKind: "message",
+      }),
+    ]);
+  });
+
   it("indexes parallel agent messages for conversation search", () => {
     const session = createSession({
       messages: [

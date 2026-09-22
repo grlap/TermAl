@@ -1731,6 +1731,8 @@ fn persisted_state_requires_queued_prompt_source() {
     queue_prompt_on_record(
         &mut inner.sessions[index],
         PendingPrompt {
+            engram_interrupted: false,
+            is_engram_retained: false,
             attachments: Vec::new(),
             id: "queued-prompt-1".to_owned(),
             timestamp: stamp_now(),

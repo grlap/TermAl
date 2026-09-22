@@ -1661,7 +1661,9 @@ impl AppState {
             if completion.should_dispatch_next {
                 match self.dispatch_next_queued_turn(&completion.session_id, false) {
                     Ok(Some(dispatch)) => {
-                        if let Err(error) = deliver_turn_dispatch(self, dispatch) {
+                        if let Err(error) =
+                            deliver_turn_dispatch(self, dispatch).into_background_result("session restore queue drain")
+                        {
                             outcome.failures.push(format!(
                                 "session `{}`: failed to deliver queued turn dispatch: {}",
                                 completion.session_id, error.message
@@ -2918,6 +2920,15 @@ impl AppState {
                         .expect("session index should be valid");
                     record.engram = EngramSessionState::default();
                     record.engram.dispatch_generation = dispatch_generation;
+                    // Resetting a binding is not proof that a retained prompt
+                    // was never delivered. Preserve the durable queue barrier.
+                    if let Some(queued) = record.queued_prompts.front_mut()
+                        .filter(|queued| queued.is_engram_retained()) {
+                        queued.engram_interrupted = true;
+                        record.set_auto_dispatch_blocked(true);
+                        record.session.preview = "Engram settings changed. Authorization retained; cancel or reconcile before continuing.".to_owned();
+                        sync_pending_prompts(record);
+                    }
                     if let Some((_, routing_token, active_grant_id)) = checkpoint_recovery
                         .iter()
                         .find(|(failed_session_id, _, _)| failed_session_id == session_id)
@@ -3473,7 +3484,9 @@ impl AppState {
         for session_id in affected_session_ids {
             match self.dispatch_next_queued_turn(&session_id, false) {
                 Ok(Some(dispatch)) => {
-                    if let Err(error) = deliver_turn_dispatch(self, dispatch) {
+                    if let Err(error) =
+                        deliver_turn_dispatch(self, dispatch).into_background_result("session activation queue drain")
+                    {
                         eprintln!(
                             "engram> session={session_id} failed delivering queued turn after project-reset release: {}",
                             error.message
@@ -3546,7 +3559,9 @@ impl AppState {
             for session_id in affected_session_ids {
                 match self.dispatch_next_queued_turn(&session_id, false) {
                     Ok(Some(dispatch)) => {
-                        if let Err(error) = deliver_turn_dispatch(self, dispatch) {
+                        if let Err(error) =
+                            deliver_turn_dispatch(self, dispatch).into_background_result("session runtime queue drain")
+                        {
                             eprintln!(
                                 "engram> session={session_id} failed delivering queued turn after project-reset/runtime-fence release: {}",
                                 error.message

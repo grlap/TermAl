@@ -738,6 +738,7 @@ include!("work_visualizer_beads.rs");
 include!("work_memories.rs");
 include!("session_runtime.rs");
 include!("session_interaction.rs");
+include!("engram_queued_admission.rs");
 include!("messages.rs");
 include!("workspace_watch.rs");
 include!("codex_discovery.rs");

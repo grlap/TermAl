@@ -604,6 +604,8 @@ impl AppState {
                             .session_mut_by_index(destination_session_index)
                             .expect("session index should be valid"),
                         PendingPrompt {
+                            engram_interrupted: false,
+                            is_engram_retained: false,
                             attachments: Vec::new(),
                             id: message_id,
                             timestamp: stamp_now(),
@@ -633,7 +635,7 @@ impl AppState {
                 .ok_or_else(|| {
                     anyhow!("queued orchestrator transition prompt disappeared before dispatch")
                 })?;
-            if let Err(err) = deliver_turn_dispatch(self, dispatch) {
+            if let Err(err) = deliver_turn_dispatch(self, dispatch).into_background_result("orchestrator lifecycle") {
                 eprintln!(
                     "orchestrator transition warning> failed to dispatch queued prompt for session `{}`: {}",
                     destination_session_id, err.message

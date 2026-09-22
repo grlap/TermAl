@@ -262,6 +262,7 @@ struct MessageCreatedDeltaParts {
     message: Message,
     preview: String,
     status: SessionStatus,
+    session_queue: Option<SessionQueueDelta>,
     session_mutation_stamp: u64,
 }
 
@@ -337,6 +338,7 @@ fn message_created_delta_parts_for_indices(
                 message,
                 preview: preview.clone(),
                 status,
+                session_queue: None,
                 session_mutation_stamp,
             })
         })
@@ -359,6 +361,7 @@ impl AppState {
                 message: created.message,
                 preview: created.preview,
                 status: created.status,
+                session_queue: created.session_queue,
                 session_mutation_stamp: Some(created.session_mutation_stamp),
             });
         }
@@ -419,6 +422,14 @@ fn message_index_on_record(record: &mut SessionRecord, message_id: &str) -> Opti
 
     record.message_positions = build_message_positions(&record.session.messages);
     record.message_positions.get(message_id).copied()
+}
+
+// A fresh prompt is expected to miss. Unlike the repairing lookup, this
+// membership check never rebuilds the transcript index on that normal path.
+fn cached_message_index_on_record(record: &SessionRecord, message_id: &str) -> Option<usize> {
+    record.message_positions.get(message_id).copied().filter(|index| {
+        record.session.messages.get(*index).is_some_and(|message| message.id() == message_id)
+    })
 }
 
 fn insert_message_on_record(record: &mut SessionRecord, index: usize, message: Message) -> usize {

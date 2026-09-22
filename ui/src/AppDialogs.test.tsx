@@ -472,7 +472,12 @@ describe("AppDialogs settings agent defaults", () => {
     expect(
       screen.getByRole("tab", { name: "Engram", selected: true }),
     ).toBeInTheDocument();
-    expect(screen.getByLabelText("Engram project")).toHaveValue("project-1");
+    const projectPicker = screen.getByRole("combobox", { name: "Engram project" });
+    expect(projectPicker).toHaveTextContent("TermAl");
+    fireEvent.click(projectPicker);
+    expect(screen.getByRole("listbox")).toHaveClass("combo-menu");
+    expect(screen.getByRole("option", { name: /TermAl/ })).toHaveAttribute("aria-selected", "true");
+    fireEvent.click(projectPicker);
     expect(screen.getByLabelText("Engram host binary path")).toHaveValue(
       "engram",
     );

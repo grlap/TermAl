@@ -144,6 +144,9 @@ export function buildSessionSearchIndex(session: Session): SessionSearchIndex {
 function buildSearchableSessionItems(session: Session): SearchableSessionItem[] {
   const connectionRetryDisplayStateByMessageId =
     buildConnectionRetryDisplayStateByMessageId(session);
+  const visibleMessageIds = new Set(
+    session.messages.map((message) => message.id),
+  );
   return [
     ...session.messages.flatMap((message) =>
       createSearchableSessionItems(
@@ -156,11 +159,13 @@ function buildSearchableSessionItems(session: Session): SearchableSessionItem[] 
       ),
     ),
     ...(session.pendingPrompts ?? []).flatMap((prompt) =>
-      createSearchableSessionItems(
-        "pendingPrompt",
-        prompt.id,
-        collectPendingPromptSearchText(prompt),
-      ),
+      prompt.isEngramRetained === true && visibleMessageIds.has(prompt.id)
+        ? []
+        : createSearchableSessionItems(
+            "pendingPrompt",
+            prompt.id,
+            collectPendingPromptSearchText(prompt),
+          ),
     ),
   ];
 }

@@ -1527,6 +1527,8 @@ async fn targeted_session_tail_includes_pending_prompts_redacted_from_global_sta
             .session
             .pending_prompts
             .push(PendingPrompt {
+                engram_interrupted: false,
+                is_engram_retained: false,
                 attachments: Vec::new(),
                 id: "queued-mailbox-wakeup".to_owned(),
                 timestamp: "10:00".to_owned(),

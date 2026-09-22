@@ -35,6 +35,22 @@ impl std::fmt::Display for QueuedFollowupStartFailure {
 }
 impl std::error::Error for QueuedFollowupStartFailure {}
 
+#[derive(Debug)]
+struct RetainedQueuedPromotionPersistenceUnknown {
+    prompt_id: String,
+}
+
+impl std::fmt::Display for RetainedQueuedPromotionPersistenceUnknown {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "queued Engram prompt {} has retained authorization after promotion persistence became unknown",
+            self.prompt_id
+        )
+    }
+}
+impl std::error::Error for RetainedQueuedPromotionPersistenceUnknown {}
+
 // Tag failures at the locked promotion boundary, not before off-lock Engram
 // work. Only this exact persisted first-prompt identity may be settled later.
 fn annotate_queued_followup_start_failure(
@@ -76,7 +92,28 @@ impl FollowupAdmissionReservation {
 }
 
 impl AppState {
+    fn queued_start_api_error(&self, error: anyhow::Error) -> ApiError {
+        let retained = error
+            .downcast_ref::<RetainedQueuedPromotionPersistenceUnknown>()
+            .is_some();
+        let error = ApiError::internal(format!("{error:#}"));
+        if retained {
+            error.with_kind(ApiErrorKind::RetainedQueuedPromotionPersistenceUnknown)
+        } else {
+            error
+        }
+    }
+
     fn finish_queued_followup_start_error(&self, error: anyhow::Error) -> ApiError {
+        // A durable prepared Engram operation is neither a start rejection nor
+        // evidence of non-delivery. The live admission owner must leave the
+        // delegation Running just as the delayed settlement wrapper does.
+        if error
+            .downcast_ref::<RetainedQueuedPromotionPersistenceUnknown>()
+            .is_some()
+        {
+            return self.queued_start_api_error(error);
+        }
         if let Some(failure) = error.downcast_ref::<QueuedFollowupStartFailure>() {
             if let Err(cleanup) =
                 self.settle_queued_followup_start_failure(failure, &format!("{error:#}"))
@@ -86,7 +123,7 @@ impl AppState {
                 ));
             }
         }
-        ApiError::internal(format!("{error:#}"))
+        self.queued_start_api_error(error)
     }
 
     // Wait consumption and the parent's queued wake are one transaction. No

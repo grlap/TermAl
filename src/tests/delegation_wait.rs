@@ -41,6 +41,8 @@ fn delegation_wait_resume_respects_a_preexisting_user_queue_barrier() {
             .session_mut_by_index(parent_index)
             .expect("parent should exist"),
         PendingPrompt {
+            engram_interrupted: false,
+            is_engram_retained: false,
             attachments: Vec::new(),
             id: "preexisting-user-barrier".to_owned(),
             timestamp: stamp_now(),
@@ -1104,6 +1106,8 @@ fn stop_session_keeps_queued_work_idle_and_cancels_late_delegation_resume() {
         queue_prompt_on_record(
             parent,
             PendingPrompt {
+                engram_interrupted: false,
+                is_engram_retained: false,
                 attachments: Vec::new(),
                 id: "queued-before-stop".to_owned(),
                 timestamp: stamp_now(),

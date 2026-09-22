@@ -706,6 +706,7 @@ enum RemoteDeltaReplayPayload {
         message_fingerprint: String,
         preview_fingerprint: String,
         status: u8,
+        session_queue_fingerprint: Option<String>,
         session_mutation_stamp: Option<u64>,
     },
     MessageUpdated {
@@ -1777,6 +1778,7 @@ struct SessionRecord {
 /// where it was instead of leaving a half-started turn in memory: head gone,
 /// latch cleared, status Active, and nothing delivered to the runtime.
 struct QueuePromotionSnapshot {
+    active_turn_generation: u64,
     status: SessionStatus,
     preview: String,
     live_activity: Option<SessionLiveActivity>,
@@ -1799,6 +1801,7 @@ impl SessionRecord {
 
     fn capture_queue_promotion_snapshot(&self) -> QueuePromotionSnapshot {
         QueuePromotionSnapshot {
+            active_turn_generation: self.active_turn_generation,
             status: self.session.status,
             preview: self.session.preview.clone(),
             live_activity: self.session.live_activity.clone(),
@@ -1814,8 +1817,9 @@ impl SessionRecord {
 
     /// Undoes a promotion whose persist commit failed: drops the prompt
     /// message the promotion appended, returns the queue head to the front,
-    /// abandons the pending Engram dispatch, and restores the captured
-    /// fields including the explicit-resume latch. A runtime spawned for the
+    /// and restores the captured fields including the explicit-resume latch.
+    /// A durable prepared Engram bind/evaluate is preserved for exact replay;
+    /// an ordinary pending dispatch is abandoned. A runtime spawned for the
     /// attempt is left attached; an idle session with a live runtime is an
     /// ordinary state and the next promotion reuses it.
     fn restore_queue_promotion(
@@ -1829,6 +1833,7 @@ impl SessionRecord {
             .messages
             .iter()
             .rposition(|message| message.id() == started_message_id)
+            .filter(|_| queued.promoted_message_index.is_none())
         {
             self.session.messages.remove(position);
             self.message_positions = build_message_positions(&self.session.messages);
@@ -1842,15 +1847,34 @@ impl SessionRecord {
         self.session.messages_loaded = snapshot.messages_loaded;
         self.session.prompt_history = snapshot.prompt_history;
         self.prompt_history_mutation_stamp = snapshot.prompt_history_mutation_stamp;
-        take_and_abandon_engram_pending_dispatch(self);
-        self.queued_prompts.push_front(queued);
+        let preserve_prepared_engram_operation = queued.has_engram_intent();
+        if preserve_prepared_engram_operation {
+            // The bind/evaluate request was committed before promotion. The
+            // failed promotion commit did not make a provider handoff real,
+            // so detach only its runtime pending marker without retiring the
+            // prepared request or advancing the operation generation.
+            self.engram.pending_dispatch = None;
+        } else {
+            take_and_abandon_engram_pending_dispatch(self);
+        }
+        if let Some(current) = self.queued_prompts.iter_mut().find(|current| current.pending_prompt.id == queued.pending_prompt.id) {
+            *current = queued;
+        } else {
+            self.queued_prompts.push_front(queued);
+        }
         sync_pending_prompts(self);
         self.session.status = snapshot.status;
+        self.active_turn_generation = snapshot.active_turn_generation;
         self.session.preview = snapshot.preview;
         self.session.live_activity = snapshot.live_activity;
         self.active_turn_mailbox_notification = snapshot.active_turn_mailbox_notification;
         self.active_turn_start_message_count = snapshot.active_turn_start_message_count;
-        self.set_auto_dispatch_blocked(snapshot.auto_dispatch_blocked);
+        if preserve_prepared_engram_operation {
+            self.set_auto_dispatch_blocked(true);
+            self.session.preview = "Engram authorization is prepared, but prompt promotion was not persisted. Prompt retained; resume to retry or cancel.".to_owned();
+        } else {
+            self.set_auto_dispatch_blocked(snapshot.auto_dispatch_blocked);
+        }
     }
 
     /// Sets the explicit-resume latch and mirrors it onto the embedded

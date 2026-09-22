@@ -224,6 +224,7 @@ impl StateInner {
                 markers: Vec::new(),
                 pending_prompts: Vec::new(),
                 queue_paused: false,
+                queue_projection_hash: None,
                 session_mutation_stamp: None,
                 parent_delegation_id: None,
             },

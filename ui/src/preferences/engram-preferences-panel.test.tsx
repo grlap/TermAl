@@ -42,6 +42,7 @@ describe("EngramPreferencesPanel", () => {
         }}
         projects={[
           declaredProject,
+          { ...declaredProject, id: "second", name: "Second repo", rootPath: "C:\\work\\second" },
           {
             ...declaredProject,
             id: "undeclared",
@@ -53,8 +54,18 @@ describe("EngramPreferencesPanel", () => {
       />,
     );
 
-    expect(screen.getByLabelText("Engram project")).toHaveValue("declared");
+    const projectPicker = screen.getByRole("combobox", { name: "Engram project" });
+    expect(projectPicker).toHaveTextContent("Declared repo");
+    projectPicker.focus();
+    fireEvent.keyDown(projectPicker, { key: "ArrowDown" });
+    expect(screen.getByRole("listbox")).toHaveClass("combo-menu");
+    expect(screen.getByRole("option", { name: /Declared repo/ })).toHaveAttribute("aria-selected", "true");
     expect(screen.queryByText(/Undeclared repo/)).not.toBeInTheDocument();
+    fireEvent.keyDown(projectPicker, { key: "ArrowDown" });
+    fireEvent.keyDown(projectPicker, { key: "Enter" });
+    expect(projectPicker).toHaveTextContent("Second repo");
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Second repo" })).toBeInTheDocument();
     expect(
       screen.getByText(/Base MCP and work context are enabled/),
     ).toBeInTheDocument();

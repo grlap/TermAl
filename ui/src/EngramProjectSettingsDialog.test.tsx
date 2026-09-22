@@ -100,7 +100,8 @@ describe("EngramProjectSettingsDialog", () => {
     fireEvent.click(screen.getByLabelText("Turn-gated control"));
     fireEvent.click(screen.getByRole("button", { name: "Change store policy…" }));
     fireEvent.click(screen.getByLabelText("Allow Independent session"));
-    fireEvent.change(screen.getByLabelText("Evaluator agent"), { target: { value: "Claude" } });
+    fireEvent.click(screen.getByRole("combobox", { name: "Evaluator agent" }));
+    fireEvent.click(screen.getByRole("option", { name: "Claude" }));
     fireEvent.click(screen.getByRole("button", { name: "Save evaluator defaults" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Save evaluator defaults" })).toBeEnabled());
     expect(saveEvaluatorDefaults).toHaveBeenCalledWith("project-1", { evaluatorAgent: "Claude" });
@@ -109,7 +110,7 @@ describe("EngramProjectSettingsDialog", () => {
     expect(screen.getByLabelText("Turn-gated control")).toBeChecked();
     expect(screen.getByLabelText("Allow Independent session")).toBeChecked();
     expect(screen.queryByLabelText("Policy change reason")).not.toBeInTheDocument();
-    expect(screen.getByLabelText("Evaluator agent")).toHaveValue("Claude");
+    expect(screen.getByLabelText("Evaluator agent")).toHaveTextContent("Claude");
     expect(updateProjectEngramSettings).not.toHaveBeenCalled();
   });
 

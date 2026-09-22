@@ -6,6 +6,9 @@ mod session_reconciliation;
 #[path = "engram_root_dispatch.rs"]
 mod root_dispatch;
 
+#[path = "engram_root_recovery_live.rs"]
+mod root_recovery_live;
+
 use super::delegation_support::test_app_state_with_delegation_codex_runtime;
 use super::phase_sync::{DEADLOCK_GUARD, receive};
 use super::*;
@@ -2024,6 +2027,8 @@ fn queue_test_engram_prompt(
             .session_mut_by_index(index)
             .expect("test session should exist"),
         PendingPrompt {
+            engram_interrupted: false,
+            is_engram_retained: false,
             attachments: Vec::new(),
             id: message_id,
             timestamp: stamp_now(),
@@ -3855,12 +3860,8 @@ fn issued_grant_invalidated_before_begin_is_withheld_and_arms_rebind() {
         pending.started_at =
             std::time::Instant::now() - Duration::from_millis(ENGRAM_DISPATCH_BUDGET_MS + 1);
     }
-    assert_eq!(
-        deliver_turn_dispatch(&state, first_dispatch)
-            .expect_err("an expired Engram begin budget must withhold the runtime prompt")
-            .status,
-        StatusCode::CONFLICT
-    );
+    deliver_turn_dispatch(&state, first_dispatch)
+        .expect("an expired Engram begin budget parks the original prompt without delivery");
 
     {
         let inner = state.inner.lock().expect("state mutex poisoned");
@@ -3878,8 +3879,15 @@ fn issued_grant_invalidated_before_begin_is_withheld_and_arms_rebind() {
                     && card.refusal_code.as_deref() == Some("dispatch_budget_exhausted")
                     && card.dispatch == EngramControlCardDispatch::Withheld
         )));
-        assert_eq!(child.session.status, SessionStatus::Error);
-        assert!(child.runtime.runtime_token().is_none());
+        assert_eq!(child.session.status, SessionStatus::Idle);
+        assert!(child.runtime.runtime_token().is_some());
+        assert!(child.orchestrator_auto_dispatch_blocked);
+        assert!(
+            child
+                .queued_prompts
+                .front()
+                .is_some_and(QueuedPromptRecord::is_engram_retained)
+        );
     }
     assert_eq!(
         transport.grant_state(&child_id),
@@ -10422,7 +10430,10 @@ fn enablement_accepts_real_doctor_required_turn_gated_and_adopts_identity() {
     assert_eq!(
         settings.authority_store_key,
         Some(EngramAuthorityStoreKey {
-            database_path: normalize_user_facing_path(&work_database_path(&root, "fixture-doctor-turn-gated")),
+            database_path: normalize_user_facing_path(&work_database_path(
+                &root,
+                "fixture-doctor-turn-gated"
+            )),
             project_id: "fixture-doctor-turn-gated".to_owned(),
         })
     );
@@ -10588,6 +10599,7 @@ fn assert_terminal_case_checkpoints_once(case: EngramTerminationCase, label: &st
                     &child_id,
                     &runtime_token,
                     active_turn_generation,
+                    None,
                     "test delivery failure",
                 )
                 .expect("fail turn should succeed");
@@ -16713,7 +16725,9 @@ fn circuit_breaker_and_fatal_protocol_errors_update_only_the_effective_child() {
         assert_eq!(child.engram.consecutive_transport_failures, 2);
         assert!(!child.engram.circuit_open);
         assert!(child.engram.next_bind_retry_at.is_some());
-        assert!(AppState::engram_session_is_enabled_locked(&inner, &child_id));
+        assert!(AppState::engram_session_is_enabled_locked(
+            &inner, &child_id
+        ));
     }
     state.record_engram_transport_failure(&child_id, &deadline);
     {
@@ -16754,7 +16768,9 @@ fn circuit_breaker_and_fatal_protocol_errors_update_only_the_effective_child() {
         Some("unknown_control_schema")
     );
     assert!(child.engram.next_bind_retry_at.is_none());
-    assert!(!AppState::engram_session_is_enabled_locked(&inner, &child_id));
+    assert!(!AppState::engram_session_is_enabled_locked(
+        &inner, &child_id
+    ));
     drop(inner);
     let pending = state
         .evaluate_engram_turn_off_lock(&EngramTurnIntentSnapshot {
@@ -16831,7 +16847,7 @@ fn circuit_breaker_and_fatal_protocol_errors_update_only_the_effective_child() {
 }
 
 #[test]
-fn dispatch_card_persist_failure_continues_granted_delivery_from_memory() {
+fn dispatch_card_persist_failure_withholds_granted_delivery() {
     let (mut state, runtime_rx) =
         test_app_state_with_delegation_codex_runtime("engram-dispatch-card-persist-failure");
     let root = state
@@ -16868,6 +16884,20 @@ fn dispatch_card_persist_failure_continues_granted_delivery_from_memory() {
         CodexRuntimeCommand::Prompt { .. }
     ));
     let child_id = created.delegation.child_session_id;
+    enable_test_project_engram(&state, &project_id, &root);
+    queue_test_engram_prompt(
+        &state,
+        &child_id,
+        "retained child after ambiguous dispatch-card persistence",
+        QueuedPromptSource::User,
+        None,
+    );
+    let target = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        AppState::engram_binding_target_for_session_shape_locked(&inner, &child_id, true)
+            .expect("binding target lookup should succeed")
+            .expect("enabled child should have an Engram binding target")
+    };
     let dispatch_generation = {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
         let index = inner
@@ -16876,10 +16906,35 @@ fn dispatch_card_persist_failure_continues_granted_delivery_from_memory() {
         let record = inner
             .session_mut_by_index(index)
             .expect("child should be mutable");
+        let queued = record
+            .queued_prompts
+            .front_mut()
+            .expect("retained child prompt should exist");
+        let intent_fingerprint = engram_turn_intent_fingerprint(
+            &queued.pending_prompt.text,
+            queued.pending_prompt.expanded_text.as_deref(),
+            &queued.attachments,
+            queued.pending_prompt.source.as_ref(),
+            queued.source,
+        );
+        queued.engram_evaluate = Some(EngramQueuedEvaluate {
+            connection: target.connection,
+            settings: target.settings,
+            operation_generation: None,
+            request: EngramControlRequest::TurnEvaluate {
+                routing_token: "persist-failure-token".to_owned(),
+                intent_fingerprint: intent_fingerprint.clone(),
+                requested_effects: target.effects,
+                resource_intents: Vec::new(),
+                purpose: "ordinary".to_owned(),
+                idempotency_key: "persist-failure-old-evaluate-key".to_owned(),
+            },
+            begun_grant_id: Some("persist-failure-grant".to_owned()),
+        });
         record.session.status = SessionStatus::Active;
         record.engram.pending_dispatch = Some(EngramPendingDispatch {
             dispatch_generation: record.engram.dispatch_generation,
-            intent_fingerprint: "persist-failure-intent".to_owned(),
+            intent_fingerprint,
             evaluated: EngramDispatchEvaluation::Grant {
                 grant_id: "persist-failure-grant".to_owned(),
                 delivery_tokens: Vec::new(),
@@ -16892,11 +16947,21 @@ fn dispatch_card_persist_failure_continues_granted_delivery_from_memory() {
         record.engram.dispatch_generation
     };
 
+    let durable_path = state.persistence_path.clone();
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        persist_state_from_persisted(
+            durable_path.as_path(),
+            &PersistedState::from_inner(&inner),
+        )
+        .expect("the old authorization intent should be durable before fault injection");
+    }
     state.shutdown_persist_blocking();
     let failing_persistence_path = root.join("dispatch-card-persist-failure.sqlite");
     fs::create_dir_all(&failing_persistence_path)
         .expect("a directory at the persistence path should force failure");
     state.persistence_path = Arc::new(failing_persistence_path.clone());
+    let mut state_events = state.subscribe_events();
 
     let preparation = state.finish_engram_dispatch_record(
         &child_id,
@@ -16924,7 +16989,30 @@ fn dispatch_card_persist_failure_continues_granted_delivery_from_memory() {
             next_intent: None,
         },
     );
-    assert_eq!(preparation, EngramDispatchRecordFinish::Ready);
+    assert_eq!(preparation, EngramDispatchRecordFinish::PersistenceUnknown);
+
+    let published_payload = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .unwrap()
+        .block_on(async {
+            tokio::time::timeout(phase_sync::DEADLOCK_GUARD, state_events.recv())
+                .await
+                .expect("persistence uncertainty publication timed out")
+                .expect("persistence uncertainty should publish the fail-closed snapshot")
+        });
+    let published: Value = serde_json::from_str(&published_payload).unwrap();
+    let published_child = published["sessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|session| session["id"] == child_id)
+        .expect("published snapshot should include the retained child");
+    assert_eq!(published_child["queuePaused"], true);
+    assert!(published_child["preview"]
+        .as_str()
+        .unwrap()
+        .contains("persistence unknown"));
 
     let inner = state.inner.lock().expect("state mutex poisoned");
     let child = inner
@@ -16933,6 +17021,9 @@ fn dispatch_card_persist_failure_continues_granted_delivery_from_memory() {
         .find(|record| record.session.id == child_id)
         .expect("child should remain");
     assert!(child.engram.pending_dispatch.is_none());
+    assert!(child.orchestrator_auto_dispatch_blocked);
+    assert!(child.queued_prompts[0].engram_interrupted);
+    assert!(!child.queued_prompts[0].engram_waiting);
     assert_eq!(
         child.engram.active_grant_id.as_deref(),
         Some("persist-failure-grant")
@@ -16944,7 +17035,42 @@ fn dispatch_card_persist_failure_continues_granted_delivery_from_memory() {
                 if card.grant_id.as_deref() == Some("persist-failure-grant")
         )
     }));
+    assert_eq!(
+        child.queued_prompts[0]
+            .engram_evaluate
+            .as_ref()
+            .and_then(|prepared| prepared.begun_grant_id.as_deref()),
+        Some("persist-failure-grant"),
+        "ambiguous persistence must retain begun evidence"
+    );
+    assert_eq!(
+        inner.delegations[inner.find_delegation_index(&created.delegation.id).unwrap()].status,
+        DelegationStatus::Running,
+        "persistence uncertainty must not terminalize delegated work"
+    );
     drop(inner);
+    assert!(runtime_rx.try_recv().is_err(), "provider delivery stays withheld");
+
+    let durable = load_state(durable_path.as_path())
+        .expect("old persistence should remain readable")
+        .expect("old persistence should contain state");
+    let durable_child = &durable.sessions[durable.find_session_index(&child_id).unwrap()];
+    let durable_evaluate = durable_child.queued_prompts[0]
+        .engram_evaluate
+        .as_ref()
+        .expect("the last durable evaluate intent should survive");
+    assert!(matches!(
+        &durable_evaluate.request,
+        EngramControlRequest::TurnEvaluate { idempotency_key, .. }
+            if idempotency_key == "persist-failure-old-evaluate-key"
+    ));
+    assert!(
+        !durable_child.session.messages.iter().any(|message| {
+            matches!(message, Message::EngramControl { card, .. }
+                if card.grant_id.as_deref() == Some("persist-failure-grant"))
+        }),
+        "failed commit must not replace the prior durable authorization intent"
+    );
 
     fs::remove_dir_all(failing_persistence_path)
         .expect("failing persistence directory should be removable");

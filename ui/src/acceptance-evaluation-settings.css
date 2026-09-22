@@ -28,7 +28,7 @@
 }
 
 .acceptance-evaluation-settings input:not([type="checkbox"]),
-.acceptance-evaluation-settings select {
+.acceptance-evaluation-settings .combo-trigger {
   min-width: 0;
   width: 100%;
 }

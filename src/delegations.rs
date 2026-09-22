@@ -768,20 +768,31 @@ impl AppState {
         }
 
         let runtime_prompt = build_delegation_prompt(&record);
-        if let Err(err) =
-            self.start_delegation_child_turn(&record.id, &record.child_session_id, runtime_prompt)
-        {
-            if err.status == StatusCode::CONFLICT
-                && err.message == DELEGATION_NO_LONGER_STARTABLE_MESSAGE
-            {
+        match self.start_delegation_child_turn(
+            &record.id,
+            &record.child_session_id,
+            runtime_prompt,
+        ) {
+            TurnDispatchDeliveryOutcome::Rejected(err) => {
+                if err.status == StatusCode::CONFLICT
+                    && err.message == DELEGATION_NO_LONGER_STARTABLE_MESSAGE
+                {
+                    return self.delegation_response_from_state(&record.id);
+                }
+                self.mark_delegation_failed_after_start_error(
+                    &record.id,
+                    &record.child_session_id,
+                    "child session failed to start",
+                )?;
                 return self.delegation_response_from_state(&record.id);
             }
-            self.mark_delegation_failed_after_start_error(
-                &record.id,
-                &record.child_session_id,
-                "child session failed to start",
-            )?;
-            return self.delegation_response_from_state(&record.id);
+            TurnDispatchDeliveryOutcome::Held { error: Some(error) } => {
+                return Err(error);
+            }
+            TurnDispatchDeliveryOutcome::Delivered
+            | TurnDispatchDeliveryOutcome::Scheduled
+            | TurnDispatchDeliveryOutcome::Held { error: None }
+            | TurnDispatchDeliveryOutcome::Superseded => {}
         }
 
         let inner = self.inner.lock().expect("state mutex poisoned");
@@ -1485,15 +1496,17 @@ impl AppState {
         ) {
             Ok(dispatch) => dispatch,
             Err(mut error) => {
-                admission.fail_queued_start(&error.message);
-                match admission.rollback_before_prompt() {
-                    Ok(true) => error
-                        .message
-                        .push_str("; archive compensation scheduled; cleanup may still be pending"),
-                    Ok(false) => {}
-                    Err(cleanup_error) => error
-                        .message
-                        .push_str(&format!("; {}", cleanup_error.message)),
+                if error.kind != Some(ApiErrorKind::RetainedQueuedPromotionPersistenceUnknown) {
+                    admission.fail_queued_start(&error.message);
+                    match admission.rollback_before_prompt() {
+                        Ok(true) => error.message.push_str(
+                            "; archive compensation scheduled; cleanup may still be pending",
+                        ),
+                        Ok(false) => {}
+                        Err(cleanup_error) => error
+                            .message
+                            .push_str(&format!("; {}", cleanup_error.message)),
+                    }
                 }
                 if let Err(wait_error) = admission.release() {
                     error.message.push_str(&format!(
@@ -1509,10 +1522,10 @@ impl AppState {
             | DispatchTurnResult::DispatchedAfterQueue(dispatch) => {
                 deliver_turn_dispatch(self, dispatch)
             }
-            DispatchTurnResult::Queued => Ok(()),
+            DispatchTurnResult::Queued => TurnDispatchDeliveryOutcome::Held { error: None },
         };
         let released = admission.release();
-        if let Err(mut error) = delivery {
+        if let Err(mut error) = delivery.into_public_result() {
             if let Err(wait_error) = released {
                 error.message.push_str(&format!(
                     "; failed to refresh follow-up waits: {wait_error:#}"
@@ -2017,6 +2030,7 @@ impl AppState {
                 message,
                 preview,
                 status,
+                session_queue: None,
                 session_mutation_stamp: Some(session_mutation_stamp),
             }),
             ParentDelegationCardDelta::Updated {
@@ -2064,6 +2078,7 @@ impl AppState {
                 message,
                 preview,
                 status,
+                session_queue: None,
                 session_mutation_stamp: Some(session_mutation_stamp),
             }),
             DelegationChildTranscriptDelta::MessageUpdated {
@@ -2094,13 +2109,19 @@ impl AppState {
         delegation_id: &str,
         child_session_id: &str,
         runtime_prompt: String,
-    ) -> Result<(), ApiError> {
+    ) -> TurnDispatchDeliveryOutcome {
         #[cfg(test)]
         if runtime_prompt.contains(TEST_FORCE_DELEGATION_START_FAILURE_PROMPT) {
-            return Err(ApiError::internal("forced delegation start failure"));
+            return TurnDispatchDeliveryOutcome::Rejected(ApiError::internal(
+                "forced delegation start failure",
+            ));
         }
-        self.ensure_delegation_can_start_child_turn(delegation_id, child_session_id)?;
-        let dispatch = self.dispatch_turn(
+        if let Err(error) =
+            self.ensure_delegation_can_start_child_turn(delegation_id, child_session_id)
+        {
+            return TurnDispatchDeliveryOutcome::Rejected(error);
+        }
+        let dispatch = match self.dispatch_turn(
             child_session_id,
             SendMessageRequest {
                 text: runtime_prompt,
@@ -2109,15 +2130,23 @@ impl AppState {
                 source_session_id: None,
                 source_mailbox: None,
             },
-        )?;
+        ) {
+            Ok(dispatch) => dispatch,
+            Err(error)
+                if error.kind
+                    == Some(ApiErrorKind::RetainedQueuedPromotionPersistenceUnknown) =>
+            {
+                return TurnDispatchDeliveryOutcome::Held { error: Some(error) };
+            }
+            Err(error) => return TurnDispatchDeliveryOutcome::Rejected(error),
+        };
         match dispatch {
             DispatchTurnResult::Dispatched(dispatch)
             | DispatchTurnResult::DispatchedAfterQueue(dispatch) => {
-                deliver_turn_dispatch(self, dispatch)?;
+                deliver_turn_dispatch(self, dispatch)
             }
-            DispatchTurnResult::Queued => {}
+            DispatchTurnResult::Queued => TurnDispatchDeliveryOutcome::Held { error: None },
         }
-        Ok(())
     }
 
     fn dispatch_delegation_wait_resumes(&self, revision: u64, parent_session_ids: Vec<String>) {
@@ -2128,7 +2157,9 @@ impl AppState {
             }
             match self.dispatch_next_queued_turn(&parent_session_id, false) {
                 Ok(Some(dispatch)) => {
-                    if let Err(err) = deliver_turn_dispatch(self, dispatch) {
+                    if let Err(err) =
+                        deliver_turn_dispatch(self, dispatch).into_background_result("delegation follow-up")
+                    {
                         let error = format!(
                             "failed to dispatch queued resume for session `{}`: {}",
                             parent_session_id, err.message
@@ -2543,6 +2574,8 @@ fn queue_delegation_wait_resume_locked(
     queue_orchestrator_prompt_on_record(
         record,
         PendingPrompt {
+            engram_interrupted: false,
+            is_engram_retained: false,
             attachments: Vec::new(),
             id: message_id,
             timestamp: stamp_now(),
@@ -4015,6 +4048,13 @@ fn delegation_child_outcome(inner: &StateInner, child_session_id: &str) -> Deleg
         return DelegationChildOutcome::Missing;
     };
     let child = &inner.sessions[child_index];
+    // A held authorization has not produced a provider outcome. Polling must
+    // not mistake Idle (or a previous follow-up result) for completion/failure.
+    if child.orchestrator_auto_dispatch_blocked
+        && child.queued_prompts.front().is_some_and(QueuedPromptRecord::is_engram_retained)
+    {
+        return DelegationChildOutcome::Running;
+    }
     match child.session.status {
         SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping => {
             if !matches!(child.runtime, SessionRuntime::None) || !child.is_local_session() {

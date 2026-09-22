@@ -91,9 +91,7 @@ impl PersistedState {
             delegation_waits: inner.delegation_waits.clone(),
             workspace_layouts: inner.workspace_layouts.clone(),
             sessions: Vec::new(),
-            quarantined_persisted_session_ids: inner
-                .quarantined_persisted_session_ids
-                .clone(),
+            quarantined_persisted_session_ids: inner.quarantined_persisted_session_ids.clone(),
             quarantined_persisted_delegation_ids: inner
                 .quarantined_persisted_delegation_ids
                 .clone(),
@@ -126,12 +124,8 @@ impl PersistedState {
             next_session_number: self.next_session_number,
             next_message_number: self.next_message_number,
             projects: self.projects.clone(),
-            engram_retired_work_authority_grants: self
-                .engram_retired_work_authority_grants
-                .clone(),
-            pending_coordination_scope_deletions: self
-                .pending_coordination_scope_deletions
-                .clone(),
+            engram_retired_work_authority_grants: self.engram_retired_work_authority_grants.clone(),
+            pending_coordination_scope_deletions: self.pending_coordination_scope_deletions.clone(),
             pending_response_board_project_detachments: self
                 .pending_response_board_project_detachments
                 .clone(),
@@ -141,12 +135,8 @@ impl PersistedState {
             delegation_waits: self.delegation_waits.clone(),
             workspace_layouts: self.workspace_layouts.clone(),
             sessions: Vec::new(),
-            quarantined_persisted_session_ids: self
-                .quarantined_persisted_session_ids
-                .clone(),
-            quarantined_persisted_delegation_ids: self
-                .quarantined_persisted_delegation_ids
-                .clone(),
+            quarantined_persisted_session_ids: self.quarantined_persisted_session_ids.clone(),
+            quarantined_persisted_delegation_ids: self.quarantined_persisted_delegation_ids.clone(),
         }
     }
 
@@ -180,10 +170,8 @@ impl PersistedState {
             next_session_number: self.next_session_number,
             next_message_number: self.next_message_number,
             projects: self.projects,
-            engram_retired_work_authority_grants: self
-                .engram_retired_work_authority_grants,
-            pending_coordination_scope_deletions: self
-                .pending_coordination_scope_deletions,
+            engram_retired_work_authority_grants: self.engram_retired_work_authority_grants,
+            pending_coordination_scope_deletions: self.pending_coordination_scope_deletions,
             pending_response_board_project_detachments: self
                 .pending_response_board_project_detachments,
             ignored_discovered_codex_thread_ids: self.ignored_discovered_codex_thread_ids,
@@ -277,6 +265,8 @@ struct PersistedSessionRecord {
     engram_routing_token: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     engram_open_grant_id: Option<String>,
+    #[serde(default)]
+    engram_dispatch_generation: u64,
     #[serde(skip)]
     message_start_index: usize,
     /// Runtime-only instruction for the SQLite serializer. Full snapshots set
@@ -302,15 +292,11 @@ impl PersistedRemoteProxyIdentity {
         if !value.is_object() {
             bail!("persisted session metadata is not an object");
         }
-        serde_json::from_value(value)
-            .context("failed to decode persisted remote proxy identity")
+        serde_json::from_value(value).context("failed to decode persisted remote proxy identity")
     }
 
     fn remote_proxy_identity(&self) -> Result<Option<(&str, &str)>> {
-        validate_remote_proxy_identity(
-            self.remote_id.as_deref(),
-            self.remote_session_id.as_deref(),
-        )
+        validate_remote_proxy_identity(self.remote_id.as_deref(), self.remote_session_id.as_deref())
     }
 
     fn is_remote_proxy(&self) -> Result<bool> {
@@ -368,6 +354,7 @@ impl PersistedSessionRecord {
             orchestrator_auto_dispatch_blocked: record.orchestrator_auto_dispatch_blocked,
             engram_routing_token: record.engram.routing_token.clone(),
             engram_open_grant_id: record.engram.active_grant_id.clone(),
+            engram_dispatch_generation: record.engram.dispatch_generation,
             message_start_index: record.message_start_index,
             persist_prompt_history: true,
             session,
@@ -403,6 +390,10 @@ impl PersistedSessionRecord {
             session.pending_prompts.clear();
         }
 
+        let recovered_admission = self
+            .queued_prompts
+            .iter()
+            .any(QueuedPromptRecord::has_engram_intent);
         let mut record = SessionRecord {
             codex_delegation_release: None,
             active_codex_approval_policy: self.active_codex_approval_policy,
@@ -438,8 +429,10 @@ impl PersistedSessionRecord {
             engram_mcp_runtime_quarantined: false,
             orchestrator_auto_dispatch_blocked: self.orchestrator_auto_dispatch_blocked,
             engram: EngramSessionState {
+                recovered_admission,
                 routing_token: self.engram_routing_token.clone(),
                 active_grant_id: self.engram_open_grant_id,
+                dispatch_generation: self.engram_dispatch_generation,
                 rebind_required: self.engram_routing_token.is_some(),
                 ..EngramSessionState::default()
             },
@@ -462,6 +455,37 @@ impl PersistedSessionRecord {
         // is rebuilt from it so a loaded session never advertises a stale
         // paused/unpaused state from an older snapshot.
         record.session.queue_paused = record.orchestrator_auto_dispatch_blocked;
+        // Migrate older retained entries only when their transcript position
+        // is still known. Current records explicitly distinguish a definitive
+        // unpromoted disposition from missing legacy evidence; only the latter
+        // must fail closed once earlier transcript positions were evicted.
+        for queued in &mut record.queued_prompts {
+            if queued.promoted_message_index.is_some() {
+                queued.promotion_disposition_known = true;
+            } else if queued.is_engram_retained() && !queued.promotion_disposition_known {
+                queued.promoted_message_index = record
+                    .message_positions
+                    .get(&queued.pending_prompt.id)
+                    .map(|index| record.message_start_index + index);
+                if queued.promoted_message_index.is_some() || record.message_start_index == 0 {
+                    queued.promotion_disposition_known = true;
+                } else {
+                    queued.engram_interrupted = true;
+                    record.engram.recovered_admission = false;
+                    record.orchestrator_auto_dispatch_blocked = true;
+                    record.session.queue_paused = true;
+                }
+            }
+        }
+        // A prepared Engram request can be persisted before the admission
+        // worker parks the queue. Re-establish the explicit-resume barrier
+        // while reconstructing the record, before boot recovery polls child
+        // delegations or settles orchestrator state. Otherwise an unpaused
+        // bind/evaluate snapshot can look like an idle child with no result
+        // and be terminalized before the retained authorization is visible.
+        if record.engram.recovered_admission {
+            record.set_auto_dispatch_blocked(true);
+        }
         sync_codex_thread_state(&mut record);
         sync_pending_prompts(&mut record);
         Ok(record)
@@ -532,7 +556,9 @@ fn validate_persisted_session_fields(
     }
 
     if !session.agent.supports_opencode_settings() && session.opencode_approval_mode.is_some() {
-        return Err(anyhow!("opencodeApprovalMode is only valid for OpenCode sessions"));
+        return Err(anyhow!(
+            "opencodeApprovalMode is only valid for OpenCode sessions"
+        ));
     }
 
     if session.agent.supports_codex_prompt_settings() {
@@ -595,12 +621,7 @@ fn validate_persisted_session_fields(
         let mode = session
             .opencode_mode
             .as_deref()
-            .ok_or_else(|| {
-                anyhow!(
-                    "persisted session `{}` is missing opencodeMode",
-                    session.id
-                )
-            })
+            .ok_or_else(|| anyhow!("persisted session `{}` is missing opencodeMode", session.id))
             .and_then(normalize_opencode_mode)?;
         let effort = session
             .opencode_effort

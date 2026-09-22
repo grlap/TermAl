@@ -289,6 +289,7 @@ impl AppState {
                 message_index,
                 preview,
                 session_id,
+                session_queue,
                 session_mutation_stamp: remote_session_mutation_stamp,
                 status,
                 ..
@@ -400,6 +401,14 @@ impl AppState {
                         };
                         record.session.preview = preview.clone();
                         record.session.status = status;
+                        if let Some(queue) = session_queue.as_ref() {
+                            record.session.pending_prompts = queue.pending_prompts.clone();
+                            record.set_auto_dispatch_blocked(queue.queue_paused);
+                            if queue.queue_projection_hash.is_some() {
+                                record.session.queue_projection_hash =
+                                    queue.queue_projection_hash.clone();
+                            }
+                        }
                         if remote_session_mutation_stamp.is_some() {
                             record.session.session_mutation_stamp = remote_session_mutation_stamp;
                         }
@@ -429,6 +438,7 @@ impl AppState {
                     message,
                     preview,
                     status,
+                    session_queue,
                     session_mutation_stamp: Some(session_mutation_stamp),
                 });
                 self.note_remote_applied_delta_replay(&remote_delta_replay_key);
@@ -986,6 +996,7 @@ impl AppState {
                         message,
                         preview,
                         status: session_status,
+                        session_queue: None,
                         session_mutation_stamp: Some(session_mutation_stamp),
                     });
                 } else {
@@ -1167,6 +1178,7 @@ impl AppState {
                         message,
                         preview,
                         status: session_status,
+                        session_queue: None,
                         session_mutation_stamp: Some(session_mutation_stamp),
                     });
                 } else {

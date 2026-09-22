@@ -32,7 +32,8 @@ beforeEach(() => {
 it("reads policy without enabling and saves defaults through the dedicated endpoint", async () => {
   const { saved } = setup();
   await screen.findByText("Off — completion is self-asserted.");
-  fireEvent.change(screen.getByLabelText("Evaluator agent"), { target: { value: "Claude" } });
+  fireEvent.click(screen.getByRole("combobox", { name: "Evaluator agent" }));
+  fireEvent.click(screen.getByRole("option", { name: "Claude" }));
   fireEvent.click(screen.getByRole("button", { name: "Save evaluator defaults" }));
   await waitFor(() => expect(saveEvaluatorDefaults).toHaveBeenCalledWith("project", { evaluatorAgent: "Claude" }));
   expect(saved).toHaveBeenCalled();
@@ -53,16 +54,18 @@ it("shows unknown policy and disables editing for an older binary", async () => 
 });
 
 async function confirmChange() {
+  const previousWrites = vi.mocked(changeAcceptancePolicy).mock.calls.length;
   await screen.findByText("Off — completion is self-asserted.");
   fireEvent.click(screen.getByRole("button", { name: "Change store policy…" }));
   fireEvent.click(screen.getByLabelText("Allow Independent session"));
   expect(screen.queryByLabelText("Policy change reason")).not.toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Confirm policy change" })).toBeDisabled();
-  fireEvent.click(screen.getByLabelText("I confirm this store-wide policy change"));
+  expect(screen.queryByLabelText("I confirm this store-wide policy change")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Confirm policy change" })).toBeEnabled();
+  expect(changeAcceptancePolicy).toHaveBeenCalledTimes(previousWrites);
   await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Confirm policy change" })); });
 }
 
-it("requires explicit confirmation and replays the exact change/key after a lost response", async () => {
+it("saves without a confirmation checkbox and replays the exact change/key after a lost response", async () => {
   vi.mocked(changeAcceptancePolicy).mockRejectedValueOnce(new ApiRequestError("request-failed", "Outcome unknown", { status: 502 }));
   setup();
   await confirmChange();
@@ -92,7 +95,6 @@ it("keeps an open draft tied to its original policy even after refresh", async (
   await screen.findByText("Off — completion is self-asserted.");
   fireEvent.click(screen.getByRole("button", { name: "Change store policy…" }));
   fireEvent.click(screen.getByLabelText("Allow Independent session"));
-  fireEvent.click(screen.getByLabelText("I confirm this store-wide policy change"));
   vi.mocked(getAcceptancePolicy).mockResolvedValue({ ...policy, policy: "b".repeat(32), readerKey: "new-reader",
     acceptanceEvaluation: { ...policy.acceptanceEvaluation, requireSourceFreshness: true } });
   await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Refresh policy" })); });
@@ -162,7 +164,6 @@ it("ignores a pre-write refresh that resolves after the newer policy write", asy
   await screen.findByText("Off — completion is self-asserted.");
   fireEvent.click(screen.getByRole("button", { name: "Change store policy…" }));
   fireEvent.click(screen.getByLabelText("Allow Independent session"));
-  fireEvent.click(screen.getByLabelText("I confirm this store-wide policy change"));
   let resolveRead!: (snapshot: AcceptancePolicySnapshot) => void;
   vi.mocked(getAcceptancePolicy).mockImplementationOnce(() => new Promise(resolve => { resolveRead = resolve; }));
   fireEvent.click(screen.getByRole("button", { name: "Refresh policy" }));
@@ -175,7 +176,6 @@ it("ignores a pre-write refresh that resolves after the newer policy write", asy
   await act(async () => resolveRead(policy)); // Deliberately ignores AbortSignal.
   expect(screen.queryByText("Off — completion is self-asserted.")).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Change store policy…" }));
-  fireEvent.click(screen.getByLabelText("I confirm this store-wide policy change"));
   await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Confirm policy change" })); });
   expect(vi.mocked(changeAcceptancePolicy).mock.calls[1][1].expectedPolicy).toBe(newer.policy);
 });
@@ -213,18 +213,37 @@ it("binds model defaults to a concrete agent and enforces the UTF-8 byte limit",
   setup();
   await screen.findByText("Off — completion is self-asserted.");
   expect(screen.getByLabelText("Evaluator model override")).toBeDisabled();
+  fireEvent.click(screen.getByRole("combobox", { name: "Default evaluator mode" }));
   expect(screen.getByRole("option", { name: /Sub-agent — not produced/ })).toBeDisabled();
-  fireEvent.change(screen.getByLabelText("Default evaluator mode"), { target: { value: "sub_agent" } });
-  expect(screen.getByLabelText("Default evaluator mode")).toHaveValue("");
-  fireEvent.change(screen.getByLabelText("Evaluator agent"), { target: { value: "Claude" } });
+  fireEvent.click(screen.getByRole("option", { name: /Sub-agent — not produced/ }));
+  expect(screen.getByLabelText("Default evaluator mode")).toHaveTextContent("Auto — strongest admitted mode");
+  fireEvent.keyDown(window, { key: "Escape" });
+  fireEvent.click(screen.getByRole("combobox", { name: "Evaluator agent" }));
+  fireEvent.click(screen.getByRole("option", { name: "Claude" }));
   fireEvent.change(screen.getByLabelText("Evaluator model override"), { target: { value: "界".repeat(43) } });
   fireEvent.click(screen.getByRole("button", { name: "Save evaluator defaults" }));
   expect(screen.getByRole("alert")).toHaveTextContent("128 UTF-8 bytes");
   expect(saveEvaluatorDefaults).not.toHaveBeenCalled();
-  fireEvent.change(screen.getByLabelText("Evaluator agent"), { target: { value: "Codex" } });
+  fireEvent.click(screen.getByRole("combobox", { name: "Evaluator agent" }));
+  fireEvent.click(screen.getByRole("option", { name: "Codex" }));
   expect(screen.getByLabelText("Evaluator model override")).toHaveValue("");
-  fireEvent.change(screen.getByLabelText("Evaluator agent"), { target: { value: "" } });
+  fireEvent.click(screen.getByRole("combobox", { name: "Evaluator agent" }));
+  fireEvent.click(screen.getByRole("option", { name: "Auto — other vendor when ready" }));
   expect(screen.getByLabelText("Evaluator model override")).toBeDisabled();
+});
+
+it("navigates evaluator choices repeatedly from the focused trigger", async () => {
+  setup();
+  await screen.findByText("Off — completion is self-asserted.");
+  const evaluator = screen.getByRole("combobox", { name: "Evaluator agent" });
+  evaluator.focus();
+  fireEvent.keyDown(evaluator, { key: "ArrowDown" });
+  fireEvent.keyDown(evaluator, { key: "ArrowDown" });
+  fireEvent.keyDown(evaluator, { key: "ArrowDown" });
+  fireEvent.keyDown(evaluator, { key: "ArrowUp" });
+  fireEvent.keyDown(evaluator, { key: "Enter" });
+  expect(evaluator).toHaveTextContent("Claude");
+  expect(screen.getByLabelText("Evaluator model override")).toBeEnabled();
 });
 
 it("does not let a late response from a closed dialog erase a newer uncertain attempt", async () => {
@@ -252,7 +271,8 @@ it("does not let a late response from a closed dialog erase a newer uncertain at
 it("clears a whitespace-only model override before saving defaults", async () => {
   setup();
   await screen.findByText("Off — completion is self-asserted.");
-  fireEvent.change(screen.getByLabelText("Evaluator agent"), { target: { value: "Claude" } });
+  fireEvent.click(screen.getByRole("combobox", { name: "Evaluator agent" }));
+  fireEvent.click(screen.getByRole("option", { name: "Claude" }));
   fireEvent.change(screen.getByLabelText("Evaluator model override"), { target: { value: "   " } });
   await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Save evaluator defaults" })); });
   expect(saveEvaluatorDefaults).toHaveBeenCalledWith("project", { evaluatorAgent: "Claude", evaluatorModel: undefined });

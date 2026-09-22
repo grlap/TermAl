@@ -1,6 +1,6 @@
 // Owns evaluator defaults and explicit store-policy editing in project settings.
 // Does not enable Engram, run doctor, or submit task verdicts. New focused editor.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { ApiRequestError } from "./api-request";
 import { changeAcceptancePolicy, getAcceptancePolicy, saveEvaluatorDefaults,
   type AcceptancePolicySnapshot, type EvaluatorDefaults, type PolicyChange, type StoreAcceptancePolicy } from "./acceptance-settings-api";
@@ -9,6 +9,7 @@ import type { AcceptanceEvaluationMode } from "./types";
 import "./acceptance-evaluation-settings.css";
 import { clearPolicyAttempt, readPolicyAttempt, storePolicyAttempt } from "./acceptance-policy-recovery";
 import { useCommittedRef } from "./panels/use-committed-ref";
+import { ThemedCombobox } from "./preferences/themed-combobox";
 
 const modes: [AcceptanceEvaluationMode, string][] = [
   ["same_session", "Same session"], ["sub_agent", "Sub-agent"], ["independent_session", "Independent session"],
@@ -26,6 +27,7 @@ export function AcceptanceEvaluationSettings(props: AcceptanceEvaluationSettings
 }
 
 function AcceptanceEvaluationSettingsBody({ projectId, enabled, value, onChange, busy, onBusyChange, onSaved }: AcceptanceEvaluationSettingsProps) {
+  const controlId = useId();
   const [recovery] = useState(() => readPolicyAttempt(projectId));
   const [recoveryBlocked, setRecoveryBlocked] = useState(!!recovery.error);
   const mounted = useRef(true);
@@ -47,7 +49,6 @@ function AcceptanceEvaluationSettingsBody({ projectId, enabled, value, onChange,
   const [editing, setEditing] = useState(!!recovery.attempt);
   const [draft, setDraft] = useState<StoreAcceptancePolicy>(recovery.attempt ?? { modes: [], mechanicalBasis: "asserted", requireSourceFreshness: false });
   const [base, setBase] = useState<{ policy: string; readerKey: string } | null>(null);
-  const [confirmed, setConfirmed] = useState(!!recovery.attempt);
   const [attempt, setAttempt] = useState<PolicyChange | null>(recovery.attempt);
   const [saving, setSaving] = useState(false);
   useEffect(() => {
@@ -81,7 +82,7 @@ function AcceptanceEvaluationSettingsBody({ projectId, enabled, value, onChange,
     finally { if (mounted.current) { setSaving(false); onBusyChange(false); } }
   }
   async function savePolicy() {
-    if (recoveryBlocked || (!attempt && (!base || !confirmed))) return;
+    if (recoveryBlocked || (!attempt && !base)) return;
     const change = attempt ?? { ...draft, expectedPolicy: base!.policy, readerKey: base!.readerKey,
       idempotencyKey: `termal-policy-${crypto.randomUUID()}` };
     try { storePolicyAttempt(projectId, change); }
@@ -98,7 +99,7 @@ function AcceptanceEvaluationSettingsBody({ projectId, enabled, value, onChange,
       setReadError(null);
       if (!cleared) setError("Policy change applied, but recovery storage could not be cleared. Restore storage and reopen this editor before another change.");
       else if (result.writeApplied && result.error) setError(`Policy change applied. ${result.error}`);
-      setAttempt(null); setEditing(false); setConfirmed(false);
+      setAttempt(null); setEditing(false);
     } catch (failure) {
       if (mounted.current) setError(describe(failure));
       if (!attempt && failure instanceof ApiRequestError && failure.status === 409) {
@@ -126,20 +127,20 @@ function AcceptanceEvaluationSettingsBody({ projectId, enabled, value, onChange,
     </p>
     <fieldset disabled={busy || saving || !!attempt}>
       <label>Default evaluator mode
-        <select aria-label="Default evaluator mode" value={value.defaultMode ?? ""}
-          onChange={e => { const mode = modes.find(([mode]) => mode === e.target.value)?.[0]; if (mode !== "sub_agent") onChange({ ...value, defaultMode: mode }); }}>
-          <option value="">Auto — strongest admitted mode</option>
-          {modes.map(([mode, name]) => <option key={mode} value={mode}
-            disabled={mode === "sub_agent" || (!!store && !store.modes.includes(mode))}>
-            {name}{mode === "sub_agent" ? " — not produced by this host yet" : store && !store.modes.includes(mode) ? " — not admitted by policy" : ""}
-          </option>)}
-        </select>
+        <ThemedCombobox id={`${controlId}-mode`} aria-label="Default evaluator mode" value={value.defaultMode ?? ""}
+          disabled={busy || saving || !!attempt}
+          onChange={next => { const mode = modes.find(([mode]) => mode === next)?.[0]; if (mode !== "sub_agent") onChange({ ...value, defaultMode: mode }); }}
+          options={[{ value: "", label: "Auto — strongest admitted mode" }, ...modes.map(([mode, name]) => ({
+            value: mode,
+            disabled: mode === "sub_agent" || (!!store && !store.modes.includes(mode)),
+            label: `${name}${mode === "sub_agent" ? " — not produced by this host yet" : store && !store.modes.includes(mode) ? " — not admitted by policy" : ""}`,
+          }))]} />
       </label>
       <label>Evaluator agent
-        <select aria-label="Evaluator agent" value={value.evaluatorAgent ?? ""}
-          onChange={e => { const agent = e.target.value; if (agent === "" || agent === "Claude" || agent === "Codex") onChange({ ...value, evaluatorAgent: agent || undefined, evaluatorModel: undefined }); }}>
-          <option value="">Auto — other vendor when ready</option><option>Claude</option><option>Codex</option>
-        </select>
+        <ThemedCombobox id={`${controlId}-agent`} aria-label="Evaluator agent" value={value.evaluatorAgent ?? ""}
+          disabled={busy || saving || !!attempt}
+          onChange={agent => { if (agent === "" || agent === "Claude" || agent === "Codex") onChange({ ...value, evaluatorAgent: agent || undefined, evaluatorModel: undefined }); }}
+          options={[{ value: "", label: "Auto — other vendor when ready" }, { value: "Claude", label: "Claude" }, { value: "Codex", label: "Codex" }]} />
       </label>
       <label>Evaluator model override
         <input aria-label="Evaluator model override" disabled={!value.evaluatorAgent} value={value.evaluatorModel ?? ""} maxLength={128}
@@ -149,7 +150,7 @@ function AcceptanceEvaluationSettingsBody({ projectId, enabled, value, onChange,
       <p className="create-session-field-hint">Task pins take precedence. Defaults change only future evaluations, without auditing the store or resetting sessions.</p>
       <button type="button" className="ghost-button" disabled={!enabled} onClick={() => void saveDefaults()}>Save evaluator defaults</button>
       <button type="button" className="ghost-button" disabled={recoveryBlocked || !policy?.available || !store || !policy.policy}
-        onClick={() => { if (store && policy?.policy) { setDraft({ ...store, modes: [...store.modes] }); setBase({ policy: policy.policy, readerKey: policy.readerKey }); } setEditing(true); setConfirmed(false); setError(null); }}>
+        onClick={() => { if (store && policy?.policy) { setDraft({ ...store, modes: [...store.modes] }); setBase({ policy: policy.policy, readerKey: policy.readerKey }); } setEditing(true); setError(null); }}>
         Change store policy…
       </button>
       <button type="button" className="ghost-button" disabled={!enabled || !!attempt} onClick={() => setRefresh(n => n + 1)}>Refresh policy</button>
@@ -159,15 +160,14 @@ function AcceptanceEvaluationSettingsBody({ projectId, enabled, value, onChange,
       <fieldset disabled={busy || saving || !!attempt}>
         {modes.map(([mode, name]) => <label key={mode}><input type="checkbox" checked={draft.modes.includes(mode)}
           onChange={e => setDraft({ ...draft, modes: e.target.checked ? [...draft.modes, mode] : draft.modes.filter(m => m !== mode) })} />Allow {name}</label>)}
-        <label>Mechanical evidence basis<select aria-label="Mechanical evidence basis" value={draft.mechanicalBasis}
-          onChange={e => { const basis = e.target.value; if (basis === "asserted" || basis === "observed") setDraft({ ...draft, mechanicalBasis: basis }); }}>
-          <option value="asserted">Asserted</option><option value="observed">Observed</option>
-        </select></label>
+        <label>Mechanical evidence basis<ThemedCombobox id={`${controlId}-basis`} aria-label="Mechanical evidence basis" value={draft.mechanicalBasis}
+          disabled={busy || saving || !!attempt}
+          onChange={basis => { if (basis === "asserted" || basis === "observed") setDraft({ ...draft, mechanicalBasis: basis }); }}
+          options={[{ value: "asserted", label: "Asserted" }, { value: "observed", label: "Observed" }]} /></label>
         <label><input type="checkbox" checked={draft.requireSourceFreshness} onChange={e => setDraft({ ...draft, requireSourceFreshness: e.target.checked })} />Require source freshness</label>
         <p>Sub-agent evaluations, observed build evidence and source fingerprints are not yet produced by this host. Requiring them can block completion until another capable host supplies them.</p>
-        <label><input type="checkbox" checked={confirmed} onChange={e => setConfirmed(e.target.checked)} />I confirm this store-wide policy change</label>
       </fieldset>
-      <button type="button" className="primary-button" disabled={busy || saving || !enabled || recoveryBlocked || !confirmed} onClick={() => void savePolicy()}>
+      <button type="button" className="primary-button" disabled={busy || saving || !enabled || recoveryBlocked || (!attempt && !base)} onClick={() => void savePolicy()}>
         {saving ? "Saving policy…" : attempt ? "Retry identical policy change" : "Confirm policy change"}
       </button>
       {!attempt && <button type="button" className="ghost-button" disabled={busy || saving} onClick={() => setEditing(false)}>Cancel policy change</button>}

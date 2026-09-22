@@ -2219,6 +2219,7 @@ fn remote_message_delta_hydrates_unloaded_proxy_before_gap_check() {
                 ),
                 preview: "New remote message from delta revision.".to_owned(),
                 status: SessionStatus::Idle,
+                session_queue: None,
                 session_mutation_stamp: Some(11),
             },
         )
@@ -2514,6 +2515,7 @@ fn remote_session_create_forwards_configured_default_model() {
         markers: Vec::new(),
         pending_prompts: Vec::new(),
         queue_paused: false,
+        queue_projection_hash: None,
         session_mutation_stamp: None,
         parent_delegation_id: None,
     };
@@ -3059,6 +3061,7 @@ fn remote_delta_falls_through_when_targeted_hydration_returns_summary() {
                 message: remote_text_message("remote-message-1", "Delta repaired transcript."),
                 preview: "Delta repaired transcript.".to_owned(),
                 status: SessionStatus::Idle,
+                session_queue: None,
                 session_mutation_stamp: Some(10),
             },
         )
@@ -3169,6 +3172,7 @@ fn remote_delta_repair_rejects_newer_targeted_session_revision() {
                 ),
                 preview: "Newer transcript from future revision.".to_owned(),
                 status: SessionStatus::Idle,
+                session_queue: None,
                 session_mutation_stamp: Some(40),
             },
         )
@@ -3258,6 +3262,7 @@ fn stale_remote_delta_skips_before_targeted_hydration_fetch() {
                 ),
                 preview: "Stale delta should not trigger a remote fetch.".to_owned(),
                 status: SessionStatus::Idle,
+                session_queue: None,
                 session_mutation_stamp: Some(60),
             },
         )
@@ -3298,6 +3303,7 @@ fn apply_remote_created_text_message_at(
                 message: remote_text_message(message_id, text),
                 preview: text.to_owned(),
                 status: SessionStatus::Active,
+                session_queue: None,
                 session_mutation_stamp: None,
             },
         )
@@ -3339,6 +3345,7 @@ fn remote_summary_state_snapshot_preserves_existing_proxy_transcript() {
                 message: remote_text_message("message-1", "Hydrated remote transcript."),
                 preview: "Hydrated remote transcript.".to_owned(),
                 status: SessionStatus::Active,
+                session_queue: None,
                 session_mutation_stamp: Some(42),
             },
         )
@@ -3404,6 +3411,20 @@ fn remote_message_created_delta_replaces_and_reorders_existing_message() {
                 message: remote_text_message("message-2", "Second final."),
                 preview: "Second final.".to_owned(),
                 status: SessionStatus::Idle,
+                session_queue: Some(SessionQueueDelta {
+                    pending_prompts: vec![PendingPrompt {
+                        engram_interrupted: false,
+                        is_engram_retained: true,
+                        attachments: Vec::new(),
+                        id: "message-1".to_owned(),
+                        timestamp: "2026-04-05 10:00:00".to_owned(),
+                        text: "First remote message.".to_owned(),
+                        expanded_text: None,
+                        source: None,
+                    }],
+                    queue_paused: true,
+                    queue_projection_hash: Some("remote-queue-held".to_owned()),
+                }),
                 session_mutation_stamp: None,
             },
         )
@@ -3417,6 +3438,14 @@ fn remote_message_created_delta_replaces_and_reorders_existing_message() {
         .expect("localized remote session should exist");
     assert_eq!(session.preview, "Second final.");
     assert_eq!(session.status, SessionStatus::Idle);
+    assert!(session.queue_paused);
+    assert_eq!(
+        session.queue_projection_hash.as_deref(),
+        Some("remote-queue-held")
+    );
+    assert_eq!(session.pending_prompts.len(), 1);
+    assert_eq!(session.pending_prompts[0].id, "message-1");
+    assert!(session.pending_prompts[0].is_engram_retained);
     let message_ids: Vec<_> = session
         .messages
         .iter()
@@ -3448,6 +3477,7 @@ fn remote_message_created_delta_replaces_and_reorders_existing_message() {
             message,
             preview,
             status,
+            session_queue,
             session_mutation_stamp,
         } => {
             assert_eq!(revision, snapshot.revision);
@@ -3461,6 +3491,15 @@ fn remote_message_created_delta_replaces_and_reorders_existing_message() {
             ));
             assert_eq!(preview, "Second final.");
             assert_eq!(status, SessionStatus::Idle);
+            let session_queue = session_queue.expect("queue metadata should bridge atomically");
+            assert!(session_queue.queue_paused);
+            assert_eq!(
+                session_queue.queue_projection_hash.as_deref(),
+                Some("remote-queue-held")
+            );
+            assert_eq!(session_queue.pending_prompts.len(), 1);
+            assert_eq!(session_queue.pending_prompts[0].id, "message-1");
+            assert!(session_queue.pending_prompts[0].is_engram_retained);
             assert_eq!(session_mutation_stamp, session.session_mutation_stamp);
         }
         _ => panic!("expected localized MessageCreated delta"),
@@ -3506,6 +3545,7 @@ fn remote_message_created_delta_rejects_gap_without_advancing_revision() {
                 message: remote_text_message("message-1", "Gap message."),
                 preview: "Gap message.".to_owned(),
                 status: SessionStatus::Active,
+                session_queue: None,
                 session_mutation_stamp: None,
             },
         )
@@ -3563,6 +3603,7 @@ fn remote_message_created_delta_rejects_payload_id_mismatch_without_advancing_re
                 message: remote_text_message("different-message", "Wrong message."),
                 preview: "Wrong message.".to_owned(),
                 status: SessionStatus::Active,
+                session_queue: None,
                 session_mutation_stamp: None,
             },
         )
@@ -3631,6 +3672,7 @@ fn remote_message_created_delta_rejects_existing_message_out_of_bounds_without_a
                 message: remote_text_message("message-2", "Second final."),
                 preview: "Second final.".to_owned(),
                 status: SessionStatus::Idle,
+                session_queue: None,
                 session_mutation_stamp: None,
             },
         )
@@ -3919,6 +3961,7 @@ fn remote_message_updated_delta_uses_message_id_when_remote_index_is_stale() {
                 message: remote_text_message("message-2", "Second draft."),
                 preview: "Second draft.".to_owned(),
                 status: SessionStatus::Active,
+                session_queue: None,
                 session_mutation_stamp: None,
             },
         )
@@ -4327,6 +4370,7 @@ fn remote_same_revision_deltas_apply_in_sequence() {
                 },
                 preview: "First remote message.".to_owned(),
                 status: SessionStatus::Active,
+                session_queue: None,
                 session_mutation_stamp: None,
             },
         )

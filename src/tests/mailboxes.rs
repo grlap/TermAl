@@ -1471,9 +1471,17 @@ fn failed_mailbox_recovery_moves_a_covering_newer_wake_ahead_of_successors() {
             .session_mut_by_index(index)
             .expect("target index should be valid");
         record.queued_prompts.push_front(QueuedPromptRecord {
+            engram_waiting: false,
+            promoted_message_index: None,
+            promotion_disposition_known: true,
+            engram_bind: None,
+            engram_evaluate: None,
+            engram_interrupted: false,
             source: QueuedPromptSource::User,
             attachments: Vec::new(),
             pending_prompt: PendingPrompt {
+                engram_interrupted: false,
+                is_engram_retained: false,
                 attachments: Vec::new(),
                 id: prompt_id,
                 timestamp: stamp_now(),
@@ -2104,6 +2112,8 @@ fn queue_drain_skips_a_stale_wake_left_after_the_cursor_advanced() {
         queue_prompt_on_record(
             target,
             PendingPrompt {
+                engram_interrupted: false,
+                is_engram_retained: false,
                 attachments: Vec::new(),
                 id: prompt_id,
                 timestamp: stamp_now(),
@@ -2714,6 +2724,8 @@ fn boot_dispatches_committed_workflow_queue_heads() {
         queue_orchestrator_prompt_on_record(
             target,
             PendingPrompt {
+                engram_interrupted: false,
+                is_engram_retained: false,
                 attachments: Vec::new(),
                 id: "committed-workflow-resume".to_owned(),
                 timestamp: stamp_now(),
@@ -2766,6 +2778,8 @@ fn boot_keeps_a_user_queue_barrier_and_workflow_behind_it_dormant() {
         queue_prompt_on_record(
             target,
             PendingPrompt {
+                engram_interrupted: false,
+                is_engram_retained: false,
                 attachments: Vec::new(),
                 id: "committed-user-prompt".to_owned(),
                 timestamp: stamp_now(),
@@ -2778,6 +2792,8 @@ fn boot_keeps_a_user_queue_barrier_and_workflow_behind_it_dormant() {
         queue_orchestrator_prompt_on_record(
             target,
             PendingPrompt {
+                engram_interrupted: false,
+                is_engram_retained: false,
                 attachments: Vec::new(),
                 id: "workflow-behind-user-barrier".to_owned(),
                 timestamp: stamp_now(),
@@ -2853,6 +2869,8 @@ fn boot_workflow_activation_drains_a_recovered_mailbox_wake_first() {
         queue_orchestrator_prompt_on_record(
             target,
             PendingPrompt {
+                engram_interrupted: false,
+                is_engram_retained: false,
                 attachments: Vec::new(),
                 id: "committed-workflow-behind-mailbox".to_owned(),
                 timestamp: stamp_now(),
@@ -2943,6 +2961,8 @@ fn boot_workflow_activation_retries_a_rejected_recovered_wake_once() {
         queue_orchestrator_prompt_on_record(
             target,
             PendingPrompt {
+                engram_interrupted: false,
+                is_engram_retained: false,
                 attachments: Vec::new(),
                 id: "workflow-behind-rejected-recovery-wake".to_owned(),
                 timestamp: stamp_now(),
@@ -3010,6 +3030,8 @@ fn boot_requeues_a_rejected_workflow_head_for_a_later_recovery_pass() {
         queue_orchestrator_prompt_on_record(
             target,
             PendingPrompt {
+                engram_interrupted: false,
+                is_engram_retained: false,
                 attachments: Vec::new(),
                 id: "rejected-workflow-head".to_owned(),
                 timestamp: stamp_now(),

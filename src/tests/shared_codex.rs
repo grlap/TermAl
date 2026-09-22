@@ -4974,9 +4974,17 @@ fn shared_codex_runtime_exit_clears_shared_slot_before_queued_dispatch_attempt()
         record.remote_id = Some("remote-proxy-to-block-dispatch-spawn".to_owned());
         record.remote_session_id = Some("remote-session".to_owned());
         record.queued_prompts.push_back(QueuedPromptRecord {
+            engram_waiting: false,
+            promoted_message_index: None,
+            promotion_disposition_known: true,
+            engram_bind: None,
+            engram_evaluate: None,
+            engram_interrupted: false,
             source: QueuedPromptSource::User,
             attachments: Vec::new(),
             pending_prompt: PendingPrompt {
+                engram_interrupted: false,
+                is_engram_retained: false,
                 attachments: Vec::new(),
                 id: queued_prompt_id,
                 timestamp: stamp_now(),

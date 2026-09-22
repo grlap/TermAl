@@ -4,6 +4,254 @@
 
 use super::*;
 
+#[path = "engram_root_recovery_corrections.rs"]
+mod recovery_corrections;
+
+#[path = "engram_post_receipt.rs"]
+mod post_receipt;
+
+#[path = "engram_retained_disposition.rs"]
+mod retained_disposition;
+
+#[test]
+fn root_known_defer_resume_uses_new_evaluation_identity() {
+    let (state, session, receiver, transport) = root_fixture([
+        bind_reply("root-token"),
+        defer_reply("busy"),
+        grant_reply("new-grant"),
+        begin_reply("new-grant"),
+    ]);
+    let dispatch = root_dispatch(&state, &session, false);
+    deliver_turn_dispatch(&state, dispatch).expect("defer parks original prompt");
+    assert!(receiver.try_recv().is_err());
+    state
+        .resume_session_queue(&session)
+        .expect("explicit resume is a new evaluation");
+    assert!(matches!(
+        receiver.try_recv().unwrap(),
+        CodexRuntimeCommand::Prompt { .. }
+    ));
+    assert!(receiver.try_recv().is_err());
+    let requests = transport.requests();
+    assert_eq!(
+        requests[1].request["intent_fingerprint"],
+        requests[2].request["intent_fingerprint"]
+    );
+    assert_ne!(
+        requests[1].request["idempotency_key"],
+        requests[2].request["idempotency_key"]
+    );
+}
+
+#[test]
+fn root_unknown_evaluate_retains_exact_prompt_and_replays_without_rebind() {
+    let (state, session, receiver, transport) = root_fixture([
+        bind_reply("root-token"),
+        ScriptedEngramControlResponse::Reply(Err(EngramTransportError::deadline(
+            "reply lost after evaluate",
+        ))),
+        grant_reply("replayed-grant"),
+        begin_reply("replayed-grant"),
+    ]);
+    let dispatch = root_dispatch(&state, &session, false);
+    deliver_turn_dispatch(&state, dispatch).expect("unknown admission should remain waiting");
+    assert!(receiver.try_recv().is_err());
+    let (prompt, generation) = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let record = &inner.sessions[inner.find_session_index(&session).expect("root exists")];
+        assert!(record.session.preview.contains("Waiting/Unknown"));
+        assert!(record.orchestrator_auto_dispatch_blocked);
+        assert!(
+            record
+                .queued_prompts
+                .front()
+                .expect("prompt retained")
+                .engram_evaluate
+                .is_some()
+        );
+        (
+            serde_json::to_value(&record.queued_prompts[0].pending_prompt).unwrap(),
+            record.engram.dispatch_generation,
+        )
+    };
+    state
+        .resume_session_queue(&session)
+        .expect("exact retry succeeds");
+    assert!(matches!(
+        receiver.try_recv().expect("one provider attempt"),
+        CodexRuntimeCommand::Prompt { .. }
+    ));
+    assert!(receiver.try_recv().is_err());
+    let requests = transport.requests();
+    assert_eq!(
+        requests[1].request, requests[2].request,
+        "byte-equivalent evaluate replay"
+    );
+    assert_eq!(
+        operations(&transport),
+        [
+            "session_bind",
+            "turn_evaluate",
+            "turn_evaluate",
+            "turn_begin"
+        ]
+    );
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+    assert_eq!(record.engram.dispatch_generation, generation);
+    assert!(record.queued_prompts.is_empty());
+    assert_eq!(
+        record
+            .session
+            .messages
+            .iter()
+            .filter(|message| message.id() == prompt["id"].as_str().unwrap())
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn root_unknown_bind_is_durable_and_cancelable_without_provider_delivery() {
+    let (state, session, receiver, transport) =
+        root_fixture([ScriptedEngramControlResponse::Reply(Err(
+            EngramTransportError::deadline("bind response lost"),
+        ))]);
+    let dispatch = root_dispatch(&state, &session, false);
+    deliver_turn_dispatch(&state, dispatch).expect("unknown bind remains waiting");
+    let prompt_id = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+        let prompt = record.queued_prompts.front().expect("prompt retained");
+        assert!(prompt.engram_bind.is_some());
+        prompt.pending_prompt.id.clone()
+    };
+    let persisted = persisted_session_json(&state, &session);
+    assert!(persisted.contains("engram_bind"));
+    state
+        .cancel_queued_prompt(&session, &prompt_id)
+        .expect("cancel is immediate");
+    assert!(receiver.try_recv().is_err());
+    assert_eq!(operations(&transport), ["session_bind"]);
+}
+
+#[test]
+fn root_default_admission_budget_is_ten_seconds() {
+    assert_eq!(
+        EngramProjectSettings::default().call_timeout(),
+        Duration::from_secs(10)
+    );
+    assert_eq!(ENGRAM_DISPATCH_BUDGET_MS, 10_000);
+}
+
+#[test]
+fn root_lost_begin_replays_exact_evaluate_and_begin_without_new_generation() {
+    let (state, session, receiver, transport) = root_fixture([
+        bind_reply("root-token"),
+        grant_reply("original-grant"),
+        ScriptedEngramControlResponse::Reply(Err(EngramTransportError::deadline(
+            "begin reply lost",
+        ))),
+        grant_reply("original-grant"),
+        begin_reply("original-grant"),
+    ]);
+    let dispatch = root_dispatch(&state, &session, false);
+    deliver_turn_dispatch(&state, dispatch).unwrap();
+    assert!(receiver.try_recv().is_err());
+    state.resume_session_queue(&session).unwrap();
+    assert!(matches!(
+        receiver.try_recv().unwrap(),
+        CodexRuntimeCommand::Prompt { .. }
+    ));
+    assert!(receiver.try_recv().is_err());
+    let requests = transport.requests();
+    assert_eq!(requests.len(), 5);
+    assert_eq!(requests[1].request, requests[3].request);
+    assert_eq!(requests[2].request, requests[4].request);
+}
+
+#[test]
+fn root_cold_begun_recovery_checkpoints_but_never_resends_retained_prompt() {
+    let (state, session, receiver, transport) = root_fixture([
+        bind_reply("root-token"),
+        grant_reply("original-grant"),
+        ScriptedEngramControlResponse::Reply(Err(EngramTransportError::deadline(
+            "begin reply lost",
+        ))),
+        ScriptedEngramControlResponse::Reply(Ok(
+            json!({ "phase": "turn_open", "open_grant_id": "original-grant", "open_grant_state": "begun" }),
+        )),
+        checkpoint_reply("original-grant"),
+    ]);
+    let dispatch = root_dispatch(&state, &session, false);
+    deliver_turn_dispatch(&state, dispatch).unwrap();
+    let encoded = {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        serde_json::to_string(&PersistedSessionRecord::from_record(
+            &inner.sessions[inner.find_session_index(&session).unwrap()],
+        ))
+        .unwrap()
+    };
+    let restored: PersistedSessionRecord = serde_json::from_str(&encoded).unwrap();
+    let restored = restored.into_record().unwrap();
+    assert_eq!(restored.engram.dispatch_generation, 1);
+    assert!(restored.engram.recovered_admission);
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let index = inner.find_session_index(&session).unwrap();
+        inner.sessions[index] = restored;
+    }
+    state.resume_session_queue(&session).unwrap();
+    assert!(receiver.try_recv().is_err());
+    assert_eq!(
+        operations(&transport),
+        [
+            "session_bind",
+            "turn_evaluate",
+            "turn_begin",
+            "session_status",
+            "turn_checkpoint"
+        ]
+    );
+    let inner = state.inner.lock().expect("state mutex poisoned");
+    let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+    assert!(record.queued_prompts.front().unwrap().engram_interrupted);
+    assert!(record.orchestrator_auto_dispatch_blocked);
+}
+
+#[test]
+fn root_stop_while_bind_waits_prevents_late_provider_handoff() {
+    let (state, session, receiver, _) = root_fixture([]);
+    let (bind, gate) = gated_engram_step("session_bind", bind_reply("late-token"));
+    let transport = GatedEngramControlTransport::new([bind]);
+    state.install_control_test_transport(transport.clone());
+    std::thread::scope(|scope| {
+        let worker = scope.spawn(|| {
+            state.dispatch_turn(
+                &session,
+                SendMessageRequest {
+                    text: "Keep this exact prompt".to_owned(),
+                    expanded_text: None,
+                    attachments: vec![],
+                    source_session_id: None,
+                    source_mailbox: None,
+                },
+            )
+        });
+        gate.wait();
+        state
+            .request_stop_session(&session)
+            .expect("Stop does not wait for transport");
+        gate.release();
+        assert!(matches!(
+            worker.join().unwrap().unwrap(),
+            DispatchTurnResult::Queued
+        ));
+    });
+    assert!(receiver.try_recv().is_err());
+    assert_eq!(transport.requests().len(), 1);
+}
+
 fn root_fixture(
     responses: impl IntoIterator<Item = ScriptedEngramControlResponse>,
 ) -> (
@@ -173,12 +421,17 @@ fn root_direct_and_queued_denials_and_failures_never_reach_provider() {
                 inner.sessions[index].engram.disabled_reason = Some("control_disabled".to_owned());
             }
             let dispatch = root_dispatch(&state, &session, queued);
-            assert_eq!(
-                deliver_turn_dispatch(&state, dispatch)
-                    .expect_err("must withhold denied root prompt")
-                    .status,
-                StatusCode::CONFLICT
-            );
+            let delivery = deliver_turn_dispatch(&state, dispatch);
+            if matches!(failure, "defer" | "bind") {
+                delivery.expect("uncertain admission remains waiting, not denied");
+            } else {
+                assert_eq!(
+                    delivery
+                        .expect_err("must withhold denied root prompt")
+                        .status,
+                    StatusCode::CONFLICT
+                );
+            }
             assert!(
                 receiver.try_recv().is_err(),
                 "queued={queued} failure={failure}"

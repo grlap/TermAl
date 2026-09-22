@@ -321,6 +321,8 @@ helpers.
 
 Streaming paths (`append_text_delta`, `update_command_message`) bump revision and publish a `DeltaEvent` instead of a full snapshot, avoiding the cost of serializing all sessions on every token. They use `commit_delta_locked()` which bumps revision + wakes the persist thread but skips the full-state broadcast; callers emit the matching `DeltaEvent` explicitly via `publish_delta()` under the same lock. `publish_state_locked()` and `publish_delta()` both feed one bounded ordered broadcaster mailbox: consecutive snapshots can coalesce, but a retained snapshot queued before a retained delta is sent before that delta so the frontend does not see an artificial revision gap. If snapshot serialization falls behind and the mailbox reaches capacity, producers drop the oldest pending work instead of blocking while holding `StateInner`; dropped deltas surface as ordinary revision gaps and the frontend repairs from `/api/state`.
 
+`sessionQueue` is authoritative client-visible state: it carries the pending-prompt projection plus `queuePaused`, including Engram retained and interrupted disposition. Mutations to that projection publish a snapshot or a matching delta at the revision they consume. Durable Engram wire bookkeeping (prepared bind/evaluate keys, retirement, and routing receipts) is persisted without advancing the client revision when it does not change that projection; clients therefore see contiguous revisions and still treat every real gap as a resnapshot trigger.
+
 Internal bookkeeping that the frontend doesn't need (e.g. recording Codex sandbox mode after runtime config) uses `persist_internal_locked()` directly without bumping revision.
 
 ### HTTP API

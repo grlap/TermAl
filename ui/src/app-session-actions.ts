@@ -46,6 +46,7 @@ import { createSessionMarkerActions } from "./app-session-marker-actions";
 import { isServerInstanceMismatch } from "./state-revision";
 import {
   getErrorMessage,
+  pendingPromptContentsMatch,
   releaseDraftAttachments,
   removeQueuedPromptFromSessions,
   setSessionFlag,
@@ -136,33 +137,6 @@ type SuccessfulAdoptActionStateOutcome = Extract<
   "adopted" | "stale-success"
 >;
 
-function samePendingPromptAttachments(
-  left: PendingPrompt["attachments"],
-  right: PendingPrompt["attachments"],
-) {
-  const leftAttachments = left ?? [];
-  const rightAttachments = right ?? [];
-  return (
-    leftAttachments.length === rightAttachments.length &&
-    leftAttachments.every((attachment, index) => {
-      const candidate = rightAttachments[index];
-      return (
-        candidate?.fileName === attachment.fileName &&
-        candidate.mediaType === attachment.mediaType &&
-        candidate.byteSize === attachment.byteSize
-      );
-    })
-  );
-}
-
-function samePendingPromptContent(left: PendingPrompt, right: PendingPrompt) {
-  return (
-    left.text === right.text &&
-    (left.expandedText ?? null) === (right.expandedText ?? null) &&
-    samePendingPromptAttachments(left.attachments, right.attachments)
-  );
-}
-
 function resolveAuthoritativePendingPromptId(
   optimisticPrompt: PendingPrompt,
   previousPendingPrompts: PendingPrompt[],
@@ -177,13 +151,13 @@ function resolveAuthoritativePendingPromptId(
     .filter(
       (prompt) =>
         prompt.localOnly === true &&
-        samePendingPromptContent(prompt, optimisticPrompt),
+        pendingPromptContentsMatch(prompt, optimisticPrompt),
     )
     .findIndex((prompt) => prompt.id === optimisticPrompt.id);
   const matchingAuthoritativePrompts = authoritativePendingPrompts.filter(
     (prompt) =>
       !authoritativeIdsAlreadyVisible.has(prompt.id) &&
-      samePendingPromptContent(prompt, optimisticPrompt),
+      pendingPromptContentsMatch(prompt, optimisticPrompt),
   );
   return matchingAuthoritativePrompts[
     optimisticMatchIndex >= 0 ? optimisticMatchIndex : 0

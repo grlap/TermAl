@@ -424,6 +424,8 @@ export type Session = {
    * Stop leaves behind; nothing starts until the user resumes the queue or
    * sends a new prompt. */
   queuePaused?: boolean;
+  /** Opaque identity/disposition fingerprint for the authoritative queue. */
+  queueProjectionHash?: string | null;
   sessionMutationStamp?: number | null;
   parentDelegationId?: string | null;
 };
@@ -710,6 +712,8 @@ export type MailboxMessage = {
 };
 
 export type PendingPrompt = {
+  engramInterrupted?: boolean;
+  isEngramRetained?: boolean;
   id: string;
   timestamp: string;
   text: string;
@@ -1058,6 +1062,11 @@ export type MessageCreatedEvent = {
   message: Message;
   preview: string;
   status: SessionStatus;
+  sessionQueue?: {
+    pendingPrompts: PendingPrompt[];
+    queuePaused: boolean;
+    queueProjectionHash?: string | null;
+  } | null;
   sessionMutationStamp?: number | null;
 };
 

@@ -29,6 +29,7 @@ export type ComboboxOption = {
   value: string;
   description?: string;
   badges?: string[];
+  disabled?: boolean;
 };
 
 export const NEW_SESSION_MODEL_OPTIONS: Readonly<Record<AgentType, readonly ComboboxOption[]>> = {

@@ -230,6 +230,7 @@ fn assert_hydration_rejects_authority_change_before_target(restore_original: boo
                 ),
                 preview: "Stale bridge message must not hydrate.".to_owned(),
                 status: SessionStatus::Idle,
+                session_queue: None,
                 session_mutation_stamp: Some(10),
             },
         )
@@ -293,6 +294,7 @@ fn remote_delta_repair_rejects_post_decode_a_to_b_to_a_before_apply() {
         message: remote_text_message("remote-message-1", "Trigger bounded repair."),
         preview: "Trigger bounded repair.".to_owned(),
         status: SessionStatus::Idle,
+        session_queue: None,
         session_mutation_stamp: Some(10),
     };
 

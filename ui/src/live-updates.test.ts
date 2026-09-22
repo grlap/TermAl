@@ -10,6 +10,7 @@ import type {
   CodexAppRequestMessage,
   DeltaEvent,
   McpElicitationRequestMessage,
+  Message,
   Session,
   UserInputRequestMessage,
 } from "./types";
@@ -760,6 +761,7 @@ describe("applyDeltaToSessions", () => {
   it("removes a queued prompt when its user message is created", () => {
     const sessions = [
       makeSession("session-a", {
+        queuePaused: true,
         pendingPrompts: [
           {
             id: "message-queued-1",
@@ -797,6 +799,819 @@ describe("applyDeltaToSessions", () => {
     expect(result.sessions[0].messages.map((message) => message.id)).toEqual([
       "message-queued-1",
     ]);
+  });
+
+  it("preserves an explicitly retained Engram prompt when its user message is created", () => {
+    const pendingPrompts = [
+      {
+        id: "message-retained-1",
+        timestamp: "10:00",
+        text: "Retained prompt",
+        isEngramRetained: true,
+      },
+    ];
+    const sessions = [
+      makeSession("session-a", {
+        queuePaused: true,
+        pendingPrompts,
+      }),
+    ];
+    const delta: DeltaEvent = {
+      type: "messageCreated",
+      revision: 1,
+      sessionId: "session-a",
+      messageId: "message-retained-1",
+      messageIndex: 0,
+      messageCount: 1,
+      message: {
+        id: "message-retained-1",
+        type: "text",
+        timestamp: "10:00",
+        author: "you",
+        text: "Retained prompt",
+      },
+      preview: "Retained prompt",
+      status: "idle",
+    };
+
+    const result = applyDeltaToSessions(sessions, delta);
+
+    expect(result.kind).toBe("applied");
+    if (result.kind !== "applied") {
+      throw new Error("expected retained delta to apply");
+    }
+    expect(result.sessions[0].pendingPrompts).toBe(pendingPrompts);
+    expect(result.sessions[0].messages.map((message) => message.id)).toEqual([
+      "message-retained-1",
+    ]);
+  });
+
+  it("applies an atomic Defer card and held queue to a pre-Defer hydrated session", () => {
+    const sessions = [
+      makeSession("session-a", {
+        status: "active",
+        preview: "Authorize exact prompt",
+        queuePaused: false,
+        pendingPrompts: undefined,
+        messageCount: 1,
+        sessionMutationStamp: 100,
+        messages: [{
+          id: "message-retained-1",
+          type: "text",
+          timestamp: "10:00",
+          author: "you",
+          text: "Authorize exact prompt",
+        }],
+      }),
+    ];
+    const delta: DeltaEvent = {
+      type: "messageCreated",
+      revision: 7,
+      sessionId: "session-a",
+      messageId: "engram-defer-1",
+      messageIndex: 1,
+      messageCount: 2,
+      message: {
+        id: "engram-defer-1",
+        type: "engramControl",
+        timestamp: "10:01",
+        author: "assistant",
+        schemaVersion: 1,
+        stage: "dispatch",
+        assurance: "authoritative",
+        decision: "defer",
+        dispatch: "queued",
+        deferCode: "busy",
+        directives: [],
+        latencyMs: { total: 5 },
+        failMode: "enforced",
+      },
+      preview: "Engram deferred this prompt (busy). Prompt retained; resume to retry or cancel.",
+      status: "idle",
+      sessionQueue: {
+        queuePaused: true,
+        queueProjectionHash: "queue-held",
+        pendingPrompts: [{
+          id: "message-retained-1",
+          timestamp: "10:00",
+          text: "Authorize exact prompt",
+          isEngramRetained: true,
+          engramInterrupted: false,
+        }],
+      },
+      sessionMutationStamp: 101,
+    };
+
+    const result = applyDeltaToSessions(sessions, delta);
+
+    expect(result.kind).toBe("applied");
+    if (result.kind !== "applied") {
+      throw new Error("expected the atomic Defer delta to apply");
+    }
+    const updated = result.sessions[0];
+    expect(updated.status).toBe("idle");
+    expect(updated.queuePaused).toBe(true);
+    expect(updated.queueProjectionHash).toBe("queue-held");
+    expect(updated.pendingPrompts).toEqual(delta.sessionQueue?.pendingPrompts);
+    expect(updated.pendingPrompts?.[0]).toMatchObject({
+      id: "message-retained-1",
+      isEngramRetained: true,
+      engramInterrupted: false,
+    });
+    expect(updated.messages.map((message) => message.id)).toEqual([
+      "message-retained-1",
+      "engram-defer-1",
+    ]);
+    expect(updated.messages.filter((message) => message.id === "message-retained-1")).toHaveLength(1);
+    expect(updated.messages.filter((message) => message.id === "engram-defer-1")).toHaveLength(1);
+  });
+
+  it("keeps an unmatched optimistic successor across an atomic Defer and its replay", () => {
+    const retainedPrompt = {
+      id: "message-retained-1",
+      timestamp: "10:00",
+      text: "Authorize exact prompt",
+      isEngramRetained: true,
+    };
+    const optimisticSuccessor = {
+      id: "optimistic-successor",
+      timestamp: "10:01",
+      text: "Queued successor",
+      localOnly: true,
+      transcriptEndIndexAtEnqueue: 1,
+    };
+    const sessions = [
+      makeSession("session-a", {
+        status: "active",
+        messageCount: 1,
+        sessionMutationStamp: 100,
+        messages: [{
+          id: retainedPrompt.id,
+          type: "text",
+          timestamp: "10:00",
+          author: "you",
+          text: retainedPrompt.text,
+        }],
+        pendingPrompts: [retainedPrompt, optimisticSuccessor],
+      }),
+    ];
+    const delta: DeltaEvent = {
+      type: "messageCreated",
+      revision: 7,
+      sessionId: "session-a",
+      messageId: "engram-defer-1",
+      messageIndex: 1,
+      messageCount: 2,
+      message: {
+        id: "engram-defer-1",
+        type: "engramControl",
+        timestamp: "10:02",
+        author: "assistant",
+        schemaVersion: 1,
+        stage: "dispatch",
+        assurance: "authoritative",
+        decision: "defer",
+        dispatch: "queued",
+        deferCode: "busy",
+        directives: [],
+        latencyMs: { total: 5 },
+        failMode: "enforced",
+      },
+      preview: "Prompt retained",
+      status: "idle",
+      sessionQueue: {
+        queuePaused: true,
+        pendingPrompts: [retainedPrompt],
+      },
+      sessionMutationStamp: 101,
+    };
+
+    const first = applyDeltaToSessions(sessions, delta);
+    expect(first.kind).toBe("applied");
+    if (first.kind !== "applied") {
+      throw new Error("expected the Defer delta to apply");
+    }
+    expect(first.sessions[0].pendingPrompts).toEqual([
+      retainedPrompt,
+      optimisticSuccessor,
+    ]);
+
+    const replay = applyDeltaToSessions(first.sessions, delta);
+    expect(replay.kind).toBe("appliedNoOp");
+    if (replay.kind !== "appliedNoOp") {
+      throw new Error("expected the exact Defer replay to be a no-op");
+    }
+    expect(replay.sessions).toBe(first.sessions);
+
+    const authoritativeSuccessor = {
+      id: "pending-successor",
+      timestamp: "10:01",
+      text: optimisticSuccessor.text,
+    };
+    const acknowledged = applyDeltaToSessions(first.sessions, {
+      ...delta,
+      revision: 8,
+      sessionMutationStamp: 102,
+      sessionQueue: {
+        queuePaused: true,
+        pendingPrompts: [retainedPrompt, authoritativeSuccessor],
+      },
+    });
+    expect(acknowledged.kind).toBe("applied");
+    if (acknowledged.kind !== "applied") {
+      throw new Error("expected authoritative queue evidence to apply");
+    }
+    expect(acknowledged.sessions[0].pendingPrompts).toEqual([
+      retainedPrompt,
+      authoritativeSuccessor,
+    ]);
+  });
+
+  it("does not let a reintroduced retained owner acknowledge an identical optimistic successor", () => {
+    const attachment = {
+      fileName: "same.png",
+      mediaType: "image/png",
+      byteSize: 10,
+    };
+    const retainedPrompt = {
+      id: "message-a",
+      timestamp: "10:00",
+      text: "Same request",
+      attachments: [attachment],
+      isEngramRetained: true,
+    };
+    const optimisticSuccessor = {
+      id: "optimistic-b",
+      timestamp: "10:01",
+      text: "Same request",
+      attachments: [attachment],
+      localOnly: true,
+      transcriptEndIndexAtEnqueue: 1,
+    };
+    const delta: DeltaEvent = {
+      type: "messageCreated",
+      revision: 7,
+      sessionId: "session-a",
+      messageId: "defer-a",
+      messageIndex: 1,
+      messageCount: 2,
+      message: {
+        id: "defer-a",
+        type: "engramControl",
+        timestamp: "10:02",
+        author: "assistant",
+        schemaVersion: 1,
+        stage: "dispatch",
+        assurance: "authoritative",
+        decision: "defer",
+        dispatch: "queued",
+        deferCode: "busy",
+        directives: [],
+        latencyMs: { total: 5 },
+        failMode: "enforced",
+      },
+      preview: "Prompt retained",
+      status: "idle",
+      sessionQueue: {
+        queuePaused: true,
+        pendingPrompts: [retainedPrompt],
+      },
+      sessionMutationStamp: 101,
+    };
+    const first = applyDeltaToSessions(
+      [makeSession("session-a", {
+        messageCount: 1,
+        sessionMutationStamp: 100,
+        messages: [{
+          id: "message-a",
+          type: "text",
+          timestamp: "10:00",
+          author: "you",
+          text: "Same request",
+          attachments: [attachment],
+        }],
+        pendingPrompts: [optimisticSuccessor],
+      })],
+      delta,
+    );
+    expect(first.kind).toBe("applied");
+    if (first.kind !== "applied") {
+      throw new Error("expected retained-owner Defer to apply");
+    }
+    expect(first.sessions[0].pendingPrompts).toEqual([
+      retainedPrompt,
+      optimisticSuccessor,
+    ]);
+
+    const replay = applyDeltaToSessions(first.sessions, delta);
+    expect(replay.kind).toBe("appliedNoOp");
+    if (replay.kind !== "appliedNoOp") {
+      throw new Error("expected exact retained-owner replay to be a no-op");
+    }
+    expect(replay.sessions).toBe(first.sessions);
+
+    const authoritativeSuccessor = {
+      id: "pending-b",
+      timestamp: "10:01",
+      text: "Same request",
+      attachments: [attachment],
+    };
+    const acknowledged = applyDeltaToSessions(first.sessions, {
+      ...delta,
+      revision: 8,
+      sessionMutationStamp: 102,
+      sessionQueue: {
+        queuePaused: true,
+        pendingPrompts: [retainedPrompt, authoritativeSuccessor],
+      },
+    });
+    expect(acknowledged.kind).toBe("applied");
+    if (acknowledged.kind !== "applied") {
+      throw new Error("expected successor acknowledgement to apply");
+    }
+    expect(acknowledged.sessions[0].pendingPrompts).toEqual([
+      retainedPrompt,
+      authoritativeSuccessor,
+    ]);
+  });
+
+  it("uses an evicted transcript boundary to preserve an identical optimistic successor", () => {
+    const retainedPrompt = {
+      id: "evicted-message-a",
+      timestamp: "10:00",
+      text: "Same evicted request",
+      isEngramRetained: true,
+    };
+    const optimisticSuccessor = {
+      id: "optimistic-b",
+      timestamp: "10:01",
+      text: "Same evicted request",
+      localOnly: true,
+      transcriptEndIndexAtEnqueue: 20,
+    };
+    const deferDelta: DeltaEvent = {
+      type: "messageCreated",
+      revision: 7,
+      sessionId: "session-a",
+      messageId: "defer-a",
+      messageIndex: 20,
+      messageCount: 21,
+      message: {
+        id: "defer-a",
+        type: "engramControl",
+        timestamp: "10:02",
+        author: "assistant",
+        schemaVersion: 1,
+        stage: "dispatch",
+        assurance: "authoritative",
+        decision: "defer",
+        dispatch: "queued",
+        deferCode: "busy",
+        directives: [],
+        latencyMs: { total: 5 },
+        failMode: "enforced",
+      },
+      preview: "Prompt retained",
+      status: "idle",
+      sessionQueue: {
+        queuePaused: true,
+        pendingPrompts: [retainedPrompt],
+      },
+      sessionMutationStamp: 101,
+    };
+    const first = applyDeltaToSessions(
+      [makeSession("session-a", {
+        messagesLoaded: false,
+        hasNewerHistory: true,
+        messageCount: 20,
+        messageStartIndex: 20,
+        sessionMutationStamp: 100,
+        messages: [],
+        pendingPrompts: [optimisticSuccessor],
+      })],
+      deferDelta,
+    );
+    expect(first.kind).toBe("applied");
+    if (first.kind !== "applied") {
+      throw new Error("expected metadata-only retained-owner Defer to apply");
+    }
+    expect(first.sessions[0].pendingPrompts).toEqual([
+      retainedPrompt,
+      optimisticSuccessor,
+    ]);
+
+    const acknowledged = applyDeltaToSessions(first.sessions, {
+      type: "messageCreated",
+      revision: 8,
+      sessionId: "session-a",
+      messageId: "message-b",
+      messageIndex: 21,
+      messageCount: 22,
+      message: {
+        id: "message-b",
+        type: "text",
+        timestamp: "10:03",
+        author: "you",
+        text: "Same evicted request",
+      },
+      preview: "Same evicted request",
+      status: "active",
+      sessionMutationStamp: 102,
+    });
+    expect(acknowledged.kind).toBe("applied");
+    if (acknowledged.kind !== "applied") {
+      throw new Error("expected later message evidence to apply");
+    }
+    expect(acknowledged.sessions[0].pendingPrompts).toEqual([retainedPrompt]);
+  });
+
+  it("does not reuse an already-known created message to consume an identical optimistic successor", () => {
+    const optimisticSuccessor = {
+      id: "optimistic-b",
+      timestamp: "10:01",
+      text: "Same request",
+      localOnly: true,
+      transcriptEndIndexAtEnqueue: 1,
+    };
+    const message = {
+      id: "message-a",
+      type: "text",
+      timestamp: "10:00",
+      author: "you",
+      text: "Same request",
+    } as const;
+    const sessions = [makeSession("session-a", {
+      messageCount: 1,
+      messages: [message],
+      pendingPrompts: [optimisticSuccessor],
+      preview: "Same request",
+      status: "idle",
+    })];
+    const result = applyDeltaToSessions(sessions, {
+      type: "messageCreated",
+      revision: 2,
+      sessionId: "session-a",
+      messageId: message.id,
+      messageIndex: 0,
+      messageCount: 1,
+      message,
+      preview: "Same request",
+      status: "idle",
+    });
+
+    expect(result.kind).toBe("appliedNoOp");
+    if (result.kind !== "appliedNoOp") {
+      throw new Error("expected the known created message to be a no-op");
+    }
+    expect(result.sessions).toBe(sessions);
+    expect(result.sessions[0].pendingPrompts).toEqual([optimisticSuccessor]);
+  });
+
+  it("keeps an unmatched optimistic successor on the metadata-only Defer path", () => {
+    const retainedPrompt = {
+      id: "message-retained-1",
+      timestamp: "10:00",
+      text: "Authorize exact prompt",
+      isEngramRetained: true,
+    };
+    const optimisticSuccessor = {
+      id: "optimistic-successor",
+      timestamp: "10:01",
+      text: "Queued successor",
+      localOnly: true,
+      transcriptEndIndexAtEnqueue: 1,
+    };
+    const delta: DeltaEvent = {
+      type: "messageCreated",
+      revision: 7,
+      sessionId: "session-a",
+      messageId: "engram-defer-1",
+      messageIndex: 1,
+      messageCount: 2,
+      message: {
+        id: "engram-defer-1",
+        type: "engramControl",
+        timestamp: "10:02",
+        author: "assistant",
+        schemaVersion: 1,
+        stage: "dispatch",
+        assurance: "authoritative",
+        decision: "defer",
+        dispatch: "queued",
+        deferCode: "busy",
+        directives: [],
+        latencyMs: { total: 5 },
+        failMode: "enforced",
+      },
+      preview: "Prompt retained",
+      status: "idle",
+      sessionQueue: {
+        queuePaused: true,
+        pendingPrompts: [retainedPrompt],
+      },
+      sessionMutationStamp: 101,
+    };
+    const result = applyDeltaToSessions(
+      [makeSession("session-a", {
+        messagesLoaded: false,
+        hasNewerHistory: true,
+        messageCount: 1,
+        sessionMutationStamp: 100,
+        messages: [],
+        pendingPrompts: [retainedPrompt, optimisticSuccessor],
+      })],
+      delta,
+    );
+
+    expect(result.kind).toBe("applied");
+    if (result.kind !== "applied") {
+      throw new Error("expected metadata-only Defer delta to apply");
+    }
+    expect(result.sessions[0].messages).toEqual([]);
+    expect(result.sessions[0].pendingPrompts).toEqual([
+      retainedPrompt,
+      optimisticSuccessor,
+    ]);
+  });
+
+  it("matches new authoritative queue evidence one-to-one by content and attachments", () => {
+    const retainedPrompt = {
+      id: "retained",
+      timestamp: "10:00",
+      text: "Held",
+      isEngramRetained: true,
+    };
+    const firstOptimistic = {
+      id: "optimistic-first",
+      timestamp: "10:01",
+      text: "Same text",
+      attachments: [{ fileName: "first.png", mediaType: "image/png", byteSize: 10 }],
+      localOnly: true,
+    };
+    const secondOptimistic = {
+      id: "optimistic-second",
+      timestamp: "10:02",
+      text: "Same text",
+      attachments: [{ fileName: "second.png", mediaType: "image/png", byteSize: 20 }],
+      localOnly: true,
+    };
+    const duplicateOptimistic = {
+      ...firstOptimistic,
+      id: "optimistic-first-duplicate",
+      timestamp: "10:02",
+    };
+    const result = applyDeltaToSessions(
+      [makeSession("session-a", {
+        messageCount: 1,
+        messages: [{
+          id: "defer-card",
+          type: "engramControl",
+          timestamp: "10:03",
+          author: "assistant",
+          schemaVersion: 1,
+          stage: "dispatch",
+          assurance: "authoritative",
+          decision: "defer",
+          dispatch: "queued",
+          deferCode: "busy",
+          directives: [],
+          latencyMs: { total: 5 },
+          failMode: "enforced",
+        }],
+        pendingPrompts: [
+          retainedPrompt,
+          firstOptimistic,
+          duplicateOptimistic,
+          secondOptimistic,
+        ],
+      })],
+      {
+        type: "messageCreated",
+        revision: 8,
+        sessionId: "session-a",
+        messageId: "defer-card",
+        messageIndex: 0,
+        messageCount: 1,
+        message: {
+          id: "defer-card",
+          type: "engramControl",
+          timestamp: "10:03",
+          author: "assistant",
+          schemaVersion: 1,
+          stage: "dispatch",
+          assurance: "authoritative",
+          decision: "defer",
+          dispatch: "queued",
+          deferCode: "busy",
+          directives: [],
+          latencyMs: { total: 5 },
+          failMode: "enforced",
+        },
+        preview: "Prompt retained",
+        status: "idle",
+        sessionQueue: {
+          queuePaused: true,
+          pendingPrompts: [retainedPrompt, {
+            id: "pending-first",
+            timestamp: "10:01",
+            text: "Same text",
+            attachments: firstOptimistic.attachments,
+          }],
+        },
+        sessionMutationStamp: 102,
+      },
+    );
+
+    expect(result.kind).toBe("applied");
+    if (result.kind !== "applied") {
+      throw new Error("expected authoritative queue evidence to apply");
+    }
+    expect(result.sessions[0].pendingPrompts?.map((prompt) => prompt.id)).toEqual([
+      "retained",
+      "pending-first",
+      "optimistic-first-duplicate",
+      "optimistic-second",
+    ]);
+  });
+
+  it("drops removed server prompts while preserving only the optimistic tail", () => {
+    const optimistic = {
+      id: "optimistic-successor",
+      timestamp: "10:01",
+      text: "Still submitting",
+      localOnly: true,
+    };
+    const message: Message = {
+      id: "stable-card",
+      type: "engramControl",
+      timestamp: "10:02",
+      author: "assistant",
+      schemaVersion: 1,
+      stage: "dispatch",
+      assurance: "authoritative",
+      decision: "defer",
+      dispatch: "queued",
+      deferCode: "busy",
+      directives: [],
+      latencyMs: { total: 5 },
+      failMode: "enforced",
+    };
+    const result = applyDeltaToSessions(
+      [makeSession("session-a", {
+        messageCount: 1,
+        messages: [message],
+        pendingPrompts: [{
+          id: "removed-server-prompt",
+          timestamp: "10:00",
+          text: "Remove me",
+        }, optimistic],
+      })],
+      {
+        type: "messageCreated",
+        revision: 8,
+        sessionId: "session-a",
+        messageId: message.id,
+        messageIndex: 0,
+        messageCount: 1,
+        message,
+        preview: "Prompt retained",
+        status: "idle",
+        sessionQueue: { queuePaused: true, pendingPrompts: [] },
+        sessionMutationStamp: 102,
+      },
+    );
+
+    expect(result.kind).toBe("applied");
+    if (result.kind !== "applied") {
+      throw new Error("expected authoritative removal to apply");
+    }
+    expect(result.sessions[0].pendingPrompts).toEqual([optimistic]);
+  });
+
+  it.each([
+    {
+      label: "A",
+      queuedBefore: [
+        { id: "prompt-a", timestamp: "10:00", text: "Refused prompt A" },
+      ],
+      queuedAfter: [],
+    },
+    {
+      label: "A followed by B",
+      queuedBefore: [
+        { id: "prompt-a", timestamp: "10:00", text: "Refused prompt A" },
+        { id: "prompt-b", timestamp: "10:01", text: "Successor prompt B" },
+      ],
+      queuedAfter: [
+        { id: "prompt-b", timestamp: "10:01", text: "Successor prompt B" },
+      ],
+    },
+  ])("atomically projects terminal queue removal for $label", ({ queuedBefore, queuedAfter }) => {
+    const result = applyDeltaToSessions(
+      [makeSession("session-a", {
+        status: "active",
+        messageCount: 1,
+        messages: [{
+          id: "prompt-a",
+          type: "text",
+          timestamp: "10:00",
+          author: "you",
+          text: "Refused prompt A",
+        }],
+        pendingPrompts: queuedBefore,
+        sessionMutationStamp: 100,
+      })],
+      {
+        type: "messageCreated",
+        revision: 8,
+        sessionId: "session-a",
+        messageId: "terminal-refusal-a",
+        messageIndex: 1,
+        messageCount: 2,
+        message: {
+          id: "terminal-refusal-a",
+          type: "engramControl",
+          timestamp: "10:02",
+          author: "assistant",
+          schemaVersion: 1,
+          stage: "dispatch",
+          assurance: "authoritative",
+          decision: "refuse",
+          dispatch: "queued",
+          refusalCode: "policy_denied",
+          directives: [],
+          latencyMs: { total: 5 },
+          failMode: "enforced",
+        },
+        preview: "Engram refused prompt A.",
+        status: "idle",
+        sessionQueue: {
+          queuePaused: false,
+          queueProjectionHash: `terminal-${queuedAfter.length}`,
+          pendingPrompts: queuedAfter,
+        },
+        sessionMutationStamp: 101,
+      },
+    );
+
+    expect(result.kind).toBe("applied");
+    if (result.kind !== "applied") {
+      throw new Error("expected terminal queue removal to apply atomically");
+    }
+    expect(result.sessions[0].pendingPrompts ?? []).toEqual(queuedAfter);
+    expect(result.sessions[0].queueProjectionHash).toBe(
+      `terminal-${queuedAfter.length}`,
+    );
+    expect(result.sessions[0].messages.map((message) => message.id)).toEqual([
+      "prompt-a",
+      "terminal-refusal-a",
+    ]);
+  });
+
+  it("preserves an explicitly retained Engram prompt on the metadata-only live-update path", () => {
+    const pendingPrompts = [
+      {
+        id: "message-retained-tail",
+        timestamp: "10:00",
+        text: "Retained tail prompt",
+        isEngramRetained: true,
+      },
+    ];
+    const sessions = [
+      makeSession("session-a", {
+        messagesLoaded: false,
+        hasNewerHistory: true,
+        messageCount: 1,
+        messages: [],
+        queuePaused: true,
+        pendingPrompts,
+      }),
+    ];
+    const delta: DeltaEvent = {
+      type: "messageCreated",
+      revision: 2,
+      sessionId: "session-a",
+      messageId: "message-retained-tail",
+      messageIndex: 1,
+      messageCount: 2,
+      message: {
+        id: "message-retained-tail",
+        type: "text",
+        timestamp: "10:00",
+        author: "you",
+        text: "Retained tail prompt",
+      },
+      preview: "Retained tail prompt",
+      status: "idle",
+    };
+
+    const result = applyDeltaToSessions(sessions, delta);
+
+    expect(result.kind).toBe("applied");
+    if (result.kind !== "applied") {
+      throw new Error("expected metadata-only retained delta to apply");
+    }
+    expect(result.sessions[0].pendingPrompts).toBe(pendingPrompts);
   });
 
   it("removes a matching optimistic prompt when its user message is created", () => {
@@ -840,6 +1655,52 @@ describe("applyDeltaToSessions", () => {
     expect(result.sessions[0].messages.map((message) => message.id)).toEqual([
       "message-server-1",
     ]);
+  });
+
+  it("uses attachments to retire exactly one same-text optimistic send", () => {
+    const firstOptimistic = {
+      id: "optimistic-first",
+      timestamp: "10:00",
+      text: "Review this",
+      attachments: [{ fileName: "first.png", mediaType: "image/png", byteSize: 10 }],
+      localOnly: true,
+    };
+    const secondOptimistic = {
+      id: "optimistic-second",
+      timestamp: "10:01",
+      text: "Review this",
+      attachments: [{ fileName: "second.png", mediaType: "image/png", byteSize: 20 }],
+      localOnly: true,
+    };
+    const result = applyDeltaToSessions(
+      [makeSession("session-a", {
+        pendingPrompts: [firstOptimistic, secondOptimistic],
+      })],
+      {
+        type: "messageCreated",
+        revision: 1,
+        sessionId: "session-a",
+        messageId: "message-server-1",
+        messageIndex: 0,
+        messageCount: 1,
+        message: {
+          id: "message-server-1",
+          type: "text",
+          timestamp: "10:02",
+          author: "you",
+          text: "Review this",
+          attachments: secondOptimistic.attachments,
+        },
+        preview: "Review this",
+        status: "active",
+      },
+    );
+
+    expect(result.kind).toBe("applied");
+    if (result.kind !== "applied") {
+      throw new Error("expected matching message evidence to apply");
+    }
+    expect(result.sessions[0].pendingPrompts).toEqual([firstOptimistic]);
   });
 
   it("matches an optimistic slash-command prompt by its expanded text", () => {

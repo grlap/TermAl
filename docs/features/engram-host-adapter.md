@@ -281,6 +281,88 @@ control card. Turning the premium flag off fences the transition, checkpoints
 open control state, clears the binding, and resumes ordinary Base-only
 dispatch.
 
+### Authorization timeout and retained prompts
+
+Ordinary gated admission uses one ten-second remaining-time budget across work
+focus, binding, evaluation, begin, and host persistence acknowledgements. Base
+context reads remain a separate operation. A timeout or unavailable transport
+does not mean policy denial: the session shows **Waiting/Unknown**, pauses its
+queue, and keeps the original prompt, attachments, source and identifier. Resume
+retries unknown authorization; Cancel and Stop remain available without waiting
+for the Engram call. An explicit Refuse still withholds delivery as a refusal.
+
+If a retained prompt already appears in the visible transcript, a paused queue
+shows an action-only recovery card without repeating the prompt body. When the
+prompt was never promoted or its transcript row is outside the resident window,
+the recovery card also shows the original prompt content and context. Retryable held
+authorization offers Resume and Cancel; a pending prompt projected with
+`engramInterrupted: true` offers Cancel/reconciliation guidance, not a no-op
+Resume. Removing it preserves the operator's intentional queue pause.
+A Stop-marked head remains ahead of later mailbox and user
+prompts even when Stop arrived before the first authorization request was saved.
+An unresolved Stop defers an already-admitted handoff in the Stop callback queue.
+Failed Stop replays the exact delivery only while the original runtime, turn and
+authorization still own it; successful Stop or replacement discards it.
+The public asynchronous Stop restores that admitted turn before replaying a
+failed shutdown's handoff, while still publishing the Stop failure. Successful
+rollback also restores the exact admitted owner when the handoff has not yet
+arrived; callback arrival order is not evidence of admission. Successful
+Stop retires its promoted queue head even after the durable begin receipt has
+consumed the pending dispatch marker; Resume can start a successor, not replay
+the stopped authorization.
+Definite supersession is a no-op, not a channel failure. Retryable authorization
+is parked before terminal delegation/orchestrator failure handling, so a child
+or follow-up keeps its original prompt. An immutable mailbox head also covers
+its original wake boundary: recovery does not insert a second copy of that wake,
+while genuinely newer inbound sequences remain separate.
+
+The default timeout for an individual control call is also ten seconds (or the
+configured project call timeout). Outside admission this bounds each completion,
+project-reset or stale-begin checkpoint and obligation waiver independently;
+these calls do not share the admission deadline. A completion checkpoint can
+therefore delay the next queued turn by that call timeout. Admission itself still
+uses one shared ten-second budget, not ten seconds per step.
+
+Prepared bind and evaluation requests live on the existing queued prompt. They
+are acknowledged by the host persistence writer before transmission, retain
+their original store/principal, and replay with the same payload and idempotency
+key after a lost reply. A received Defer completes that evaluation; explicit
+Resume asks a new operation for the same retained prompt. Authority-relevant
+settings changes do not silently authorize replay under another principal;
+an incompatible retained bind/evaluation stays paused and explicitly interrupted
+for cancellation or reconciliation, including in delegated children;
+completion-evaluator defaults do not invalidate an otherwise identical retry.
+Public settings resets preserve that barrier even when they clear the transient
+recovery flag. Refusal (or control disabled before an operation) retires the
+failed head. Other degraded outcomes with retained intent, including protocol,
+store and local persistence faults, remain interrupted and cancelable; they are
+not silently retried or allowed to terminalize a waiting child. Transient
+transport failures and Defer remain explicitly retryable.
+
+Queue records persist their original promoted transcript position. Trimming the
+resident transcript cannot cause a retry to append the same prompt or composer
+history again. Older retained records recover the marker from known transcript
+positions; absent historical evidence requires explicit reconciliation.
+
+On restart, recovery checks the original control session before rebinding.
+Engram expires issued-but-unbegun grants when its control connection restarts:
+the host reconciles an obsolete replayed grant before requesting a fresh one.
+A **begun** grant has unknown provider delivery after host restart. Its begin
+acknowledgment is persisted on the retained evaluation before provider handoff,
+so a later closed remote grant cannot erase possibly-delivered evidence during
+an asynchronous queue-removal write. Recovery persists the interrupted state
+before checkpointing a still-open grant. The prompt remains held for explicit
+resolution, never automatically resent. If control is off after a restart, the
+retained authorization is surfaced for cancellation rather than silently
+blocking or sending it without admission. This is at-most-once host handoff,
+not a claim of exactly-once model execution.
+
+Opt-in tests in `src/tests/engram_root_recovery_live.rs` use a caller-identified
+Engram binary (`TERMAL_TEST_LIVE_ENGRAM_BINARY` and its SHA-256 in
+`TERMAL_TEST_LIVE_ENGRAM_SHA256`), disposable stores and a simulated provider
+receiver. They exercise real control replies, committed-reply loss, restart,
+deadline, explicit refusal and writer contention without touching live stores.
+
 ### Strict Save and absent control sessions
 
 A strict settings Save still refuses uncertain checkpoint failures. The only
@@ -680,8 +762,13 @@ them does not discard an unsaved turn-gating draft (or vice versa). Switching
 projects releases the old acceptance form's busy state; late completions cannot
 unlock a newer project's in-flight operation.
 
-Changing store policy is a separate, confirmed operator action. No justification
-field is collected or sent; policy administration uses the reason-free Engram CLI.
+The project picker and acceptance-setting dropdowns use the shared themed
+combobox, matching the session-list menus on Windows as well as other platforms.
+Unsupported evaluator modes remain visible but disabled.
+
+Changing store policy is a separate operator action, submitted with the
+"Confirm policy change" button; no additional confirmation checkbox is required.
+No justification field is collected or sent; policy administration uses the reason-free Engram CLI.
 The captured setter help fixture records build `e364f61f49a4` (2026-09-21);
 default tests check both advertised and required flags. On 2026-09-21, isolated
 real-binary tests also passed against build `d7d8caddc923`, schema `025fb9bb102f`,

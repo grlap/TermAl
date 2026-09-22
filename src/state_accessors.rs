@@ -276,6 +276,7 @@ mod visible_session_hydration_error_tests {
             message_count: 0,
             markers: Vec::new(),
             queue_paused: false,
+            queue_projection_hash: Some("remote-queue-projection".to_owned()),
             session_mutation_stamp: Some(7),
             parent_delegation_id: None,
         };
@@ -304,6 +305,10 @@ mod visible_session_hydration_error_tests {
             .find(|session| session.id == remote_session_id)
             .expect("remote summary session should exist");
         assert_eq!(remote_summary_session.remote_id.as_deref(), Some("ssh-lab"));
+        assert_eq!(
+            remote_summary_session.queue_projection_hash.as_deref(),
+            Some("remote-queue-projection")
+        );
         let local_summary_session = summary
             .sessions
             .iter()
@@ -317,6 +322,10 @@ mod visible_session_hydration_error_tests {
         assert_eq!(
             remote_detail.session.remote_id.as_deref(),
             Some("ssh-lab")
+        );
+        assert_eq!(
+            remote_detail.session.queue_projection_hash.as_deref(),
+            Some("remote-queue-projection")
         );
         let local_detail = state
             .get_session(&local_session_id)
@@ -360,6 +369,8 @@ mod visible_session_hydration_error_tests {
                 .find_session_index(&session_id)
                 .expect("session should exist");
             inner.sessions[index].session.pending_prompts.push(PendingPrompt {
+                engram_interrupted: false,
+                is_engram_retained: false,
                 attachments: Vec::new(),
                 id: "pending-1".to_owned(),
                 timestamp: "10:00".to_owned(),
@@ -384,6 +395,8 @@ mod visible_session_hydration_error_tests {
         assert!(summary_json.get("pendingPrompts").is_none());
         assert!(summary_json.get("promptHistory").is_none());
         assert!(summary_json.get("promptHistoryRedacted").is_none());
+        assert!(summary_json["queueProjectionHash"].is_string());
+        assert!(!summary_json.to_string().contains("Sensitive queued prompt"));
 
         let targeted_session = state
             .get_session(&session_id)
@@ -402,6 +415,10 @@ mod visible_session_hydration_error_tests {
         assert_eq!(
             targeted_session.pending_prompts[0].expanded_text.as_deref(),
             Some("Expanded sensitive queued prompt")
+        );
+        assert_eq!(
+            targeted_session.queue_projection_hash,
+            summary_session.queue_projection_hash
         );
     }
 
@@ -603,6 +620,30 @@ mod visible_session_hydration_error_tests {
 }
 
 impl AppState {
+    fn queue_projection_hash(record: &SessionRecord) -> String {
+        let pending_prompts = if record.is_local_session() && !record.queued_prompts.is_empty() {
+            projected_pending_prompts(record)
+        } else {
+            record.session.pending_prompts.clone()
+        };
+        let identity_and_disposition = pending_prompts
+            .iter()
+            .map(|prompt| {
+                (
+                    prompt.id.as_str(),
+                    prompt.engram_interrupted,
+                    prompt.is_engram_retained,
+                )
+            })
+            .collect::<Vec<_>>();
+        let serialized = serde_json::to_vec(&(
+            record.orchestrator_auto_dispatch_blocked,
+            identity_and_disposition,
+        ))
+        .expect("queue projection identity should serialize");
+        sha256_hex(&serialized)
+    }
+
     fn wire_session_from_record(record: &SessionRecord) -> Session {
         let mut session = record.session.clone();
         // The record owns remote-proxy identity; the wire field is a derived
@@ -612,6 +653,19 @@ impl AppState {
         // derives the projection from it so no code path can publish a
         // stale `queuePaused`, whichever site last flipped the latch.
         session.queue_paused = record.orchestrator_auto_dispatch_blocked;
+        session.queue_projection_hash = if record.is_local_session() {
+            Some(Self::queue_projection_hash(record))
+        } else {
+            record.session.queue_projection_hash.clone()
+        };
+        if record.is_local_session() && !record.queued_prompts.is_empty() {
+            // QueuedPromptRecord owns retained authorization. Derive the
+            // public queue whenever that authority exists so an internal
+            // preparation can never leak an older embedded Session projection.
+            // Legacy/test-local records with no queue authority retain their
+            // embedded projection until their next ordinary queue mutation.
+            session.pending_prompts = projected_pending_prompts(record);
+        }
         session.prompt_history_redacted = false;
         session.messages_loaded = record.session.messages_loaded;
         session.message_count = session_message_count(record);
@@ -706,6 +760,11 @@ impl AppState {
             // card even before targeted detail hydrates the prompt bodies.
             // Derived from record authority, like the full projection.
             queue_paused: record.orchestrator_auto_dispatch_blocked,
+            queue_projection_hash: if record.is_local_session() {
+                Some(Self::queue_projection_hash(record))
+            } else {
+                session.queue_projection_hash.clone()
+            },
             session_mutation_stamp: Some(record.mutation_stamp),
             parent_delegation_id: session.parent_delegation_id.clone(),
         };
@@ -751,6 +810,7 @@ impl AppState {
         );
         debug_assert_eq!(summary.opencode_mode, full.opencode_mode);
         debug_assert_eq!(summary.queue_paused, full.queue_paused);
+        debug_assert_eq!(summary.queue_projection_hash, full.queue_projection_hash);
         debug_assert_eq!(
             summary.opencode_current_mode,
             full.opencode_current_mode

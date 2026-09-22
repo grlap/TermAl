@@ -5,8 +5,25 @@ import {
   isMonacoEditorEventTarget,
   MAX_PASTED_IMAGE_BYTES,
   messageChangeMarker,
+  removePendingPromptForCreatedMessage,
 } from "./app-utils";
 import type { Message, ParallelAgentsMessage } from "./types";
+
+describe("paused authorization queue reconciliation", () => {
+  const message: Message = { id: "held", type: "text", author: "you", timestamp: "10:00", text: "Exact prompt" };
+  const pending = [{ id: "held", timestamp: "10:00", text: "Exact prompt", isEngramRetained: true }];
+
+  it("retains only an explicitly retained Engram queue identity when its transcript message arrives", () => {
+    expect(removePendingPromptForCreatedMessage(pending, message)).toBe(pending);
+    expect(removePendingPromptForCreatedMessage([
+      { ...pending[0], isEngramRetained: false },
+    ], message)).toBeUndefined();
+  });
+
+  it("still retires optimistic local sends while paused", () => {
+    expect(removePendingPromptForCreatedMessage([{ ...pending[0], localOnly: true }], message)).toBeUndefined();
+  });
+});
 
 describe("messageChangeMarker", () => {
   const baseParallelAgentsMessage: ParallelAgentsMessage = {

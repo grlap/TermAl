@@ -1,4 +1,5 @@
 import {
+  Fragment,
   memo,
   useCallback,
   useDeferredValue,
@@ -1205,47 +1206,127 @@ const SessionConversationPage = memo(
         forceVirtualized={hasOlderHistory || hasNewerHistory}
       />
     );
+    // A retained authorization owns its recovery UI whether its transcript
+    // message is visible, evicted, or not promoted yet. Keep one recovery card
+    // instead of also rendering the entry as an ordinary queued prompt.
+    const retainedPrompts = !isTurnActive && !hasNewerHistory
+      ? pendingPrompts.filter((prompt) => prompt.isEngramRetained === true)
+      : EMPTY_PENDING_PROMPTS;
+    const ordinaryPendingPrompts = !isTurnActive
+      ? visiblePendingPrompts.filter((prompt) => prompt.isEngramRetained !== true)
+      : visiblePendingPrompts;
+    const actionableQueuedCount = ordinaryPendingPrompts.length + retainedPrompts.length;
+    const hasInterruptedRetainedPrompt = pendingPrompts.some(
+      (prompt) =>
+        prompt.isEngramRetained === true && prompt.engramInterrupted === true,
+    );
     const queuePaused =
       !isTurnActive &&
       Boolean(session.queuePaused) &&
-      visiblePendingPrompts.length > 0;
+      !hasInterruptedRetainedPrompt &&
+      actionableQueuedCount > 0;
     const pausedQueueCard = queuePaused ? (
       <QueuePausedIndicator
         agent={session.agent}
-        queuedCount={visiblePendingPrompts.length}
+        queuedCount={actionableQueuedCount}
         onResume={() => onResumeSessionQueue?.(session.id)}
       />
     ) : null;
-    const pendingPromptCards = visiblePendingPrompts.map((prompt) => (
-      <MessageSlot
-        key={prompt.id}
-        itemKey={isActive ? `pendingPrompt:${prompt.id}` : undefined}
-        isSearchMatch={conversationSearchMatchedItemKeys.has(
-          `pendingPrompt:${prompt.id}`,
-        )}
-        isSearchActive={
-          conversationSearchActiveItemKey === `pendingPrompt:${prompt.id}`
-        }
-        onSearchItemMount={onConversationSearchItemMount}
-      >
-        <PendingPromptCard
-          prompt={prompt}
-          sessionId={session.id}
-          onOpenMailbox={onOpenMailbox}
-          onCancel={() => onCancelQueuedPrompt(session.id, prompt.id)}
-          searchQuery={
-            conversationSearchActiveItemKey === `pendingPrompt:${prompt.id}`
-              ? conversationSearchQuery
-              : ""
-          }
-          searchHighlightTone={
-            conversationSearchActiveItemKey === `pendingPrompt:${prompt.id}`
-              ? "active"
-              : "match"
-          }
-        />
-      </MessageSlot>
-    ));
+    const ordinaryPendingPromptIds = new Set(
+      ordinaryPendingPrompts.map((prompt) => prompt.id),
+    );
+    const retainedPromptIds = new Set(retainedPrompts.map((prompt) => prompt.id));
+    const pendingPromptCards = pendingPrompts
+      .filter(
+        (prompt) =>
+          ordinaryPendingPromptIds.has(prompt.id) || retainedPromptIds.has(prompt.id),
+      )
+      .map((prompt) =>
+        retainedPromptIds.has(prompt.id) ? (() => {
+          const retainedBodyIsVisible = visibleMessageIds.has(prompt.id);
+          const retainedCard = (
+            <article className="activity-card">
+              <div className="activity-card-copy">
+                <div className="card-label">Prompt retained</div>
+                <p>{prompt.engramInterrupted
+                  ? "Delivery is interrupted or unknown. Cancel this retained prompt or reconcile it before continuing."
+                  : "Authorization is paused. Resume to retry, or cancel the retained prompt."}</p>
+                {!retainedBodyIsVisible ? (
+                  <PendingPromptCard
+                    prompt={prompt}
+                    sessionId={session.id}
+                    onOpenMailbox={onOpenMailbox}
+                    searchQuery={
+                      conversationSearchActiveItemKey === `pendingPrompt:${prompt.id}`
+                        ? conversationSearchQuery
+                        : ""
+                    }
+                    searchHighlightTone={
+                      conversationSearchActiveItemKey === `pendingPrompt:${prompt.id}`
+                        ? "active"
+                        : "match"
+                    }
+                  />
+                ) : null}
+              </div>
+              <button
+                type="button"
+                className="queue-resume-button"
+                aria-label="Cancel retained prompt"
+                onClick={() => onCancelQueuedPrompt(session.id, prompt.id)}
+              >
+                Cancel
+              </button>
+            </article>
+          );
+          return retainedBodyIsVisible ? (
+            <Fragment key={prompt.id}>{retainedCard}</Fragment>
+          ) : (
+            <MessageSlot
+              key={prompt.id}
+              itemKey={isActive ? `pendingPrompt:${prompt.id}` : undefined}
+              isSearchMatch={conversationSearchMatchedItemKeys.has(
+                `pendingPrompt:${prompt.id}`,
+              )}
+              isSearchActive={
+                conversationSearchActiveItemKey === `pendingPrompt:${prompt.id}`
+              }
+              onSearchItemMount={onConversationSearchItemMount}
+            >
+              {retainedCard}
+            </MessageSlot>
+          );
+        })() : (
+          <MessageSlot
+            key={prompt.id}
+            itemKey={isActive ? `pendingPrompt:${prompt.id}` : undefined}
+            isSearchMatch={conversationSearchMatchedItemKeys.has(
+              `pendingPrompt:${prompt.id}`,
+            )}
+            isSearchActive={
+              conversationSearchActiveItemKey === `pendingPrompt:${prompt.id}`
+            }
+            onSearchItemMount={onConversationSearchItemMount}
+          >
+            <PendingPromptCard
+              prompt={prompt}
+              sessionId={session.id}
+              onOpenMailbox={onOpenMailbox}
+              onCancel={() => onCancelQueuedPrompt(session.id, prompt.id)}
+              searchQuery={
+                conversationSearchActiveItemKey === `pendingPrompt:${prompt.id}`
+                  ? conversationSearchQuery
+                  : ""
+              }
+              searchHighlightTone={
+                conversationSearchActiveItemKey === `pendingPrompt:${prompt.id}`
+                  ? "active"
+                  : "match"
+              }
+            />
+          </MessageSlot>
+        ),
+      );
     const pendingPromptQueue =
       pendingPromptCards.length > 0 ? (
         <div className="conversation-pending-prompts">

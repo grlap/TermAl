@@ -1077,6 +1077,7 @@ describe("reconcileSessions", () => {
   it("clears completed queued prompts from a targeted partial-tail response", () => {
     const previous = makeSession("session-a", {
       messagesLoaded: false,
+      sessionMutationStamp: 10,
       pendingPrompts: [
         {
           id: "prompt-1",
@@ -1087,15 +1088,62 @@ describe("reconcileSessions", () => {
     });
     const targetedTail = makeSession("session-a", {
       messagesLoaded: false,
+      sessionMutationStamp: 11,
       pendingPrompts: [],
     });
 
     const merged = reconcileSingleSession(previous, targetedTail, {
       adoptPartialMessages: true,
-      disableMutationStampFastPath: true,
     });
 
     expect(merged.pendingPrompts).toBeUndefined();
+  });
+
+  it("preserves paused authorization on transcript hydration until the server clears the queue", () => {
+    const pendingPrompts = [{ id: "held", timestamp: "10:00", text: "Exact prompt", isEngramRetained: true }];
+    const previous = makeSession("session-a", { messagesLoaded: false, queuePaused: true, pendingPrompts });
+    const hydrated = makeSession("session-a", {
+      messagesLoaded: false, queuePaused: true, pendingPrompts,
+      messageCount: 1, messageStartIndex: 0,
+      messages: [{ ...pendingPrompts[0], type: "text", author: "you" }],
+    });
+    const merged = reconcileSingleSession(previous, hydrated, { disableMutationStampFastPath: true });
+    expect(merged.messages).toEqual(hydrated.messages);
+    expect(merged.pendingPrompts).toEqual(pendingPrompts);
+    const cleared = reconcileSingleSession(merged, { ...hydrated, pendingPrompts: [] }, {
+      adoptPartialMessages: true, disableMutationStampFastPath: true,
+    });
+    expect(cleared.pendingPrompts).toBeUndefined();
+  });
+
+  it("adopts authoritative retained and interrupted disposition changes for a same-content prompt", () => {
+    const previousPrompt = {
+      id: "held",
+      timestamp: "10:00",
+      text: "Exact prompt",
+    };
+    const previous = makeSession("session-a", {
+      sessionMutationStamp: 20,
+      pendingPrompts: [previousPrompt],
+    });
+    const next = makeSession("session-a", {
+      sessionMutationStamp: 21,
+      pendingPrompts: [
+        {
+          ...previousPrompt,
+          isEngramRetained: true,
+          engramInterrupted: true,
+        },
+      ],
+    });
+
+    const merged = reconcileSingleSession(previous, next);
+
+    expect(merged.pendingPrompts?.[0]).not.toBe(previousPrompt);
+    expect(merged.pendingPrompts?.[0]).toMatchObject({
+      isEngramRetained: true,
+      engramInterrupted: true,
+    });
   });
 
   it("reuses marker state when only valid color casing changed", () => {

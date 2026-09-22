@@ -38,7 +38,9 @@ fn record_rejected_turn_dispatch(
     runtime_token: &RuntimeToken,
     active_turn_generation: u64,
 ) -> bool {
-    let rejected_by_engram_generation = if let Some(dispatch_generation) = engram_dispatch_generation {
+    let rejected_by_engram_generation = if let Some(dispatch_generation) =
+        engram_dispatch_generation
+    {
         match state.reject_engram_turn_delivery_if_current(
             session_id,
             dispatch_generation,
@@ -58,14 +60,17 @@ fn record_rejected_turn_dispatch(
     if !rejected_by_engram_generation {
         // A policy refusal/defer/degradation persists its Engram card and
         // consumes the pending-dispatch marker before returning Rejected. The
-        // Engram-generation cleanup is therefore expected to no-op for that
-        // case; finish the exact turn by runtime token + active generation.
+        // Engram-generation cleanup is therefore expected to no-op. A held
+        // Defer has also advanced its operation identity and left Active, so
+        // the runtime-token cleanup intentionally no-ops too; other refusals
+        // finish the exact turn by runtime token + active generation.
         // If this callback is stale, the atomic helper returns false without
         // touching the successor.
         match state.fail_rejected_turn_delivery(
             session_id,
             runtime_token,
             active_turn_generation,
+            engram_dispatch_generation,
             error_message,
         ) {
             Ok(true) => {}
@@ -97,16 +102,91 @@ fn record_rejected_turn_dispatch(
     true
 }
 
+#[derive(Debug)]
+enum TurnDispatchDeliveryOutcome {
+    Delivered,
+    Scheduled,
+    Held { error: Option<ApiError> },
+    Superseded,
+    Rejected(ApiError),
+}
+
+impl TurnDispatchDeliveryOutcome {
+    fn into_public_result(self) -> Result<(), ApiError> {
+        match self {
+            Self::Delivered | Self::Scheduled | Self::Held { error: None } | Self::Superseded => {
+                Ok(())
+            }
+            Self::Held { error: Some(error) } | Self::Rejected(error) => Err(error),
+        }
+    }
+
+    fn into_background_result(self, context: &str) -> Result<(), ApiError> {
+        match self {
+            Self::Rejected(error) => Err(error),
+            Self::Held { error: Some(error) } => {
+                eprintln!(
+                    "{context}> dispatch held after persistence uncertainty: {}",
+                    error.message
+                );
+                Ok(())
+            }
+            Self::Delivered
+            | Self::Scheduled
+            | Self::Held { error: None }
+            | Self::Superseded => Ok(()),
+        }
+    }
+
+    #[cfg(test)]
+    fn expect(self, message: &str) {
+        self.into_public_result().expect(message);
+    }
+
+    #[cfg(test)]
+    fn unwrap(self) {
+        self.into_public_result().unwrap();
+    }
+
+    #[cfg(test)]
+    fn expect_err(self, message: &str) -> ApiError {
+        self.into_public_result().expect_err(message)
+    }
+
+    #[cfg(test)]
+    fn unwrap_err(self) -> ApiError {
+        self.into_public_result().unwrap_err()
+    }
+
+    #[cfg(test)]
+    fn is_err(&self) -> bool {
+        matches!(
+            self,
+            Self::Held { error: Some(_) } | Self::Rejected(_)
+        )
+    }
+}
+
+fn engram_persistence_unknown_error() -> ApiError {
+    ApiError::internal(
+        "Engram authorization persistence is unknown. Provider delivery was withheld and the prompt remains retained for recovery.",
+    )
+}
+
 /// Keeps transport readers free to route replies needed by Fast discovery.
-fn deliver_turn_dispatch(state: &AppState, dispatch: TurnDispatch) -> Result<(), ApiError> {
+fn deliver_turn_dispatch(state: &AppState, dispatch: TurnDispatch) -> TurnDispatchDeliveryOutcome {
     if matches!(
         &dispatch,
-        TurnDispatch::PersistentCodex { service_tier: Err(_), .. }
+        TurnDispatch::PersistentCodex {
+            service_tier: Err(_),
+            ..
+        }
     ) {
         let worker_state = state.clone();
         let session_id = dispatch.session_id().to_owned();
         let runtime_token = dispatch.runtime_token().clone();
         let generation = dispatch.active_turn_generation();
+        let engram_generation = dispatch.engram_dispatch_generation();
         let notification = dispatch.mailbox_notification().cloned();
         // Completion callbacks run on the shared stdout reader. Waiting there
         // for model/list would prevent that same reader from routing its reply.
@@ -114,10 +194,19 @@ fn deliver_turn_dispatch(state: &AppState, dispatch: TurnDispatch) -> Result<(),
         if let Err(err) = std::thread::Builder::new()
             .name("codex-fast-dispatch".to_owned())
             .spawn(move || {
-                if let Err(err) = deliver_turn_dispatch_now(&worker_state, dispatch) {
-                    // The delivery path records the guarded session error. Do
-                    // not escalate a destination failure to the shared reader.
-                    eprintln!("Codex Fast dispatch> {}", err.message);
+                match deliver_turn_dispatch_now(&worker_state, dispatch) {
+                    TurnDispatchDeliveryOutcome::Held { error: Some(error) } => {
+                        eprintln!("Codex Fast dispatch held> {}", error.message);
+                    }
+                    TurnDispatchDeliveryOutcome::Rejected(error) => {
+                        // The delivery path records the guarded session error.
+                        // Do not escalate a destination failure to the reader.
+                        eprintln!("Codex Fast dispatch> {}", error.message);
+                    }
+                    TurnDispatchDeliveryOutcome::Delivered
+                    | TurnDispatchDeliveryOutcome::Scheduled
+                    | TurnDispatchDeliveryOutcome::Held { error: None }
+                    | TurnDispatchDeliveryOutcome::Superseded => {}
                 }
             })
         {
@@ -127,36 +216,60 @@ fn deliver_turn_dispatch(state: &AppState, dispatch: TurnDispatch) -> Result<(),
                 &session_id,
                 &detail,
                 notification.as_ref(),
-                None,
+                engram_generation,
                 &runtime_token,
                 generation,
             ) {
-                Err(ApiError::internal(detail))
+                TurnDispatchDeliveryOutcome::Rejected(ApiError::internal(detail))
             } else {
-                Ok(())
+                TurnDispatchDeliveryOutcome::Superseded
             };
         }
-        return Ok(());
+        return TurnDispatchDeliveryOutcome::Scheduled;
     }
     deliver_turn_dispatch_now(state, dispatch)
 }
 
 /// Performs delivery on the caller for ready commands, or on the Fast worker.
-fn deliver_turn_dispatch_now(state: &AppState, dispatch: TurnDispatch) -> Result<(), ApiError> {
+fn deliver_turn_dispatch_now(
+    state: &AppState,
+    dispatch: TurnDispatch,
+) -> TurnDispatchDeliveryOutcome {
     let active_turn_generation = dispatch.active_turn_generation();
     let runtime_token = dispatch.runtime_token().clone();
-    let delivered_session_id = dispatch.session_id().to_owned();
     if let Some(dispatch_generation) = dispatch.engram_dispatch_generation() {
-        match state.prepare_engram_turn_delivery_off_lock(
-            dispatch.session_id(),
-            dispatch_generation,
-        ) {
+        match state
+            .prepare_engram_turn_delivery_off_lock(dispatch.session_id(), dispatch_generation)
+        {
             EngramTurnDeliveryPreparation::Ready => {}
-            EngramTurnDeliveryPreparation::Superseded => return Ok(()),
+            EngramTurnDeliveryPreparation::Superseded => {
+                return TurnDispatchDeliveryOutcome::Superseded;
+            }
+            EngramTurnDeliveryPreparation::PersistenceUnknown => {
+                return TurnDispatchDeliveryOutcome::Held {
+                    error: Some(engram_persistence_unknown_error()),
+                };
+            }
             EngramTurnDeliveryPreparation::Rejected => {
                 let session_id = dispatch.session_id().to_owned();
                 let mailbox_notification = dispatch.mailbox_notification().cloned();
                 let error_message = "Engram did not authorize this turn for runtime delivery";
+                match state.park_unknown_engram_authorization(
+                    &session_id,
+                    dispatch_generation,
+                    &runtime_token,
+                    active_turn_generation,
+                ) {
+                    EngramAuthorizationParkOutcome::Parked => {
+                        return TurnDispatchDeliveryOutcome::Held { error: None };
+                    }
+                    EngramAuthorizationParkOutcome::PersistenceUnknown => {
+                        return TurnDispatchDeliveryOutcome::Held {
+                            error: Some(engram_persistence_unknown_error()),
+                        };
+                    }
+                    EngramAuthorizationParkOutcome::Superseded => {}
+                }
                 let rejected = record_rejected_turn_dispatch(
                     state,
                     &session_id,
@@ -167,158 +280,252 @@ fn deliver_turn_dispatch_now(state: &AppState, dispatch: TurnDispatch) -> Result
                     active_turn_generation,
                 );
                 return if rejected {
-                    Err(ApiError::conflict(error_message))
+                    TurnDispatchDeliveryOutcome::Rejected(ApiError::conflict(error_message))
                 } else {
-                    Ok(())
+                    TurnDispatchDeliveryOutcome::Superseded
                 };
             }
         }
     }
-    let mailbox_notification = match dispatch {
-        TurnDispatch::PersistentClaude {
-            active_turn_generation: _,
-            command,
-            engram_dispatch_generation: _,
-            mailbox_notification,
-            runtime_token: _,
-            sender,
-            session_id,
-        } => {
-            if let Err(err) = sender.send(ClaudeRuntimeCommand::Prompt(command)) {
-                record_rejected_turn_dispatch(
-                    state,
-                    &session_id,
-                    &format!("failed to queue prompt for Claude session: {err}"),
-                    mailbox_notification.as_ref(),
-                    None,
-                    &runtime_token,
-                    active_turn_generation,
-                );
-                return Err(ApiError::internal(
-                    "failed to queue prompt for Claude session",
-                ));
-            }
-            mailbox_notification
+    match handoff_prepared_turn_dispatch(state, dispatch) {
+        Ok(HandoffPreparedTurnDispatchOutcome::Delivered) => {
+            TurnDispatchDeliveryOutcome::Delivered
         }
-        TurnDispatch::PersistentCodex {
-            active_turn_generation: _,
-            mut command,
-            service_tier,
-            engram_dispatch_generation: _,
-            mailbox_notification,
-            runtime_token: _,
-            sender,
-            session_id,
-        } => {
-            let resolved_tier = state.prepare_codex_service_tier_off_lock(
+        Ok(HandoffPreparedTurnDispatchOutcome::Scheduled) => {
+            TurnDispatchDeliveryOutcome::Scheduled
+        }
+        Ok(HandoffPreparedTurnDispatchOutcome::Superseded) => {
+            TurnDispatchDeliveryOutcome::Superseded
+        }
+        Err(error) => TurnDispatchDeliveryOutcome::Rejected(error),
+    }
+}
+
+#[derive(Debug)]
+enum HandoffPreparedTurnDispatchOutcome {
+    Delivered,
+    Scheduled,
+    Superseded,
+}
+
+// Admission and its durable receipt are complete. The Stop fence and provider
+// enqueue are arbitrated under the same lock; a pending Stop is not yet final.
+fn handoff_prepared_turn_dispatch(
+    state: &AppState,
+    mut dispatch: TurnDispatch,
+) -> Result<HandoffPreparedTurnDispatchOutcome, ApiError> {
+    let engram_generation = dispatch.engram_dispatch_generation();
+    let active_turn_generation = dispatch.active_turn_generation();
+    let runtime_token = dispatch.runtime_token().clone();
+    let session_id = dispatch.session_id().to_owned();
+    let mailbox_notification = dispatch.mailbox_notification().cloned();
+
+    loop {
+        let preparation = match &dispatch {
+            TurnDispatch::PersistentCodex {
+                command,
+                service_tier,
+                sender,
+                ..
+            } => Some(state.prepare_codex_service_tier_off_lock(
                 &session_id,
                 &runtime_token,
                 active_turn_generation,
                 &command.model,
                 service_tier,
-                &sender,
-            );
-            command.service_tier = match resolved_tier {
-                Ok(CodexServiceTierPreparation::Ready(tier)) => tier,
-                Ok(CodexServiceTierPreparation::Superseded) => {
-                    // The terminal/Stop owner retains and recovers the record's
-                    // active mailbox boundary. A stale discovery must not
-                    // requeue its copy over a successor or a user-held wake.
-                    return Ok(());
-                }
-                Err(err) => {
-                    let detail = format!("failed to resolve Codex Fast before dispatch: {err:#}. Retry or select Standard with /fast or settings");
-                    return if record_rejected_turn_dispatch(
-                        state,
-                        &session_id,
-                        &detail,
-                        mailbox_notification.as_ref(),
-                        None,
-                        &runtime_token,
-                        active_turn_generation,
-                    ) {
-                        Err(ApiError::internal(detail))
-                    } else {
-                        Ok(())
-                    };
-                }
-            };
-            // Stop/restart or a newer turn can supersede discovery while it is
-            // waiting. Check and enqueue under the same lock as those transitions.
-            let inner = state.inner.lock().expect("state mutex poisoned");
-            let Some(index) = inner.find_session_index(&session_id) else {
-                return Ok(());
-            };
-            let record = &inner.sessions[index];
-            if !record.runtime.matches_runtime_token(&runtime_token)
-                || record.active_turn_generation != active_turn_generation
-                || record.runtime_stop_in_progress
-                || record.session.status != SessionStatus::Active
-            {
-                return Ok(());
+                sender,
+            )),
+            _ => None,
+        };
+        match preparation {
+            None => break,
+            Some(Ok(CodexServiceTierPreparation::Ready(tier))) => {
+                let TurnDispatch::PersistentCodex {
+                    command,
+                    service_tier,
+                    ..
+                } = &mut dispatch
+                else {
+                    unreachable!("only Codex dispatches prepare a service tier")
+                };
+                command.service_tier = tier.clone();
+                // A deferred replay must not repeat discovery or lose its resolved tier.
+                *service_tier = Ok(tier);
+                break;
             }
-            if let Err(err) = sender.send(CodexRuntimeCommand::Prompt {
-                session_id: session_id.clone(),
-                command,
-            }) {
-                drop(inner);
-                record_rejected_turn_dispatch(
+            Some(Ok(CodexServiceTierPreparation::PendingStop)) => {
+                let mut inner = state.inner.lock().expect("state mutex poisoned");
+                let Some(index) = inner.find_session_index(&session_id) else {
+                    return Ok(HandoffPreparedTurnDispatchOutcome::Superseded);
+                };
+                let record = &mut inner.sessions[index];
+                if !record.runtime.matches_runtime_token(&runtime_token)
+                    || record.active_turn_generation != active_turn_generation
+                    || engram_generation.is_some_and(|generation| {
+                        record.engram.dispatch_generation != generation
+                            || record.engram.active_grant_id.is_none()
+                    })
+                {
+                    return Ok(HandoffPreparedTurnDispatchOutcome::Superseded);
+                }
+                if record.runtime_stop_in_progress {
+                    if engram_generation.is_some() {
+                        record
+                            .deferred_stop_callbacks
+                            .push(DeferredStopCallback::EngramHandoff {
+                                active_turn_generation,
+                                dispatch: DeferredEngramHandoff(Arc::new(Mutex::new(Some(
+                                    dispatch,
+                                )))),
+                            });
+                        return Ok(HandoffPreparedTurnDispatchOutcome::Scheduled);
+                    }
+                    return Ok(HandoffPreparedTurnDispatchOutcome::Superseded);
+                }
+                if record.session.status != SessionStatus::Active {
+                    return Ok(HandoffPreparedTurnDispatchOutcome::Superseded);
+                }
+                // Stop failed between discovery arbitration and callback
+                // capture. Retry with the original unresolved Fast intent.
+            }
+            Some(Ok(CodexServiceTierPreparation::Superseded)) => {
+                return Ok(HandoffPreparedTurnDispatchOutcome::Superseded);
+            }
+            Some(Err(error)) => {
+                let detail = format!(
+                    "failed to resolve Codex Fast before dispatch: {error:#}. Retry or select Standard with /fast or settings"
+                );
+                return if record_rejected_turn_dispatch(
                     state,
                     &session_id,
-                    &format!("failed to queue prompt for Codex session: {err}"),
+                    &detail,
                     mailbox_notification.as_ref(),
-                    None,
+                    engram_generation,
                     &runtime_token,
                     active_turn_generation,
-                );
-                return Err(ApiError::internal(
-                    "failed to queue prompt for Codex session",
-                ));
+                ) {
+                    Err(ApiError::internal(detail))
+                } else {
+                    Ok(HandoffPreparedTurnDispatchOutcome::Superseded)
+                };
             }
-            mailbox_notification
         }
-        TurnDispatch::PersistentAcp {
-            active_turn_generation: _,
-            command,
-            engram_dispatch_generation: _,
-            mailbox_notification,
-            runtime_token: _,
-            sender,
-            session_id,
-            turn_lifecycle,
-        } => {
-            // Publish the queued/starting state before the prompt enters the
-            // writer channel. A concurrent OpenCode stop can now observe the
-            // turn and wait for its cancellation grace instead of sampling
-            // the old idle state immediately before the writer starts it.
-            set_acp_turn_active(&turn_lifecycle, true);
-            if let Err(err) = sender.send(AcpRuntimeCommand::Prompt(command)) {
-                set_acp_turn_active(&turn_lifecycle, false);
-                record_rejected_turn_dispatch(
-                    state,
-                    &session_id,
-                    &format!("failed to queue prompt for ACP session: {err}"),
-                    mailbox_notification.as_ref(),
-                    None,
-                    &runtime_token,
-                    active_turn_generation,
-                );
-                return Err(ApiError::internal(
-                    "failed to queue prompt for agent session",
-                ));
-            }
-            mailbox_notification
-        }
-    };
-    state.acknowledge_engram_context_nudge_delivery(
-        &delivered_session_id,
-        active_turn_generation,
-    );
-    if let Some(mailbox_notification) = mailbox_notification.as_ref() {
-        state.mark_mailbox_notification_delivered(mailbox_notification);
     }
 
-    Ok(())
+    let mut inner = state.inner.lock().expect("state mutex poisoned");
+    let index = inner.find_session_index(&session_id);
+    let guarded =
+        engram_generation.is_some() || matches!(&dispatch, TurnDispatch::PersistentCodex { .. });
+    if guarded {
+        let Some(index) = index else {
+            return Ok(HandoffPreparedTurnDispatchOutcome::Superseded);
+        };
+        let record = &mut inner.sessions[index];
+        if !record.runtime.matches_runtime_token(&runtime_token)
+            || record.active_turn_generation != active_turn_generation
+            || engram_generation.is_some_and(|generation| {
+                record.engram.dispatch_generation != generation
+                    || record.engram.active_grant_id.is_none()
+            })
+        {
+            return Ok(HandoffPreparedTurnDispatchOutcome::Superseded);
+        }
+        if record.runtime_stop_in_progress {
+            if engram_generation.is_some() {
+                record
+                    .deferred_stop_callbacks
+                    .push(DeferredStopCallback::EngramHandoff {
+                        active_turn_generation,
+                        dispatch: DeferredEngramHandoff(Arc::new(Mutex::new(Some(dispatch)))),
+                    });
+                return Ok(HandoffPreparedTurnDispatchOutcome::Scheduled);
+            }
+            return Ok(HandoffPreparedTurnDispatchOutcome::Superseded);
+        }
+        if record.session.status != SessionStatus::Active {
+            return Ok(HandoffPreparedTurnDispatchOutcome::Superseded);
+        }
+    }
+
+    // Channels are unbounded. ACP lifecycle lock order is state -> lifecycle;
+    // lifecycle waiters must release that lock before accessing AppState.
+    let (agent, sent) = match dispatch {
+        TurnDispatch::PersistentClaude {
+            command, sender, ..
+        } => (
+            "Claude",
+            sender
+                .send(ClaudeRuntimeCommand::Prompt(command))
+                .map_err(|error| error.to_string()),
+        ),
+        TurnDispatch::PersistentCodex {
+            command, sender, ..
+        } => (
+            "Codex",
+            sender
+                .send(CodexRuntimeCommand::Prompt {
+                    session_id: session_id.clone(),
+                    command,
+                })
+                .map_err(|error| error.to_string()),
+        ),
+        TurnDispatch::PersistentAcp {
+            command,
+            sender,
+            turn_lifecycle,
+            ..
+        } => {
+            set_acp_turn_active(&turn_lifecycle, true);
+            let sent = sender
+                .send(AcpRuntimeCommand::Prompt(command))
+                .map_err(|error| error.to_string());
+            if sent.is_err() {
+                set_acp_turn_active(&turn_lifecycle, false);
+            }
+            ("ACP", sent)
+        }
+    };
+    if let Err(error) = sent {
+        drop(inner);
+        let detail = format!("failed to queue prompt for {agent} session: {error}");
+        let rejected = record_rejected_turn_dispatch(
+            state,
+            &session_id,
+            &detail,
+            mailbox_notification.as_ref(),
+            engram_generation,
+            &runtime_token,
+            active_turn_generation,
+        );
+        return if rejected {
+            Err(ApiError::internal(detail))
+        } else {
+            Ok(HandoffPreparedTurnDispatchOutcome::Superseded)
+        };
+    }
+    if engram_generation.is_some() {
+        let index = index.expect("guarded handoff owns session");
+        if inner.sessions[index]
+            .queued_prompts
+            .front()
+            .is_some_and(QueuedPromptRecord::has_engram_intent)
+        {
+            let record = inner
+                .session_mut_by_index(index)
+                .expect("guarded handoff session should be valid");
+            record.queued_prompts.pop_front();
+            sync_pending_prompts(record);
+            if let Err(error) = state.commit_locked(&mut inner) {
+                eprintln!("engram> failed persisting provider handoff: {error:#}");
+            }
+        }
+    }
+    drop(inner);
+    state.acknowledge_engram_context_nudge_delivery(&session_id, active_turn_generation);
+    if let Some(notification) = mailbox_notification.as_ref() {
+        state.mark_mailbox_notification_delivered(notification);
+    }
+    Ok(HandoffPreparedTurnDispatchOutcome::Delivered)
 }
 
 #[derive(Debug)]
@@ -353,7 +560,7 @@ fn dispatch_turn_and_snapshot(
     match dispatch {
         DispatchTurnResult::Dispatched(dispatch)
         | DispatchTurnResult::DispatchedAfterQueue(dispatch) => {
-            deliver_turn_dispatch(state, dispatch)?;
+            deliver_turn_dispatch(state, dispatch).into_public_result()?;
         }
         DispatchTurnResult::Queued => {}
     }
@@ -717,7 +924,7 @@ impl AppState {
                 match dispatch {
                     DispatchTurnResult::Dispatched(dispatch)
                     | DispatchTurnResult::DispatchedAfterQueue(dispatch) => {
-                        deliver_turn_dispatch(self, dispatch)?;
+                        deliver_turn_dispatch(self, dispatch).into_public_result()?;
                     }
                     DispatchTurnResult::Queued => {}
                 }
@@ -1134,9 +1341,8 @@ async fn get_delegation_result_output(
     State(state): State<AppState>,
     query: Result<Query<DelegationResultOutputQuery>, QueryRejection>,
 ) -> Result<Json<DelegationResultOutputResponse>, ApiError> {
-    let Query(query) = query.map_err(|rejection| {
-        api_query_rejection("delegation result output query", rejection)
-    })?;
+    let Query(query) = query
+        .map_err(|rejection| api_query_rejection("delegation result output query", rejection))?;
     let response = run_blocking_api(move || {
         state.get_delegation_result_output(
             &parent_session_id,
@@ -1262,7 +1468,11 @@ async fn update_project_engram_settings(
     let Json(request) =
         request.map_err(|rejection| api_json_rejection("Engram project settings", rejection))?;
     // Disable remains an unconditional recovery path, including under load.
-    let permit = if request.enabled { Some(acquire_engram_readiness(limiter)?) } else { None };
+    let permit = if request.enabled {
+        Some(acquire_engram_readiness(limiter)?)
+    } else {
+        None
+    };
     let response = run_blocking_api(move || {
         let _permit = permit;
         state.patch_project_engram_settings(&project_id, request)
@@ -1412,8 +1622,7 @@ async fn list_codex_mcp_servers(
     AxumPath(session_id): AxumPath<String>,
     State(state): State<AppState>,
 ) -> Result<Json<CodexMcpServersResponse>, ApiError> {
-    let response =
-        run_blocking_api(move || state.list_codex_mcp_servers(&session_id)).await?;
+    let response = run_blocking_api(move || state.list_codex_mcp_servers(&session_id)).await?;
     Ok(Json(response))
 }
 
@@ -1476,16 +1685,31 @@ async fn send_message(
         move || {
             // Explicit UI input may reopen a finished child. Runtime queues and
             // peer deliveries still pass through the terminal dispatch fence.
-            let followup = if request.source_session_id.is_none() && request.source_mailbox.is_none() {
+            let followup = if request.source_session_id.is_none()
+                && request.source_mailbox.is_none()
+            {
                 let inner = state.inner.lock().expect("state mutex poisoned");
-                inner.delegations.iter().find(|delegation| delegation.child_session_id == session_id
-                    && delegation.agent == Agent::Codex
-                    && matches!(delegation.status, DelegationStatus::Completed | DelegationStatus::Failed))
+                inner
+                    .delegations
+                    .iter()
+                    .find(|delegation| {
+                        delegation.child_session_id == session_id
+                            && delegation.agent == Agent::Codex
+                            && matches!(
+                                delegation.status,
+                                DelegationStatus::Completed | DelegationStatus::Failed
+                            )
+                    })
                     .map(|delegation| (delegation.parent_session_id.clone(), delegation.id.clone()))
-            } else { None };
+            } else {
+                None
+            };
             if let Some((parent, delegation)) = followup {
                 state.followup_delegation_request(&parent, &delegation, request)?;
-                Ok(SendMessageRouteResponse { state: state.summary_snapshot(), message_disposition: None })
+                Ok(SendMessageRouteResponse {
+                    state: state.summary_snapshot(),
+                    message_disposition: None,
+                })
             } else {
                 dispatch_turn_and_snapshot(&state, &session_id, request)
             }

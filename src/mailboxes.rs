@@ -189,10 +189,7 @@ impl std::fmt::Display for MailboxStoreError {
 
 impl std::error::Error for MailboxStoreError {}
 
-fn mailbox_store_error(
-    kind: MailboxStoreErrorKind,
-    message: impl Into<String>,
-) -> anyhow::Error {
+fn mailbox_store_error(kind: MailboxStoreErrorKind, message: impl Into<String>) -> anyhow::Error {
     MailboxStoreError {
         kind,
         message: message.into(),
@@ -278,10 +275,7 @@ struct MailboxDispatchFinalizationGuard {
 }
 
 #[cfg(test)]
-fn decrement_dispatch_waiter(
-    state: &mut MailboxDispatchFinalizationState,
-    message_id: &str,
-) {
+fn decrement_dispatch_waiter(state: &mut MailboxDispatchFinalizationState, message_id: &str) {
     if let Some(waiters) = state.waiters_by_message_id.get_mut(message_id) {
         *waiters -= 1;
         if *waiters == 0 {
@@ -332,10 +326,7 @@ impl AppState {
     /// the current in-memory session. The second validation closes the race
     /// with deletion or any other transition that makes the session ineligible;
     /// every failed revalidation restores `left_at`.
-    fn ensure_mailbox_session_active(
-        &self,
-        session_id: &str,
-    ) -> std::result::Result<(), ApiError> {
+    fn ensure_mailbox_session_active(&self, session_id: &str) -> std::result::Result<(), ApiError> {
         let validate = || {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
@@ -419,17 +410,12 @@ impl AppState {
         // This post-commit probe controls wake delivery only. It must never
         // mutate participant authorization: only deliberate session deletion
         // owns `left_at`.
-        let (_, target_still_active) = self.mailbox_participants_still_active(
-            sender_session_id,
-            &input.target_session_id,
-        );
+        let (_, target_still_active) =
+            self.mailbox_participants_still_active(sender_session_id, &input.target_session_id);
         if !target_still_active {
             if let Err(err) = self
                 .mailbox_store
-                .record_initial_dispatch_outcome(
-                    &receipt.message_id,
-                    "durableButNotWoken",
-                )
+                .record_initial_dispatch_outcome(&receipt.message_id, "durableButNotWoken")
             {
                 eprintln!(
                     "mailbox> message {} committed, but failed finalizing its durable receipt: {err:#}",
@@ -462,8 +448,11 @@ impl AppState {
         let disposition = match self.dispatch_turn(&input.target_session_id, notification_request) {
             Ok(DispatchTurnResult::Dispatched(dispatch)) => {
                 match deliver_turn_dispatch(self, dispatch) {
-                    Ok(()) => Some("deliveredToIdleSession"),
-                    Err(err) => {
+                    TurnDispatchDeliveryOutcome::Delivered
+                    | TurnDispatchDeliveryOutcome::Scheduled => {
+                        Some("deliveredToIdleSession")
+                    }
+                    TurnDispatchDeliveryOutcome::Rejected(err) => {
                         eprintln!(
                             "mailbox> failed waking target session `{}` for mailbox `{}` message `{}` ({}): {}",
                             input.target_session_id,
@@ -474,12 +463,29 @@ impl AppState {
                         );
                         None
                     }
+                    TurnDispatchDeliveryOutcome::Held { error } => {
+                        if let Some(error) = error {
+                            eprintln!(
+                                "mailbox> held wake for target session `{}` mailbox `{}` message `{}` after persistence uncertainty ({}): {}",
+                                input.target_session_id,
+                                receipt.mailbox_id,
+                                receipt.message_id,
+                                error.status,
+                                error.message
+                            );
+                        }
+                        None
+                    }
+                    TurnDispatchDeliveryOutcome::Superseded => None,
                 }
             }
             Ok(DispatchTurnResult::DispatchedAfterQueue(dispatch)) => {
                 match deliver_turn_dispatch(self, dispatch) {
-                    Ok(()) => Some("queuedBehindActiveTurn"),
-                    Err(err) => {
+                    TurnDispatchDeliveryOutcome::Delivered
+                    | TurnDispatchDeliveryOutcome::Scheduled => {
+                        Some("queuedBehindActiveTurn")
+                    }
+                    TurnDispatchDeliveryOutcome::Rejected(err) => {
                         eprintln!(
                             "mailbox> failed waking queued target session `{}` for mailbox `{}` message `{}` ({}): {}",
                             input.target_session_id,
@@ -490,6 +496,20 @@ impl AppState {
                         );
                         None
                     }
+                    TurnDispatchDeliveryOutcome::Held { error } => {
+                        if let Some(error) = error {
+                            eprintln!(
+                                "mailbox> held queued wake for target session `{}` mailbox `{}` message `{}` after persistence uncertainty ({}): {}",
+                                input.target_session_id,
+                                receipt.mailbox_id,
+                                receipt.message_id,
+                                error.status,
+                                error.message
+                            );
+                        }
+                        None
+                    }
+                    TurnDispatchDeliveryOutcome::Superseded => None,
                 }
             }
             Ok(DispatchTurnResult::Queued) => Some("queuedBehindActiveTurn"),
@@ -513,9 +533,7 @@ impl AppState {
             Ok(MailboxDispatchOutcomeRecord::Recorded { .. }) => {
                 receipt.notification_disposition = disposition.to_owned();
             }
-            Ok(MailboxDispatchOutcomeRecord::AlreadyFinalized {
-                dispatch_outcome,
-            }) => {
+            Ok(MailboxDispatchOutcomeRecord::AlreadyFinalized { dispatch_outcome }) => {
                 receipt.notification_disposition = dispatch_outcome;
             }
             Err(err) => {
@@ -572,17 +590,15 @@ impl AppState {
     ) -> (bool, bool) {
         let inner = self.inner.lock().expect("state mutex poisoned");
         let active = |session_id: &str| {
-            inner
-                .find_session_index(session_id)
-                .is_some_and(|index| {
-                    let record = &inner.sessions[index];
-                    !record.hidden
-                        && record.is_local_session()
-                        && record.session.parent_delegation_id.is_none()
-                        && inner
-                            .find_delegation_index_by_child_session_id(session_id)
-                            .is_none()
-                })
+            inner.find_session_index(session_id).is_some_and(|index| {
+                let record = &inner.sessions[index];
+                !record.hidden
+                    && record.is_local_session()
+                    && record.session.parent_delegation_id.is_none()
+                    && inner
+                        .find_delegation_index_by_child_session_id(session_id)
+                        .is_none()
+            })
         };
         (active(sender_session_id), active(target_session_id))
     }
@@ -606,7 +622,8 @@ impl AppState {
             &notification.session_id,
             &notification.mailbox_id,
             notification.through_sequence,
-        )? else {
+        )?
+        else {
             return Ok(false);
         };
         let outcome = self.queue_mailbox_wakeups_for_session_outcome(
@@ -697,13 +714,30 @@ impl AppState {
             let record = inner
                 .session_mut_by_index(index)
                 .expect("session index should be valid");
+            // A retained request is immutable, but it still covers its original
+            // boundary. Recovery of that same wake must not append a duplicate.
+            if record.queued_prompts.iter().any(|queued| {
+                queued.is_engram_retained()
+                    && queued
+                        .pending_prompt
+                        .source
+                        .as_ref()
+                        .and_then(|source| source.mailbox.as_ref())
+                        .is_some_and(|mailbox| {
+                            mailbox.mailbox_id == wakeup.mailbox_id
+                                && mailbox.sequence >= wakeup.sequence
+                        })
+            }) {
+                continue;
+            }
             if let Some(existing_index) = record.queued_prompts.iter().position(|queued| {
-                queued
-                    .pending_prompt
-                    .source
-                    .as_ref()
-                    .and_then(|candidate| candidate.mailbox.as_ref())
-                    .is_some_and(|mailbox| mailbox.mailbox_id == wakeup.mailbox_id)
+                !queued.is_engram_retained()
+                    && queued
+                        .pending_prompt
+                        .source
+                        .as_ref()
+                        .and_then(|candidate| candidate.mailbox.as_ref())
+                        .is_some_and(|mailbox| mailbox.mailbox_id == wakeup.mailbox_id)
             }) {
                 let mut existing = record
                     .queued_prompts
@@ -728,7 +762,12 @@ impl AppState {
                     existing.pending_prompt.source = Some(source);
                     changed = true;
                 }
-                if promote_existing_to_front {
+                if promote_existing_to_front
+                    && !record
+                        .queued_prompts
+                        .front()
+                        .is_some_and(QueuedPromptRecord::is_engram_retained)
+                {
                     record.queued_prompts.push_front(existing);
                     changed |= existing_index != 0;
                 } else {
@@ -741,18 +780,35 @@ impl AppState {
             let record = inner
                 .session_mut_by_index(index)
                 .expect("session index should be valid");
-            record.queued_prompts.push_front(QueuedPromptRecord {
-                source: QueuedPromptSource::Mailbox,
-                attachments: Vec::new(),
-                pending_prompt: PendingPrompt {
+            let insert_at = usize::from(
+                record
+                    .queued_prompts
+                    .front()
+                    .is_some_and(QueuedPromptRecord::is_engram_retained),
+            );
+            record.queued_prompts.insert(
+                insert_at,
+                QueuedPromptRecord {
+                    engram_waiting: false,
+                    promoted_message_index: None,
+                    promotion_disposition_known: true,
+                    engram_bind: None,
+                    engram_evaluate: None,
+                    engram_interrupted: false,
+                    source: QueuedPromptSource::Mailbox,
                     attachments: Vec::new(),
-                    id: prompt_id,
-                    timestamp: stamp_now(),
-                    text,
-                    expanded_text: None,
-                    source: Some(source),
+                    pending_prompt: PendingPrompt {
+                        engram_interrupted: false,
+                        is_engram_retained: false,
+                        attachments: Vec::new(),
+                        id: prompt_id,
+                        timestamp: stamp_now(),
+                        text,
+                        expanded_text: None,
+                        source: Some(source),
+                    },
                 },
-            });
+            );
             changed = true;
         }
         if changed {
@@ -781,10 +837,7 @@ impl AppState {
         &self,
         session_id: &str,
     ) -> Result<bool> {
-        self.reconcile_mailbox_wakeups_for_session(
-            session_id,
-            MailboxWakeupRecovery::NeverWoken,
-        )
+        self.reconcile_mailbox_wakeups_for_session(session_id, MailboxWakeupRecovery::NeverWoken)
     }
 
     /// Revalidates the queue head against the durable participant cursor.
@@ -800,6 +853,7 @@ impl AppState {
             inner
                 .find_session_index(session_id)
                 .and_then(|index| inner.sessions[index].queued_prompts.front())
+                .filter(|queued| !queued.is_engram_retained())
                 .and_then(|queued| {
                     queued
                         .pending_prompt
@@ -807,10 +861,7 @@ impl AppState {
                         .as_ref()
                         .and_then(|source| source.mailbox.as_ref())
                         .map(|mailbox| {
-                            (
-                                queued.pending_prompt.id.clone(),
-                                mailbox.mailbox_id.clone(),
-                            )
+                            (queued.pending_prompt.id.clone(), mailbox.mailbox_id.clone())
                         })
                 })
         }) else {
@@ -842,6 +893,15 @@ impl AppState {
             });
         if !front_matches {
             return Ok(true);
+        }
+        // Authorization may have been prepared during the off-lock mailbox
+        // read. Its text/source is now replay input, not a coalescible wake.
+        if inner.sessions[index]
+            .queued_prompts
+            .front()
+            .is_some_and(QueuedPromptRecord::is_engram_retained)
+        {
+            return Ok(false);
         }
 
         let Some(wakeup) = wakeup else {
@@ -950,8 +1010,7 @@ impl AppState {
                 .as_ref()
                 .and_then(|source| source.mailbox.as_ref())
                 .is_some_and(|mailbox| {
-                    mailbox.mailbox_id == mailbox_id
-                        && mailbox.sequence <= processed_through
+                    mailbox.mailbox_id == mailbox_id && mailbox.sequence <= processed_through
                 })
         });
         if record.queued_prompts.len() == original_len {
@@ -1018,10 +1077,7 @@ impl AppState {
         }
     }
 
-    fn mark_mailbox_notification_delivered(
-        &self,
-        notification: &MailboxNotificationDelivery,
-    ) {
+    fn mark_mailbox_notification_delivered(&self, notification: &MailboxNotificationDelivery) {
         if let Err(err) = self.mailbox_store.mark_notifications_delivered_through(
             &notification.session_id,
             &notification.mailbox_id,
@@ -1072,12 +1128,11 @@ async fn submit_delegation_review_result(
     State(state): State<AppState>,
     request: Result<Json<SubmitDelegationReviewResultRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<MailboxAppendReceipt>), ApiError> {
-    let Json(request) = request
-        .map_err(|rejection| api_json_rejection("delegation review result", rejection))?;
-    let receipt = run_blocking_api(move || {
-        state.submit_delegation_review_result(&child_session_id, request)
-    })
-    .await?;
+    let Json(request) =
+        request.map_err(|rejection| api_json_rejection("delegation review result", rejection))?;
+    let receipt =
+        run_blocking_api(move || state.submit_delegation_review_result(&child_session_id, request))
+            .await?;
     Ok((StatusCode::ACCEPTED, Json(receipt)))
 }
 
@@ -1140,25 +1195,40 @@ async fn acknowledge_mailbox(
 ) -> Result<Json<MailboxSummary>, ApiError> {
     let summary = run_blocking_api(move || {
         state.ensure_mailbox_session_active(&session_id)?;
-        match (request.receipt, request.expected_processed_through, request.processed_through) {
+        match (
+            request.receipt,
+            request.expected_processed_through,
+            request.processed_through,
+        ) {
             (Some(receipt), None, None) => {
-                let summary = state.mailbox_store.acknowledge_page(&session_id, &mailbox_id, &receipt)
+                let summary = state
+                    .mailbox_store
+                    .acknowledge_page(&session_id, &mailbox_id, &receipt)
                     .map_err(mailbox_api_error)?;
-                let through = summary.participants.iter()
+                let through = summary
+                    .participants
+                    .iter()
                     .find(|participant| participant.session_id == session_id)
-                    .map(|participant| participant.processed_through).unwrap_or(0);
-                if let Err(err) = state.remove_acknowledged_mailbox_wakeups(&session_id, &mailbox_id, through) {
+                    .map(|participant| participant.processed_through)
+                    .unwrap_or(0);
+                if let Err(err) =
+                    state.remove_acknowledged_mailbox_wakeups(&session_id, &mailbox_id, through)
+                {
                     eprintln!("mailbox> receipt committed but wake cleanup failed: {err:#}");
                 }
                 Ok(summary)
             }
-            (None, Some(expected), Some(through)) => state.acknowledge_mailbox_and_remove_covered_wakeups(
-                &session_id,
-                &mailbox_id,
-                expected,
-                through,
-            ).map_err(mailbox_api_error),
-            _ => Err(ApiError::bad_request("Supply receipt OR both expectedProcessedThrough and processedThrough")),
+            (None, Some(expected), Some(through)) => state
+                .acknowledge_mailbox_and_remove_covered_wakeups(
+                    &session_id,
+                    &mailbox_id,
+                    expected,
+                    through,
+                )
+                .map_err(mailbox_api_error),
+            _ => Err(ApiError::bad_request(
+                "Supply receipt OR both expectedProcessedThrough and processedThrough",
+            )),
         }
     })
     .await?;
@@ -1171,12 +1241,8 @@ fn mailbox_api_error(err: anyhow::Error) -> ApiError {
             MailboxStoreErrorKind::Validation => {
                 ApiError::bad_request(mailbox_error.message.clone())
             }
-            MailboxStoreErrorKind::Conflict => {
-                ApiError::conflict(mailbox_error.message.clone())
-            }
-            MailboxStoreErrorKind::NotFound => {
-                ApiError::not_found(mailbox_error.message.clone())
-            }
+            MailboxStoreErrorKind::Conflict => ApiError::conflict(mailbox_error.message.clone()),
+            MailboxStoreErrorKind::NotFound => ApiError::not_found(mailbox_error.message.clone()),
             MailboxStoreErrorKind::Retryable => ApiError::from_status(
                 StatusCode::SERVICE_UNAVAILABLE,
                 mailbox_error.message.clone(),
@@ -1214,7 +1280,7 @@ impl MailboxStore {
                     "failed to enable mailbox foreign keys for `{}`",
                     path.display()
                 )
-        })?;
+            })?;
         Ok(Self {
             connection: Mutex::new(Some(connection)),
             write_lock: sqlite_state_write_lock(path),
@@ -1334,16 +1400,15 @@ impl MailboxStore {
         if state.pending_message_ids.contains(message_id) {
             #[cfg(test)]
             {
-            *state
-                .waiters_by_message_id
-                .entry(message_id.to_owned())
-                .or_default() += 1;
-            self.dispatch_finalization.changed.notify_all();
+                *state
+                    .waiters_by_message_id
+                    .entry(message_id.to_owned())
+                    .or_default() += 1;
+                self.dispatch_finalization.changed.notify_all();
             }
             let deadline = std::time::Instant::now() + self.write_admission_timeout;
             while state.pending_message_ids.contains(message_id) {
-                let Some(remaining) =
-                    deadline.checked_duration_since(std::time::Instant::now())
+                let Some(remaining) = deadline.checked_duration_since(std::time::Instant::now())
                 else {
                     #[cfg(test)]
                     decrement_dispatch_waiter(&mut state, message_id);
@@ -1387,7 +1452,9 @@ impl MailboxStore {
                 rusqlite::Error::QueryReturnedNoRows => {
                     anyhow!("mailbox message `{message_id}` disappeared during dispatch")
                 }
-                other => anyhow!(other).context("failed to read finalized mailbox dispatch outcome"),
+                other => {
+                    anyhow!(other).context("failed to read finalized mailbox dispatch outcome")
+                }
             })?;
         Ok(dispatch_outcome.unwrap_or_else(|| "durableButNotWoken".to_owned()))
     }
@@ -1451,9 +1518,7 @@ impl MailboxStore {
             .connection
             .lock()
             .expect("mailbox connection mutex poisoned");
-        guard
-            .is_some()
-            .then_some(MailboxConnectionGuard { guard })
+        guard.is_some().then_some(MailboxConnectionGuard { guard })
     }
 
     fn connection(&self) -> Result<MailboxConnectionGuard<'_>> {
@@ -1474,12 +1539,13 @@ impl MailboxStore {
         validate_mailbox_append_input(input)?;
         let write_guard = self.lock_writer("waiting to begin mailbox append")?;
         let mut connection = self.connection()?;
-        let transaction =
-            begin_mailbox_write(&mut connection, "beginning mailbox append")?;
+        let transaction = begin_mailbox_write(&mut connection, "beginning mailbox append")?;
 
-        if let Some(existing) =
-            mailbox_message_for_idempotency_key(&transaction, &input.sender_session_id, &input.idempotency_key)?
-        {
+        if let Some(existing) = mailbox_message_for_idempotency_key(
+            &transaction,
+            &input.sender_session_id,
+            &input.idempotency_key,
+        )? {
             if existing.target_session_id != input.target_session_id
                 || existing.body != input.body
                 || existing.topic != input.topic
@@ -1498,11 +1564,9 @@ impl MailboxStore {
                 &existing.mailbox_id,
                 &input.sender_session_id,
             )?;
-            transaction
-                .commit()
-                .map_err(|err| {
-                    mailbox_sqlite_write_error("finishing duplicate mailbox lookup", err)
-                })?;
+            transaction.commit().map_err(|err| {
+                mailbox_sqlite_write_error("finishing duplicate mailbox lookup", err)
+            })?;
             // Lock order: a duplicate may wait on dispatch finalization only after
             // releasing both SQLite resources and the shared writer-admission guard.
             drop(connection);
@@ -1598,11 +1662,7 @@ impl MailboxStore {
                  WHERE mailbox_id = ?1
                    AND target_session_id = ?2
                    AND sequence > ?3",
-                rusqlite::params![
-                    &mailbox_id,
-                    &input.target_session_id,
-                    processed_through
-                ],
+                rusqlite::params![&mailbox_id, &input.target_session_id, processed_through],
                 |row| row.get::<_, u64>(0),
             )
             .context("failed to count inbound unread mailbox messages")?;
@@ -1655,7 +1715,8 @@ impl MailboxStore {
                    AND processed_through = ?3 - 1",
                 rusqlite::params![&mailbox_id, &input.sender_session_id, sequence],
             )
-            .context("failed to advance sender mailbox cursor")? == 1;
+            .context("failed to advance sender mailbox cursor")?
+            == 1;
         // Prepare the receipt in the append transaction: no fallible cursor
         // lookup after commit, and no claim that this snapshot fences later sends.
         let sender_processed_through =
@@ -1666,10 +1727,7 @@ impl MailboxStore {
             message_id: message_id.clone(),
         };
         if let Err(err) = transaction.commit() {
-            return Err(mailbox_sqlite_write_error(
-                "committing mailbox append",
-                err,
-            ));
+            return Err(mailbox_sqlite_write_error("committing mailbox append", err));
         }
         drop(write_guard);
 
@@ -1725,14 +1783,12 @@ impl MailboxStore {
                         other => anyhow!(other).context("failed to read finalized mailbox outcome"),
                     })?
                     .context("finalized mailbox outcome should not be NULL")?;
-                transaction
-                    .commit()
-                    .map_err(|err| {
-                        mailbox_sqlite_write_error(
-                            "committing duplicate mailbox dispatch finalization",
-                            err,
-                        )
-                    })?;
+                transaction.commit().map_err(|err| {
+                    mailbox_sqlite_write_error(
+                        "committing duplicate mailbox dispatch finalization",
+                        err,
+                    )
+                })?;
                 return Ok(MailboxDispatchOutcomeRecord::AlreadyFinalized {
                     dispatch_outcome: existing_outcome,
                 });
@@ -1746,14 +1802,12 @@ impl MailboxStore {
                     rusqlite::params![message_id, dispatch_outcome],
                 )
                 .context("failed to advance initial mailbox notification state")?;
-            transaction
-                .commit()
-                .map_err(|err| {
-                    mailbox_sqlite_write_error(
-                        "committing initial mailbox dispatch outcome update",
-                        err,
-                    )
-                })?;
+            transaction.commit().map_err(|err| {
+                mailbox_sqlite_write_error(
+                    "committing initial mailbox dispatch outcome update",
+                    err,
+                )
+            })?;
             Ok(MailboxDispatchOutcomeRecord::Recorded {
                 state_advanced: state_advanced > 0,
             })
@@ -2173,21 +2227,17 @@ impl MailboxStore {
             .context("failed to prepare unread mailbox wake-up query")?;
         let rows = statement
             .query_map(
-                rusqlite::params![
-                    session_id,
-                    recovery_mode,
-                    DELEGATION_REVIEW_RESULT_TOPIC
-                ],
+                rusqlite::params![session_id, recovery_mode, DELEGATION_REVIEW_RESULT_TOPIC],
                 |row| {
-                Ok(MailboxUnreadWakeup {
-                    mailbox_id: row.get(0)?,
-                    message_id: row.get(1)?,
-                    sequence: row.get(2)?,
-                    unread_count: row.get(3)?,
-                    sender_session_id: row.get(4)?,
-                    sender_name: row.get(5)?,
-                    topic: row.get(6)?,
-                })
+                    Ok(MailboxUnreadWakeup {
+                        mailbox_id: row.get(0)?,
+                        message_id: row.get(1)?,
+                        sequence: row.get(2)?,
+                        unread_count: row.get(3)?,
+                        sender_session_id: row.get(4)?,
+                        sender_name: row.get(5)?,
+                        topic: row.get(6)?,
+                    })
                 },
             )
             .context("failed to query unread mailbox wake-ups")?;
@@ -2231,7 +2281,8 @@ impl MailboxStore {
         let transaction = if issue_receipt {
             begin_mailbox_write(&mut connection, "recording mailbox page issuance")?
         } else {
-            connection.transaction_with_behavior(rusqlite::TransactionBehavior::Deferred)
+            connection
+                .transaction_with_behavior(rusqlite::TransactionBehavior::Deferred)
                 .context("failed to begin mailbox preview snapshot")?
         };
         require_mailbox_participant(&transaction, mailbox_id, session_id)?;
@@ -2286,8 +2337,12 @@ impl MailboxStore {
                 rusqlite::params![mailbox_id, session_id, after_sequence, through],
                 |row| row.get(0),
             )?)
-        } else { None };
-        transaction.commit().map_err(|err| mailbox_sqlite_write_error("committing mailbox page issuance", err))?;
+        } else {
+            None
+        };
+        transaction
+            .commit()
+            .map_err(|err| mailbox_sqlite_write_error("committing mailbox page issuance", err))?;
         Ok(MailboxReadResponse {
             messages,
             after_sequence,
@@ -2298,11 +2353,7 @@ impl MailboxStore {
         })
     }
 
-    fn read_message(
-        &self,
-        session_id: &str,
-        message_id: &str,
-    ) -> Result<MailboxMessage> {
+    fn read_message(&self, session_id: &str, message_id: &str) -> Result<MailboxMessage> {
         let connection = self.connection()?;
         let message = connection
             .query_row(
@@ -2316,11 +2367,7 @@ impl MailboxStore {
                      target_session_id = ?2
                      AND COALESCE(topic, '') = ?3
                    )",
-                rusqlite::params![
-                    message_id,
-                    session_id,
-                    DELEGATION_REVIEW_RESULT_TOPIC
-                ],
+                rusqlite::params![message_id, session_id, DELEGATION_REVIEW_RESULT_TOPIC],
                 mailbox_message_from_row,
             )
             .map_err(|err| match err {
@@ -2341,16 +2388,31 @@ impl MailboxStore {
         expected_processed_through: u64,
         processed_through: u64,
     ) -> Result<MailboxSummary> {
-        self.acknowledge_validated(session_id, mailbox_id, None, expected_processed_through, processed_through)
+        self.acknowledge_validated(
+            session_id,
+            mailbox_id,
+            None,
+            expected_processed_through,
+            processed_through,
+        )
     }
 
-    fn acknowledge_page(&self, session_id: &str, mailbox_id: &str, receipt: &str) -> Result<MailboxSummary> {
+    fn acknowledge_page(
+        &self,
+        session_id: &str,
+        mailbox_id: &str,
+        receipt: &str,
+    ) -> Result<MailboxSummary> {
         self.acknowledge_validated(session_id, mailbox_id, Some(receipt), 0, 0)
     }
 
     fn acknowledge_validated(
-        &self, session_id: &str, mailbox_id: &str, receipt: Option<&str>,
-        mut expected_processed_through: u64, mut processed_through: u64,
+        &self,
+        session_id: &str,
+        mailbox_id: &str,
+        receipt: Option<&str>,
+        mut expected_processed_through: u64,
+        mut processed_through: u64,
     ) -> Result<MailboxSummary> {
         if processed_through < expected_processed_through {
             return Err(mailbox_store_error(
@@ -2375,31 +2437,49 @@ impl MailboxStore {
             ))?;
             // A later page must not acknowledge an earlier unprocessed visible
             // page, even if both have been read. Hidden review rows are not gaps.
-            if page.1 > current && transaction.query_row(
-                "SELECT EXISTS(SELECT 1 FROM mailbox_messages WHERE mailbox_id = ?1
+            if page.1 > current
+                && transaction.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM mailbox_messages WHERE mailbox_id = ?1
                  AND sequence > ?2 AND sequence <= ?3
                  AND NOT (target_session_id = ?4 AND COALESCE(topic, '') = ?5))",
-                rusqlite::params![mailbox_id, current, page.0, session_id, DELEGATION_REVIEW_RESULT_TOPIC],
-                |row| row.get::<_, bool>(0),
-            )? {
-                return Err(mailbox_store_error(MailboxStoreErrorKind::Conflict,
-                    "mailbox receipt skips an unacknowledged page; read from the current cursor and process it first"));
+                    rusqlite::params![
+                        mailbox_id,
+                        current,
+                        page.0,
+                        session_id,
+                        DELEGATION_REVIEW_RESULT_TOPIC
+                    ],
+                    |row| row.get::<_, bool>(0),
+                )?
+            {
+                return Err(mailbox_store_error(
+                    MailboxStoreErrorKind::Conflict,
+                    "mailbox receipt skips an unacknowledged page; read from the current cursor and process it first",
+                ));
             }
             expected_processed_through = current;
             processed_through = page.1.max(current);
         }
         let latest_sequence: u64 = transaction.query_row(
             "SELECT next_sequence - 1 FROM mailboxes WHERE id = ?1",
-            rusqlite::params![mailbox_id], |row| row.get(0),
+            rusqlite::params![mailbox_id],
+            |row| row.get(0),
         )?;
         if processed_through > latest_sequence {
-            return Err(mailbox_store_error(MailboxStoreErrorKind::Validation,
-                format!("mailbox acknowledgement {} exceeds latest sequence {}", processed_through, latest_sequence)));
+            return Err(mailbox_store_error(
+                MailboxStoreErrorKind::Validation,
+                format!(
+                    "mailbox acknowledgement {} exceeds latest sequence {}",
+                    processed_through, latest_sequence
+                ),
+            ));
         }
         if processed_through > current {
             if expected_processed_through != current {
-                return Err(mailbox_store_error(MailboxStoreErrorKind::Conflict,
-                    "mailbox acknowledgement conflict: cursor changed; read again"));
+                return Err(mailbox_store_error(
+                    MailboxStoreErrorKind::Conflict,
+                    "mailbox acknowledgement conflict: cursor changed; read again",
+                ));
             }
             // Numeric compatibility is NOT a bypass. Every visible row in the
             // advance must have been issued; already processed history needs no
@@ -2415,8 +2495,10 @@ impl MailboxStore {
                 |row| row.get::<_, bool>(0),
             )?;
             if unissued {
-                return Err(mailbox_store_error(MailboxStoreErrorKind::Conflict,
-                    "mailbox acknowledgement includes messages not issued to this participant; read from the current cursor using the current MCP/CLI bridge, process, then acknowledge. Old bridges without issueReceipt only preview: upgrade/restart the bridge or use the current CLI"));
+                return Err(mailbox_store_error(
+                    MailboxStoreErrorKind::Conflict,
+                    "mailbox acknowledgement includes messages not issued to this participant; read from the current cursor using the current MCP/CLI bridge, process, then acknowledge. Old bridges without issueReceipt only preview: upgrade/restart the bridge or use the current CLI",
+                ));
             }
         }
         let updated = transaction
@@ -2474,9 +2556,7 @@ impl MailboxStore {
             })?;
         transaction
             .commit()
-            .map_err(|err| {
-                mailbox_sqlite_write_error("committing mailbox acknowledgement", err)
-            })?;
+            .map_err(|err| mailbox_sqlite_write_error("committing mailbox acknowledgement", err))?;
         drop(connection);
         drop(write_guard);
         Ok(summary)
@@ -2564,7 +2644,6 @@ fn validate_mailbox_append_input(input: &MailboxAppendInput) -> Result<()> {
     }
     Ok(())
 }
-
 
 fn mailbox_participant_key(left: &str, right: &str) -> String {
     let mut participants = [left, right];
@@ -2681,13 +2760,13 @@ fn mailbox_summaries_for_session(
         .query_map(
             rusqlite::params![session_id, DELEGATION_REVIEW_RESULT_TOPIC],
             |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, u64>(1)?,
-                row.get::<_, u64>(2)?,
-                row.get::<_, Option<String>>(3)?,
-                row.get::<_, Option<String>>(4)?,
-            ))
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, u64>(1)?,
+                    row.get::<_, u64>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                ))
             },
         )
         .context("failed to query mailbox summaries")?;
@@ -2778,7 +2857,13 @@ fn mailbox_preview(body: &str) -> String {
     // separate words. Remove invisible direction/format marks from display only.
     let display_text: String = body
         .chars()
-        .map(|character| if character.is_whitespace() { ' ' } else { character })
+        .map(|character| {
+            if character.is_whitespace() {
+                ' '
+            } else {
+                character
+            }
+        })
         .filter(|character| {
             !character.is_control()
                 && !matches!(
@@ -2791,7 +2876,10 @@ fn mailbox_preview(body: &str) -> String {
                 )
         })
         .collect();
-    let single_line = display_text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let single_line = display_text
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
     let mut chars = single_line.chars();
     let preview = chars.by_ref().take(MAX_CHARS).collect::<String>();
     if chars.next().is_some() {

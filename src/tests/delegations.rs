@@ -279,9 +279,17 @@ fn queue_delegation_child_prompt(state: &AppState, child_session_id: &str, text:
     inner.sessions[child_index]
         .queued_prompts
         .push_back(QueuedPromptRecord {
+            engram_waiting: false,
+            promoted_message_index: None,
+            promotion_disposition_known: true,
+            engram_bind: None,
+            engram_evaluate: None,
+            engram_interrupted: false,
             source: QueuedPromptSource::User,
             attachments: Vec::new(),
             pending_prompt: PendingPrompt {
+                engram_interrupted: false,
+                is_engram_retained: false,
                 attachments: Vec::new(),
                 id: message_id,
                 timestamp: stamp_now(),
@@ -3685,9 +3693,17 @@ fn delegation_result_completion_clears_child_follow_up_queue() {
         inner.sessions[child_index]
             .queued_prompts
             .push_back(QueuedPromptRecord {
+                engram_waiting: false,
+                promoted_message_index: None,
+                promotion_disposition_known: true,
+                engram_bind: None,
+                engram_evaluate: None,
+                engram_interrupted: false,
                 source: QueuedPromptSource::User,
                 attachments: Vec::new(),
                 pending_prompt: PendingPrompt {
+                    engram_interrupted: false,
+                    is_engram_retained: false,
                     attachments: Vec::new(),
                     id: "queued-child-follow-up".to_owned(),
                     timestamp: stamp_now(),
@@ -3762,9 +3778,17 @@ fn delegation_failed_result_clears_child_follow_up_queue() {
         inner.sessions[child_index]
             .queued_prompts
             .push_back(QueuedPromptRecord {
+                engram_waiting: false,
+                promoted_message_index: None,
+                promotion_disposition_known: true,
+                engram_bind: None,
+                engram_evaluate: None,
+                engram_interrupted: false,
                 source: QueuedPromptSource::User,
                 attachments: Vec::new(),
                 pending_prompt: PendingPrompt {
+                    engram_interrupted: false,
+                    is_engram_retained: false,
                     attachments: Vec::new(),
                     id: "queued-child-follow-up".to_owned(),
                     timestamp: stamp_now(),
@@ -6127,9 +6151,17 @@ fn delegation_cancel_clears_queued_child_prompts() {
         inner.sessions[child_index]
             .queued_prompts
             .push_back(QueuedPromptRecord {
+                engram_waiting: false,
+                promoted_message_index: None,
+                promotion_disposition_known: true,
+                engram_bind: None,
+                engram_evaluate: None,
+                engram_interrupted: false,
                 source: QueuedPromptSource::User,
                 attachments: Vec::new(),
                 pending_prompt: PendingPrompt {
+                    engram_interrupted: false,
+                    is_engram_retained: false,
                     attachments: Vec::new(),
                     id: "queued-child-follow-up".to_owned(),
                     timestamp: stamp_now(),
@@ -6449,9 +6481,17 @@ fn removing_delegation_parent_deletes_child_runtime_and_session() {
             },
         );
         child.queued_prompts.push_back(QueuedPromptRecord {
+            engram_waiting: false,
+            promoted_message_index: None,
+            promotion_disposition_known: true,
+            engram_bind: None,
+            engram_evaluate: None,
+            engram_interrupted: false,
             source: QueuedPromptSource::User,
             attachments: Vec::new(),
             pending_prompt: PendingPrompt {
+                engram_interrupted: false,
+                is_engram_retained: false,
                 attachments: Vec::new(),
                 id: queued_prompt_id,
                 timestamp: stamp_now(),

@@ -1164,6 +1164,234 @@ describe("deferred session-store sync", () => {
     expect(setBackendConnectionState).toHaveBeenLastCalledWith("connected");
   });
 
+  it("hydrates every newer retained-admission revision and rejects private replay at the same revision", async () => {
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.spyOn(api, "fetchState").mockImplementation(
+      () => new Promise<StateResponse>(() => {}),
+    );
+    const fetchSessionTail = vi
+      .spyOn(api, "fetchSessionTail")
+      .mockImplementation(
+        () =>
+          new Promise<Awaited<ReturnType<typeof api.fetchSessionTail>>>(() => {}),
+      );
+    const initialSession = makeSession({
+      messagesLoaded: true,
+      messageCount: 0,
+      pendingPrompts: [
+        {
+          id: "queued",
+          timestamp: "10:00",
+          text: "Queued",
+          isEngramRetained: false,
+        },
+      ],
+      sessionMutationStamp: 1,
+      queueProjectionHash: "queue-unretained",
+    });
+    const params = makeLiveStateParams(initialSession);
+    params.adoptionRefs.latestStateRevisionRef.current = 2;
+    params.adoptionRefs.sessionsRef.current = [initialSession];
+
+    renderLiveStateHarness(params, () => {});
+    const eventSource =
+      EventSourceMock.instances[EventSourceMock.instances.length - 1];
+    fetchSessionTail.mockReset();
+
+    const emitAndHydrate = async (
+      revision: number,
+      sessionMutationStamp: number,
+      retained: boolean,
+      interrupted = false,
+    ) => {
+      fetchSessionTail.mockResolvedValueOnce({
+        revision,
+        serverInstanceId: "server-a",
+        session: makeSession({
+          messagesLoaded: true,
+          messageCount: 0,
+          queuePaused: interrupted,
+          pendingPrompts: [
+            {
+              id: "queued",
+              timestamp: "10:00",
+              text: "Queued",
+              isEngramRetained: retained,
+              engramInterrupted: interrupted,
+            },
+          ],
+          sessionMutationStamp,
+          queueProjectionHash: `queue-${revision}`,
+        }),
+      });
+      act(() => {
+        eventSource?.dispatchNamedEvent(
+          "state",
+          makeStateResponse(
+            makeSession({
+              sessionMutationStamp,
+              queuePaused: interrupted,
+              queueProjectionHash: `queue-${revision}`,
+            }),
+            revision,
+          ),
+        );
+      });
+      await waitFor(() =>
+        expect(
+          params.adoptionRefs.sessionsRef.current[0]?.pendingPrompts?.[0]
+            ?.isEngramRetained,
+        ).toBe(retained),
+      );
+    };
+
+    // Cold bind preparation, accepted-bind retirement, and evaluate
+    // preparation are three distinct backend publications.
+    await emitAndHydrate(3, 2, true);
+    await emitAndHydrate(4, 3, false);
+    await emitAndHydrate(5, 4, true);
+    expect(fetchSessionTail).toHaveBeenCalledTimes(3);
+
+    // Exact replay is host-private bookkeeping and must not manufacture a
+    // same-revision hydration or relax stale-event rejection.
+    act(() => {
+      eventSource?.dispatchNamedEvent(
+        "state",
+        makeStateResponse(
+          makeSession({
+            sessionMutationStamp: 4,
+            queueProjectionHash: "queue-5",
+          }),
+          5,
+        ),
+      );
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(fetchSessionTail).toHaveBeenCalledTimes(3);
+
+    // A failed revision-consuming commit publishes fail-closed uncertainty
+    // at its consumed revision, which must hydrate without another commit.
+    await emitAndHydrate(6, 5, true, true);
+    expect(params.adoptionRefs.sessionsRef.current[0]?.queuePaused).toBe(true);
+    expect(
+      params.adoptionRefs.sessionsRef.current[0]?.pendingPrompts?.[0]
+        ?.engramInterrupted,
+    ).toBe(true);
+  });
+
+  it("hydrates opaque queue additions, replacements, and removals without unrelated fetches", async () => {
+    vi.stubGlobal(
+      "EventSource",
+      EventSourceMock as unknown as typeof EventSource,
+    );
+    vi.spyOn(api, "fetchState").mockImplementation(
+      () => new Promise<StateResponse>(() => {}),
+    );
+    const fetchSessionTail = vi
+      .spyOn(api, "fetchSessionTail")
+      .mockImplementation(
+        () =>
+          new Promise<Awaited<ReturnType<typeof api.fetchSessionTail>>>(() => {}),
+      );
+    const initialSession = makeSession({
+      messagesLoaded: true,
+      messageCount: 0,
+      sessionMutationStamp: 1,
+      queueProjectionHash: "queue-empty-1",
+    });
+    const params = makeLiveStateParams(initialSession);
+    params.adoptionRefs.latestStateRevisionRef.current = 2;
+    params.adoptionRefs.sessionsRef.current = [initialSession];
+
+    renderLiveStateHarness(params, () => {});
+    const eventSource =
+      EventSourceMock.instances[EventSourceMock.instances.length - 1];
+    fetchSessionTail.mockReset();
+
+    const emitQueueProjection = async (
+      revision: number,
+      sessionMutationStamp: number,
+      queueProjectionHash: string,
+      promptId: string | null,
+    ) => {
+      fetchSessionTail.mockResolvedValueOnce({
+        revision,
+        serverInstanceId: "server-a",
+        session: makeSession({
+          messagesLoaded: true,
+          messageCount: 0,
+          pendingPrompts:
+            promptId === null
+              ? []
+              : [{ id: promptId, timestamp: "10:00", text: promptId }],
+          sessionMutationStamp,
+          queueProjectionHash,
+        }),
+      });
+      act(() => {
+        eventSource?.dispatchNamedEvent(
+          "state",
+          makeStateResponse(
+            makeSession({ sessionMutationStamp, queueProjectionHash }),
+            revision,
+          ),
+        );
+      });
+      await waitFor(() =>
+        expect(
+          params.adoptionRefs.sessionsRef.current[0]?.pendingPrompts?.[0]?.id ??
+            null,
+        ).toBe(promptId),
+      );
+    };
+
+    await emitQueueProjection(3, 2, "queue-a", "prompt-a");
+    await emitQueueProjection(4, 3, "queue-b", "prompt-b");
+    expect(fetchSessionTail).toHaveBeenCalledTimes(2);
+
+    act(() => {
+      eventSource?.dispatchNamedEvent(
+        "state",
+        makeStateResponse(
+          makeSession({
+            sessionMutationStamp: 4,
+            queueProjectionHash: "queue-b",
+          }),
+          5,
+        ),
+      );
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(fetchSessionTail).toHaveBeenCalledTimes(2);
+
+    act(() => {
+      eventSource?.dispatchNamedEvent(
+        "state",
+        makeStateResponse(
+          makeSession({
+            sessionMutationStamp: 5,
+            queueProjectionHash: "same-revision-private-change",
+          }),
+          5,
+        ),
+      );
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(fetchSessionTail).toHaveBeenCalledTimes(2);
+
+    await emitQueueProjection(6, 5, "queue-empty-2", null);
+    expect(fetchSessionTail).toHaveBeenCalledTimes(3);
+  });
+
   it("keeps reconnecting when automatic fallback adopts a newer idle snapshot", async () => {
     vi.useFakeTimers();
     vi.stubGlobal(

@@ -151,12 +151,41 @@ enum QueuedPromptSource {
 /// Represents a queued prompt record.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct QueuedPromptRecord {
+    // Global transcript position survives eviction from the resident window.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    promoted_message_index: Option<usize>,
+    // `None` is a definitive not-yet-promoted disposition only for current
+    // records. Legacy rows omit this marker and remain fail-closed when their
+    // possible transcript position has already been evicted.
+    #[serde(default, skip_serializing_if = "session_flag_is_false")]
+    promotion_disposition_known: bool,
+    #[serde(default, skip_serializing_if = "session_flag_is_false")]
+    engram_waiting: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    engram_bind: Option<EngramQueuedBind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    engram_evaluate: Option<EngramQueuedEvaluate>,
+    #[serde(default, skip_serializing_if = "session_flag_is_false")]
+    engram_interrupted: bool,
     source: QueuedPromptSource,
     attachments: Vec<PromptImageAttachment>,
     pending_prompt: PendingPrompt,
 }
 
 /// Syncs pending prompts.
+fn projected_pending_prompts(record: &SessionRecord) -> Vec<PendingPrompt> {
+    record
+        .queued_prompts
+        .iter()
+        .map(|queued| {
+            let mut prompt = queued.pending_prompt.clone();
+            prompt.engram_interrupted = queued.engram_interrupted;
+            prompt.is_engram_retained = queued.is_engram_retained();
+            prompt
+        })
+        .collect()
+}
+
 fn sync_pending_prompts(record: &mut SessionRecord) {
     if !record.is_local_session() {
         return;
@@ -195,11 +224,7 @@ fn sync_pending_prompts(record: &mut SessionRecord) {
     record
         .queued_peer_messages
         .retain(|prompt_id, _| live_prompt_ids.contains(&prompt_id.as_str()));
-    record.session.pending_prompts = record
-        .queued_prompts
-        .iter()
-        .map(|queued| queued.pending_prompt.clone())
-        .collect();
+    record.session.pending_prompts = projected_pending_prompts(record);
 }
 
 /// Sets approval decision on record.
@@ -394,7 +419,9 @@ fn user_input_request_preview_text(agent_name: &str, state: InteractionRequestSt
             format!("Input request canceled. {agent_name} is continuing\u{2026}")
         }
         InteractionRequestState::Declined => {
-            format!("Questions resolved without answers. {agent_name} is deciding on its own\u{2026}")
+            format!(
+                "Questions resolved without answers. {agent_name} is deciding on its own\u{2026}"
+            )
         }
     }
 }
@@ -525,6 +552,12 @@ fn queue_prompt_on_record_with_source(
         && attachments.is_empty();
     let prompt_id = pending_prompt.id.clone();
     record.queued_prompts.push_back(QueuedPromptRecord {
+        engram_waiting: false,
+        promoted_message_index: None,
+        promotion_disposition_known: true,
+        engram_bind: None,
+        engram_evaluate: None,
+        engram_interrupted: false,
         source,
         attachments,
         pending_prompt,
@@ -551,8 +584,13 @@ fn append_to_tail_peer_message_batch(
     source: QueuedPromptSource,
 ) -> bool {
     let Some((tail_id, tail_prompt)) = record.queued_prompts.back().and_then(|queued| {
-        (queued.source == source && queued.attachments.is_empty())
-            .then(|| (queued.pending_prompt.id.clone(), queued.pending_prompt.clone()))
+        (queued.source == source && queued.attachments.is_empty() && !queued.is_engram_retained())
+            .then(|| {
+                (
+                    queued.pending_prompt.id.clone(),
+                    queued.pending_prompt.clone(),
+                )
+            })
     }) else {
         return false;
     };
@@ -590,6 +628,8 @@ fn peer_message_batch_pending_prompt(messages: &[PendingPrompt]) -> PendingPromp
     });
 
     PendingPrompt {
+        engram_interrupted: false,
+        is_engram_retained: false,
         attachments: Vec::new(),
         id: first.id.clone(),
         timestamp: first.timestamp.clone(),
@@ -634,6 +674,13 @@ To reply, use the TermAl MCP tool `termal_send_to_session` with the `sessionId` 
 
 /// Handles prioritize user queued prompts.
 fn prioritize_user_queued_prompts(record: &mut SessionRecord) {
+    if record
+        .queued_prompts
+        .front()
+        .is_some_and(QueuedPromptRecord::is_engram_retained)
+    {
+        return;
+    }
     let mut user_prompts = VecDeque::new();
     let mut deferred_prompts = VecDeque::new();
 
@@ -656,6 +703,29 @@ fn clear_queued_prompts_by_source(record: &mut SessionRecord, source: QueuedProm
     record
         .queued_prompts
         .retain(|queued| queued.source != source);
+    if record.queued_prompts.len() != original_len {
+        sync_pending_prompts(record);
+    }
+}
+
+/// Clears queued prompts from `source`, except for the exact promoted head
+/// whose admitted provider handoff is owned by an in-flight public Stop.
+fn clear_queued_prompts_by_source_except_admission_owner(
+    record: &mut SessionRecord,
+    source: QueuedPromptSource,
+    admission_owner: Option<&EngramQueuedAdmissionOwner>,
+) {
+    let preserve_head = admission_owner.is_some_and(|owner| owner.matches(record))
+        && record.queued_prompts.front().is_some_and(|queued| {
+            queued.source == source && queued.promoted_message_index.is_some()
+        });
+    let original_len = record.queued_prompts.len();
+    let mut index = 0usize;
+    record.queued_prompts.retain(|queued| {
+        let retain = queued.source != source || (index == 0 && preserve_head);
+        index = index.saturating_add(1);
+        retain
+    });
     if record.queued_prompts.len() != original_len {
         sync_pending_prompts(record);
     }

@@ -49,9 +49,17 @@ fn queue_delegation_child_prompt(state: &AppState, child_session_id: &str, promp
         .session_mut_by_index(child_index)
         .expect("child session index should be valid");
     child.queued_prompts.push_back(QueuedPromptRecord {
+        engram_waiting: false,
+        promoted_message_index: None,
+        promotion_disposition_known: true,
+        engram_bind: None,
+        engram_evaluate: None,
+        engram_interrupted: false,
         source: QueuedPromptSource::User,
         attachments: Vec::new(),
         pending_prompt: PendingPrompt {
+            engram_interrupted: false,
+            is_engram_retained: false,
             attachments: Vec::new(),
             id: prompt_id.to_owned(),
             timestamp: stamp_now(),

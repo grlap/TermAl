@@ -12,6 +12,7 @@ import {
 } from "../EngramProjectSettingsPanel";
 import { isLocalRemoteId } from "../remotes";
 import type { EngramHostSettings, Project } from "../types";
+import { ThemedCombobox } from "./themed-combobox";
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -251,23 +252,17 @@ export function EngramPreferencesPanel({
             htmlFor="settings-engram-project"
           >
             <span>Project</span>
-            <select
+            <ThemedCombobox
               id="settings-engram-project"
               aria-label="Engram project"
-              className="themed-input"
               value={selectedProjectId}
-              onChange={(event) => setSelectedProjectId(event.target.value)}
-            >
-              {declaredProjects.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.name} —{" "}
-                  {describeProjectEngramState(
-                    project,
-                    verificationByProjectId[project.id],
-                  )}
-                </option>
-              ))}
-            </select>
+              onChange={setSelectedProjectId}
+              options={declaredProjects.map((project) => ({
+                value: project.id,
+                label: `${project.name} — ${describeProjectEngramState(project, verificationByProjectId[project.id])}`,
+                description: project.rootPath,
+              }))}
+            />
             <span className="create-session-field-hint">
               Base MCP and work context are enabled per declared repository;
               turn-gated control remains a separate opt-in.

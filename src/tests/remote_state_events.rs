@@ -1957,6 +1957,7 @@ fn remote_delta_hydration_in_flight_skips_narrow_unloaded_delta_apply() {
         message: remote_text_message("remote-message-1", "Delta should wait for hydration."),
         preview: "Delta should wait for hydration.".to_owned(),
         status: SessionStatus::Idle,
+        session_queue: None,
         session_mutation_stamp: Some(10),
     };
     let replay_key =
@@ -2110,6 +2111,7 @@ fn remote_delta_hydration_burst_uses_one_fetch_and_skips_duplicate_delta() {
                 message: remote_text_message("remote-message-1", "Hydrated body."),
                 preview: "Hydrated body.".to_owned(),
                 status: SessionStatus::Idle,
+                session_queue: None,
                 session_mutation_stamp: Some(10),
             },
         )

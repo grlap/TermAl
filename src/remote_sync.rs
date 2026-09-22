@@ -871,6 +871,7 @@ fn localize_remote_session_summary(
             .collect(),
         pending_prompts: Vec::new(),
         queue_paused: remote_session.queue_paused,
+        queue_projection_hash: remote_session.queue_projection_hash.clone(),
         session_mutation_stamp: remote_session.session_mutation_stamp,
         // Delegation records are intentionally not mirrored across remotes.
         parent_delegation_id: None,

@@ -415,6 +415,7 @@ fn remote_delta_replay_cache_skips_exact_replays_for_remaining_variants() {
                 message: remote_text_message("remote-message-1", "Created once."),
                 preview: "Created once.".to_owned(),
                 status: SessionStatus::Idle,
+                session_queue: None,
                 session_mutation_stamp: Some(11),
             },
             |published| match published {
@@ -785,6 +786,7 @@ fn remote_delta_replay_key_includes_state_mutating_payload_fields() {
         message: remote_text_message("remote-message-1", message_text),
         preview: preview.to_owned(),
         status: SessionStatus::Idle,
+        session_queue: None,
         session_mutation_stamp: Some(11),
     };
     assert_eq!(
@@ -796,6 +798,26 @@ fn remote_delta_replay_key_includes_state_mutating_payload_fields() {
         replay_key(message_created("first text", "same preview")),
         replay_key(message_created("second text", "same preview")),
         "MessageCreated replay identity must include the message payload"
+    );
+    assert_ne!(
+        replay_key(message_created("same text", "same preview")),
+        replay_key(DeltaEvent::MessageCreated {
+            revision: 4,
+            session_id: "remote-session-1".to_owned(),
+            message_id: "remote-message-1".to_owned(),
+            message_index: 0,
+            message_count: 1,
+            message: remote_text_message("remote-message-1", "same text"),
+            preview: "same preview".to_owned(),
+            status: SessionStatus::Idle,
+            session_queue: Some(SessionQueueDelta {
+                pending_prompts: Vec::new(),
+                queue_paused: true,
+                queue_projection_hash: Some("queue-replay".to_owned()),
+            }),
+            session_mutation_stamp: Some(11),
+        }),
+        "MessageCreated replay identity must include authoritative queue metadata"
     );
 
     let message_updated = |message_text: &str, preview: &str| DeltaEvent::MessageUpdated {
@@ -1085,6 +1107,7 @@ fn remote_delta_replay_key_isolates_individual_fingerprinted_fields() {
         message: remote_text_message("remote-message-1", message_text),
         preview: preview.to_owned(),
         status: SessionStatus::Idle,
+        session_queue: None,
         session_mutation_stamp: Some(11),
     };
     assert_ne!(
@@ -1472,6 +1495,7 @@ fn remote_delta_replay_key_includes_revision_and_routing_fields() {
             message: remote_text_message(message_id, "same message"),
             preview: "same preview".to_owned(),
             status: SessionStatus::Idle,
+            session_queue: None,
             session_mutation_stamp,
         }
     };

@@ -641,6 +641,7 @@ impl AppState {
                 message,
                 preview,
                 status,
+                session_queue,
                 session_mutation_stamp,
                 ..
             } => RemoteDeltaReplayPayload::MessageCreated {
@@ -651,6 +652,10 @@ impl AppState {
                 message_fingerprint: Self::remote_delta_payload_fingerprint(message)?,
                 preview_fingerprint: Self::remote_delta_text_fingerprint(preview),
                 status: Self::session_status_replay_code(*status),
+                session_queue_fingerprint: match session_queue {
+                    Some(queue) => Some(Self::remote_delta_payload_fingerprint(queue)?),
+                    None => None,
+                },
                 session_mutation_stamp: *session_mutation_stamp,
             },
             DeltaEvent::MessageUpdated {

@@ -262,6 +262,7 @@ function sameSessionSummary(previous: Session, next: Session) {
     (previous.liveActivity?.commandStatus ?? null) ===
       (next.liveActivity?.commandStatus ?? null) &&
     previous.sessionMutationStamp === next.sessionMutationStamp &&
+    previous.queueProjectionHash === next.queueProjectionHash &&
     previous.engramBootRecoveryPending === next.engramBootRecoveryPending &&
     previous.status === next.status &&
     previous.preview === next.preview &&
@@ -1308,6 +1309,10 @@ function reconcilePendingPrompts(
       previousPrompt.text === nextPrompt.text &&
       (previousPrompt.expandedText ?? null) ===
         (nextPrompt.expandedText ?? null) &&
+      Boolean(previousPrompt.isEngramRetained) ===
+        Boolean(nextPrompt.isEngramRetained) &&
+      Boolean(previousPrompt.engramInterrupted) ===
+        Boolean(nextPrompt.engramInterrupted) &&
       attachments === previousPrompt.attachments
     ) {
       if (previous[index]?.id !== nextPrompt.id) {

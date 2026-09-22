@@ -5,13 +5,17 @@ import type {
   ParallelAgentsMessage,
   Session,
   SessionLiveActivity,
+  PendingPrompt,
   TextMessage,
 } from "./types";
 import {
   reconcileSingleStateSessionSummary,
   reconcileStateSessionSummaries,
 } from "./session-reconcile";
-import { removePendingPromptForCreatedMessage } from "./app-utils";
+import {
+  pendingPromptContentsMatch,
+  removePendingPromptForCreatedMessage,
+} from "./app-utils";
 
 export const LIVE_SESSION_TRANSPORT_STALE_RESYNC_DELAY_MS = 15000;
 export const LIVE_SESSION_RESUME_WATCHDOG_DRIFT_MS = 5000;
@@ -276,19 +280,105 @@ function liveActivityAfterTranscriptDelta(
   return session.liveActivity ?? undefined;
 }
 
+function pendingPromptsAfterMessageCreated(
+  session: Session,
+  delta: MessageCreatedDelta,
+): PendingPrompt[] | undefined {
+  const residentMessageIds = new Set(
+    session.messages.map((message) => message.id),
+  );
+  const knownTranscriptEnd = Math.max(
+    session.messageCount ?? 0,
+    retainedTranscriptStartIndex(session) + session.messages.length,
+  );
+  const createdMessageWasAlreadyKnown =
+    residentMessageIds.has(delta.messageId) ||
+    delta.messageIndex < knownTranscriptEnd;
+  if (!delta.sessionQueue) {
+    return createdMessageWasAlreadyKnown
+      ? removePendingPromptForCreatedMessage(
+          session.pendingPrompts,
+          delta.message,
+          null,
+        )
+      : removePendingPromptForCreatedMessage(
+          session.pendingPrompts,
+          delta.message,
+        );
+  }
+
+  const authoritativePrompts = delta.sessionQueue.pendingPrompts;
+  const previousPrompts = session.pendingPrompts ?? [];
+  const previouslyVisibleAuthoritativeIds = new Set(
+    previousPrompts
+      .filter((prompt) => prompt.localOnly !== true)
+      .map((prompt) => prompt.id),
+  );
+  const matchedOptimisticIds = new Set<string>();
+
+  // A newly visible authoritative queue entry acknowledges exactly one
+  // matching optimistic send. Entries already visible before this delta are
+  // not fresh evidence: consuming another same-content send on replay would
+  // make repeated deltas non-idempotent.
+  for (const authoritativePrompt of authoritativePrompts) {
+    if (previouslyVisibleAuthoritativeIds.has(authoritativePrompt.id)) {
+      continue;
+    }
+    const optimisticMatch = previousPrompts.find(
+      (prompt) =>
+        prompt.localOnly === true &&
+        !matchedOptimisticIds.has(prompt.id) &&
+        !residentMessageIds.has(authoritativePrompt.id) &&
+        !(
+          authoritativePrompt.isEngramRetained === true &&
+          typeof prompt.transcriptEndIndexAtEnqueue === "number" &&
+          delta.messageIndex <= prompt.transcriptEndIndexAtEnqueue
+        ) &&
+        pendingPromptContentsMatch(prompt, authoritativePrompt),
+    );
+    if (optimisticMatch) {
+      matchedOptimisticIds.add(optimisticMatch.id);
+    }
+  }
+
+  const unmatchedOptimisticPrompts = previousPrompts.filter(
+    (prompt) =>
+      prompt.localOnly === true && !matchedOptimisticIds.has(prompt.id),
+  );
+  const optimisticPromptsAfterMessageEvidence = createdMessageWasAlreadyKnown
+    ? unmatchedOptimisticPrompts
+    : removePendingPromptForCreatedMessage(
+        unmatchedOptimisticPrompts,
+        delta.message,
+      ) ?? [];
+  const merged = [
+    ...authoritativePrompts,
+    ...optimisticPromptsAfterMessageEvidence,
+  ];
+  return merged.length > 0 ? merged : undefined;
+}
+
 function applyMetadataOnlySessionDelta(
   session: Session,
   delta: TranscriptDelta,
 ): Session {
   const pendingPrompts =
     delta.type === "messageCreated"
-      ? removePendingPromptForCreatedMessage(session.pendingPrompts, delta.message)
+      ? pendingPromptsAfterMessageCreated(session, delta)
       : session.pendingPrompts;
   const base = {
     ...session,
     liveActivity: liveActivityAfterTranscriptDelta(session, delta),
     messageCount: delta.messageCount,
     pendingPrompts,
+    queuePaused:
+      delta.type === "messageCreated" && delta.sessionQueue
+        ? delta.sessionQueue.queuePaused
+        : session.queuePaused,
+    queueProjectionHash:
+      delta.type === "messageCreated" && delta.sessionQueue
+        ? delta.sessionQueue.queueProjectionHash ?? session.queueProjectionHash
+        : session.queueProjectionHash,
     sessionMutationStamp: resolveSessionMutationStamp(
       session,
       delta.sessionMutationStamp,
@@ -467,7 +557,12 @@ function messageCreatedDeltaIsNoOp(
       delta.status,
       delta.sessionMutationStamp,
     ) &&
-    !session.pendingPrompts?.some((prompt) => prompt.id === delta.messageId)
+    serializedValuesMatch(
+      session.pendingPrompts,
+      pendingPromptsAfterMessageCreated(session, delta),
+    ) &&
+    (delta.sessionQueue?.queuePaused ?? session.queuePaused) ===
+      session.queuePaused
   );
 }
 
@@ -545,10 +640,7 @@ function applyMessageCreatedDeltaToRetainedTranscript(
     updatedMessages.splice(localMessageIndex, 0, delta.message);
   }
 
-  const pendingPrompts = removePendingPromptForCreatedMessage(
-    session.pendingPrompts,
-    delta.message,
-  );
+  const pendingPrompts = pendingPromptsAfterMessageCreated(session, delta);
 
   const nextMessageCount = Math.max(
     session.messageCount ?? 0,
@@ -569,6 +661,9 @@ function applyMessageCreatedDeltaToRetainedTranscript(
         : retainedTranscriptStartIndex(session),
     messageCount: nextMessageCount,
     pendingPrompts,
+    queuePaused: delta.sessionQueue?.queuePaused ?? session.queuePaused,
+    queueProjectionHash:
+      delta.sessionQueue?.queueProjectionHash ?? session.queueProjectionHash,
     preview: delta.preview,
     status: delta.status,
     liveActivity: liveActivityAfterTranscriptDelta(session, delta),

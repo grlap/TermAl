@@ -4258,6 +4258,11 @@ textarea {
   background: var(--tab-active-bg);
 }
 
+.combo-option:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .combo-option-copy {
   min-width: 0;
   display: grid;

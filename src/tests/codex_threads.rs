@@ -999,6 +999,8 @@ fn codex_thread_actions_require_a_live_idle_thread() {
         queue_prompt_on_record(
             &mut inner.sessions[index],
             PendingPrompt {
+                engram_interrupted: false,
+                is_engram_retained: false,
                 attachments: Vec::new(),
                 id: queued_message_id,
                 timestamp: stamp_now(),
