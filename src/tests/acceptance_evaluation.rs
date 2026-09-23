@@ -1976,7 +1976,8 @@ fn acceptance_request_applies_request_defaults_and_real_provider_precedence() {
                 .as_mut()
                 .unwrap()
                 .acceptance_evaluation = Some(AcceptanceEvaluatorDefaults {
-                default_mode: Some(AcceptanceEvaluationMode::SubAgent), // old persisted unsupported defaults are ignored
+                // Old persisted unsupported defaults are ignored.
+                default_mode: Some(AcceptanceEvaluationMode::SubAgent),
                 evaluator_agent: default_agent,
                 evaluator_model: default_model.map(str::to_owned),
             });

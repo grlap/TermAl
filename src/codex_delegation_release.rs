@@ -312,62 +312,123 @@ impl CodexDelegationReleaseTicket {
         let thread_id = self.thread_id.clone();
         let runtime = self.runtime.clone();
         let terminal = self.terminal.clone();
-        let spawned = std::thread::Builder::new().name("termal-child-thread-release".to_owned()).spawn(move || {
-            // turn/completed may still own runtime.sessions on the reader.
-            // Finish local detach off-reader before archive or follow-up.
-            release.detach_on_worker();
-            let mut sent = false;
-            let mut rejected = false;
-            let mut confirmed_not_archived = false;
-            let outcome = (|| -> Result<(), ApiError> {
-                release.confirm_durability(&state, &terminal, connected, waiter)?;
-                let current = state.shared_codex_runtime.lock().expect("shared Codex runtime mutex poisoned")
-                    .as_ref().is_some_and(|current| current.runtime_id == runtime.runtime_id);
-                if !current { return Err(ApiError::conflict("Codex runtime changed before child thread archive")); }
-                release.record_archive_origin(&runtime);
-                let (response_tx, response_rx) = mpsc::channel();
-                runtime.input_tx.send(CodexRuntimeCommand::JsonRpcRequest {
-                    method: "thread/archive".to_owned(), params: json!({"threadId":thread_id}),
-                    timeout: CODEX_CHILD_ARCHIVE_RPC_TIMEOUT, response_tx,
-                }).map_err(|error| ApiError::internal(format!("failed to queue child thread archive: {error}")))?;
-                sent = true; // Enqueued: loss of a reply is now ambiguous.
-                release.compensation_pending.store(false, std::sync::atomic::Ordering::Release);
-                let reply = response_rx.recv_timeout(CODEX_CHILD_ARCHIVE_REPLY_TIMEOUT)
-                    .map_err(|error| match error {
-                        mpsc::RecvTimeoutError::Timeout => CodexResponseError::Timeout(error.to_string()),
-                        mpsc::RecvTimeoutError::Disconnected => CodexResponseError::Transport(error.to_string()),
-                    }).and_then(|reply| reply);
-                let current = state.shared_codex_runtime.lock().expect("shared Codex runtime mutex poisoned")
-                    .as_ref().is_some_and(|current| current.runtime_id == runtime.runtime_id);
-                if !current { return Err(ApiError::conflict("Codex runtime changed during child thread archive")); }
-                if let Err(error) = reply {
-                    rejected = matches!(error, CodexResponseError::JsonRpc(_));
-                    eprintln!("codex child archive> session={session_id} thread={thread_id} error={error}");
-                    if !state.probe_codex_archive_state(&thread_id, true) {
-                        confirmed_not_archived = rejected && state.probe_codex_archive_state(&thread_id, false);
-                        return Err(ApiError::internal(format!("child thread archive is unconfirmed: {error}")));
+        let spawned = std::thread::Builder::new()
+            .name("termal-child-thread-release".to_owned())
+            .spawn(move || {
+                // turn/completed may still own runtime.sessions on the reader.
+                // Finish local detach off-reader before archive or follow-up.
+                release.detach_on_worker();
+                let mut sent = false;
+                let mut rejected = false;
+                let mut confirmed_not_archived = false;
+                let outcome = (|| -> Result<(), ApiError> {
+                    release.confirm_durability(&state, &terminal, connected, waiter)?;
+                    let current = state
+                        .shared_codex_runtime
+                        .lock()
+                        .expect("shared Codex runtime mutex poisoned")
+                        .as_ref()
+                        .is_some_and(|current| current.runtime_id == runtime.runtime_id);
+                    if !current {
+                        return Err(ApiError::conflict(
+                            "Codex runtime changed before child thread archive",
+                        ));
                     }
+                    release.record_archive_origin(&runtime);
+                    let (response_tx, response_rx) = mpsc::channel();
+                    runtime
+                        .input_tx
+                        .send(CodexRuntimeCommand::JsonRpcRequest {
+                            method: "thread/archive".to_owned(),
+                            params: json!({"threadId":thread_id}),
+                            timeout: CODEX_CHILD_ARCHIVE_RPC_TIMEOUT,
+                            response_tx,
+                        })
+                        .map_err(|error| {
+                            ApiError::internal(format!(
+                                "failed to queue child thread archive: {error}"
+                            ))
+                        })?;
+                    sent = true; // Enqueued: loss of a reply is now ambiguous.
+                    release
+                        .compensation_pending
+                        .store(false, std::sync::atomic::Ordering::Release);
+                    let reply = response_rx
+                        .recv_timeout(CODEX_CHILD_ARCHIVE_REPLY_TIMEOUT)
+                        .map_err(|error| match error {
+                            mpsc::RecvTimeoutError::Timeout => {
+                                CodexResponseError::Timeout(error.to_string())
+                            }
+                            mpsc::RecvTimeoutError::Disconnected => {
+                                CodexResponseError::Transport(error.to_string())
+                            }
+                        })
+                        .and_then(|reply| reply);
+                    let current = state
+                        .shared_codex_runtime
+                        .lock()
+                        .expect("shared Codex runtime mutex poisoned")
+                        .as_ref()
+                        .is_some_and(|current| current.runtime_id == runtime.runtime_id);
+                    if !current {
+                        return Err(ApiError::conflict(
+                            "Codex runtime changed during child thread archive",
+                        ));
+                    }
+                    if let Err(error) = reply {
+                        rejected = matches!(error, CodexResponseError::JsonRpc(_));
+                        eprintln!(
+                            "codex child archive> session={session_id} thread={thread_id} \
+                             error={error}"
+                        );
+                        if !state.probe_codex_archive_state(&thread_id, true) {
+                            confirmed_not_archived =
+                                rejected && state.probe_codex_archive_state(&thread_id, false);
+                            return Err(ApiError::internal(format!(
+                                "child thread archive is unconfirmed: {error}"
+                            )));
+                        }
+                    }
+                    let mut inner = state.inner.lock().expect("state mutex poisoned");
+                    let Some(index) = inner.find_session_index(&session_id) else {
+                        return Ok(());
+                    };
+                    let record = &inner.sessions[index];
+                    if record.external_session_id.as_deref() != Some(&thread_id)
+                        || !record
+                            .codex_delegation_release
+                            .as_ref()
+                            .is_some_and(|current| Arc::ptr_eq(current, &release))
+                    {
+                        return Err(ApiError::conflict(
+                            "Codex child thread changed during archive",
+                        ));
+                    }
+                    set_record_codex_thread_state(
+                        inner
+                            .session_mut_by_index(index)
+                            .expect("validated child session index"),
+                        CodexThreadState::Archived,
+                    );
+                    state.commit_locked(&mut inner).map_err(|error| {
+                        ApiError::internal(format!(
+                            "failed persisting released child thread: {error:#}"
+                        ))
+                    })?;
+                    Ok(())
+                })()
+                .map_err(|error| error.message);
+                if let Err(error) = &outcome {
+                    eprintln!("codex child release> session={session_id} error={error}");
                 }
-                let mut inner = state.inner.lock().expect("state mutex poisoned");
-                let Some(index) = inner.find_session_index(&session_id) else { return Ok(()); };
-                let record = &inner.sessions[index];
-                if record.external_session_id.as_deref() != Some(&thread_id)
-                    || !record.codex_delegation_release.as_ref().is_some_and(|current| Arc::ptr_eq(current, &release)) {
-                    return Err(ApiError::conflict("Codex child thread changed during archive"));
-                }
-                set_record_codex_thread_state(inner.session_mut_by_index(index).expect("validated child session index"), CodexThreadState::Archived);
-                state.commit_locked(&mut inner).map_err(|error| ApiError::internal(format!("failed persisting released child thread: {error:#}")))?;
-                Ok(())
-            })().map_err(|error| error.message);
-            if let Err(error) = &outcome { eprintln!("codex child release> session={session_id} error={error}"); }
-            release.finish(match outcome {
-                Ok(()) => CodexReleaseOutcome::Archived,
-                Err(_) if confirmed_not_archived => CodexReleaseOutcome::NotArchived,
-                Err(error) if rejected => CodexReleaseOutcome::Rejected(error),
-                Err(error) if sent => CodexReleaseOutcome::Ambiguous(error),
-                Err(error) => CodexReleaseOutcome::NotSent(error),
+                release.finish(match outcome {
+                    Ok(()) => CodexReleaseOutcome::Archived,
+                    Err(_) if confirmed_not_archived => CodexReleaseOutcome::NotArchived,
+                    Err(error) if rejected => CodexReleaseOutcome::Rejected(error),
+                    Err(error) if sent => CodexReleaseOutcome::Ambiguous(error),
+                    Err(error) => CodexReleaseOutcome::NotSent(error),
+                });
             });
-        });
         if let Err(error) = spawned {
             self.release.finish(CodexReleaseOutcome::NotSent(format!(
                 "failed to start child archive reconciliation: {error}"

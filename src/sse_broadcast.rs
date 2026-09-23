@@ -162,7 +162,8 @@ impl AppState {
         Ok(inner.revision)
     }
 
-    // Internal bookkeeping changes should be persisted without advancing the client-visible revision.
+    // Internal bookkeeping changes should be persisted without advancing the
+    // client-visible revision.
     /// Persists internal locked.
     ///
     /// Sends a `PersistRequest::Delta` wake signal to the background
@@ -288,10 +289,10 @@ impl AppState {
         }
     }
 
-    // Delta-producing changes advance the revision without publishing a full snapshot; the delta event
-    // carries the new revision instead. Persisting the full state on every streamed chunk makes
-    // long responses increasingly slow, so durable persistence is deferred until the next
-    // non-delta commit.
+    // Delta-producing changes advance the revision without publishing a full
+    // snapshot; the delta event carries the new revision instead. Persisting the
+    // full state on every streamed chunk makes long responses increasingly slow,
+    // so durable persistence is deferred until the next non-delta commit.
     /// Commit variant that bumps the revision + wakes the persist
     /// thread but broadcasts a delta event instead of a full snapshot.
     ///

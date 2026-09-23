@@ -1110,8 +1110,7 @@ fn remote_snapshot_sync_preserves_existing_orchestrators_when_localization_fails
 // Guards against the retention pass removing proxy sessions still in
 // active use by a mirrored orchestrator.
 #[test]
-fn remote_snapshot_sync_preserves_sessions_referenced_by_existing_orchestrators_when_localization_fails()
- {
+fn remote_snapshot_sync_preserves_sessions_referenced_by_orchestrators_when_localization_fails() {
     let state = test_app_state();
     let remote = RemoteConfig {
         id: "ssh-lab".to_owned(),

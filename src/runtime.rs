@@ -880,6 +880,9 @@ struct SharedCodexSessions {
     cleanup_tx: mpsc::Sender<SharedCodexCompletedTurnCleanup>,
 }
 
+type SharedCodexSessionsGuard<'a> =
+    std::sync::MutexGuard<'a, HashMap<String, SharedCodexSessionState>>;
+
 impl SharedCodexSessions {
     fn new() -> SharedCodexSessionMap {
         let (cleanup_tx, cleanup_rx) = mpsc::channel();
@@ -891,17 +894,11 @@ impl SharedCodexSessions {
         sessions
     }
 
-    fn lock(
-        &self,
-    ) -> std::sync::LockResult<std::sync::MutexGuard<'_, HashMap<String, SharedCodexSessionState>>>
-    {
+    fn lock(&self) -> std::sync::LockResult<SharedCodexSessionsGuard<'_>> {
         self.inner.lock()
     }
 
-    fn try_lock(
-        &self,
-    ) -> std::sync::TryLockResult<std::sync::MutexGuard<'_, HashMap<String, SharedCodexSessionState>>>
-    {
+    fn try_lock(&self) -> std::sync::TryLockResult<SharedCodexSessionsGuard<'_>> {
         self.inner.try_lock()
     }
 

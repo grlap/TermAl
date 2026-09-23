@@ -140,15 +140,18 @@ async fn verify_delegation_review_freeze(
     .await
 }
 
-async fn run_review_freeze_request(
+async fn run_review_freeze_request<V>(
     child: String,
     state: AppState,
     request: Result<Json<ReviewFreezeRequest>, JsonRejection>,
     permits: Arc<tokio::sync::Semaphore>,
-    verify: impl FnOnce(AppState, &str, ReviewFreezeRequest) -> Result<ReviewFreezeResponse, ApiError>
-    + Send
-    + 'static,
-) -> Result<Json<ReviewFreezeResponse>, ApiError> {
+    verify: V,
+) -> Result<Json<ReviewFreezeResponse>, ApiError>
+where
+    V: FnOnce(AppState, &str, ReviewFreezeRequest) -> Result<ReviewFreezeResponse, ApiError>
+        + Send
+        + 'static,
+{
     let Json(request) = request.map_err(|e| api_json_rejection("review freeze", e))?;
     let permit = permits.try_acquire_owned().map_err(|_| {
         ApiError::from_status(

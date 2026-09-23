@@ -2485,9 +2485,17 @@ impl MailboxStore {
                 "SELECT EXISTS(SELECT 1 FROM mailbox_messages m WHERE m.mailbox_id = ?1
                  AND m.sequence > ?2 AND m.sequence <= ?3
                  AND NOT (m.target_session_id = ?4 AND COALESCE(m.topic, '') = ?5)
-                 AND NOT EXISTS(SELECT 1 FROM mailbox_read_pages p WHERE p.mailbox_id = m.mailbox_id
-                     AND p.session_id = ?4 AND p.after_sequence < m.sequence AND p.through_sequence >= m.sequence))",
-                rusqlite::params![mailbox_id, current, processed_through, session_id, DELEGATION_REVIEW_RESULT_TOPIC],
+                 AND NOT EXISTS(SELECT 1 FROM mailbox_read_pages p
+                     WHERE p.mailbox_id = m.mailbox_id AND p.session_id = ?4
+                     AND p.after_sequence < m.sequence
+                     AND p.through_sequence >= m.sequence))",
+                rusqlite::params![
+                    mailbox_id,
+                    current,
+                    processed_through,
+                    session_id,
+                    DELEGATION_REVIEW_RESULT_TOPIC
+                ],
                 |row| row.get::<_, bool>(0),
             )?;
             if unissued {

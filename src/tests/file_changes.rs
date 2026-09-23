@@ -435,9 +435,12 @@ fn assert_file_change_diagnostics_after_unlock(grace: bool, fail_commit: bool) {
     if grace {
         assert!(record.active_turn_file_changes.is_empty());
         assert!(record.active_turn_file_change_grace_deadline.is_none());
-        assert!(
-            matches!(record.session.messages.last(), Some(Message::FileChanges { files, .. }) if files.len() == 1 && files[0].path == path)
-        );
+        assert!(match record.session.messages.last() {
+            Some(Message::FileChanges { files, .. }) => {
+                files.len() == 1 && files[0].path == path
+            }
+            _ => false,
+        });
     } else {
         assert_eq!(record.active_turn_file_changes.len(), 1);
         assert!(record.active_turn_file_changes.contains_key(&path));

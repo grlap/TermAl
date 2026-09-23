@@ -387,8 +387,13 @@ fn root_direct_and_queued_turns_bind_evaluate_begin_and_complete() {
         let inner = state.inner.lock().unwrap();
         let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
         assert!(record.engram.active_grant_id.is_none());
-        assert!(record.session.messages.iter().any(|m| matches!(m, Message::EngramControl { card, .. }
-            if card.stage == EngramControlStage::Checkpoint && card.decision == EngramControlCardDecision::Grant)));
+        assert!(record.session.messages.iter().any(|m| match m {
+            Message::EngramControl { card, .. } => {
+                card.stage == EngramControlStage::Checkpoint
+                    && card.decision == EngramControlCardDecision::Grant
+            }
+            _ => false,
+        }));
     }
 }
 

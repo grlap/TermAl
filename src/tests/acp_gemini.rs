@@ -835,9 +835,10 @@ fn disable_gemini_interactive_shell_in_settings_builds_shell_path_from_empty_obj
 }
 
 // Pins `load_gemini_settings_json` returning `{}` (not panicking or propagating
-// the parse error) when the file contains broken JSON, and `gemini_selected_auth_type_from_settings_file`
-// returning `None`. Guards against a malformed user settings file bricking
-// TermAl's own override-file write or auth inspection on Windows.
+// the parse error) when the file contains broken JSON, and
+// `gemini_selected_auth_type_from_settings_file` returning `None`. Guards against
+// a malformed user settings file bricking TermAl's own override-file write or
+// auth inspection on Windows.
 #[test]
 fn load_gemini_settings_json_ignores_malformed_input() {
     let temp_root = TestTempRoot::create("termal-gemini-settings-invalid");

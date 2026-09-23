@@ -729,8 +729,9 @@ fn spawn_claude_runtime(
                         let action_result =
                             finish_claude_assistant_text_stream(&mut turn_state, &mut recorder)
                                 .and_then(|_| {
+                                    use ClaudeControlRequestAction as Action;
                                     match action {
-                                        ClaudeControlRequestAction::QueueApproval {
+                                        Action::QueueApproval {
                                             title,
                                             command,
                                             detail,
@@ -738,7 +739,7 @@ fn spawn_claude_runtime(
                                         } => recorder.push_claude_approval(
                                             &title, &command, &detail, approval,
                                         ),
-                                        ClaudeControlRequestAction::QueueUserInput {
+                                        Action::QueueUserInput {
                                             title,
                                             detail,
                                             questions,
@@ -746,18 +747,17 @@ fn spawn_claude_runtime(
                                         } => recorder.push_claude_user_input_request(
                                             &title, &detail, questions, request,
                                         ),
-                                        ClaudeControlRequestAction::Respond(decision) => {
-                                            reader_input_tx
-                                                .send(ClaudeRuntimeCommand::PermissionResponse(
-                                                    decision,
-                                                ))
-                                                .map_err(|err| {
-                                                    anyhow!(
-                                                        "failed to auto-approve Claude tool request: {err}"
-                                                    )
-                                                })
-                                        }
-                                        ClaudeControlRequestAction::RecordSelfResolvedQuestion {
+                                        Action::Respond(decision) => reader_input_tx
+                                            .send(ClaudeRuntimeCommand::PermissionResponse(
+                                                decision,
+                                            ))
+                                            .map_err(|err| {
+                                                anyhow!(
+                                                    "failed to auto-approve Claude tool \
+                                                     request: {err}"
+                                                )
+                                            }),
+                                        Action::RecordSelfResolvedQuestion {
                                             title,
                                             detail,
                                             questions,
@@ -773,12 +773,13 @@ fn spawn_claude_runtime(
                                                     response,
                                                 ))
                                                 .map_err(|err| {
-                                                anyhow!(
-                                                    "failed to self-resolve Claude question: {err}"
-                                                )
-                                            })
+                                                    anyhow!(
+                                                        "failed to self-resolve Claude \
+                                                         question: {err}"
+                                                    )
+                                                })
                                         }
-                                        ClaudeControlRequestAction::RecordSelfResolvedQuestionError {
+                                        Action::RecordSelfResolvedQuestionError {
                                             detail,
                                             response,
                                         } => {
@@ -789,7 +790,8 @@ fn spawn_claude_runtime(
                                                 ))
                                                 .map_err(|err| {
                                                     anyhow!(
-                                                        "failed to self-resolve malformed Claude question: {err}"
+                                                        "failed to self-resolve malformed Claude \
+                                                         question: {err}"
                                                     )
                                                 })
                                         }

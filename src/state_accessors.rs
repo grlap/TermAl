@@ -119,11 +119,14 @@ fn conversation_overview_message_metadata(message: &Message) -> (ConversationOve
             (author, ConversationOverviewKind::Error)
         }
         Message::Approval {
-            author,
-            decision:
-                ApprovalDecision::Interrupted | ApprovalDecision::Canceled | ApprovalDecision::Rejected,
-            ..
-        } => (author, ConversationOverviewKind::Error),
+            author, decision, ..
+        } if matches!(
+            decision,
+            ApprovalDecision::Interrupted | ApprovalDecision::Canceled | ApprovalDecision::Rejected
+        ) =>
+        {
+            (author, ConversationOverviewKind::Error)
+        }
         // Deliberate: Declined is a benign answerless resolution, whether the
         // user skipped or TermAl self-resolved an unattended question. It
         // does not match this error guard and falls through to Text below.

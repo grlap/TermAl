@@ -728,8 +728,15 @@ impl AppState {
                         owner,
                         "Recovered grant checkpoint",
                     )?;
-                    if !matches!(response, EngramTurnCheckpointResponse::Checkpointed { receipt } if receipt.grant_id == grant_id)
-                    {
+                    let checkpointed = match response {
+                        EngramTurnCheckpointResponse::Checkpointed { receipt }
+                            if receipt.grant_id == grant_id =>
+                        {
+                            true
+                        }
+                        _ => false,
+                    };
+                    if !checkpointed {
                         return Err(EngramTransportError::local_state(
                             "Interrupted grant checkpoint was not acknowledged",
                         ));
@@ -1022,8 +1029,13 @@ impl AppState {
                     "Queued Engram evaluation belongs to different settings; reconcile or cancel the retained prompt",
                 ));
             }
-            if !matches!(&prepared.request, EngramControlRequest::TurnEvaluate { intent_fingerprint, .. } if intent_fingerprint == &intent.intent_fingerprint)
-            {
+            let matches_queued_intent = match &prepared.request {
+                EngramControlRequest::TurnEvaluate {
+                    intent_fingerprint, ..
+                } if intent_fingerprint == &intent.intent_fingerprint => true,
+                _ => false,
+            };
+            if !matches_queued_intent {
                 return Err(EngramTransportError::local_state(
                     "Retained evaluation does not match the queued prompt",
                 ));

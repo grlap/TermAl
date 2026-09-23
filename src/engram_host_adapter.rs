@@ -4221,27 +4221,37 @@ impl AppState {
                                 );
                             };
                             let reevaluate_started = std::time::Instant::now();
-                            let mut reevaluated = self.retire_queued_engram_evaluation(session_id, admission_owner.as_ref())
-                                .and_then(|()| self.queued_engram_evaluate_request(
-                                    &reevaluate_target,
-                                    &EngramTurnIntentSnapshot {
-                                        session_id: session_id.to_owned(),
-                                        dispatch_generation: pending.dispatch_generation,
-                                        intent_fingerprint: pending.intent_fingerprint.clone(),
-                                    },
-                                    admission_owner.as_ref().ok_or_else(|| {
-                                        EngramTransportError::local_state(
-                                            "Re-evaluation owner disappeared",
-                                        )
-                                    })?,
-                                    EngramControlRequest::TurnEvaluate {
-                                        routing_token: reevaluate_routing_token,
-                                        idempotency_key: format!("termal-reevaluate:{session_id}:{}:{grant_id}", pending.dispatch_generation),
-                                        intent_fingerprint: pending.intent_fingerprint.clone(),
-                                        purpose: "ordinary".to_owned(),
-                                        requested_effects: reevaluate_target.effects.clone(),
-                                        resource_intents: Vec::new(),
-                                    }))
+                            let mut reevaluated = self
+                                .retire_queued_engram_evaluation(
+                                    session_id,
+                                    admission_owner.as_ref(),
+                                )
+                                .and_then(|()| {
+                                    self.queued_engram_evaluate_request(
+                                        &reevaluate_target,
+                                        &EngramTurnIntentSnapshot {
+                                            session_id: session_id.to_owned(),
+                                            dispatch_generation: pending.dispatch_generation,
+                                            intent_fingerprint: pending.intent_fingerprint.clone(),
+                                        },
+                                        admission_owner.as_ref().ok_or_else(|| {
+                                            EngramTransportError::local_state(
+                                                "Re-evaluation owner disappeared",
+                                            )
+                                        })?,
+                                        EngramControlRequest::TurnEvaluate {
+                                            routing_token: reevaluate_routing_token,
+                                            idempotency_key: format!(
+                                                "termal-reevaluate:{session_id}:{}:{grant_id}",
+                                                pending.dispatch_generation
+                                            ),
+                                            intent_fingerprint: pending.intent_fingerprint.clone(),
+                                            purpose: "ordinary".to_owned(),
+                                            requested_effects: reevaluate_target.effects.clone(),
+                                            resource_intents: Vec::new(),
+                                        },
+                                    )
+                                })
                                 .and_then(|request| {
                                     self.require_queued_engram_owner(
                                         session_id,
@@ -4252,9 +4262,19 @@ impl AppState {
                                         })?,
                                         "Engram re-evaluation transmission",
                                     )?;
-                                    let timeout = reevaluate_target.remaining_dispatch_timeout(dispatch_budget_started_at)
-                                        .ok_or_else(|| EngramTransportError::deadline("Engram admission budget exhausted before re-evaluation"))?;
-                                    reevaluate_target.adapter.request(&reevaluate_target.connection, &request, timeout)
+                                    let timeout = reevaluate_target
+                                        .remaining_dispatch_timeout(dispatch_budget_started_at)
+                                        .ok_or_else(|| {
+                                            EngramTransportError::deadline(
+                                                "Engram admission budget exhausted \
+                                                 before re-evaluation",
+                                            )
+                                        })?;
+                                    reevaluate_target.adapter.request(
+                                        &reevaluate_target.connection,
+                                        &request,
+                                        timeout,
+                                    )
                                 })
                                 .and_then(parse_engram_result::<EngramTurnDecisionResponse>);
                             if !admission_owner.as_ref().is_some_and(|owner| {
@@ -4700,11 +4720,22 @@ impl AppState {
                 sync_pending_prompts(record);
             }
             if let Some(pending) = &record.engram.pending_dispatch.clone() {
-                if matches!(&message, Message::EngramControl { card, .. }
-                    if engram_admission_disposition(card) == EngramAdmissionDisposition::Reject
-                        || (engram_admission_disposition(card) == EngramAdmissionDisposition::Reconcile
-                            && !record.queued_prompts.front().is_some_and(QueuedPromptRecord::is_engram_retained)))
-                {
+                let retires_promoted_head = match &message {
+                    Message::EngramControl { card, .. }
+                        if engram_admission_disposition(card)
+                            == EngramAdmissionDisposition::Reject
+                            || (engram_admission_disposition(card)
+                                == EngramAdmissionDisposition::Reconcile
+                                && !record
+                                    .queued_prompts
+                                    .front()
+                                    .is_some_and(QueuedPromptRecord::is_engram_retained)) =>
+                    {
+                        true
+                    }
+                    _ => false,
+                };
+                if retires_promoted_head {
                     retire_promoted_engram_head(record, &pending.intent_fingerprint);
                 }
             }

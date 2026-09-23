@@ -783,11 +783,12 @@ impl AppState {
                 .is_some_and(KillableRuntime::stop_failure_is_best_effort);
             let stop_token = record.runtime.runtime_token();
 
-            // Preserve the public session status until the stop succeeds so borrowed state reads
-            // never observe a contradictory transient Idle snapshot while shutdown is still pending.
-            // `deferred_stop_callbacks` is guaranteed to be empty here because the guard above
-            // already returned if `runtime_stop_in_progress` was true (and callbacks can only
-            // defer when that flag is set).
+            // Preserve the public session status until the stop succeeds so borrowed
+            // state reads never observe a contradictory transient Idle snapshot while
+            // shutdown is still pending. `deferred_stop_callbacks` is guaranteed to be
+            // empty here because the guard above already returned if
+            // `runtime_stop_in_progress` was true (and callbacks can only defer when
+            // that flag is set).
             let stop_owner_generation = match requested_claim.as_ref() {
                 Some(claim) => claim.owner_generation,
                 None => match stop_token.as_ref() {
@@ -835,18 +836,20 @@ impl AppState {
                             // transferred revocation fence instead of retrying an
                             // interrupt that can only no-op after detachment.
                             let mut outcome = self.finalize_revoked_engram_mcp_runtimes(
-                            EngramMcpRuntimeRevocationShutdownBatch {
-                                shutdowns: vec![EngramMcpRuntimeRevocationShutdown {
-                                    target,
-                                    shutdown_error: Some(format!(
-                                        "shared Codex interrupt failed after detach; the old thread may remain alive with its prior MCP capabilities until Codex unloads it: {err:#}"
-                                    )),
-                                    retain_runtime_for_retry: false,
-                                    suppress_codex_thread_resume: true,
-                                }],
-                                pending_session_ids: Vec::new(),
-                            },
-                        );
+                                EngramMcpRuntimeRevocationShutdownBatch {
+                                    shutdowns: vec![EngramMcpRuntimeRevocationShutdown {
+                                        target,
+                                        shutdown_error: Some(format!(
+                                            "shared Codex interrupt failed after detach; \
+                                             the old thread may remain alive with its prior MCP \
+                                             capabilities until Codex unloads it: {err:#}"
+                                        )),
+                                        retain_runtime_for_retry: false,
+                                        suppress_codex_thread_resume: true,
+                                    }],
+                                    pending_session_ids: Vec::new(),
+                                },
+                            );
                             self.resume_revoked_engram_mcp_sessions(&mut outcome);
                             return match self.finish_revoked_engram_mcp_runtime_outcome(outcome) {
                                 Ok(_) => Err(ApiError::internal(format!(
@@ -932,8 +935,9 @@ impl AppState {
                             };
                         }
 
-                        // Replay any terminal callbacks that arrived during the failed shutdown window.
-                        // The flag is now cleared so the callback methods will proceed normally.
+                        // Replay any terminal callbacks that arrived during the failed
+                        // shutdown window. The flag is now cleared so the callback methods
+                        // will proceed normally.
                         if let Some(token) = token {
                             self.replay_deferred_runtime_stop_callbacks(
                                 session_id,

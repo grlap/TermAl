@@ -1447,7 +1447,8 @@ fn finish_shared_codex_thread_setup(
         // suppressing a LIVE thread, and the thing that made it hurt was clearing the
         // record's claim on it at the same time. Do not add a rollback of
         // `external_session_id` next to a suppression without re-reading
-        // `state_boot.rs`. `import_discovered_codex_threads_reclaims_a_suppressed_thread_a_session_still_owns`
+        // `state_boot.rs`.
+        // `import_discovered_codex_threads_reclaims_a_suppressed_thread_a_session_still_owns`
         // pins the invariant.
         let suppress_orphaned_new_thread = |thread_id: &str| {
             if waiter_method == "thread/start" {
@@ -1808,7 +1809,8 @@ fn handle_shared_codex_start_turn(
         // That early bail is the ONLY thing standing between this line and destroying a
         // prompt the user just typed. An earlier revision relied on a `debug_assert!`
         // and a claim that the writer thread's serialization made this unreachable. It
-        // was reachable — `stale_start_turn_handoff_leaves_the_setup_that_re_armed_the_session_alone`
+        // was reachable —
+        // `stale_start_turn_handoff_leaves_the_setup_that_re_armed_the_session_alone`
         // is the test that proves it. Do not reintroduce that reasoning.
         session_state.thread_id = Some(thread_id.to_owned());
         clear_shared_codex_turn_session_state(session_state);

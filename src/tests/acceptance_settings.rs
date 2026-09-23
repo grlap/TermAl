@@ -574,10 +574,24 @@ fn acceptance_settings_parser_refusal_is_correctable_before_a_write() {
         .acceptance_policy_target(&project, None)
         .unwrap()
         .reader_key;
-    let error = state.update_acceptance_policy_with_runner(&project, change(reader), |_, _| Ok(EngramCliOutput {
-        success: false, exit: EngramCliExit::Code(2), status: "exit code: 2".into(), stdout: vec![],
-        stderr: b"error: unexpected argument\nUsage: engram control-policy set-acceptance-evaluation [OPTIONS]".to_vec(),
-    }), |_, _, _| panic!("parser refusal cannot read a new policy")).unwrap_err();
+    let error = state
+        .update_acceptance_policy_with_runner(
+            &project,
+            change(reader),
+            |_, _| {
+                Ok(EngramCliOutput {
+                    success: false,
+                    exit: EngramCliExit::Code(2),
+                    status: "exit code: 2".into(),
+                    stdout: vec![],
+                    stderr: b"error: unexpected argument\nUsage: engram control-policy \
+                              set-acceptance-evaluation [OPTIONS]"
+                        .to_vec(),
+                })
+            },
+            |_, _, _| panic!("parser refusal cannot read a new policy"),
+        )
+        .unwrap_err();
     assert_eq!(error.status, StatusCode::BAD_REQUEST);
     assert!(error.message.contains("not sent"));
 }

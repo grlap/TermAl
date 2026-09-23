@@ -1734,11 +1734,12 @@ struct SessionRecord {
     /// successful Stop has no runtime left to revoke, while a failed Stop
     /// transfers its fence directly to the revocation teardown.
     engram_mcp_revocation_pending: bool,
-    /// Terminal callbacks deferred while `runtime_stop_in_progress` was true. Each callback keeps
-    /// the active-turn generation it observed so replay cannot land on a successor turn that reused
-    /// the same persistent runtime token. Replayed in arrival order on dedicated stop failure so the
-    /// session doesn't get stuck in a stale Active state or reconstruct the wrong terminal sequence
-    /// when completion/error and runtime-exit both land during the shutdown window.
+    /// Terminal callbacks deferred while `runtime_stop_in_progress` was true. Each
+    /// callback keeps the active-turn generation it observed so replay cannot land
+    /// on a successor turn that reused the same persistent runtime token. Replayed
+    /// in arrival order on dedicated stop failure so the session doesn't get stuck
+    /// in a stale Active state or reconstruct the wrong terminal sequence when
+    /// completion/error and runtime-exit both land during the shutdown window.
     deferred_stop_callbacks: Vec<DeferredStopCallback>,
     /// Host-private Engram binding and open-turn state. It is persisted in the
     /// session row but never copied onto the wire-level `Session`.

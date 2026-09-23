@@ -104,13 +104,26 @@ fn kimi_agent_readiness_with(resolve: impl FnOnce() -> Option<PathBuf>) -> Agent
     let path = resolve().map(|path| display_path_for_user(&normalize_user_facing_path(&path)));
     AgentReadiness {
         agent: Agent::Kimi,
-        status: if path.is_some() { AgentReadinessStatus::Ready } else { AgentReadinessStatus::Missing },
+        status: if path.is_some() {
+            AgentReadinessStatus::Ready
+        } else {
+            AgentReadinessStatus::Missing
+        },
         blocking: path.is_none(),
-        detail: path.as_ref().map(|path| format!(
-            "Kimi Code CLI is available at `{path}`; authentication is checked by its runtime. Run `kimi login` in a terminal if setup is needed."
-        )).unwrap_or_else(||
-            "Install Kimi Code CLI on PATH or in ~/.kimi-code/bin, then run `kimi login`. Windows requires native kimi.exe; shell shims are not supported.".to_owned()
-        ),
+        detail: path
+            .as_ref()
+            .map(|path| {
+                format!(
+                    "Kimi Code CLI is available at `{path}`; authentication is checked by its \
+                     runtime. Run `kimi login` in a terminal if setup is needed."
+                )
+            })
+            .unwrap_or_else(|| {
+                "Install Kimi Code CLI on PATH or in ~/.kimi-code/bin, \
+                 then run `kimi login`. Windows requires native kimi.exe; \
+                 shell shims are not supported."
+                    .to_owned()
+            }),
         warning_detail: None,
         command_path: path,
     }
