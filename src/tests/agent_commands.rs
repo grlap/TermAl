@@ -2859,8 +2859,23 @@ fn review_changes_pins_two_child_resume_wait_flow() {
     );
     assert_command_contains(
         review_changes,
-        "product defect, test defect, or environment/resource issue",
+        "product defect, test/runner defect, or environment/resource issue",
         "/review-changes must classify the root cause of a failed gate",
+    );
+    assert_command_contains(
+        review_changes,
+        "with falsifiable hypotheses and focused discriminating diagnostics",
+        "/review-changes must diagnose failures rather than blindly retrying",
+    );
+    assert_command_contains(
+        review_changes,
+        "Fix confirmed in-scope test or runner defects without another user approval round trip",
+        "/review-changes must authorize bounded test/runner remediation",
+    );
+    assert_command_contains(
+        review_changes,
+        "Never automate retry/repair/reviewer loops, weaken or ignore tests, inflate timeouts, or change product semantics to obtain green",
+        "/review-changes must retain the remediation safety boundaries",
     );
     assert_command_contains(
         review_changes,
@@ -2874,13 +2889,23 @@ fn review_changes_pins_two_child_resume_wait_flow() {
     );
     assert_command_contains(
         review_changes,
-        "Then run `scripts/test-rust.sh` in the parent session",
-        "/review-changes must run backend tests through the stable parent-session wrapper",
+        "node scripts/test-launcher.mjs full",
+        "/review-changes must use the maintained launcher CLI",
     );
     assert_command_contains(
         review_changes,
-        "Then run `cd ui && npx vitest run` in the parent session",
-        "/review-changes must run frontend tests in the parent session",
+        "Do not import launcher functions from inline Node",
+        "/review-changes must not bypass the CLI with inline orchestration",
+    );
+    assert_command_contains(
+        review_changes,
+        "end the turn immediately after launch is acknowledged",
+        "/review-changes must yield for the completion wake",
+    );
+    assert_command_contains(
+        review_changes,
+        "Do not keep the turn alive with repeated execution waits",
+        "/review-changes must not babysit the launcher",
     );
     assert_command_contains(
         review_changes,

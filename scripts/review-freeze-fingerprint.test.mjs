@@ -12,12 +12,45 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { hashUntrackedFiles } from "./review-freeze-fingerprint.mjs";
+import {
+  compositeFingerprint,
+  hashUntrackedFiles,
+} from "./review-freeze-fingerprint.mjs";
 import { testTempDirectory } from "./test-temp-root.mjs";
 
 const helper = fileURLToPath(
   new URL("./review-freeze-fingerprint.mjs", import.meta.url),
 );
+
+test("composite fingerprint uses the pinned ordered component contract", () => {
+  const components = {
+    root: "C:/repo",
+    headCommit: "1111",
+    trackedIndexDiffSha256: "2222",
+    trackedHeadDiffSha256: "3333",
+    statusSha256: "4444",
+    untrackedContentSha256: "5555",
+  };
+  assert.equal(
+    compositeFingerprint({ ...components, ignored: "not part of the contract" }),
+    "6a63123131b929728cf3cc8a88cdde5d33bd25f1f106259e92d067c9cd14a5b0",
+  );
+});
+
+test("fingerprint CLI keeps its component-only wire format", async () => {
+  const root = createRepository();
+  try {
+    assert.deepEqual(Object.keys(await fingerprint(root)), [
+      "headCommit",
+      "trackedIndexDiffSha256",
+      "trackedHeadDiffSha256",
+      "statusSha256",
+      "untrackedContentSha256",
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 function run(command, args, cwd) {
   const env = { ...process.env };

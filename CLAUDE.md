@@ -56,6 +56,33 @@ anything implied by my default behaviour or by the Claude-Code skills
 - `cargo check` clean. `cargo test --bin termal` green or explained.
 - Respect the project conventions captured in `.claude/reviewers/rust.md`.
 
+## Shared test launcher
+
+Use `node scripts/test-launcher.mjs full` for the maintained five-stage gate and
+`node scripts/test-launcher.mjs focused -- COMMAND ARG...` for an authorized
+focused check. The launcher stores complete stdout/stderr and atomic terminal
+results under Git metadata, while context receives only a bounded summary.
+Detached runs require a different coordinator via `--notify`; after `STARTED`,
+end the turn and wait for the mailbox wake—do not poll status or tail logs.
+Use `summary RUN_DIRECTORY` or `notify RUN_DIRECTORY` to recover an existing
+run without rerunning tests. Pinned disposable Engram checks use `live` with an
+absolute `--engram-binary` and `--engram-sha256`; never substitute an unpinned
+binary. The launcher never installs, builds production UI, mutates `ui/dist`,
+restarts a host, or changes live-store policy.
+
+### Failed gate investigation
+
+A failed gate is an investigation trigger, not permission to retry until green.
+Preserve the original run and logs, state falsifiable hypotheses, use focused
+discriminating diagnostics, and classify the cause as product, test/runner, or
+environment/resource. Fix confirmed in-scope test or runner defects without
+another user approval round trip. A later pass is validation of the fix; it is
+not by itself a diagnosis or closure of the original failure. Never automate
+retry/repair/reviewer loops, weaken or ignore tests, inflate timeouts, or change
+product semantics to obtain green. Escalate when the evidence requires product
+behavior changes, destructive or external actions, missing authority, or a
+genuine blocker.
+
 ## Documentation
 
 - Feature briefs live in `docs/features/*.md`. Cross-link them both

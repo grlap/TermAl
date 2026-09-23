@@ -41,102 +41,64 @@ If there are no staged, unstaged, or untracked changes, tell the user there is n
 
 ## Step 2: Parent quality gates
 
-This parent session is the only session in this workflow allowed to run quality gates. Run every command in this step before spawning reviewers; delegated `/review-code` children inspect code only and must not repeat these commands.
+The parent owns gate execution. Use the maintained CLI once from the repository root:
 
-### Run gates once; do not babysit them or read successful logs
-
-- Launch the ordered gates below as one parent-owned, fail-fast run. Capture
-  stdout/stderr in separate per-gate logs under a unique, gitignored run directory
-  (for example `.git/review-gates/<run-id>/`). Record each command, exit code and
-  the reviewed input fingerprint. Stop at the first nonzero exit; in PowerShell,
-  explicitly check `$LASTEXITCODE` after every native command rather than assuming
-  it throws. Do not launch competing full Rust and UI suites.
-- Keep full output on disk, not in the conversation: redirect it rather than
-  streaming it through the tool response or `tee`. Have the runner produce a
-  separate compact result report: each gate's completion state and exit code,
-  plus extracted errors and warnings with their source log paths. A successful
-  gate with no diagnostics needs only one `PASS` line, not its passing-test list.
-  Extract diagnostics mechanically from structured reporter output where
-  available, otherwise from bounded log searches with surrounding context.
-  Test names containing "error" or expected stderr are not automatically failures;
-  preserve the actual process exit code independently of any output filter.
-- Announce the run once. Use the execution tool's completion notification/resume
-  mechanism when available, and yield until it completes. If that mechanism is
-  unavailable, use a supported blocking wait with a substantial timeout within
-  the host's limits; if it yields before completion, resume the same execution.
-  Do not create a short-interval polling loop, repeatedly tail logs, count passing
-  tests, or narrate unchanged "still running" status. Do not promise an automatic
-  resume unless one was actually registered.
-- A tool yielding, a quiet log, an unrelated mailbox message, or a user asking
-  for status is not a reason to restart tests. Keep the existing run identifier;
-  never launch a duplicate just to regain visibility. Do not edit the tested input
-  while gates are running. If it changes externally, disclose the drift rather
-  than treating those results as verification of the new input.
-- On completion, read only the compact result report and its errors/warnings.
-  Do not open, tail, or dump successful logs just to confirm success. Warnings
-  from successful gates still belong in the report. Open a bounded excerpt of a
-  full log only when a reported failure/warning needs diagnosis, or a nonzero
-  exit has no extracted diagnostic; expand around that evidence only as needed.
-  Cap diagnostic excerpts and disclose truncation with the retained log path;
-  never flood context with a massive log or silently discard excess diagnostics.
-  Missing completion/exit-code evidence means unknown, not PASS. Follow the
-  failure protocol below when a gate fails.
-  A log file existing or containing some passing tests does not prove completion.
-  During an unchanged-input review/adjudication, reuse the completed gate evidence
-  instead of rerunning it for a status report. Changed code still requires gates.
-
-On Windows, use native Git Bash for the Rust wrapper, not a `bash` that resolves
-to WSL. Resolve the native Cargo executable before invoking the wrapper:
-
-```powershell
-$reviewCargo = rustup which cargo
-if ($LASTEXITCODE -ne 0) { throw 'Cannot resolve native Cargo; stop the gate sequence' }
-$env:TERMAL_TEST_CARGO = $reviewCargo.Trim().Replace('\', '/')
-& 'C:/Program Files/Git/bin/bash.exe' scripts/test-rust.sh
-if ($LASTEXITCODE -ne 0) { throw 'Rust gate failed; stop the gate sequence' }
+```bash
+node scripts/test-launcher.mjs full
 ```
 
-Verify the Git Bash path on the host and adjust it if installed elsewhere. Apply
-the per-gate logging and exit-code checks above to the entire sequence. This is
-execution guidance, not permission to delegate gates or skip any gate below.
+The script owns the stage order, working directories, native tool resolution,
+fingerprint, fail-fast execution, logs and diagnostic summary. Do not run the
+individual gates manually. Do not import launcher functions from inline Node,
+override its stage array, reconstruct the sequence, or write another runner.
+
+Launch with a supported completion wake and end the turn immediately after
+launch is acknowledged. Resume only on that completion notification. Do not
+keep the turn alive with repeated execution waits, poll processes, tail logs,
+count passing tests, or narrate unchanged status.
+
+For an existing authorized root worker notifying a different coordinator, the
+supported CLI is:
+
+```bash
+node scripts/test-launcher.mjs full --detach --notify COORDINATOR_SESSION_ID
+```
+
+Preserve the real sender identity; never spoof TERMAL_SESSION_ID or self-send.
+Reviewer children must never run gates. The parent-session route requires a
+host completion wake: if none is available, report that launcher integration
+gap and stop. Do not silently substitute foreground wait loops or delegate
+the review command itself.
+
+Keep the run directory from the launch receipt. On completion, read only:
+`node scripts/test-launcher.mjs summary RUN_DIRECTORY`.
+Report failures and warnings with log paths; inspect bounded log excerpts only
+to diagnose them. Missing terminal evidence is UNKNOWN, not PASS. Notification
+recovery uses `node scripts/test-launcher.mjs notify RUN_DIRECTORY`, never a
+new test run. Reuse completed evidence for unchanged input; do not edit tested
+input while running. Only a successful full run for the current input permits
+Step 3. See docs/test.md for the launcher contract, not an alternate gate plan.
 
 If any quality gate in this step produces a failure or error, stop the remaining
 gate sequence and do not spawn reviewers, but do not stop at merely presenting
 the raw output. Immediately investigate the failing path in this parent session
-with focused reproduction and diagnostics, then classify the root cause as a
-product defect, test defect, or environment/resource issue. An intermittent
-symptom is never resolved by labeling it "flaky." Search Beads for existing work
-and create or update the matching item with the failure evidence and next action.
+with falsifiable hypotheses and focused discriminating diagnostics, then classify
+the root cause as a product defect, test/runner defect, or environment/resource
+issue. Preserve the original run and logs; do not blindly rerun an unchanged
+gate, and do not treat a later pass as diagnosis or closure. Fix confirmed
+in-scope test or runner defects without another user approval round trip. Never
+automate retry/repair/reviewer loops, weaken or ignore tests, inflate timeouts,
+or change product semantics to obtain green. Escalate when the evidence requires
+product behavior changes, destructive or external actions, missing authority,
+or a genuine blocker. An intermittent symptom is never resolved by labeling it
+"flaky." Search Beads for existing work and create or update the matching item
+with the failure evidence and next action.
 This pre-review gate-failure record is an explicit exception to the Step 5
 tracker-timing rule; it must cover only the failed gate, not unreviewed code
 findings. Present the relevant original failure excerpt and full-log path together
 with the diagnosis and tracker action, not the entire run's output. Do not resume
 the gate sequence or spawn reviewers until the original
 required gate succeeds.
-
-Run `cargo check` in the parent session before spawning reviewers.
-If it produces ANY errors, apply the gate-failure protocol above.
-Warnings are acceptable; report them and continue.
-
-Then run `cd ui && npx tsc --noEmit`.
-If it produces ANY errors, apply the gate-failure protocol above.
-
-Then run `node --test scripts/review-freeze-fingerprint.test.mjs`.
-If it produces ANY failures or errors, apply the gate-failure protocol above.
-The freeze helper is the integrity boundary for the delegated review,
-so its HEAD/index/worktree identity, path-safety, executable-mode, streaming,
-and concurrent-drift contracts must pass before the worktree is declared
-frozen.
-
-Then run `scripts/test-rust.sh` in the parent session. This wrapper raises the
-Unix file-descriptor soft limit where possible and bounds Rust test
-parallelism so FD-heavy fixtures do not exhaust the process descriptor budget.
-If it produces ANY failures or errors, apply the gate-failure protocol above.
-
-Then run `cd ui && npx vitest run` in the parent session.
-If it produces ANY failures or errors, apply the gate-failure protocol above.
-
-These checks and tests intentionally run in the parent session rather than read-only delegated children because Cargo and frontend tooling may need to write build artifacts, caches, or lock files such as `target/debug/.cargo-lock`.
 
 ## Step 3: Spawn delegated reviewers
 
@@ -225,4 +187,7 @@ Beads. Use only the deduplicated findings and follow-ups produced in Step 5:
 
 If both reviewers report no findings and no tracker cleanup is needed, tell the user `beads is up to date - no changes needed.`
 
-Do not modify source or test files; the only tracker updates are through `bd`.
+Outside the explicitly authorized Step 2 gate-failure remediation, this is an
+ordinary review workflow: do not modify source or test files, and make tracker
+updates only through `bd`. Delegated reviewer children remain inspection-only;
+the Step 2 exception never authorizes product-semantic changes.

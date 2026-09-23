@@ -825,6 +825,32 @@ fn review_freeze_missing_promisor_object_never_invokes_transport() {
 }
 
 #[test]
+fn review_freeze_git_failures_retain_operation_timing_budget_and_cause() {
+    for cause in ["bounded read deadline exceeded", "process wait failed"] {
+        let error = review_freeze_git_failure(
+            anyhow!(cause),
+            &["diff", "--binary", "--no-ext-diff"],
+            Duration::from_millis(125),
+            Duration::from_secs(7),
+        );
+        let rendered = format!("{error:#}");
+        assert!(
+            rendered.contains(
+                "Git verification operation \"diff\" with arguments \
+                 [\"diff\", \"--binary\", \"--no-ext-diff\"] failed after 125ms"
+            ),
+            "{rendered}"
+        );
+        assert!(
+            rendered
+                .contains("remaining shared budget at call start: 7s; total shared budget: 20s"),
+            "{rendered}"
+        );
+        assert_eq!(error.chain().last().unwrap().to_string(), cause);
+    }
+}
+
+#[test]
 fn review_freeze_matches_independent_nonempty_engram_golden() {
     let root = test_temp_dir().join(format!("review-golden-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();

@@ -9,17 +9,48 @@ import {
   readlinkSync,
 } from "node:fs";
 import { spawn } from "node:child_process";
+import { devNull } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+
+export const fingerprintComponentNames = Object.freeze([
+  "root",
+  "headCommit",
+  "trackedIndexDiffSha256",
+  "trackedHeadDiffSha256",
+  "statusSha256",
+  "untrackedContentSha256",
+]);
+
+export function compositeFingerprint(source) {
+  const components = Object.fromEntries(
+    fingerprintComponentNames.map((name) => [name, source[name]]),
+  );
+  return createHash("sha256").update(JSON.stringify(components)).digest("hex");
+}
 
 const FILE_HASH_BUFFER_BYTES = 64 * 1024;
 const CAPTURED_GIT_OUTPUT_LIMIT_BYTES = 64 * 1024;
 const GIT_DIAGNOSTIC_LIMIT_BYTES = 64 * 1024;
 
-function runGit(args, cwd, onStdout) {
+export function isolatedGitEnvironment(source = process.env) {
+  const env = { ...source };
+  for (const key of Object.keys(env)) {
+    if (key.toUpperCase().startsWith("GIT_")) delete env[key];
+  }
+  env.GIT_CONFIG_NOSYSTEM = "1";
+  env.GIT_CONFIG_GLOBAL = process.platform === "win32" ? "NUL" : devNull;
+  env.GIT_ATTR_NOSYSTEM = "1";
+  env.GIT_OPTIONAL_LOCKS = "0";
+  env.GIT_TERMINAL_PROMPT = "0";
+  return env;
+}
+
+function runGit(args, cwd, onStdout, env) {
   return new Promise((resolve, reject) => {
     const child = spawn("git", args, {
       cwd,
+      env,
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
     });
@@ -68,7 +99,7 @@ function runGit(args, cwd, onStdout) {
   });
 }
 
-async function captureGit(args, cwd) {
+async function captureGit(args, cwd, env) {
   const chunks = [];
   let totalBytes = 0;
   await runGit(args, cwd, (chunk) => {
@@ -79,13 +110,13 @@ async function captureGit(args, cwd) {
       );
     }
     chunks.push(chunk);
-  });
+  }, env);
   return Buffer.concat(chunks);
 }
 
-async function hashGitOutput(args, cwd) {
+async function hashGitOutput(args, cwd, env) {
   const hash = createHash("sha256");
-  await runGit(args, cwd, (chunk) => hash.update(chunk));
+  await runGit(args, cwd, (chunk) => hash.update(chunk), env);
   return hash.digest("hex");
 }
 
@@ -95,7 +126,7 @@ function writeLength(hash, length) {
   hash.update(encoded);
 }
 
-async function nulSeparatedGitValues(args, cwd) {
+async function nulSeparatedGitValues(args, cwd, env) {
   const values = [];
   let pending = Buffer.alloc(0);
   await runGit(args, cwd, (chunk) => {
@@ -113,7 +144,7 @@ async function nulSeparatedGitValues(args, cwd) {
       start = end + 1;
     }
     pending = Buffer.from(buffer.subarray(start));
-  });
+  }, env);
   if (pending.length !== 0) {
     throw new Error("git returned a non-NUL-terminated path list");
   }
@@ -201,7 +232,7 @@ function hashRegularFile(hash, path, gitPath, metadata, hooks) {
   assertFilesystemEntryStable(path, gitPath, metadata);
 }
 
-export async function hashUntrackedFiles(root, hooks = {}) {
+export async function hashUntrackedFiles(root, hooks = {}, env = isolatedGitEnvironment()) {
   const paths = await nulSeparatedGitValues(
     [
       "ls-files",
@@ -212,6 +243,7 @@ export async function hashUntrackedFiles(root, hooks = {}) {
       ":(exclude).beads",
     ],
     root,
+    env,
   );
   const hash = createHash("sha256");
   for (const gitPath of paths) {
@@ -246,23 +278,25 @@ export async function hashUntrackedFiles(root, hooks = {}) {
   return hash.digest("hex");
 }
 
-export async function main() {
-  const requestedRoot = process.argv[2] ?? process.cwd();
-  const root = (await captureGit(["rev-parse", "--show-toplevel"], requestedRoot))
+export async function captureFingerprint(requestedRoot = process.cwd(), sourceEnv = process.env) {
+  const env = isolatedGitEnvironment(sourceEnv);
+  const root = (await captureGit(["rev-parse", "--show-toplevel"], requestedRoot, env))
     .toString("utf8")
     .trim();
   const headCommit = (
-    await captureGit(["rev-parse", "--verify", "HEAD^{commit}"], root)
+    await captureGit(["rev-parse", "--verify", "HEAD^{commit}"], root, env)
   )
     .toString("utf8")
     .trim();
   const trackedIndexDiffSha256 = await hashGitOutput(
     ["diff", "--cached", "HEAD", "--binary", "--", ":(exclude).beads"],
     root,
+    env,
   );
   const trackedHeadDiffSha256 = await hashGitOutput(
     ["diff", "HEAD", "--binary", "--", ":(exclude).beads"],
     root,
+    env,
   );
   const statusSha256 = await hashGitOutput(
     [
@@ -274,16 +308,32 @@ export async function main() {
       ":(exclude).beads",
     ],
     root,
+    env,
   );
-  const untrackedContentSha256 = await hashUntrackedFiles(root);
+  const untrackedContentSha256 = await hashUntrackedFiles(root, {}, env);
+
+  const fields = {
+    root,
+    headCommit,
+    trackedIndexDiffSha256,
+    trackedHeadDiffSha256,
+    statusSha256,
+    untrackedContentSha256,
+  };
+  const fingerprint = compositeFingerprint(fields);
+  return { ...fields, fingerprint };
+}
+
+export async function main() {
+  const actual = await captureFingerprint(process.argv[2] ?? process.cwd());
 
   process.stdout.write(
     [
-      `headCommit=${headCommit}`,
-      `trackedIndexDiffSha256=${trackedIndexDiffSha256}`,
-      `trackedHeadDiffSha256=${trackedHeadDiffSha256}`,
-      `statusSha256=${statusSha256}`,
-      `untrackedContentSha256=${untrackedContentSha256}`,
+      `headCommit=${actual.headCommit}`,
+      `trackedIndexDiffSha256=${actual.trackedIndexDiffSha256}`,
+      `trackedHeadDiffSha256=${actual.trackedHeadDiffSha256}`,
+      `statusSha256=${actual.statusSha256}`,
+      `untrackedContentSha256=${actual.untrackedContentSha256}`,
       "",
     ].join("\n"),
   );

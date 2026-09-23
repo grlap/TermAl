@@ -140,21 +140,44 @@ impl ReviewFreezeGit {
 
     fn run(&self, args: &[&str], allow_absent: bool) -> Result<Vec<u8>> {
         let mut command = self.command(args);
+        let started = std::time::Instant::now();
+        let remaining_at_start = self.deadline.saturating_duration_since(started);
         let output = run_bounded_read_process(
             &mut command,
             self.deadline,
             REVIEW_FREEZE_OUTPUT_LIMIT,
             false,
-        )?;
+        )
+        .map_err(|error| {
+            review_freeze_git_failure(error, args, started.elapsed(), remaining_at_start)
+        })?;
         if !output.status.success() && !(allow_absent && output.status.code() == Some(1)) {
-            bail!(
-                "Git verification {} failed: {}",
-                args[0],
-                String::from_utf8_lossy(&output.stderr[..output.stderr.len().min(4096)])
-            );
+            return Err(review_freeze_git_failure(
+                anyhow!(
+                    "Git exited unsuccessfully: {}",
+                    String::from_utf8_lossy(&output.stderr[..output.stderr.len().min(4096)])
+                ),
+                args,
+                started.elapsed(),
+                remaining_at_start,
+            ));
         }
         Ok(output.stdout)
     }
+}
+
+fn review_freeze_git_failure(
+    error: anyhow::Error,
+    args: &[&str],
+    elapsed: Duration,
+    remaining_at_start: Duration,
+) -> anyhow::Error {
+    let operation = args.first().copied().unwrap_or("<missing>");
+    error.context(format!(
+        "Git verification operation {operation:?} with arguments {args:?} failed after {elapsed:?} \
+         (remaining shared budget at call start: {remaining_at_start:?}; total shared budget: \
+         {REVIEW_FREEZE_TIMEOUT:?})"
+    ))
 }
 
 fn review_freeze_file(path: &FsPath, limit: usize) -> Result<Vec<u8>> {

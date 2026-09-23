@@ -476,6 +476,9 @@ fn claude_tool_permission_request_is_read_only(
         // ToolSearch only discovers definitions; executing the discovered tool
         // gets its own permission request (and control-plane authority check).
         "Read" | "LS" | "Glob" | "Grep" | "ToolSearch" => true,
+        // Loading skill instructions is not a workspace write. Any tools the
+        // skill subsequently requests still pass through this permission gate.
+        "Skill" => true,
         // The Windows PowerShell tool is DENIED for read-only reviewers. It carries
         // its command in the same `command` field, so an earlier revision routed it
         // through the Bash reader below. That reader implements BASH grammar, and

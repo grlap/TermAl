@@ -37,23 +37,92 @@ Type/build checks:
 
 ## Review Gate
 
-Before a code review of staged/unstaged work:
+The maintained full gate is one launcher invocation:
 
 ```bash
-cargo check
-cd ui && npx tsc --noEmit
-cd .. && node --test scripts/review-freeze-fingerprint.test.mjs scripts/vitest-resource-preflight.test.mjs
+node scripts/test-launcher.mjs full
 ```
 
-If any command reports errors, stop and fix those first. Warnings can be
-reported and triaged with the review.
+It runs, in fail-fast order, `cargo check`, TypeScript `--noEmit`, the review
+fingerprint and launcher fixtures, the native Git Bash Rust wrapper, and the
+full Vitest suite. Fingerprinting, Cargo and Rust stay rooted at the repository;
+TypeScript and Vitest execute with `ui/` as their real working directory so
+relative source and fixture paths retain the same semantics as `cd ui`. On
+every platform, the effective Cargo is `TERMAL_TEST_CARGO` when explicitly set,
+otherwise `cargo` resolved from `PATH`; that same executable is used by the
+compile check and passed to `scripts/test-rust.sh`. On Windows, TypeScript and
+Vitest use their JavaScript entrypoints rather than `.cmd` shims. All commands,
+working directories and required files are preflighted, and a missing
+prerequisite leaves every stage explicitly unrun.
 
-For higher-confidence changes, also run:
+For an authorized focused check, pass an argument array after `--`:
 
 ```bash
-scripts/test-rust.sh
-cd ui && npx vitest run
+node scripts/test-launcher.mjs focused -- node --test scripts/test-launcher.test.mjs
 ```
+
+Name a shell explicitly when one is required. On Windows, direct `.cmd` and
+`.bat` executables are rejected; use Node with the package's JavaScript CLI or
+an explicit known native shell. No launcher preset installs dependencies,
+builds the production UI, touches `ui/dist`, restarts a host, or accesses live
+store policy.
+
+Each run owns a unique directory below Git's `review-runs` metadata directory.
+`request.json` records the exact plan and captured source fingerprint;
+`results.json` records actual process exits, explicit unrun stages, timestamps,
+and full log paths. Terminal JSON replacement is atomic for concurrent readers
+on the same filesystem; it is not a claim of power-loss or crash durability.
+Diagnostic extraction is bounded and does not decide success. A missing
+terminal result is `UNKNOWN`, never a pass. Source/index drift before or during
+execution invalidates the run, and `execution.lock` prevents rerunning the same
+plan.
+
+An existing root worker may deliver completion to a different coordinator:
+
+```bash
+node scripts/test-launcher.mjs full --detach --notify COORDINATOR_SESSION_ID
+```
+
+The worker must inherit its genuine `TERMAL_SESSION_ID`, absolute `TERMAL_CLI`,
+and host connection environment. Self-send and identity changes are rejected.
+After the `STARTED` receipt, end the turn and wait for the genuine mailbox wake;
+do not poll status, tail logs, or launch a watcher. Completion is saved before
+notification. Recover without rerunning tests with:
+
+```bash
+node scripts/test-launcher.mjs summary RUN_DIRECTORY
+node scripts/test-launcher.mjs notify RUN_DIRECTORY
+```
+
+`notify` reuses the saved message and stable idempotency key. It never executes
+the test stages again.
+
+When a run fails, `results.json`, the compact summary, and any mailbox
+completion contain an `INVESTIGATION REQUIRED` handoff. That handoff does not
+claim the launcher can diagnose arbitrary code; it makes the agent-owned next
+step explicit.
+
+A failed gate is an investigation trigger, not permission to retry until green.
+Preserve the original run and logs, state falsifiable hypotheses, use focused
+discriminating diagnostics, and classify the cause as product, test/runner, or
+environment/resource. Fix confirmed in-scope test or runner defects without
+another user approval round trip. A later pass is validation of the fix; it is
+not by itself a diagnosis or closure of the original failure. Never automate
+retry/repair/reviewer loops, weaken or ignore tests, inflate timeouts, or change
+product semantics to obtain green. Escalate when the evidence requires product
+behavior changes, destructive or external actions, missing authority, or a
+genuine blocker.
+
+The operator-run disposable Engram suite requires an absolute binary and its
+reviewed SHA-256:
+
+```bash
+node scripts/test-launcher.mjs live --engram-binary C:/absolute/engram.exe --engram-sha256 SHA256
+```
+
+The binary path, fingerprint, executable probe, native Cargo and Git Bash are
+verified before the ignored live stage starts. A mismatch is a terminal failed
+run with the stage unrun; required live checks are never silently skipped.
 
 The Rust wrapper raises the inherited Unix file-descriptor soft limit toward
 4096 and defaults libtest to four threads. This prevents FD-heavy SQLite,
@@ -136,9 +205,10 @@ captures the bug.
 
 ## Known Coverage Gaps
 
-The active follow-up list lives in `docs/bugs.md` under **Implementation Tasks**.
-Those tasks are not active bugs; they are P2 coverage or type-surface
-improvements.
+The active follow-up list lives in Beads. Use `bd ready` for currently
+unblocked work and `bd list --status=open` for the wider open inventory.
+Coverage and type-surface improvements are tracked there alongside their
+priority and dependencies.
 
 Current gaps:
 

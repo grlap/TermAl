@@ -90,6 +90,60 @@ fn claude_read_only_host_checks_commands_even_if_cli_settings_allow_them() {
     }
 }
 
+#[test]
+fn claude_read_only_allows_skill_loading_without_granting_write_permissions() {
+    let mut turn_state = ClaudeTurnState::default();
+    for (index, (tool, input, allowed)) in [
+        ("Skill", json!({"skill":"review-code"}), true),
+        (
+            "Skill",
+            json!({"skill":"project:custom", "args":"src"}),
+            true,
+        ),
+        (
+            "Read",
+            json!({"file_path":".claude/commands/review-code.md"}),
+            true,
+        ),
+        (
+            "Edit",
+            json!({"file_path":"src/main.rs", "old_string":"a", "new_string":"b"}),
+            false,
+        ),
+        (
+            "Write",
+            json!({"file_path":"sentinel", "content":"no"}),
+            false,
+        ),
+        ("Bash", json!({"command":"git add ."}), false),
+        ("Bash", json!({"command":"cargo test"}), false),
+        ("Agent", json!({"prompt":"write a file"}), false),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let action = classify_claude_control_request(
+            &json!({"type":"control_request", "request_id":format!("skill-boundary-{index}"),
+                "request":{"subtype":"can_use_tool", "tool_name":tool, "input":input}}),
+            &mut turn_state,
+            ClaudeApprovalMode::ReadOnlyAutoApprove,
+            true,
+            ".",
+            false,
+        )
+        .unwrap()
+        .expect("skill and subsequent tool requests must reach the classifier");
+        assert_eq!(
+            matches!(
+                action,
+                ClaudeControlRequestAction::Respond(ClaudePermissionDecision::Allow { .. })
+            ),
+            allowed,
+            "{tool}"
+        );
+    }
+}
+
 fn assert_permission(tool: &str, input: Value, authority: bool, allowed: bool) {
     let action = classify_claude_control_request(
         &json!({"type":"control_request", "request_id":"permission-boundary",
