@@ -95,6 +95,7 @@ mod session_stop;
 mod session_stop_runtime;
 mod shared_codex;
 mod shared_codex_events;
+mod shared_codex_thread_setup;
 mod state_mutex;
 mod telegram;
 mod telegram_forwarding;
@@ -486,28 +487,6 @@ fn clear_shared_codex_turn_recorder_state_resets_all_fields() {
     assert!(recorder_state.command_messages.is_empty());
     assert!(recorder_state.parallel_agents_messages.is_empty());
     assert_eq!(recorder_state.streaming_text_message_id, None);
-}
-
-/// An in-flight Codex thread setup carrying a parked prompt.
-///
-/// A setup always owns the prompt that opened it, so tests cannot construct one
-/// without a command — which is the point of collapsing the two into one value.
-fn test_pending_codex_thread_setup(request_id: &str) -> PendingCodexThreadSetup {
-    PendingCodexThreadSetup {
-        request_id: request_id.to_owned(),
-        command: CodexPromptCommand {
-            active_turn_generation: 0,
-            approval_policy: CodexApprovalPolicy::Never,
-            attachments: Vec::new(),
-            cwd: "/tmp".to_owned(),
-            model: "gpt-5.4".to_owned(),
-            prompt: "parked prompt".to_owned(),
-            reasoning_effort: CodexReasoningEffort::Medium,
-            service_tier: None,
-            resume_thread_id: None,
-            sandbox_mode: CodexSandboxMode::WorkspaceWrite,
-        },
-    }
 }
 
 #[test]

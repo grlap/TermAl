@@ -30,6 +30,7 @@
 //! `handle_shared_codex_*` helpers in `src/runtime.rs` plus the
 //! `*_if_runtime_matches_*` state helpers in `src/state.rs`.
 
+use super::shared_codex_thread_setup::test_pending_codex_thread_setup;
 use super::*;
 
 // A late thread-level notification must not disarm the turn-level watchdog.
