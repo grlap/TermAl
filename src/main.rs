@@ -716,6 +716,7 @@ include!("test_temp_paths.rs");
 include!("test_temp_root.rs");
 include!("state.rs");
 include!("engram_host_adapter.rs");
+include!("engram_control_transport.rs");
 include!("engram_readiness.rs");
 include!("engram_session_reconciliation.rs");
 include!("coordination_instructions.rs");
