@@ -981,10 +981,9 @@ impl AppState {
         &self,
         request: CreateOrchestratorInstanceRequest,
     ) -> Result<CreateOrchestratorInstanceResponse, ApiError> {
-        self.create_orchestrator_instance_with_agent_setup_validator(
-            request,
-            |agent, workdir| self.validate_agent_session_setup_for_state(agent, workdir),
-        )
+        self.create_orchestrator_instance_with_agent_setup_validator(request, |agent, workdir| {
+            self.validate_agent_session_setup_for_state(agent, workdir)
+        })
     }
 
     /// Creates an orchestrator with an injectable unlocked readiness preflight.
@@ -1068,9 +1067,7 @@ impl AppState {
                 .find_project(project_id)
                 .cloned()
                 .ok_or_else(|| ApiError::not_found(format!("unknown project `{project_id}`")))?;
-            if project.remote_id != LOCAL_REMOTE_ID
-                || project.root_path != preflight_project_root
-            {
+            if project.remote_id != LOCAL_REMOTE_ID || project.root_path != preflight_project_root {
                 return Err(ApiError::conflict(
                     "project changed while creating the orchestrator",
                 ));
@@ -1129,7 +1126,6 @@ impl AppState {
             state,
         })
     }
-
 }
 
 /// Lists orchestrator instances.

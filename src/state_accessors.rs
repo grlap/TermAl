@@ -84,9 +84,7 @@ fn conversation_overview_kind_index(kind: ConversationOverviewKind) -> usize {
     }
 }
 
-fn dominant_conversation_overview_kind(
-    counts: [u32; 4],
-) -> ConversationOverviewKind {
+fn dominant_conversation_overview_kind(counts: [u32; 4]) -> ConversationOverviewKind {
     // Error wins ties, followed by command and diff. Equal-count buckets
     // should preserve the visually strongest signal instead of dissolving it
     // into ordinary text.
@@ -106,9 +104,7 @@ fn dominant_conversation_overview_kind(
     dominant
 }
 
-fn conversation_overview_message_metadata(
-    message: &Message,
-) -> (ConversationOverviewKind, bool) {
+fn conversation_overview_message_metadata(message: &Message) -> (ConversationOverviewKind, bool) {
     let (author, kind) = match message {
         Message::Command {
             author,
@@ -125,9 +121,7 @@ fn conversation_overview_message_metadata(
         Message::Approval {
             author,
             decision:
-                ApprovalDecision::Interrupted
-                | ApprovalDecision::Canceled
-                | ApprovalDecision::Rejected,
+                ApprovalDecision::Interrupted | ApprovalDecision::Canceled | ApprovalDecision::Rejected,
             ..
         } => (author, ConversationOverviewKind::Error),
         // Deliberate: Declined is a benign answerless resolution, whether the
@@ -156,9 +150,7 @@ fn conversation_overview_message_metadata(
         | Message::Approval { author, .. }
         | Message::UserInputRequest { author, .. }
         | Message::McpElicitationRequest { author, .. }
-        | Message::CodexAppRequest { author, .. } => {
-            (author, ConversationOverviewKind::Text)
-        }
+        | Message::CodexAppRequest { author, .. } => (author, ConversationOverviewKind::Text),
     };
     (kind, matches!(author, Author::You))
 }
@@ -180,10 +172,7 @@ fn conversation_overview_bucket_index(
 /// A remote tail repair may fall back to applying the narrow SSE delta when
 /// transport or freshness prevents the bounded fetch itself.
 fn is_recoverable_remote_tail_miss(err: &ApiError) -> bool {
-    matches!(
-        err.kind,
-        Some(ApiErrorKind::RemoteConnectionUnavailable)
-    )
+    matches!(err.kind, Some(ApiErrorKind::RemoteConnectionUnavailable))
 }
 
 #[cfg(test)]
@@ -319,10 +308,7 @@ mod visible_session_hydration_error_tests {
         let remote_detail = state
             .get_session(&remote_session_id)
             .expect("remote session detail should be available");
-        assert_eq!(
-            remote_detail.session.remote_id.as_deref(),
-            Some("ssh-lab")
-        );
+        assert_eq!(remote_detail.session.remote_id.as_deref(), Some("ssh-lab"));
         assert_eq!(
             remote_detail.session.queue_projection_hash.as_deref(),
             Some("remote-queue-projection")
@@ -368,16 +354,19 @@ mod visible_session_hydration_error_tests {
             let index = inner
                 .find_session_index(&session_id)
                 .expect("session should exist");
-            inner.sessions[index].session.pending_prompts.push(PendingPrompt {
-                engram_interrupted: false,
-                is_engram_retained: false,
-                attachments: Vec::new(),
-                id: "pending-1".to_owned(),
-                timestamp: "10:00".to_owned(),
-                text: "Sensitive queued prompt".to_owned(),
-                expanded_text: Some("Expanded sensitive queued prompt".to_owned()),
-                source: None,
-            });
+            inner.sessions[index]
+                .session
+                .pending_prompts
+                .push(PendingPrompt {
+                    engram_interrupted: false,
+                    is_engram_retained: false,
+                    attachments: Vec::new(),
+                    id: "pending-1".to_owned(),
+                    timestamp: "10:00".to_owned(),
+                    text: "Sensitive queued prompt".to_owned(),
+                    expanded_text: Some("Expanded sensitive queued prompt".to_owned()),
+                    source: None,
+                });
             inner.sessions[index].session.prompt_history =
                 vec!["Sensitive historical prompt".to_owned()];
         }
@@ -388,8 +377,7 @@ mod visible_session_hydration_error_tests {
             .iter()
             .find(|session| session.id == session_id)
             .expect("summary session should be present");
-        let summary_json =
-            serde_json::to_value(summary_session).expect("summary should serialize");
+        let summary_json = serde_json::to_value(summary_session).expect("summary should serialize");
         assert!(summary_json.get("messages").is_none());
         assert!(summary_json.get("messagesLoaded").is_none());
         assert!(summary_json.get("pendingPrompts").is_none());
@@ -473,8 +461,7 @@ mod visible_session_hydration_error_tests {
         }
 
         let snapshot = state.summary_snapshot();
-        let json = serde_json::to_value(&snapshot)
-            .expect("summary snapshot should serialize");
+        let json = serde_json::to_value(&snapshot).expect("summary snapshot should serialize");
         let delegations = json["delegations"]
             .as_array()
             .expect("delegation links should be an array");
@@ -585,10 +572,7 @@ mod visible_session_hydration_error_tests {
             .find(|session| session.id == session_id)
             .and_then(|session| session.live_activity.as_ref())
             .expect("active summary should retain a bounded activity hint");
-        assert!(
-            summary_activity.prompt.chars().count()
-                <= SESSION_LIVE_ACTIVITY_SUMMARY_MAX_CHARS
-        );
+        assert!(summary_activity.prompt.chars().count() <= SESSION_LIVE_ACTIVITY_SUMMARY_MAX_CHARS);
         assert!(!summary_activity.prompt.contains("PROMPT-TAIL"));
         assert!(
             summary_activity
@@ -615,7 +599,10 @@ mod visible_session_hydration_error_tests {
             .live_activity
             .expect("targeted detail should retain activity");
         assert_eq!(targeted_activity.prompt, full_prompt);
-        assert_eq!(targeted_activity.command.as_deref(), Some(full_command.as_str()));
+        assert_eq!(
+            targeted_activity.command.as_deref(),
+            Some(full_command.as_str())
+        );
     }
 }
 
@@ -678,8 +665,7 @@ impl AppState {
     }
 
     fn session_tail_start_index(record: &SessionRecord, message_limit: usize) -> usize {
-        let retained_message_count =
-            message_limit.min(SESSION_TAIL_HYDRATION_MAX_MESSAGES);
+        let retained_message_count = message_limit.min(SESSION_TAIL_HYDRATION_MAX_MESSAGES);
         record
             .session
             .messages
@@ -811,14 +797,8 @@ impl AppState {
         debug_assert_eq!(summary.opencode_mode, full.opencode_mode);
         debug_assert_eq!(summary.queue_paused, full.queue_paused);
         debug_assert_eq!(summary.queue_projection_hash, full.queue_projection_hash);
-        debug_assert_eq!(
-            summary.opencode_current_mode,
-            full.opencode_current_mode
-        );
-        debug_assert_eq!(
-            summary.opencode_mode_options,
-            full.opencode_mode_options
-        );
+        debug_assert_eq!(summary.opencode_current_mode, full.opencode_current_mode);
+        debug_assert_eq!(summary.opencode_mode_options, full.opencode_mode_options);
         debug_assert_eq!(summary.external_session_id, full.external_session_id);
         debug_assert_eq!(
             summary.agent_commands_revision,
@@ -980,9 +960,7 @@ impl AppState {
         session_id: &str,
         requested_bucket_count: usize,
     ) -> Result<SessionOverviewResponse, ApiError> {
-        debug_assert!(
-            (1..=SESSION_OVERVIEW_MAX_BUCKETS).contains(&requested_bucket_count)
-        );
+        debug_assert!((1..=SESSION_OVERVIEW_MAX_BUCKETS).contains(&requested_bucket_count));
         if let Some(target) = self.remote_session_target(session_id)? {
             return self.fetch_remote_session_overview_target(
                 &target,
@@ -1009,8 +987,7 @@ impl AppState {
             let message_count =
                 usize::try_from(session_message_count(record)).unwrap_or(usize::MAX);
             let bucket_count = requested_bucket_count.min(message_count.max(1));
-            let mut bucket_counts =
-                vec![ConversationOverviewBucketCounts::default(); bucket_count];
+            let mut bucket_counts = vec![ConversationOverviewBucketCounts::default(); bucket_count];
             let mut observed_positions = 0usize;
             for (local_index, message) in record.session.messages.iter().enumerate() {
                 let position = resident_start_index.saturating_add(local_index);
@@ -1038,11 +1015,9 @@ impl AppState {
         };
 
         if resident_start_index > 0 {
-            let connection = open_sqlite_history_snapshot(self.persistence_path.as_ref())
-                .map_err(|err| {
-                    ApiError::internal(format!(
-                        "failed to open session overview snapshot: {err:#}"
-                    ))
+            let connection =
+                open_sqlite_history_snapshot(self.persistence_path.as_ref()).map_err(|err| {
+                    ApiError::internal(format!("failed to open session overview snapshot: {err:#}"))
                 })?;
             let persisted = load_persisted_message_overview_with_connection(
                 &connection,
@@ -1057,9 +1032,8 @@ impl AppState {
             let mut persisted_positions = 0usize;
             for (bucket_index, kind, count, user_count) in persisted {
                 let bucket = &mut bucket_counts[bucket_index];
-                bucket.kinds[conversation_overview_kind_index(kind)] = bucket.kinds
-                    [conversation_overview_kind_index(kind)]
-                    .saturating_add(count);
+                bucket.kinds[conversation_overview_kind_index(kind)] =
+                    bucket.kinds[conversation_overview_kind_index(kind)].saturating_add(count);
                 bucket.user_authored = bucket.user_authored.saturating_add(user_count);
                 persisted_positions = persisted_positions.saturating_add(count as usize);
             }
@@ -1086,11 +1060,8 @@ impl AppState {
                     marker.message_index_hint.min(message_count - 1)
                 };
                 if message_count > 0 {
-                    let bucket_index = conversation_overview_bucket_index(
-                        position,
-                        message_count,
-                        bucket_count,
-                    );
+                    let bucket_index =
+                        conversation_overview_bucket_index(position, message_count, bucket_count);
                     bucket_counts[bucket_index].marker_present = true;
                 }
                 ConversationOverviewMarker {
@@ -1183,23 +1154,19 @@ impl AppState {
         let cursor_position = match (cursor, local_cursor_position) {
             (_, Some(position)) => Some(position),
             (Some(cursor_id), None) => {
-                let connection =
-                    open_sqlite_history_snapshot(self.persistence_path.as_ref()).map_err(
-                        |err| {
-                            ApiError::internal(format!(
-                                "failed to open session history snapshot: {err:#}"
-                            ))
-                        },
-                    )?;
+                let connection = open_sqlite_history_snapshot(self.persistence_path.as_ref())
+                    .map_err(|err| {
+                        ApiError::internal(format!(
+                            "failed to open session history snapshot: {err:#}"
+                        ))
+                    })?;
                 let position = persisted_message_position_with_connection(
                     &connection,
                     session_id,
                     cursor_id,
                 )
                 .map_err(|err| {
-                    ApiError::internal(format!(
-                        "failed to resolve session history cursor: {err:#}"
-                    ))
+                    ApiError::internal(format!("failed to resolve session history cursor: {err:#}"))
                 })?
                 .ok_or_else(|| {
                     ApiError::conflict(
@@ -1449,9 +1416,6 @@ impl AppState {
         true
     }
 
-
-
-
     #[cfg(not(test))]
     fn spawn_workspace_file_watcher(&self) {
         let state = self.clone();
@@ -1460,7 +1424,6 @@ impl AppState {
             .spawn(move || run_workspace_file_watcher(state))
             .expect("failed to spawn file watcher thread");
     }
-
 
     /// Builds a snapshot using the latest cached agent readiness **without refreshing**.
     ///
@@ -1631,5 +1594,4 @@ impl AppState {
             .and_then(|index| inner.sessions.get(index))
             .is_some_and(|record| record.runtime.matches_runtime_token(token))
     }
-
 }

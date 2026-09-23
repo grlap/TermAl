@@ -18,11 +18,8 @@ const ENGRAM_AGENT_PROCESS_ENV_NAMES: [&str; 4] = [
     ENGRAM_ACTOR_CONTEXT_ENV,
     ENGRAM_SESSION_ID_ENV,
 ];
-const ENGRAM_REQUIRED_AGENT_PROCESS_ENV_NAMES: [&str; 3] = [
-    ENGRAM_HOME_ENV,
-    ENGRAM_ACTOR_ID_ENV,
-    ENGRAM_SESSION_ID_ENV,
-];
+const ENGRAM_REQUIRED_AGENT_PROCESS_ENV_NAMES: [&str; 3] =
+    [ENGRAM_HOME_ENV, ENGRAM_ACTOR_ID_ENV, ENGRAM_SESSION_ID_ENV];
 const ENGRAM_CONTEXT_NUDGE_MAX_BYTES: usize = 32 * 1024;
 const ENGRAM_CONTEXT_NUDGE_READER_LABEL: &str = "context nudge";
 
@@ -139,9 +136,11 @@ impl AppState {
         let Some(index) = inner.find_session_index(session_id) else {
             return false;
         };
-        inner.session_mut_by_index(index)
+        inner
+            .session_mut_by_index(index)
             .expect("session index should be valid")
-            .engram.mark_context_refresh_needed(compaction_item_id)
+            .engram
+            .mark_context_refresh_needed(compaction_item_id)
     }
 
     /// Refreshes the repository-declaration cache without holding the global
@@ -186,13 +185,14 @@ impl AppState {
             .is_ok_and(|metadata| metadata.is_file() && metadata.len() > 0);
 
         let mut inner = self.inner.lock().expect("state mutex poisoned");
-        let current = engram_project_for_session_locked(&inner, session_id).is_some_and(|project| {
-            project.id == project_id
-                && project.root_path == project_root
-                && project.remote_id == LOCAL_REMOTE_ID
-                && project.engram == settings
-                && !inner.engram_project_resets.contains(&project_id)
-        });
+        let current =
+            engram_project_for_session_locked(&inner, session_id).is_some_and(|project| {
+                project.id == project_id
+                    && project.root_path == project_root
+                    && project.remote_id == LOCAL_REMOTE_ID
+                    && project.engram == settings
+                    && !inner.engram_project_resets.contains(&project_id)
+            });
         if !current {
             return false;
         }
@@ -243,83 +243,85 @@ impl AppState {
         let mut waited_for_generation = None;
         loop {
             let target = {
-            let mut inner = self.inner.lock().expect("state mutex poisoned");
-            let Some(index) = inner.find_session_index(session_id) else {
-                return EngramContextNudgePreparation::NotApplicable;
-            };
-            let record = &inner.sessions[index];
-            if !record.is_local_session() {
-                return EngramContextNudgePreparation::NotApplicable;
-            }
-            // Reuse the pending orientation snapshot until runtime admission.
-            // This is only a local prompt cache: peek neither stages nor
-            // acknowledges an Engram delivery page, including on refresh.
-            if record.engram.pending_context_nudge.is_some() {
-                return EngramContextNudgePreparation::Ready;
-            }
-            if !record.engram.context_nudge_pending {
-                return EngramContextNudgePreparation::Ready;
-            }
-            if record.engram.context_nudge_in_progress {
-                waited_for_generation = record.engram.context_nudge_in_progress_generation;
-                None
-            } else {
-                if waited_for_generation == Some(record.engram.context_nudge_generation) {
-                    return EngramContextNudgePreparation::Failed;
-                }
-                let Some(project) = engram_project_for_session_locked(&inner, session_id) else {
+                let mut inner = self.inner.lock().expect("state mutex poisoned");
+                let Some(index) = inner.find_session_index(session_id) else {
                     return EngramContextNudgePreparation::NotApplicable;
                 };
-                let Some(settings) = project.engram.as_ref() else {
-                    return EngramContextNudgePreparation::NotApplicable;
-                };
-                if project.remote_id != LOCAL_REMOTE_ID
-                    || inner.engram_project_resets.contains(&project.id)
-                    || !settings.is_base_enabled()
-                {
+                let record = &inner.sessions[index];
+                if !record.is_local_session() {
                     return EngramContextNudgePreparation::NotApplicable;
                 }
-                let (Some(command), Some(home)) =
-                    (settings.binary_path.as_deref(), settings.home.as_deref())
-                else {
-                    return EngramContextNudgePreparation::NotApplicable;
-                };
-                let generation = if record.engram.context_refresh_needed {
-                    record.engram.context_nudge_generation.saturating_add(1)
+                // Reuse the pending orientation snapshot until runtime admission.
+                // This is only a local prompt cache: peek neither stages nor
+                // acknowledges an Engram delivery page, including on refresh.
+                if record.engram.pending_context_nudge.is_some() {
+                    return EngramContextNudgePreparation::Ready;
+                }
+                if !record.engram.context_nudge_pending {
+                    return EngramContextNudgePreparation::Ready;
+                }
+                if record.engram.context_nudge_in_progress {
+                    waited_for_generation = record.engram.context_nudge_in_progress_generation;
+                    None
                 } else {
-                    record.engram.context_nudge_generation
-                }.max(1);
-                let (actor_id, actor_context) = engram_runtime_actor_identity(
-                    &inner.preferences.engram.developer_name,
-                    record,
-                );
-                let project_root = PathBuf::from(&project.root_path);
-                let project_file = project_root.join(".engram-project");
-                if !project_declared {
-                    return EngramContextNudgePreparation::NotApplicable;
+                    if waited_for_generation == Some(record.engram.context_nudge_generation) {
+                        return EngramContextNudgePreparation::Failed;
+                    }
+                    let Some(project) = engram_project_for_session_locked(&inner, session_id)
+                    else {
+                        return EngramContextNudgePreparation::NotApplicable;
+                    };
+                    let Some(settings) = project.engram.as_ref() else {
+                        return EngramContextNudgePreparation::NotApplicable;
+                    };
+                    if project.remote_id != LOCAL_REMOTE_ID
+                        || inner.engram_project_resets.contains(&project.id)
+                        || !settings.is_base_enabled()
+                    {
+                        return EngramContextNudgePreparation::NotApplicable;
+                    }
+                    let (Some(command), Some(home)) =
+                        (settings.binary_path.as_deref(), settings.home.as_deref())
+                    else {
+                        return EngramContextNudgePreparation::NotApplicable;
+                    };
+                    let generation = if record.engram.context_refresh_needed {
+                        record.engram.context_nudge_generation.saturating_add(1)
+                    } else {
+                        record.engram.context_nudge_generation
+                    }
+                    .max(1);
+                    let (actor_id, actor_context) = engram_runtime_actor_identity(
+                        &inner.preferences.engram.developer_name,
+                        record,
+                    );
+                    let project_root = PathBuf::from(&project.root_path);
+                    let project_file = project_root.join(".engram-project");
+                    if !project_declared {
+                        return EngramContextNudgePreparation::NotApplicable;
+                    }
+                    let target = EngramContextNudgeTarget {
+                        command: PathBuf::from(command),
+                        home: home.to_owned(),
+                        project_file,
+                        project_root,
+                        actor_id,
+                        actor_context,
+                        session_id: session_id.to_owned(),
+                        generation,
+                        timeout: ENGRAM_WORK_BINDING_COMMAND_TIMEOUT,
+                    };
+                    let record = inner
+                        .session_mut_by_index(index)
+                        .expect("session index should be valid");
+                    record.engram.context_nudge_in_progress = true;
+                    record.engram.context_nudge_in_progress_generation = Some(generation);
+                    record.engram.context_nudge_generation = generation;
+                    // A later boundary during this read sets this back to true;
+                    // completing this read must not consume that later request.
+                    record.engram.context_refresh_needed = false;
+                    Some(target)
                 }
-                let target = EngramContextNudgeTarget {
-                    command: PathBuf::from(command),
-                    home: home.to_owned(),
-                    project_file,
-                    project_root,
-                    actor_id,
-                    actor_context,
-                    session_id: session_id.to_owned(),
-                    generation,
-                    timeout: ENGRAM_WORK_BINDING_COMMAND_TIMEOUT,
-                };
-                let record = inner
-                    .session_mut_by_index(index)
-                    .expect("session index should be valid");
-                record.engram.context_nudge_in_progress = true;
-                record.engram.context_nudge_in_progress_generation = Some(generation);
-                record.engram.context_nudge_generation = generation;
-                // A later boundary during this read sets this back to true;
-                // completing this read must not consume that later request.
-                record.engram.context_refresh_needed = false;
-                Some(target)
-            }
             };
 
             let Some(target) = target else {
@@ -410,9 +412,7 @@ impl AppState {
         let record = inner
             .session_mut_by_index(index)
             .expect("session index should be valid");
-        if record.engram.context_nudge_delivery_turn_generation
-            != Some(active_turn_generation)
-        {
+        if record.engram.context_nudge_delivery_turn_generation != Some(active_turn_generation) {
             return;
         }
         if record.engram.context_nudge_delivery_generation
@@ -486,11 +486,13 @@ fn run_engram_context_nudge(
         let _ = process.wait();
         format!("failed preparing `engram work next` process tree: {error:#}")
     })?;
-    process_tree.resume_after_attach(&process).map_err(|error| {
-        let _ = process_tree.terminate(&process);
-        let _ = process.wait();
-        format!("failed resuming `engram work next`: {error:#}")
-    })?;
+    process_tree
+        .resume_after_attach(&process)
+        .map_err(|error| {
+            let _ = process_tree.terminate(&process);
+            let _ = process.wait();
+            format!("failed resuming `engram work next`: {error:#}")
+        })?;
     let stdout_reader = spawn_engram_cli_output_reader(stdout, ENGRAM_CONTEXT_NUDGE_READER_LABEL);
     let stderr_reader = spawn_engram_cli_output_reader(stderr, ENGRAM_CONTEXT_NUDGE_READER_LABEL);
     let timeout = target.timeout;
@@ -516,12 +518,10 @@ fn run_engram_context_nudge(
             }
         }
     };
-    let stdout =
-        join_engram_cli_output(stdout_reader, ENGRAM_CONTEXT_NUDGE_READER_LABEL, "stdout")
-            .map_err(|error| error.message)?;
-    let stderr =
-        join_engram_cli_output(stderr_reader, ENGRAM_CONTEXT_NUDGE_READER_LABEL, "stderr")
-            .map_err(|error| error.message)?;
+    let stdout = join_engram_cli_output(stdout_reader, ENGRAM_CONTEXT_NUDGE_READER_LABEL, "stdout")
+        .map_err(|error| error.message)?;
+    let stderr = join_engram_cli_output(stderr_reader, ENGRAM_CONTEXT_NUDGE_READER_LABEL, "stderr")
+        .map_err(|error| error.message)?;
     let status = status?;
     if !status.success() {
         let stderr = String::from_utf8_lossy(&stderr).trim().to_owned();
@@ -586,10 +586,7 @@ fn engram_mcp_runtime_config_for_session_locked(
         return None;
     }
     let project_file = PathBuf::from(&project.root_path).join(".engram-project");
-    let actor_id = engram_seat_id(
-        &inner.preferences.engram.developer_name,
-        &session.session,
-    );
+    let actor_id = engram_seat_id(&inner.preferences.engram.developer_name, &session.session);
     let actor_context = engram_actor_context(&session.session);
     let mut args = vec![
         "--project-file".to_owned(),
@@ -601,23 +598,14 @@ fn engram_mcp_runtime_config_for_session_locked(
         actor_id.clone(),
     ];
     if let Some(actor_context) = actor_context.as_ref() {
-        args.extend([
-            "--actor-context".to_owned(),
-            actor_context.clone(),
-        ]);
+        args.extend(["--actor-context".to_owned(), actor_context.clone()]);
     }
-    args.extend([
-        "--session-id".to_owned(),
-        session_id.to_owned(),
-    ]);
+    args.extend(["--session-id".to_owned(), session_id.to_owned()]);
     let mut env = BTreeMap::new();
     env.insert(ENGRAM_HOME_ENV.to_owned(), home.to_owned());
     env.insert(ENGRAM_ACTOR_ID_ENV.to_owned(), actor_id.clone());
     if let Some(actor_context) = actor_context.as_ref() {
-        env.insert(
-            ENGRAM_ACTOR_CONTEXT_ENV.to_owned(),
-            actor_context.clone(),
-        );
+        env.insert(ENGRAM_ACTOR_CONTEXT_ENV.to_owned(), actor_context.clone());
     }
     env.insert(ENGRAM_SESSION_ID_ENV.to_owned(), session_id.to_owned());
     let installed = EngramMcpInstalledDescriptor {

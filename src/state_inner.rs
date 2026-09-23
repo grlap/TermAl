@@ -112,7 +112,8 @@ impl StateInner {
         let session_id = format!("session-{number}");
         let session_name =
             name.unwrap_or_else(|| generated_session_name(agent, session_id.as_str()));
-        let session_model = model.unwrap_or_else(|| self.preferences.default_model_for_agent(agent));
+        let session_model =
+            model.unwrap_or_else(|| self.preferences.default_model_for_agent(agent));
         let opencode_model = agent
             .supports_opencode_settings()
             .then(|| session_model.clone());
@@ -194,7 +195,8 @@ impl StateInner {
                     .supports_gemini_approval_mode()
                     .then_some(default_gemini_approval_mode()),
                 opencode_model,
-                opencode_approval_mode: agent.supports_opencode_settings()
+                opencode_approval_mode: agent
+                    .supports_opencode_settings()
                     .then_some(self.preferences.default_opencode_approval_mode),
                 opencode_effort: agent
                     .supports_opencode_settings()
@@ -236,7 +238,8 @@ impl StateInner {
             record.session.reasoning_effort = Some(record.codex_reasoning_effort);
             record.session.sandbox_mode = Some(record.codex_sandbox_mode);
         } else if record.session.agent.supports_claude_approval_mode() {
-            record.session.claude_approval_mode = Some(self.preferences.default_claude_approval_mode);
+            record.session.claude_approval_mode =
+                Some(self.preferences.default_claude_approval_mode);
             record.session.claude_effort = Some(self.preferences.default_claude_effort);
         }
 
@@ -257,12 +260,7 @@ impl StateInner {
         let mut links = self
             .delegations
             .iter()
-            .map(|delegation| {
-                (
-                    delegation.child_session_id.clone(),
-                    delegation.id.clone(),
-                )
-            })
+            .map(|delegation| (delegation.child_session_id.clone(), delegation.id.clone()))
             .collect::<BTreeMap<_, _>>();
 
         for record in &mut self.sessions {
@@ -499,9 +497,7 @@ impl StateInner {
     fn push_session(&mut self, mut record: SessionRecord) -> usize {
         let stamp = self.next_mutation_stamp();
         record.mutation_stamp = stamp;
-        if record.prompt_history_mutation_stamp == 0
-            && !record.session.prompt_history.is_empty()
-        {
+        if record.prompt_history_mutation_stamp == 0 && !record.session.prompt_history.is_empty() {
             record.prompt_history_mutation_stamp = stamp;
         }
         self.sessions.push(record);
@@ -671,11 +667,7 @@ impl StateInner {
         self.materialize_persist_delta(plan)
     }
 
-    fn trim_persisted_session_tails(
-        &mut self,
-        watermark: u64,
-        persisted_session_ids: &[String],
-    ) {
+    fn trim_persisted_session_tails(&mut self, watermark: u64, persisted_session_ids: &[String]) {
         for session_id in persisted_session_ids {
             let Some(index) = self.find_session_index(session_id) else {
                 continue;
@@ -1020,8 +1012,7 @@ fn collect_persist_delta_pass_from_shared_state(
         state.collect_persist_delta_plan(watermark)
     };
     for candidate in &mut plan.changed_sessions {
-        candidate.persist_prompt_history |=
-            prompt_history_carry.contains(&candidate.session_id);
+        candidate.persist_prompt_history |= prompt_history_carry.contains(&candidate.session_id);
     }
     after_plan();
 
@@ -1073,7 +1064,10 @@ fn delegation_id_from_child_session_marker(record: &SessionRecord) -> Option<Str
         .and_then(|message| delegation_id_from_message_marker(message, &record.session.id))
 }
 
-fn delegation_id_from_message_marker(message: &Message, expected_child_session_id: &str) -> Option<String> {
+fn delegation_id_from_message_marker(
+    message: &Message,
+    expected_child_session_id: &str,
+) -> Option<String> {
     match message {
         Message::Text {
             author: Author::You,
@@ -1100,7 +1094,9 @@ fn delegated_child_marker_parts(text: &str) -> Option<(&str, &str)> {
     // prompt text and both identity fields must use the reserved shape. The
     // caller that repairs a durable parent link additionally checks that the
     // parsed child id matches the session being repaired.
-    let after_marker = text.trim_start().strip_prefix(DELEGATED_CHILD_SESSION_MARKER)?;
+    let after_marker = text
+        .trim_start()
+        .strip_prefix(DELEGATED_CHILD_SESSION_MARKER)?;
     let after_opening_tick = after_marker.strip_prefix(" `")?;
     let closing_tick = after_opening_tick.find('`')?;
     let after_closing_tick = &after_opening_tick[closing_tick + 1..];

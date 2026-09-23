@@ -265,12 +265,11 @@ fn take_coordination_cli_session_id(
     flags: &mut CoordinationCliFlags,
     default_session_id: Option<&str>,
 ) -> Result<String> {
-    take_optional_coordination_cli_session_id(flags, default_session_id)?
-        .ok_or_else(|| {
-            coordination_cli_usage_error(
-                "`--as-session` is required when TERMAL_SESSION_ID is unavailable",
-            )
-        })
+    take_optional_coordination_cli_session_id(flags, default_session_id)?.ok_or_else(|| {
+        coordination_cli_usage_error(
+            "`--as-session` is required when TERMAL_SESSION_ID is unavailable",
+        )
+    })
 }
 
 /// Parses `sessions ...` / `mailbox ...` arguments (the group word included).
@@ -366,10 +365,8 @@ fn parse_coordination_cli_args_with_default_session_id(
             )?,
         },
         ("mailbox", "send") => {
-            let as_session = take_coordination_cli_session_id(
-                &mut flags,
-                default_session_id.as_deref(),
-            )?;
+            let as_session =
+                take_coordination_cli_session_id(&mut flags, default_session_id.as_deref())?;
             let to = flags.take_required("--to")?;
             let inline = flags.values.remove("--message");
             let file = flags.take_optional("--message-file");
@@ -429,11 +426,16 @@ fn parse_coordination_cli_args_with_default_session_id(
             )?,
             message_id: flags.take_required("--message-id")?,
         },
-        ("mailbox", "acknowledge") if flags.values.contains_key("--receipt") => CoordinationCliCommand::MailboxAcknowledgeReceipt {
-            as_session: take_coordination_cli_session_id(&mut flags, default_session_id.as_deref())?,
-            mailbox_id: flags.take_required("--mailbox-id")?,
-            receipt: flags.take_required("--receipt")?,
-        },
+        ("mailbox", "acknowledge") if flags.values.contains_key("--receipt") => {
+            CoordinationCliCommand::MailboxAcknowledgeReceipt {
+                as_session: take_coordination_cli_session_id(
+                    &mut flags,
+                    default_session_id.as_deref(),
+                )?,
+                mailbox_id: flags.take_required("--mailbox-id")?,
+                receipt: flags.take_required("--receipt")?,
+            }
+        }
         ("mailbox", "acknowledge") => CoordinationCliCommand::MailboxAcknowledge {
             as_session: take_coordination_cli_session_id(
                 &mut flags,
@@ -464,7 +466,10 @@ fn parse_coordination_cli_args_with_default_session_id(
 
 /// Reads at most the backend body cap plus one byte, so an oversized file or
 /// stream is refused here without being buffered whole.
-fn read_coordination_cli_message_bounded(reader: impl std::io::Read, label: &str) -> Result<String> {
+fn read_coordination_cli_message_bounded(
+    reader: impl std::io::Read,
+    label: &str,
+) -> Result<String> {
     let mut bytes = Vec::new();
     let mut limited = std::io::Read::take(reader, MAX_MAILBOX_BODY_BYTES as u64 + 1);
     std::io::Read::read_to_end(&mut limited, &mut bytes)
@@ -513,10 +518,7 @@ fn resolve_coordination_cli_message(source: &CoordinationCliMessageSource) -> Re
     Ok(text)
 }
 
-fn coordination_cli_bridge(
-    as_session: &str,
-    base_url: &str,
-) -> Result<TermalDelegationMcpBridge> {
+fn coordination_cli_bridge(as_session: &str, base_url: &str) -> Result<TermalDelegationMcpBridge> {
     // The bridge validates the id as a path segment; a rejection here is an
     // argument problem, not a request failure.
     TermalDelegationMcpBridge::new(as_session.to_owned(), base_url.to_owned())
@@ -570,8 +572,7 @@ fn validate_coordination_cli_output(
     command: &CoordinationCliCommand,
     output: &Value,
 ) -> Result<()> {
-    let unusable =
-        |detail: String| anyhow!("the server returned an unusable response: {detail}");
+    let unusable = |detail: String| anyhow!("the server returned an unusable response: {detail}");
     match command {
         CoordinationCliCommand::Help => Ok(()),
         CoordinationCliCommand::SessionsList { .. } => {
@@ -590,10 +591,7 @@ fn validate_coordination_cli_output(
                 // The bridge emits every attribute key, null when the state
                 // snapshot lacks it; a missing key means the contract broke.
                 for key in ["name", "agent", "status", "workdir", "preview"] {
-                    if !matches!(
-                        session.get(key),
-                        Some(Value::Null) | Some(Value::String(_))
-                    ) {
+                    if !matches!(session.get(key), Some(Value::Null) | Some(Value::String(_))) {
                         return Err(unusable(format!(
                             "sessions[{index}].{key} is missing or not a string"
                         )));
@@ -640,7 +638,8 @@ fn validate_coordination_cli_output(
                 .map(|_| ())
                 .map_err(|err| unusable(format!("message: {err}")))
         }
-        CoordinationCliCommand::MailboxAcknowledge { .. } | CoordinationCliCommand::MailboxAcknowledgeReceipt { .. } => {
+        CoordinationCliCommand::MailboxAcknowledge { .. }
+        | CoordinationCliCommand::MailboxAcknowledgeReceipt { .. } => {
             serde_json::from_value::<MailboxSummary>(output.clone())
                 .map(|_| ())
                 .map_err(|err| unusable(format!("mailbox summary: {err}")))
@@ -746,7 +745,11 @@ fn execute_coordination_cli(command: &CoordinationCliCommand, base_url: &str) ->
             let bridge = coordination_cli_authorized_bridge(as_session, base_url)?;
             bridge.tool_read_mailbox_message(json!({ "messageId": message_id }))
         }
-        CoordinationCliCommand::MailboxAcknowledgeReceipt { as_session, mailbox_id, receipt } => {
+        CoordinationCliCommand::MailboxAcknowledgeReceipt {
+            as_session,
+            mailbox_id,
+            receipt,
+        } => {
             let bridge = coordination_cli_authorized_bridge(as_session, base_url)?;
             bridge.tool_acknowledge_mailbox(json!({"mailboxId":mailbox_id,"receipt":receipt}))
         }
@@ -937,10 +940,7 @@ fn render_coordination_cli_output(
             coordination_cli_field(output, "senderProcessedThrough"),
             coordination_cli_field(output, "senderCursorAdvanced"),
         )?,
-        CoordinationCliCommand::MailboxRead {
-            mailbox_id,
-            ..
-        } => {
+        CoordinationCliCommand::MailboxRead { mailbox_id, .. } => {
             writeln!(
                 out,
                 "{}: afterSequence {}, processedThrough {} (snapshot; reading does not acknowledge)",
@@ -948,10 +948,13 @@ fn render_coordination_cli_output(
                 coordination_cli_field(output, "afterSequence"),
                 coordination_cli_field(output, "processedThrough"),
             )?;
-            writeln!(out, "receipt {}, hasMore {}, nextAfterSequence {}",
+            writeln!(
+                out,
+                "receipt {}, hasMore {}, nextAfterSequence {}",
                 coordination_cli_field(output, "receipt"),
                 coordination_cli_field(output, "hasMore"),
-                coordination_cli_field(output, "nextAfterSequence"))?;
+                coordination_cli_field(output, "nextAfterSequence")
+            )?;
             let messages = output
                 .get("messages")
                 .and_then(Value::as_array)
@@ -971,17 +974,19 @@ fn render_coordination_cli_output(
         CoordinationCliCommand::MailboxReadMessage { .. } => {
             render_coordination_cli_message(output, out)?;
         }
-        CoordinationCliCommand::MailboxAcknowledge {
-            as_session, ..
-        } | CoordinationCliCommand::MailboxAcknowledgeReceipt {
-            as_session, ..
-        } => writeln!(
+        CoordinationCliCommand::MailboxAcknowledge { as_session, .. }
+        | CoordinationCliCommand::MailboxAcknowledgeReceipt { as_session, .. } => writeln!(
             out,
             "acknowledged {} through #{} (latest #{}, unread {})",
             coordination_cli_field(output, "id"),
-            output.get("participants").and_then(Value::as_array)
-                .and_then(|participants| participants.iter().find(|p| p["sessionId"].as_str() == Some(as_session)))
-                .map(|p| coordination_cli_field(p, "processedThrough")).unwrap_or_else(|| "unknown".to_owned()),
+            output
+                .get("participants")
+                .and_then(Value::as_array)
+                .and_then(|participants| participants
+                    .iter()
+                    .find(|p| p["sessionId"].as_str() == Some(as_session)))
+                .map(|p| coordination_cli_field(p, "processedThrough"))
+                .unwrap_or_else(|| "unknown".to_owned()),
             coordination_cli_field(output, "latestSequence"),
             coordination_cli_field(output, "unreadCount"),
         )?,

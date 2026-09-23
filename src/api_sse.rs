@@ -26,7 +26,6 @@
 // tag fallback payloads so clients can dedup retransmits.
 // `empty_state_events_response` is the minimal skeleton.
 
-
 fn stable_text_hash(value: &str) -> String {
     let mut hash = 0xcbf29ce484222325_u64;
     for byte in value.as_bytes() {
@@ -128,7 +127,11 @@ fn fallback_state_events_payload(
     revision: u64,
     server_instance_id: String,
 ) -> Result<String, ApiError> {
-    serde_json::to_string(&fallback_state_events_response(revision, server_instance_id)).map_err(|err| {
+    serde_json::to_string(&fallback_state_events_response(
+        revision,
+        server_instance_id,
+    ))
+    .map_err(|err| {
         ApiError::internal(format!(
             "failed to serialize fallback SSE state snapshot: {err}"
         ))

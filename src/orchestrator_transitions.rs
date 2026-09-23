@@ -410,10 +410,10 @@ fn mark_deadlocked_orchestrator_instances(
                 continue;
             };
             clear_stopped_orchestrator_queued_prompts(
-                    inner
-                        .session_mut_by_index(session_index)
-                        .expect("session index should be valid"),
-                );
+                inner
+                    .session_mut_by_index(session_index)
+                    .expect("session index should be valid"),
+            );
         }
 
         for session_id in deadlocked_session_ids {

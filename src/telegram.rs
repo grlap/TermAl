@@ -386,9 +386,7 @@ fn forward_telegram_text_to_project_for_relay(
 ) -> Result<TelegramPromptForwardOutcome> {
     let (project_id, mut dirty) = resolve_telegram_active_project_id(config, state);
     let digest_primary_session_id = if config.project_digests_enabled {
-        termal
-            .get_project_digest(&project_id)?
-            .primary_session_id
+        termal.get_project_digest(&project_id)?.primary_session_id
     } else {
         None
     };

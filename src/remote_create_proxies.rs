@@ -121,26 +121,23 @@ impl AppState {
                     })?;
                 (project_id, self.snapshot_from_inner(&inner))
             };
-            return Ok(CreateProjectResponse {
-                project_id,
-                state,
-            });
+            return Ok(CreateProjectResponse { project_id, state });
         }
 
         let (remote_response, response_lease): (CreateProjectResponse, RemoteRequestLease) = self
             .remote_registry
             .request_json_with_lease(
-            &remote,
-            Method::POST,
-            "/api/projects",
-            &[],
-            Some(json!({
-                "name": request.name,
-                "rootPath": root_path,
-                "remoteId": LOCAL_REMOTE_ID,
-            })),
-        )
-        .map_err(remote_create_authority_error)?;
+                &remote,
+                Method::POST,
+                "/api/projects",
+                &[],
+                Some(json!({
+                    "name": request.name,
+                    "rootPath": root_path,
+                    "remoteId": LOCAL_REMOTE_ID,
+                })),
+            )
+            .map_err(remote_create_authority_error)?;
 
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         self.ensure_remote_create_request_current_locked(&inner, &response_lease)?;
@@ -153,9 +150,7 @@ impl AppState {
                 )));
             }
             RemoteAuthorityResolution::RemoteChanged => {
-                return Err(ApiError::conflict(
-                    REMOTE_CONNECTION_CHANGED_DURING_CREATE,
-                ));
+                return Err(ApiError::conflict(REMOTE_CONNECTION_CHANGED_DURING_CREATE));
             }
         }
         let existing_len = inner.projects.len();
@@ -218,33 +213,34 @@ impl AppState {
         let Some(binding) = self.ensure_remote_project_binding_with_missing_status(
             &project.id,
             RemoteCreateMissingProjectStatus::BadRequest,
-        )? else {
+        )?
+        else {
             return Err(ApiError::bad_request("remote project binding is missing"));
         };
         let (remote_response, response_lease): (CreateSessionResponse, RemoteRequestLease) = self
             .remote_registry
             .request_json_with_lease(
-            &binding.remote,
-            Method::POST,
-            "/api/sessions",
-            &[],
-            Some(json!({
-                "agent": request.agent,
-                "name": request.name,
-                "workdir": request.workdir,
-                "projectId": binding.remote_project_id,
-                "model": request.model,
-                "approvalPolicy": request.approval_policy,
-                "reasoningEffort": request.reasoning_effort,
-                "sandboxMode": request.sandbox_mode,
-                "cursorMode": request.cursor_mode,
-                "claudeApprovalMode": request.claude_approval_mode,
-                "claudeEffort": request.claude_effort,
-                "geminiApprovalMode": request.gemini_approval_mode,
-                "opencodeApprovalMode": request.opencode_approval_mode,
-            })),
-        )
-        .map_err(remote_create_authority_error)?;
+                &binding.remote,
+                Method::POST,
+                "/api/sessions",
+                &[],
+                Some(json!({
+                    "agent": request.agent,
+                    "name": request.name,
+                    "workdir": request.workdir,
+                    "projectId": binding.remote_project_id,
+                    "model": request.model,
+                    "approvalPolicy": request.approval_policy,
+                    "reasoningEffort": request.reasoning_effort,
+                    "sandboxMode": request.sandbox_mode,
+                    "cursorMode": request.cursor_mode,
+                    "claudeApprovalMode": request.claude_approval_mode,
+                    "claudeEffort": request.claude_effort,
+                    "geminiApprovalMode": request.gemini_approval_mode,
+                    "opencodeApprovalMode": request.opencode_approval_mode,
+                })),
+            )
+            .map_err(remote_create_authority_error)?;
         // A response whose two identity fields disagree cannot be safely
         // attributed to the requested remote session. Reject it without
         // starting a bridge solely on the strength of that malformed payload.
@@ -293,10 +289,7 @@ impl AppState {
             // proxy records (no existing row) still get created
             // regardless; this flag only controls the refresh branch.
             let update_existing = !inner
-                .should_skip_remote_applied_revision(
-                    &binding.remote.id,
-                    remote_response.revision,
-                );
+                .should_skip_remote_applied_revision(&binding.remote.id, remote_response.revision);
             let (local_session_id, changed) = ensure_remote_proxy_session_record(
                 &mut inner,
                 &binding.remote.id,
@@ -309,10 +302,7 @@ impl AppState {
                 // as the most-recent-applied for this remote. Exact
                 // same-revision payload replays are deduplicated by
                 // the per-remote replay cache, not by this watermark.
-                inner.note_remote_applied_revision(
-                    &binding.remote.id,
-                    remote_response.revision,
-                );
+                inner.note_remote_applied_revision(&binding.remote.id, remote_response.revision);
             }
             let local_record = inner
                 .find_session_index(&local_session_id)
@@ -338,7 +328,13 @@ impl AppState {
             };
             let delta_session =
                 changed.then(|| AppState::wire_session_summary_from_record(&local_record));
-            (revision, local_session_id, local_session, changed, delta_session)
+            (
+                revision,
+                local_session_id,
+                local_session,
+                changed,
+                delta_session,
+            )
         };
         // Skip the SSE announcement on the no-change branch. The client
         // would silently drop it anyway (`decideDeltaRevisionAction`
@@ -380,7 +376,8 @@ impl AppState {
         let Some(binding) = self.ensure_remote_project_binding_with_missing_status(
             &project.id,
             RemoteCreateMissingProjectStatus::NotFound,
-        )? else {
+        )?
+        else {
             return Err(ApiError::bad_request("remote project binding is missing"));
         };
         let mut remote_template = orchestrator_template_to_draft(template);
@@ -461,11 +458,12 @@ impl AppState {
                 );
             }
             if applied_remote_revision || changed {
-                self.commit_remote_localization_locked(&mut inner).map_err(|err| {
-                    ApiError::internal(format!(
-                        "failed to persist remote orchestrator proxy: {err:#}"
-                    ))
-                })?;
+                self.commit_remote_localization_locked(&mut inner)
+                    .map_err(|err| {
+                        ApiError::internal(format!(
+                            "failed to persist remote orchestrator proxy: {err:#}"
+                        ))
+                    })?;
             } else {
                 self.retry_remote_delta_persist_if_dirty_locked(&mut inner)
                     .map_err(|err| {

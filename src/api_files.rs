@@ -28,7 +28,6 @@
 // Both discovery routes short-circuit to the matching `proxy_remote_*`
 // helper when the session is remote-backed.
 
-
 /// Reads file.
 async fn read_file(
     State(state): State<AppState>,
@@ -378,8 +377,8 @@ async fn resolve_agent_command(
     State(state): State<AppState>,
     payload: std::result::Result<Json<ResolveAgentCommandRequest>, JsonRejection>,
 ) -> Result<Json<ResolveAgentCommandResponse>, ApiError> {
-    let Json(request) =
-        payload.map_err(|rejection| api_json_rejection("agent command resolve request", rejection))?;
+    let Json(request) = payload
+        .map_err(|rejection| api_json_rejection("agent command resolve request", rejection))?;
     let response =
         run_blocking_api(move || state.resolve_agent_command(&session_id, &command_name, request))
             .await?;
@@ -410,12 +409,10 @@ fn open_agent_command_file(path: &FsPath) -> Result<fs::File, ApiError> {
         .open(path)
     {
         Ok(file) => Ok(file),
-        Err(err) if err.raw_os_error() == Some(libc::ELOOP) => {
-            Err(ApiError::bad_request(format!(
-                "agent command {} changed to a symlink",
-                path.display()
-            )))
-        }
+        Err(err) if err.raw_os_error() == Some(libc::ELOOP) => Err(ApiError::bad_request(format!(
+            "agent command {} changed to a symlink",
+            path.display()
+        ))),
         Err(err) => Err(ApiError::internal(format!(
             "failed to open agent command {}: {err}",
             path.display()
@@ -665,17 +662,17 @@ fn looks_like_markdown_frontmatter(frontmatter: &str) -> bool {
         key == "metadata.termal"
             || key.starts_with("metadata.termal.")
             || matches!(
-            key,
-            "name"
-                | "description"
-                | "metadata"
-                | "argument-hint"
-                | "argument_hint"
-                | "allowed-tools"
-                | "tools"
-                | "model"
-                | "disable-model-invocation"
-                | "disable_model_invocation"
+                key,
+                "name"
+                    | "description"
+                    | "metadata"
+                    | "argument-hint"
+                    | "argument_hint"
+                    | "allowed-tools"
+                    | "tools"
+                    | "model"
+                    | "disable-model-invocation"
+                    | "disable_model_invocation"
             )
     })
 }
@@ -704,10 +701,7 @@ fn parse_agent_command_resolver_metadata(
     if !has_termal_metadata {
         return Ok(None);
     }
-    if !fields
-        .keys()
-        .any(|key| key.starts_with("metadata.termal."))
-    {
+    if !fields.keys().any(|key| key.starts_with("metadata.termal.")) {
         return Err(ApiError::bad_request(
             "metadata.termal must define title or delegation metadata",
         ));
@@ -729,7 +723,10 @@ fn parse_agent_command_resolver_metadata(
     }
 
     let title_prefix = fields.get("metadata.termal.title.prefix");
-    let title = match fields.get("metadata.termal.title.strategy").map(String::as_str) {
+    let title = match fields
+        .get("metadata.termal.title.strategy")
+        .map(String::as_str)
+    {
         None | Some("default") => {
             if title_prefix.is_some() {
                 return Err(ApiError::bad_request(
@@ -876,24 +873,21 @@ fn markdown_frontmatter_fields(frontmatter: &str) -> Result<BTreeMap<String, Str
 
         let value = raw_value.trim();
         if value.is_empty() {
-            let mut field_path = path
-                .iter()
-                .map(|(_, key)| key.as_str())
-                .collect::<Vec<_>>();
+            let mut field_path = path.iter().map(|(_, key)| key.as_str()).collect::<Vec<_>>();
             field_path.push(key);
             fields.entry(field_path.join(".")).or_default();
             path.push((indent, key.to_owned()));
             continue;
         }
 
-        let mut field_path = path
-            .iter()
-            .map(|(_, key)| key.as_str())
-            .collect::<Vec<_>>();
+        let mut field_path = path.iter().map(|(_, key)| key.as_str()).collect::<Vec<_>>();
         field_path.push(key);
         let field_key = field_path.join(".");
-        let field_value =
-            unquote_markdown_frontmatter_string(value, &field_key, is_termal_frontmatter_key(&field_key))?;
+        let field_value = unquote_markdown_frontmatter_string(
+            value,
+            &field_key,
+            is_termal_frontmatter_key(&field_key),
+        )?;
         fields.insert(field_key, field_value);
     }
     Ok(fields)
@@ -928,8 +922,8 @@ fn markdown_command_frontmatter_fields(frontmatter: &str) -> BTreeMap<String, St
         {
             continue;
         }
-        let field_value =
-            unquote_markdown_frontmatter_string(value, key, false).unwrap_or_else(|_| value.to_owned());
+        let field_value = unquote_markdown_frontmatter_string(value, key, false)
+            .unwrap_or_else(|_| value.to_owned());
         fields.insert(key.to_owned(), field_value);
     }
     fields
@@ -1008,10 +1002,7 @@ fn markdown_frontmatter_title_fields(
         if key.is_empty() {
             continue;
         }
-        let mut field_path = path
-            .iter()
-            .map(|(_, key)| key.as_str())
-            .collect::<Vec<_>>();
+        let mut field_path = path.iter().map(|(_, key)| key.as_str()).collect::<Vec<_>>();
         field_path.push(key);
         let is_title_path = is_termal_title_frontmatter_components(&field_path);
         if line[..indent].contains('\t') {
@@ -1043,10 +1034,7 @@ fn markdown_frontmatter_title_fields(
 }
 
 fn is_termal_frontmatter_path(path: &[(usize, String)], key: &str) -> bool {
-    let mut components = path
-        .iter()
-        .map(|(_, key)| key.as_str())
-        .collect::<Vec<_>>();
+    let mut components = path.iter().map(|(_, key)| key.as_str()).collect::<Vec<_>>();
     components.push(key);
     is_termal_frontmatter_components(&components)
 }
@@ -1103,7 +1091,9 @@ fn non_empty_frontmatter_field(fields: &BTreeMap<String, String>, key: &str) -> 
 
 fn has_frontmatter_field_children(fields: &BTreeMap<String, String>, key: &str) -> bool {
     let child_prefix = format!("{key}.");
-    fields.keys().any(|candidate| candidate.starts_with(&child_prefix))
+    fields
+        .keys()
+        .any(|candidate| candidate.starts_with(&child_prefix))
 }
 
 fn parse_frontmatter_bool(value: &str, key: &str) -> Result<bool, ApiError> {
@@ -1198,7 +1188,10 @@ fn unquote_markdown_frontmatter_string(
 fn frontmatter_error_value(value: &str) -> String {
     const MAX_ERROR_VALUE_CHARS: usize = 64;
     let mut chars = value.chars();
-    let truncated = chars.by_ref().take(MAX_ERROR_VALUE_CHARS).collect::<String>();
+    let truncated = chars
+        .by_ref()
+        .take(MAX_ERROR_VALUE_CHARS)
+        .collect::<String>();
     if chars.next().is_some() {
         format!("{truncated}...")
     } else {

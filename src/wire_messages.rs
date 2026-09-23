@@ -23,7 +23,6 @@
 // `submit_mcp_elicitation`, `submit_codex_app_request`), but those
 // routes are thin; all the vocabulary lives here.
 
-
 /// Enumerates parallel agent states.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]

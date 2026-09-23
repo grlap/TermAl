@@ -65,20 +65,17 @@ struct RemoteRegistry {
     /// authority after a bridge frame's first fence but before bounded delta
     /// hydration resolves its target. Production builds contain no hook.
     #[cfg(test)]
-    test_before_remote_delta_hydration_target:
-        Arc<Mutex<Option<Box<dyn FnOnce() + Send>>>>,
+    test_before_remote_delta_hydration_target: Arc<Mutex<Option<Box<dyn FnOnce() + Send>>>>,
     /// One-shot deterministic interleaving seam for tests that delete or
     /// rebind a project after an existing-project fast path first resolves it
     /// but before that path performs its final state-locked revalidation.
     #[cfg(test)]
-    test_before_existing_remote_project_revalidation:
-        Arc<Mutex<Option<Box<dyn FnOnce() + Send>>>>,
+    test_before_existing_remote_project_revalidation: Arc<Mutex<Option<Box<dyn FnOnce() + Send>>>>,
     /// One-shot deterministic interleaving seam for tests that arm remote
     /// persistence debt after the apply entry retry but before an
     /// informational delta records its consumed revision.
     #[cfg(test)]
-    test_before_remote_informational_delta_watermark:
-        Arc<Mutex<Option<Box<dyn FnOnce() + Send>>>>,
+    test_before_remote_informational_delta_watermark: Arc<Mutex<Option<Box<dyn FnOnce() + Send>>>>,
 }
 
 /// Result of publishing a new settings-owned remote list. Connections are
@@ -148,13 +145,8 @@ impl RemoteStreamingAuthority {
                 .configs
                 .lock()
                 .expect("remote registry config mutex poisoned");
-            ensure_remote_routing_config(
-                configs.get(&self.lease.pinned.id),
-                &self.lease.pinned,
-            )?;
-            return Err(ApiError::conflict(
-                REMOTE_CONNECTION_CHANGED_BEFORE_REQUEST,
-            ));
+            ensure_remote_routing_config(configs.get(&self.lease.pinned.id), &self.lease.pinned)?;
+            return Err(ApiError::conflict(REMOTE_CONNECTION_CHANGED_BEFORE_REQUEST));
         }
         let published_generation = self.config_generation.load(Ordering::Acquire);
         if self.observed_generation.load(Ordering::Acquire) == published_generation {
@@ -362,10 +354,7 @@ impl RemoteRegistry {
     }
 
     #[cfg(test)]
-    fn set_test_before_remote_delta_hydration_target(
-        &self,
-        hook: impl FnOnce() + Send + 'static,
-    ) {
+    fn set_test_before_remote_delta_hydration_target(&self, hook: impl FnOnce() + Send + 'static) {
         *self
             .test_before_remote_delta_hydration_target
             .lock()
@@ -616,19 +605,11 @@ impl RemoteRegistry {
             .lock()
             .expect("remote registry mutex poisoned");
         let config_generation = self.config_generation.load(Ordering::Acquire);
-        let retired_connection = Self::retire_stale_cached_connection_locked(
-            &mut connections,
-            &remote.id,
-            &current,
-        );
+        let retired_connection =
+            Self::retire_stale_cached_connection_locked(&mut connections, &remote.id, &current);
         let connection = connections
             .entry(remote.id.clone())
-            .or_insert_with(|| {
-                Arc::new(RemoteConnection::new(
-                    current.clone(),
-                    config_generation,
-                ))
-            })
+            .or_insert_with(|| Arc::new(RemoteConnection::new(current.clone(), config_generation)))
             .clone();
         drop(connections);
         drop(configs);
@@ -835,7 +816,10 @@ impl RemoteRegistry {
         Ok(())
     }
 
-    fn claim_event_bridge(&self, remote_id: &str) -> Result<Option<Arc<RemoteConnection>>, ApiError> {
+    fn claim_event_bridge(
+        &self,
+        remote_id: &str,
+    ) -> Result<Option<Arc<RemoteConnection>>, ApiError> {
         self.claim_event_bridge_with_expected_lease(remote_id, None, |_| {})
     }
 
@@ -890,20 +874,15 @@ impl RemoteRegistry {
                 .get(remote_id)
                 .filter(|connection| Arc::ptr_eq(connection, &lease.connection))
                 .cloned()
-                .ok_or_else(|| {
-                    ApiError::conflict(REMOTE_CONNECTION_CHANGED_BEFORE_REQUEST)
-                })?;
+                .ok_or_else(|| ApiError::conflict(REMOTE_CONNECTION_CHANGED_BEFORE_REQUEST))?;
             (connection, None)
         } else {
             // Publication normally removes changed entries before replacing
             // the authoritative map. Share `connection()`'s defensive
             // retirement so a stale cache entry can never be claimed if that
             // invariant breaks.
-            let retired_connection = Self::retire_stale_cached_connection_locked(
-                &mut connections,
-                remote_id,
-                &current,
-            );
+            let retired_connection =
+                Self::retire_stale_cached_connection_locked(&mut connections, remote_id, &current);
             let connection = connections
                 .entry(remote_id.to_owned())
                 .or_insert_with(|| {
@@ -935,7 +914,6 @@ impl RemoteRegistry {
         Ok(Some(connection))
     }
 }
-
 
 /// Represents remote connection.
 struct RemoteConnection {
@@ -1016,21 +994,16 @@ impl RemoteConnection {
     fn ensure_pinned_route(&self, pinned: &RemoteConfig) -> Result<(), ApiError> {
         // The config comparison is defensive: the field is immutable, while
         // `retired` is the live publication signal.
-        if self.retired.load(Ordering::SeqCst)
-            || !same_remote_routing_config(&self.config, pinned)
+        if self.retired.load(Ordering::SeqCst) || !same_remote_routing_config(&self.config, pinned)
         {
-            return Err(ApiError::conflict(
-                REMOTE_CONNECTION_CHANGED_BEFORE_REQUEST,
-            ));
+            return Err(ApiError::conflict(REMOTE_CONNECTION_CHANGED_BEFORE_REQUEST));
         }
         Ok(())
     }
 
     fn ensure_state_continuity_generation(&self, expected: u64) -> Result<(), ApiError> {
         if self.state_continuity_generation.load(Ordering::SeqCst) != expected {
-            return Err(ApiError::conflict(
-                REMOTE_CONNECTION_CHANGED_BEFORE_REQUEST,
-            ));
+            return Err(ApiError::conflict(REMOTE_CONNECTION_CHANGED_BEFORE_REQUEST));
         }
         Ok(())
     }
@@ -1113,10 +1086,10 @@ impl RemoteConnection {
                             "remote SSH connection failed for `{}`. managed start failed: {}. tunnel-only fallback failed: {}",
                             pinned.name, managed_error, tunnel_error
                         );
-                        Err(ApiError::bad_gateway(remote_connection_issue_message(
-                            &pinned.name,
-                        ))
-                        .with_kind(ApiErrorKind::RemoteConnectionUnavailable))
+                        Err(
+                            ApiError::bad_gateway(remote_connection_issue_message(&pinned.name))
+                                .with_kind(ApiErrorKind::RemoteConnectionUnavailable),
+                        )
                     }
                 }
             }
@@ -1292,5 +1265,3 @@ struct RemoteProjectBinding {
     remote: RemoteConfig,
     remote_project_id: String,
 }
-
-

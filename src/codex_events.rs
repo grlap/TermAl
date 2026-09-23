@@ -285,8 +285,8 @@ fn handle_shared_codex_app_server_message(
             Some("notification")
         },
     );
-    let session_id_from_thread =
-        message_thread_id.and_then(|thread_id| find_shared_codex_session_id(state, thread_sessions, thread_id));
+    let session_id_from_thread = message_thread_id
+        .and_then(|thread_id| find_shared_codex_session_id(state, thread_sessions, thread_id));
     let session_id_from_turn = || {
         if message_thread_id.is_some() {
             return None;
@@ -378,8 +378,12 @@ fn handle_shared_codex_app_server_message(
     // notifications still describe a persisted thread. Do not discard this
     // evidence solely because its logical session has already detached.
     if matches!(method, "thread/archived" | "thread/unarchived") {
-        let current_server = state.shared_codex_runtime.lock().expect("shared Codex runtime mutex poisoned")
-            .as_ref().is_some_and(|runtime| runtime.runtime_id == runtime_id);
+        let current_server = state
+            .shared_codex_runtime
+            .lock()
+            .expect("shared Codex runtime mutex poisoned")
+            .as_ref()
+            .is_some_and(|runtime| runtime.runtime_id == runtime_id);
         if current_server {
             let mut inner = state.inner.lock().expect("state mutex poisoned");
             if let Some(index) = inner.find_session_index(&session_id) {
@@ -387,10 +391,23 @@ fn handle_shared_codex_app_server_message(
                 if matches!(record.runtime, SessionRuntime::None)
                     && record.external_session_id.as_deref() == message_thread_id
                     && !record.runtime_stop_in_progress
-                    && !matches!(record.session.status, SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping) {
-                    let next = if method == "thread/archived" { CodexThreadState::Archived } else { CodexThreadState::Active };
+                    && !matches!(
+                        record.session.status,
+                        SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
+                    )
+                {
+                    let next = if method == "thread/archived" {
+                        CodexThreadState::Archived
+                    } else {
+                        CodexThreadState::Active
+                    };
                     if record.session.codex_thread_state != Some(next) {
-                        set_record_codex_thread_state(inner.session_mut_by_index(index).expect("validated detached Codex session index"), next);
+                        set_record_codex_thread_state(
+                            inner
+                                .session_mut_by_index(index)
+                                .expect("validated detached Codex session index"),
+                            next,
+                        );
                         state.commit_locked(&mut inner)?;
                     }
                     return Ok(());
@@ -541,13 +558,7 @@ fn handle_shared_codex_app_server_message(
         )? {
             return Ok(());
         }
-        if try_auto_respond_codex_approval_request(
-            method,
-            message,
-            state,
-            &session_id,
-            input_tx,
-        )? {
+        if try_auto_respond_codex_approval_request(method, message, state, &session_id, input_tx)? {
             return Ok(());
         }
         return handle_codex_app_server_request(method, message, &mut recorder);
@@ -572,7 +583,6 @@ fn handle_shared_codex_app_server_message(
         &mut recorder,
     )
 }
-
 
 /// Dispatches fire-and-forget notifications (no response expected) to
 /// the appropriate per-event handler. Owns the session-scoped mutable
@@ -643,9 +653,7 @@ fn handle_shared_codex_app_server_notification(
             )?;
         }
         "turn/started" => {
-            let event_turn_id = message
-                .pointer("/params/turn/id")
-                .and_then(Value::as_str);
+            let event_turn_id = message.pointer("/params/turn/id").and_then(Value::as_str);
             if event_turn_id.is_none()
                 && turn_id.is_none()
                 && pending_turn_start_request_id.is_some()
@@ -855,27 +863,36 @@ fn handle_shared_codex_app_server_notification(
             // completed boundary before filtering ordinary work-turn items.
             if item.get("type").and_then(Value::as_str) == Some("contextCompaction") {
                 if state.mark_engram_context_refresh_needed(
-                    session_id, item.get("id").and_then(Value::as_str),
+                    session_id,
+                    item.get("id").and_then(Value::as_str),
                 ) {
-                    push_shared_codex_turn_notice(state, session_id, turn_state,
-                        "Codex compacted the thread context.")?;
+                    push_shared_codex_turn_notice(
+                        state,
+                        session_id,
+                        turn_state,
+                        "Codex compacted the thread context.",
+                    )?;
                 }
                 return Ok(());
             }
             let event_turn_id = shared_codex_event_turn_id(message);
             let matches_completed_agent_message = turn_id.is_none()
                 && completed_turn_id.is_some()
-                && matches!(item.get("type").and_then(Value::as_str), Some("agentMessage"))
+                && matches!(
+                    item.get("type").and_then(Value::as_str),
+                    Some("agentMessage")
+                )
                 && match event_turn_id {
                     Some(event) => completed_turn_id.as_deref() == Some(event),
                     None => true,
                 };
             if !matches_completed_agent_message
                 && !shared_codex_app_server_event_matches_active_turn(
-                turn_id.as_deref(),
-                *turn_started,
-                event_turn_id,
-            ) {
+                    turn_id.as_deref(),
+                    *turn_started,
+                    event_turn_id,
+                )
+            {
                 trace_shared_codex_event(
                     "drop",
                     method,
@@ -902,10 +919,11 @@ fn handle_shared_codex_app_server_notification(
                 };
             if !matches_completed_turn
                 && !shared_codex_app_server_event_matches_active_turn(
-                turn_id.as_deref(),
-                *turn_started,
-                event_turn_id,
-            ) {
+                    turn_id.as_deref(),
+                    *turn_started,
+                    event_turn_id,
+                )
+            {
                 trace_shared_codex_event(
                     "drop",
                     method,
@@ -1373,11 +1391,7 @@ fn handle_shared_codex_event_item_completed(
     recorder: &mut impl TurnRecorder,
 ) -> Result<()> {
     let event_turn_id = shared_codex_event_turn_id(message);
-    if !shared_codex_event_matches_visible_turn(
-        current_turn_id,
-        completed_turn_id,
-        event_turn_id,
-    ) {
+    if !shared_codex_event_matches_visible_turn(current_turn_id, completed_turn_id, event_turn_id) {
         return Ok(());
     }
 

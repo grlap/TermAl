@@ -162,7 +162,9 @@ fn is_acceptance_evaluation_work_ref(work_ref: &str) -> bool {
     !work_ref.is_empty()
         && work_ref.chars().count() <= MAX_ACCEPTANCE_EVALUATION_WORK_REF_CHARS
         && !work_ref.starts_with('-')
-        && !work_ref.chars().any(|c| c.is_control() || c.is_whitespace())
+        && !work_ref
+            .chars()
+            .any(|c| c.is_control() || c.is_whitespace())
 }
 
 fn validate_acceptance_evaluation_work_ref(work_ref: &str) -> std::result::Result<(), ApiError> {
@@ -447,7 +449,10 @@ fn build_acceptance_evaluator_prompt(
     // Context shrinks before anything is said about the criteria: evidence,
     // oldest first, down to none with the outcome still at its own bound; only
     // then the outcome, down to its marker.
-    let mut shown = task.evidence.len().min(MAX_ACCEPTANCE_BRIEF_EVIDENCE_ENTRIES);
+    let mut shown = task
+        .evidence
+        .len()
+        .min(MAX_ACCEPTANCE_BRIEF_EVIDENCE_ENTRIES);
     loop {
         let prompt = render_acceptance_evaluator_prompt(
             task,
@@ -472,7 +477,12 @@ fn build_acceptance_evaluator_prompt(
     let outcome_bytes = (max_bytes - floor.len())
         .saturating_sub(1)
         .min(MAX_ACCEPTANCE_BRIEF_OUTCOME_BYTES);
-    Ok(render_acceptance_evaluator_prompt(task, cwd, 0, outcome_bytes))
+    Ok(render_acceptance_evaluator_prompt(
+        task,
+        cwd,
+        0,
+        outcome_bytes,
+    ))
 }
 
 fn render_acceptance_evaluator_prompt(
@@ -879,7 +889,9 @@ fn classify_acceptance_evaluation_run(
             ));
         }
         Err(error) => {
-            return AcceptanceEvaluationRunOutcome::Unknown(format!("engram work evaluate: {error}"));
+            return AcceptanceEvaluationRunOutcome::Unknown(format!(
+                "engram work evaluate: {error}"
+            ));
         }
     };
     if output.success {
@@ -970,7 +982,9 @@ fn acceptance_evidence_continuation(page: &Value) -> Option<String> {
 }
 
 fn acceptance_evidence_page_len(page: &Value) -> usize {
-    page.get("notes").and_then(Value::as_array).map_or(0, Vec::len)
+    page.get("notes")
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len)
 }
 
 /// Folds continuation pages into the first receipt: `notes` becomes every

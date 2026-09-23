@@ -140,14 +140,13 @@ impl AppState {
         &self,
         request: UpdateTelegramConfigRequest,
         post_validation_hook: TelegramPostValidationHook,
-    ) -> Result<TelegramStatusResponse, ApiError>
-    {
+    ) -> Result<TelegramStatusResponse, ApiError> {
         let _guard = telegram_settings_file_guard();
         let file = self.load_telegram_bot_file()?;
         // Layering is intentional: first tolerate/scrub stale persisted
         // project/session references, then validate the user's patch strictly.
-        let mut config = self
-            .sanitize_telegram_config_for_current_state(self.telegram_config_from_state());
+        let mut config =
+            self.sanitize_telegram_config_for_current_state(self.telegram_config_from_state());
         let saved_bot_token = self.saved_telegram_bot_token()?;
         let mut requested_bot_token = None;
 
@@ -371,12 +370,7 @@ impl AppState {
                 .sessions
                 .iter()
                 .filter(|record| record.session.parent_delegation_id.is_none())
-                .map(|record| {
-                    (
-                        record.session.id.clone(),
-                        record.session.project_id.clone(),
-                    )
-                })
+                .map(|record| (record.session.id.clone(), record.session.project_id.clone()))
                 .collect(),
             delegated_session_ids: inner
                 .sessions
@@ -425,8 +419,7 @@ impl AppState {
             .assistant_forwarding_cursors
             .remove(session_id)
             .is_some();
-        file_changed |=
-            clear_forward_next_assistant_message_session_id(&mut file, session_id);
+        file_changed |= clear_forward_next_assistant_message_session_id(&mut file, session_id);
         if file.selected_session_id.as_deref() == Some(session_id) {
             file_changed |= clear_telegram_project_scoped_state(&mut file);
         }
@@ -551,7 +544,8 @@ impl AppState {
                 return;
             }
         };
-        match TelegramBotConfig::from_ui_settings(&self.default_workdir, &config, &state, bot_token) {
+        match TelegramBotConfig::from_ui_settings(&self.default_workdir, &config, &state, bot_token)
+        {
             Ok(config) => self.start_telegram_relay_runtime(config),
             Err(_reason) => self.stop_telegram_relay_runtime(),
         }
@@ -609,9 +603,7 @@ fn validate_telegram_config_against_snapshot(
             .session_project_ids
             .get(session_id)
             .ok_or_else(|| {
-                ApiError::bad_request(format!(
-                    "unknown default Telegram session `{session_id}`"
-                ))
+                ApiError::bad_request(format!("unknown default Telegram session `{session_id}`"))
             })?
             .as_deref()
             .ok_or_else(|| {
@@ -738,7 +730,9 @@ type NativeTelegramSecretStore = std::sync::Arc<keyring_core::CredentialStore>;
 #[cfg(windows)]
 fn native_telegram_secret_store() -> keyring_core::Result<NativeTelegramSecretStore> {
     let config = HashMap::<&str, &str>::new();
-    Ok(windows_native_keyring_store::Store::new_with_configuration(&config)?)
+    Ok(windows_native_keyring_store::Store::new_with_configuration(
+        &config,
+    )?)
 }
 
 #[cfg(target_os = "macos")]
@@ -753,10 +747,7 @@ fn native_telegram_secret_store() -> keyring_core::Result<NativeTelegramSecretSt
     Ok(zbus_secret_service_keyring_store::Store::new_with_configuration(&config)?)
 }
 
-#[cfg(all(
-    not(test),
-    any(windows, target_os = "macos", target_os = "linux")
-))]
+#[cfg(all(not(test), any(windows, target_os = "macos", target_os = "linux")))]
 fn configure_telegram_secret_store() -> Result<(), ApiError> {
     let store = native_telegram_secret_store()
         .map_err(|err| telegram_secret_store_error("initialize", err))?;

@@ -245,82 +245,87 @@ fn delegation_result_summary_reports_findings(summary: &str) -> bool {
 }
 
 fn delegation_result_summary_reported_severity(tokens: &[&str]) -> Option<&'static str> {
-    tokens.iter().enumerate().find_map(|(severity_index, token)| {
-        let severity = delegation_result_token_severity(token)?;
-        // A severity word is meaningful only when it is attached to
-        // "severity" or a finding noun. This excludes incidental prose such
-        // as "one module with high complexity" while retaining compact
-        // declarations such as "one High-severity issue" and "one high risk".
-        let previous = severity_index.checked_sub(1).and_then(|index| tokens.get(index));
-        let next = tokens.get(severity_index + 1);
-        let is_finding_severity = previous
-            .into_iter()
-            .chain(next)
-            .any(|token| *token == "severity" || delegation_result_token_is_finding_noun(token));
-        if !is_finding_severity {
-            return None;
-        }
+    tokens
+        .iter()
+        .enumerate()
+        .find_map(|(severity_index, token)| {
+            let severity = delegation_result_token_severity(token)?;
+            // A severity word is meaningful only when it is attached to
+            // "severity" or a finding noun. This excludes incidental prose such
+            // as "one module with high complexity" while retaining compact
+            // declarations such as "one High-severity issue" and "one high risk".
+            let previous = severity_index
+                .checked_sub(1)
+                .and_then(|index| tokens.get(index));
+            let next = tokens.get(severity_index + 1);
+            let is_finding_severity = previous.into_iter().chain(next).any(|token| {
+                *token == "severity" || delegation_result_token_is_finding_noun(token)
+            });
+            if !is_finding_severity {
+                return None;
+            }
 
-        let count_start = severity_index.saturating_sub(4);
-        let count_end = (severity_index + 5).min(tokens.len());
-        if !tokens[count_start..count_end]
-            .iter()
-            .any(|token| delegation_result_token_is_positive_count(token))
-        {
-            return None;
-        }
+            let count_start = severity_index.saturating_sub(4);
+            let count_end = (severity_index + 5).min(tokens.len());
+            if !tokens[count_start..count_end]
+                .iter()
+                .any(|token| delegation_result_token_is_positive_count(token))
+            {
+                return None;
+            }
 
-        let context_start = severity_index.saturating_sub(7);
-        let context_end = (severity_index + 8).min(tokens.len());
-        let context = &tokens[context_start..context_end];
-        let reports_discovery = context.iter().any(|token| {
-            matches!(
-                *token,
-                "detect"
-                    | "detected"
-                    | "discover"
-                    | "discovered"
-                    | "find"
-                    | "found"
-                    | "flag"
-                    | "flagged"
-                    | "identify"
-                    | "identified"
-                    | "report"
-                    | "reported"
-                    | "uncover"
-                    | "uncovered"
-            )
-        });
-        let reports_resolution = context.iter().any(|token| {
-            matches!(
-                *token,
-                "addressed"
-                    | "closed"
-                    | "corrected"
-                    | "eliminated"
-                    | "fixed"
-                    | "removed"
-                    | "repaired"
-                    | "resolved"
-            )
-        });
-        let reports_unresolved_work = context.iter().any(|token| {
-            matches!(
-                *token,
-                "open"
-                    | "outstanding"
-                    | "persist"
-                    | "persists"
-                    | "remain"
-                    | "remaining"
-                    | "remains"
-                    | "unresolved"
-            )
-        });
+            let context_start = severity_index.saturating_sub(7);
+            let context_end = (severity_index + 8).min(tokens.len());
+            let context = &tokens[context_start..context_end];
+            let reports_discovery = context.iter().any(|token| {
+                matches!(
+                    *token,
+                    "detect"
+                        | "detected"
+                        | "discover"
+                        | "discovered"
+                        | "find"
+                        | "found"
+                        | "flag"
+                        | "flagged"
+                        | "identify"
+                        | "identified"
+                        | "report"
+                        | "reported"
+                        | "uncover"
+                        | "uncovered"
+                )
+            });
+            let reports_resolution = context.iter().any(|token| {
+                matches!(
+                    *token,
+                    "addressed"
+                        | "closed"
+                        | "corrected"
+                        | "eliminated"
+                        | "fixed"
+                        | "removed"
+                        | "repaired"
+                        | "resolved"
+                )
+            });
+            let reports_unresolved_work = context.iter().any(|token| {
+                matches!(
+                    *token,
+                    "open"
+                        | "outstanding"
+                        | "persist"
+                        | "persists"
+                        | "remain"
+                        | "remaining"
+                        | "remains"
+                        | "unresolved"
+                )
+            });
 
-        (reports_discovery && (!reports_resolution || reports_unresolved_work)).then_some(severity)
-    })
+            (reports_discovery && (!reports_resolution || reports_unresolved_work))
+                .then_some(severity)
+        })
 }
 
 fn delegation_result_token_severity(token: &str) -> Option<&'static str> {
@@ -449,7 +454,11 @@ fn is_decorated_code_review_heading(label: &str) -> bool {
         return false;
     };
     let suffix = suffix.trim_start();
-    suffix.is_empty() || matches!(suffix.chars().next(), Some(':' | '-' | '\u{2013}' | '\u{2014}'))
+    suffix.is_empty()
+        || matches!(
+            suffix.chars().next(),
+            Some(':' | '-' | '\u{2013}' | '\u{2014}')
+        )
 }
 
 fn parse_delegation_note_line(line: &str) -> Option<String> {
@@ -631,8 +640,7 @@ fn parse_delegation_review_actionable_finding_line(line: &str) -> Option<Delegat
     }
     let (severity, rest) = parse_delegation_review_severity(text)?;
     if let Some((headline, details)) = split_delegation_review_bold_headline(rest) {
-        let (file, line) = leading_delegation_review_location(details)
-            .unwrap_or((None, None));
+        let (file, line) = leading_delegation_review_location(details).unwrap_or((None, None));
         return Some(DelegationFinding {
             severity: severity.to_owned(),
             file,

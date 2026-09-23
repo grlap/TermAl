@@ -37,12 +37,22 @@ fn mailbox_acknowledgement_rejects_a_message_not_in_the_issued_page() {
     second.idempotency_key = "unissued-second".to_owned();
     second.body = "Unissued obligation B".to_owned();
     store.append(&second).unwrap();
-    let page = store.read_range("session-target", &first.mailbox_id, None, 1).unwrap();
+    let page = store
+        .read_range("session-target", &first.mailbox_id, None, 1)
+        .unwrap();
     assert_eq!(page.messages.len(), 1);
     assert_eq!(page.messages[0].sequence, 1);
     let result = store.acknowledge("session-target", &first.mailbox_id, 0, 2);
-    let cursor = mailbox_processed_through(&store.connection().unwrap(), &first.mailbox_id, "session-target").unwrap();
-    assert!(result.is_err(), "ack of unissued obligation B (#2) succeeded; processedThrough={cursor}");
+    let cursor = mailbox_processed_through(
+        &store.connection().unwrap(),
+        &first.mailbox_id,
+        "session-target",
+    )
+    .unwrap();
+    assert!(
+        result.is_err(),
+        "ack of unissued obligation B (#2) succeeded; processedThrough={cursor}"
+    );
     assert_eq!(cursor, 0, "rejected ack must not process obligation B");
 }
 
@@ -51,18 +61,46 @@ fn mailbox_preview_neither_acquires_writer_admission_nor_records_issuance() {
     let root = MailboxTestRoot::new();
     let store = MailboxStore::open(&root.database_path()).unwrap();
     let first = store.append(&test_input()).unwrap();
-    let guard = store.lock_writer("holding writer during preview test").unwrap();
-    store.connection().unwrap().execute_batch("PRAGMA query_only = ON").unwrap();
-    let page = store.read_range_with_issuance("session-target", &first.mailbox_id, None, 1, false).unwrap();
+    let guard = store
+        .lock_writer("holding writer during preview test")
+        .unwrap();
+    store
+        .connection()
+        .unwrap()
+        .execute_batch("PRAGMA query_only = ON")
+        .unwrap();
+    let page = store
+        .read_range_with_issuance("session-target", &first.mailbox_id, None, 1, false)
+        .unwrap();
     assert_eq!(page.messages[0].sequence, 1);
     assert_eq!(page.processed_through, 0);
     assert_eq!(page.receipt, None);
     assert_eq!(page.next_after_sequence, Some(1));
     assert!(!page.has_more);
-    assert_eq!(store.connection().unwrap().query_row("SELECT count(*) FROM mailbox_read_pages", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
-    store.connection().unwrap().execute_batch("PRAGMA query_only = OFF").unwrap();
+    assert_eq!(
+        store
+            .connection()
+            .unwrap()
+            .query_row("SELECT count(*) FROM mailbox_read_pages", [], |r| r
+                .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+    store
+        .connection()
+        .unwrap()
+        .execute_batch("PRAGMA query_only = OFF")
+        .unwrap();
     drop(guard);
-    assert_eq!(mailbox_api_error(store.acknowledge("session-target", &first.mailbox_id, 0, 1).unwrap_err()).status, StatusCode::CONFLICT);
+    assert_eq!(
+        mailbox_api_error(
+            store
+                .acknowledge("session-target", &first.mailbox_id, 0, 1)
+                .unwrap_err()
+        )
+        .status,
+        StatusCode::CONFLICT
+    );
 }
 
 #[test]
@@ -115,31 +153,87 @@ fn mailbox_receipts_require_order_and_are_bound_to_the_issued_participant() {
     let mut input = test_input();
     input.idempotency_key = "page-two".into();
     store.append(&input).unwrap();
-    let one = store.read_range("session-target", &first.mailbox_id, None, 1).unwrap();
+    let one = store
+        .read_range("session-target", &first.mailbox_id, None, 1)
+        .unwrap();
     assert!(one.has_more);
     assert_eq!(one.next_after_sequence, Some(1));
-    let two = store.read_range("session-target", &first.mailbox_id, one.next_after_sequence, 1).unwrap();
+    let two = store
+        .read_range(
+            "session-target",
+            &first.mailbox_id,
+            one.next_after_sequence,
+            1,
+        )
+        .unwrap();
     assert!(!two.has_more);
     assert_eq!(two.next_after_sequence, Some(2));
     let token = one.receipt.as_deref().unwrap();
-    assert_eq!(store.read_range("session-target", &first.mailbox_id, None, 1).unwrap().receipt, one.receipt,
-        "an identical lost read response can be recovered");
+    assert_eq!(
+        store
+            .read_range("session-target", &first.mailbox_id, None, 1)
+            .unwrap()
+            .receipt,
+        one.receipt,
+        "an identical lost read response can be recovered"
+    );
     for invalid in ["forged-receipt", &format!("{token}-changed")] {
-        assert!(store.acknowledge_page("session-target", &first.mailbox_id, invalid).is_err());
+        assert!(
+            store
+                .acknowledge_page("session-target", &first.mailbox_id, invalid)
+                .is_err()
+        );
     }
-    assert!(store.acknowledge_page("session-sender", &first.mailbox_id, token).is_err());
+    assert!(
+        store
+            .acknowledge_page("session-sender", &first.mailbox_id, token)
+            .is_err()
+    );
     let mut other = test_input();
     other.sender_session_id = "third-peer".into();
     other.idempotency_key = "other-mailbox".into();
     let other = store.append(&other).unwrap();
-    assert!(store.acknowledge_page("session-target", &other.mailbox_id, token).is_err());
-    assert!(store.acknowledge_page("session-target", &first.mailbox_id, two.receipt.as_deref().unwrap())
-        .unwrap_err().to_string().contains("skips an unacknowledged page"));
-    assert_eq!(mailbox_processed_through(&store.connection().unwrap(), &first.mailbox_id, "session-target").unwrap(), 0);
-    store.acknowledge_page("session-target", &first.mailbox_id, token).unwrap();
-    store.acknowledge_page("session-target", &first.mailbox_id, two.receipt.as_deref().unwrap()).unwrap();
-    store.acknowledge_page("session-target", &first.mailbox_id, token).unwrap();
-    let empty = store.read_range("session-target", &first.mailbox_id, None, 1).unwrap();
+    assert!(
+        store
+            .acknowledge_page("session-target", &other.mailbox_id, token)
+            .is_err()
+    );
+    assert!(
+        store
+            .acknowledge_page(
+                "session-target",
+                &first.mailbox_id,
+                two.receipt.as_deref().unwrap()
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("skips an unacknowledged page")
+    );
+    assert_eq!(
+        mailbox_processed_through(
+            &store.connection().unwrap(),
+            &first.mailbox_id,
+            "session-target"
+        )
+        .unwrap(),
+        0
+    );
+    store
+        .acknowledge_page("session-target", &first.mailbox_id, token)
+        .unwrap();
+    store
+        .acknowledge_page(
+            "session-target",
+            &first.mailbox_id,
+            two.receipt.as_deref().unwrap(),
+        )
+        .unwrap();
+    store
+        .acknowledge_page("session-target", &first.mailbox_id, token)
+        .unwrap();
+    let empty = store
+        .read_range("session-target", &first.mailbox_id, None, 1)
+        .unwrap();
     assert_eq!(empty.processed_through, 2);
     assert!(empty.messages.is_empty());
     assert_eq!(empty.receipt, None);
@@ -153,30 +247,70 @@ fn mailbox_receipt_survives_send_restart_and_lost_ack_response() {
     let path = root.database_path();
     let store = MailboxStore::open(&path).unwrap();
     let first = store.append(&test_input()).unwrap();
-    let page = store.read_range("session-target", &first.mailbox_id, None, 1).unwrap();
+    let page = store
+        .read_range("session-target", &first.mailbox_id, None, 1)
+        .unwrap();
     let mut reply = test_input();
     std::mem::swap(&mut reply.sender_session_id, &mut reply.target_session_id);
     reply.idempotency_key = "reply-before-ack".into();
     let reply_receipt = store.append(&reply).unwrap();
     assert_eq!(reply_receipt.sender_processed_through, 0);
     assert!(!reply_receipt.sender_cursor_advanced);
-    let error = store.acknowledge("session-target", &first.mailbox_id, 0, 2).unwrap_err();
-    assert_eq!(mailbox_api_error(error).status, StatusCode::CONFLICT,
-        "a reply appended after the page was read has not been issued");
+    let error = store
+        .acknowledge("session-target", &first.mailbox_id, 0, 2)
+        .unwrap_err();
+    assert_eq!(
+        mailbox_api_error(error).status,
+        StatusCode::CONFLICT,
+        "a reply appended after the page was read has not been issued"
+    );
     drop(store);
     let store = MailboxStore::open(&path).unwrap();
-    store.acknowledge_page("session-target", &first.mailbox_id, page.receipt.as_deref().unwrap()).unwrap();
-    let own = store.read_range("session-target", &first.mailbox_id, None, 10).unwrap();
-    assert_eq!(own.processed_through, 1, "old receipt cannot cover the subsequent reply");
+    store
+        .acknowledge_page(
+            "session-target",
+            &first.mailbox_id,
+            page.receipt.as_deref().unwrap(),
+        )
+        .unwrap();
+    let own = store
+        .read_range("session-target", &first.mailbox_id, None, 10)
+        .unwrap();
+    assert_eq!(
+        own.processed_through, 1,
+        "old receipt cannot cover the subsequent reply"
+    );
     assert_eq!(own.messages.len(), 1);
     assert_eq!(own.messages[0].sender_session_id, "session-target");
     assert_eq!(own.messages[0].sequence, 2);
-    store.acknowledge("session-target", &first.mailbox_id, 1, 2).unwrap();
-    store.acknowledge_page("session-target", &first.mailbox_id, own.receipt.as_deref().unwrap()).unwrap();
+    store
+        .acknowledge("session-target", &first.mailbox_id, 1, 2)
+        .unwrap();
+    store
+        .acknowledge_page(
+            "session-target",
+            &first.mailbox_id,
+            own.receipt.as_deref().unwrap(),
+        )
+        .unwrap();
     reply.idempotency_key = "reply-after-ack".into();
     assert_eq!(store.append(&reply).unwrap().sender_processed_through, 3);
-    store.acknowledge_page("session-target", &first.mailbox_id, page.receipt.as_deref().unwrap()).unwrap();
-    assert_eq!(mailbox_processed_through(&store.connection().unwrap(), &first.mailbox_id, "session-target").unwrap(), 3);
+    store
+        .acknowledge_page(
+            "session-target",
+            &first.mailbox_id,
+            page.receipt.as_deref().unwrap(),
+        )
+        .unwrap();
+    assert_eq!(
+        mailbox_processed_through(
+            &store.connection().unwrap(),
+            &first.mailbox_id,
+            "session-target"
+        )
+        .unwrap(),
+        3
+    );
 }
 
 #[test]
@@ -184,17 +318,41 @@ fn mailbox_explicit_read_and_exact_lookup_cannot_bypass_an_unissued_gap() {
     let root = MailboxTestRoot::new();
     let store = MailboxStore::open(&root.database_path()).unwrap();
     let first = store.append(&test_input()).unwrap();
-    store.read_message("session-target", &first.message_id).unwrap();
-    assert!(store.acknowledge("session-target", &first.mailbox_id, 0, 1).is_err(),
-        "exact lookup is not page issuance");
+    store
+        .read_message("session-target", &first.message_id)
+        .unwrap();
+    assert!(
+        store
+            .acknowledge("session-target", &first.mailbox_id, 0, 1)
+            .is_err(),
+        "exact lookup is not page issuance"
+    );
     let mut input = test_input();
     input.idempotency_key = "skipped-second".into();
     store.append(&input).unwrap();
-    let later = store.read_range("session-target", &first.mailbox_id, Some(1), 10).unwrap();
-    assert!(store.acknowledge_page("session-target", &first.mailbox_id, later.receipt.as_deref().unwrap()).is_err());
-    assert!(store.acknowledge("session-target", &first.mailbox_id, 0, 2).is_err());
-    store.read_range("session-target", &first.mailbox_id, None, 1).unwrap();
-    store.acknowledge("session-target", &first.mailbox_id, 0, 2).unwrap();
+    let later = store
+        .read_range("session-target", &first.mailbox_id, Some(1), 10)
+        .unwrap();
+    assert!(
+        store
+            .acknowledge_page(
+                "session-target",
+                &first.mailbox_id,
+                later.receipt.as_deref().unwrap()
+            )
+            .is_err()
+    );
+    assert!(
+        store
+            .acknowledge("session-target", &first.mailbox_id, 0, 2)
+            .is_err()
+    );
+    store
+        .read_range("session-target", &first.mailbox_id, None, 1)
+        .unwrap();
+    store
+        .acknowledge("session-target", &first.mailbox_id, 0, 2)
+        .unwrap();
 }
 
 #[test]
@@ -204,49 +362,98 @@ fn mailbox_version_one_upgrade_preserves_cursors_and_requires_new_issuance() {
     let first = {
         let store = MailboxStore::open(&path).unwrap();
         let first = store.append(&test_input()).unwrap();
-        store.read_range("session-target", &first.mailbox_id, None, 10).unwrap();
-        store.acknowledge("session-target", &first.mailbox_id, 0, 1).unwrap();
+        store
+            .read_range("session-target", &first.mailbox_id, None, 10)
+            .unwrap();
+        store
+            .acknowledge("session-target", &first.mailbox_id, 0, 1)
+            .unwrap();
         let mut input = test_input();
         input.idempotency_key = "unprocessed-before-upgrade".into();
         store.append(&input).unwrap();
         // Exact old schema and existing durable state, in an isolated fixture.
-        store.connection().unwrap().execute_batch(
-            "DROP TABLE mailbox_read_pages;
-             UPDATE meta SET value = '1' WHERE key = 'coordination_schema_version';"
-        ).unwrap();
+        store
+            .connection()
+            .unwrap()
+            .execute_batch(
+                "DROP TABLE mailbox_read_pages;
+             UPDATE meta SET value = '1' WHERE key = 'coordination_schema_version';",
+            )
+            .unwrap();
         first
     };
     let store = MailboxStore::open(&path).unwrap();
-    assert_eq!(mailbox_processed_through(&store.connection().unwrap(), &first.mailbox_id, "session-target").unwrap(), 1);
-    store.acknowledge("session-target", &first.mailbox_id, 0, 1).unwrap();
-    assert!(store.acknowledge("session-target", &first.mailbox_id, 1, 2).is_err());
-    let page = store.read_range("session-target", &first.mailbox_id, None, 10).unwrap();
+    assert_eq!(
+        mailbox_processed_through(
+            &store.connection().unwrap(),
+            &first.mailbox_id,
+            "session-target"
+        )
+        .unwrap(),
+        1
+    );
+    store
+        .acknowledge("session-target", &first.mailbox_id, 0, 1)
+        .unwrap();
+    assert!(
+        store
+            .acknowledge("session-target", &first.mailbox_id, 1, 2)
+            .is_err()
+    );
+    let page = store
+        .read_range("session-target", &first.mailbox_id, None, 10)
+        .unwrap();
     assert_eq!(page.messages[0].sequence, 2);
-    store.acknowledge_page("session-target", &first.mailbox_id, page.receipt.as_deref().unwrap()).unwrap();
+    store
+        .acknowledge_page(
+            "session-target",
+            &first.mailbox_id,
+            page.receipt.as_deref().unwrap(),
+        )
+        .unwrap();
     validate_current_coordination_schema(&store.connection().unwrap()).unwrap();
 }
 
 #[test]
 fn mailbox_version_one_upgrade_rejects_modified_schema_without_mutation() {
     let connection = rusqlite::Connection::open_in_memory().unwrap();
-    connection.execute_batch(COORDINATION_SCHEMA_V1_SQL).unwrap();
-    connection.execute_batch(
-        "INSERT INTO meta VALUES('coordination_schema_version', '1');
+    connection
+        .execute_batch(COORDINATION_SCHEMA_V1_SQL)
+        .unwrap();
+    connection
+        .execute_batch(
+            "INSERT INTO meta VALUES('coordination_schema_version', '1');
          CREATE TABLE foreign_payload(body TEXT);
-         INSERT INTO foreign_payload VALUES('retain me');"
-    ).unwrap();
+         INSERT INTO foreign_payload VALUES('retain me');",
+        )
+        .unwrap();
     let before = coordination_schema_objects(&connection).unwrap();
     assert!(ensure_sqlite_coordination_schema(&connection).is_err());
     assert_eq!(coordination_schema_objects(&connection).unwrap(), before);
-    assert_eq!(connection.query_row("SELECT body FROM foreign_payload", [], |r| r.get::<_, String>(0)).unwrap(), "retain me");
-    assert_eq!(connection.query_row("SELECT value FROM meta", [], |r| r.get::<_, String>(0)).unwrap(), "1");
+    assert_eq!(
+        connection
+            .query_row("SELECT body FROM foreign_payload", [], |r| r
+                .get::<_, String>(0))
+            .unwrap(),
+        "retain me"
+    );
+    assert_eq!(
+        connection
+            .query_row("SELECT value FROM meta", [], |r| r.get::<_, String>(0))
+            .unwrap(),
+        "1"
+    );
 }
 
 #[test]
 fn mailbox_version_one_unreadable_metadata_is_not_reset_guidance() {
     let connection = rusqlite::Connection::open_in_memory().unwrap();
-    connection.execute_batch(COORDINATION_SCHEMA_V1_SQL).unwrap();
-    connection.execute_batch("INSERT INTO meta VALUES('coordination_schema_version', x'00');").unwrap();
+    connection
+        .execute_batch(COORDINATION_SCHEMA_V1_SQL)
+        .unwrap();
+    connection
+        .execute_batch("INSERT INTO meta VALUES('coordination_schema_version', x'00');")
+        .unwrap();
     let before = coordination_schema_objects(&connection).unwrap();
     let error = ensure_sqlite_coordination_schema(&connection).unwrap_err();
     assert!(format!("{error:#}").contains("failed to read the coordination schema version"));
@@ -263,13 +470,29 @@ fn mailbox_receipt_allows_hidden_review_gaps_but_returns_own_messages() {
     input.topic = None;
     input.idempotency_key = "visible-after-review".into();
     store.append(&input).unwrap();
-    let page = store.read_range("session-target", &hidden.mailbox_id, None, 1).unwrap();
-    assert_eq!(page.messages.iter().map(|m| m.sequence).collect::<Vec<_>>(), vec![2]);
+    let page = store
+        .read_range("session-target", &hidden.mailbox_id, None, 1)
+        .unwrap();
+    assert_eq!(
+        page.messages.iter().map(|m| m.sequence).collect::<Vec<_>>(),
+        vec![2]
+    );
     assert_eq!(page.next_after_sequence, Some(2));
     assert!(!page.has_more);
-    store.acknowledge_page("session-target", &hidden.mailbox_id, page.receipt.as_deref().unwrap()).unwrap();
-    let own = store.read_range("session-sender", &hidden.mailbox_id, Some(0), 10).unwrap();
-    assert_eq!(own.messages.iter().map(|m| m.sequence).collect::<Vec<_>>(), vec![1, 2]);
+    store
+        .acknowledge_page(
+            "session-target",
+            &hidden.mailbox_id,
+            page.receipt.as_deref().unwrap(),
+        )
+        .unwrap();
+    let own = store
+        .read_range("session-sender", &hidden.mailbox_id, Some(0), 10)
+        .unwrap();
+    assert_eq!(
+        own.messages.iter().map(|m| m.sequence).collect::<Vec<_>>(),
+        vec![1, 2]
+    );
 }
 
 #[test]
@@ -284,15 +507,39 @@ fn mailbox_receipt_concurrent_reads_and_replays_share_durable_authority() {
     let mailbox_id = first.mailbox_id.clone();
     let worker = std::thread::spawn(move || {
         peer_barrier.wait();
-        let page = other.read_range("session-target", &mailbox_id, Some(0), 10).unwrap();
-        other.acknowledge_page("session-target", &mailbox_id, page.receipt.as_deref().unwrap()).unwrap();
+        let page = other
+            .read_range("session-target", &mailbox_id, Some(0), 10)
+            .unwrap();
+        other
+            .acknowledge_page(
+                "session-target",
+                &mailbox_id,
+                page.receipt.as_deref().unwrap(),
+            )
+            .unwrap();
         page.receipt
     });
     barrier.wait();
-    let page = store.read_range("session-target", &first.mailbox_id, Some(0), 10).unwrap();
-    store.acknowledge_page("session-target", &first.mailbox_id, page.receipt.as_deref().unwrap()).unwrap();
+    let page = store
+        .read_range("session-target", &first.mailbox_id, Some(0), 10)
+        .unwrap();
+    store
+        .acknowledge_page(
+            "session-target",
+            &first.mailbox_id,
+            page.receipt.as_deref().unwrap(),
+        )
+        .unwrap();
     assert_eq!(worker.join().unwrap(), page.receipt);
-    assert_eq!(mailbox_processed_through(&store.connection().unwrap(), &first.mailbox_id, "session-target").unwrap(), 1);
+    assert_eq!(
+        mailbox_processed_through(
+            &store.connection().unwrap(),
+            &first.mailbox_id,
+            "session-target"
+        )
+        .unwrap(),
+        1
+    );
 }
 
 #[test]
@@ -327,7 +574,9 @@ fn mailbox_append_and_acknowledgement_bound_same_file_writer_contention() {
     let receipt = store
         .append(&test_input())
         .expect("append should succeed after writer release");
-    store.read_range("session-target", &receipt.mailbox_id, None, 10).unwrap();
+    store
+        .read_range("session-target", &receipt.mailbox_id, None, 10)
+        .unwrap();
 
     let coordination_writer_guard = lock_sqlite_state_writer(&coordination_writer_lock);
     let acknowledge_err = store
@@ -356,11 +605,8 @@ fn sqlite_state_writer_admission_serves_request_and_internal_tickets_in_fifo_ord
     let (request_acquired_tx, request_acquired_rx) = mpsc::channel();
     let (release_request_tx, release_request_rx) = mpsc::channel();
     let request_thread = std::thread::spawn(move || {
-        let _guard = lock_sqlite_state_writer_for(
-            &request_admission,
-            Duration::from_secs(2),
-        )
-        .expect("queued request writer should acquire before its diagnostic deadline");
+        let _guard = lock_sqlite_state_writer_for(&request_admission, Duration::from_secs(2))
+            .expect("queued request writer should acquire before its diagnostic deadline");
         request_acquired_tx
             .send(())
             .expect("request acquisition observer should remain connected");
@@ -368,10 +614,7 @@ fn sqlite_state_writer_admission_serves_request_and_internal_tickets_in_fifo_ord
             .recv()
             .expect("request writer should be released");
     });
-    wait_for_sqlite_state_writer_issued_tickets(
-        &admission,
-        issued_with_holder + 1,
-    );
+    wait_for_sqlite_state_writer_issued_tickets(&admission, issued_with_holder + 1);
 
     let internal_admission = admission.clone();
     let (internal_acquired_tx, internal_acquired_rx) = mpsc::channel();
@@ -381,10 +624,7 @@ fn sqlite_state_writer_admission_serves_request_and_internal_tickets_in_fifo_ord
             .send(())
             .expect("internal acquisition observer should remain connected");
     });
-    wait_for_sqlite_state_writer_issued_tickets(
-        &admission,
-        issued_with_holder + 2,
-    );
+    wait_for_sqlite_state_writer_issued_tickets(&admission, issued_with_holder + 2);
 
     drop(first_guard);
     request_acquired_rx
@@ -431,10 +671,7 @@ fn sqlite_state_writer_admission_skips_a_timed_out_head_ticket() {
             .send(())
             .expect("next-ticket observer should remain connected");
     });
-    wait_for_sqlite_state_writer_issued_tickets(
-        &admission,
-        issued_with_holder + 2,
-    );
+    wait_for_sqlite_state_writer_issued_tickets(&admission, issued_with_holder + 2);
 
     // The canceled ticket becomes queue head only when this holder drops.
     // Advancement must skip it immediately so the next live ticket cannot
@@ -443,9 +680,7 @@ fn sqlite_state_writer_admission_skips_a_timed_out_head_ticket() {
     next_acquired_rx
         .recv_timeout(Duration::from_secs(2))
         .expect("queue advancement should skip the canceled head ticket");
-    next_thread
-        .join()
-        .expect("next writer thread should join");
+    next_thread.join().expect("next writer thread should join");
 }
 
 #[test]
@@ -463,10 +698,7 @@ fn internal_lifecycle_write_waits_through_request_admission_saturation() {
     let lifecycle_store = store.clone();
     let message_id = receipt.message_id.clone();
     let lifecycle_thread = std::thread::spawn(move || {
-        lifecycle_store.record_initial_dispatch_outcome(
-            &message_id,
-            "queuedBehindActiveTurn",
-        )
+        lifecycle_store.record_initial_dispatch_outcome(&message_id, "queuedBehindActiveTurn")
     });
     store.wait_for_internal_writer_waiter();
 
@@ -514,7 +746,9 @@ fn append_retry_after_reopen_returns_original_durable_receipt() {
     assert_eq!(first.notification_disposition, "durableButNotWoken");
 
     let store = MailboxStore::open(&path).expect("mailbox store should reopen");
-    store.read_range("session-target", &first.mailbox_id, None, 10).unwrap();
+    store
+        .read_range("session-target", &first.mailbox_id, None, 10)
+        .unwrap();
     store
         .acknowledge("session-target", &first.mailbox_id, 0, 1)
         .expect("target cursor should advance before retry");
@@ -543,8 +777,7 @@ fn append_retry_after_reopen_returns_original_durable_receipt() {
 #[test]
 fn duplicate_receipt_preserves_dispatch_outcome_while_notification_state_advances() {
     let root = MailboxTestRoot::new();
-    let store =
-        MailboxStore::open(&root.database_path()).expect("mailbox store should open");
+    let store = MailboxStore::open(&root.database_path()).expect("mailbox store should open");
     let committed = store.append(&test_input()).expect("append should succeed");
     assert_eq!(
         store
@@ -556,7 +789,7 @@ fn duplicate_receipt_preserves_dispatch_outcome_while_notification_state_advance
 
     assert_eq!(
         store
-        .record_initial_dispatch_outcome(&committed.message_id, "queuedBehindActiveTurn")
+            .record_initial_dispatch_outcome(&committed.message_id, "queuedBehindActiveTurn")
             .expect("initial dispatch outcome should persist"),
         MailboxDispatchOutcomeRecord::Recorded {
             state_advanced: true
@@ -572,11 +805,11 @@ fn duplicate_receipt_preserves_dispatch_outcome_while_notification_state_advance
 
     assert_eq!(
         store
-        .mark_notifications_delivered_through(
-            "session-target",
-            &committed.mailbox_id,
-            committed.sequence,
-        )
+            .mark_notifications_delivered_through(
+                "session-target",
+                &committed.mailbox_id,
+                committed.sequence,
+            )
             .expect("notification state should advance after runtime acceptance"),
         1
     );
@@ -604,13 +837,11 @@ fn duplicate_receipt_preserves_dispatch_outcome_while_notification_state_advance
 #[test]
 fn concurrent_duplicate_waits_for_the_original_dispatch_outcome() {
     let root = MailboxTestRoot::new();
-    let store = Arc::new(
-        MailboxStore::open(&root.database_path()).expect("mailbox store should open"),
-    );
+    let store =
+        Arc::new(MailboxStore::open(&root.database_path()).expect("mailbox store should open"));
     let committed = store.append(&test_input()).expect("append should succeed");
     let duplicate_store = store.clone();
-    let duplicate_thread =
-        std::thread::spawn(move || duplicate_store.append(&test_input()));
+    let duplicate_thread = std::thread::spawn(move || duplicate_store.append(&test_input()));
 
     store.wait_for_dispatch_outcome_waiter(&committed.message_id);
     let mut unrelated_input = test_input();
@@ -621,18 +852,12 @@ fn concurrent_duplicate_waits_for_the_original_dispatch_outcome() {
         .expect("a parked duplicate must not retain the SQLite writer boundary");
     assert_eq!(unrelated.sequence, committed.sequence + 1);
     store
-        .record_initial_dispatch_outcome(
-            &unrelated.message_id,
-            "durableButNotWoken",
-        )
+        .record_initial_dispatch_outcome(&unrelated.message_id, "durableButNotWoken")
         .expect("unrelated dispatch outcome should finalize");
 
     assert_eq!(
         store
-        .record_initial_dispatch_outcome(
-            &committed.message_id,
-            "queuedBehindActiveTurn",
-        )
+            .record_initial_dispatch_outcome(&committed.message_id, "queuedBehindActiveTurn",)
             .expect("initial dispatch outcome should persist"),
         MailboxDispatchOutcomeRecord::Recorded {
             state_advanced: true
@@ -695,17 +920,15 @@ fn duplicate_finalization_wait_returns_retryable_error_at_admission_deadline() {
 #[test]
 fn dropping_dispatch_finalization_guard_releases_waiters_with_durable_fallback() {
     let root = MailboxTestRoot::new();
-    let store = Arc::new(
-        MailboxStore::open(&root.database_path()).expect("mailbox store should open"),
-    );
+    let store =
+        Arc::new(MailboxStore::open(&root.database_path()).expect("mailbox store should open"));
     let MailboxAppendResult {
         receipt: committed,
         finalization,
     } = store.append(&test_input()).expect("append should succeed");
     let finalization = finalization.expect("fresh append should own finalization");
     let duplicate_store = store.clone();
-    let duplicate_thread =
-        std::thread::spawn(move || duplicate_store.append(&test_input()));
+    let duplicate_thread = std::thread::spawn(move || duplicate_store.append(&test_input()));
 
     store.wait_for_dispatch_outcome_waiter(&committed.message_id);
     drop(finalization);
@@ -724,26 +947,22 @@ fn dropping_dispatch_finalization_guard_releases_waiters_with_durable_fallback()
 #[test]
 fn initial_dispatch_outcome_cannot_regress_delivered_notification_state() {
     let root = MailboxTestRoot::new();
-    let store =
-        MailboxStore::open(&root.database_path()).expect("mailbox store should open");
+    let store = MailboxStore::open(&root.database_path()).expect("mailbox store should open");
     let committed = store.append(&test_input()).expect("append should succeed");
 
     assert_eq!(
         store
-        .mark_notifications_delivered_through(
-            "session-target",
-            &committed.mailbox_id,
-            committed.sequence,
-        )
+            .mark_notifications_delivered_through(
+                "session-target",
+                &committed.mailbox_id,
+                committed.sequence,
+            )
             .expect("runtime acceptance should mark the notification delivered"),
         1
     );
     assert_eq!(
         store
-        .record_initial_dispatch_outcome(
-            &committed.message_id,
-            "queuedBehindActiveTurn",
-        )
+            .record_initial_dispatch_outcome(&committed.message_id, "queuedBehindActiveTurn",)
             .expect("initial dispatch outcome should persist after runtime acceptance"),
         MailboxDispatchOutcomeRecord::Recorded {
             state_advanced: false
@@ -767,16 +986,12 @@ fn initial_dispatch_outcome_cannot_regress_delivered_notification_state() {
 #[test]
 fn initial_dispatch_outcome_is_immutable_after_finalization() {
     let root = MailboxTestRoot::new();
-    let store =
-        MailboxStore::open(&root.database_path()).expect("mailbox store should open");
+    let store = MailboxStore::open(&root.database_path()).expect("mailbox store should open");
     let committed = store.append(&test_input()).expect("append should succeed");
 
     assert_eq!(
         store
-            .record_initial_dispatch_outcome(
-                &committed.message_id,
-                "queuedBehindActiveTurn",
-            )
+            .record_initial_dispatch_outcome(&committed.message_id, "queuedBehindActiveTurn",)
             .expect("first dispatch finalization should persist"),
         MailboxDispatchOutcomeRecord::Recorded {
             state_advanced: true
@@ -784,10 +999,7 @@ fn initial_dispatch_outcome_is_immutable_after_finalization() {
     );
     assert_eq!(
         store
-            .record_initial_dispatch_outcome(
-                &committed.message_id,
-                "deliveredToIdleSession",
-            )
+            .record_initial_dispatch_outcome(&committed.message_id, "deliveredToIdleSession",)
             .expect("duplicate dispatch finalization should be a no-op"),
         MailboxDispatchOutcomeRecord::AlreadyFinalized {
             dispatch_outcome: "queuedBehindActiveTurn".to_owned()
@@ -814,15 +1026,11 @@ fn initial_dispatch_outcome_is_immutable_after_finalization() {
 #[test]
 fn recovery_cannot_regress_delivered_notification_state() {
     let root = MailboxTestRoot::new();
-    let store =
-        MailboxStore::open(&root.database_path()).expect("mailbox store should open");
+    let store = MailboxStore::open(&root.database_path()).expect("mailbox store should open");
     let committed = store.append(&test_input()).expect("append should succeed");
     assert_eq!(
         store
-        .record_initial_dispatch_outcome(
-            &committed.message_id,
-            "deliveredToIdleSession",
-        )
+            .record_initial_dispatch_outcome(&committed.message_id, "deliveredToIdleSession",)
             .expect("delivered dispatch outcome should persist"),
         MailboxDispatchOutcomeRecord::Recorded {
             state_advanced: true
@@ -830,12 +1038,12 @@ fn recovery_cannot_regress_delivered_notification_state() {
     );
     assert_eq!(
         store
-        .mark_notifications_recovered_through(
-            "session-target",
-            &committed.mailbox_id,
-            committed.sequence,
-            MailboxWakeupRecovery::NeverWoken,
-        )
+            .mark_notifications_recovered_through(
+                "session-target",
+                &committed.mailbox_id,
+                committed.sequence,
+                MailboxWakeupRecovery::NeverWoken,
+            )
             .expect("recovery bookkeeping should succeed"),
         0,
         "recovery must be a guarded no-op after delivery"
@@ -853,8 +1061,7 @@ fn recovery_cannot_regress_delivered_notification_state() {
 #[test]
 fn boot_recovery_marks_only_unread_active_participant_notifications() {
     let root = MailboxTestRoot::new();
-    let store =
-        MailboxStore::open(&root.database_path()).expect("mailbox store should open");
+    let store = MailboxStore::open(&root.database_path()).expect("mailbox store should open");
     let first = store.append(&test_input()).expect("append should succeed");
     store
         .record_initial_dispatch_outcome(&first.message_id, "deliveredToIdleSession")
@@ -885,14 +1092,11 @@ fn boot_recovery_marks_only_unread_active_participant_notifications() {
         "boot recovery must be idempotent"
     );
 
-    store.read_range("session-target", &first.mailbox_id, None, 10).unwrap();
     store
-        .acknowledge(
-            "session-target",
-            &first.mailbox_id,
-            0,
-            first.sequence,
-        )
+        .read_range("session-target", &first.mailbox_id, None, 10)
+        .unwrap();
+    store
+        .acknowledge("session-target", &first.mailbox_id, 0, first.sequence)
         .expect("acknowledgement should advance the cursor");
     store
         .set_notification_state(&first.message_id, "deliveredToIdleSession")
@@ -939,8 +1143,7 @@ fn boot_recovery_marks_only_unread_active_participant_notifications() {
 #[test]
 fn boot_recovery_lists_every_unread_mailbox_beyond_the_live_pass_cap() {
     let root = MailboxTestRoot::new();
-    let store =
-        MailboxStore::open(&root.database_path()).expect("mailbox store should open");
+    let store = MailboxStore::open(&root.database_path()).expect("mailbox store should open");
 
     for index in 0..17 {
         let mut input = test_input();
@@ -950,19 +1153,13 @@ fn boot_recovery_lists_every_unread_mailbox_beyond_the_live_pass_cap() {
         input.body = format!("Durable hello {index}");
         let committed = store.append(&input).expect("append should succeed");
         store
-            .record_initial_dispatch_outcome(
-                &committed.message_id,
-                "deliveredToIdleSession",
-            )
+            .record_initial_dispatch_outcome(&committed.message_id, "deliveredToIdleSession")
             .expect("delivery should finalize");
     }
 
     assert_eq!(
         store
-            .wakeups_for_session(
-                "session-target",
-                MailboxWakeupRecovery::AllUnreadAfterBoot,
-            )
+            .wakeups_for_session("session-target", MailboxWakeupRecovery::AllUnreadAfterBoot,)
             .expect("boot wake-up query should succeed")
             .len(),
         17,
@@ -977,10 +1174,7 @@ fn idempotent_retry_ignores_mutable_participant_display_names() {
     let store = MailboxStore::open(&path).expect("mailbox store should open");
     let first = store.append(&test_input()).expect("append should succeed");
     store
-        .record_initial_dispatch_outcome(
-            &first.message_id,
-            "durableButNotWoken",
-        )
+        .record_initial_dispatch_outcome(&first.message_id, "durableButNotWoken")
         .expect("original receipt should finalize before retry");
 
     let mut renamed = test_input();
@@ -1019,7 +1213,9 @@ fn acknowledgement_is_forward_only_compare_and_swap() {
     let path = root.database_path();
     let store = MailboxStore::open(&path).expect("mailbox store should open");
     let receipt = store.append(&test_input()).expect("append should succeed");
-    store.read_range("session-target", &receipt.mailbox_id, None, 10).unwrap();
+    store
+        .read_range("session-target", &receipt.mailbox_id, None, 10)
+        .unwrap();
 
     let summary = store
         .acknowledge("session-target", &receipt.mailbox_id, 0, 1)
@@ -1127,7 +1323,9 @@ fn concurrent_appends_allocate_one_dense_mailbox_sequence() {
             input.idempotency_key = format!("send-{index}");
             input.body = format!("message {index}");
             barrier.wait();
-            store.append(&input).expect("concurrent append should succeed")
+            store
+                .append(&input)
+                .expect("concurrent append should succeed")
         }));
     }
     barrier.wait();
@@ -1181,20 +1379,21 @@ fn appending_again_does_not_resurrect_a_departed_participant() {
         .into_iter()
         .find(|summary| summary.id == first.mailbox_id)
         .expect("sender should retain mailbox history");
-    assert!(sender_summary
-        .participants
-        .iter()
-        .find(|participant| participant.session_id == "session-target")
-        .expect("target snapshot should remain")
-        .left_at
-        .is_some());
+    assert!(
+        sender_summary
+            .participants
+            .iter()
+            .find(|participant| participant.session_id == "session-target")
+            .expect("target snapshot should remain")
+            .left_at
+            .is_some()
+    );
 }
 
 #[test]
 fn explicit_live_session_reactivation_restores_departed_mailbox_access() {
     let root = MailboxTestRoot::new();
-    let store =
-        MailboxStore::open(&root.database_path()).expect("mailbox store should open");
+    let store = MailboxStore::open(&root.database_path()).expect("mailbox store should open");
     let committed = store.append(&test_input()).expect("append should succeed");
     store
         .mark_session_left("session-target")
@@ -1219,7 +1418,8 @@ fn explicit_live_session_reactivation_restores_departed_mailbox_access() {
     assert_eq!(summaries[0].id, committed.mailbox_id);
     let messages = store
         .read_range("session-target", &committed.mailbox_id, Some(0), 10)
-        .expect("reactivated participant should read").messages;
+        .expect("reactivated participant should read")
+        .messages;
     assert_eq!(messages.len(), 1);
     let acknowledged = store
         .acknowledge(
@@ -1243,8 +1443,7 @@ fn explicit_live_session_reactivation_restores_departed_mailbox_access() {
 #[test]
 fn mailbox_range_reads_leave_every_participant_cursor_unchanged() {
     let root = MailboxTestRoot::new();
-    let store =
-        MailboxStore::open(&root.database_path()).expect("mailbox store should open");
+    let store = MailboxStore::open(&root.database_path()).expect("mailbox store should open");
     let first = store.append(&test_input()).expect("append should succeed");
     let mailbox_id = first.mailbox_id.clone();
     drop(first);
@@ -1257,7 +1456,8 @@ fn mailbox_range_reads_leave_every_participant_cursor_unchanged() {
 
     let messages = store
         .read_range("session-target", &mailbox_id, Some(0), 50)
-        .expect("mailbox range should read").messages;
+        .expect("mailbox range should read")
+        .messages;
     assert_eq!(messages.len(), 1);
 
     let after = store
@@ -1285,8 +1485,7 @@ fn mailbox_range_reads_leave_every_participant_cursor_unchanged() {
 #[test]
 fn reactivation_rollback_restores_only_rows_cleared_by_that_attempt() {
     let root = MailboxTestRoot::new();
-    let store =
-        MailboxStore::open(&root.database_path()).expect("mailbox store should open");
+    let store = MailboxStore::open(&root.database_path()).expect("mailbox store should open");
     let first = store.append(&test_input()).expect("append should succeed");
     store
         .mark_session_left("session-target")
@@ -1329,9 +1528,8 @@ fn reactivation_rollback_restores_only_rows_cleared_by_that_attempt() {
 fn live_session_reactivation_uses_bounded_request_writer_admission() {
     let root = MailboxTestRoot::new();
     let path = root.database_path();
-    let store =
-        MailboxStore::open_with_write_admission_timeout(&path, Duration::ZERO)
-            .expect("mailbox store should open");
+    let store = MailboxStore::open_with_write_admission_timeout(&path, Duration::ZERO)
+        .expect("mailbox store should open");
     store.append(&test_input()).expect("append should succeed");
     store
         .mark_session_left("session-target")
@@ -1367,7 +1565,9 @@ fn mailbox_sender_cursor_follows_its_own_append() {
     let root = MailboxTestRoot::new();
     let store = MailboxStore::open(&root.database_path()).expect("mailbox store should open");
 
-    let first = store.append(&test_input()).expect("first append should commit");
+    let first = store
+        .append(&test_input())
+        .expect("first append should commit");
     assert_eq!(first.receipt.sequence, 1);
     drop(first);
 

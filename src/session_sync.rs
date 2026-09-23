@@ -18,9 +18,7 @@
 // and must not land on a session whose Codex runtime has since been
 // replaced.
 
-fn ensure_opencode_sync_deadline(
-    execution_deadline: Option<std::time::Instant>,
-) -> Result<()> {
+fn ensure_opencode_sync_deadline(execution_deadline: Option<std::time::Instant>) -> Result<()> {
     if execution_deadline.is_some_and(|deadline| std::time::Instant::now() >= deadline) {
         bail!("OpenCode config request deadline expired before committing session state");
     }
@@ -40,9 +38,7 @@ impl AppState {
             .find(|record| record.session.id == session_id)
             .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
         if !record.session.agent.supports_opencode_settings() {
-            return Err(anyhow!(
-                "session `{session_id}` is not an OpenCode session"
-            ));
+            return Err(anyhow!("session `{session_id}` is not an OpenCode session"));
         }
         Ok(AcpPromptCommand {
             cwd: record.session.workdir.clone(),
@@ -71,9 +67,7 @@ impl AppState {
             .find(|record| record.session.id == session_id)
             .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
         if !record.session.agent.supports_opencode_settings() {
-            return Err(anyhow!(
-                "session `{session_id}` is not an OpenCode session"
-            ));
+            return Err(anyhow!("session `{session_id}` is not an OpenCode session"));
         }
         Ok(OpenCodeConfigSnapshot {
             model_selection: record
@@ -135,9 +129,7 @@ impl AppState {
             .session_mut_by_index(index)
             .expect("session index should be valid");
         if !record.session.agent.supports_opencode_settings() {
-            return Err(anyhow!(
-                "session `{session_id}` is not an OpenCode session"
-            ));
+            return Err(anyhow!("session `{session_id}` is not an OpenCode session"));
         }
 
         match option_id {
@@ -215,10 +207,7 @@ impl AppState {
             if record.session.codex_fast_mode
                 && codex_model_option(&record.session.model, &record.session.model_options)
                     .is_some()
-                && !codex_model_supports_fast(
-                    &record.session.model,
-                    &record.session.model_options,
-                )
+                && !codex_model_supports_fast(&record.session.model, &record.session.model_options)
             {
                 record.session.codex_fast_mode = false;
                 changed = true;
@@ -314,9 +303,7 @@ impl AppState {
             .session_mut_by_index(index)
             .expect("session index should be valid");
         if !record.session.agent.supports_opencode_settings() {
-            return Err(anyhow!(
-                "session `{session_id}` is not an OpenCode session"
-            ));
+            return Err(anyhow!("session `{session_id}` is not an OpenCode session"));
         }
 
         if let Some(update) = model_update {

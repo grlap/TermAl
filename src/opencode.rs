@@ -20,9 +20,7 @@ fn normalize_opencode_model(value: &str) -> Result<String> {
         bail!("OpenCode model cannot be empty");
     }
     if model.chars().count() > MAX_OPENCODE_MODEL_CHARS {
-        bail!(
-            "OpenCode model must be at most {MAX_OPENCODE_MODEL_CHARS} characters"
-        );
+        bail!("OpenCode model must be at most {MAX_OPENCODE_MODEL_CHARS} characters");
     }
     if model.chars().any(char::is_control) {
         bail!("OpenCode model cannot contain control characters");
@@ -40,9 +38,7 @@ fn normalize_opencode_effort(value: &str) -> Result<String> {
         bail!("OpenCode reasoning variant cannot be empty");
     }
     if effort.chars().count() > MAX_OPENCODE_EFFORT_CHARS {
-        bail!(
-            "OpenCode reasoning variant must be at most {MAX_OPENCODE_EFFORT_CHARS} characters"
-        );
+        bail!("OpenCode reasoning variant must be at most {MAX_OPENCODE_EFFORT_CHARS} characters");
     }
     if effort.chars().any(char::is_control) {
         bail!("OpenCode reasoning variant cannot contain control characters");
@@ -59,9 +55,7 @@ fn normalize_opencode_mode(value: &str) -> Result<String> {
         bail!("OpenCode mode cannot be empty");
     }
     if mode.chars().count() > MAX_OPENCODE_MODE_CHARS {
-        bail!(
-            "OpenCode mode must be at most {MAX_OPENCODE_MODE_CHARS} characters"
-        );
+        bail!("OpenCode mode must be at most {MAX_OPENCODE_MODE_CHARS} characters");
     }
     if mode.chars().any(char::is_control) {
         bail!("OpenCode mode cannot contain control characters");

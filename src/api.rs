@@ -131,10 +131,9 @@ impl TurnDispatchDeliveryOutcome {
                 );
                 Ok(())
             }
-            Self::Delivered
-            | Self::Scheduled
-            | Self::Held { error: None }
-            | Self::Superseded => Ok(()),
+            Self::Delivered | Self::Scheduled | Self::Held { error: None } | Self::Superseded => {
+                Ok(())
+            }
         }
     }
 
@@ -160,10 +159,7 @@ impl TurnDispatchDeliveryOutcome {
 
     #[cfg(test)]
     fn is_err(&self) -> bool {
-        matches!(
-            self,
-            Self::Held { error: Some(_) } | Self::Rejected(_)
-        )
+        matches!(self, Self::Held { error: Some(_) } | Self::Rejected(_))
     }
 }
 
@@ -288,12 +284,8 @@ fn deliver_turn_dispatch_now(
         }
     }
     match handoff_prepared_turn_dispatch(state, dispatch) {
-        Ok(HandoffPreparedTurnDispatchOutcome::Delivered) => {
-            TurnDispatchDeliveryOutcome::Delivered
-        }
-        Ok(HandoffPreparedTurnDispatchOutcome::Scheduled) => {
-            TurnDispatchDeliveryOutcome::Scheduled
-        }
+        Ok(HandoffPreparedTurnDispatchOutcome::Delivered) => TurnDispatchDeliveryOutcome::Delivered,
+        Ok(HandoffPreparedTurnDispatchOutcome::Scheduled) => TurnDispatchDeliveryOutcome::Scheduled,
         Ok(HandoffPreparedTurnDispatchOutcome::Superseded) => {
             TurnDispatchDeliveryOutcome::Superseded
         }

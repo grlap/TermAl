@@ -128,12 +128,13 @@ impl<'a> SharedCodexStdinActivityGuard<'a> {
     ) -> SharedCodexStdinActivityGuard<'a> {
         *activity
             .lock()
-            .expect("shared Codex stdin activity mutex poisoned") = Some(SharedCodexStdinActivity {
-            operation,
-            context,
-            started_at: std::time::Instant::now(),
-            timed_out: false,
-        });
+            .expect("shared Codex stdin activity mutex poisoned") =
+            Some(SharedCodexStdinActivity {
+                operation,
+                context,
+                started_at: std::time::Instant::now(),
+                timed_out: false,
+            });
         SharedCodexStdinActivityGuard { activity }
     }
 }
@@ -221,8 +222,7 @@ fn shared_codex_stdin_timeout_detail(
     if shared_codex_trace_enabled() {
         eprintln!(
             "shared-codex trace> context=stdin_watchdog method=- session=- thread=- event_turn=- active_turn=- completed_turn=- turn_started=- pending_turn_start=- reason=blocked_{} writer_context={}",
-            activity.operation,
-            activity.context
+            activity.operation, activity.context
         );
     }
     "Agent communication timed out.".to_owned()
@@ -296,13 +296,17 @@ fn start_shared_codex_rpc_command(
     timeout: Duration,
     response_tx: Sender<std::result::Result<Value, CodexResponseError>>,
 ) -> Result<()> {
-    match start_codex_json_rpc_request_with_id(writer, pending_requests, request_id, method, params) {
+    match start_codex_json_rpc_request_with_id(writer, pending_requests, request_id, method, params)
+    {
         Ok(pending) => {
             let pending_requests = pending_requests.clone();
             let method = method.to_owned();
             std::thread::spawn(move || {
                 let result = wait_for_codex_json_rpc_response(
-                    &pending_requests, pending, &method, Some(timeout),
+                    &pending_requests,
+                    pending,
+                    &method,
+                    Some(timeout),
                 );
                 let _ = response_tx.send(result);
             });
@@ -388,9 +392,10 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
             SHARED_CODEX_STDIN_WRITE_TIMEOUT,
             SHARED_CODEX_STDIN_WATCHDOG_POLL_INTERVAL,
         ) {
-            if let Err(kill_err) =
-                kill_child_process(&process, "shared Codex runtime after watchdog startup failure")
-            {
+            if let Err(kill_err) = kill_child_process(
+                &process,
+                "shared Codex runtime after watchdog startup failure",
+            ) {
                 eprintln!(
                     "[termal] failed to clean up shared Codex app-server after watchdog startup failure: {kill_err:#}"
                 );
@@ -437,9 +442,7 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
                         command,
                     } => {
                         let active_turn_generation = command.active_turn_generation;
-                        stdin.set_activity_context(format!(
-                            "command=Prompt session={session_id}"
-                        ));
+                        stdin.set_activity_context(format!("command=Prompt session={session_id}"));
                         handle_shared_codex_prompt_command_result(
                             &writer_state,
                             &session_id,
@@ -465,10 +468,17 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
                         request_id,
                         params,
                     } => handle_shared_codex_start_thread_after_config(
-                        &mut stdin, &writer_pending_requests, &writer_state,
-                        &writer_runtime_id, &writer_sessions, &writer_thread_sessions,
-                        &writer_input_tx, Some(&writer_context), &session_id,
-                        request_id, params,
+                        &mut stdin,
+                        &writer_pending_requests,
+                        &writer_state,
+                        &writer_runtime_id,
+                        &writer_sessions,
+                        &writer_thread_sessions,
+                        &writer_input_tx,
+                        Some(&writer_context),
+                        &session_id,
+                        request_id,
+                        params,
                     ),
                     CodexRuntimeCommand::StartTurnAfterSetup {
                         session_id,
@@ -499,23 +509,26 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
                             ),
                         )
                     }
-                    CodexRuntimeCommand::RecoverLostThread { session_id, request_id, thread_id, detail } => {
-                        handle_shared_codex_lost_thread_recovery(
-                            &mut stdin,
-                            &writer_pending_requests,
-                            &writer_state,
-                            &writer_runtime_id,
-                            &writer_codex_home,
-                            &writer_sessions,
-                            &writer_thread_sessions,
-                            &writer_input_tx,
-                            Some(&writer_context),
-                            &session_id,
-                            &request_id,
-                            &thread_id,
-                            &detail,
-                        )
-                    }
+                    CodexRuntimeCommand::RecoverLostThread {
+                        session_id,
+                        request_id,
+                        thread_id,
+                        detail,
+                    } => handle_shared_codex_lost_thread_recovery(
+                        &mut stdin,
+                        &writer_pending_requests,
+                        &writer_state,
+                        &writer_runtime_id,
+                        &writer_codex_home,
+                        &writer_sessions,
+                        &writer_thread_sessions,
+                        &writer_input_tx,
+                        Some(&writer_context),
+                        &session_id,
+                        &request_id,
+                        &thread_id,
+                        &detail,
+                    ),
                     CodexRuntimeCommand::JsonRpcRequest {
                         method,
                         params,
@@ -595,17 +608,21 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
                                     Ok(_) => {
                                         let _ = response_tx.send(Ok(()));
                                     }
-                                    Err(CodexResponseError::JsonRpc(detail)
+                                    Err(
+                                        CodexResponseError::JsonRpc(detail)
                                         | CodexResponseError::Timeout(detail)
-                                        | CodexResponseError::Transport(detail)) => {
+                                        | CodexResponseError::Transport(detail),
+                                    ) => {
                                         let _ = response_tx.send(Err(detail));
                                     }
                                 });
                                 Ok(())
                             }
                             Err(CodexResponseError::Transport(detail)) => Err(anyhow!(detail)),
-                            Err(CodexResponseError::JsonRpc(detail)
-                                | CodexResponseError::Timeout(detail)) => {
+                            Err(
+                                CodexResponseError::JsonRpc(detail)
+                                | CodexResponseError::Timeout(detail),
+                            ) => {
                                 let _ = response_tx.send(Err(detail));
                                 Ok(())
                             }
@@ -1300,8 +1317,16 @@ fn start_shared_codex_thread_setup_request(
     // Seeded user environment values are not proof of an enabled integration.
     if method == "thread/start" && engram_enabled {
         start_shared_codex_engram_config_read(
-            writer, pending_requests, state, runtime_id, sessions, input_tx,
-            writer_context, session_id, &request_id, params,
+            writer,
+            pending_requests,
+            state,
+            runtime_id,
+            sessions,
+            input_tx,
+            writer_context,
+            session_id,
+            &request_id,
+            params,
         )?;
         setup_guard.disarm();
         return Ok(());
@@ -1310,8 +1335,18 @@ fn start_shared_codex_thread_setup_request(
     // Transfer ownership synchronously to the unchanged thread-setup handshake.
     setup_guard.disarm();
     finish_shared_codex_thread_setup(
-        writer, pending_requests, state, runtime_id, sessions, thread_sessions,
-        input_tx, writer_context, session_id, request_id, method, params,
+        writer,
+        pending_requests,
+        state,
+        runtime_id,
+        sessions,
+        thread_sessions,
+        input_tx,
+        writer_context,
+        session_id,
+        request_id,
+        method,
+        params,
     )
 }
 
@@ -1337,7 +1372,12 @@ fn finish_shared_codex_thread_setup(
     let setup_guard = PendingCodexThreadSetupGuard::new(sessions, session_id, &request_id);
     // Bind recovery to the thread in this RPC, not a later parked command.
     let resumed_thread_id = (method == "thread/resume")
-        .then(|| params.get("threadId").and_then(Value::as_str).map(str::to_owned))
+        .then(|| {
+            params
+                .get("threadId")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
         .flatten();
 
     set_shared_codex_writer_context(
@@ -1453,11 +1493,10 @@ fn finish_shared_codex_thread_setup(
                         if let CodexThreadSetupAbort::Released {
                             active_turn_generation,
                         } = abort_shared_codex_thread_setup(
-                                &waiter_sessions,
-                                &waiter_session_id,
-                                &request_id,
-                            )
-                        {
+                            &waiter_sessions,
+                            &waiter_session_id,
+                            &request_id,
+                        ) {
                             let _ = fail_shared_codex_turn_after_start_error(
                                 &waiter_state,
                                 &waiter_session_id,
@@ -1480,7 +1519,9 @@ fn finish_shared_codex_thread_setup(
                     &runtime_token,
                     thread_id.clone(),
                 ) {
-                    Ok(RuntimeMatchOutcome::SessionMissing | RuntimeMatchOutcome::RuntimeMismatch) => {
+                    Ok(
+                        RuntimeMatchOutcome::SessionMissing | RuntimeMatchOutcome::RuntimeMismatch,
+                    ) => {
                         // Session was stopped or rebound while we waited for
                         // thread setup — discard the stale result and suppress
                         // rediscovery of the orphaned new thread. Release the setup
@@ -1520,10 +1561,10 @@ fn finish_shared_codex_thread_setup(
                         suppress_orphaned_new_thread(&thread_id);
                         // As above: only fail the turn if the setup was still ours.
                         let active_turn_generation = match abort_shared_codex_thread_setup(
-                                &waiter_sessions,
-                                &waiter_session_id,
-                                &request_id,
-                            ) {
+                            &waiter_sessions,
+                            &waiter_session_id,
+                            &request_id,
+                        ) {
                             CodexThreadSetupAbort::Released {
                                 active_turn_generation,
                             } => active_turn_generation,
@@ -1619,7 +1660,9 @@ fn finish_shared_codex_thread_setup(
                 }
             }
             Err(err) => {
-                if let Some(thread_id) = resumed_thread_id.filter(|_| is_lost_codex_rollout_error(&err)) {
+                if let Some(thread_id) =
+                    resumed_thread_id.filter(|_| is_lost_codex_rollout_error(&err))
+                {
                     if !shared_codex_thread_setup_is_current(
                         &waiter_sessions,
                         &waiter_session_id,
@@ -1886,10 +1929,7 @@ fn handle_shared_codex_start_turn(
                     if wait_for_shared_codex_turn_started_or_timeout(
                         &watchdog_cancel_rx,
                         watchdog_config,
-                        || {
-                            wait_state
-                                .shared_codex_stdout_silence_if_matches(&wait_runtime_id)
-                        },
+                        || wait_state.shared_codex_stdout_silence_if_matches(&wait_runtime_id),
                     ) {
                         handle_shared_codex_turn_started_watchdog_expiry(
                             &wait_state,
@@ -2226,11 +2266,7 @@ struct PendingCodexThreadSetupGuard<'a> {
 }
 
 impl<'a> PendingCodexThreadSetupGuard<'a> {
-    fn new(
-        sessions: &'a SharedCodexSessionMap,
-        session_id: &'a str,
-        request_id: &'a str,
-    ) -> Self {
+    fn new(sessions: &'a SharedCodexSessionMap, session_id: &'a str, request_id: &'a str) -> Self {
         Self {
             armed: true,
             request_id,
@@ -2350,16 +2386,13 @@ fn handle_shared_codex_thread_setup_response_error_if_current(
     // Release the setup and drop the prompt parked on it in one step: the setup
     // this prompt was waiting for has failed, so a later prompt must be free to
     // start a fresh one and must not inherit this dead command.
-    let active_turn_generation = match abort_shared_codex_thread_setup(
-        sessions,
-        session_id,
-        request_id,
-    ) {
-        CodexThreadSetupAbort::Released {
-            active_turn_generation,
-        } => active_turn_generation,
-        CodexThreadSetupAbort::NotCurrent => return,
-    };
+    let active_turn_generation =
+        match abort_shared_codex_thread_setup(sessions, session_id, request_id) {
+            CodexThreadSetupAbort::Released {
+                active_turn_generation,
+            } => active_turn_generation,
+            CodexThreadSetupAbort::NotCurrent => return,
+        };
     let runtime_token = RuntimeToken::Codex(runtime_id.to_owned());
     if !state.session_matches_runtime_token(session_id, &runtime_token) {
         return;
@@ -2382,19 +2415,16 @@ fn fail_shared_codex_turn_without_runtime_exit(
     detail: &str,
     context: &str,
 ) {
-    if let Err(err) =
-        fail_shared_codex_turn_after_start_error(
-            state,
-            session_id,
-            runtime_id,
-            active_turn_generation,
-            detail,
-        )
-    {
+    if let Err(err) = fail_shared_codex_turn_after_start_error(
+        state,
+        session_id,
+        runtime_id,
+        active_turn_generation,
+        detail,
+    ) {
         eprintln!(
             "runtime state warning> failed to mark shared Codex turn error for session `{}` after {}: {err:#}",
-            session_id,
-            context,
+            session_id, context,
         );
     }
 }
@@ -2497,13 +2527,11 @@ fn handle_shared_codex_turn_started_watchdog_expiry(
         watchdog_timeout.as_secs_f64()
     );
     let runtime_token = RuntimeToken::Codex(runtime_id.to_owned());
-    let owner_generation = match state
-        .claim_turn_terminalization_if_runtime_matches(
-            session_id,
-            &runtime_token,
-            active_turn_generation,
-        )
-    {
+    let owner_generation = match state.claim_turn_terminalization_if_runtime_matches(
+        session_id,
+        &runtime_token,
+        active_turn_generation,
+    ) {
         Ok(Some(owner_generation)) => owner_generation,
         Ok(None) => return false,
         Err(error) => {
@@ -2533,11 +2561,7 @@ fn handle_shared_codex_turn_started_watchdog_expiry(
         })
     };
     if !watchdog_still_owns_request {
-        state.release_turn_terminalization_if_owned(
-            session_id,
-            &runtime_token,
-            owner_generation,
-        );
+        state.release_turn_terminalization_if_owned(session_id, &runtime_token, owner_generation);
         return false;
     }
 
@@ -2565,16 +2589,18 @@ fn handle_shared_codex_turn_started_watchdog_expiry(
                     turn_id,
                 })
                 .map_err(|error| anyhow!("failed to queue Codex turn interrupt: {error}"))
-                .and_then(|()| match response_rx.recv_timeout(Duration::from_secs(10)) {
-                    Ok(Ok(())) => Ok(()),
-                    Ok(Err(detail)) => Err(anyhow!(detail)),
-                    Err(mpsc::RecvTimeoutError::Timeout) => {
-                        Err(anyhow!("timed out waiting for Codex turn interrupt"))
-                    }
-                    Err(mpsc::RecvTimeoutError::Disconnected) => {
-                        Err(anyhow!("Codex turn interrupt did not return a result"))
-                    }
-                })
+                .and_then(
+                    |()| match response_rx.recv_timeout(Duration::from_secs(10)) {
+                        Ok(Ok(())) => Ok(()),
+                        Ok(Err(detail)) => Err(anyhow!(detail)),
+                        Err(mpsc::RecvTimeoutError::Timeout) => {
+                            Err(anyhow!("timed out waiting for Codex turn interrupt"))
+                        }
+                        Err(mpsc::RecvTimeoutError::Disconnected) => {
+                            Err(anyhow!("Codex turn interrupt did not return a result"))
+                        }
+                    },
+                )
         }
         (None, _) => Err(anyhow!("shared Codex runtime handle is unavailable")),
         (_, None) => Err(anyhow!("accepted shared Codex turn has no turn id")),
@@ -2632,9 +2658,8 @@ fn handle_shared_codex_prompt_command_result(
     match result {
         Ok(()) => Ok(()),
         Err(err) => {
-            if let Some(
-                CodexResponseError::JsonRpc(detail) | CodexResponseError::Timeout(detail),
-            ) = err.downcast_ref::<CodexResponseError>()
+            if let Some(CodexResponseError::JsonRpc(detail) | CodexResponseError::Timeout(detail)) =
+                err.downcast_ref::<CodexResponseError>()
             {
                 fail_shared_codex_turn_after_start_error(
                     state,

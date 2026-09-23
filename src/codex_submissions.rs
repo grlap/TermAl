@@ -168,15 +168,14 @@ fn validate_claude_user_input_answers(
             // preserve an exact label byte-for-byte so Claude can match it
             // back to its own option list. Free-form "Other" answers keep the
             // historical surrounding-whitespace normalization.
-            let answer = if question.options.as_ref().is_some_and(|options| {
-                options
-                    .iter()
-                    .any(|option| option.label == answer.as_str())
-            }) {
-                answer.as_str()
-            } else {
-                answer.trim()
-            };
+            let answer =
+                if question.options.as_ref().is_some_and(|options| {
+                    options.iter().any(|option| option.label == answer.as_str())
+                }) {
+                    answer.as_str()
+                } else {
+                    answer.trim()
+                };
             if !answer.is_empty() && !normalized_answers.iter().any(|seen| seen == answer) {
                 normalized_answers.push(answer.to_owned());
             }
@@ -310,9 +309,11 @@ impl AppState {
                     session_mutation_stamp,
                 )
             };
-            let revision = self.commit_persisted_delta_locked(&mut inner).map_err(|err| {
-                ApiError::internal(format!("failed to persist session state: {err:#}"))
-            })?;
+            let revision = self
+                .commit_persisted_delta_locked(&mut inner)
+                .map_err(|err| {
+                    ApiError::internal(format!("failed to persist session state: {err:#}"))
+                })?;
             let event = DeltaEvent::MessageUpdated {
                 revision,
                 session_id: session_id.to_owned(),
@@ -445,14 +446,12 @@ impl AppState {
         } else if matches!(
             record.session.agent,
             Agent::Cursor | Agent::Gemini | Agent::OpenCode | Agent::Kimi
-        )
-            && matches!(
-                decision,
-                ApprovalDecision::Accepted
-                    | ApprovalDecision::AcceptedForSession
-                    | ApprovalDecision::Rejected
-            )
-        {
+        ) && matches!(
+            decision,
+            ApprovalDecision::Accepted
+                | ApprovalDecision::AcceptedForSession
+                | ApprovalDecision::Rejected
+        ) {
             if record.session.agent == Agent::OpenCode {
                 let next_message_id = record
                     .pending_acp_approval_order
@@ -614,8 +613,8 @@ impl AppState {
                 .find_visible_session_index(session_id)
                 .ok_or_else(|| ApiError::not_found("session not found"))?;
             let record = inner
-            .session_mut_by_index(index)
-            .expect("session index should be valid");
+                .session_mut_by_index(index)
+                .expect("session index should be valid");
             if record.session.status != SessionStatus::Approval {
                 return Err(ApiError::conflict(
                     "session is not currently waiting for input",
@@ -881,8 +880,8 @@ impl AppState {
                 .find_visible_session_index(session_id)
                 .ok_or_else(|| ApiError::not_found("session not found"))?;
             let record = inner
-            .session_mut_by_index(index)
-            .expect("session index should be valid");
+                .session_mut_by_index(index)
+                .expect("session index should be valid");
             if record.session.status != SessionStatus::Approval {
                 return Err(ApiError::conflict(
                     "session is not currently waiting for a Codex request response",
@@ -941,7 +940,6 @@ impl AppState {
             Ok(message_index)
         })
     }
-
 }
 
 /// Maps a user decision only to an ACP option with the same authorization
@@ -956,9 +954,9 @@ fn acp_approval_option_id(
         ApprovalDecision::Accepted => pending.allow_once_option_id.clone(),
         ApprovalDecision::AcceptedForSession => pending.allow_always_option_id.clone(),
         ApprovalDecision::Rejected => pending.reject_option_id.clone(),
-        ApprovalDecision::Pending
-        | ApprovalDecision::Interrupted
-        | ApprovalDecision::Canceled => None,
+        ApprovalDecision::Pending | ApprovalDecision::Interrupted | ApprovalDecision::Canceled => {
+            None
+        }
     }
 }
 

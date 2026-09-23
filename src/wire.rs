@@ -1319,7 +1319,10 @@ enum AcceptanceEvaluationMode {
 /// read before spawning; the evaluator submits against exactly those, so a
 /// task that moved on is refused by the tracker instead of silently covered.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase", from = "PersistedDelegationAcceptanceEvaluation")]
+#[serde(
+    rename_all = "camelCase",
+    from = "PersistedDelegationAcceptanceEvaluation"
+)]
 struct DelegationAcceptanceEvaluation {
     work_ref: String,
     mode: AcceptanceEvaluationMode,
@@ -1334,7 +1337,10 @@ struct DelegationAcceptanceEvaluation {
     /// which can no longer submit.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     store: Option<EngramAuthorityStoreKey>,
-    #[serde(default, skip_serializing_if = "AcceptanceEvaluationSubmission::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "AcceptanceEvaluationSubmission::is_none"
+    )]
     submission: AcceptanceEvaluationSubmission,
 }
 
@@ -1342,7 +1348,11 @@ struct DelegationAcceptanceEvaluation {
 /// persisted before the tracker runs, so a crash or a lost response never
 /// reads as "nothing was recorded".
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
-#[serde(tag = "state", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "state",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 enum AcceptanceEvaluationSubmission {
     #[default]
     None,

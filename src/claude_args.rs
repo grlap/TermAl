@@ -33,7 +33,6 @@
 // CLI's message shape changes with CLI version and we want to
 // degrade gracefully when new / unknown fields appear.
 
-
 /// Returns the Claude CLI model argument, or None to use Claude's own default selector.
 fn claude_cli_model_arg(model: &str) -> Option<&str> {
     let model = model.trim();
@@ -43,10 +42,7 @@ fn claude_cli_model_arg(model: &str) -> Option<&str> {
     Some(model)
 }
 
-fn push_claude_cli_common_args(
-    args: &mut Vec<String>,
-    model: &str,
-) {
+fn push_claude_cli_common_args(args: &mut Vec<String>, model: &str) {
     if let Some(model) = claude_cli_model_arg(model) {
         args.extend(["--model".to_owned(), model.to_owned()]);
     }
@@ -85,7 +81,8 @@ fn push_claude_cli_permission_args(
                 "permissions": { "ask": ["*"] },
                 "sandbox": { "autoAllowBashIfSandboxed": false },
                 "disableAllHooks": true,
-            }).to_string(),
+            })
+            .to_string(),
         ]);
     }
     if let Some(effort) = effort.as_cli_value() {

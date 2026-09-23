@@ -43,9 +43,12 @@ impl AppState {
         let index = inner
             .find_session_index(session_id)
             .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
-        set_record_external_session_id(inner
-            .session_mut_by_index(index)
-            .expect("session index should be valid"), Some(external_session_id));
+        set_record_external_session_id(
+            inner
+                .session_mut_by_index(index)
+                .expect("session index should be valid"),
+            Some(external_session_id),
+        );
         if inner.sessions[index]
             .session
             .agent

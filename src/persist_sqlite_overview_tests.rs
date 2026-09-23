@@ -15,34 +15,22 @@ mod sqlite_overview_tests {
             ("healthy-local", "{}".to_owned().into()),
             (
                 "valid-remote",
-                r#"{"remoteId":"r","remoteSessionId":"s"}"#
-                    .to_owned()
-                    .into(),
+                r#"{"remoteId":"r","remoteSessionId":"s"}"#.to_owned().into(),
             ),
-            (
-                "partial-remote",
-                r#"{"remoteId":"r"}"#.to_owned().into(),
-            ),
+            ("partial-remote", r#"{"remoteId":"r"}"#.to_owned().into()),
             (
                 "partial-remote-session",
                 r#"{"remoteSessionId":"s"}"#.to_owned().into(),
             ),
             (
                 "empty-remote",
-                r#"{"remoteId":"","remoteSessionId":"s"}"#
-                    .to_owned()
-                    .into(),
+                r#"{"remoteId":"","remoteSessionId":"s"}"#.to_owned().into(),
             ),
             (
                 "empty-remote-session",
-                r#"{"remoteId":"r","remoteSessionId":" "}"#
-                    .to_owned()
-                    .into(),
+                r#"{"remoteId":"r","remoteSessionId":" "}"#.to_owned().into(),
             ),
-            (
-                "non-string-remote",
-                r#"{"remoteId":7}"#.to_owned().into(),
-            ),
+            ("non-string-remote", r#"{"remoteId":7}"#.to_owned().into()),
             ("malformed-json", "{".to_owned().into()),
             ("non-object", "[]".to_owned().into()),
             (

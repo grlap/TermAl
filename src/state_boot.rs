@@ -283,14 +283,14 @@ impl StateInner {
         }
 
         for delegation_index in 0..self.delegations.len() {
-            let defer_required_review = self
-                .delegations
-                .get(delegation_index)
-                .is_some_and(|delegation| {
-                    delegation.mode == DelegationMode::Reviewer
-                        && delegation.review_result_schema_version.is_none()
-                        && delegation.submitted_review_result.is_none()
-                });
+            let defer_required_review =
+                self.delegations
+                    .get(delegation_index)
+                    .is_some_and(|delegation| {
+                        delegation.mode == DelegationMode::Reviewer
+                            && delegation.review_result_schema_version.is_none()
+                            && delegation.submitted_review_result.is_none()
+                    });
             // coordination.sqlite opens after StateInner boot repair. Defer a
             // required review with no primary-state submission until AppState
             // can consult its durable per-attempt mailbox envelope; otherwise

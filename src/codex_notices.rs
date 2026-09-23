@@ -23,7 +23,6 @@
 // rerouting) go through `push_shared_codex_turn_notice` in
 // `codex_events.rs` instead.
 
-
 /// Intercepts top-level `configWarning` / `deprecationNotice` events
 /// that are not scoped to a thread and records them as session-wide
 /// notices. Returns `true` when the event was a recognized global

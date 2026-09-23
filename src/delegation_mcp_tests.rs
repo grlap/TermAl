@@ -1122,7 +1122,10 @@ fn delegation_mcp_evaluate_acceptance_is_listed_and_forwards_to_the_caller_endpo
         .iter()
         .find(|tool| tool["name"] == TERMAL_EVALUATE_ACCEPTANCE_TOOL_NAME)
         .expect("the request tool should be advertised");
-    assert_eq!(tool["description"], TERMAL_EVALUATE_ACCEPTANCE_TOOL_DESCRIPTION);
+    assert_eq!(
+        tool["description"],
+        TERMAL_EVALUATE_ACCEPTANCE_TOOL_DESCRIPTION
+    );
     assert_eq!(tool["inputSchema"]["required"], json!(["workRef"]));
     assert_eq!(
         tool["inputSchema"]["properties"]["agent"]["enum"],
@@ -1148,7 +1151,10 @@ fn delegation_mcp_evaluate_acceptance_is_listed_and_forwards_to_the_caller_endpo
         );
         let body: Value = serde_json::from_str(&request.body).unwrap();
         assert_eq!(body, json!({"workRef": "w-task", "agent": "Claude"}));
-        (201, json!({"mode": "independent_session", "workRef": "w-task"}))
+        (
+            201,
+            json!({"mode": "independent_session", "workRef": "w-task"}),
+        )
     });
     let bridge = TermalDelegationMcpBridge::new("session-root".to_owned(), base_url).unwrap();
     let result = bridge
@@ -1162,7 +1168,9 @@ fn delegation_mcp_evaluate_acceptance_is_listed_and_forwards_to_the_caller_endpo
     assert_eq!(requests.lock().unwrap().len(), 1);
     assert!(
         bridge
-            .handle_tool_call(json!({"name": TERMAL_EVALUATE_ACCEPTANCE_TOOL_NAME, "arguments": {}}))
+            .handle_tool_call(
+                json!({"name": TERMAL_EVALUATE_ACCEPTANCE_TOOL_NAME, "arguments": {}})
+            )
             .unwrap_err()
             .to_string()
             .contains("workRef is required")

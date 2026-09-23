@@ -449,9 +449,7 @@ impl AppState {
             Ok(DispatchTurnResult::Dispatched(dispatch)) => {
                 match deliver_turn_dispatch(self, dispatch) {
                     TurnDispatchDeliveryOutcome::Delivered
-                    | TurnDispatchDeliveryOutcome::Scheduled => {
-                        Some("deliveredToIdleSession")
-                    }
+                    | TurnDispatchDeliveryOutcome::Scheduled => Some("deliveredToIdleSession"),
                     TurnDispatchDeliveryOutcome::Rejected(err) => {
                         eprintln!(
                             "mailbox> failed waking target session `{}` for mailbox `{}` message `{}` ({}): {}",
@@ -482,9 +480,7 @@ impl AppState {
             Ok(DispatchTurnResult::DispatchedAfterQueue(dispatch)) => {
                 match deliver_turn_dispatch(self, dispatch) {
                     TurnDispatchDeliveryOutcome::Delivered
-                    | TurnDispatchDeliveryOutcome::Scheduled => {
-                        Some("queuedBehindActiveTurn")
-                    }
+                    | TurnDispatchDeliveryOutcome::Scheduled => Some("queuedBehindActiveTurn"),
                     TurnDispatchDeliveryOutcome::Rejected(err) => {
                         eprintln!(
                             "mailbox> failed waking queued target session `{}` for mailbox `{}` message `{}` ({}): {}",

@@ -115,11 +115,15 @@ fn rebuild_sqlite_message_rowid_storage(connection: &rusqlite::Connection) -> Re
     tx.execute_batch(
         "DROP TABLE messages;
          ALTER TABLE messages_rowid_rebuild RENAME TO messages;",
-    ).context("failed to replace transcript storage after copying records")?;
+    )
+    .context("failed to replace transcript storage after copying records")?;
     // A view-owned INSTEAD OF trigger requires its target to exist. Restore
     // every view first, including views unrelated to the transcript table.
     for kind in ["index", "view", "trigger"] {
-        for (_, _, sql) in objects.iter().filter(|(object_kind, _, _)| object_kind == kind) {
+        for (_, _, sql) in objects
+            .iter()
+            .filter(|(object_kind, _, _)| object_kind == kind)
+        {
             tx.execute_batch(sql)
                 .context("failed to restore transcript schema objects")?;
         }

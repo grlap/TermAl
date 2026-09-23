@@ -72,10 +72,7 @@ fn remote_authority_io_error(error: ApiError) -> io::Error {
     )
 }
 
-fn remote_stream_read_api_error(
-    error: io::Error,
-    cancellation: &Arc<AtomicBool>,
-) -> ApiError {
+fn remote_stream_read_api_error(error: io::Error, cancellation: &Arc<AtomicBool>) -> ApiError {
     if error.kind() == io::ErrorKind::Interrupted && cancellation.load(Ordering::SeqCst) {
         return ApiError::bad_gateway("terminal stream client disconnected");
     }
@@ -321,9 +318,7 @@ fn send_remote_terminal_stream_event(
                 std::thread::sleep(TERMINAL_COMMAND_CANCEL_POLL_INTERVAL);
             }
             Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
-                return Err(ApiError::bad_gateway(
-                    "terminal stream client disconnected",
-                ));
+                return Err(ApiError::bad_gateway("terminal stream client disconnected"));
             }
         }
     }
@@ -369,10 +364,7 @@ fn handle_remote_terminal_sse_frame_with_authority(
             }
             send_remote_terminal_stream_event(
                 event_tx,
-                TerminalCommandStreamEvent::Output {
-                    stream,
-                    text,
-                },
+                TerminalCommandStreamEvent::Output { stream, text },
                 cancellation,
                 authority,
             )?;
@@ -405,7 +397,9 @@ fn handle_remote_terminal_sse_frame_with_authority(
                 }),
             )?;
             let detail = match payload.status {
-                Some(status) => format!("remote terminal stream error ({status}): {}", payload.error),
+                Some(status) => {
+                    format!("remote terminal stream error ({status}): {}", payload.error)
+                }
                 None => format!("remote terminal stream error: {}", payload.error),
             };
             let result = if payload.status == Some(StatusCode::TOO_MANY_REQUESTS.as_u16()) {
@@ -464,9 +458,7 @@ impl InterruptibleRemoteStreamReader {
     {
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
         let reader_cancellation = cancellation.clone();
-        std::thread::spawn(move || {
-            read_remote_stream_response(source, tx, reader_cancellation)
-        });
+        std::thread::spawn(move || read_remote_stream_response(source, tx, reader_cancellation));
         Self::new_inner(rx, cancellation, authority)
     }
 
@@ -550,7 +542,10 @@ impl std::io::Read for InterruptibleRemoteStreamReader {
                 ));
             }
 
-            match self.rx.recv_timeout(TERMINAL_REMOTE_STREAM_READ_CANCEL_POLL_INTERVAL) {
+            match self
+                .rx
+                .recv_timeout(TERMINAL_REMOTE_STREAM_READ_CANCEL_POLL_INTERVAL)
+            {
                 Ok(Ok(chunk)) if chunk.is_empty() => {
                     self.ensure_current_authority()?;
                     return Ok(0);
@@ -616,10 +611,9 @@ fn remote_response_is_event_stream(response: &BlockingHttpResponse) -> bool {
         .get("content-type")
         .and_then(|value| value.to_str().ok())
         .is_some_and(|value| {
-            value
-                .split(';')
-                .next()
-                .is_some_and(|media_type| media_type.trim().eq_ignore_ascii_case("text/event-stream"))
+            value.split(';').next().is_some_and(|media_type| {
+                media_type.trim().eq_ignore_ascii_case("text/event-stream")
+            })
         })
 }
 
@@ -689,5 +683,8 @@ fn find_sse_frame_delimiter(bytes: &[u8]) -> Option<(usize, usize)> {
         .windows(4)
         .position(|window| window == b"\r\n\r\n")
         .map(|index| (index, 4));
-    [lf, cr, crlf].into_iter().flatten().min_by_key(|(index, _)| *index)
+    [lf, cr, crlf]
+        .into_iter()
+        .flatten()
+        .min_by_key(|(index, _)| *index)
 }

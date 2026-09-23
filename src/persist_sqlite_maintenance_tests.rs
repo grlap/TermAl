@@ -214,21 +214,33 @@ mod sqlite_maintenance_tests {
     #[test]
     fn setup_error_precedence_is_independent_of_permission_platform() {
         let path = FsPath::new("fixture.sqlite");
-        assert_eq!(resolve_sqlite_state_setup_result(path, Ok(42), Ok(())).unwrap(), 42);
+        assert_eq!(
+            resolve_sqlite_state_setup_result(path, Ok(42), Ok(())).unwrap(),
+            42
+        );
         let hardening = anyhow!("hardening failure").context("permission context");
         let expected = format!("{hardening:#}");
         assert_eq!(
-            format!("{:#}", resolve_sqlite_state_setup_result(path, Ok(()), Err(hardening)).unwrap_err()),
+            format!(
+                "{:#}",
+                resolve_sqlite_state_setup_result(path, Ok(()), Err(hardening)).unwrap_err()
+            ),
             expected
         );
         for fail_hardening in [false, true] {
-            let original = anyhow!("original maintenance failure").context("original setup context");
+            let original =
+                anyhow!("original maintenance failure").context("original setup context");
             let expected = format!("{original:#}");
             let error = resolve_sqlite_state_setup_result::<()>(
                 path,
                 Err(original),
-                if fail_hardening { Err(anyhow!("secondary hardening failure")) } else { Ok(()) },
-            ).unwrap_err();
+                if fail_hardening {
+                    Err(anyhow!("secondary hardening failure"))
+                } else {
+                    Ok(())
+                },
+            )
+            .unwrap_err();
             assert_eq!(format!("{error:#}"), expected);
         }
     }

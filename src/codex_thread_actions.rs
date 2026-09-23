@@ -111,8 +111,8 @@ impl AppState {
             .get("serviceTier")
             .or_else(|| fork_result.pointer("/thread/serviceTier"))
             .and_then(Value::as_str);
-        let fast_mode = codex_fast_service_tier(&fork_model, &context.model_options)
-            .is_some_and(|fast_tier| {
+        let fast_mode =
+            codex_fast_service_tier(&fork_model, &context.model_options).is_some_and(|fast_tier| {
                 reported_service_tier
                     .map(|tier| tier.eq_ignore_ascii_case(&fast_tier.id))
                     .unwrap_or(context.fast_mode)
@@ -172,9 +172,11 @@ impl AppState {
         // whole-struct replace so the persist thread picks up the
         // rewrite instead of skipping it at the delta watermark.
         let _ = inner.session_mut_by_index(index);
-        let revision = self.commit_session_created_locked(&mut inner, &record).map_err(|err| {
-            ApiError::internal(format!("failed to persist forked Codex session: {err:#}"))
-        })?;
+        let revision = self
+            .commit_session_created_locked(&mut inner, &record)
+            .map_err(|err| {
+                ApiError::internal(format!("failed to persist forked Codex session: {err:#}"))
+            })?;
         let created_record = inner
             .find_session_index(&record.session.id)
             .and_then(|index| inner.sessions.get(index))
@@ -229,25 +231,36 @@ impl AppState {
             if !confirmed_archived {
                 let previous = {
                     let inner = self.inner.lock().expect("state mutex poisoned");
-                    inner.find_session_index(session_id)
+                    inner
+                        .find_session_index(session_id)
                         .and_then(|index| inner.sessions[index].codex_delegation_release.clone())
                 };
-                if !previous.as_ref().is_some_and(|release| release.archive_origin_has_exited(self))
+                if !previous
+                    .as_ref()
+                    .is_some_and(|release| release.archive_origin_has_exited(self))
                     || !self.probe_codex_archive_state(&context.thread_id, false)
                 {
-                    return Err(ApiError::conflict("previous Codex archive is still unconfirmed; retry after it completes or the old runtime exits"));
+                    return Err(ApiError::conflict(
+                        "previous Codex archive is still unconfirmed; retry after it completes or the old runtime exits",
+                    ));
                 }
                 // The old process is dead and a replacement confirms Active;
                 // a new manual archive cannot race the previous operation.
             } else {
                 let mut inner = self.inner.lock().expect("state mutex poisoned");
-                let index = inner.find_session_index(session_id)
+                let index = inner
+                    .find_session_index(session_id)
                     .ok_or_else(|| ApiError::not_found("session not found"))?;
-                if inner.sessions[index].external_session_id.as_deref() != Some(&context.thread_id) {
-                    return Err(ApiError::conflict("Codex thread changed during archive reconciliation"));
+                if inner.sessions[index].external_session_id.as_deref() != Some(&context.thread_id)
+                {
+                    return Err(ApiError::conflict(
+                        "Codex thread changed during archive reconciliation",
+                    ));
                 }
                 set_record_codex_thread_state(
-                    inner.session_mut_by_index(index).expect("validated session index"),
+                    inner
+                        .session_mut_by_index(index)
+                        .expect("validated session index"),
                     CodexThreadState::Archived,
                 );
                 self.commit_locked(&mut inner).map_err(|error| {
@@ -264,7 +277,8 @@ impl AppState {
             if let Some(index) = inner.find_session_index(session_id) {
                 let record = &inner.sessions[index];
                 if record.external_session_id.as_deref() == Some(&context.thread_id)
-                    && record_has_archived_codex_thread(record) {
+                    && record_has_archived_codex_thread(record)
+                {
                     if let Some(release) = &record.codex_delegation_release {
                         release.confirm_completed_outcome(CodexReleaseOutcome::Archived);
                     }
@@ -276,17 +290,41 @@ impl AppState {
         let barrier = Arc::new(CodexDelegationRelease::default());
         {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
-            let index = inner.find_session_index(session_id).ok_or_else(|| ApiError::not_found("session not found"))?;
+            let index = inner
+                .find_session_index(session_id)
+                .ok_or_else(|| ApiError::not_found("session not found"))?;
             let record = &mut inner.sessions[index];
             if record.external_session_id.as_deref() != Some(&context.thread_id)
-                || record.runtime_stop_in_progress || !record.queued_prompts.is_empty()
-                || matches!(record.session.status, SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping)
-                || record.codex_delegation_release.as_ref().is_some_and(|release| release.outcome.lock().expect("Codex release mutex poisoned").is_none()) {
-                return Err(ApiError::conflict("Codex thread changed before archive admission; retry"));
+                || record.runtime_stop_in_progress
+                || !record.queued_prompts.is_empty()
+                || matches!(
+                    record.session.status,
+                    SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
+                )
+                || record
+                    .codex_delegation_release
+                    .as_ref()
+                    .is_some_and(|release| {
+                        release
+                            .outcome
+                            .lock()
+                            .expect("Codex release mutex poisoned")
+                            .is_none()
+                    })
+            {
+                return Err(ApiError::conflict(
+                    "Codex thread changed before archive admission; retry",
+                ));
             }
             if let Some(previous) = &record.codex_delegation_release {
-                *barrier.undurable_terminal.lock().expect("Codex release durability mutex poisoned") =
-                    previous.undurable_terminal.lock().expect("Codex release durability mutex poisoned").clone();
+                *barrier
+                    .undurable_terminal
+                    .lock()
+                    .expect("Codex release durability mutex poisoned") = previous
+                    .undurable_terminal
+                    .lock()
+                    .expect("Codex release durability mutex poisoned")
+                    .clone();
             }
             record.codex_delegation_release = Some(barrier.clone());
         }
@@ -294,57 +332,61 @@ impl AppState {
         let mut rejected = false;
         let mut confirmed_not_archived = false;
         let outcome = (|| {
-        // Preserve and confirm any terminal-result obligation before archive.
-        barrier.retry_durability(self)?;
-        let runtime = self.shared_codex_runtime().map_err(|error| {
-            ApiError::internal(format!("failed to start Codex runtime: {error:#}"))
-        })?;
-        barrier.record_archive_origin(&runtime);
-        archive_attempted = true;
-        if let Err(error) = self.perform_codex_json_rpc_request_on_runtime(
-            &runtime,
-            "thread/archive",
-            json!({
-                "threadId": context.thread_id,
-            }),
-            CODEX_CHILD_ARCHIVE_RPC_TIMEOUT,
-        ) {
-            rejected = matches!(error, CodexResponseError::JsonRpc(_));
-            eprintln!("codex archive> thread={} error={error}", context.thread_id);
-            if !self.probe_codex_archive_state(&context.thread_id, true) {
-                confirmed_not_archived = rejected && self.probe_codex_archive_state(&context.thread_id, false);
-                return Err(error.into_api_error("thread/archive"));
+            // Preserve and confirm any terminal-result obligation before archive.
+            barrier.retry_durability(self)?;
+            let runtime = self.shared_codex_runtime().map_err(|error| {
+                ApiError::internal(format!("failed to start Codex runtime: {error:#}"))
+            })?;
+            barrier.record_archive_origin(&runtime);
+            archive_attempted = true;
+            if let Err(error) = self.perform_codex_json_rpc_request_on_runtime(
+                &runtime,
+                "thread/archive",
+                json!({
+                    "threadId": context.thread_id,
+                }),
+                CODEX_CHILD_ARCHIVE_RPC_TIMEOUT,
+            ) {
+                rejected = matches!(error, CodexResponseError::JsonRpc(_));
+                eprintln!("codex archive> thread={} error={error}", context.thread_id);
+                if !self.probe_codex_archive_state(&context.thread_id, true) {
+                    confirmed_not_archived =
+                        rejected && self.probe_codex_archive_state(&context.thread_id, false);
+                    return Err(error.into_api_error("thread/archive"));
+                }
             }
-        }
 
-        let mut inner = self.inner.lock().expect("state mutex poisoned");
-        let index = inner
-            .find_session_index(session_id)
-            .ok_or_else(|| ApiError::not_found("session not found"))?;
-        if inner.sessions[index].external_session_id.as_deref() != Some(&context.thread_id) {
-            return Err(ApiError::conflict("Codex thread changed during archive"));
-        }
-        let note_message_id = inner.next_message_id();
-        set_record_codex_thread_state(inner
-            .session_mut_by_index(index)
-            .expect("session index should be valid"), CodexThreadState::Archived);
-        push_session_markdown_note_on_record(
-            inner
-            .session_mut_by_index(index)
-            .expect("session index should be valid"),
-            note_message_id,
-            "Archived Codex thread",
-            format!(
-                "Archived the live Codex thread `{}`.\n\nUse **Unarchive** to restore it later before sending more prompts.",
-                context.thread_id
-            ),
-        );
-        self.commit_locked(&mut inner).map_err(|err| {
-            ApiError::internal(format!(
-                "failed to persist archived Codex thread note: {err:#}"
-            ))
-        })?;
-        Ok(self.snapshot_from_inner(&inner))
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let index = inner
+                .find_session_index(session_id)
+                .ok_or_else(|| ApiError::not_found("session not found"))?;
+            if inner.sessions[index].external_session_id.as_deref() != Some(&context.thread_id) {
+                return Err(ApiError::conflict("Codex thread changed during archive"));
+            }
+            let note_message_id = inner.next_message_id();
+            set_record_codex_thread_state(
+                inner
+                    .session_mut_by_index(index)
+                    .expect("session index should be valid"),
+                CodexThreadState::Archived,
+            );
+            push_session_markdown_note_on_record(
+                inner
+                    .session_mut_by_index(index)
+                    .expect("session index should be valid"),
+                note_message_id,
+                "Archived Codex thread",
+                format!(
+                    "Archived the live Codex thread `{}`.\n\nUse **Unarchive** to restore it later before sending more prompts.",
+                    context.thread_id
+                ),
+            );
+            self.commit_locked(&mut inner).map_err(|err| {
+                ApiError::internal(format!(
+                    "failed to persist archived Codex thread note: {err:#}"
+                ))
+            })?;
+            Ok(self.snapshot_from_inner(&inner))
         })();
         barrier.finish(match &outcome {
             Ok(_) => CodexReleaseOutcome::Archived,
@@ -362,8 +404,10 @@ impl AppState {
     fn confirm_codex_thread_archived(&self, thread_id: &str) -> Result<bool, ApiError> {
         {
             let inner = self.inner.lock().expect("state mutex poisoned");
-            if inner.sessions.iter().any(|record| record.external_session_id.as_deref() == Some(thread_id)
-                && record.session.codex_thread_state == Some(CodexThreadState::Archived)) {
+            if inner.sessions.iter().any(|record| {
+                record.external_session_id.as_deref() == Some(thread_id)
+                    && record.session.codex_thread_state == Some(CodexThreadState::Archived)
+            }) {
                 return Ok(true); // A matching late notification is positive evidence too.
             }
         }
@@ -373,8 +417,11 @@ impl AppState {
     // Absence is normal; probe failure is operational evidence and gets its
     // own diagnostic on every automatic/manual/retry reconciliation path.
     fn probe_codex_archive_state(&self, thread_id: &str, archived: bool) -> bool {
-        let result = if archived { self.confirm_codex_thread_archived(thread_id) }
-            else { self.confirm_codex_thread_in_inventory(thread_id, false) };
+        let result = if archived {
+            self.confirm_codex_thread_archived(thread_id)
+        } else {
+            self.confirm_codex_thread_in_inventory(thread_id, false)
+        };
         result.unwrap_or_else(|error| {
             eprintln!("codex archive reconciliation> thread={thread_id} archived={archived} probe_error={}", error.message);
             false
@@ -383,25 +430,44 @@ impl AppState {
 
     // Local Active may be stale. Only a matching inventory entry confirms
     // non-archive; missing/partial pages never establish the opposite state.
-    fn confirm_codex_thread_in_inventory(&self, thread_id: &str, archived: bool) -> Result<bool, ApiError> {
+    fn confirm_codex_thread_in_inventory(
+        &self,
+        thread_id: &str,
+        archived: bool,
+    ) -> Result<bool, ApiError> {
         let deadline = std::time::Instant::now() + CODEX_THREAD_RECONCILIATION_TIMEOUT;
         let mut cursor = Value::Null;
         let mut seen = HashSet::new();
         for _ in 0..20 {
             let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-            if remaining.is_zero() { return Ok(false); }
+            if remaining.is_zero() {
+                return Ok(false);
+            }
             let page = self.perform_codex_json_rpc_request("thread/list", json!({
                 "archived": archived, "limit": 100, "cursor": cursor, "modelProviders": [],
                 "sourceKinds": ["cli", "vscode", "exec", "appServer", "subAgent",
                     "subAgentReview", "subAgentCompact", "subAgentThreadSpawn", "subAgentOther", "unknown"]
             }), remaining)?;
-            let data = page.get("data").and_then(Value::as_array)
+            let data = page
+                .get("data")
+                .and_then(Value::as_array)
                 .ok_or_else(|| ApiError::internal("invalid Codex thread inventory"))?;
-            if data.iter().any(|thread| thread.get("id").and_then(Value::as_str) == Some(thread_id)) {
+            if data
+                .iter()
+                .any(|thread| thread.get("id").and_then(Value::as_str) == Some(thread_id))
+            {
                 return Ok(true);
             }
-            let Some(next) = page.get("nextCursor").and_then(Value::as_str).filter(|s| !s.is_empty()) else { return Ok(false); };
-            if !seen.insert(next.to_owned()) { return Ok(false); }
+            let Some(next) = page
+                .get("nextCursor")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+            else {
+                return Ok(false);
+            };
+            if !seen.insert(next.to_owned()) {
+                return Ok(false);
+            }
             cursor = Value::String(next.to_owned());
         }
         Ok(false)
@@ -531,8 +597,8 @@ impl AppState {
         }
         push_session_markdown_note_on_record(
             inner
-            .session_mut_by_index(index)
-            .expect("session index should be valid"),
+                .session_mut_by_index(index)
+                .expect("session index should be valid"),
             note_message_id,
             "Started Codex compaction",
             format!(
@@ -603,8 +669,8 @@ impl AppState {
         if let Some(rollback_messages) = rollback_messages {
             replace_session_messages_on_record(
                 inner
-            .session_mut_by_index(index)
-            .expect("session index should be valid"),
+                    .session_mut_by_index(index)
+                    .expect("session index should be valid"),
                 rollback_messages,
                 rollback_preview,
             );
@@ -613,8 +679,8 @@ impl AppState {
             let note_message_id = inner.next_message_id();
             push_session_markdown_note_on_record(
                 inner
-            .session_mut_by_index(index)
-            .expect("session index should be valid"),
+                    .session_mut_by_index(index)
+                    .expect("session index should be valid"),
                 note_message_id,
                 "Rolled back Codex thread",
                 format!(

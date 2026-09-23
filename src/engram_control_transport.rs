@@ -177,7 +177,9 @@ impl EngramControlTransport for ProcessEngramControlTransport {
         let process = self.process_for(connection)?;
         if started_at.elapsed() >= timeout {
             self.discard_process(&connection.session_id, &process);
-            return Err(EngramTransportError::deadline("Engram admission budget exhausted during process startup"));
+            return Err(EngramTransportError::deadline(
+                "Engram admission budget exhausted during process startup",
+            ));
         }
         let (reply_tx, reply_rx) = mpsc::channel();
         process

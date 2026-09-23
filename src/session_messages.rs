@@ -53,15 +53,23 @@ impl AppState {
         // summaries should refresh for a newly recorded resolved audit card
         // as well as for a card that is still waiting on the operator.
         let should_refresh_delegation = message.is_interaction_request();
-        let (revision, message, message_index, message_count, preview, status, session_mutation_stamp) = {
+        let (
+            revision,
+            message,
+            message_index,
+            message_count,
+            preview,
+            status,
+            session_mutation_stamp,
+        ) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_session_index(session_id)
                 .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
             let (message_index, message_count, preview, status, session_mutation_stamp) = {
                 let record = inner
-            .session_mut_by_index(index)
-            .expect("session index should be valid");
+                    .session_mut_by_index(index)
+                    .expect("session index should be valid");
                 if let Some(next_preview) = message.preview_text() {
                     record.session.preview = next_preview;
                 }
@@ -138,15 +146,23 @@ impl AppState {
         anchor_message_id: &str,
         message: Message,
     ) -> Result<()> {
-        let (revision, message, message_index, message_count, preview, status, session_mutation_stamp) = {
+        let (
+            revision,
+            message,
+            message_index,
+            message_count,
+            preview,
+            status,
+            session_mutation_stamp,
+        ) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_session_index(session_id)
                 .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
             let (message_index, message_count, preview, status, session_mutation_stamp) = {
                 let record = inner
-            .session_mut_by_index(index)
-            .expect("session index should be valid");
+                    .session_mut_by_index(index)
+                    .expect("session index should be valid");
                 let anchor_index =
                     message_index_on_record(record, anchor_message_id).ok_or_else(|| {
                         anyhow!(
@@ -224,9 +240,10 @@ impl AppState {
                 let record = inner
                     .session_mut_by_index(index)
                     .expect("session index should be valid");
-                let message_index = message_index_on_record(record, message_id).ok_or_else(|| {
-                    anyhow!("session `{session_id}` message `{message_id}` not found")
-                })?;
+                let message_index =
+                    message_index_on_record(record, message_id).ok_or_else(|| {
+                        anyhow!("session `{session_id}` message `{message_id}` not found")
+                    })?;
                 let session = &mut record.session;
 
                 let Some(message) = session.messages.get_mut(message_index) else {
@@ -316,9 +333,10 @@ impl AppState {
                 let record = inner
                     .session_mut_by_index(index)
                     .expect("session index should be valid");
-                let message_index = message_index_on_record(record, message_id).ok_or_else(|| {
-                    anyhow!("session `{session_id}` message `{message_id}` not found")
-                })?;
+                let message_index =
+                    message_index_on_record(record, message_id).ok_or_else(|| {
+                        anyhow!("session `{session_id}` message `{message_id}` not found")
+                    })?;
                 let session = &mut record.session;
 
                 let Some(message) = session.messages.get_mut(message_index) else {
@@ -423,8 +441,8 @@ impl AppState {
                 session_mutation_stamp,
             ) = {
                 let record = inner
-            .session_mut_by_index(index)
-            .expect("session index should be valid");
+                    .session_mut_by_index(index)
+                    .expect("session index should be valid");
                 let (message_index, created_message) = if let Some(message_index) =
                     message_index_on_record(record, message_id)
                 {
@@ -599,8 +617,8 @@ impl AppState {
                 session_mutation_stamp,
             ) = {
                 let record = inner
-            .session_mut_by_index(index)
-            .expect("session index should be valid");
+                    .session_mut_by_index(index)
+                    .expect("session index should be valid");
 
                 let (message_index, created_message) = if let Some(message_index) =
                     message_index_on_record(record, message_id)

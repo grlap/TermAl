@@ -337,10 +337,7 @@ fn handle_repl_codex_app_server_request(
 
     if approval_policy == CodexApprovalPolicy::AutoApprove {
         if let Some(described) = parse_codex_approval_request(method, message)? {
-            let result = codex_approval_result(
-                &described.pending.kind,
-                ApprovalDecision::Accepted,
-            );
+            let result = codex_approval_result(&described.pending.kind, ApprovalDecision::Accepted);
             eprintln!(
                 "repl-codex auto-approval> kind={} request_id={} decision=accepted",
                 method, described.pending.request_id,
@@ -681,7 +678,10 @@ fn handle_repl_codex_app_server_notification(
             if let Some(item) = message.get("params").and_then(|params| params.get("item")) {
                 let allow_late_agent_message = repl_state.current_turn_id.is_none()
                     && repl_state.completed_turn_id.is_some()
-                    && matches!(item.get("type").and_then(Value::as_str), Some("agentMessage"));
+                    && matches!(
+                        item.get("type").and_then(Value::as_str),
+                        Some("agentMessage")
+                    );
                 if repl_state.current_turn_id.is_some() || allow_late_agent_message {
                     handle_repl_codex_app_server_item_completed(
                         item,

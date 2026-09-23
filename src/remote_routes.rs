@@ -393,12 +393,9 @@ impl AppState {
     ) -> Result<Option<RemoteProjectBinding>, ApiError> {
         let project = {
             let inner = self.inner.lock().expect("state mutex poisoned");
-            inner
-                .find_project(project_id)
-                .cloned()
-                .ok_or_else(|| {
-                    missing_project_status.error(format!("unknown project `{project_id}`"))
-                })?
+            inner.find_project(project_id).cloned().ok_or_else(|| {
+                missing_project_status.error(format!("unknown project `{project_id}`"))
+            })?
         };
         if project.remote_id == LOCAL_REMOTE_ID {
             return Ok(None);
@@ -415,8 +412,7 @@ impl AppState {
                 missing_project_status.error(format!("unknown project `{project_id}`"))
             })?;
             if current_project.remote_id != project.remote_id
-                || current_project.remote_project_id.as_deref()
-                    != Some(remote_project_id.as_str())
+                || current_project.remote_project_id.as_deref() != Some(remote_project_id.as_str())
             {
                 return Err(ApiError::conflict(
                     REMOTE_PROJECT_BINDING_CHANGED_DURING_CREATE,
@@ -426,10 +422,7 @@ impl AppState {
                 .find_remote(&current_project.remote_id)
                 .cloned()
                 .ok_or_else(|| {
-                    ApiError::bad_request(format!(
-                        "unknown remote `{}`",
-                        current_project.remote_id
-                    ))
+                    ApiError::bad_request(format!("unknown remote `{}`", current_project.remote_id))
                 })?;
             validate_remote_connection_config(&current_remote)?;
             let binding = RemoteProjectBinding {
@@ -449,17 +442,17 @@ impl AppState {
         let (response, response_lease): (CreateProjectResponse, RemoteRequestLease) = self
             .remote_registry
             .request_json_with_lease(
-            &remote,
-            Method::POST,
-            "/api/projects",
-            &[],
-            Some(json!({
-                "name": project.name,
-                "rootPath": project.root_path,
-                "remoteId": LOCAL_REMOTE_ID,
-            })),
-        )
-        .map_err(remote_create_authority_error)?;
+                &remote,
+                Method::POST,
+                "/api/projects",
+                &[],
+                Some(json!({
+                    "name": project.name,
+                    "rootPath": project.root_path,
+                    "remoteId": LOCAL_REMOTE_ID,
+                })),
+            )
+            .map_err(remote_create_authority_error)?;
 
         let response_remote_project_id = response.project_id;
         let (remote, remote_project_id) = {
@@ -470,9 +463,7 @@ impl AppState {
                 .cloned()
                 .ok_or_else(|| ApiError::bad_request(format!("unknown remote `{}`", remote.id)))?;
             if !same_remote_routing_config(&current_remote, &remote) {
-                return Err(ApiError::conflict(
-                    REMOTE_CONNECTION_CHANGED_DURING_CREATE,
-                ));
+                return Err(ApiError::conflict(REMOTE_CONNECTION_CHANGED_DURING_CREATE));
             }
             let index = inner
                 .projects
@@ -502,11 +493,13 @@ impl AppState {
                     })?;
                 existing
             } else {
-                inner.projects[index].remote_project_id =
-                    Some(response_remote_project_id.clone());
-                self.commit_remote_localization_locked(&mut inner).map_err(|err| {
-                    ApiError::internal(format!("failed to persist remote project binding: {err:#}"))
-                })?;
+                inner.projects[index].remote_project_id = Some(response_remote_project_id.clone());
+                self.commit_remote_localization_locked(&mut inner)
+                    .map_err(|err| {
+                        ApiError::internal(format!(
+                            "failed to persist remote project binding: {err:#}"
+                        ))
+                    })?;
                 response_remote_project_id
             };
             (current_remote, remote_project_id)
@@ -561,9 +554,10 @@ impl AppState {
             return Ok(());
         }
         inner.note_remote_applied_revision(&target.remote.id, remote_state.revision);
-        self.commit_remote_localization_locked(&mut inner).map_err(|err| {
-            ApiError::internal(format!("failed to persist remote state: {err:#}"))
-        })?;
+        self.commit_remote_localization_locked(&mut inner)
+            .map_err(|err| {
+                ApiError::internal(format!("failed to persist remote state: {err:#}"))
+            })?;
         Ok(())
     }
 
@@ -598,9 +592,7 @@ impl AppState {
         }
     }
 
-    fn remote_delta_session_payload_fingerprint(
-        session: &StateSessionSummary,
-    ) -> Option<String> {
+    fn remote_delta_session_payload_fingerprint(session: &StateSessionSummary) -> Option<String> {
         let mut normalized = session.clone();
         // `localize_remote_session` discards inbound wire ownership, so replay
         // identity must ignore it too.
@@ -873,39 +865,38 @@ impl AppState {
         expected_state_continuity_generation: Option<u64>,
     ) -> Result<SessionResponse, ApiError> {
         let query = vec![("tail".to_owned(), message_limit.to_string())];
-        let (remote_response, response_lease): (SessionResponse, RemoteRequestLease) = self
-            .remote_registry
-            .request_json_with_timeout_and_lease(
-            &target.remote,
-            Method::GET,
-            &format!(
-                "/api/sessions/{}",
-                encode_uri_component(&target.remote_session_id)
-            ),
-            &query,
-            None,
-            request_timeout,
-        )?;
+        let (remote_response, response_lease): (SessionResponse, RemoteRequestLease) =
+            self.remote_registry.request_json_with_timeout_and_lease(
+                &target.remote,
+                Method::GET,
+                &format!(
+                    "/api/sessions/{}",
+                    encode_uri_component(&target.remote_session_id)
+                ),
+                &query,
+                None,
+                request_timeout,
+            )?;
 
         let response_validation = (|| -> Result<(), ApiError> {
             if remote_response.session.id != target.remote_session_id {
                 return Err(ApiError::bad_gateway(format!(
-                "remote session response id `{}` did not match requested session `{}`",
-                remote_response.session.id, target.remote_session_id
+                    "remote session response id `{}` did not match requested session `{}`",
+                    remote_response.session.id, target.remote_session_id
                 )));
             }
             if remote_response.session.messages.len() > message_limit {
                 return Err(ApiError::bad_gateway(format!(
-                "remote session tail returned {} messages, exceeding requested limit {message_limit}",
-                remote_response.session.messages.len()
+                    "remote session tail returned {} messages, exceeding requested limit {message_limit}",
+                    remote_response.session.messages.len()
                 )));
             }
             let loaded_message_count =
                 u32::try_from(remote_response.session.messages.len()).unwrap_or(u32::MAX);
             if loaded_message_count > remote_response.session.message_count {
                 return Err(ApiError::bad_gateway(format!(
-                "remote session tail length {loaded_message_count} exceeded messageCount {}",
-                remote_response.session.message_count
+                    "remote session tail length {loaded_message_count} exceeded messageCount {}",
+                    remote_response.session.message_count
                 )));
             }
             if remote_response.session.messages_loaded
@@ -918,8 +909,8 @@ impl AppState {
             if let Some(min_revision) = min_remote_revision {
                 if remote_response.revision < min_revision {
                     return Err(ApiError::bad_gateway(format!(
-                    "remote session response revision {} is older than required revision {min_revision}",
-                    remote_response.revision
+                        "remote session response revision {} is older than required revision {min_revision}",
+                        remote_response.revision
                     )));
                 }
                 if remote_response.revision > min_revision {
@@ -933,8 +924,8 @@ impl AppState {
                         });
                     if !metadata_matches_triggering_delta {
                         return Err(ApiError::bad_gateway(format!(
-                        "remote session response revision {} is newer than targeted repair revision {min_revision} without matching session mutation metadata",
-                        remote_response.revision
+                            "remote session response revision {} is newer than targeted repair revision {min_revision} without matching session mutation metadata",
+                            remote_response.revision
                         )));
                     }
                 }
@@ -954,10 +945,9 @@ impl AppState {
                     expected_connection,
                 )?;
             }
-            if let (Some(connection), Some(generation)) = (
-                expected_connection,
-                expected_state_continuity_generation,
-            ) {
+            if let (Some(connection), Some(generation)) =
+                (expected_connection, expected_state_continuity_generation)
+            {
                 connection.ensure_state_continuity_generation(generation)?;
             }
             self.ensure_remote_request_current_locked(&inner, &response_lease)?;
@@ -1005,20 +995,19 @@ impl AppState {
                         .copied()
                         .unwrap_or_default(),
                 );
-            let response_is_compatible_at_current_revision =
-                match (
-                    record.session.session_mutation_stamp,
-                    remote_response.session.session_mutation_stamp,
-                ) {
-                    (Some(current_stamp), Some(response_stamp)) => {
-                        response_stamp > current_stamp
-                            || (response_stamp == current_stamp
-                                && remote_response.session.message_count
-                                    == record.session.message_count)
-                    }
-                    (Some(_), None) => false,
-                    (None, _) => true,
-                };
+            let response_is_compatible_at_current_revision = match (
+                record.session.session_mutation_stamp,
+                remote_response.session.session_mutation_stamp,
+            ) {
+                (Some(current_stamp), Some(response_stamp)) => {
+                    response_stamp > current_stamp
+                        || (response_stamp == current_stamp
+                            && remote_response.session.message_count
+                                == record.session.message_count)
+                }
+                (Some(_), None) => false,
+                (None, _) => true,
+            };
             if remote_response.revision < latest_remote_revision
                 || (remote_response.revision == latest_remote_revision
                     && !response_is_compatible_at_current_revision)
@@ -1061,11 +1050,13 @@ impl AppState {
             if let Some(remote_revision) = min_remote_revision {
                 inner.note_remote_applied_revision(&target.remote.id, remote_revision);
             }
-            let revision = self.commit_remote_localization_locked(&mut inner).map_err(|err| {
-                ApiError::internal(format!(
-                    "failed to persist bounded remote session tail: {err:#}"
-                ))
-            })?;
+            let revision = self
+                .commit_remote_localization_locked(&mut inner)
+                .map_err(|err| {
+                    ApiError::internal(format!(
+                        "failed to persist bounded remote session tail: {err:#}"
+                    ))
+                })?;
             (revision, session)
         };
 
@@ -1114,8 +1105,8 @@ impl AppState {
         let response_validation = (|| -> Result<(), ApiError> {
             if remote_page.messages.len() > message_limit {
                 return Err(ApiError::bad_gateway(format!(
-                "remote session history returned {} messages, exceeding requested limit {message_limit}",
-                remote_page.messages.len()
+                    "remote session history returned {} messages, exceeding requested limit {message_limit}",
+                    remote_page.messages.len()
                 )));
             }
             if remote_page.has_more != remote_page.next_before.is_some() {
@@ -1160,11 +1151,10 @@ impl AppState {
             .sessions
             .get(index)
             .ok_or_else(|| ApiError::not_found("session not found"))?;
-        let metadata_matches_current_session =
-            remote_page.message_count == record.session.message_count
-                && record.session.session_mutation_stamp.is_some()
-                && Some(remote_page.session_mutation_stamp)
-                    == record.session.session_mutation_stamp;
+        let metadata_matches_current_session = remote_page.message_count
+            == record.session.message_count
+            && record.session.session_mutation_stamp.is_some()
+            && Some(remote_page.session_mutation_stamp) == record.session.session_mutation_stamp;
         let latest_remote_revision = inner
             .remote_applied_revisions
             .get(&target.remote.id)
@@ -1200,10 +1190,8 @@ impl AppState {
         request_timeout: Duration,
     ) -> Result<SessionOverviewResponse, ApiError> {
         let query = vec![("buckets".to_owned(), bucket_count.to_string())];
-        let (mut remote_overview, response_lease):
-            (SessionOverviewResponse, RemoteRequestLease) = self
-            .remote_registry
-            .request_json_with_timeout_and_lease(
+        let (mut remote_overview, response_lease): (SessionOverviewResponse, RemoteRequestLease) =
+            self.remote_registry.request_json_with_timeout_and_lease(
                 &target.remote,
                 Method::GET,
                 &format!(
@@ -1217,14 +1205,14 @@ impl AppState {
         let response_validation = (|| -> Result<(), ApiError> {
             if remote_overview.session_id != target.remote_session_id {
                 return Err(ApiError::bad_gateway(format!(
-                "remote session overview id `{}` did not match requested session `{}`",
-                remote_overview.session_id, target.remote_session_id
+                    "remote session overview id `{}` did not match requested session `{}`",
+                    remote_overview.session_id, target.remote_session_id
                 )));
             }
             if remote_overview.buckets.len() > bucket_count {
                 return Err(ApiError::bad_gateway(format!(
-                "remote session overview returned {} buckets, exceeding requested limit {bucket_count}",
-                remote_overview.buckets.len()
+                    "remote session overview returned {} buckets, exceeding requested limit {bucket_count}",
+                    remote_overview.buckets.len()
                 )));
             }
             let bucket_message_count: u64 = remote_overview
@@ -1263,9 +1251,10 @@ impl AppState {
             .get(index)
             .ok_or_else(|| ApiError::not_found("session not found"))?;
         if remote_overview.message_count != record.session.message_count
-            || record.session.session_mutation_stamp.is_some_and(|stamp| {
-                stamp != remote_overview.session_mutation_stamp
-            })
+            || record
+                .session
+                .session_mutation_stamp
+                .is_some_and(|stamp| stamp != remote_overview.session_mutation_stamp)
         {
             return Err(ApiError::conflict(
                 "remote session overview changed while loading; retry the request",
@@ -1281,10 +1270,7 @@ impl AppState {
         event: &DeltaEvent,
     ) -> Result<bool, anyhow::Error> {
         self.repair_remote_session_tail_after_delta_error_with_authority(
-            remote_id,
-            None,
-            None,
-            event,
+            remote_id, None, None, event,
         )
     }
 
@@ -1324,9 +1310,7 @@ impl AppState {
                 )
                 .map_err(|err| anyhow::Error::new(RemoteAuthorityApplyError(err)))?;
             }
-            let Some(index) =
-                inner.find_remote_session_index(remote_id, remote_session_id)
-            else {
+            let Some(index) = inner.find_remote_session_index(remote_id, remote_session_id) else {
                 return Ok(false);
             };
             let record = &inner.sessions[index];
@@ -1406,10 +1390,9 @@ impl AppState {
                 )
                 .map_err(|err| anyhow::Error::new(RemoteAuthorityApplyError(err)))?;
             }
-            if let (Some(connection), Some(generation)) = (
-                expected_connection,
-                expected_state_continuity_generation,
-            ) {
+            if let (Some(connection), Some(generation)) =
+                (expected_connection, expected_state_continuity_generation)
+            {
                 connection
                     .ensure_state_continuity_generation(generation)
                     .map_err(|err| anyhow::Error::new(RemoteAuthorityApplyError(err)))?;
@@ -1536,19 +1519,18 @@ impl AppState {
         target: RemoteOrchestratorTarget,
         action: &str,
     ) -> Result<StateResponse, ApiError> {
-        let (remote_state, response_lease): (StateResponse, RemoteRequestLease) = self
-            .remote_registry
-            .request_json_with_lease(
-            &target.remote,
-            Method::POST,
-            &format!(
-                "/api/orchestrators/{}/{}",
-                encode_uri_component(&target.remote_orchestrator_id),
-                action
-            ),
-            &[],
-            None,
-        )?;
+        let (remote_state, response_lease): (StateResponse, RemoteRequestLease) =
+            self.remote_registry.request_json_with_lease(
+                &target.remote,
+                Method::POST,
+                &format!(
+                    "/api/orchestrators/{}/{}",
+                    encode_uri_component(&target.remote_orchestrator_id),
+                    action
+                ),
+                &[],
+                None,
+            )?;
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         self.ensure_remote_request_current_locked(&inner, &response_lease)?;
         self.retry_remote_delta_persist_if_dirty_locked(&mut inner)
@@ -1569,12 +1551,13 @@ impl AppState {
                 &target.remote.id,
                 &remote_state,
             );
-            self.commit_remote_localization_locked(&mut inner).map_err(|err| {
-                ApiError::internal(format!(
-                    "failed to persist remote orchestrator `{}` state: {err:#}",
-                    target.local_instance_id
-                ))
-            })?;
+            self.commit_remote_localization_locked(&mut inner)
+                .map_err(|err| {
+                    ApiError::internal(format!(
+                        "failed to persist remote orchestrator `{}` state: {err:#}",
+                        target.local_instance_id
+                    ))
+                })?;
         }
         Ok(self.snapshot_from_inner(&inner))
     }
@@ -1679,10 +1662,9 @@ impl AppState {
                 expected_connection,
             )?;
         }
-        if let (Some(connection), Some(generation)) = (
-            expected_connection,
-            expected_state_continuity_generation,
-        ) {
+        if let (Some(connection), Some(generation)) =
+            (expected_connection, expected_state_continuity_generation)
+        {
             connection.ensure_state_continuity_generation(generation)?;
         }
         if !apply_remote_state_if_newer_locked(&mut inner, remote_id, &remote_state, None, mode) {

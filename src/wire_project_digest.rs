@@ -400,9 +400,8 @@ fn registered_pending_approval_message_id(record: &SessionRecord) -> Option<Stri
                 .copied()
                 .map(|position| (position, message_id.clone()))
         });
-    let acp_candidate = acp_head.or_else(|| {
-        latest_registered_message(record, record.pending_acp_approvals.keys())
-    });
+    let acp_candidate =
+        acp_head.or_else(|| latest_registered_message(record, record.pending_acp_approvals.keys()));
     let other_candidate = latest_registered_message(
         record,
         record
@@ -463,9 +462,7 @@ fn project_digest_session_from_record(record: &SessionRecord) -> ProjectDigestSe
         }
         if pending_approval_message_id.is_none() {
             if let Message::Approval { id, decision, .. } = message {
-                if *decision == ApprovalDecision::Pending
-                    && has_live_pending_approval(record, id)
-                {
+                if *decision == ApprovalDecision::Pending && has_live_pending_approval(record, id) {
                     pending_approval_message_id = Some(id.clone());
                 }
             }
@@ -475,7 +472,10 @@ fn project_digest_session_from_record(record: &SessionRecord) -> ProjectDigestSe
                 Message::UserInputRequest { id, state, .. }
                 | Message::McpElicitationRequest { id, state, .. }
                 | Message::CodexAppRequest { id, state, .. }
-                    if *state == InteractionRequestState::Pending => Some(id.clone()),
+                    if *state == InteractionRequestState::Pending =>
+                {
+                    Some(id.clone())
+                }
                 _ => None,
             };
         }

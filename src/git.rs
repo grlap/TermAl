@@ -14,11 +14,7 @@ fn load_git_diff_for_request(
     workdir: &FsPath,
     request: &GitDiffRequest,
 ) -> Result<GitDiffResponse, ApiError> {
-    load_git_diff_for_request_with_document_loader(
-        workdir,
-        request,
-        load_git_diff_document_content,
-    )
+    load_git_diff_for_request_with_document_loader(workdir, request, load_git_diff_document_content)
 }
 
 fn load_git_diff_for_request_with_document_loader<F>(
@@ -51,19 +47,17 @@ where
         .as_deref()
         .and_then(|value| value.chars().next())
         .and_then(normalize_git_status_code);
-    let is_submodule = if git_diff_request_requires_submodule_probe(
-        request.section_id,
-        status_code.as_deref(),
-    ) {
-        git_diff_path_is_submodule(
-            &repo_root,
-            &current_path,
-            original_path.as_deref(),
-            request.section_id,
-        )?
-    } else {
-        false
-    };
+    let is_submodule =
+        if git_diff_request_requires_submodule_probe(request.section_id, status_code.as_deref()) {
+            git_diff_path_is_submodule(
+                &repo_root,
+                &current_path,
+                original_path.as_deref(),
+                request.section_id,
+            )?
+        } else {
+            false
+        };
     let diff = load_git_file_diff_text(
         &repo_root,
         &current_path,
@@ -379,15 +373,13 @@ fn finalize_empty_git_diff_explanation(
     section_id: GitDiffSection,
     inspection: Result<String, ApiError>,
 ) -> String {
-    inspection.unwrap_or_else(
-        |err| {
-            eprintln!(
-                "git> auxiliary empty-diff inspection failed for `{current_path}`: {}",
-                err.message
-            );
-            empty_git_diff_reason(current_path, section_id, false, true, "", "")
-        },
-    )
+    inspection.unwrap_or_else(|err| {
+        eprintln!(
+            "git> auxiliary empty-diff inspection failed for `{current_path}`: {}",
+            err.message
+        );
+        empty_git_diff_reason(current_path, section_id, false, true, "", "")
+    })
 }
 
 fn inspect_empty_git_diff(
@@ -557,11 +549,10 @@ fn git_diff_path_is_submodule(
         command.arg("--cached");
     }
 
-    let output = command
-        .arg("--")
-        .args(&pathspecs)
-        .output()
-        .map_err(|err| ApiError::internal(format!("failed to inspect git diff modes: {err}")))?;
+    let output =
+        command.arg("--").args(&pathspecs).output().map_err(|err| {
+            ApiError::internal(format!("failed to inspect git diff modes: {err}"))
+        })?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
@@ -658,16 +649,15 @@ fn load_git_diff_document_content(
             if normalized_status == "D" {
                 read_git_diff_document_side(repo_root, GitDiffDocumentSideSpec::Empty)
             } else {
-                read_git_diff_document_side(repo_root, GitDiffDocumentSideSpec::Worktree(current_path))
+                read_git_diff_document_side(
+                    repo_root,
+                    GitDiffDocumentSideSpec::Worktree(current_path),
+                )
             }
         }
     }?;
-    let edit_blocked_reason = git_diff_document_edit_blocked_reason(
-        repo_root,
-        current_path,
-        original_path,
-        section_id,
-    )?;
+    let edit_blocked_reason =
+        git_diff_document_edit_blocked_reason(repo_root, current_path, original_path, section_id)?;
 
     Ok(GitDiffDocumentContent {
         before,
@@ -715,7 +705,9 @@ fn git_path_has_unstaged_worktree_changes(
         .arg("--")
         .args(&pathspecs)
         .output()
-        .map_err(|err| ApiError::internal(format!("failed to inspect unstaged git changes: {err}")))?;
+        .map_err(|err| {
+            ApiError::internal(format!("failed to inspect unstaged git changes: {err}"))
+        })?;
 
     if output.status.success() {
         return Ok(false);
@@ -769,7 +761,11 @@ fn read_git_diff_document_side(
 }
 
 /// Reads a UTF-8 Git object as text.
-fn read_git_object_text(repo_root: &FsPath, revision: &str, path: &str) -> Result<String, ApiError> {
+fn read_git_object_text(
+    repo_root: &FsPath,
+    revision: &str,
+    path: &str,
+) -> Result<String, ApiError> {
     let object_path = normalize_git_object_path(path);
     let spec = format!("{revision}:{object_path}");
     read_git_spec_text(repo_root, &spec, "git object")
@@ -844,9 +840,9 @@ fn read_git_spec_text(repo_root: &FsPath, spec: &str, label: &str) -> Result<Str
 
     drop(stdout);
     let wait_result = child.wait();
-    let (stderr, stderr_truncated, stderr_error) = stderr_thread
-        .join()
-        .map_err(|_| ApiError::internal(format!("failed to read {label}: stderr reader panicked")))?;
+    let (stderr, stderr_truncated, stderr_error) = stderr_thread.join().map_err(|_| {
+        ApiError::internal(format!("failed to read {label}: stderr reader panicked"))
+    })?;
     let status =
         wait_result.map_err(|err| ApiError::internal(format!("failed to read {label}: {err}")))?;
 
@@ -874,7 +870,9 @@ fn read_git_spec_text(repo_root: &FsPath, spec: &str, label: &str) -> Result<Str
             "failed to read {label}: {stderr}... [stderr truncated]"
         )))
     } else {
-        Err(ApiError::internal(format!("failed to read {label}: {stderr}")))
+        Err(ApiError::internal(format!(
+            "failed to read {label}: {stderr}"
+        )))
     }
 }
 
@@ -916,22 +914,21 @@ fn read_git_worktree_bytes(repo_root: &FsPath, path: &str) -> Result<Vec<u8>, Ap
             ))
             .with_kind(ApiErrorKind::GitDocumentNotFile));
         }
-        ensure_git_document_bytes_within_limit(target_metadata.len(), "git worktree symlink target")?;
-        return read_capped_worktree_file(
-            &canonical_target,
-            path,
+        ensure_git_document_bytes_within_limit(
+            target_metadata.len(),
             "git worktree symlink target",
-        );
+        )?;
+        return read_capped_worktree_file(&canonical_target, path, "git worktree symlink target");
     }
 
     if !metadata.is_file() {
         // NOT_FOUND here means "this path is not an enrichable worktree
         // document"; load_git_diff_for_request maps that to document_content
         // fallback instead of treating the whole diff as missing.
-        return Err(ApiError::not_found(format!(
-            "git worktree path is not a file: {path}"
-        ))
-        .with_kind(ApiErrorKind::GitDocumentNotFile));
+        return Err(
+            ApiError::not_found(format!("git worktree path is not a file: {path}"))
+                .with_kind(ApiErrorKind::GitDocumentNotFile),
+        );
     }
 
     ensure_git_document_bytes_within_limit(metadata.len(), "git worktree file")?;
@@ -958,7 +955,8 @@ fn ensure_worktree_parent_stays_in_repo(
             "failed to resolve parent for git worktree file {relative_path}"
         )));
     };
-    let canonical_parent = canonicalize_worktree_path(parent_path, "worktree parent", relative_path)?;
+    let canonical_parent =
+        canonicalize_worktree_path(parent_path, "worktree parent", relative_path)?;
     ensure_canonical_path_starts_in_repo(
         canonical_repo_root,
         &canonical_parent,
@@ -1023,8 +1021,7 @@ fn git_diff_document_enrichment_note(error: &ApiError) -> Option<String> {
                 .to_owned(),
         ),
         Some(ApiErrorKind::GitDocumentInvalidUtf8) => Some(
-            "Rendered Markdown is unavailable because the document is not valid UTF-8."
-                .to_owned(),
+            "Rendered Markdown is unavailable because the document is not valid UTF-8.".to_owned(),
         ),
         Some(ApiErrorKind::GitDocumentNotFile) => Some(
             "Rendered Markdown is unavailable because the path is not a regular file.".to_owned(),
@@ -1037,10 +1034,9 @@ fn git_diff_document_enrichment_note(error: &ApiError) -> Option<String> {
             | ApiErrorKind::RemoteConnectionUnavailable
             | ApiErrorKind::RetainedQueuedPromotionPersistenceUnknown,
         ) => None,
-        None if error.status.is_server_error() => Some(
-            "Rendered Markdown is unavailable due to a read error."
-                .to_owned(),
-        ),
+        None if error.status.is_server_error() => {
+            Some("Rendered Markdown is unavailable due to a read error.".to_owned())
+        }
         None if is_untagged_degradable_status(error.status) => {
             Some("Rendered Markdown is unavailable.".to_owned())
         }
@@ -1070,7 +1066,11 @@ fn ensure_canonical_path_starts_in_repo(
 
 /// Opens a regular worktree file for reading.
 #[cfg(unix)]
-fn open_worktree_file(file_path: &FsPath, relative_path: &str, label: &str) -> Result<fs::File, ApiError> {
+fn open_worktree_file(
+    file_path: &FsPath,
+    relative_path: &str,
+    label: &str,
+) -> Result<fs::File, ApiError> {
     use std::os::unix::fs::OpenOptionsExt as _;
 
     match fs::OpenOptions::new()
@@ -1079,22 +1079,30 @@ fn open_worktree_file(file_path: &FsPath, relative_path: &str, label: &str) -> R
         .open(file_path)
     {
         Ok(file) => Ok(file),
-        Err(err) if err.raw_os_error() == Some(libc::ELOOP) => {
-            Err(ApiError::bad_request(format!("{label} changed to a symlink: {relative_path}"))
-                .with_kind(ApiErrorKind::GitDocumentBecameSymlink))
-        }
+        Err(err) if err.raw_os_error() == Some(libc::ELOOP) => Err(ApiError::bad_request(format!(
+            "{label} changed to a symlink: {relative_path}"
+        ))
+        .with_kind(ApiErrorKind::GitDocumentBecameSymlink)),
         Err(err) => Err(git_worktree_io_error("open", relative_path, err)),
     }
 }
 
 /// Opens a regular worktree file for reading.
 #[cfg(not(unix))]
-fn open_worktree_file(file_path: &FsPath, relative_path: &str, _label: &str) -> Result<fs::File, ApiError> {
+fn open_worktree_file(
+    file_path: &FsPath,
+    relative_path: &str,
+    _label: &str,
+) -> Result<fs::File, ApiError> {
     fs::File::open(file_path).map_err(|err| git_worktree_io_error("open", relative_path, err))
 }
 
 /// Reads a worktree file through the shared document byte cap.
-fn read_capped_worktree_file(file_path: &FsPath, relative_path: &str, label: &str) -> Result<Vec<u8>, ApiError> {
+fn read_capped_worktree_file(
+    file_path: &FsPath,
+    relative_path: &str,
+    label: &str,
+) -> Result<Vec<u8>, ApiError> {
     use std::io::Read as _;
 
     let file = open_worktree_file(file_path, relative_path, label)?;

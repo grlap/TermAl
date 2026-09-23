@@ -47,10 +47,9 @@ async fn run_terminal_command(
     // worker thread (undoing the round-99 fix) — not worth the
     // complexity. Documented here so a future reader tracing the
     // counters does not chase this as a bug.
-    if state.terminal_request_is_remote(
-        request.session_id.as_deref(),
-        request.project_id.as_deref(),
-    ) {
+    if state
+        .terminal_request_is_remote(request.session_id.as_deref(), request.project_id.as_deref())
+    {
         let permit = state
             .terminal_remote_command_semaphore
             .clone()
@@ -165,15 +164,13 @@ async fn run_terminal_command_stream(
     let cancel_on_drop = TerminalStreamCancelGuard {
         cancellation: cancellation.clone(),
     };
-    let (event_tx, event_rx) =
-        tokio::sync::mpsc::channel::<TerminalCommandStreamEvent>(
-            TERMINAL_STREAM_EVENT_QUEUE_CAPACITY,
-        );
+    let (event_tx, event_rx) = tokio::sync::mpsc::channel::<TerminalCommandStreamEvent>(
+        TERMINAL_STREAM_EVENT_QUEUE_CAPACITY,
+    );
 
-    if state.terminal_request_is_remote(
-        request.session_id.as_deref(),
-        request.project_id.as_deref(),
-    ) {
+    if state
+        .terminal_request_is_remote(request.session_id.as_deref(), request.project_id.as_deref())
+    {
         let permit = state
             .terminal_remote_command_semaphore
             .clone()
@@ -314,7 +311,9 @@ where
             Err(err) => {
                 send_terminal_stream_result(
                     &panic_tx,
-                    Err(ApiError::internal(format!("terminal stream task failed: {err}"))),
+                    Err(ApiError::internal(format!(
+                        "terminal stream task failed: {err}"
+                    ))),
                 )
                 .await;
             }
@@ -551,9 +550,11 @@ fn run_terminal_shell_command_with_timeout_and_stream(
         .map(|(sender, active)| {
             TerminalOutputStreamer::new(sender, TerminalOutputStream::Stdout, active)
         });
-    let stderr_streamer = event_tx.zip(streaming_active.clone()).map(|(sender, active)| {
-        TerminalOutputStreamer::new(sender, TerminalOutputStream::Stderr, active)
-    });
+    let stderr_streamer = event_tx
+        .zip(streaming_active.clone())
+        .map(|(sender, active)| {
+            TerminalOutputStreamer::new(sender, TerminalOutputStream::Stderr, active)
+        });
     let (stdout_done_tx, stdout_done_rx) = std::sync::mpsc::sync_channel::<()>(1);
     let (stderr_done_tx, stderr_done_rx) = std::sync::mpsc::sync_channel::<()>(1);
     let stdout_reader = std::thread::spawn(move || {
@@ -593,11 +594,8 @@ fn run_terminal_shell_command_with_timeout_and_stream(
         )));
     }
 
-    let (mut status, cancelled) = wait_for_terminal_command_status(
-        &process,
-        timeout,
-        cancellation.as_deref(),
-    )?;
+    let (mut status, cancelled) =
+        wait_for_terminal_command_status(&process, timeout, cancellation.as_deref())?;
     let timed_out = status.is_none();
     if timed_out || cancelled {
         process_tree
@@ -634,10 +632,7 @@ fn run_terminal_shell_command_with_timeout_and_stream(
     if let Some(active) = &streaming_active {
         active.store(false, Ordering::SeqCst);
     }
-    let duration_ms = started_at
-        .elapsed()
-        .as_millis()
-        .min(u128::from(u64::MAX)) as u64;
+    let duration_ms = started_at.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
 
     Ok(TerminalCommandResponse {
         command: command.to_owned(),
@@ -647,7 +642,10 @@ fn run_terminal_shell_command_with_timeout_and_stream(
         shell: shell_label.to_owned(),
         stderr,
         stdout,
-        success: !timed_out && status.map(|exit_status| exit_status.success()).unwrap_or(false),
+        success: !timed_out
+            && status
+                .map(|exit_status| exit_status.success())
+                .unwrap_or(false),
         timed_out,
         workdir: normalize_user_facing_path(workdir)
             .to_string_lossy()
@@ -698,10 +696,8 @@ fn terminate_terminal_job(job: &TerminalJobObject, label: &str) -> Result<()> {
     use std::os::windows::io::AsRawHandle;
 
     unsafe {
-        if windows_sys::Win32::System::JobObjects::TerminateJobObject(
-            job.handle.as_raw_handle(),
-            1,
-        ) != 0
+        if windows_sys::Win32::System::JobObjects::TerminateJobObject(job.handle.as_raw_handle(), 1)
+            != 0
         {
             return Ok(());
         }
@@ -734,15 +730,11 @@ fn resume_terminal_process_threads(process_id: u32) -> io::Result<()> {
     // fix is to capture `hThread` at spawn time rather than to add
     // ad-hoc snapshot-scope constants that don't exist in the Win32 API.
     use std::mem::size_of;
-    use windows_sys::Win32::Foundation::{
-        CloseHandle, ERROR_NO_MORE_FILES, INVALID_HANDLE_VALUE,
-    };
+    use windows_sys::Win32::Foundation::{CloseHandle, ERROR_NO_MORE_FILES, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::System::Diagnostics::ToolHelp::{
         CreateToolhelp32Snapshot, TH32CS_SNAPTHREAD, THREADENTRY32, Thread32First, Thread32Next,
     };
-    use windows_sys::Win32::System::Threading::{
-        OpenThread, ResumeThread, THREAD_SUSPEND_RESUME,
-    };
+    use windows_sys::Win32::System::Threading::{OpenThread, ResumeThread, THREAD_SUSPEND_RESUME};
 
     unsafe {
         let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
@@ -1079,8 +1071,7 @@ fn assign_terminal_process_to_job(
         // or switches to a spawn helper that doesn't hold the HANDLE),
         // this OpenProcess could silently return a handle to a recycled
         // PID belonging to an unrelated process.
-        let process_handle =
-            OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, 0, process.id());
+        let process_handle = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, 0, process.id());
         if process_handle.is_null() {
             return Err(io::Error::last_os_error());
         }
@@ -1189,10 +1180,12 @@ impl TerminalOutputStreamer {
         if text.is_empty() || !self.active.load(Ordering::SeqCst) {
             return;
         }
-        let _ = self.sender.blocking_send(TerminalCommandStreamEvent::Output {
-            stream: self.stream,
-            text,
-        });
+        let _ = self
+            .sender
+            .blocking_send(TerminalCommandStreamEvent::Output {
+                stream: self.stream,
+                text,
+            });
     }
 }
 
@@ -1201,7 +1194,9 @@ fn new_terminal_output_buffer() -> SharedTerminalOutputBuffer {
 }
 
 fn snapshot_terminal_output_buffer(buffer: &SharedTerminalOutputBuffer) -> (String, bool) {
-    let guard = buffer.lock().expect("terminal output buffer mutex poisoned");
+    let guard = buffer
+        .lock()
+        .expect("terminal output buffer mutex poisoned");
     (
         String::from_utf8_lossy(&guard.bytes).into_owned(),
         guard.truncated,
@@ -1273,14 +1268,13 @@ fn terminal_output_delta_locked(
     buffer: &mut TerminalOutputBuffer,
     flush_incomplete_utf8: bool,
 ) -> Option<String> {
-    let streamable_len =
-        terminal_streamable_utf8_prefix_len(&buffer.bytes, flush_incomplete_utf8);
+    let streamable_len = terminal_streamable_utf8_prefix_len(&buffer.bytes, flush_incomplete_utf8);
     if streamable_len <= buffer.emitted_bytes {
         return None;
     }
 
-    let chunk = String::from_utf8_lossy(&buffer.bytes[buffer.emitted_bytes..streamable_len])
-        .into_owned();
+    let chunk =
+        String::from_utf8_lossy(&buffer.bytes[buffer.emitted_bytes..streamable_len]).into_owned();
     buffer.emitted_bytes = streamable_len;
     Some(chunk)
 }
@@ -1336,7 +1330,9 @@ fn join_terminal_output_reader(
             })? {
                 Ok(()) => Ok(snapshot_terminal_output_buffer(&buffer)),
                 Err(err) => {
-                    eprintln!("terminal warning> failed to read terminal command {stream_label}: {err}");
+                    eprintln!(
+                        "terminal warning> failed to read terminal command {stream_label}: {err}"
+                    );
                     let (bytes, _buffer_truncated) = snapshot_terminal_output_buffer(&buffer);
                     Ok((bytes, true))
                 }

@@ -179,13 +179,11 @@ impl AppState {
     /// and we fall back to the old synchronous JSON persist so
     /// existing test infrastructure keeps working.
     fn persist_internal_locked(&self, inner: &StateInner) -> Result<()> {
-        self.persist_internal_locked_with_dispatch(inner).map(|_| ())
+        self.persist_internal_locked_with_dispatch(inner)
+            .map(|_| ())
     }
 
-    fn persist_internal_locked_with_dispatch(
-        &self,
-        inner: &StateInner,
-    ) -> Result<PersistDispatch> {
+    fn persist_internal_locked_with_dispatch(&self, inner: &StateInner) -> Result<PersistDispatch> {
         if self.persist_tx.send(PersistRequest::Delta).is_err() {
             // Channel disconnected — synchronous fallback for tests
             // and any shutdown path where the persist thread has
@@ -266,9 +264,7 @@ impl AppState {
         // mode this ordering closes.
         let _ = self.persist_tx.send(PersistRequest::Shutdown);
         if let Err(err) = handle.join() {
-            eprintln!(
-                "[termal] persist worker join failed during graceful shutdown: {err:?}"
-            );
+            eprintln!("[termal] persist worker join failed during graceful shutdown: {err:?}");
         }
         // Worker has now exited (join returned). Persist one final
         // full-state snapshot while holding `inner`, then publish
@@ -519,7 +515,12 @@ impl AppState {
         let preparation_started = std::time::Instant::now();
         let session_scoped_change_paths = changes
             .iter()
-            .filter(|change| change.session_id.as_deref().is_some_and(|value| !value.trim().is_empty()))
+            .filter(|change| {
+                change
+                    .session_id
+                    .as_deref()
+                    .is_some_and(|value| !value.trim().is_empty())
+            })
             .map(|change| change.path.trim().to_owned())
             .collect::<HashSet<_>>();
         let mut diagnostic = FileChangeTrackingDiagnostic {
@@ -619,9 +620,7 @@ impl AppState {
         diagnostic.finish_held_work(held_work);
         self.inner.report_file_change_tracking(diagnostic);
         if let Some(err) = commit_error {
-            eprintln!(
-                "state warning> failed to persist late turn file-change summary: {err:#}"
-            );
+            eprintln!("state warning> failed to persist late turn file-change summary: {err:#}");
         }
     }
 

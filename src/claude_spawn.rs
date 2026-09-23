@@ -41,7 +41,11 @@ fn resolve_claude_executable() -> Option<PathBuf> {
 }
 
 fn resolve_claude_executable_on_path(path: &std::ffi::OsStr) -> Option<PathBuf> {
-    let name = if cfg!(windows) { "claude.exe" } else { "claude" };
+    let name = if cfg!(windows) {
+        "claude.exe"
+    } else {
+        "claude"
+    };
     std::env::split_paths(path).find_map(|dir| {
         let candidate = dir.join(name);
         if !candidate.is_file() {
@@ -676,21 +680,20 @@ fn spawn_claude_runtime(
                     // Approval mode and delegation-child identity are read
                     // under one state lock so the attendedness policy never
                     // sees a torn pair.
-                    let (approval_mode, delegation_child) = match reader_state
-                        .claude_control_request_context(&reader_session_id)
-                    {
-                        Ok(context) => context,
-                        Err(err) => {
-                            let _ = reader_state.fail_turn_if_runtime_matches(
+                    let (approval_mode, delegation_child) =
+                        match reader_state.claude_control_request_context(&reader_session_id) {
+                            Ok(context) => context,
+                            Err(err) => {
+                                let _ = reader_state.fail_turn_if_runtime_matches(
                                 &reader_session_id,
                                 &reader_runtime_token,
                                 &format!(
                                     "failed to resolve Claude approval mode for session: {err:#}"
                                 ),
                             );
-                            break;
-                        }
-                    };
+                                break;
+                            }
+                        };
 
                     let action = match classify_claude_control_request(
                         &message,

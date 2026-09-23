@@ -148,8 +148,8 @@ fn coordination_board_canonical_json_sorts_nested_object_keys_explicitly() {
     root.insert("a".to_owned(), Value::Object(nested));
 
     let value = Value::Object(root);
-    let canonical = canonical_coordination_board_value(&value)
-        .expect("bounded JSON should canonicalize");
+    let canonical =
+        canonical_coordination_board_value(&value).expect("bounded JSON should canonicalize");
     assert_eq!(canonical, r#"{"a":{"a":1,"z":2},"z":0}"#);
 
     let test_root = CoordinationBoardTestRoot::new();
@@ -474,9 +474,8 @@ fn coordination_board_idempotency_receipts_are_bounded_per_scope() {
                 [],
             )
             .expect("the oldest receipt should simulate a backwards-clock timestamp");
-        let synthetic_count =
-            i64::try_from(COORDINATION_BOARD_IDEMPOTENCY_RECEIPTS_PER_SCOPE - 1)
-                .expect("test retention count should fit in i64");
+        let synthetic_count = i64::try_from(COORDINATION_BOARD_IDEMPOTENCY_RECEIPTS_PER_SCOPE - 1)
+            .expect("test retention count should fit in i64");
         connection
             .execute(
                 "WITH RECURSIVE sequence(value) AS (
@@ -818,7 +817,11 @@ fn coordination_board_bounds_lifetime_distinct_names_but_allows_tombstone_reuse(
         board_error_kind(&error),
         CoordinationBoardStoreErrorKind::Validation
     );
-    assert!(error.to_string().contains("4096-distinct-key lifetime limit"));
+    assert!(
+        error
+            .to_string()
+            .contains("4096-distinct-key lifetime limit")
+    );
 
     let restored = store
         .set(&board_input(
@@ -1108,8 +1111,7 @@ fn coordination_board_lifecycle_deadline_reaches_sqlite_busy_wait() {
 
 #[test]
 fn coordination_board_lifecycle_busy_timeout_is_scoped_and_restored() {
-    let connection =
-        rusqlite::Connection::open_in_memory().expect("in-memory SQLite should open");
+    let connection = rusqlite::Connection::open_in_memory().expect("in-memory SQLite should open");
     connection
         .busy_timeout(SQLITE_BUSY_TIMEOUT)
         .expect("ordinary busy timeout should install");
@@ -1256,11 +1258,9 @@ fn blocked_state_writer_does_not_block_mailbox_or_board_writes() {
     let root = CoordinationBoardTestRoot::new();
     let state_path = root.0.join("termal.sqlite");
     let coordination_path = root.0.join("coordination.sqlite");
-    let mailbox_store = MailboxStore::open_with_write_admission_timeout(
-        &coordination_path,
-        Duration::ZERO,
-    )
-    .expect("mailbox store should open");
+    let mailbox_store =
+        MailboxStore::open_with_write_admission_timeout(&coordination_path, Duration::ZERO)
+            .expect("mailbox store should open");
     let board_store = CoordinationBoardStore::open_with_write_admission_timeout(
         &coordination_path,
         Duration::ZERO,
@@ -1297,7 +1297,14 @@ fn blocked_state_writer_does_not_block_mailbox_or_board_writes() {
             "state-block-board",
         ))
         .expect("board write must ignore a blocked state writer");
-    mailbox_store.read_range("session-state-block-target", &mailbox_receipt.mailbox_id, None, 10).unwrap();
+    mailbox_store
+        .read_range(
+            "session-state-block-target",
+            &mailbox_receipt.mailbox_id,
+            None,
+            10,
+        )
+        .unwrap();
     let acknowledged = mailbox_store
         .acknowledge(
             "session-state-block-target",

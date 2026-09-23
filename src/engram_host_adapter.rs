@@ -148,10 +148,7 @@ impl std::fmt::Debug for EngramProjectSettings {
             .field("home", &self.home)
             .field(
                 "work_authority_grant",
-                &self
-                    .work_authority_grant
-                    .as_ref()
-                    .map(|_| "[REDACTED]"),
+                &self.work_authority_grant.as_ref().map(|_| "[REDACTED]"),
             )
             .field("authority_store_key", &self.authority_store_key)
             .field("deadline_ms", &self.deadline_ms)
@@ -283,15 +280,26 @@ fn run_engram_doctor_result_within(
     doctor_timeout: Duration,
 ) -> std::result::Result<EngramDoctorResult, ApiError> {
     let output = run_engram_diagnostic_within(
-        binary_path, project_file, home, project_root, "doctor", doctor_timeout,
+        binary_path,
+        project_file,
+        home,
+        project_root,
+        "doctor",
+        doctor_timeout,
     )?;
     if output.status.success() {
-        let result: EngramDoctorResult = serde_json::from_slice(&output.stdout)
-            .map_err(|error| ApiError::bad_request(format!("Engram doctor returned invalid JSON: {error}")))?;
+        let result: EngramDoctorResult =
+            serde_json::from_slice(&output.stdout).map_err(|error| {
+                ApiError::bad_request(format!("Engram doctor returned invalid JSON: {error}"))
+            })?;
         return Ok(result);
     }
-    Err(ApiError::bad_request(format!("Engram doctor failed ({}): {} {}",
-        output.status, String::from_utf8_lossy(&output.stderr), String::from_utf8_lossy(&output.stdout))))
+    Err(ApiError::bad_request(format!(
+        "Engram doctor failed ({}): {} {}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr),
+        String::from_utf8_lossy(&output.stdout)
+    )))
 }
 
 // Shared bounded process transport; callers retain distinct admission contracts.
@@ -304,7 +312,13 @@ fn run_engram_diagnostic_within(
     doctor_timeout: Duration,
 ) -> std::result::Result<std::process::Output, ApiError> {
     run_engram_diagnostic_args_within(
-        binary_path, project_file, home, project_root, diagnostic, &[], doctor_timeout,
+        binary_path,
+        project_file,
+        home,
+        project_root,
+        diagnostic,
+        &[],
+        doctor_timeout,
     )
 }
 
@@ -318,8 +332,14 @@ fn run_engram_diagnostic_args_within(
     doctor_timeout: Duration,
 ) -> std::result::Result<std::process::Output, ApiError> {
     run_engram_diagnostic_args_until(
-        binary_path, project_file, home, project_root, diagnostic, args,
-        std::time::Instant::now() + doctor_timeout, doctor_timeout,
+        binary_path,
+        project_file,
+        home,
+        project_root,
+        diagnostic,
+        args,
+        std::time::Instant::now() + doctor_timeout,
+        doctor_timeout,
     )
 }
 
@@ -361,7 +381,10 @@ fn run_engram_diagnostic_args_until(
         .arg("--json");
     #[cfg(windows)]
     if diagnostic == "control-session-inspect"
-        && binary_path.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("ps1"))
+        && binary_path
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| e.eq_ignore_ascii_case("ps1"))
     {
         command = engram_absence_powershell_command(binary_path, project_file, home, args)?;
     }
@@ -372,7 +395,9 @@ fn run_engram_diagnostic_args_until(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|err| ApiError::bad_request(format!("Engram {diagnostic} failed to start: {err}")))?;
+        .map_err(|err| {
+            ApiError::bad_request(format!("Engram {diagnostic} failed to start: {err}"))
+        })?;
     let stdout = child
         .stdout
         .take()
@@ -433,11 +458,18 @@ fn run_engram_diagnostic_args_until(
     // does not signal a recycled process-group ID on Unix. Cleanup failure
     // must not make collection unbounded. Unix escaped/remaining descendants
     // may keep detached readers alive until they close their pipes.
-    if let Err(error) = process_tree.inner.cleanup_after_shell_exit(&process, "Engram doctor") {
+    if let Err(error) = process_tree
+        .inner
+        .cleanup_after_shell_exit(&process, "Engram doctor")
+    {
         eprintln!("engram warning> doctor post-exit cleanup failed: {error:#}");
     }
     let (collected_stdout, collected_stderr) = output?;
-    Ok(std::process::Output { status, stdout: collected_stdout, stderr: collected_stderr })
+    Ok(std::process::Output {
+        status,
+        stdout: collected_stdout,
+        stderr: collected_stderr,
+    })
 }
 
 #[derive(Clone, Deserialize)]
@@ -708,10 +740,7 @@ struct EngramCheckpointReceipt {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(
-    tag = "decision",
-    rename_all = "snake_case"
-)]
+#[serde(tag = "decision", rename_all = "snake_case")]
 enum EngramObligationWaiverDecisionResponse {
     Waived {
         receipt: EngramObligationWaiverReceipt,
@@ -924,9 +953,7 @@ struct ScriptedEngramControlTransport {
     requests: Mutex<Vec<RecordedEngramControlRequest>>,
     responses: Mutex<VecDeque<ScriptedEngramControlResponse>>,
     work_bindings: Mutex<
-        VecDeque<
-            std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError>,
-        >,
+        VecDeque<std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError>>,
     >,
     shutdowns: Mutex<Vec<String>>,
 }
@@ -945,10 +972,7 @@ impl ScriptedEngramControlTransport {
     fn new_with_work_bindings(
         responses: impl IntoIterator<Item = ScriptedEngramControlResponse>,
         work_bindings: impl IntoIterator<
-            Item = std::result::Result<
-                Option<EngramControlWorkBinding>,
-                EngramTransportError,
-            >,
+            Item = std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError>,
         >,
     ) -> Arc<Self> {
         Arc::new(Self {
@@ -1384,10 +1408,9 @@ impl EngramControlTransport for StatefulEngramControlTransport {
                         "decision": "refuse",
                         "code": "grant_scope_mismatch"
                     }));
-                    session.seen_begins.insert(
-                        idempotency_key.clone(),
-                        (intent, response.clone()),
-                    );
+                    session
+                        .seen_begins
+                        .insert(idempotency_key.clone(), (intent, response.clone()));
                     return response;
                 }
 
@@ -1410,10 +1433,9 @@ impl EngramControlTransport for StatefulEngramControlTransport {
                         }
                     }))
                 };
-                session.seen_begins.insert(
-                    idempotency_key.clone(),
-                    (intent, response.clone()),
-                );
+                session
+                    .seen_begins
+                    .insert(idempotency_key.clone(), (intent, response.clone()));
                 response
             }
             EngramControlRequest::TurnCheckpoint {
@@ -1426,8 +1448,7 @@ impl EngramControlTransport for StatefulEngramControlTransport {
                 Self::validate_routing_token(session.as_deref(), routing_token)?;
                 let session = session.expect("validated Engram session should exist");
                 let intent = Self::request_intent_without_auth_and_idempotency(request);
-                if let Some((seen_intent, response)) =
-                    session.seen_checkpoints.get(idempotency_key)
+                if let Some((seen_intent, response)) = session.seen_checkpoints.get(idempotency_key)
                 {
                     if seen_intent != &intent {
                         return Err(Self::idempotency_conflict("turn_checkpoint"));
@@ -1453,10 +1474,9 @@ impl EngramControlTransport for StatefulEngramControlTransport {
                         "decision": "refuse",
                         "code": code
                     }));
-                    session.seen_checkpoints.insert(
-                        idempotency_key.clone(),
-                        (intent, response.clone()),
-                    );
+                    session
+                        .seen_checkpoints
+                        .insert(idempotency_key.clone(), (intent, response.clone()));
                     return response;
                 }
                 session.begun_grant_id = None;
@@ -1468,10 +1488,9 @@ impl EngramControlTransport for StatefulEngramControlTransport {
                         "confirmed_cursor": 0
                     }
                 }));
-                session.seen_checkpoints.insert(
-                    idempotency_key.clone(),
-                    (intent, response.clone()),
-                );
+                session
+                    .seen_checkpoints
+                    .insert(idempotency_key.clone(), (intent, response.clone()));
                 response
             }
         }
@@ -1573,8 +1592,12 @@ fn read_engram_work_binding_from_cli(
     let focus = run_engram_json_command_with_lock_retry(
         connection,
         &focus_args,
-        timeout.checked_sub(next_started_at.elapsed()).filter(|remaining| !remaining.is_zero())
-            .ok_or_else(|| EngramTransportError::deadline("Work-binding budget exhausted before focus"))?,
+        timeout
+            .checked_sub(next_started_at.elapsed())
+            .filter(|remaining| !remaining.is_zero())
+            .ok_or_else(|| {
+                EngramTransportError::deadline("Work-binding budget exhausted before focus")
+            })?,
         ENGRAM_WORK_BINDING_READER_LABEL,
     );
     if trace_boot_recovery {
@@ -1593,9 +1616,7 @@ fn read_engram_work_binding_from_cli(
         .map(serde_json::from_value)
         .transpose()
         .map_err(|error| {
-            EngramTransportError::protocol(format!(
-                "invalid Engram work control_binding: {error}"
-            ))
+            EngramTransportError::protocol(format!("invalid Engram work control_binding: {error}"))
         })
 }
 
@@ -1619,8 +1640,14 @@ fn run_engram_json_command_with_lock_retry(
                     .contains("database is locked") =>
         {
             std::thread::sleep(ENGRAM_WORK_BINDING_LOCK_RETRY_DELAY);
-            let remaining = timeout.checked_sub(started_at.elapsed()).filter(|remaining| !remaining.is_zero())
-                .ok_or_else(|| EngramTransportError::deadline("Work-binding budget exhausted during lock retry"))?;
+            let remaining = timeout
+                .checked_sub(started_at.elapsed())
+                .filter(|remaining| !remaining.is_zero())
+                .ok_or_else(|| {
+                    EngramTransportError::deadline(
+                        "Work-binding budget exhausted during lock retry",
+                    )
+                })?;
             run_engram_json_command(connection, args, remaining, label)
         }
         result => result,
@@ -1820,13 +1847,15 @@ fn run_engram_authority_revoke_command(
             "failed preparing Engram authority revocation process tree: {error:#}"
         ))
     })?;
-    process_tree.resume_after_attach(&process).map_err(|error| {
-        let _ = process_tree.terminate(&process);
-        let _ = process.wait();
-        EngramTransportError::transport(format!(
-            "failed resuming Engram authority revocation: {error:#}"
-        ))
-    })?;
+    process_tree
+        .resume_after_attach(&process)
+        .map_err(|error| {
+            let _ = process_tree.terminate(&process);
+            let _ = process.wait();
+            EngramTransportError::transport(format!(
+                "failed resuming Engram authority revocation: {error:#}"
+            ))
+        })?;
     let stdout_reader = spawn_engram_cli_output_reader(stdout, "authority revocation");
     let stderr_reader = spawn_engram_cli_output_reader(stderr, "authority revocation");
     let deadline = std::time::Instant::now() + timeout;
@@ -1930,11 +1959,13 @@ fn run_engram_cli_command(
             "failed preparing Engram {label} process tree: {error:#}"
         ))
     })?;
-    process_tree.resume_after_attach(&process).map_err(|error| {
-        let _ = process_tree.terminate(&process);
-        let _ = process.wait();
-        EngramTransportError::transport(format!("failed resuming Engram {label}: {error:#}"))
-    })?;
+    process_tree
+        .resume_after_attach(&process)
+        .map_err(|error| {
+            let _ = process_tree.terminate(&process);
+            let _ = process.wait();
+            EngramTransportError::transport(format!("failed resuming Engram {label}: {error:#}"))
+        })?;
     let stdout_reader = spawn_engram_cli_output_reader(stdout, label);
     let stderr_reader = spawn_engram_cli_output_reader(stderr, label);
     let deadline = std::time::Instant::now() + timeout;
@@ -1973,10 +2004,7 @@ fn run_engram_cli_command(
     })
 }
 
-fn apply_engram_connection_environment(
-    command: &mut Command,
-    connection: &EngramConnectionConfig,
-) {
+fn apply_engram_connection_environment(command: &mut Command, connection: &EngramConnectionConfig) {
     command
         .env(ENGRAM_HOME_ENV, &connection.home)
         .env(ENGRAM_ACTOR_ID_ENV, &connection.actor_id)
@@ -2011,8 +2039,13 @@ fn read_engram_doctor_output(reader: impl std::io::Read) -> std::io::Result<Vec<
     std::io::Read::take(reader, (ENGRAM_DOCTOR_MAX_OUTPUT_BYTES + 1) as u64)
         .read_to_end(&mut output)?;
     if output.len() > ENGRAM_DOCTOR_MAX_OUTPUT_BYTES {
-        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData,
-            format!("Engram doctor output exceeds TermAl's {} byte per-stream capture budget; a larger valid report is not supported", ENGRAM_DOCTOR_MAX_OUTPUT_BYTES)));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "Engram doctor output exceeds TermAl's {} byte per-stream capture budget; a larger valid report is not supported",
+                ENGRAM_DOCTOR_MAX_OUTPUT_BYTES
+            ),
+        ));
     }
     Ok(output)
 }
@@ -2038,21 +2071,21 @@ fn collect_engram_doctor_output(
     deadline: std::time::Instant,
 ) -> std::result::Result<Vec<u8>, ApiError> {
     match receiver.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now())) {
-        Ok(result) => result.map_err(|error|
-            ApiError::bad_request(format!("failed reading Engram doctor {stream}: {error}"))),
+        Ok(result) => result.map_err(|error| {
+            ApiError::bad_request(format!("failed reading Engram doctor {stream}: {error}"))
+        }),
         Err(mpsc::RecvTimeoutError::Timeout) => Err(ApiError::bad_request(format!(
-            "Engram doctor {stream} output collection exceeded the enablement deadline"))),
+            "Engram doctor {stream} output collection exceeded the enablement deadline"
+        ))),
         Err(mpsc::RecvTimeoutError::Disconnected) => Err(ApiError::bad_request(format!(
-            "Engram doctor {stream} reader stopped without returning output"))),
+            "Engram doctor {stream} reader stopped without returning output"
+        ))),
     }
 }
 
 /// `label` names the operation in the overflow diagnostic, as it does in every
 /// other failure of the same call.
-fn read_engram_cli_output(
-    reader: impl std::io::Read,
-    label: &str,
-) -> std::io::Result<Vec<u8>> {
+fn read_engram_cli_output(reader: impl std::io::Read, label: &str) -> std::io::Result<Vec<u8>> {
     let mut output = Vec::new();
     std::io::Read::take(reader, (ENGRAM_CONTROL_MAX_FRAME_BYTES + 1) as u64)
         .read_to_end(&mut output)?;
@@ -2126,7 +2159,8 @@ impl EngramHostAdapter {
         connection: &EngramConnectionConfig,
         timeout: Duration,
     ) -> std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError> {
-        self.transport.read_work_binding_for_boot(connection, timeout)
+        self.transport
+            .read_work_binding_for_boot(connection, timeout)
     }
 
     fn shutdown_session(&self, session_id: &str) {
@@ -2252,7 +2286,11 @@ impl EngramSessionState {
 
     fn mark_context_refresh_needed(&mut self, compaction_item_id: Option<&str>) -> bool {
         if let Some(id) = compaction_item_id.filter(|id| id.len() <= 256) {
-            if self.signalled_compaction_item_ids.iter().any(|known| known == id) {
+            if self
+                .signalled_compaction_item_ids
+                .iter()
+                .any(|known| known == id)
+            {
                 return false;
             }
             if self.signalled_compaction_item_ids.len() == 64 {
@@ -2275,9 +2313,7 @@ impl EngramSessionState {
     }
 
     fn clear_checkpoint_if_owned_by(&mut self, owner_generation: Option<u64>) -> bool {
-        if !self.checkpoint_in_progress
-            || self.checkpoint_owner_generation != owner_generation
-        {
+        if !self.checkpoint_in_progress || self.checkpoint_owner_generation != owner_generation {
             return false;
         }
         self.checkpoint_in_progress = false;
@@ -2355,7 +2391,14 @@ fn abandon_engram_pending_dispatch(
     };
     let mut projection_changed = false;
     if let Some(queued) = record.queued_prompts.front_mut() {
-        if engram_turn_intent_fingerprint(&queued.pending_prompt.text, queued.pending_prompt.expanded_text.as_deref(), &queued.attachments, queued.pending_prompt.source.as_ref(), queued.source) != pending.intent_fingerprint {
+        if engram_turn_intent_fingerprint(
+            &queued.pending_prompt.text,
+            queued.pending_prompt.expanded_text.as_deref(),
+            &queued.attachments,
+            queued.pending_prompt.source.as_ref(),
+            queued.source,
+        ) != pending.intent_fingerprint
+        {
             projection_changed = queued.engram_evaluate.is_some();
             queued.engram_evaluate = None;
         }
@@ -2554,13 +2597,17 @@ fn engram_actor_context(session: &Session) -> Option<String> {
         Agent::Codex => session
             .reasoning_effort
             .map(CodexReasoningEffort::as_api_value),
-        Agent::Claude => session.claude_effort.and_then(ClaudeEffortLevel::as_cli_value),
+        Agent::Claude => session
+            .claude_effort
+            .and_then(ClaudeEffortLevel::as_cli_value),
         Agent::OpenCode => session
             .opencode_effort
             .as_deref()
             .map(str::trim)
             .filter(|value| !value.is_empty() && *value != OPENCODE_CONFIG_AUTO),
-        Agent::Kimi => session.kimi_effort.as_deref()
+        Agent::Kimi => session
+            .kimi_effort
+            .as_deref()
             .map(str::trim)
             .filter(|value| !value.is_empty() && *value != "auto"),
         Agent::Cursor | Agent::Gemini => None,
@@ -2583,10 +2630,7 @@ fn engram_runtime_actor_identity(
     if !record.runtime_reset_required
         && let Some(installed) = record.engram_mcp_installed.as_ref()
     {
-        return (
-            installed.actor_id.clone(),
-            installed.actor_context.clone(),
-        );
+        return (installed.actor_id.clone(), installed.actor_context.clone());
     }
     (
         engram_seat_id(developer_name, &record.session),
@@ -2807,7 +2851,10 @@ fn engram_waiver_api_error(error: EngramTransportError) -> ApiError {
                         | "invalid_routing_token"
                         | "unknown_routing_token"
                 )
-            ) => ApiError::conflict(detail),
+            ) =>
+        {
+            ApiError::conflict(detail)
+        }
         EngramTransportErrorKind::LocalState => ApiError::conflict(detail),
         EngramTransportErrorKind::Deadline
         | EngramTransportErrorKind::Transport
@@ -3114,7 +3161,10 @@ impl AppState {
         match result {
             Ok(response) => {
                 self.record_engram_transport_success(session_id);
-                if matches!(response, EngramObligationWaiverDecisionResponse::Waived { .. }) {
+                if matches!(
+                    response,
+                    EngramObligationWaiverDecisionResponse::Waived { .. }
+                ) {
                     let mut inner = self.inner.lock().expect("state mutex poisoned");
                     if let Some(index) = inner.find_session_index(session_id) {
                         let message_id = format!("engram-obligation-waiver-{obligation_id}");
@@ -3181,9 +3231,13 @@ impl AppState {
                         || record.engram.rebind_required)
             })
             .filter_map(|record| {
-                Self::engram_binding_target_for_session_shape_locked(inner, &record.session.id, true)
-                    .ok()
-                    .flatten()
+                Self::engram_binding_target_for_session_shape_locked(
+                    inner,
+                    &record.session.id,
+                    true,
+                )
+                .ok()
+                .flatten()
             })
             .collect()
     }
@@ -3228,9 +3282,7 @@ impl AppState {
             let inner = self.inner.lock().expect("state mutex poisoned");
             EngramBootRecoveryPlan {
                 targets: Self::engram_boot_recovery_targets_locked(&inner),
-                budget: Duration::from_millis(
-                    inner.preferences.engram.boot_recovery_budget_ms,
-                ),
+                budget: Duration::from_millis(inner.preferences.engram.boot_recovery_budget_ms),
             }
         };
         self.recover_prepared_engram_sessions_after_boot(plan);
@@ -3267,32 +3319,34 @@ impl AppState {
                 let state = self.clone();
                 let sender = completion_tx.clone();
                 let accepting_completions = accepting_completions.clone();
-                match std::thread::Builder::new().name(thread_name).spawn(move || {
-                    let target_started_at = std::time::Instant::now();
-                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        state.bind_engram_target_off_lock_traced(target)
-                    }))
-                    .unwrap_or_else(|_| {
-                        state.clear_engram_bind_in_progress(&worker_session_id);
-                        Err(EngramTransportError::transport(
-                            "restart recovery worker panicked",
-                        ))
-                    });
-                    let completion = EngramBootRecoveryCompletion {
-                        session_id: worker_session_id,
-                        elapsed: target_started_at.elapsed(),
-                        result,
-                    };
-                    let accepting = accepting_completions
-                        .lock()
-                        .expect("boot recovery completion gate mutex poisoned");
-                    if *accepting {
-                        let _ = sender.send(completion);
-                    } else {
-                        drop(accepting);
-                        state.finish_late_engram_restart_recovery(completion);
-                    }
-                }) {
+                match std::thread::Builder::new()
+                    .name(thread_name)
+                    .spawn(move || {
+                        let target_started_at = std::time::Instant::now();
+                        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            state.bind_engram_target_off_lock_traced(target)
+                        }))
+                        .unwrap_or_else(|_| {
+                            state.clear_engram_bind_in_progress(&worker_session_id);
+                            Err(EngramTransportError::transport(
+                                "restart recovery worker panicked",
+                            ))
+                        });
+                        let completion = EngramBootRecoveryCompletion {
+                            session_id: worker_session_id,
+                            elapsed: target_started_at.elapsed(),
+                            result,
+                        };
+                        let accepting = accepting_completions
+                            .lock()
+                            .expect("boot recovery completion gate mutex poisoned");
+                        if *accepting {
+                            let _ = sender.send(completion);
+                        } else {
+                            drop(accepting);
+                            state.finish_late_engram_restart_recovery(completion);
+                        }
+                    }) {
                     Ok(_) => {
                         in_flight.insert(session_id);
                     }
@@ -3351,9 +3405,7 @@ impl AppState {
                 .filter(|session_id| {
                     inner
                         .find_session_index(session_id)
-                        .is_some_and(|index| {
-                            inner.sessions[index].engram_boot_recovery_pending
-                        })
+                        .is_some_and(|index| inner.sessions[index].engram_boot_recovery_pending)
                 })
                 .count()
         };
@@ -3436,23 +3488,26 @@ impl AppState {
         let state = self.clone();
         let retry_session_id = session_id.to_owned();
         let thread_name = format!("engram-recover-lazy-{session_id}");
-        if let Err(error) = std::thread::Builder::new().name(thread_name).spawn(move || {
-            let started_at = std::time::Instant::now();
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                state.bind_engram_target_off_lock_traced(target)
-            }))
-            .unwrap_or_else(|_| {
-                state.clear_engram_bind_in_progress(&retry_session_id);
-                Err(EngramTransportError::transport(
-                    "lazy restart recovery worker panicked",
-                ))
-            });
-            state.finish_engram_restart_recovery(
-                &retry_session_id,
-                started_at.elapsed(),
-                result,
-            );
-        }) {
+        if let Err(error) = std::thread::Builder::new()
+            .name(thread_name)
+            .spawn(move || {
+                let started_at = std::time::Instant::now();
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    state.bind_engram_target_off_lock_traced(target)
+                }))
+                .unwrap_or_else(|_| {
+                    state.clear_engram_bind_in_progress(&retry_session_id);
+                    Err(EngramTransportError::transport(
+                        "lazy restart recovery worker panicked",
+                    ))
+                });
+                state.finish_engram_restart_recovery(
+                    &retry_session_id,
+                    started_at.elapsed(),
+                    result,
+                );
+            })
+        {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             if let Some(index) = inner.find_session_index(session_id) {
                 inner.sessions[index].engram_boot_recovery_retry_in_progress = false;
@@ -3742,10 +3797,7 @@ impl AppState {
             Ok(()) => self.record_engram_transport_success(session_id),
             Err(error) => self.record_engram_transport_failure(session_id, error),
         }
-        let failure_detail = outcome
-            .as_ref()
-            .err()
-            .map(|error| format!("{error:#}"));
+        let failure_detail = outcome.as_ref().err().map(|error| format!("{error:#}"));
         let (decision, refusal_code, fail_mode) = match outcome {
             Ok(()) => (
                 EngramControlCardDecision::Grant,
@@ -3838,9 +3890,7 @@ impl AppState {
                 return;
             }
             if std::time::Instant::now() >= deadline {
-                eprintln!(
-                    "engram> session={session_id} waiver wait exceeded the control deadline"
-                );
+                eprintln!("engram> session={session_id} waiver wait exceeded the control deadline");
                 return;
             }
             std::thread::sleep(Duration::from_millis(5));
@@ -3947,9 +3997,10 @@ impl AppState {
             if pending.dispatch_generation != dispatch_generation {
                 return EngramTurnDeliveryPreparation::Superseded;
             };
-            let target = Self::engram_binding_target_for_session_shape_locked(&inner, session_id, true)
-                .ok()
-                .flatten();
+            let target =
+                Self::engram_binding_target_for_session_shape_locked(&inner, session_id, true)
+                    .ok()
+                    .flatten();
             (pending, target, EngramQueuedAdmissionOwner::capture(record))
         };
         let (pending, mut binding_target, admission_owner) = snapshot;
@@ -4006,9 +4057,10 @@ impl AppState {
                         );
                     };
                     let begin_started = std::time::Instant::now();
-                    if !admission_owner.as_ref().is_some_and(|owner| {
-                        self.queued_engram_owner_is_current(session_id, owner)
-                    }) {
+                    if !admission_owner
+                        .as_ref()
+                        .is_some_and(|owner| self.queued_engram_owner_is_current(session_id, owner))
+                    {
                         break (
                             EngramControlCardDecision::Degraded,
                             Some("authorization_superseded".to_owned()),
@@ -4025,15 +4077,20 @@ impl AppState {
                                 routing_token: routing_token.clone(),
                                 grant_id: grant_id.clone(),
                                 delivery_tokens,
-                                idempotency_key: self.queued_engram_begin_key(session_id, pending.dispatch_generation, &grant_id),
+                                idempotency_key: self.queued_engram_begin_key(
+                                    session_id,
+                                    pending.dispatch_generation,
+                                    &grant_id,
+                                ),
                             },
                             timeout,
                         )
                         .and_then(parse_engram_result::<EngramTurnBeginResponse>);
                     begin_latency_ms = Some(duration_millis(begin_started.elapsed()));
-                    if !admission_owner.as_ref().is_some_and(|owner| {
-                        self.queued_engram_owner_is_current(session_id, owner)
-                    }) {
+                    if !admission_owner
+                        .as_ref()
+                        .is_some_and(|owner| self.queued_engram_owner_is_current(session_id, owner))
+                    {
                         if let Ok(EngramTurnBeginResponse::Begin { receipt }) = &begin
                             && receipt.grant_id == grant_id
                         {
@@ -4074,13 +4131,14 @@ impl AppState {
                             );
                         }
                         Ok(EngramTurnBeginResponse::Refuse { code })
-                            if !retry_used && (engram_begin_refusal_allows_reevaluation(&code)
-                                || (code == "grant_scope_mismatch"
-                                    && self.engram_issued_grant_was_retired(
-                                        target,
-                                        dispatch_budget_started_at,
-                                        admission_owner.as_ref(),
-                                    ))) =>
+                            if !retry_used
+                                && (engram_begin_refusal_allows_reevaluation(&code)
+                                    || (code == "grant_scope_mismatch"
+                                        && self.engram_issued_grant_was_retired(
+                                            target,
+                                            dispatch_budget_started_at,
+                                            admission_owner.as_ref(),
+                                        ))) =>
                         {
                             retry_used = true;
                             // Engram has definitively rejected this issued
@@ -4088,8 +4146,20 @@ impl AppState {
                             // orphan recovery if begin cannot complete.
                             issued_unbegun_grant_id = None;
                             let reevaluate_target = if code == "stale_fence" {
-                                if self.retire_queued_engram_evaluation(session_id, admission_owner.as_ref()).is_err() {
-                                    break (EngramControlCardDecision::Degraded, Some("authorization_unknown".to_owned()), Vec::new(), delivered_range, EngramControlFailMode::Degraded);
+                                if self
+                                    .retire_queued_engram_evaluation(
+                                        session_id,
+                                        admission_owner.as_ref(),
+                                    )
+                                    .is_err()
+                                {
+                                    break (
+                                        EngramControlCardDecision::Degraded,
+                                        Some("authorization_unknown".to_owned()),
+                                        Vec::new(),
+                                        delivered_range,
+                                        EngramControlFailMode::Degraded,
+                                    );
                                 }
                                 self.mark_queued_engram_rebind_required(
                                     session_id,
@@ -4139,8 +4209,8 @@ impl AppState {
                                 binding_target = Some(reevaluate_target.clone());
                                 // Recovery consumes the original remaining budget.
                             }
-                            let Some(_) =
-                                reevaluate_target.remaining_dispatch_timeout(dispatch_budget_started_at)
+                            let Some(_) = reevaluate_target
+                                .remaining_dispatch_timeout(dispatch_budget_started_at)
                             else {
                                 break (
                                     EngramControlCardDecision::Degraded,
@@ -4388,8 +4458,8 @@ impl AppState {
                 admission_owner.as_ref(),
             );
         }
-        let delivery_is_authorized = decision == EngramControlCardDecision::Grant
-            && active_grant_id.is_some();
+        let delivery_is_authorized =
+            decision == EngramControlCardDecision::Grant && active_grant_id.is_some();
         let preparation = loop {
             match self.finish_engram_dispatch_record(
                 session_id,
@@ -4585,17 +4655,21 @@ impl AppState {
                 .expect("session index should be valid");
             let queue_projection_before = Self::queue_projection_hash(record);
             let defer_is_held = defer_was_decided
-                && record.engram.pending_dispatch.as_ref().is_some_and(|pending| {
-                    record.queued_prompts.front().is_some_and(|queued| {
-                        engram_turn_intent_fingerprint(
-                            &queued.pending_prompt.text,
-                            queued.pending_prompt.expanded_text.as_deref(),
-                            &queued.attachments,
-                            queued.pending_prompt.source.as_ref(),
-                            queued.source,
-                        ) == pending.intent_fingerprint
-                    })
-                });
+                && record
+                    .engram
+                    .pending_dispatch
+                    .as_ref()
+                    .is_some_and(|pending| {
+                        record.queued_prompts.front().is_some_and(|queued| {
+                            engram_turn_intent_fingerprint(
+                                &queued.pending_prompt.text,
+                                queued.pending_prompt.expanded_text.as_deref(),
+                                &queued.attachments,
+                                queued.pending_prompt.source.as_ref(),
+                                queued.source,
+                            ) == pending.intent_fingerprint
+                        })
+                    });
             let prior_defer_evaluate = defer_is_held
                 .then(|| {
                     record
@@ -4629,14 +4703,18 @@ impl AppState {
                 if matches!(&message, Message::EngramControl { card, .. }
                     if engram_admission_disposition(card) == EngramAdmissionDisposition::Reject
                         || (engram_admission_disposition(card) == EngramAdmissionDisposition::Reconcile
-                            && !record.queued_prompts.front().is_some_and(QueuedPromptRecord::is_engram_retained))) {
+                            && !record.queued_prompts.front().is_some_and(QueuedPromptRecord::is_engram_retained)))
+                {
                     retire_promoted_engram_head(record, &pending.intent_fingerprint);
                 }
             }
             record.engram.pending_dispatch = None;
             if let Some(grant_id) = active_grant_id {
-                if let Some(prepared) = record.queued_prompts.front_mut()
-                    .and_then(|queued| queued.engram_evaluate.as_mut()) {
+                if let Some(prepared) = record
+                    .queued_prompts
+                    .front_mut()
+                    .and_then(|queued| queued.engram_evaluate.as_mut())
+                {
                     prepared.begun_grant_id = Some(grant_id.clone());
                 }
                 record.engram.active_grant_id = Some(grant_id);
@@ -4645,9 +4723,7 @@ impl AppState {
             let mut creates = message_created_delta_parts_for_indices(record, vec![message_index]);
             let queue_projection_changed =
                 queue_projection_before != Self::queue_projection_hash(record);
-            if queue_projection_changed
-                && let Some(created) = creates.last_mut()
-            {
+            if queue_projection_changed && let Some(created) = creates.last_mut() {
                 created.session_queue = Some(SessionQueueDelta {
                     pending_prompts: record.session.pending_prompts.clone(),
                     queue_paused: record.session.queue_paused,
@@ -4880,10 +4956,8 @@ impl AppState {
             .map(PathBuf::from)
             .ok_or_else(|| "enabled Engram project is missing home".to_owned())?;
         let root = PathBuf::from(&project.root_path);
-        let (actor_id, actor_context) = engram_runtime_actor_identity(
-            &inner.preferences.engram.developer_name,
-            child,
-        );
+        let (actor_id, actor_context) =
+            engram_runtime_actor_identity(&inner.preferences.engram.developer_name, child);
         Ok(Some(EngramBindingTarget {
             admission_started_at: None,
             adapter: inner.engram_host_adapter.clone(),
@@ -4971,10 +5045,8 @@ impl AppState {
             .map(PathBuf::from)
             .ok_or_else(|| "enabled Engram project is missing home".to_owned())?;
         let root = PathBuf::from(&project.root_path);
-        let (actor_id, actor_context) = engram_runtime_actor_identity(
-            &inner.preferences.engram.developer_name,
-            parent,
-        );
+        let (actor_id, actor_context) =
+            engram_runtime_actor_identity(&inner.preferences.engram.developer_name, parent);
         Ok(Some(EngramBindingTarget {
             admission_started_at: None,
             adapter: inner.engram_host_adapter.clone(),
@@ -5116,11 +5188,8 @@ impl AppState {
             record.engram.bind_in_progress = true;
         }
 
-        let result = self.bind_engram_target_uncoordinated_off_lock(
-            target,
-            trace_boot_recovery,
-            owner,
-        );
+        let result =
+            self.bind_engram_target_uncoordinated_off_lock(target, trace_boot_recovery, owner);
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         if let Some(index) = inner.find_session_index(&session_id) {
             inner
@@ -5177,7 +5246,9 @@ impl AppState {
                 remaining.as_millis()
             )));
         }
-        let recovery_started_at = target.admission_started_at.unwrap_or_else(std::time::Instant::now);
+        let recovery_started_at = target
+            .admission_started_at
+            .unwrap_or_else(std::time::Instant::now);
         let was_rebind = target.rebind_required || target.circuit_open;
         if target.rebind_required || target.circuit_open {
             if let Some(routing_token) = target.routing_token.clone() {
@@ -5194,14 +5265,16 @@ impl AppState {
                         "Engram session status",
                     )?;
                 }
-                let status = target.adapter.request(
-                    &target.connection,
-                    &EngramControlRequest::SessionStatus {
-                        routing_token: routing_token.clone(),
-                    },
-                    timeout,
-                )
-                .and_then(parse_engram_result::<EngramSessionStatusResponse>);
+                let status = target
+                    .adapter
+                    .request(
+                        &target.connection,
+                        &EngramControlRequest::SessionStatus {
+                            routing_token: routing_token.clone(),
+                        },
+                        timeout,
+                    )
+                    .and_then(parse_engram_result::<EngramSessionStatusResponse>);
                 if let Some(owner) = owner {
                     self.require_queued_engram_owner(
                         &target.connection.session_id,
@@ -5306,15 +5379,13 @@ impl AppState {
                                 None
                             }
                             Ok(EngramTurnCheckpointResponse::Refuse { .. }) => {
-                                return Err(EngramTransportError::remote(
-                                    EngramControlErrorBody {
-                                        code: "restart_checkpoint_refused".to_owned(),
-                                        message: format!(
-                                            "Engram refused restart checkpoint for grant `{grant_id}`"
-                                        ),
-                                    },
-                                ));
-                                }
+                                return Err(EngramTransportError::remote(EngramControlErrorBody {
+                                    code: "restart_checkpoint_refused".to_owned(),
+                                    message: format!(
+                                        "Engram refused restart checkpoint for grant `{grant_id}`"
+                                    ),
+                                }));
+                            }
                         };
                         if checkpoint.is_none() {
                             // Engram reports an issued grant as open, but only a
@@ -5379,9 +5450,14 @@ impl AppState {
                 )?
             } else {
                 let work_binding = if trace_boot_recovery {
-                    target.adapter.read_work_binding_for_boot(&target.connection, ENGRAM_WORK_BINDING_COMMAND_TIMEOUT)
+                    target.adapter.read_work_binding_for_boot(
+                        &target.connection,
+                        ENGRAM_WORK_BINDING_COMMAND_TIMEOUT,
+                    )
                 } else {
-                    target.adapter.read_work_binding(&target.connection, ENGRAM_WORK_BINDING_COMMAND_TIMEOUT)
+                    target
+                        .adapter
+                        .read_work_binding(&target.connection, ENGRAM_WORK_BINDING_COMMAND_TIMEOUT)
                 }?;
                 EngramControlRequest::SessionBind {
                     external_ref: target.external_ref.clone(),
@@ -5390,12 +5466,23 @@ impl AppState {
                     mediated_effects: target.effects.clone(),
                     capability_map_revision: ENGRAM_CAPABILITY_MAP_REVISION,
                     work_binding,
-                    idempotency_key: format!("termal-bind:{}:{}", target.connection.session_id, Uuid::new_v4()),
+                    idempotency_key: format!(
+                        "termal-bind:{}:{}",
+                        target.connection.session_id,
+                        Uuid::new_v4()
+                    ),
                 }
             };
             let timeout = match target.admission_started_at {
-                Some(started_at) => target.remaining_dispatch_timeout(started_at)
-                    .ok_or_else(|| EngramTransportError::deadline("Engram admission budget exhausted before bind"))?,
+                Some(started_at) => {
+                    target
+                        .remaining_dispatch_timeout(started_at)
+                        .ok_or_else(|| {
+                            EngramTransportError::deadline(
+                                "Engram admission budget exhausted before bind",
+                            )
+                        })?
+                }
                 None => target.settings.call_timeout(),
             };
             if let Some(owner) = owner {
@@ -5405,7 +5492,9 @@ impl AppState {
                     "Engram bind transmission",
                 )?;
             }
-            let result = target.adapter.request(&target.connection, &request, timeout)
+            let result = target
+                .adapter
+                .request(&target.connection, &request, timeout)
                 .and_then(parse_engram_result::<EngramSessionBindingResponse>);
             if let Some(owner) = owner {
                 self.require_queued_engram_owner(
@@ -5477,15 +5566,33 @@ impl AppState {
             if target.admission_started_at.is_some() {
                 let owner_matches =
                     owner.is_some_and(|owner| owner.matches(&inner.sessions[index]));
-                let same_authority = Self::engram_binding_target_for_session_shape_locked(&inner, &target.connection.session_id, true)
-                    .ok().flatten().is_some_and(|current| current.connection == target.connection
-                        && current.settings.same_admission_settings(&target.settings) && current.effects == target.effects);
-                let same_intent = inner.sessions[index].queued_prompts.front().is_some_and(|queued| {
-                    !queued.engram_interrupted && queued.engram_bind.as_ref().is_some_and(|prepared|
-                        serde_json::to_value(&prepared.request).ok() == serde_json::to_value(&bound_request).ok())
+                let same_authority = Self::engram_binding_target_for_session_shape_locked(
+                    &inner,
+                    &target.connection.session_id,
+                    true,
+                )
+                .ok()
+                .flatten()
+                .is_some_and(|current| {
+                    current.connection == target.connection
+                        && current.settings.same_admission_settings(&target.settings)
+                        && current.effects == target.effects
                 });
+                let same_intent =
+                    inner.sessions[index]
+                        .queued_prompts
+                        .front()
+                        .is_some_and(|queued| {
+                            !queued.engram_interrupted
+                                && queued.engram_bind.as_ref().is_some_and(|prepared| {
+                                    serde_json::to_value(&prepared.request).ok()
+                                        == serde_json::to_value(&bound_request).ok()
+                                })
+                        });
                 if !owner_matches || !same_authority || !same_intent {
-                    return Err(EngramTransportError::local_state("Engram binding owner changed while authorization was in flight"));
+                    return Err(EngramTransportError::local_state(
+                        "Engram binding owner changed while authorization was in flight",
+                    ));
                 }
             }
             let record = inner
@@ -5498,7 +5605,10 @@ impl AppState {
             record.engram.routing_token = Some(routing_token.clone());
             if target.admission_started_at.is_some() {
                 if let Some(queued) = record.queued_prompts.front_mut() {
-                    if queued.engram_bind.as_ref().is_some_and(|prepared| serde_json::to_value(&prepared.request).ok() == serde_json::to_value(&bound_request).ok()) {
+                    if queued.engram_bind.as_ref().is_some_and(|prepared| {
+                        serde_json::to_value(&prepared.request).ok()
+                            == serde_json::to_value(&bound_request).ok()
+                    }) {
                         queued.engram_bind = None;
                         // A bind-only restart is resolved only after its exact
                         // reply is accepted under the owner/authority checks.
@@ -5576,12 +5686,11 @@ impl AppState {
             record.engram.routing_token = None;
         }
         record.engram.active_grant_id = None;
-        self.persist_internal_locked(&inner)
-            .map_err(|error| {
-                EngramTransportError::transport(format!(
-                    "failed persisting stale Engram binding cleanup: {error:#}"
-                ))
-            })?;
+        self.persist_internal_locked(&inner).map_err(|error| {
+            EngramTransportError::transport(format!(
+                "failed persisting stale Engram binding cleanup: {error:#}"
+            ))
+        })?;
         Ok(())
     }
 
@@ -5625,9 +5734,7 @@ impl AppState {
                     .find_session_index(session_id)
                     .and_then(|index| inner.sessions.get(index))
                     .ok_or_else(|| {
-                        EngramTransportError::local_state(
-                            "Engram admission session disappeared",
-                        )
+                        EngramTransportError::local_state("Engram admission session disappeared")
                     })?;
                 if !owner.matches(record) {
                     return Err(EngramTransportError::local_state(
@@ -5635,8 +5742,9 @@ impl AppState {
                     ));
                 }
             }
-            let target = Self::engram_binding_target_for_session_shape_locked(&inner, session_id, true)
-                .map_err(EngramTransportError::local_state)?;
+            let target =
+                Self::engram_binding_target_for_session_shape_locked(&inner, session_id, true)
+                    .map_err(EngramTransportError::local_state)?;
             if target.is_none()
                 && Self::engram_session_requires_dispatch_card_locked(&inner, session_id)
             {
@@ -5691,10 +5799,13 @@ impl AppState {
         let started_at = std::time::Instant::now();
         let (disabled_reason, admission_owner) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
-            let record = inner.find_session_index(&intent.session_id)
+            let record = inner
+                .find_session_index(&intent.session_id)
                 .and_then(|index| inner.sessions.get(index));
-            (record.and_then(|record| record.engram.disabled_reason.clone()),
-                record.and_then(EngramQueuedAdmissionOwner::capture))
+            (
+                record.and_then(|record| record.engram.disabled_reason.clone()),
+                record.and_then(EngramQueuedAdmissionOwner::capture),
+            )
         };
         if let Some(code) = disabled_reason {
             return Some(EngramPendingDispatch {
@@ -5762,9 +5873,8 @@ impl AppState {
             if target.remaining_dispatch_timeout(started_at).is_none() {
                 break EngramDispatchEvaluation::Degraded {
                     code: "dispatch_budget_exhausted".to_owned(),
-                    detail:
-                        "Engram evaluate/begin dispatch budget was exhausted before evaluate"
-                            .to_owned(),
+                    detail: "Engram evaluate/begin dispatch budget was exhausted before evaluate"
+                        .to_owned(),
                 };
             }
             let request = match self.queued_engram_evaluate_request(
@@ -5783,16 +5893,26 @@ impl AppState {
                 request,
             ) {
                 Ok(request) => request,
-                Err(error) => break EngramDispatchEvaluation::Degraded {
-                    code: error.code.unwrap_or_else(|| "authorization_unknown".to_owned()), detail: error.message,
-                },
+                Err(error) => {
+                    break EngramDispatchEvaluation::Degraded {
+                        code: error
+                            .code
+                            .unwrap_or_else(|| "authorization_unknown".to_owned()),
+                        detail: error.message,
+                    };
+                }
             };
             let Some(timeout) = target.remaining_dispatch_timeout(started_at) else {
-                break EngramDispatchEvaluation::Degraded { code: "dispatch_budget_exhausted".to_owned(), detail: "Engram admission budget exhausted while persisting evaluation".to_owned() };
+                break EngramDispatchEvaluation::Degraded {
+                    code: "dispatch_budget_exhausted".to_owned(),
+                    detail: "Engram admission budget exhausted while persisting evaluation"
+                        .to_owned(),
+                };
             };
-            if !admission_owner.as_ref().is_some_and(|owner| {
-                self.queued_engram_owner_is_current(&intent.session_id, owner)
-            }) {
+            if !admission_owner
+                .as_ref()
+                .is_some_and(|owner| self.queued_engram_owner_is_current(&intent.session_id, owner))
+            {
                 break EngramDispatchEvaluation::Degraded {
                     code: "authorization_superseded".to_owned(),
                     detail: "Engram evaluation no longer owns the queued prompt".to_owned(),
@@ -5802,9 +5922,10 @@ impl AppState {
                 .adapter
                 .request(&target.connection, &request, timeout)
                 .and_then(parse_engram_result::<EngramTurnDecisionResponse>);
-            if !admission_owner.as_ref().is_some_and(|owner| {
-                self.queued_engram_owner_is_current(&intent.session_id, owner)
-            }) {
+            if !admission_owner
+                .as_ref()
+                .is_some_and(|owner| self.queued_engram_owner_is_current(&intent.session_id, owner))
+            {
                 break EngramDispatchEvaluation::Degraded {
                     code: "authorization_superseded".to_owned(),
                     detail: "Engram evaluation reply belonged to a superseded queue owner"
@@ -5812,120 +5933,126 @@ impl AppState {
                 };
             }
             match response {
-            Ok(EngramTurnDecisionResponse::Grant { grant }) => {
-                let delivered_range =
-                    grant
+                Ok(EngramTurnDecisionResponse::Grant { grant }) => {
+                    let delivered_range =
+                        grant
+                            .delivery
+                            .as_ref()
+                            .map(|delivery| EngramDeliveredRange {
+                                from: delivery.page.from_cursor,
+                                to: delivery.page.to_cursor,
+                                head: delivery.page.head_cursor,
+                            });
+                    let delivery_tokens = grant
                         .delivery
-                        .as_ref()
-                        .map(|delivery| EngramDeliveredRange {
-                            from: delivery.page.from_cursor,
-                            to: delivery.page.to_cursor,
-                            head: delivery.page.head_cursor,
-                        });
-                let delivery_tokens = grant
-                    .delivery
-                    .iter()
-                    .map(|delivery| delivery.page.delivery_token.clone())
-                    .collect();
-                self.record_queued_engram_transport_success(
-                    &intent.session_id,
-                    admission_owner.as_ref(),
-                );
-                break EngramDispatchEvaluation::Grant {
-                    grant_id: grant.grant_id,
-                    delivery_tokens,
-                    delivered_range,
-                };
-            }
-            Ok(EngramTurnDecisionResponse::Refuse { directive })
-                if directive.code == "stale_fence" && !stale_retry_used =>
-            {
-                if let Err(error) = self.retire_queued_engram_evaluation(&intent.session_id, admission_owner.as_ref()) {
-                    break EngramDispatchEvaluation::Degraded { code: "authorization_unknown".to_owned(), detail: error.message };
+                        .iter()
+                        .map(|delivery| delivery.page.delivery_token.clone())
+                        .collect();
+                    self.record_queued_engram_transport_success(
+                        &intent.session_id,
+                        admission_owner.as_ref(),
+                    );
+                    break EngramDispatchEvaluation::Grant {
+                        grant_id: grant.grant_id,
+                        delivery_tokens,
+                        delivered_range,
+                    };
                 }
-                self.record_queued_engram_transport_success(
-                    &intent.session_id,
-                    admission_owner.as_ref(),
-                );
-                self.mark_queued_engram_rebind_required(
-                    &intent.session_id,
-                    Some(&target),
-                    admission_owner.as_ref(),
-                );
-                match self.ensure_engram_session_bound_with_budget_off_lock(
-                    &intent.session_id,
-                    Some(started_at),
-                    admission_owner.as_ref(),
-                ) {
-                    Ok(Some(refreshed)) => {
-                        target = refreshed;
-                        stale_retry_used = true;
-                    }
-                    Ok(None) => {
+                Ok(EngramTurnDecisionResponse::Refuse { directive })
+                    if directive.code == "stale_fence" && !stale_retry_used =>
+                {
+                    if let Err(error) = self.retire_queued_engram_evaluation(
+                        &intent.session_id,
+                        admission_owner.as_ref(),
+                    ) {
                         break EngramDispatchEvaluation::Degraded {
-                            code: "binding_unavailable".to_owned(),
-                            detail: "Engram binding disappeared during stale-fence recovery"
-                                .to_owned(),
-                        };
-                    }
-                    Err(error) => {
-                        self.record_queued_engram_transport_failure(
-                            &intent.session_id,
-                            &error,
-                            admission_owner.as_ref(),
-                        );
-                        let code = self.engram_failure_card_code(&intent.session_id, &error);
-                        break EngramDispatchEvaluation::Degraded {
-                            code,
+                            code: "authorization_unknown".to_owned(),
                             detail: error.message,
                         };
                     }
-                }
-            }
-            Ok(EngramTurnDecisionResponse::Refuse { directive }) => {
-                self.record_queued_engram_transport_success(
-                    &intent.session_id,
-                    admission_owner.as_ref(),
-                );
-                if engram_evaluation_refusal_requires_rebind(&directive.code) {
+                    self.record_queued_engram_transport_success(
+                        &intent.session_id,
+                        admission_owner.as_ref(),
+                    );
                     self.mark_queued_engram_rebind_required(
                         &intent.session_id,
                         Some(&target),
                         admission_owner.as_ref(),
                     );
+                    match self.ensure_engram_session_bound_with_budget_off_lock(
+                        &intent.session_id,
+                        Some(started_at),
+                        admission_owner.as_ref(),
+                    ) {
+                        Ok(Some(refreshed)) => {
+                            target = refreshed;
+                            stale_retry_used = true;
+                        }
+                        Ok(None) => {
+                            break EngramDispatchEvaluation::Degraded {
+                                code: "binding_unavailable".to_owned(),
+                                detail: "Engram binding disappeared during stale-fence recovery"
+                                    .to_owned(),
+                            };
+                        }
+                        Err(error) => {
+                            self.record_queued_engram_transport_failure(
+                                &intent.session_id,
+                                &error,
+                                admission_owner.as_ref(),
+                            );
+                            let code = self.engram_failure_card_code(&intent.session_id, &error);
+                            break EngramDispatchEvaluation::Degraded {
+                                code,
+                                detail: error.message,
+                            };
+                        }
+                    }
                 }
-                break EngramDispatchEvaluation::Refuse {
-                    directive: EngramControlDirectiveCard {
-                        directive_id: directive.directive_id,
-                        kind: directive.code,
-                        audience: directive.target,
-                        satisfaction: directive.satisfaction,
-                    },
-                };
-            }
-            Ok(EngramTurnDecisionResponse::Defer { deferral }) => {
-                self.record_queued_engram_transport_success(
-                    &intent.session_id,
-                    admission_owner.as_ref(),
-                );
-                break EngramDispatchEvaluation::Defer {
-                    code: deferral.code,
-                    retry_after_ms: deferral.retry_after_ms,
-                    wake_condition: deferral.wake_condition,
-                };
-            }
-            Err(error) => {
-                self.record_queued_engram_transport_failure(
-                    &intent.session_id,
-                    &error,
-                    admission_owner.as_ref(),
-                );
-                let code = self.engram_failure_card_code(&intent.session_id, &error);
-                break EngramDispatchEvaluation::Degraded {
-                    code,
-                    detail: error.message,
-                };
-            }
+                Ok(EngramTurnDecisionResponse::Refuse { directive }) => {
+                    self.record_queued_engram_transport_success(
+                        &intent.session_id,
+                        admission_owner.as_ref(),
+                    );
+                    if engram_evaluation_refusal_requires_rebind(&directive.code) {
+                        self.mark_queued_engram_rebind_required(
+                            &intent.session_id,
+                            Some(&target),
+                            admission_owner.as_ref(),
+                        );
+                    }
+                    break EngramDispatchEvaluation::Refuse {
+                        directive: EngramControlDirectiveCard {
+                            directive_id: directive.directive_id,
+                            kind: directive.code,
+                            audience: directive.target,
+                            satisfaction: directive.satisfaction,
+                        },
+                    };
+                }
+                Ok(EngramTurnDecisionResponse::Defer { deferral }) => {
+                    self.record_queued_engram_transport_success(
+                        &intent.session_id,
+                        admission_owner.as_ref(),
+                    );
+                    break EngramDispatchEvaluation::Defer {
+                        code: deferral.code,
+                        retry_after_ms: deferral.retry_after_ms,
+                        wake_condition: deferral.wake_condition,
+                    };
+                }
+                Err(error) => {
+                    self.record_queued_engram_transport_failure(
+                        &intent.session_id,
+                        &error,
+                        admission_owner.as_ref(),
+                    );
+                    let code = self.engram_failure_card_code(&intent.session_id, &error);
+                    break EngramDispatchEvaluation::Degraded {
+                        code,
+                        detail: error.message,
+                    };
+                }
             }
         };
         Some(EngramPendingDispatch {

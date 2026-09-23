@@ -27,7 +27,6 @@
 // `"command started"` / `"command completed"` display strings the
 // session sidebar expects. Called from `codex_app_requests.rs`.
 
-
 /// Handles Codex command.
 fn codex_command() -> Result<Command> {
     let exe = resolve_codex_executable()?;
@@ -74,8 +73,6 @@ fn find_command_on_path(command: &str) -> Option<PathBuf> {
     }
     None
 }
-
-
 
 fn home_dir() -> Option<PathBuf> {
     #[cfg(windows)]

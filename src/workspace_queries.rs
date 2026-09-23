@@ -185,9 +185,10 @@ impl AppState {
     ) -> Result<Vec<AgentCommand>, ApiError> {
         let filesystem_commands = read_claude_agent_commands(workdir)?;
         match (session.agent, cached_agent_commands) {
-            (Agent::Claude, Some(cached_agent_commands)) => {
-                Ok(merge_agent_commands(cached_agent_commands, &filesystem_commands))
-            }
+            (Agent::Claude, Some(cached_agent_commands)) => Ok(merge_agent_commands(
+                cached_agent_commands,
+                &filesystem_commands,
+            )),
             _ => Ok(filesystem_commands),
         }
     }
@@ -232,10 +233,8 @@ impl AppState {
         // them only when the requested cwd resolves back to that same directory.
         let include_project_scoped_cache =
             agent_command_workdirs_match(&resolve_workdir, &session.workdir);
-        let cached_agent_commands = cached_agent_commands_for_workdir(
-            &cached_agent_commands,
-            include_project_scoped_cache,
-        );
+        let cached_agent_commands =
+            cached_agent_commands_for_workdir(&cached_agent_commands, include_project_scoped_cache);
         let command = self
             .list_agent_commands_for_workdir(
                 &session,
@@ -336,17 +335,18 @@ fn resolve_agent_command_payload(
         .as_deref()
         .map(str::trim)
         .unwrap_or_default();
-    let note = request
-        .note
-        .as_deref()
-        .map(str::trim)
-        .unwrap_or_default();
+    let note = request.note.as_deref().map(str::trim).unwrap_or_default();
     let visible_prompt = resolved_agent_command_visible_prompt(&command, arguments);
-    let title = resolved_agent_command_title(&command, metadata.as_ref(), arguments, &visible_prompt);
+    let title =
+        resolved_agent_command_title(&command, metadata.as_ref(), arguments, &visible_prompt);
 
     let expanded_prompt = match command.kind {
         AgentCommandKind::PromptTemplate => {
-            let expanded = command.content.split("$ARGUMENTS").collect::<Vec<_>>().join(arguments);
+            let expanded = command
+                .content
+                .split("$ARGUMENTS")
+                .collect::<Vec<_>>()
+                .join(arguments);
             Some(append_resolved_agent_command_note(expanded, note))
         }
         AgentCommandKind::NativeSlash => {

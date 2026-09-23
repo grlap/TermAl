@@ -711,8 +711,7 @@ impl AppState {
             } else {
                 0
             },
-            acceptance_evaluation: evaluation
-                .map(|seed| seed.into_target(delegation_id.clone())),
+            acceptance_evaluation: evaluation.map(|seed| seed.into_target(delegation_id.clone())),
         };
         let delegation_index = inner.delegations.len();
         inner.delegations.push(record.clone());
@@ -768,11 +767,8 @@ impl AppState {
         }
 
         let runtime_prompt = build_delegation_prompt(&record);
-        match self.start_delegation_child_turn(
-            &record.id,
-            &record.child_session_id,
-            runtime_prompt,
-        ) {
+        match self.start_delegation_child_turn(&record.id, &record.child_session_id, runtime_prompt)
+        {
             TurnDispatchDeliveryOutcome::Rejected(err) => {
                 if err.status == StatusCode::CONFLICT
                     && err.message == DELEGATION_NO_LONGER_STARTABLE_MESSAGE
@@ -2133,8 +2129,7 @@ impl AppState {
         ) {
             Ok(dispatch) => dispatch,
             Err(error)
-                if error.kind
-                    == Some(ApiErrorKind::RetainedQueuedPromotionPersistenceUnknown) =>
+                if error.kind == Some(ApiErrorKind::RetainedQueuedPromotionPersistenceUnknown) =>
             {
                 return TurnDispatchDeliveryOutcome::Held { error: Some(error) };
             }
@@ -2157,8 +2152,8 @@ impl AppState {
             }
             match self.dispatch_next_queued_turn(&parent_session_id, false) {
                 Ok(Some(dispatch)) => {
-                    if let Err(err) =
-                        deliver_turn_dispatch(self, dispatch).into_background_result("delegation follow-up")
+                    if let Err(err) = deliver_turn_dispatch(self, dispatch)
+                        .into_background_result("delegation follow-up")
                     {
                         let error = format!(
                             "failed to dispatch queued resume for session `{}`: {}",
@@ -2781,7 +2776,12 @@ fn add_parent_delegation_card_locked(
     };
     let message_id = inner.next_message_id();
     let agent = ParallelAgentProgress {
-        detail: Some(acceptance_card_detail(inner, delegation, &delegation_default_running_detail(delegation), false)),
+        detail: Some(acceptance_card_detail(
+            inner,
+            delegation,
+            &delegation_default_running_detail(delegation),
+            false,
+        )),
         id: delegation.id.clone(),
         source: ParallelAgentSource::Delegation,
         status: ParallelAgentStatus::Running,
@@ -2825,7 +2825,15 @@ fn update_parent_delegation_card_locked(
     status: ParallelAgentStatus,
     detail: String,
 ) -> Option<ParentDelegationCardDelta> {
-    let detail = acceptance_card_detail(inner, delegation, &detail, matches!(status, ParallelAgentStatus::Completed | ParallelAgentStatus::Error));
+    let detail = acceptance_card_detail(
+        inner,
+        delegation,
+        &detail,
+        matches!(
+            status,
+            ParallelAgentStatus::Completed | ParallelAgentStatus::Error
+        ),
+    );
     let Some(parent_index) = inner.find_session_index(&delegation.parent_session_id) else {
         return None;
     };
@@ -3181,7 +3189,15 @@ fn parent_delegation_card_matches_locked(
     status: ParallelAgentStatus,
     detail: &str,
 ) -> bool {
-    let detail = acceptance_card_detail(inner, delegation, detail, matches!(status, ParallelAgentStatus::Completed | ParallelAgentStatus::Error));
+    let detail = acceptance_card_detail(
+        inner,
+        delegation,
+        detail,
+        matches!(
+            status,
+            ParallelAgentStatus::Completed | ParallelAgentStatus::Error
+        ),
+    );
     let Some(parent_index) = inner.find_session_index(&delegation.parent_session_id) else {
         return false;
     };
@@ -4051,7 +4067,10 @@ fn delegation_child_outcome(inner: &StateInner, child_session_id: &str) -> Deleg
     // A held authorization has not produced a provider outcome. Polling must
     // not mistake Idle (or a previous follow-up result) for completion/failure.
     if child.orchestrator_auto_dispatch_blocked
-        && child.queued_prompts.front().is_some_and(QueuedPromptRecord::is_engram_retained)
+        && child
+            .queued_prompts
+            .front()
+            .is_some_and(QueuedPromptRecord::is_engram_retained)
     {
         return DelegationChildOutcome::Running;
     }

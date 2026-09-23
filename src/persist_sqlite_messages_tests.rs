@@ -115,8 +115,9 @@ mod sqlite_message_storage_tests {
     #[test]
     fn conversion_restores_views_before_their_instead_of_triggers() {
         let connection = connection(true);
-        connection.execute_batch(
-            "INSERT INTO sessions VALUES('session-a', '{}');
+        connection
+            .execute_batch(
+                "INSERT INTO sessions VALUES('session-a', '{}');
              INSERT INTO messages VALUES('session-a', 0, 'first', '{}', 0, 0);
              CREATE VIEW message_ids AS SELECT message_id FROM messages;
              CREATE TRIGGER delete_message_view INSTEAD OF DELETE ON message_ids BEGIN
@@ -126,21 +127,33 @@ mod sqlite_message_storage_tests {
              CREATE VIEW unrelated_view AS SELECT value FROM unrelated_values;
              CREATE TRIGGER delete_unrelated_view INSTEAD OF DELETE ON unrelated_view BEGIN
                DELETE FROM unrelated_values WHERE value = old.value; END;",
-        ).unwrap();
+            )
+            .unwrap();
         let before = snapshot(&connection);
         ensure_sqlite_state_schema(&connection).unwrap();
         assert!(!without_rowid(&connection));
         assert_eq!(snapshot(&connection), before);
-        connection.execute_batch(
-            "DELETE FROM message_ids WHERE message_id = 'first';
+        connection
+            .execute_batch(
+                "DELETE FROM message_ids WHERE message_id = 'first';
              DELETE FROM unrelated_view WHERE value = 'kept';",
-        ).unwrap();
+            )
+            .unwrap();
         assert!(snapshot(&connection).is_empty());
         assert_eq!(
-            connection.query_row("SELECT count(*) FROM unrelated_values", [], |row| row.get::<_, i64>(0)).unwrap(),
+            connection
+                .query_row("SELECT count(*) FROM unrelated_values", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
             0
         );
-        assert!(!connection.prepare("PRAGMA foreign_key_check").unwrap().exists([]).unwrap());
+        assert!(
+            !connection
+                .prepare("PRAGMA foreign_key_check")
+                .unwrap()
+                .exists([])
+                .unwrap()
+        );
     }
 
     #[test]

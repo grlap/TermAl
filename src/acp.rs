@@ -203,11 +203,9 @@ fn spawn_acp_runtime(
                     AcpRuntimeCommand::JsonRpcMessage(message) => {
                         write_acp_json_rpc_message(&mut stdin, &message, agent)
                     }
-                    AcpRuntimeCommand::Cancel => handle_acp_cancel_command(
-                        &mut stdin,
-                        &writer_runtime_state,
-                        agent,
-                    ),
+                    AcpRuntimeCommand::Cancel => {
+                        handle_acp_cancel_command(&mut stdin, &writer_runtime_state, agent)
+                    }
                     AcpRuntimeCommand::RefreshSessionConfig {
                         command,
                         response_tx,
@@ -256,13 +254,13 @@ fn spawn_acp_runtime(
                     ),
                     AcpRuntimeCommand::ReconcileOpenCodeConfig { config_result } => {
                         handle_opencode_config_reconcile_command(
-                        &mut stdin,
-                        &writer_pending_requests,
-                        &writer_state,
-                        &writer_session_id,
-                        &writer_runtime_state,
-                        agent,
-                        &config_result,
+                            &mut stdin,
+                            &writer_pending_requests,
+                            &writer_state,
+                            &writer_session_id,
+                            &writer_runtime_state,
+                            agent,
+                            &config_result,
                         )
                     }
                 };
@@ -446,7 +444,8 @@ fn maybe_authenticate_acp_runtime(
         agent,
     );
     if agent == AcpAgent::Kimi {
-        authentication.context("Kimi authentication failed; run `kimi login` in a terminal, then retry")?;
+        authentication
+            .context("Kimi authentication failed; run `kimi login` in a terminal, then retry")?;
     } else {
         authentication?;
     }
@@ -466,7 +465,9 @@ fn update_acp_runtime_capabilities(
     let mut state = runtime_state
         .lock()
         .expect("ACP runtime state mutex poisoned");
-    let capabilities = state.capabilities.get_or_insert_with(AcpCapabilities::default);
+    let capabilities = state
+        .capabilities
+        .get_or_insert_with(AcpCapabilities::default);
     capabilities.supports_session_load = supports_session_load;
     capabilities.supports_session_resume = supports_session_resume;
 }
@@ -575,12 +576,19 @@ fn handle_acp_prompt_command(
     // Kimi can retain an Auto/YOLO mode across continuation. Establish manual
     // approvals before every prompt, including already-running sessions.
     if agent == AcpAgent::Kimi {
-        if let Err(err) = configure_kimi_manual_approvals(
-            writer, pending_requests, &external_session_id,
-        ).and_then(|config| state.admit_kimi_thinking(
-            writer, pending_requests, session_id, &external_session_id, &config,
-            Some(runtime_token),
-        )) {
+        if let Err(err) =
+            configure_kimi_manual_approvals(writer, pending_requests, &external_session_id)
+                .and_then(|config| {
+                    state.admit_kimi_thinking(
+                        writer,
+                        pending_requests,
+                        session_id,
+                        &external_session_id,
+                        &config,
+                        Some(runtime_token),
+                    )
+                })
+        {
             set_acp_turn_active(turn_lifecycle, false);
             return Err(err);
         }
@@ -885,10 +893,10 @@ fn ensure_acp_session_ready_inner(
             .lock()
             .expect("ACP runtime state mutex poisoned");
         let capabilities = state.capabilities.as_ref();
-        let session_load_allowed = capabilities
-            .is_some_and(AcpCapabilities::session_load_supported);
-        let session_resume_allowed = capabilities
-            .is_some_and(AcpCapabilities::session_resume_supported);
+        let session_load_allowed =
+            capabilities.is_some_and(AcpCapabilities::session_load_supported);
+        let session_resume_allowed =
+            capabilities.is_some_and(AcpCapabilities::session_resume_supported);
         (
             state.current_session_id.clone(),
             session_load_allowed,
@@ -907,13 +915,9 @@ fn ensure_acp_session_ready_inner(
     };
     let mcp_servers = match engram_mcp_source {
         AcpEngramMcpSource::Runtime { token, engram } => state
-            .termal_delegation_mcp_acp_servers_for_runtime_snapshot(
-                session_id, token, engram,
-            )?,
+            .termal_delegation_mcp_acp_servers_for_runtime_snapshot(session_id, token, engram)?,
         #[cfg(test)]
-        AcpEngramMcpSource::LiveState => {
-            state.termal_delegation_mcp_acp_servers(session_id)?
-        }
+        AcpEngramMcpSource::LiveState => state.termal_delegation_mcp_acp_servers(session_id)?,
     };
 
     let resume_session_id = command.resume_session_id.as_deref();
@@ -923,65 +927,62 @@ fn ensure_acp_session_ready_inner(
             agent.label()
         );
     }
-    let session_result = if let Some(resume_session_id) =
-        resume_session_id.filter(|_| session_resume_allowed)
-    {
-        let result = send_acp_json_rpc_request(
-            writer,
-            pending_requests,
-            "session/resume",
-            json!({
-                "sessionId": resume_session_id,
-                "cwd": command.cwd,
-                "mcpServers": mcp_servers.clone(),
-            }),
-            ACP_SESSION_SETUP_TIMEOUT,
-            agent,
-        );
-        match result {
-            Ok(value) => (resume_session_id.to_owned(), value),
-            Err(err) => return Err(acp_continuity_error(agent, err)),
-        }
-    } else if let Some(resume_session_id) =
-        resume_session_id.filter(|_| session_load_allowed)
-    {
-        {
-            let mut state = runtime_state
-                .lock()
-                .expect("ACP runtime state mutex poisoned");
-            state.is_loading_history = true;
-        }
-        let result = send_acp_json_rpc_request(
-            writer,
-            pending_requests,
-            "session/load",
-            json!({
-                "sessionId": resume_session_id,
-                "cwd": command.cwd,
-                "mcpServers": mcp_servers.clone(),
-            }),
-            ACP_SESSION_SETUP_TIMEOUT,
-            agent,
-        );
-        {
-            let mut state = runtime_state
-                .lock()
-                .expect("ACP runtime state mutex poisoned");
-            state.is_loading_history = false;
-        }
-        match result {
-            Ok(value) => (resume_session_id.to_owned(), value),
-            Err(err) => return Err(acp_continuity_error(agent, err)),
-        }
-    } else {
-        start_acp_session(
-            writer,
-            pending_requests,
-            agent,
-            &command.cwd,
-            mcp_servers.clone(),
-        )?
-    };
+    let session_result =
+        if let Some(resume_session_id) = resume_session_id.filter(|_| session_resume_allowed) {
+            let result = send_acp_json_rpc_request(
+                writer,
+                pending_requests,
+                "session/resume",
+                json!({
+                    "sessionId": resume_session_id,
+                    "cwd": command.cwd,
+                    "mcpServers": mcp_servers.clone(),
+                }),
+                ACP_SESSION_SETUP_TIMEOUT,
+                agent,
+            );
+            match result {
+                Ok(value) => (resume_session_id.to_owned(), value),
+                Err(err) => return Err(acp_continuity_error(agent, err)),
+            }
+        } else if let Some(resume_session_id) = resume_session_id.filter(|_| session_load_allowed) {
+            {
+                let mut state = runtime_state
+                    .lock()
+                    .expect("ACP runtime state mutex poisoned");
+                state.is_loading_history = true;
+            }
+            let result = send_acp_json_rpc_request(
+                writer,
+                pending_requests,
+                "session/load",
+                json!({
+                    "sessionId": resume_session_id,
+                    "cwd": command.cwd,
+                    "mcpServers": mcp_servers.clone(),
+                }),
+                ACP_SESSION_SETUP_TIMEOUT,
+                agent,
+            );
+            {
+                let mut state = runtime_state
+                    .lock()
+                    .expect("ACP runtime state mutex poisoned");
+                state.is_loading_history = false;
+            }
+            match result {
+                Ok(value) => (resume_session_id.to_owned(), value),
+                Err(err) => return Err(acp_continuity_error(agent, err)),
+            }
+        } else {
+            start_acp_session(
+                writer,
+                pending_requests,
+                agent,
+                &command.cwd,
+                mcp_servers.clone(),
+            )?
+        };
 
     let (external_session_id, session_config) = session_result;
     // Publish continuity as soon as the agent allocates or resumes it.
@@ -1010,28 +1011,47 @@ fn ensure_acp_session_ready_inner(
         // admitted for prompts. The next prompt resumes and validates the latest
         // requested selection. Thinking discovery may set a valid snapshot of
         // the requested model, but cannot overwrite newer local selection intent.
-        runtime_state.lock().expect("ACP runtime state mutex poisoned")
+        runtime_state
+            .lock()
+            .expect("ACP runtime state mutex poisoned")
             .current_session_id = None;
         // Continuity is already durable; a failed config publication cannot
         // orphan the conversation or mark unvalidated settings prompt-ready.
         if !has_acp_config_option_list(&session_config, "model") {
-            bail!("Kimi did not advertise a model catalog; use a CLI compatible with the verified 2.0.2 ACP contract and refresh again");
+            bail!(
+                "Kimi did not advertise a model catalog; use a CLI compatible with the verified 2.0.2 ACP contract and refresh again"
+            );
         }
         state.sync_kimi_config_observation(
-            session_id, &session_config, Some(&command.model), source_runtime, true,
+            session_id,
+            &session_config,
+            Some(&command.model),
+            source_runtime,
+            true,
         )?;
         if let Some(config) = discover_kimi_thinking_config(
-            writer, pending_requests, &external_session_id, &command.model, &session_config,
+            writer,
+            pending_requests,
+            &external_session_id,
+            &command.model,
+            &session_config,
         )? {
             state.sync_kimi_config_observation(
-                session_id, &config, Some(&command.model), source_runtime, false,
+                session_id,
+                &config,
+                Some(&command.model),
+                source_runtime,
+                false,
             )?;
         } else {
             // The saved model is no longer advertised. Preserve requested
             // effort, but do not offer another model's cached thinking choices.
             state.sync_kimi_config_observation(
-                session_id, &json!({"configOptions":[{"id":"thinking", "options":[]}]}),
-                Some(&command.model), source_runtime, false,
+                session_id,
+                &json!({"configOptions":[{"id":"thinking", "options":[]}]}),
+                Some(&command.model),
+                source_runtime,
+                false,
             )?;
         }
     } else if agent == AcpAgent::OpenCode {
@@ -1054,11 +1074,14 @@ fn ensure_acp_session_ready_inner(
             &command.model,
             command.cursor_mode,
             &session_config,
-        ).map_err(|error| {
+        )
+        .map_err(|error| {
             if agent == AcpAgent::Kimi {
                 // A refused model must not turn into an unchecked prompt on
                 // retry through the already-ready runtime fast path.
-                runtime_state.lock().expect("ACP runtime state mutex poisoned")
+                runtime_state
+                    .lock()
+                    .expect("ACP runtime state mutex poisoned")
                     .current_session_id = None;
             }
             error
@@ -1145,7 +1168,9 @@ fn configure_acp_session(
         && !matches!(requested_model.trim(), "" | "auto" | "default")
         && matching_acp_config_option_value(config_result, "model", requested_model).is_none()
     {
-        bail!("Kimi did not advertise requested model `{requested_model}`; refresh its model choices before retrying");
+        bail!(
+            "Kimi did not advertise requested model `{requested_model}`; refresh its model choices before retrying"
+        );
     }
     if let Some(model_value) =
         matching_acp_config_option_value(config_result, "model", requested_model)
@@ -1169,8 +1194,12 @@ fn configure_acp_session(
                 agent,
             )?;
             let acknowledged_model = current_acp_config_option_value(&result, "model");
-            if agent == AcpAgent::Kimi && acknowledged_model.as_deref() != Some(model_value.as_str()) {
-                bail!("Kimi did not acknowledge requested model `{model_value}`; refusing to prompt with a different model");
+            if agent == AcpAgent::Kimi
+                && acknowledged_model.as_deref() != Some(model_value.as_str())
+            {
+                bail!(
+                    "Kimi did not acknowledge requested model `{model_value}`; refusing to prompt with a different model"
+                );
             }
             configured_model = acknowledged_model.or(Some(model_value));
         }
@@ -1251,22 +1280,33 @@ fn handle_acp_message(
                 let record = &inner.sessions[index];
                 record.runtime.matches_runtime_token(runtime_token)
                     && !record.runtime_stop_in_progress
-                    && !matches!(record.session.status, SessionStatus::Stopping | SessionStatus::Idle)
+                    && !matches!(
+                        record.session.status,
+                        SessionStatus::Stopping | SessionStatus::Idle
+                    )
             });
             let outcome = if !current {
                 Some(json!({"outcome": "cancelled"}))
             } else if opencode_auto_approval_allowed_locked(&inner, session_id) {
-                message.pointer("/params/options").and_then(Value::as_array)
+                message
+                    .pointer("/params/options")
+                    .and_then(Value::as_array)
                     .and_then(|options| find_acp_permission_option(options, &["allow_once"]))
                     .map(|option_id| json!({"outcome": "selected", "optionId": option_id}))
             } else {
                 None
             };
             if let Some(outcome) = outcome {
-                input_tx.send(AcpRuntimeCommand::JsonRpcMessage(
-                    json_rpc_result_response_message(message["id"].clone(),
-                        json!({"outcome": outcome})),
-                )).map_err(|err| anyhow!("failed delivering OpenCode permission response: {err}"))?;
+                input_tx
+                    .send(AcpRuntimeCommand::JsonRpcMessage(
+                        json_rpc_result_response_message(
+                            message["id"].clone(),
+                            json!({"outcome": outcome}),
+                        ),
+                    ))
+                    .map_err(|err| {
+                        anyhow!("failed delivering OpenCode permission response: {err}")
+                    })?;
                 return Ok(());
             }
         }
@@ -1316,14 +1356,8 @@ fn handle_acp_request(
                 .unwrap_or_default();
 
             let approval = AcpPendingApproval {
-                allow_once_option_id: find_acp_permission_option(
-                    &options,
-                    &["allow_once"],
-                ),
-                allow_always_option_id: find_acp_permission_option(
-                    &options,
-                    &["allow_always"],
-                ),
+                allow_once_option_id: find_acp_permission_option(&options, &["allow_once"]),
+                allow_always_option_id: find_acp_permission_option(&options, &["allow_always"]),
                 // Prefer a one-time refusal. If only persistent refusal exists,
                 // deny the effect; the agent owns the scope of that denial.
                 reject_option_id: find_acp_permission_option(
@@ -1407,7 +1441,11 @@ fn acp_permission_response_option_id(
             // Never promote a one-operation grant to a persistent allow_always.
             let inner = state.inner.lock().expect("state mutex poisoned");
             let allowed = opencode_auto_approval_allowed_locked(&inner, session_id);
-            Ok(if allowed { approval.allow_once_option_id.clone() } else { None })
+            Ok(if allowed {
+                approval.allow_once_option_id.clone()
+            } else {
+                None
+            })
         }
         AcpAgent::Gemini | AcpAgent::Kimi => Ok(None),
     }
@@ -1454,11 +1492,17 @@ fn handle_acp_notification(
                 return Ok(());
             };
             if agent == AcpAgent::Kimi
-                && update.get("sessionUpdate").and_then(Value::as_str)
+                && update
+                    .get("sessionUpdate")
+                    .and_then(Value::as_str)
                     .is_some_and(|kind| is_acp_config_update_kind(kind, agent))
             {
                 return state.sync_kimi_config_observation(
-                    session_id, update, None, Some(runtime_token), true,
+                    session_id,
+                    update,
+                    None,
+                    Some(runtime_token),
+                    true,
                 );
             }
             if agent == AcpAgent::OpenCode
@@ -1470,13 +1514,7 @@ fn handle_acp_notification(
                 record_opencode_config_notification(runtime_state, update);
             }
             handle_acp_session_update(
-                update,
-                state,
-                session_id,
-                input_tx,
-                turn_state,
-                recorder,
-                agent,
+                update, state, session_id, input_tx, turn_state, recorder, agent,
             )?;
         }
         "error" => {
@@ -1753,8 +1791,11 @@ fn find_acp_permission_option(options: &[Value], kinds: &[&str]) -> Option<Strin
             if option.get("kind").and_then(Value::as_str) != Some(*kind) {
                 return None;
             }
-            option.get("optionId").and_then(Value::as_str)
-                .filter(|id| !id.is_empty()).map(str::to_owned)
+            option
+                .get("optionId")
+                .and_then(Value::as_str)
+                .filter(|id| !id.is_empty())
+                .map(str::to_owned)
         })
     })
 }
@@ -1763,10 +1804,7 @@ fn find_acp_permission_option(options: &[Value], kinds: &[&str]) -> Option<Strin
 /// context. Cursor and Gemini historically send flat `toolName` +
 /// `description` fields; ACP v1 agents such as OpenCode send a nested
 /// `toolCall` carrying the title, kind, content, and locations instead.
-fn summarize_acp_permission_request(
-    params: &Value,
-    agent: AcpAgent,
-) -> (String, String) {
+fn summarize_acp_permission_request(params: &Value, agent: AcpAgent) -> (String, String) {
     const MAX_TITLE_CHARS: usize = 1_000;
     const MAX_TOOL_NAME_CHARS: usize = 200;
     let tool_call = params.get("toolCall").unwrap_or(&Value::Null);
@@ -1782,8 +1820,7 @@ fn summarize_acp_permission_request(
         .and_then(Value::as_str)
         .or_else(|| tool_call.get("title").and_then(Value::as_str))
         .unwrap_or(&tool_name);
-    let description =
-        bounded_acp_approval_text(raw_description, MAX_TITLE_CHARS, &tool_name);
+    let description = bounded_acp_approval_text(raw_description, MAX_TITLE_CHARS, &tool_name);
 
     let mut details = vec![format!(
         "{} requested approval for `{tool_name}`.",
@@ -1802,9 +1839,11 @@ fn summarize_acp_permission_request(
         let Some(value) = value.filter(|value| !value.is_null()) else {
             continue;
         };
-        let rendered =
-            serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string());
-        details.push(format!("{label}:\n{}", truncate_acp_approval_detail(&rendered)));
+        let rendered = serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string());
+        details.push(format!(
+            "{label}:\n{}",
+            truncate_acp_approval_detail(&rendered)
+        ));
     }
 
     (

@@ -121,7 +121,9 @@ impl AppState {
                 response_tx,
             })
             .map_err(|err| {
-                CodexResponseError::Transport(format!("failed to queue Codex request `{method}`: {err}"))
+                CodexResponseError::Transport(format!(
+                    "failed to queue Codex request `{method}`: {err}"
+                ))
             })?;
 
         match response_rx.recv_timeout(timeout + Duration::from_secs(1)) {
@@ -129,9 +131,9 @@ impl AppState {
             Err(mpsc::RecvTimeoutError::Timeout) => Err(CodexResponseError::Timeout(format!(
                 "timed out waiting for Codex request `{method}`"
             ))),
-            Err(mpsc::RecvTimeoutError::Disconnected) => Err(CodexResponseError::Transport(format!(
-                "Codex request `{method}` did not return a result"
-            ))),
+            Err(mpsc::RecvTimeoutError::Disconnected) => Err(CodexResponseError::Transport(
+                format!("Codex request `{method}` did not return a result"),
+            )),
         }
     }
 
@@ -334,15 +336,13 @@ impl AppState {
                 .sessions
                 .iter()
                 .filter_map(|record| match &record.runtime {
-                    SessionRuntime::Codex(handle) if handle.runtime_id == runtime_id => {
-                        Some((
-                            record.session.id.clone(),
-                            matches!(
-                                record.session.status,
-                                SessionStatus::Active | SessionStatus::Approval
-                            ),
-                        ))
-                    }
+                    SessionRuntime::Codex(handle) if handle.runtime_id == runtime_id => Some((
+                        record.session.id.clone(),
+                        matches!(
+                            record.session.status,
+                            SessionStatus::Active | SessionStatus::Approval
+                        ),
+                    )),
                     _ => None,
                 })
                 .collect::<Vec<_>>();

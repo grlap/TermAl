@@ -308,7 +308,9 @@ fn verify_scoped_write_path_after_parent_creation(
         )));
     }
 
-    Ok(normalize_user_facing_path(&canonical_parent.join(file_name)))
+    Ok(normalize_user_facing_path(
+        &canonical_parent.join(file_name),
+    ))
 }
 
 /// Normalizes user-facing paths for equality and containment checks.

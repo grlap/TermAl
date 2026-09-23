@@ -11,9 +11,7 @@ const CODEX_MCP_STATUS_MAX_PAGES: usize = 50;
 const CODEX_MCP_STATUS_TIMEOUT: Duration = Duration::from_secs(30);
 const CODEX_MCP_STATUS_TOTAL_TIMEOUT: Duration = Duration::from_secs(60);
 
-fn codex_mcp_request_timeout(
-    deadline: std::time::Instant,
-) -> Result<Duration, ApiError> {
+fn codex_mcp_request_timeout(deadline: std::time::Instant) -> Result<Duration, ApiError> {
     let remaining = deadline.saturating_duration_since(std::time::Instant::now());
     if remaining.is_zero() {
         return Err(ApiError::internal(

@@ -29,7 +29,6 @@
 // anchor the visible assistant message for the turn so the UI can
 // scroll to it when it first appears.
 
-
 /// Queues a subagent result for later flushing. Subagent results must
 /// appear *before* the final assistant reply, but arrive mid-turn
 /// before TermAl knows which reply will be the final one; buffering

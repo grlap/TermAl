@@ -241,7 +241,9 @@ fn acceptance_evaluation_submit_authority_locked(
     let index = inner
         .find_delegation_index_by_child_session_id(child)
         .ok_or_else(|| {
-            ApiError::conflict("acceptance evaluation submission requires an active evaluator child")
+            ApiError::conflict(
+                "acceptance evaluation submission requires an active evaluator child",
+            )
         })?;
     let delegation = &inner.delegations[index];
     let record = inner
@@ -259,17 +261,23 @@ fn acceptance_evaluation_submit_authority_locked(
             "acceptance evaluation submission requires an active local read-only evaluator",
         ));
     }
-    let target = delegation.acceptance_evaluation.as_ref().ok_or_else(|| {
-        ApiError::conflict("this evaluator delegation has no evaluation target")
-    })?;
+    let target = delegation
+        .acceptance_evaluation
+        .as_ref()
+        .ok_or_else(|| ApiError::conflict("this evaluator delegation has no evaluation target"))?;
     // An open write still admits the child. Recorded in memory is not final
     // while its submit call holds the guard: let the narrowly scoped tool
     // reach execution's retryable in-progress response, never an agent prompt.
     if matches!(
         target.submission,
         AcceptanceEvaluationSubmission::Recorded { .. }
-    ) && !inner.acceptance_evaluation_submissions_in_flight.contains(&delegation.id) {
-        return Err(ApiError::conflict(ACCEPTANCE_EVALUATION_ALREADY_RECORDED_ERROR));
+    ) && !inner
+        .acceptance_evaluation_submissions_in_flight
+        .contains(&delegation.id)
+    {
+        return Err(ApiError::conflict(
+            ACCEPTANCE_EVALUATION_ALREADY_RECORDED_ERROR,
+        ));
     }
     Ok(AcceptanceEvaluationSubmitAuthority {
         delegation_id: delegation.id.clone(),
@@ -330,7 +338,9 @@ fn acceptance_evaluation_spawn_admission_locked(
 ) -> Result<(), ApiError> {
     let current = acceptance_evaluation_host_target_locked(inner, parent_session_id)?;
     if current.store != seed.store {
-        return Err(ApiError::conflict(ACCEPTANCE_EVALUATION_STORE_CHANGED_ERROR));
+        return Err(ApiError::conflict(
+            ACCEPTANCE_EVALUATION_STORE_CHANGED_ERROR,
+        ));
     }
     refuse_second_active_acceptance_evaluator_locked(inner, &seed.store, &seed.work_ref, None)
 }
@@ -403,14 +413,17 @@ fn acceptance_evaluation_open_write_notice_locked(
     let earlier = inner.delegations.iter().find(|delegation| {
         delegation.mode == DelegationMode::Evaluator
             && Some(delegation.id.as_str()) != except_delegation_id
-            && delegation.acceptance_evaluation.as_ref().is_some_and(|target| {
-                target.judges(store, work_ref)
-                    && matches!(
-                        target.submission,
-                        AcceptanceEvaluationSubmission::Pending { .. }
-                            | AcceptanceEvaluationSubmission::Unconfirmed { .. }
-                    )
-            })
+            && delegation
+                .acceptance_evaluation
+                .as_ref()
+                .is_some_and(|target| {
+                    target.judges(store, work_ref)
+                        && matches!(
+                            target.submission,
+                            AcceptanceEvaluationSubmission::Pending { .. }
+                                | AcceptanceEvaluationSubmission::Unconfirmed { .. }
+                        )
+                })
     })?;
     Some(format!(
         "An earlier evaluator of this task (delegation `{}`) ended with its write outcome unknown: the tracker may already hold its verdict. Read the task before relying on this evaluation alone.",
@@ -563,7 +576,8 @@ impl AppState {
                 inner.sessions[index].session.agent,
                 engram_project_for_session_locked(&inner, parent_session_id)
                     .and_then(|project| project.engram.as_ref())
-                    .and_then(|settings| settings.acceptance_evaluation.clone()).unwrap_or_default(),
+                    .and_then(|settings| settings.acceptance_evaluation.clone())
+                    .unwrap_or_default(),
             )
         };
         // The ref is caller text: never hand it to a shell shim or to a store
@@ -583,9 +597,8 @@ impl AppState {
         // Two reads: the CLI refuses `--full` together with the evidence
         // windows, and the windowed read clips long criteria.
         let mut full_args = show_args.clone();
-        show_args.extend(
-            ["show", work_ref.as_str(), "--notes", "--gates", "--json"].map(str::to_owned),
-        );
+        show_args
+            .extend(["show", work_ref.as_str(), "--notes", "--gates", "--json"].map(str::to_owned));
         full_args.extend(["show", work_ref.as_str(), "--full", "--json"].map(str::to_owned));
         let mut show = read(connection, &show_args, ENGRAM_WORK_BINDING_COMMAND_TIMEOUT)
             .map_err(|e| acceptance_evaluation_transport_error("engram work show", e))?;
@@ -640,14 +653,26 @@ impl AppState {
             }
         };
         let preferred_mode = defaults.default_mode.filter(|mode| {
-            *mode != AcceptanceEvaluationMode::SubAgent && admitted.as_ref().is_some_and(|modes| modes.iter().any(|word| AcceptanceEvaluationMode::parse(word) == Some(*mode)))
+            *mode != AcceptanceEvaluationMode::SubAgent
+                && admitted.as_ref().is_some_and(|modes| {
+                    modes
+                        .iter()
+                        .any(|word| AcceptanceEvaluationMode::parse(word) == Some(*mode))
+                })
         });
-        let mode = select_acceptance_evaluation_mode(task.pinned_mode.as_deref().or(preferred_mode.map(AcceptanceEvaluationMode::word)), admitted.as_deref())
-            .map_err(ApiError::conflict)?;
+        let mode = select_acceptance_evaluation_mode(
+            task.pinned_mode
+                .as_deref()
+                .or(preferred_mode.map(AcceptanceEvaluationMode::word)),
+            admitted.as_deref(),
+        )
+        .map_err(ApiError::conflict)?;
 
         match mode {
             AcceptanceEvaluationMode::IndependentSession => {
-                let default_agent = defaults.evaluator_agent.filter(|agent| matches!(agent, Agent::Claude | Agent::Codex));
+                let default_agent = defaults
+                    .evaluator_agent
+                    .filter(|agent| matches!(agent, Agent::Claude | Agent::Codex));
                 let agent = request.agent.or(default_agent).unwrap_or_else(|| {
                     auto_acceptance_evaluator_agent(parent_agent, &self.agent_readiness_snapshot())
                 });
@@ -764,7 +789,11 @@ impl AppState {
         let mut target = acceptance_evaluation_host_target_locked(&inner, child)?;
         match authority.target.store.as_ref() {
             Some(store) if *store == target.store => {}
-            Some(_) => return Err(ApiError::conflict(ACCEPTANCE_EVALUATION_STORE_CHANGED_ERROR)),
+            Some(_) => {
+                return Err(ApiError::conflict(
+                    ACCEPTANCE_EVALUATION_STORE_CHANGED_ERROR,
+                ));
+            }
             None => {
                 return Err(ApiError::conflict(
                     "this evaluation does not say which tracker store it was read from; request a new evaluation",
@@ -831,7 +860,10 @@ impl AppState {
         )?;
         // An open write replays its stored command, not this freshly built
         // candidate. Host identity/model growth must not reject a valid replay.
-        if matches!(authority.target.submission, AcceptanceEvaluationSubmission::None) {
+        if matches!(
+            authority.target.submission,
+            AcceptanceEvaluationSubmission::None
+        ) {
             validate_acceptance_evaluation_command_size(&target.connection, &args)?;
         }
 
@@ -981,7 +1013,12 @@ impl AppState {
         except_delegation_id: Option<&str>,
     ) -> Option<String> {
         let inner = self.inner.lock().expect("state mutex poisoned");
-        acceptance_evaluation_open_write_notice_locked(&inner, store, work_ref, except_delegation_id)
+        acceptance_evaluation_open_write_notice_locked(
+            &inner,
+            store,
+            work_ref,
+            except_delegation_id,
+        )
     }
 
     /// Makes an open write durable, or refuses. `Ok` says what runs: for a
@@ -1075,7 +1112,8 @@ impl AppState {
                 match self.commit_locked_with_persist_dispatch(&mut inner) {
                     Ok((_, dispatch)) => Some(dispatch),
                     Err(err) => {
-                        if let Some(target) = inner.delegations[index].acceptance_evaluation.as_mut()
+                        if let Some(target) =
+                            inner.delegations[index].acceptance_evaluation.as_mut()
                         {
                             target.submission = AcceptanceEvaluationSubmission::None;
                         }
@@ -1286,7 +1324,8 @@ impl AppState {
                 Ok((_, dispatch)) => (inner.delegations[index].clone(), previous, dispatch),
                 Err(err) => {
                     if recorded {
-                        if let Some(target) = inner.delegations[index].acceptance_evaluation.as_mut()
+                        if let Some(target) =
+                            inner.delegations[index].acceptance_evaluation.as_mut()
                         {
                             target.submission = previous;
                         }
@@ -1300,7 +1339,9 @@ impl AppState {
         }
         let confirmed = self.confirm_acceptance_evaluation_submission_durable(authority, &written);
         if confirmed.is_err() && recorded {
-            self.restore_unacknowledged_acceptance_evaluation_recorded(authority, &written, previous);
+            self.restore_unacknowledged_acceptance_evaluation_recorded(
+                authority, &written, previous,
+            );
         }
         confirmed
     }

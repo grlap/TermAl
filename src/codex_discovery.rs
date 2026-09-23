@@ -203,10 +203,7 @@ fn discover_codex_threads_from_home(
     codex_home: &FsPath,
     discovery_scopes: &[PathBuf],
 ) -> Result<Vec<DiscoveredCodexThread>> {
-    Ok(
-        discover_codex_threads_with_subagents_from_home(codex_home, discovery_scopes)?
-            .threads,
-    )
+    Ok(discover_codex_threads_with_subagents_from_home(codex_home, discovery_scopes)?.threads)
 }
 
 fn discover_codex_threads_with_subagents_from_home(
@@ -275,9 +272,7 @@ fn discover_codex_threads_with_subagents_from_home(
         params.push(rusqlite::types::Value::from(scope.clone()));
         params.push(rusqlite::types::Value::from(like_pattern.clone()));
     }
-    params.push(rusqlite::types::Value::from(
-        delegated_child_prompt_pattern,
-    ));
+    params.push(rusqlite::types::Value::from(delegated_child_prompt_pattern));
     let rows = statement.query_map(rusqlite::params_from_iter(params), |row| {
         Ok((
             row.get::<_, String>(0)?,
@@ -295,10 +290,7 @@ fn discover_codex_threads_with_subagents_from_home(
             .as_deref()
             .is_some_and(is_delegated_child_bootstrap_title)
             && normalized_scopes.iter().any(|scope| {
-                codex_discovery_scope_contains(
-                    scope.to_string_lossy().as_ref(),
-                    FsPath::new(&cwd),
-                )
+                codex_discovery_scope_contains(scope.to_string_lossy().as_ref(), FsPath::new(&cwd))
             })
         {
             discovery.delegation_thread_ids.insert(thread_id);
@@ -310,8 +302,7 @@ fn discover_codex_threads_with_subagents_from_home(
     // to return the normal per-home cap without allowing child rows to crowd
     // out an older top-level conversation.
     let query_row_limit = i64::try_from(
-        MAX_DISCOVERED_CODEX_THREADS_PER_HOME
-            .saturating_add(discovery.delegation_thread_ids.len()),
+        MAX_DISCOVERED_CODEX_THREADS_PER_HOME.saturating_add(discovery.delegation_thread_ids.len()),
     )
     .unwrap_or(i64::MAX);
     let query = format!(
@@ -396,10 +387,7 @@ fn discover_codex_threads_with_subagents_from_home(
                 continue;
             }
             if normalized_scopes.iter().any(|scope| {
-                codex_discovery_scope_contains(
-                    scope.to_string_lossy().as_ref(),
-                    FsPath::new(&cwd),
-                )
+                codex_discovery_scope_contains(scope.to_string_lossy().as_ref(), FsPath::new(&cwd))
             }) {
                 discovery.subagent_thread_ids.insert(thread_id);
             }

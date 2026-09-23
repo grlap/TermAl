@@ -12,7 +12,13 @@ struct TestTempRoot {
 
 impl TestTempRoot {
     fn create(prefix: &str) -> Self {
-        assert!(!prefix.is_empty() && prefix.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-'), "test root prefix must be a simple name");
+        assert!(
+            !prefix.is_empty()
+                && prefix
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-'),
+            "test root prefix must be a simple name"
+        );
         let path = test_temp_dir().join(format!("{prefix}-{}", Uuid::new_v4()));
         fs::create_dir_all(&path).expect("test temp root should be created");
         Self::own(path)
@@ -35,7 +41,10 @@ impl TestTempRoot {
 
     fn observe_cleanup(&self) -> mpsc::Receiver<std::result::Result<(), String>> {
         let (tx, rx) = mpsc::channel();
-        self.cleanup_observers.lock().expect("cleanup observers mutex poisoned").push(tx);
+        self.cleanup_observers
+            .lock()
+            .expect("cleanup observers mutex poisoned")
+            .push(tx);
         rx
     }
 }
@@ -47,7 +56,9 @@ impl Drop for TestTempRoot {
             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
             Err(error) => Err(format!(
                 "test temp root not removed: {} ({error}; kind={:?}; os={:?})",
-                self.path.display(), error.kind(), error.raw_os_error()
+                self.path.display(),
+                error.kind(),
+                error.raw_os_error()
             )),
         };
         if let Err(detail) = &outcome {
@@ -56,7 +67,10 @@ impl Drop for TestTempRoot {
         // This receipt is a resource-release barrier: AppState keeps its root
         // last, so every state-owned file handle is gone before it is sent.
         let observers = self.cleanup_observers.get_mut().unwrap_or_else(|poisoned| {
-            eprintln!("cleanup observers mutex poisoned for {}; completing removal receipt", self.path.display());
+            eprintln!(
+                "cleanup observers mutex poisoned for {}; completing removal receipt",
+                self.path.display()
+            );
             poisoned.into_inner()
         });
         for observer in observers.drain(..) {
@@ -81,7 +95,13 @@ impl<F: FnOnce() -> std::result::Result<(), String>> TestAppStateCleanup<F> {
         let root = state.test_temp_root.as_ref().expect("fixture temp root");
         let cleaned = root.observe_cleanup();
         let path = root.path().to_owned();
-        Self { state: Some(state), release: Some(release), cleaned, holder, path }
+        Self {
+            state: Some(state),
+            release: Some(release),
+            cleaned,
+            holder,
+            path,
+        }
     }
 
     fn finish(self) {
@@ -108,7 +128,9 @@ impl<F: FnOnce() -> std::result::Result<(), String>> Drop for TestAppStateCleanu
                 Ok(Ok(())) => (),
                 Ok(Err(detail)) => failures.push(detail),
                 Err(payload) => {
-                    let detail = payload.downcast_ref::<String>().map(String::as_str)
+                    let detail = payload
+                        .downcast_ref::<String>()
+                        .map(String::as_str)
                         .or_else(|| payload.downcast_ref::<&str>().copied())
                         .unwrap_or("non-string panic payload");
                     failures.push(format!("fixture release panicked: {detail}"));
@@ -116,14 +138,27 @@ impl<F: FnOnce() -> std::result::Result<(), String>> Drop for TestAppStateCleanu
             }
         }
         drop(self.state.take());
-        let outcome = self.cleaned.recv_timeout(TEST_PHASE_DEADLOCK_GUARD)
-            .map_err(|error| format!("{} retained fixture {}: {error}", self.holder, self.path.display()))
+        let outcome = self
+            .cleaned
+            .recv_timeout(TEST_PHASE_DEADLOCK_GUARD)
+            .map_err(|error| {
+                format!(
+                    "{} retained fixture {}: {error}",
+                    self.holder,
+                    self.path.display()
+                )
+            })
             .and_then(|outcome| outcome);
         if let Err(detail) = outcome {
             failures.push(detail);
         }
         if !failures.is_empty() {
-            let detail = format!("{} fixture {}: {}", self.holder, self.path.display(), failures.join("; "));
+            let detail = format!(
+                "{} fixture {}: {}",
+                self.holder,
+                self.path.display(),
+                failures.join("; ")
+            );
             if std::thread::panicking() {
                 eprintln!("fixture cleanup during unwind failed: {detail}");
             } else {

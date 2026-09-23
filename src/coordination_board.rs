@@ -24,8 +24,7 @@ const COORDINATION_BOARD_MAX_LIVE_ENTRIES_PER_SCOPE: usize = 512;
 const COORDINATION_BOARD_MAX_DISTINCT_KEYS_PER_SCOPE: usize = 4_096;
 const COORDINATION_BOARD_HISTORY_REVISIONS_PER_KEY: usize = 100;
 const COORDINATION_BOARD_IDEMPOTENCY_RECEIPTS_PER_SCOPE: usize = 4_096;
-const COORDINATION_BOARD_LIFECYCLE_CLEANUP_TIMEOUT: Duration =
-    Duration::from_millis(100);
+const COORDINATION_BOARD_LIFECYCLE_CLEANUP_TIMEOUT: Duration = Duration::from_millis(100);
 const COORDINATION_BOARD_READ_SAFE_RETRY_CLAUSE: &str =
     "no mutation was attempted by this read operation, so retry the same request";
 const COORDINATION_BOARD_WRITE_SAFE_RETRY_CLAUSE: &str =
@@ -341,8 +340,7 @@ impl CoordinationBoardStore {
         )
         .context("failed to begin coordination board key read snapshot")?;
         ensure_coordination_board_scope_active(&transaction, scope_project_id)?;
-        let scope_generation =
-            query_coordination_board_generation(&transaction, scope_project_id)?;
+        let scope_generation = query_coordination_board_generation(&transaction, scope_project_id)?;
         let current = query_coordination_board_head(&transaction, scope_project_id, key)?;
         let result = match current {
             Some(head) if !head.is_deleted() => Ok(CoordinationBoardGetResponse {
@@ -710,11 +708,7 @@ impl CoordinationBoardStore {
         self.delete_scope_with_timeout(scope_project_id, self.write_admission_timeout)
     }
 
-    fn delete_scope_with_timeout(
-        &self,
-        scope_project_id: &str,
-        timeout: Duration,
-    ) -> Result<bool> {
+    fn delete_scope_with_timeout(&self, scope_project_id: &str, timeout: Duration) -> Result<bool> {
         validate_coordination_board_scope_id(scope_project_id)?;
         let deadline = std::time::Instant::now()
             .checked_add(timeout)
@@ -750,8 +744,7 @@ impl CoordinationBoardStore {
                          ON CONFLICT(scope_id) DO NOTHING",
                         rusqlite::params![
                             scope_project_id,
-                            chrono::Utc::now()
-                                .to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+                            chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
                         ],
                     )
                     .context("failed to fence deleted coordination board scope")?;
@@ -1022,10 +1015,7 @@ fn sort_coordination_board_object_keys(value: &Value) -> Value {
             entries.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
             let mut sorted = serde_json::Map::new();
             for (key, value) in entries {
-                sorted.insert(
-                    key.clone(),
-                    sort_coordination_board_object_keys(value),
-                );
+                sorted.insert(key.clone(), sort_coordination_board_object_keys(value));
             }
             Value::Object(sorted)
         }

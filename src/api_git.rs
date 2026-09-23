@@ -19,7 +19,6 @@
 // `Query<FileQuery>`, `Json<...>`) are the only contract this file
 // exposes.
 
-
 /// Reads Git status.
 async fn read_git_status(
     State(state): State<AppState>,

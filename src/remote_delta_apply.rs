@@ -174,10 +174,9 @@ impl AppState {
                 )
                 .map_err(|err| anyhow::Error::new(RemoteAuthorityApplyError(err)))?;
             }
-            if let (Some(connection), Some(generation)) = (
-                expected_connection,
-                expected_state_continuity_generation,
-            ) {
+            if let (Some(connection), Some(generation)) =
+                (expected_connection, expected_state_continuity_generation)
+            {
                 connection
                     .ensure_state_continuity_generation(generation)
                     .map_err(|err| anyhow::Error::new(RemoteAuthorityApplyError(err)))?;
@@ -196,15 +195,16 @@ impl AppState {
                 return Ok(());
             }
             expected_connection.map_or_else(
-                || self.remote_registry.config_generation.load(Ordering::Acquire),
+                || {
+                    self.remote_registry
+                        .config_generation
+                        .load(Ordering::Acquire)
+                },
                 |connection| connection.authority_generation,
             )
         };
-        let remote_delta_replay_key = Self::remote_delta_replay_key_for_generation(
-            remote_id,
-            authority_generation,
-            &event,
-        );
+        let remote_delta_replay_key =
+            Self::remote_delta_replay_key_for_generation(remote_id, authority_generation, &event);
         if self.should_skip_remote_applied_delta_replay(&remote_delta_replay_key) {
             return Ok(());
         }
@@ -260,8 +260,8 @@ impl AppState {
                             inner.sessions.get(local_index).cloned().ok_or_else(|| {
                                 anyhow!("local proxy session `{local_session_id}` not found")
                             })?;
-                        let revision = self
-                            .commit_remote_session_created_locked(&mut inner, &local_record)?;
+                        let revision =
+                            self.commit_remote_session_created_locked(&mut inner, &local_record)?;
                         let local_record = inner.sessions.get(local_index).ok_or_else(|| {
                             anyhow!("local proxy session `{local_session_id}` not found")
                         })?;
@@ -392,11 +392,7 @@ impl AppState {
                                     "remote MessageCreated index `{message_index}` leaves a gap in session `{session_id}`"
                                 ));
                             }
-                            insert_message_on_record(
-                                record,
-                                local_message_index,
-                                message.clone(),
-                            );
+                            insert_message_on_record(record, local_message_index, message.clone());
                             message_index
                         };
                         record.session.preview = preview.clone();
@@ -945,11 +941,7 @@ impl AppState {
                                 output_language: output_language.clone(),
                                 status,
                             };
-                            insert_message_on_record(
-                                record,
-                                local_message_index,
-                                message.clone(),
-                            );
+                            insert_message_on_record(record, local_message_index, message.clone());
                             (Some(message), message_index)
                         };
                         record.session.preview = preview.clone();
@@ -1127,11 +1119,7 @@ impl AppState {
                                 author: Author::Assistant,
                                 agents: agents.clone(),
                             };
-                            insert_message_on_record(
-                                record,
-                                local_message_index,
-                                message.clone(),
-                            );
+                            insert_message_on_record(record, local_message_index, message.clone());
                             (Some(message), message_index)
                         };
                         record.session.preview = preview.clone();

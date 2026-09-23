@@ -103,10 +103,7 @@ fn test_stop_fence_gate_key(state: &AppState, session_id: &str) -> TestStopFence
 }
 
 #[cfg(test)]
-fn install_test_stop_fence_gate(
-    state: &AppState,
-    session_id: &str,
-) -> TestStopFenceGateControl {
+fn install_test_stop_fence_gate(state: &AppState, session_id: &str) -> TestStopFenceGateControl {
     let (claimed_tx, claimed_rx) = std::sync::mpsc::channel();
     let (release_tx, release_rx) = std::sync::mpsc::channel();
     let key = test_stop_fence_gate_key(state, session_id);
@@ -313,8 +310,10 @@ impl AppState {
             .session_mut_by_index(index)
             .expect("session index should be valid");
         let original_len = record.queued_prompts.len();
-        let cancel_admission = record.queued_prompts.front().is_some_and(|queued|
-            queued.pending_prompt.id == prompt_id && (queued.is_engram_retained() || record.engram.admission_in_progress.is_some()));
+        let cancel_admission = record.queued_prompts.front().is_some_and(|queued| {
+            queued.pending_prompt.id == prompt_id
+                && (queued.is_engram_retained() || record.engram.admission_in_progress.is_some())
+        });
         record
             .queued_prompts
             .retain(|queued| queued.pending_prompt.id != prompt_id);
@@ -464,7 +463,9 @@ impl AppState {
         if self.remote_session_target(session_id)?.is_some() {
             return self.proxy_remote_stop_session(session_id);
         }
-        if self.stop_waiting_engram_admission(session_id)? { return Ok(self.snapshot()); }
+        if self.stop_waiting_engram_admission(session_id)? {
+            return Ok(self.snapshot());
+        }
 
         let options = StopSessionOptions::default();
         let (response, claim) = self.begin_requested_stop_session(session_id, &options)?;
@@ -536,10 +537,9 @@ impl AppState {
                 .session_mut_by_index(index)
                 .expect("session index should be valid");
             let owner_generation = match runtime_token.as_ref() {
-                Some(runtime_token) => record.claim_runtime_stop(
-                    RuntimeStopOwnerKind::UserStop,
-                    runtime_token.clone(),
-                ),
+                Some(runtime_token) => {
+                    record.claim_runtime_stop(RuntimeStopOwnerKind::UserStop, runtime_token.clone())
+                }
                 None => record.claim_missing_runtime_stop(RuntimeStopOwnerKind::UserStop),
             };
             record.session.status = SessionStatus::Stopping;
@@ -628,9 +628,17 @@ impl AppState {
                 && owns_stop
                 && claim.was_active
                 && record.active_turn_generation == claim.active_turn_generation
-                && claim.runtime_token.as_ref().is_some_and(|token| record.runtime.matches_runtime_token(token))
-                && claim.admission_owner.as_ref().is_some_and(|owner| owner.matches(record))
-                && record.queued_prompts.front()
+                && claim
+                    .runtime_token
+                    .as_ref()
+                    .is_some_and(|token| record.runtime.matches_runtime_token(token))
+                && claim
+                    .admission_owner
+                    .as_ref()
+                    .is_some_and(|owner| owner.matches(record))
+                && record
+                    .queued_prompts
+                    .front()
                     .and_then(|queued| queued.engram_evaluate.as_ref())
                     .and_then(|prepared| prepared.begun_grant_id.as_ref())
                     .is_some_and(|grant| record.engram.active_grant_id.as_ref() == Some(grant));
@@ -640,7 +648,11 @@ impl AppState {
                 let callbacks = std::mem::take(&mut record.deferred_stop_callbacks);
                 (runtime_token, callbacks)
             });
-            record.session.status = if restore_admitted { SessionStatus::Active } else { SessionStatus::Error };
+            record.session.status = if restore_admitted {
+                SessionStatus::Active
+            } else {
+                SessionStatus::Error
+            };
             record.session.preview = make_preview(&failure_text);
             let message_index = push_message_on_record(
                 record,
@@ -715,7 +727,13 @@ impl AppState {
         requested_claim: Option<RequestedStopClaim>,
     ) -> std::result::Result<StateResponse, ApiError> {
         self.wait_for_engram_waiver_completion(session_id);
-        let (runtime_to_stop, stop_failure_is_best_effort, stop_token, stop_owner_generation, admission_owner) = {
+        let (
+            runtime_to_stop,
+            stop_failure_is_best_effort,
+            stop_token,
+            stop_owner_generation,
+            admission_owner,
+        ) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_visible_session_index(session_id)
@@ -773,10 +791,8 @@ impl AppState {
             let stop_owner_generation = match requested_claim.as_ref() {
                 Some(claim) => claim.owner_generation,
                 None => match stop_token.as_ref() {
-                    Some(stop_token) => record.claim_runtime_stop(
-                        RuntimeStopOwnerKind::UserStop,
-                        stop_token.clone(),
-                    ),
+                    Some(stop_token) => record
+                        .claim_runtime_stop(RuntimeStopOwnerKind::UserStop, stop_token.clone()),
                     None => record.claim_missing_runtime_stop(RuntimeStopOwnerKind::UserStop),
                 },
             };
@@ -800,25 +816,25 @@ impl AppState {
             match shutdown_stopped_runtime(runtime_to_stop, &format!("session `{session_id}`")) {
                 Ok(()) => false,
                 Err(err) => {
-                if stop_failure_is_best_effort {
-                    let pending_revocation_target = {
-                        let mut inner = self.inner.lock().expect("state mutex poisoned");
-                        let index = inner
-                            .find_visible_session_index(session_id)
-                            .ok_or_else(|| ApiError::not_found("session not found"))?;
-                        take_pending_engram_mcp_revocation_after_stop_failure_locked(
-                            &mut inner,
-                            index,
-                            stop_owner_generation,
-                            options.clone(),
-                        )
-                    };
-                    if let Some(target) = pending_revocation_target {
-                        // A shared Codex interrupt failure already detached the
-                        // session. Finalize that exact failure under the
-                        // transferred revocation fence instead of retrying an
-                        // interrupt that can only no-op after detachment.
-                        let mut outcome = self.finalize_revoked_engram_mcp_runtimes(
+                    if stop_failure_is_best_effort {
+                        let pending_revocation_target = {
+                            let mut inner = self.inner.lock().expect("state mutex poisoned");
+                            let index = inner
+                                .find_visible_session_index(session_id)
+                                .ok_or_else(|| ApiError::not_found("session not found"))?;
+                            take_pending_engram_mcp_revocation_after_stop_failure_locked(
+                                &mut inner,
+                                index,
+                                stop_owner_generation,
+                                options.clone(),
+                            )
+                        };
+                        if let Some(target) = pending_revocation_target {
+                            // A shared Codex interrupt failure already detached the
+                            // session. Finalize that exact failure under the
+                            // transferred revocation fence instead of retrying an
+                            // interrupt that can only no-op after detachment.
+                            let mut outcome = self.finalize_revoked_engram_mcp_runtimes(
                             EngramMcpRuntimeRevocationShutdownBatch {
                                 shutdowns: vec![EngramMcpRuntimeRevocationShutdown {
                                     target,
@@ -831,103 +847,106 @@ impl AppState {
                                 pending_session_ids: Vec::new(),
                             },
                         );
-                        self.resume_revoked_engram_mcp_sessions(&mut outcome);
-                        return match self.finish_revoked_engram_mcp_runtime_outcome(outcome) {
-                            Ok(_) => Err(ApiError::internal(format!(
-                                "failed to stop session `{session_id}` cleanly after shared Codex detach: {err:#}"
-                            ))),
-                            Err(cleanup_error) => Err(ApiError::internal(format!(
-                                "failed to stop session `{session_id}` cleanly: {err:#}; {}",
-                                cleanup_error.message
-                            ))),
-                        };
-                    }
-                    eprintln!(
-                        "session cleanup warning> failed to stop session `{session_id}` cleanly: {err:#}"
-                    );
-                    true
-                } else {
-                    let (deferred_callbacks, token, pending_revocation_target) = {
-                        let mut inner = self.inner.lock().expect("state mutex poisoned");
-                        let index = inner
-                            .find_visible_session_index(session_id)
-                            .ok_or_else(|| ApiError::not_found("session not found"))?;
-                        let pending_revocation_target =
-                            take_pending_engram_mcp_revocation_after_stop_failure_locked(
-                                &mut inner,
-                                index,
-                                stop_owner_generation,
-                                options.clone(),
-                            );
-                        if pending_revocation_target.is_some() {
-                            (Vec::new(), None, pending_revocation_target)
-                        } else {
-                            let record = inner
-                                .session_mut_by_index(index)
-                                .expect("session index should be valid");
-                            if !record.runtime_stop_is_owned_by(
-                                RuntimeStopOwnerKind::UserStop,
-                                stop_token
-                                    .as_ref()
-                                    .expect("a failed runtime shutdown must retain its token"),
-                                stop_owner_generation,
-                            ) {
-                                return Err(ApiError::internal(format!(
-                                    "failed to stop session `{session_id}` cleanly after stop ownership changed: {err:#}"
-                                )));
-                            }
-                            if let Some(claim) = requested_claim.as_ref() {
-                                // Keep the fence and payload until the public
-                                // failure transition restores the original turn.
-                                drop(inner);
-                                self.record_requested_stop_failure(
-                                    session_id, claim, &format!("failed to stop session cleanly: {err:#}"), true,
-                                );
-                                return Err(ApiError::internal(format!(
-                                    "failed to stop session `{session_id}` cleanly: {err:#}"
-                                )));
-                            }
-                            record.clear_runtime_stop();
-                            let deferred_callbacks =
-                                std::mem::take(&mut record.deferred_stop_callbacks);
-                            let token = record.runtime.runtime_token();
-                            (deferred_callbacks, token, None)
+                            self.resume_revoked_engram_mcp_sessions(&mut outcome);
+                            return match self.finish_revoked_engram_mcp_runtime_outcome(outcome) {
+                                Ok(_) => Err(ApiError::internal(format!(
+                                    "failed to stop session `{session_id}` cleanly after shared Codex detach: {err:#}"
+                                ))),
+                                Err(cleanup_error) => Err(ApiError::internal(format!(
+                                    "failed to stop session `{session_id}` cleanly: {err:#}; {}",
+                                    cleanup_error.message
+                                ))),
+                            };
                         }
-                    };
-
-                    if let Some(target) = pending_revocation_target {
-                        let cleanup_result = self.teardown_revoked_engram_mcp_runtimes(
-                            EngramMcpRuntimeRevocationBatch {
-                                targets: vec![target],
-                                pending_session_ids: Vec::new(),
-                                newly_pending_session_ids: Vec::new(),
-                            },
-                            "pending Engram MCP revocation after failed Stop",
+                        eprintln!(
+                            "session cleanup warning> failed to stop session `{session_id}` cleanly: {err:#}"
                         );
-                        return match cleanup_result {
-                            Ok(_) => Ok(self.snapshot()),
-                            Err(cleanup_error) => Err(ApiError::internal(format!(
-                                "failed to stop session `{session_id}` cleanly: {err:#}; pending Engram MCP revocation also degraded: {}",
-                                cleanup_error.message
-                            ))),
+                        true
+                    } else {
+                        let (deferred_callbacks, token, pending_revocation_target) = {
+                            let mut inner = self.inner.lock().expect("state mutex poisoned");
+                            let index = inner
+                                .find_visible_session_index(session_id)
+                                .ok_or_else(|| ApiError::not_found("session not found"))?;
+                            let pending_revocation_target =
+                                take_pending_engram_mcp_revocation_after_stop_failure_locked(
+                                    &mut inner,
+                                    index,
+                                    stop_owner_generation,
+                                    options.clone(),
+                                );
+                            if pending_revocation_target.is_some() {
+                                (Vec::new(), None, pending_revocation_target)
+                            } else {
+                                let record = inner
+                                    .session_mut_by_index(index)
+                                    .expect("session index should be valid");
+                                if !record.runtime_stop_is_owned_by(
+                                    RuntimeStopOwnerKind::UserStop,
+                                    stop_token
+                                        .as_ref()
+                                        .expect("a failed runtime shutdown must retain its token"),
+                                    stop_owner_generation,
+                                ) {
+                                    return Err(ApiError::internal(format!(
+                                        "failed to stop session `{session_id}` cleanly after stop ownership changed: {err:#}"
+                                    )));
+                                }
+                                if let Some(claim) = requested_claim.as_ref() {
+                                    // Keep the fence and payload until the public
+                                    // failure transition restores the original turn.
+                                    drop(inner);
+                                    self.record_requested_stop_failure(
+                                        session_id,
+                                        claim,
+                                        &format!("failed to stop session cleanly: {err:#}"),
+                                        true,
+                                    );
+                                    return Err(ApiError::internal(format!(
+                                        "failed to stop session `{session_id}` cleanly: {err:#}"
+                                    )));
+                                }
+                                record.clear_runtime_stop();
+                                let deferred_callbacks =
+                                    std::mem::take(&mut record.deferred_stop_callbacks);
+                                let token = record.runtime.runtime_token();
+                                (deferred_callbacks, token, None)
+                            }
                         };
-                    }
 
-                    // Replay any terminal callbacks that arrived during the failed shutdown window.
-                    // The flag is now cleared so the callback methods will proceed normally.
-                    if let Some(token) = token {
-                        self.replay_deferred_runtime_stop_callbacks(
-                            session_id,
-                            &token,
-                            deferred_callbacks,
-                        );
-                    }
+                        if let Some(target) = pending_revocation_target {
+                            let cleanup_result = self.teardown_revoked_engram_mcp_runtimes(
+                                EngramMcpRuntimeRevocationBatch {
+                                    targets: vec![target],
+                                    pending_session_ids: Vec::new(),
+                                    newly_pending_session_ids: Vec::new(),
+                                },
+                                "pending Engram MCP revocation after failed Stop",
+                            );
+                            return match cleanup_result {
+                                Ok(_) => Ok(self.snapshot()),
+                                Err(cleanup_error) => Err(ApiError::internal(format!(
+                                    "failed to stop session `{session_id}` cleanly: {err:#}; pending Engram MCP revocation also degraded: {}",
+                                    cleanup_error.message
+                                ))),
+                            };
+                        }
 
-                    return Err(ApiError::internal(format!(
-                        "failed to stop session `{session_id}` cleanly: {err:#}"
-                    )));
+                        // Replay any terminal callbacks that arrived during the failed shutdown window.
+                        // The flag is now cleared so the callback methods will proceed normally.
+                        if let Some(token) = token {
+                            self.replay_deferred_runtime_stop_callbacks(
+                                session_id,
+                                &token,
+                                deferred_callbacks,
+                            );
+                        }
+
+                        return Err(ApiError::internal(format!(
+                            "failed to stop session `{session_id}` cleanly: {err:#}"
+                        )));
+                    }
                 }
-            }
             }
         } else {
             false
@@ -937,22 +956,35 @@ impl AppState {
         // marker, before preparing any successor or closing the remote grant.
         {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
-            let index = inner.find_visible_session_index(session_id)
+            let index = inner
+                .find_visible_session_index(session_id)
                 .ok_or_else(|| ApiError::not_found("session not found"))?;
             let record = &mut inner.sessions[index];
             let owns_stop = match stop_token.as_ref() {
-                Some(token) => record.runtime_stop_is_owned_by(RuntimeStopOwnerKind::UserStop, token, stop_owner_generation),
-                None => record.missing_runtime_stop_is_owned_by(RuntimeStopOwnerKind::UserStop, stop_owner_generation),
+                Some(token) => record.runtime_stop_is_owned_by(
+                    RuntimeStopOwnerKind::UserStop,
+                    token,
+                    stop_owner_generation,
+                ),
+                None => record.missing_runtime_stop_is_owned_by(
+                    RuntimeStopOwnerKind::UserStop,
+                    stop_owner_generation,
+                ),
             };
             if !owns_stop {
                 return Ok(self.snapshot_from_inner(&inner));
             }
-            if admission_owner.as_ref().is_some_and(|owner| owner.matches(record)) {
+            if admission_owner
+                .as_ref()
+                .is_some_and(|owner| owner.matches(record))
+            {
                 record.queued_prompts.pop_front();
                 sync_pending_prompts(record);
-                self.commit_locked(&mut inner).map_err(|error| ApiError::internal(format!(
-                    "failed to persist stopped admission retirement: {error:#}"
-                )))?;
+                self.commit_locked(&mut inner).map_err(|error| {
+                    ApiError::internal(format!(
+                        "failed to persist stopped admission retirement: {error:#}"
+                    ))
+                })?;
             }
         }
         let checkpoint_failure = match self.checkpoint_engram_turn_off_lock(
@@ -1025,8 +1057,7 @@ impl AppState {
                 let record = inner
                     .session_mut_by_index(index)
                     .expect("session index should be valid");
-                let stopped_mailbox_notification =
-                    record.active_turn_mailbox_notification.take();
+                let stopped_mailbox_notification = record.active_turn_mailbox_notification.take();
                 take_and_abandon_engram_pending_dispatch(record);
                 record.clear_runtime();
                 record.clear_runtime_reset();
@@ -1058,9 +1089,7 @@ impl AppState {
                 let (terminal_status, terminal_text) = match checkpoint_failure.as_deref() {
                     Some(detail) => (
                         SessionStatus::Error,
-                        format!(
-                            "Stop completed, but the Engram checkpoint failed: {detail}"
-                        ),
+                        format!("Stop completed, but the Engram checkpoint failed: {detail}"),
                     ),
                     None => (
                         SessionStatus::Idle,
@@ -1138,8 +1167,7 @@ impl AppState {
             }
             let should_dispatch_next = options.dispatch_queued_prompts_on_success
                 && prepared_queued_turn.as_ref().is_some_and(|prepared| {
-                    inner.sessions[index].engram.dispatch_generation
-                        == prepared.dispatch_generation
+                    inner.sessions[index].engram.dispatch_generation == prepared.dispatch_generation
                         && inner.sessions[index]
                             .queued_prompts
                             .front()
@@ -1240,23 +1268,21 @@ impl AppState {
                         }
                     }
 
-                    let queued_runtime_to_shutdown = match (
-                        queued_turn_result.as_ref(),
-                        &inner.sessions[index].runtime,
-                    ) {
-                        (Ok(Some(_)), SessionRuntime::Claude(handle)) => {
-                            Some(KillableRuntime::Claude(handle.clone()))
-                        }
-                        (Ok(Some(_)), SessionRuntime::Codex(handle)) => {
-                            Some(KillableRuntime::Codex(handle.clone()))
-                        }
-                        (Ok(Some(_)), SessionRuntime::Acp(handle)) => {
-                            Some(KillableRuntime::Acp(handle.clone()))
-                        }
-                        (Ok(Some(_)), SessionRuntime::None)
-                        | (Ok(None), _)
-                        | (Err(_), _) => None,
-                    };
+                    let queued_runtime_to_shutdown =
+                        match (queued_turn_result.as_ref(), &inner.sessions[index].runtime) {
+                            (Ok(Some(_)), SessionRuntime::Claude(handle)) => {
+                                Some(KillableRuntime::Claude(handle.clone()))
+                            }
+                            (Ok(Some(_)), SessionRuntime::Codex(handle)) => {
+                                Some(KillableRuntime::Codex(handle.clone()))
+                            }
+                            (Ok(Some(_)), SessionRuntime::Acp(handle)) => {
+                                Some(KillableRuntime::Acp(handle.clone()))
+                            }
+                            (Ok(Some(_)), SessionRuntime::None) | (Ok(None), _) | (Err(_), _) => {
+                                None
+                            }
+                        };
 
                     if let Some(post_stop_record) = post_stop_record {
                         inner.sessions[index] = post_stop_record;
@@ -1291,34 +1317,37 @@ impl AppState {
             stopped_mailbox_notification,
             revision,
         ) = match transition {
-                Ok(transition) => transition,
-                Err((error, queued_runtime_to_shutdown, stopped_mailbox_notification)) => {
-                    if let Some(runtime) = queued_runtime_to_shutdown {
-                        if let Err(cleanup_err) = shutdown_removed_runtime(
-                            runtime,
-                            &format!("uncommitted queued successor for session `{session_id}`"),
-                        ) {
-                            eprintln!(
-                                "session cleanup warning> failed to tear down uncommitted queued successor for session `{session_id}`: {cleanup_err:#}"
-                            );
-                        }
+            Ok(transition) => transition,
+            Err((error, queued_runtime_to_shutdown, stopped_mailbox_notification)) => {
+                if let Some(runtime) = queued_runtime_to_shutdown {
+                    if let Err(cleanup_err) = shutdown_removed_runtime(
+                        runtime,
+                        &format!("uncommitted queued successor for session `{session_id}`"),
+                    ) {
+                        eprintln!(
+                            "session cleanup warning> failed to tear down uncommitted queued successor for session `{session_id}`: {cleanup_err:#}"
+                        );
                     }
-                    if let Some(notification) = stopped_mailbox_notification.as_ref() {
-                        if let Err(requeue_error) =
-                            self.requeue_rejected_mailbox_notification(notification)
-                        {
-                            eprintln!(
-                                "mailbox> failed restoring the stopped wake after persistence failure for `{}` / `{}`: {requeue_error:#}",
-                                notification.session_id, notification.mailbox_id
-                            );
-                        }
-                    }
-                    if let Some(start_error) = queued_followup_start_error {
-                        let settled = self.finish_queued_followup_start_error(start_error);
-                        eprintln!("queued follow-up start after stop failed: {}", settled.message);
-                    }
-                    return Err(error);
                 }
+                if let Some(notification) = stopped_mailbox_notification.as_ref() {
+                    if let Err(requeue_error) =
+                        self.requeue_rejected_mailbox_notification(notification)
+                    {
+                        eprintln!(
+                            "mailbox> failed restoring the stopped wake after persistence failure for `{}` / `{}`: {requeue_error:#}",
+                            notification.session_id, notification.mailbox_id
+                        );
+                    }
+                }
+                if let Some(start_error) = queued_followup_start_error {
+                    let settled = self.finish_queued_followup_start_error(start_error);
+                    eprintln!(
+                        "queued follow-up start after stop failed: {}",
+                        settled.message
+                    );
+                }
+                return Err(error);
+            }
         };
         self.publish_message_created_delta_parts(revision, created_messages);
         self.publish_message_updated_delta_parts(revision, pending_interaction_updates);

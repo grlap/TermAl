@@ -93,8 +93,8 @@ impl FileChangeTrackingDiagnostic {
     fn finish_held_work(&mut self, held_work: Duration) {
         self.held_work = held_work;
         // Do not subtract path_checks_subset again: it is already in scan.
-        self.remainder = held_work
-            .saturating_sub(self.scan_inclusive + self.late_summaries + self.commit);
+        self.remainder =
+            held_work.saturating_sub(self.scan_inclusive + self.late_summaries + self.commit);
     }
 }
 
@@ -644,7 +644,9 @@ mod state_broadcast_mailbox_tests {
         assert_eq!(pending.len(), STATE_BROADCAST_MAILBOX_CAPACITY);
         match pending.first() {
             Some(StateBroadcastWork::DeltaPayload(value)) => assert_eq!(value, "delta-0"),
-            _ => panic!("expected first retained item to be the first delta after dropped snapshot"),
+            _ => {
+                panic!("expected first retained item to be the first delta after dropped snapshot")
+            }
         }
         match pending.last() {
             Some(StateBroadcastWork::DeltaPayload(value)) => {
@@ -1108,7 +1110,6 @@ fn fresh_agent_readiness_cache(default_workdir: &str) -> AgentReadinessCache {
     AgentReadinessCache::fresh(collect_agent_readiness(default_workdir))
 }
 
-
 /// Holds stop session options.
 #[derive(Clone)]
 struct StopSessionOptions {
@@ -1172,7 +1173,6 @@ enum RuntimeMatchOutcome {
     SessionMissing,
     RuntimeMismatch,
 }
-
 
 /// Normalizes remote configs.
 fn normalize_remote_configs(remotes: Vec<RemoteConfig>) -> Result<Vec<RemoteConfig>, ApiError> {
@@ -1600,9 +1600,7 @@ impl StateInner {
             })
             .or_insert(remote_revision);
     }
-
 }
-
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct EngramMcpInstalledDescriptor {
@@ -1857,7 +1855,11 @@ impl SessionRecord {
         } else {
             take_and_abandon_engram_pending_dispatch(self);
         }
-        if let Some(current) = self.queued_prompts.iter_mut().find(|current| current.pending_prompt.id == queued.pending_prompt.id) {
+        if let Some(current) = self
+            .queued_prompts
+            .iter_mut()
+            .find(|current| current.pending_prompt.id == queued.pending_prompt.id)
+        {
             *current = queued;
         } else {
             self.queued_prompts.push_front(queued);
@@ -1894,11 +1896,7 @@ impl SessionRecord {
         self.engram_mcp_runtime_quarantined = false;
     }
 
-    fn claim_runtime_stop(
-        &mut self,
-        kind: RuntimeStopOwnerKind,
-        token: RuntimeToken,
-    ) -> u64 {
+    fn claim_runtime_stop(&mut self, kind: RuntimeStopOwnerKind, token: RuntimeToken) -> u64 {
         self.runtime_stop_generation = self.runtime_stop_generation.wrapping_add(1).max(1);
         let generation = self.runtime_stop_generation;
         self.runtime_stop_in_progress = true;
@@ -1944,7 +1942,6 @@ impl SessionRecord {
         })
     }
 
-
     fn missing_runtime_stop_is_owned_by(
         &self,
         kind: RuntimeStopOwnerKind,
@@ -1957,10 +1954,7 @@ impl SessionRecord {
 
     /// Returns the paired remote identity when this record is a valid proxy.
     fn remote_proxy_identity(&self) -> Result<Option<(&str, &str)>> {
-        validate_remote_proxy_identity(
-            self.remote_id.as_deref(),
-            self.remote_session_id.as_deref(),
-        )
+        validate_remote_proxy_identity(self.remote_id.as_deref(), self.remote_session_id.as_deref())
     }
 
     /// Returns whether remote proxy.
@@ -1978,8 +1972,6 @@ impl SessionRecord {
             .is_ok_and(|identity| identity.is_none())
     }
 }
-
-
 
 /// Handles Codex approval policy from JSON value.
 fn codex_approval_policy_from_json_value(value: &Value) -> Option<CodexApprovalPolicy> {

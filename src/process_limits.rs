@@ -71,9 +71,9 @@ fn requested_open_file_soft_limit() -> u64 {
 
 #[cfg(unix)]
 fn parse_open_file_soft_limit(value: &str) -> Result<u64, String> {
-    let limit = value.parse::<u64>().map_err(|_| {
-        format!("{OPEN_FILE_LIMIT_ENV} must be a positive integer, got `{value}`")
-    })?;
+    let limit = value
+        .parse::<u64>()
+        .map_err(|_| format!("{OPEN_FILE_LIMIT_ENV} must be a positive integer, got `{value}`"))?;
     if limit == 0 {
         return Err(format!(
             "{OPEN_FILE_LIMIT_ENV} must be a positive integer, got `0`"
@@ -91,9 +91,7 @@ struct OpenFileLimitChange {
 }
 
 #[cfg(unix)]
-fn raise_process_open_file_soft_limit(
-    requested: u64,
-) -> std::io::Result<OpenFileLimitChange> {
+fn raise_process_open_file_soft_limit(requested: u64) -> std::io::Result<OpenFileLimitChange> {
     let mut limits = std::mem::MaybeUninit::<libc::rlimit>::uninit();
     // SAFETY: `limits` points to writable storage for one `rlimit`, and
     // getrlimit initializes it on success.
@@ -109,8 +107,7 @@ fn raise_process_open_file_soft_limit(
     } else {
         Some(limits.rlim_max as u64)
     };
-    let effective_soft =
-        desired_open_file_soft_limit(previous_soft, hard_limit, requested);
+    let effective_soft = desired_open_file_soft_limit(previous_soft, hard_limit, requested);
 
     if effective_soft > previous_soft {
         limits.rlim_cur = effective_soft as libc::rlim_t;
@@ -129,11 +126,7 @@ fn raise_process_open_file_soft_limit(
 }
 
 #[cfg(unix)]
-fn desired_open_file_soft_limit(
-    current_soft: u64,
-    hard_limit: Option<u64>,
-    requested: u64,
-) -> u64 {
+fn desired_open_file_soft_limit(current_soft: u64, hard_limit: Option<u64>, requested: u64) -> u64 {
     let requested = hard_limit.map_or(requested, |hard| requested.min(hard));
     current_soft.max(requested)
 }
@@ -145,10 +138,7 @@ mod process_limit_tests {
     #[test]
     fn open_file_limit_target_raises_caps_and_never_lowers() {
         assert_eq!(desired_open_file_soft_limit(256, None, 8_192), 8_192);
-        assert_eq!(
-            desired_open_file_soft_limit(256, Some(4_096), 8_192),
-            4_096
-        );
+        assert_eq!(desired_open_file_soft_limit(256, Some(4_096), 8_192), 4_096);
         assert_eq!(
             desired_open_file_soft_limit(16_384, Some(32_768), 8_192),
             16_384

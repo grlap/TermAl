@@ -41,11 +41,20 @@ impl PersistFenceTarget {
     /// not open another connection or treat row existence as proof.
     fn is_already_durable(&self, connection: &rusqlite::Connection) -> Result<bool> {
         match self {
-            Self::EngramAdmission { session_id, content } => {
-                let stored: Option<String> = connection.query_row(
-                    "SELECT value_json FROM sessions WHERE id = ?1", [session_id], |row| row.get(0),
-                ).optional()?;
-                let Some(stored) = stored else { return Ok(false); };
+            Self::EngramAdmission {
+                session_id,
+                content,
+            } => {
+                let stored: Option<String> = connection
+                    .query_row(
+                        "SELECT value_json FROM sessions WHERE id = ?1",
+                        [session_id],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                let Some(stored) = stored else {
+                    return Ok(false);
+                };
                 let actual: PersistedSessionRecord = serde_json::from_str(&stored)?;
                 Ok(engram_admission_persisted_content(&actual) == *content)
             }
@@ -137,7 +146,8 @@ impl PersistFence {
     }
 
     fn finish(&self, result: PersistFenceResult) {
-        self.completion.resolve_at(result, std::time::Instant::now());
+        self.completion
+            .resolve_at(result, std::time::Instant::now());
     }
 }
 
@@ -250,7 +260,10 @@ impl PersistFenceBatch {
 
     fn expire_resolved(&mut self) {
         self.pending.retain(|fence| {
-            fence.completion.poll_at(std::time::Instant::now()).is_none()
+            fence
+                .completion
+                .poll_at(std::time::Instant::now())
+                .is_none()
         });
     }
 
@@ -269,7 +282,11 @@ impl PersistFenceBatch {
             return;
         }
         self.pending.retain(|fence| {
-            if fence.completion.poll_at(std::time::Instant::now()).is_some() {
+            if fence
+                .completion
+                .poll_at(std::time::Instant::now())
+                .is_some()
+            {
                 return false;
             }
             let proof = if fence.target.is_in_delta(delta) {

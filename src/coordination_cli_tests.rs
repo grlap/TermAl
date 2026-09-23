@@ -368,9 +368,11 @@ fn coordination_cli_help_is_not_a_usage_error() {
         &mut rendered,
     )
     .expect("help should render");
-    assert!(String::from_utf8(rendered)
-        .expect("help output should be UTF-8")
-        .contains("termal mailbox send"));
+    assert!(
+        String::from_utf8(rendered)
+            .expect("help output should be UTF-8")
+            .contains("termal mailbox send")
+    );
 }
 
 #[test]
@@ -409,7 +411,10 @@ fn coordination_cli_sessions_list_returns_the_root_inventory_without_a_caller() 
     )
     .expect("sessions list should succeed");
     server.join().expect("test server should join");
-    assert_eq!(requests.lock().expect("request log mutex poisoned").len(), 1);
+    assert_eq!(
+        requests.lock().expect("request log mutex poisoned").len(),
+        1
+    );
 
     let ids = output["sessions"]
         .as_array()
@@ -438,7 +443,10 @@ fn coordination_cli_scoped_sessions_list_rejects_a_delegation_child_caller() {
     .expect_err("a delegation child must not enumerate peers");
     server.join().expect("test server should join");
     assert!(err.to_string().contains("delegation-child session"));
-    assert_eq!(requests.lock().expect("request log mutex poisoned").len(), 1);
+    assert_eq!(
+        requests.lock().expect("request log mutex poisoned").len(),
+        1
+    );
     assert_eq!(coordination_cli_exit_code(&err), 1);
 }
 
@@ -551,7 +559,10 @@ fn coordination_cli_mailbox_commands_reject_child_and_self_targets_like_the_mcp_
     .expect_err("sending to yourself must be refused");
     server.join().expect("test server should join");
     assert!(err.to_string().contains("is this session"));
-    assert_eq!(requests.lock().expect("request log mutex poisoned").len(), 1);
+    assert_eq!(
+        requests.lock().expect("request log mutex poisoned").len(),
+        1
+    );
 }
 
 #[test]
@@ -562,16 +573,19 @@ fn mailbox_cursor_cli_send_exposes_both_receipt_snapshots() {
                 return (200, root_inventory_state());
             }
             assert_eq!(request.path, "/api/sessions/session-root/mailboxes/send");
-            (202, json!({
-                "mailboxId": "mailbox-1",
-                "messageId": "mailbox-message-9",
-                "sequence": 9,
-                "unreadDepth": 1,
-                "notificationDisposition": "queuedBehindActiveTurn",
-                "duplicate": false,
-                "senderProcessedThrough": cursor,
-                "senderCursorAdvanced": advanced
-            }))
+            (
+                202,
+                json!({
+                    "mailboxId": "mailbox-1",
+                    "messageId": "mailbox-message-9",
+                    "sequence": 9,
+                    "unreadDepth": 1,
+                    "notificationDisposition": "queuedBehindActiveTurn",
+                    "duplicate": false,
+                    "senderProcessedThrough": cursor,
+                    "senderCursorAdvanced": advanced
+                }),
+            )
         });
         let command = CoordinationCliCommand::MailboxSend {
             as_session: "session-root".to_owned(),
@@ -602,8 +616,14 @@ fn mailbox_cursor_cli_read_uses_response_boundary_not_zero_default() {
             if request.path == "/api/state" {
                 return (200, root_inventory_state());
             }
-            assert_eq!(request.path, "/api/sessions/session-root/mailboxes/mailbox-1/read");
-            (200, json!({ "afterSequence": used, "processedThrough": 7, "messages": [] }))
+            assert_eq!(
+                request.path,
+                "/api/sessions/session-root/mailboxes/mailbox-1/read"
+            );
+            (
+                200,
+                json!({ "afterSequence": used, "processedThrough": 7, "messages": [] }),
+            )
         });
         let command = CoordinationCliCommand::MailboxRead {
             as_session: "session-root".to_owned(),
@@ -615,7 +635,10 @@ fn mailbox_cursor_cli_read_uses_response_boundary_not_zero_default() {
         server.join().unwrap();
         let requests = requests.lock().unwrap();
         let sent: Value = serde_json::from_str(&requests[1].body).unwrap();
-        assert_eq!(sent.get("afterSequence"), explicit.map(|value| json!(value)).as_ref());
+        assert_eq!(
+            sent.get("afterSequence"),
+            explicit.map(|value| json!(value)).as_ref()
+        );
         assert_eq!(result["afterSequence"], used);
         assert_eq!(result["processedThrough"], 7);
         let mut rendered = Vec::new();
@@ -629,16 +652,34 @@ fn mailbox_cursor_cli_read_uses_response_boundary_not_zero_default() {
 #[test]
 fn mailbox_receipt_cli_parses_forwards_and_renders_committed_cursor() {
     let invocation = parse_coordination_cli_args(cli_args(&[
-        "mailbox", "acknowledge", "--as-session", "session-root",
-        "--mailbox-id", "mailbox-1", "--receipt", "issued-token",
-    ])).unwrap();
+        "mailbox",
+        "acknowledge",
+        "--as-session",
+        "session-root",
+        "--mailbox-id",
+        "mailbox-1",
+        "--receipt",
+        "issued-token",
+    ]))
+    .unwrap();
     let (base_url, requests, server) = spawn_test_mcp_http_server(2, |request| {
-        if request.path == "/api/state" { return (200, root_inventory_state()); }
-        assert_eq!(request.path, "/api/sessions/session-root/mailboxes/mailbox-1/acknowledge");
-        assert_eq!(serde_json::from_str::<Value>(&request.body).unwrap(), json!({"receipt": "issued-token"}));
-        (200, json!({"id": "mailbox-1", "latestSequence": 9, "unreadCount": 0,
+        if request.path == "/api/state" {
+            return (200, root_inventory_state());
+        }
+        assert_eq!(
+            request.path,
+            "/api/sessions/session-root/mailboxes/mailbox-1/acknowledge"
+        );
+        assert_eq!(
+            serde_json::from_str::<Value>(&request.body).unwrap(),
+            json!({"receipt": "issued-token"})
+        );
+        (
+            200,
+            json!({"id": "mailbox-1", "latestSequence": 9, "unreadCount": 0,
             "participants": [{"sessionId": "session-root", "displayName": "Root",
-                "processedThrough": 9}]}))
+                "processedThrough": 9}]}),
+        )
     });
     let result = execute_coordination_cli(&invocation.command, &base_url).unwrap();
     server.join().unwrap();
@@ -647,10 +688,21 @@ fn mailbox_receipt_cli_parses_forwards_and_renders_committed_cursor() {
     render_coordination_cli_output(&invocation.command, &result, &mut output).unwrap();
     assert!(String::from_utf8(output).unwrap().contains("through #9"));
     for extra in [vec!["--expected", "0"], vec!["--through", "1"]] {
-        let mut args = cli_args(&["mailbox", "acknowledge", "--as-session", "session-root",
-            "--mailbox-id", "mailbox-1", "--receipt", "issued-token"]);
+        let mut args = cli_args(&[
+            "mailbox",
+            "acknowledge",
+            "--as-session",
+            "session-root",
+            "--mailbox-id",
+            "mailbox-1",
+            "--receipt",
+            "issued-token",
+        ]);
         args.extend(cli_args(&extra));
-        assert!(parse_coordination_cli_args(args).is_err(), "mixed acknowledgement formats must fail before HTTP");
+        assert!(
+            parse_coordination_cli_args(args).is_err(),
+            "mixed acknowledgement formats must fail before HTTP"
+        );
     }
 }
 
@@ -695,7 +747,10 @@ fn coordination_cli_read_read_message_and_acknowledge_forward_exact_contracts() 
             ("POST", "/api/sessions/session-root/mailboxes/mailbox-1/read") => {
                 let body: Value =
                     serde_json::from_str(&request.body).expect("read body should be JSON");
-                assert_eq!(body, json!({ "afterSequence": 7, "limit": 5, "issueReceipt": true }));
+                assert_eq!(
+                    body,
+                    json!({ "afterSequence": 7, "limit": 5, "issueReceipt": true })
+                );
                 (
                     200,
                     json!({ "afterSequence": 7, "processedThrough": 7, "messages": [{
@@ -776,8 +831,8 @@ fn coordination_cli_read_read_message_and_acknowledge_forward_exact_contracts() 
         match (request.method.as_str(), request.path.as_str()) {
             ("GET", "/api/state") => (200, root_inventory_state()),
             ("POST", "/api/sessions/session-root/mailboxes/mailbox-1/acknowledge") => {
-                let body: Value = serde_json::from_str(&request.body)
-                    .expect("acknowledge body should be JSON");
+                let body: Value =
+                    serde_json::from_str(&request.body).expect("acknowledge body should be JSON");
                 assert_eq!(
                     body,
                     json!({ "expectedProcessedThrough": 7, "processedThrough": 8 })
@@ -940,8 +995,9 @@ fn coordination_cli_never_consumes_an_option_token_as_a_value() {
     assert!(usage_message(&swallowed).contains("next argument is the option `--json`"));
     assert_eq!(coordination_cli_exit_code(&swallowed), 2);
 
-    let duplicate_json = parse_coordination_cli_args(cli_args(&["sessions", "list", "--json", "--json"]))
-        .expect_err("a repeated --json must be rejected");
+    let duplicate_json =
+        parse_coordination_cli_args(cli_args(&["sessions", "list", "--json", "--json"]))
+            .expect_err("a repeated --json must be rejected");
     assert!(usage_message(&duplicate_json).contains("`--json` was given more than once"));
 
     for help in ["-h", "--help"] {
@@ -1062,9 +1118,11 @@ fn coordination_cli_human_output_neutralizes_terminal_control_sequences() {
         &mut rendered,
     )
     .expect("hostile single message should render");
-    assert!(!String::from_utf8(rendered)
-        .expect("rendered message should be UTF-8")
-        .contains('\u{1b}'));
+    assert!(
+        !String::from_utf8(rendered)
+            .expect("rendered message should be UTF-8")
+            .contains('\u{1b}')
+    );
 
     let mut rendered = Vec::new();
     render_coordination_cli_output(
@@ -1109,7 +1167,11 @@ fn coordination_cli_human_output_neutralizes_terminal_control_sequences() {
     .expect("hostile session list should render");
     let sessions = String::from_utf8(rendered).expect("rendered sessions should be UTF-8");
     assert!(!sessions.contains('\u{1b}'));
-    assert_eq!(sessions.lines().count(), 1, "a hostile name must stay on its row");
+    assert_eq!(
+        sessions.lines().count(),
+        1,
+        "a hostile name must stay on its row"
+    );
     assert_eq!(
         sessions.matches('\t').count(),
         4,
@@ -1134,9 +1196,9 @@ fn coordination_cli_message_sources_are_bounded_by_the_mailbox_body_cap() {
     assert!(usage_message(&oversized).contains("exceeds the mailbox body limit"));
     assert_eq!(coordination_cli_exit_code(&oversized), 2);
 
-    let inline = resolve_coordination_cli_message(&CoordinationCliMessageSource::Inline(
-        format!("{exact}y"),
-    ))
+    let inline = resolve_coordination_cli_message(&CoordinationCliMessageSource::Inline(format!(
+        "{exact}y"
+    )))
     .expect_err("an inline body over the cap must be rejected");
     assert!(usage_message(&inline).contains("mailbox body limit"));
 
@@ -1181,9 +1243,10 @@ fn coordination_cli_rejects_malformed_successful_responses() {
     let (base_url, _requests, server) = spawn_test_mcp_http_server(2, |request| {
         match (request.method.as_str(), request.path.as_str()) {
             ("GET", "/api/state") => (200, root_inventory_state()),
-            ("POST", "/api/sessions/session-root/mailboxes/mailbox-1/read") => {
-                (200, json!({ "afterSequence": 0, "processedThrough": 0, "messages": [{ "id": 1 }] }))
-            }
+            ("POST", "/api/sessions/session-root/mailboxes/mailbox-1/read") => (
+                200,
+                json!({ "afterSequence": 0, "processedThrough": 0, "messages": [{ "id": 1 }] }),
+            ),
             _ => (404, json!({ "error": "unexpected" })),
         }
     });
@@ -1196,7 +1259,10 @@ fn coordination_cli_rejects_malformed_successful_responses() {
     let err = execute_coordination_cli(&command, &base_url)
         .expect_err("bridge rejects invalid mailbox read envelopes");
     server.join().expect("test server should join");
-    assert!(err.to_string().contains("mailbox read response shape was invalid"));
+    assert!(
+        err.to_string()
+            .contains("mailbox read response shape was invalid")
+    );
 
     let (base_url, _requests, server) = spawn_test_mcp_http_server(2, |request| {
         match (request.method.as_str(), request.path.as_str()) {
@@ -1222,9 +1288,11 @@ fn coordination_cli_rejects_malformed_successful_responses() {
         &json!({ "sessions": [{ "sessionId": "session-root", "name": "x", "agent": "Codex", "status": "idle", "preview": null }] }),
     )
     .expect_err("a session entry without its workdir key is not the tool contract");
-    assert!(missing_scalar
-        .to_string()
-        .contains("sessions[0].workdir is missing or not a string"));
+    assert!(
+        missing_scalar
+            .to_string()
+            .contains("sessions[0].workdir is missing or not a string")
+    );
     validate_coordination_cli_output(
         &CoordinationCliCommand::SessionsList { as_session: None },
         &json!({ "sessions": [{ "sessionId": "session-root", "name": null, "agent": "Codex", "status": "idle", "workdir": null, "preview": null }] }),
@@ -1270,7 +1338,8 @@ fn coordination_cli_rejects_malformed_successful_responses() {
                 limit: None,
             },
             &missing_cursor,
-        ).expect_err("both cursor fields are required even on an explicit read");
+        )
+        .expect_err("both cursor fields are required even on an explicit read");
         assert!(error.to_string().contains(field));
     }
 }
@@ -1297,7 +1366,9 @@ fn coordination_cli_treats_a_closed_stdout_pipe_as_success() {
     assert!(coordination_cli_error_is_broken_pipe(&broken));
     let other = anyhow::Error::from(io::Error::from(io::ErrorKind::PermissionDenied));
     assert!(!coordination_cli_error_is_broken_pipe(&other));
-    assert!(!coordination_cli_error_is_broken_pipe(&anyhow!("not an io error")));
+    assert!(!coordination_cli_error_is_broken_pipe(&anyhow!(
+        "not an io error"
+    )));
 }
 
 #[test]
@@ -1338,14 +1409,17 @@ fn coordination_cli_validates_class_and_trims_identifier_values() {
 #[test]
 fn coordination_cli_words_select_the_entry_point_mode() {
     let expected = default_termal_session_id();
-    let mode = Mode::parse(cli_args(&["sessions", "list", "--json"])).expect("sessions list should parse");
+    let mode =
+        Mode::parse(cli_args(&["sessions", "list", "--json"])).expect("sessions list should parse");
     let Mode::CoordinationCli(invocation) = mode else {
         panic!("sessions list must select the coordination CLI mode");
     };
     assert_eq!(
         invocation,
         CoordinationCliInvocation {
-            command: CoordinationCliCommand::SessionsList { as_session: expected },
+            command: CoordinationCliCommand::SessionsList {
+                as_session: expected
+            },
             json: true,
             base_url: None,
         }

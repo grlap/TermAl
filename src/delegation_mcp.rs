@@ -1736,7 +1736,8 @@ impl TermalDelegationMcpBridge {
                     d.get("childSessionId").and_then(Value::as_str)
                         == Some(self.serving_session_id.as_str())
                         && d.get("mode").and_then(Value::as_str) == Some("evaluator")
-                        && d.get("acceptanceEvaluationAllowed").and_then(Value::as_bool)
+                        && d.get("acceptanceEvaluationAllowed")
+                            .and_then(Value::as_bool)
                             == Some(true)
                 });
         let _ = self.caller_allows_review_freeze.set(allows_review_freeze);

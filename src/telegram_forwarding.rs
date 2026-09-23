@@ -125,9 +125,7 @@ fn resolve_telegram_project_prompt_session(
     select_latest_when_missing: bool,
 ) -> Result<(Option<String>, bool)> {
     let selected_session_id = state.selected_session_id.clone();
-    if selected_session_id.is_none()
-        && fallback_session_id.is_none()
-        && !select_latest_when_missing
+    if selected_session_id.is_none() && fallback_session_id.is_none() && !select_latest_when_missing
     {
         return Ok((None, false));
     }
@@ -192,7 +190,8 @@ fn forward_relevant_assistant_messages(
             Ok(outcome) => {
                 outcome.debug_assert_invariants();
                 dirty |= outcome.dirty;
-                suppress_automatic_target |= outcome.sent_visible_content || outcome.delivery_failed;
+                suppress_automatic_target |=
+                    outcome.sent_visible_content || outcome.delivery_failed;
             }
             Err(err) => {
                 dirty = true;
@@ -201,8 +200,8 @@ fn forward_relevant_assistant_messages(
         }
     }
 
-    if let Some(session_id) =
-        target_session_id.filter(|id| !suppress_automatic_target && !checked_session_ids.contains(*id))
+    if let Some(session_id) = target_session_id
+        .filter(|id| !suppress_automatic_target && !checked_session_ids.contains(*id))
     {
         merge_assistant_forward_result(
             &mut dirty,
@@ -247,7 +246,11 @@ fn resolve_assistant_forwarding_cursor(
     state: &TelegramBotState,
     session_id: &str,
 ) -> TelegramAssistantForwardingCursor {
-    state.assistant_forwarding_cursors.get(session_id).cloned().unwrap_or_default()
+    state
+        .assistant_forwarding_cursors
+        .get(session_id)
+        .cloned()
+        .unwrap_or_default()
 }
 
 fn forward_next_assistant_message_session_ids(state: &TelegramBotState) -> Vec<String> {
@@ -553,25 +556,23 @@ fn build_assistant_forwarding_message_plan(
         None
     };
 
-    let needs_resend_truncated = if session_is_settled
-        && cursor.resend_if_grown
-        && needs_resend_full.is_none()
-    {
-        position_of_last.and_then(|pos| match &messages[pos] {
-            TelegramSessionFetchMessage::Text { author, text, .. } if author == "assistant" => {
-                let last_chars = cursor.text_chars;
-                let current_chars = text.chars().count();
-                match last_chars {
-                    None => Some(pos),
-                    Some(prev) if current_chars > prev => Some(pos),
-                    _ => None,
+    let needs_resend_truncated =
+        if session_is_settled && cursor.resend_if_grown && needs_resend_full.is_none() {
+            position_of_last.and_then(|pos| match &messages[pos] {
+                TelegramSessionFetchMessage::Text { author, text, .. } if author == "assistant" => {
+                    let last_chars = cursor.text_chars;
+                    let current_chars = text.chars().count();
+                    match last_chars {
+                        None => Some(pos),
+                        Some(prev) if current_chars > prev => Some(pos),
+                        _ => None,
+                    }
                 }
-            }
-            _ => None,
-        })
-    } else {
-        None
-    };
+                _ => None,
+            })
+        } else {
+            None
+        };
 
     // Decide where to start forwarding from. If we have no record OR the
     // recorded id has scrolled off the session, re-baseline against the current
@@ -780,9 +781,9 @@ fn forward_new_assistant_message_outcome(
             dirty: remember_assistant_forwarding_cursor(
                 state,
                 session_id,
-                TelegramAssistantForwardingCursor::active_baseline(
-                    latest_assistant_text_cursor(messages),
-                ),
+                TelegramAssistantForwardingCursor::active_baseline(latest_assistant_text_cursor(
+                    messages,
+                )),
             ),
             sent_visible_content: false,
             delivery_failed: false,
@@ -873,7 +874,8 @@ fn forward_new_assistant_message_outcome(
                 if let Err(err) = telegram.send_message(chat_id, chunk, None) {
                     log_telegram_error("failed to forward assistant message", &err);
                     delivery_failed = true;
-                    let failed_attempts = if cursor.message_id.as_deref() == Some(candidate.id.as_str())
+                    let failed_attempts = if cursor.message_id.as_deref()
+                        == Some(candidate.id.as_str())
                         && cursor.text_chars == Some(text_chars)
                         && cursor.sent_chunks == Some(chunk_index)
                     {
@@ -1139,7 +1141,10 @@ mod telegram_forwarding_message_plan_tests {
             TelegramAssistantForwardingCursor::default(),
         );
 
-        assert_eq!(candidate_texts(plan), vec!["First Telegram reply".to_owned()]);
+        assert_eq!(
+            candidate_texts(plan),
+            vec!["First Telegram reply".to_owned()]
+        );
     }
 
     #[test]

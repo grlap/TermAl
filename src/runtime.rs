@@ -22,10 +22,7 @@ the rest of the backend can work with one message model.
 /// and testable.
 fn session_stable_retry_jitter_percent(session_id: &str, completed_attempts: u32) -> u32 {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for byte in session_id
-        .bytes()
-        .chain(completed_attempts.to_le_bytes())
-    {
+    for byte in session_id.bytes().chain(completed_attempts.to_le_bytes()) {
         hash ^= u64::from(byte);
         hash = hash.wrapping_mul(0x0100_0000_01b3);
     }
@@ -42,7 +39,6 @@ fn session_stable_retry_delay(
     let base = base_delay * 2u32.saturating_pow(completed_attempts.saturating_sub(1));
     base * session_stable_retry_jitter_percent(session_id, completed_attempts) / 100
 }
-
 
 /// Represents a Codex runtime command.
 #[derive(Clone)]
@@ -134,7 +130,9 @@ fn codex_fast_service_tier<'a>(
 
 /// The retry must keep Fast enabled; only an explicit user choice selects Standard.
 fn unresolved_codex_fast_error(model: &str) -> anyhow::Error {
-    anyhow!("Codex Fast is enabled, but the current model catalog does not advertise a Fast service tier for '{model}'. Retry after refreshing the model catalog, or use /fast or settings to select Standard")
+    anyhow!(
+        "Codex Fast is enabled, but the current model catalog does not advertise a Fast service tier for '{model}'. Retry after refreshing the model catalog, or use /fast or settings to select Standard"
+    )
 }
 
 fn codex_model_supports_fast(model: &str, model_options: &[SessionModelOption]) -> bool {
@@ -902,9 +900,8 @@ impl SharedCodexSessions {
 
     fn try_lock(
         &self,
-    ) -> std::sync::TryLockResult<
-        std::sync::MutexGuard<'_, HashMap<String, SharedCodexSessionState>>,
-    > {
+    ) -> std::sync::TryLockResult<std::sync::MutexGuard<'_, HashMap<String, SharedCodexSessionState>>>
+    {
         self.inner.try_lock()
     }
 
@@ -919,9 +916,6 @@ impl SharedCodexSessions {
 
 type SharedCodexSessionMap = Arc<SharedCodexSessions>;
 type SharedCodexThreadMap = Arc<Mutex<HashMap<String, String>>>;
-
-
-
 
 /// Parses Codex reasoning effort.
 fn parse_codex_reasoning_effort(value: &str) -> Option<CodexReasoningEffort> {

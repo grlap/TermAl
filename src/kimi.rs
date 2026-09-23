@@ -10,8 +10,11 @@ const KIMI_THINKING_SET_TIMEOUT: Duration = Duration::from_secs(15);
 // A fresh worker initializes and authenticates before handling refresh. Allow
 // every bounded setup phase, model-dependent discovery, and response delivery.
 const KIMI_MODEL_REFRESH_TIMEOUT: Duration = Duration::from_secs(
-    ACP_INITIALIZE_TIMEOUT.as_secs() + ACP_AUTH_TIMEOUT.as_secs()
-        + ACP_SESSION_SETUP_TIMEOUT.as_secs() + KIMI_MODEL_SET_TIMEOUT.as_secs() + 5,
+    ACP_INITIALIZE_TIMEOUT.as_secs()
+        + ACP_AUTH_TIMEOUT.as_secs()
+        + ACP_SESSION_SETUP_TIMEOUT.as_secs()
+        + KIMI_MODEL_SET_TIMEOUT.as_secs()
+        + 5,
 );
 
 fn kimi_thinking_options(config: &Value) -> Vec<SessionModelOption> {
@@ -128,7 +131,9 @@ fn configure_kimi_manual_approvals(
         AcpAgent::Kimi,
     )?;
     if current_acp_config_option_value(&result, "mode").as_deref() != Some("default") {
-        bail!("Kimi did not acknowledge Default mode; refusing to prompt without manual approvals. Use a CLI compatible with the verified Kimi Code 2.0.2 ACP contract, then restart the session. No approval override is available");
+        bail!(
+            "Kimi did not acknowledge Default mode; refusing to prompt without manual approvals. Use a CLI compatible with the verified Kimi Code 2.0.2 ACP contract, then restart the session. No approval override is available"
+        );
     }
     Ok(result)
 }
@@ -148,7 +153,9 @@ fn configure_kimi_thinking(
     };
     let options = kimi_thinking_options(config);
     if !options.iter().any(|option| option.value == requested) {
-        bail!("Kimi did not advertise requested reasoning effort `{requested}`; refresh its choices and select a supported effort before retrying");
+        bail!(
+            "Kimi did not advertise requested reasoning effort `{requested}`; refresh its choices and select a supported effort before retrying"
+        );
     }
     if current_acp_config_option_value(config, "thinking").as_deref() == Some(requested) {
         return Ok(config.clone());
@@ -162,11 +169,15 @@ fn configure_kimi_thinking(
         AcpAgent::Kimi,
     )?;
     if current_acp_config_option_value(&result, "thinking").as_deref() != Some(requested) {
-        bail!("Kimi did not acknowledge requested reasoning effort `{requested}`; refusing to prompt with a different effort");
+        bail!(
+            "Kimi did not acknowledge requested reasoning effort `{requested}`; refusing to prompt with a different effort"
+        );
     }
     // The full 2.0.2 setter ACK must also retain manual approval mode.
     if current_acp_config_option_value(&result, "mode").as_deref() != Some("default") {
-        bail!("Kimi thinking acknowledgment did not retain Default mode; refusing to prompt without manual approvals");
+        bail!(
+            "Kimi thinking acknowledgment did not retain Default mode; refusing to prompt without manual approvals"
+        );
     }
     Ok(result)
 }
@@ -242,7 +253,9 @@ impl AppState {
         }
         let thinking_changed = admit_thinking
             && (session.kimi_effort_options != options || session.kimi_current_effort != current);
-        let models_changed = models.as_ref().is_some_and(|models| session.model_options != *models);
+        let models_changed = models
+            .as_ref()
+            .is_some_and(|models| session.model_options != *models);
         if session.agent != Agent::Kimi || (!thinking_changed && !models_changed) {
             return Ok(());
         }

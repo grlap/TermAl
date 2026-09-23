@@ -67,8 +67,13 @@ fn engram_admission_disposition(card: &EngramControlCard) -> EngramAdmissionDisp
         EngramControlCardDecision::Grant => EngramAdmissionDisposition::Ready,
         EngramControlCardDecision::Degraded => match card.refusal_code.as_deref() {
             Some("control_disabled") => EngramAdmissionDisposition::Reject,
-            Some("deadline_exceeded" | "control_unavailable" | "control_circuit_open"
-                | "dispatch_budget_exhausted" | "control_backoff") => EngramAdmissionDisposition::Retry,
+            Some(
+                "deadline_exceeded"
+                | "control_unavailable"
+                | "control_circuit_open"
+                | "dispatch_budget_exhausted"
+                | "control_backoff",
+            ) => EngramAdmissionDisposition::Retry,
             // Protocol/store faults and local persistence/ownership failures
             // do not establish non-delivery. Retain but never automatically
             // replay them; unknown future codes get the same safe disposition.
@@ -108,7 +113,11 @@ struct EngramQueuedAdmissionOwner {
 impl EngramQueuedAdmissionOwner {
     fn capture_promoted(record: &SessionRecord) -> Option<Self> {
         let owner = Self::capture(record)?;
-        record.queued_prompts.front()?.promoted_message_index.map(|_| owner)
+        record
+            .queued_prompts
+            .front()?
+            .promoted_message_index
+            .map(|_| owner)
     }
 
     fn capture(record: &SessionRecord) -> Option<Self> {
@@ -176,7 +185,11 @@ impl EngramAdmissionGuard<'_> {
             return false;
         }
         record.engram.admission_in_progress = None;
-        if !self.owner.as_ref().is_some_and(|owner| owner.matches(record)) {
+        if !self
+            .owner
+            .as_ref()
+            .is_some_and(|owner| owner.matches(record))
+        {
             return false;
         }
         self.wake.load(std::sync::atomic::Ordering::Relaxed)
@@ -262,9 +275,16 @@ impl AppState {
         }) {
             return false;
         }
-        let response = target.adapter.request(&target.connection, &EngramControlRequest::SessionStatus {
-            routing_token: routing_token.clone(),
-        }, timeout).and_then(parse_engram_result::<EngramSessionStatusResponse>);
+        let response = target
+            .adapter
+            .request(
+                &target.connection,
+                &EngramControlRequest::SessionStatus {
+                    routing_token: routing_token.clone(),
+                },
+                timeout,
+            )
+            .and_then(parse_engram_result::<EngramSessionStatusResponse>);
         if !owner.is_some_and(|owner| {
             self.queued_engram_owner_is_current(&target.connection.session_id, owner)
         }) {
@@ -502,16 +522,31 @@ impl AppState {
             .queued_prompts
             .front()
             .is_some_and(|queued| queued.engram_interrupted);
-        let decision = record.session.messages.iter().rev().find_map(|message| match message {
-            Message::EngramControl { card, .. } => Some((engram_admission_disposition(card),
-                card.decision == EngramControlCardDecision::Defer)),
-            _ => None,
-        });
-        interrupted |= record.queued_prompts.front().is_some_and(QueuedPromptRecord::is_engram_retained)
-            && decision.is_some_and(|(disposition, _)| disposition == EngramAdmissionDisposition::Reconcile);
+        let decision = record
+            .session
+            .messages
+            .iter()
+            .rev()
+            .find_map(|message| match message {
+                Message::EngramControl { card, .. } => Some((
+                    engram_admission_disposition(card),
+                    card.decision == EngramControlCardDecision::Defer,
+                )),
+                _ => None,
+            });
+        interrupted |= record
+            .queued_prompts
+            .front()
+            .is_some_and(QueuedPromptRecord::is_engram_retained)
+            && decision.is_some_and(|(disposition, _)| {
+                disposition == EngramAdmissionDisposition::Reconcile
+            });
         let waiting = record.engram.dispatch_generation == generation
             && !record.queued_prompts.is_empty()
-            && (interrupted || decision.is_some_and(|(disposition, _)| disposition == EngramAdmissionDisposition::Retry));
+            && (interrupted
+                || decision.is_some_and(|(disposition, _)| {
+                    disposition == EngramAdmissionDisposition::Retry
+                }));
         if !waiting {
             return EngramAuthorizationParkOutcome::Superseded;
         }
@@ -572,11 +607,7 @@ impl AppState {
                 .queued_prompts
                 .front()
                 .and_then(|queued| queued.engram_bind.clone());
-            (
-                prepared,
-                bind,
-                record.engram.recovered_admission,
-            )
+            (prepared, bind, record.engram.recovered_admission)
         };
         if let Some(bind) = bind {
             if bind.connection != target.connection
@@ -650,10 +681,7 @@ impl AppState {
                 // A begin receipt cannot prove that the provider never saw the
                 // prompt. Close that grant, retain the interrupted prompt, and
                 // never drain it under a fresh grant after a host restart.
-                self.interrupt_queued_engram_admission(
-                    &target.connection.session_id,
-                    owner,
-                )?;
+                self.interrupt_queued_engram_admission(&target.connection.session_id, owner)?;
                 // Commit the interruption before closing the last remote
                 // evidence of possible provider delivery.
                 self.confirm_engram_admission_durable(
@@ -759,9 +787,7 @@ impl AppState {
             // The owner match fences the exact retained queue head and
             // generation. Only lower Active when Engram still owns the live
             // turn; a concurrent Stop (or its rollback) owns that transition.
-            if record.session.status == SessionStatus::Active
-                && !record.runtime_stop_in_progress
-            {
+            if record.session.status == SessionStatus::Active && !record.runtime_stop_in_progress {
                 record.session.status = SessionStatus::Idle;
                 record.session.live_activity = None;
                 clear_active_turn_file_change_tracking(record);
@@ -779,7 +805,6 @@ impl AppState {
         }
         Ok(())
     }
-
 
     fn queued_engram_bind_request(
         &self,
@@ -942,11 +967,7 @@ impl AppState {
                 })?;
             }
         }
-        self.confirm_engram_admission_durable(
-            &target.connection.session_id,
-            started_at,
-            owner,
-        )?;
+        self.confirm_engram_admission_durable(&target.connection.session_id, started_at, owner)?;
         Ok(request)
     }
 

@@ -63,9 +63,11 @@ impl AppState {
                 record.session.markers.push(marker.clone());
                 record.mutation_stamp
             };
-            let revision = self.commit_persisted_delta_locked(&mut inner).map_err(|err| {
-                ApiError::internal(format!("failed to persist conversation marker: {err:#}"))
-            })?;
+            let revision = self
+                .commit_persisted_delta_locked(&mut inner)
+                .map_err(|err| {
+                    ApiError::internal(format!("failed to persist conversation marker: {err:#}"))
+                })?;
             (marker, revision, session_mutation_stamp)
         };
         self.publish_delta(&DeltaEvent::ConversationMarkerCreated {
@@ -143,9 +145,11 @@ impl AppState {
                 record.session.markers[marker_index] = marker.clone();
                 record.mutation_stamp
             };
-            let revision = self.commit_persisted_delta_locked(&mut inner).map_err(|err| {
-                ApiError::internal(format!("failed to persist conversation marker: {err:#}"))
-            })?;
+            let revision = self
+                .commit_persisted_delta_locked(&mut inner)
+                .map_err(|err| {
+                    ApiError::internal(format!("failed to persist conversation marker: {err:#}"))
+                })?;
             (marker, revision, session_mutation_stamp)
         };
         self.publish_delta(&DeltaEvent::ConversationMarkerUpdated {
@@ -252,8 +256,11 @@ impl AppState {
             marker.color = normalize_conversation_marker_color(&color)?;
         }
         if let Some(message_id) = request.message_id {
-            let (message_id, message_index_hint) = self
-                .resolve_local_conversation_marker_anchor(session_id, &message_id, "message id")?;
+            let (message_id, message_index_hint) = self.resolve_local_conversation_marker_anchor(
+                session_id,
+                &message_id,
+                "message id",
+            )?;
             marker.message_id = message_id;
             marker.message_index_hint = message_index_hint;
         }
@@ -331,9 +338,11 @@ impl AppState {
                 record.session.markers.remove(marker_index);
                 record.mutation_stamp
             };
-            let revision = self.commit_persisted_delta_locked(&mut inner).map_err(|err| {
-                ApiError::internal(format!("failed to delete conversation marker: {err:#}"))
-            })?;
+            let revision = self
+                .commit_persisted_delta_locked(&mut inner)
+                .map_err(|err| {
+                    ApiError::internal(format!("failed to delete conversation marker: {err:#}"))
+                })?;
             (revision, session_mutation_stamp)
         };
         self.publish_delta(&DeltaEvent::ConversationMarkerDeleted {
@@ -358,28 +367,20 @@ impl AppState {
         let Some(target) = self.remote_session_target(session_id)? else {
             return Err(ApiError::bad_request("session is not assigned to a remote"));
         };
-        let (remote_response, response_lease):
-            (ConversationMarkerResponse, RemoteRequestLease) = self
-            .remote_registry
-            .request_json_with_lease(
-            &target.remote,
-            Method::POST,
-            &format!(
-                "/api/sessions/{}/markers",
-                encode_uri_component(&target.remote_session_id)
-            ),
-            &[],
-            Some(serde_json::to_value(request).map_err(|err| {
-                ApiError::internal(format!("failed to encode marker create request: {err}"))
-            })?),
-        )?;
-        self.apply_remote_marker_response(
-            target,
-            remote_response,
-            &response_lease,
-            true,
-            None,
-        )
+        let (remote_response, response_lease): (ConversationMarkerResponse, RemoteRequestLease) =
+            self.remote_registry.request_json_with_lease(
+                &target.remote,
+                Method::POST,
+                &format!(
+                    "/api/sessions/{}/markers",
+                    encode_uri_component(&target.remote_session_id)
+                ),
+                &[],
+                Some(serde_json::to_value(request).map_err(|err| {
+                    ApiError::internal(format!("failed to encode marker create request: {err}"))
+                })?),
+            )?;
+        self.apply_remote_marker_response(target, remote_response, &response_lease, true, None)
     }
 
     fn proxy_remote_update_conversation_marker(
@@ -391,22 +392,20 @@ impl AppState {
         let Some(target) = self.remote_session_target(session_id)? else {
             return Err(ApiError::bad_request("session is not assigned to a remote"));
         };
-        let (remote_response, response_lease):
-            (ConversationMarkerResponse, RemoteRequestLease) = self
-            .remote_registry
-            .request_json_with_lease(
-            &target.remote,
-            Method::PATCH,
-            &format!(
-                "/api/sessions/{}/markers/{}",
-                encode_uri_component(&target.remote_session_id),
-                encode_uri_component(marker_id)
-            ),
-            &[],
-            Some(serde_json::to_value(request).map_err(|err| {
-                ApiError::internal(format!("failed to encode marker update request: {err}"))
-            })?),
-        )?;
+        let (remote_response, response_lease): (ConversationMarkerResponse, RemoteRequestLease) =
+            self.remote_registry.request_json_with_lease(
+                &target.remote,
+                Method::PATCH,
+                &format!(
+                    "/api/sessions/{}/markers/{}",
+                    encode_uri_component(&target.remote_session_id),
+                    encode_uri_component(marker_id)
+                ),
+                &[],
+                Some(serde_json::to_value(request).map_err(|err| {
+                    ApiError::internal(format!("failed to encode marker update request: {err}"))
+                })?),
+            )?;
         self.apply_remote_marker_response(
             target,
             remote_response,
@@ -424,10 +423,10 @@ impl AppState {
         let Some(target) = self.remote_session_target(session_id)? else {
             return Err(ApiError::bad_request("session is not assigned to a remote"));
         };
-        let (remote_response, response_lease):
-            (DeleteConversationMarkerResponse, RemoteRequestLease) = self
-            .remote_registry
-            .request_json_with_lease(
+        let (remote_response, response_lease): (
+            DeleteConversationMarkerResponse,
+            RemoteRequestLease,
+        ) = self.remote_registry.request_json_with_lease(
             &target.remote,
             Method::DELETE,
             &format!(
@@ -501,7 +500,9 @@ impl AppState {
         self.apply_remote_delta_event_for_request(response_lease, event)
             .map_err(|err| {
                 remote_authority_apply_error(&err).unwrap_or_else(|| {
-                    ApiError::bad_gateway(format!("failed to apply remote marker response: {err:#}"))
+                    ApiError::bad_gateway(format!(
+                        "failed to apply remote marker response: {err:#}"
+                    ))
                 })
             })?;
 
@@ -607,7 +608,9 @@ fn marker_message_index_on_record(record: &SessionRecord, message_id: &str) -> O
         .map(|local_index| global_message_index(record, local_index))
 }
 
-fn update_conversation_marker_request_has_changes(request: &UpdateConversationMarkerRequest) -> bool {
+fn update_conversation_marker_request_has_changes(
+    request: &UpdateConversationMarkerRequest,
+) -> bool {
     request.kind.is_some()
         || request.name.is_some()
         || request.body.is_some()
@@ -625,7 +628,9 @@ fn normalize_marker_route_id(value: &str, label: &str) -> Result<String, ApiErro
 fn normalize_conversation_marker_name(value: &str) -> Result<String, ApiError> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
-        return Err(ApiError::bad_request("conversation marker name is required"));
+        return Err(ApiError::bad_request(
+            "conversation marker name is required",
+        ));
     }
     if trimmed.chars().count() > CONVERSATION_MARKER_NAME_MAX_CHARS {
         return Err(ApiError::bad_request(format!(

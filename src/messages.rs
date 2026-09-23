@@ -98,11 +98,7 @@ fn normalize_prompt_history(prompts: impl IntoIterator<Item = String>) -> Vec<St
 fn prompt_history_from_messages(messages: &[Message]) -> Vec<String> {
     let mut history = Vec::with_capacity(SESSION_PROMPT_HISTORY_LIMIT);
     let mut retained_bytes = 0_usize;
-    for prompt in messages
-        .iter()
-        .rev()
-        .filter_map(Message::user_prompt_text)
-    {
+    for prompt in messages.iter().rev().filter_map(Message::user_prompt_text) {
         let prompt = prompt.trim();
         if prompt.is_empty() || prompt.len() > SESSION_PROMPT_HISTORY_MAX_BYTES {
             continue;
@@ -152,8 +148,7 @@ fn recover_interrupted_session_record(record: &mut SessionRecord) -> Option<Stri
 
     let mut notice = if record.session.status == SessionStatus::Stopping {
         "TermAl restarted while this session was stopping. The interrupted turn was recovered as an error; send another prompt to continue.".to_owned()
-    } else if interrupted_interaction_count > 0
-        || record.session.status == SessionStatus::Approval
+    } else if interrupted_interaction_count > 0 || record.session.status == SessionStatus::Approval
     {
         "TermAl restarted while this session was waiting for approval or input. That request expired. Send another prompt to continue.".to_owned()
     } else {
@@ -427,9 +422,17 @@ fn message_index_on_record(record: &mut SessionRecord, message_id: &str) -> Opti
 // A fresh prompt is expected to miss. Unlike the repairing lookup, this
 // membership check never rebuilds the transcript index on that normal path.
 fn cached_message_index_on_record(record: &SessionRecord, message_id: &str) -> Option<usize> {
-    record.message_positions.get(message_id).copied().filter(|index| {
-        record.session.messages.get(*index).is_some_and(|message| message.id() == message_id)
-    })
+    record
+        .message_positions
+        .get(message_id)
+        .copied()
+        .filter(|index| {
+            record
+                .session
+                .messages
+                .get(*index)
+                .is_some_and(|message| message.id() == message_id)
+        })
 }
 
 fn insert_message_on_record(record: &mut SessionRecord, index: usize, message: Message) -> usize {
@@ -491,10 +494,7 @@ fn clear_active_turn_file_change_tracking(record: &mut SessionRecord) {
 }
 
 /// Pushes the active turn file-change summary on record.
-fn push_active_turn_file_changes_on_record(
-    record: &mut SessionRecord,
-    message_id: String,
-) -> bool {
+fn push_active_turn_file_changes_on_record(record: &mut SessionRecord, message_id: String) -> bool {
     if record.active_turn_file_changes.is_empty() {
         return false;
     }

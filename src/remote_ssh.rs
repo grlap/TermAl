@@ -507,9 +507,9 @@ fn remote_install_metadata_json(
 fn remote_register_script(source_path: &str) -> Result<RemoteActionScript, ApiError> {
     let (source_path, platform) = validate_remote_source_path(source_path)?;
     match platform {
-        RemoteInstallPlatform::Posix => Ok(RemoteActionScript::Posix(remote_posix_register_script(
-            &source_path,
-        )?)),
+        RemoteInstallPlatform::Posix => Ok(RemoteActionScript::Posix(
+            remote_posix_register_script(&source_path)?,
+        )),
         RemoteInstallPlatform::Windows => Ok(RemoteActionScript::WindowsPowerShell(
             remote_windows_register_script(&source_path),
         )),
@@ -836,9 +836,7 @@ fn remote_action_error(remote_name: &str, action: &str, output: &RemoteScriptOut
     } else {
         format!("ssh exited with {}", output.status)
     };
-    ApiError::bad_gateway(format!(
-        "remote `{remote_name}` {action} failed: {detail}"
-    ))
+    ApiError::bad_gateway(format!("remote `{remote_name}` {action} failed: {detail}"))
 }
 
 fn run_remote_ssh_script(
@@ -914,7 +912,11 @@ fn upgrade_remote_ssh(remote: &RemoteConfig) -> Result<RemoteActionResponse, Api
                 stderr: sanitize_remote_action_output(&windows_output.stderr),
             });
         }
-        return Err(remote_action_error(&remote.name, "upgrade", &windows_output));
+        return Err(remote_action_error(
+            &remote.name,
+            "upgrade",
+            &windows_output,
+        ));
     }
 
     Err(remote_action_error(&remote.name, "upgrade", &posix_output))
@@ -924,10 +926,7 @@ fn upgrade_remote_ssh(remote: &RemoteConfig) -> Result<RemoteActionResponse, Api
 /// returns the decoded `HealthResponse` only if the remote reports
 /// `ok:true`; the short `REMOTE_HEALTH_TIMEOUT` keeps the caller's poll
 /// loop responsive.
-fn remote_healthcheck(
-    client: &BlockingHttpClient,
-    base_url: &str,
-) -> Result<HealthResponse> {
+fn remote_healthcheck(client: &BlockingHttpClient, base_url: &str) -> Result<HealthResponse> {
     let response = client
         .get(format!("{base_url}/api/health"))
         .timeout(REMOTE_HEALTH_TIMEOUT)

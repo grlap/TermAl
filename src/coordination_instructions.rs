@@ -23,7 +23,6 @@ fn termal_root_mailbox_guidance(state: &AppState, session_id: &str) -> Option<St
     let inner = state.inner.lock().expect("state mutex poisoned");
     let index = inner.find_session_index(session_id)?;
     let record = &inner.sessions[index];
-    (!record.hidden && record.is_local_session()
-        && record.session.parent_delegation_id.is_none())
+    (!record.hidden && record.is_local_session() && record.session.parent_delegation_id.is_none())
         .then(render_termal_host_guidance)
 }

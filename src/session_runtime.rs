@@ -127,7 +127,9 @@ impl SharedCodexSessionHandle {
         sessions: &mut HashMap<String, SharedCodexSessionState>,
         session_id: &str,
     ) -> Option<String> {
-        sessions.remove(session_id).and_then(|state| state.thread_id)
+        sessions
+            .remove(session_id)
+            .and_then(|state| state.thread_id)
     }
 
     fn remove_thread_mapping(&self, removed_thread_id: Option<String>) {
@@ -196,7 +198,7 @@ impl SharedCodexSessionHandle {
             })
             .map(|_| ())
             .map_err(|err| anyhow!("failed to spawn shared Codex detach cleanup: {err}"))
-        }
+    }
 
     /// Sends an `interrupt` request to the shared Codex runtime for
     /// this session's currently active `(thread_id, turn_id)` pair,
@@ -389,9 +391,10 @@ impl KillableRuntime {
         match self {
             Self::Claude(handle) => shared_child_has_exited(&handle.process, "Claude runtime"),
             Self::Codex(handle) => shared_child_has_exited(&handle.process, "Codex runtime"),
-            Self::Acp(handle) => {
-                shared_child_has_exited(&handle.process, &format!("{} runtime", handle.agent.label()))
-            }
+            Self::Acp(handle) => shared_child_has_exited(
+                &handle.process,
+                &format!("{} runtime", handle.agent.label()),
+            ),
         }
     }
 }
@@ -439,7 +442,8 @@ fn shutdown_removed_runtime(runtime: KillableRuntime, context: &str) -> Result<(
 fn shutdown_stopped_runtime(runtime: KillableRuntime, context: &str) -> Result<()> {
     match runtime {
         KillableRuntime::Acp(handle)
-            if matches!(handle.agent, AcpAgent::OpenCode | AcpAgent::Kimi) => {
+            if matches!(handle.agent, AcpAgent::OpenCode | AcpAgent::Kimi) =>
+        {
             handle.stop().with_context(|| {
                 format!(
                     "failed to stop {} runtime for {context}",
@@ -520,8 +524,7 @@ impl DeferredStopCallback {
                 active_turn_generation,
                 ..
             }
-            |
-            Self::TurnFailed {
+            | Self::TurnFailed {
                 active_turn_generation,
                 ..
             }

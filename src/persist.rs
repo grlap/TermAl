@@ -100,9 +100,7 @@ fn wait_timeout_sqlite_state_writer_admission<'a>(
         .wait_timeout(state, timeout)
         .unwrap_or_else(|poisoned| {
             if !SQLITE_STATE_WRITER_POISON_WARNING_EMITTED.swap(true, Ordering::Relaxed) {
-                eprintln!(
-                    "[termal] warning: recovered a poisoned SQLite state writer admission"
-                );
+                eprintln!("[termal] warning: recovered a poisoned SQLite state writer admission");
             }
             poisoned.into_inner()
         })
@@ -121,9 +119,7 @@ fn issue_sqlite_state_writer_ticket(
     ticket
 }
 
-fn advance_past_canceled_sqlite_state_writer_tickets(
-    state: &mut SqliteStateWriterAdmissionState,
-) {
+fn advance_past_canceled_sqlite_state_writer_tickets(state: &mut SqliteStateWriterAdmissionState) {
     while state.canceled_tickets.remove(&state.serving_ticket) {
         state.serving_ticket = state
             .serving_ticket
@@ -211,10 +207,7 @@ fn sqlite_state_writer_issued_tickets(lock: &SqliteStateWriterAdmission) -> u64 
 }
 
 #[cfg(test)]
-fn wait_for_sqlite_state_writer_issued_tickets(
-    lock: &SqliteStateWriterAdmission,
-    expected: u64,
-) {
+fn wait_for_sqlite_state_writer_issued_tickets(lock: &SqliteStateWriterAdmission, expected: u64) {
     let deadline = std::time::Instant::now() + Duration::from_secs(2);
     let mut state = lock_sqlite_state_writer_admission(lock);
     while state.next_ticket < expected {
@@ -269,8 +262,12 @@ fn open_sqlite_state_connection(path: &FsPath) -> Result<rusqlite::Connection> {
     let setup = {
         let write_lock = sqlite_state_write_lock(path);
         let _write_guard = lock_sqlite_state_writer(&write_lock);
-        let setup = configure_sqlite_state_connection(&connection)
-            .with_context(|| format!("failed to configure SQLite pragmas for `{}`", path.display()));
+        let setup = configure_sqlite_state_connection(&connection).with_context(|| {
+            format!(
+                "failed to configure SQLite pragmas for `{}`",
+                path.display()
+            )
+        });
         finish_sqlite_state_file_setup(path, setup)
     };
     setup?;
@@ -325,7 +322,12 @@ fn open_sqlite_state_read_connection(path: &FsPath) -> Result<rusqlite::Connecti
         .with_context(|| format!("failed to set SQLite read timeout for `{}`", path.display()))?;
     connection
         .execute_batch("PRAGMA query_only = ON;")
-        .with_context(|| format!("failed to configure SQLite transcript reader for `{}`", path.display()))?;
+        .with_context(|| {
+            format!(
+                "failed to configure SQLite transcript reader for `{}`",
+                path.display()
+            )
+        })?;
     Ok(connection)
 }
 
@@ -579,8 +581,9 @@ fn reject_existing_windows_state_path_redirection(path: &FsPath) -> Result<()> {
         }
         Ok(_) => Ok(()),
         Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(err) => Err(err)
-            .with_context(|| format!("failed to inspect state path `{}`", path.display())),
+        Err(err) => {
+            Err(err).with_context(|| format!("failed to inspect state path `{}`", path.display()))
+        }
     }
 }
 
@@ -660,10 +663,7 @@ mod state_permission_hardening_tests {
         std::sync::LazyLock::new(|| std::sync::Mutex::new(()));
 
     fn temp_permission_root() -> PathBuf {
-        let root = test_temp_dir().join(format!(
-            "termal-state-permissions-{}",
-            Uuid::new_v4()
-        ));
+        let root = test_temp_dir().join(format!("termal-state-permissions-{}", Uuid::new_v4()));
         fs::create_dir_all(&root).expect("create temp permission root");
         root
     }
@@ -677,8 +677,7 @@ mod state_permission_hardening_tests {
     }
 
     fn set_mode(path: &FsPath, mode: u32) {
-        fs::set_permissions(path, fs::Permissions::from_mode(mode))
-            .expect("set broad test mode");
+        fs::set_permissions(path, fs::Permissions::from_mode(mode)).expect("set broad test mode");
     }
 
     #[test]
@@ -782,8 +781,7 @@ mod state_permission_hardening_tests {
 
         fs::remove_file(&db).expect("remove main symlink");
         fs::write(&db, b"state").expect("write real main database");
-        symlink(&sidecar_target, sqlite_sidecar_path(&db, "-wal"))
-            .expect("create sidecar symlink");
+        symlink(&sidecar_target, sqlite_sidecar_path(&db, "-wal")).expect("create sidecar symlink");
 
         let sidecar_error = harden_sqlite_state_file_permissions(&db)
             .expect_err("symlinked sidecar should be rejected");
@@ -823,11 +821,10 @@ mod state_permission_hardening_tests {
         let sidecar_target = root.join("outside-wal");
         fs::write(&db, b"state").expect("write sqlite state file");
         fs::write(&sidecar_target, b"wal").expect("write sidecar target");
-        symlink(&sidecar_target, sqlite_sidecar_path(&db, "-wal"))
-            .expect("create sidecar symlink");
+        symlink(&sidecar_target, sqlite_sidecar_path(&db, "-wal")).expect("create sidecar symlink");
 
-        let error = verify_persist_commit_integrity(&db)
-            .expect_err("post-commit symlink should be fatal");
+        let error =
+            verify_persist_commit_integrity(&db).expect_err("post-commit symlink should be fatal");
 
         assert!(format!("{error:#}").contains("post-commit redirection check failed"));
         assert!(format!("{error:#}").contains("symlinked state path"));
@@ -961,10 +958,7 @@ const CURRENT_SQLITE_STATE_TABLE_COLUMNS: &[(&str, &[&str])] = &[
     ),
     ("session_overviews", &["session_id", "value_blob"]),
     ("app_state", &["key", "value_json"]),
-    (
-        "session_prompt_histories",
-        &["session_id", "value_json"],
-    ),
+    ("session_prompt_histories", &["session_id", "value_json"]),
     ("delegations", &["id", "value_json"]),
     (
         "response_board_tabs",
@@ -1136,10 +1130,7 @@ fn reject_unsupported_state_schema(detail: impl std::fmt::Display) -> anyhow::Er
     )
 }
 
-fn required_state_meta_value(
-    connection: &rusqlite::Connection,
-    key: &str,
-) -> Result<String> {
+fn required_state_meta_value(connection: &rusqlite::Connection, key: &str) -> Result<String> {
     connection
         .query_row(
             "SELECT value FROM meta WHERE key = ?1",
@@ -1247,9 +1238,7 @@ fn validate_no_legacy_embedded_state(
         let persisted = serde_json::from_str::<PersistedState>(&encoded)
             .map_err(reject_invalid_persisted_state_metadata_shape)?;
         Some(persisted)
-    } else if let Some(table_name) =
-        first_normalized_state_authority_table_with_rows(connection)?
-    {
+    } else if let Some(table_name) = first_normalized_state_authority_table_with_rows(connection)? {
         return Err(reject_unsupported_state_schema(format!(
             "missing app_state `{SQLITE_METADATA_KEY}` metadata while normalized table \
              `{table_name}` contains rows"
@@ -1325,14 +1314,10 @@ fn validate_current_sqlite_state_schema(connection: &rusqlite::Connection) -> Re
     Ok(())
 }
 
-fn initialize_current_sqlite_state_schema(
-    connection: &rusqlite::Connection,
-) -> Result<bool> {
-    let transaction = rusqlite::Transaction::new_unchecked(
-        connection,
-        rusqlite::TransactionBehavior::Immediate,
-    )
-    .context("failed to begin current state schema initialization")?;
+fn initialize_current_sqlite_state_schema(connection: &rusqlite::Connection) -> Result<bool> {
+    let transaction =
+        rusqlite::Transaction::new_unchecked(connection, rusqlite::TransactionBehavior::Immediate)
+            .context("failed to begin current state schema initialization")?;
     if !sqlite_state_user_table_names(&transaction)?.is_empty() {
         transaction
             .commit()
@@ -1670,9 +1655,15 @@ mod sqlite_schema_tests {
         let error = ensure_sqlite_state_schema(&connection)
             .expect_err("unversioned existing state should be rejected");
         let rendered = format!("{error:#}");
-        assert!(rendered.contains("unsupported state database schema"), "{rendered}");
+        assert!(
+            rendered.contains("unsupported state database schema"),
+            "{rendered}"
+        );
         assert!(rendered.contains("missing `meta` table"), "{rendered}");
-        assert!(rendered.contains("Move or delete `termal.sqlite`"), "{rendered}");
+        assert!(
+            rendered.contains("Move or delete `termal.sqlite`"),
+            "{rendered}"
+        );
         assert_eq!(
             sqlite_state_user_table_names(&connection)
                 .expect("table inventory should remain readable"),
@@ -1781,7 +1772,10 @@ mod sqlite_schema_tests {
         );
         let rendered = format!("{error:#}");
         assert!(rendered.contains("not valid JSON"), "{rendered}");
-        assert!(rendered.contains("Move or delete `termal.sqlite`"), "{rendered}");
+        assert!(
+            rendered.contains("Move or delete `termal.sqlite`"),
+            "{rendered}"
+        );
     }
 
     #[test]
@@ -1821,7 +1815,10 @@ mod sqlite_schema_tests {
             "normalized rows without metadata must be rejected",
         );
         let rendered = format!("{error:#}");
-        assert!(rendered.contains("missing app_state `metadataState`"), "{rendered}");
+        assert!(
+            rendered.contains("missing app_state `metadataState`"),
+            "{rendered}"
+        );
         assert!(rendered.contains("sessions"), "{rendered}");
         drop(connection);
         assert_eq!(
@@ -1876,7 +1873,10 @@ mod sqlite_schema_tests {
             "raw-string deserialization must retain the previous location-free rejection: \
              {rendered}"
         );
-        assert!(rendered.contains("Move or delete `termal.sqlite`"), "{rendered}");
+        assert!(
+            rendered.contains("Move or delete `termal.sqlite`"),
+            "{rendered}"
+        );
         drop(connection);
         assert_eq!(
             fs::read(&path).expect("rejected database bytes should remain readable"),
@@ -1908,16 +1908,20 @@ mod sqlite_schema_tests {
 
         let persisted = ensure_sqlite_state_schema_for_load(&connection)
             .expect("current metadata and normalized rows should validate");
-        assert!(persisted.is_some(), "current metadata should be returned to the loader");
+        assert!(
+            persisted.is_some(),
+            "current metadata should be returned to the loader"
+        );
         for table_name in ["sessions", "messages"] {
             let count = connection
-                .query_row(
-                    &format!("SELECT COUNT(*) FROM {table_name}"),
-                    [],
-                    |row| row.get::<_, u32>(0),
-                )
+                .query_row(&format!("SELECT COUNT(*) FROM {table_name}"), [], |row| {
+                    row.get::<_, u32>(0)
+                })
                 .expect("normalized row count should remain readable");
-            assert_eq!(count, 1, "schema validation must preserve `{table_name}` rows");
+            assert_eq!(
+                count, 1,
+                "schema validation must preserve `{table_name}` rows"
+            );
         }
     }
 
@@ -2007,9 +2011,7 @@ mod sqlite_schema_tests {
             rusqlite::Connection::open_in_memory().expect("in-memory sqlite should open");
         ensure_sqlite_state_schema(&connection).expect("fresh current schema should initialize");
         seed_current_state_metadata(&connection);
-        for (label, prompt_history) in
-            [("populated", r#"["remember me"]"#), ("empty", "[]")]
-        {
+        for (label, prompt_history) in [("populated", r#"["remember me"]"#), ("empty", "[]")] {
             let encoded = format!(r#"{{"session":{{"promptHistory":{prompt_history}}}}}"#);
             connection
                 .execute(
@@ -2153,8 +2155,7 @@ mod sqlite_schema_tests {
         seed_current_state_auxiliary_tables(&connection);
         seed_current_state_metadata(&connection);
 
-        ensure_sqlite_state_schema(&connection)
-            .expect("v2 overview metadata should backfill");
+        ensure_sqlite_state_schema(&connection).expect("v2 overview metadata should backfill");
         assert_eq!(
             sqlite_state_table_columns(&connection, "messages")
                 .expect("post-maintenance message columns should be readable"),
@@ -2181,18 +2182,9 @@ mod sqlite_schema_tests {
         assert_eq!(
             value_blob,
             vec![
-                encode_conversation_overview_message(
-                    ConversationOverviewKind::Error,
-                    true,
-                ),
-                encode_conversation_overview_message(
-                    ConversationOverviewKind::Text,
-                    true,
-                ),
-                encode_conversation_overview_message(
-                    ConversationOverviewKind::Text,
-                    true,
-                ),
+                encode_conversation_overview_message(ConversationOverviewKind::Error, true,),
+                encode_conversation_overview_message(ConversationOverviewKind::Text, true,),
+                encode_conversation_overview_message(ConversationOverviewKind::Text, true,),
             ]
         );
     }
@@ -2242,12 +2234,18 @@ mod sqlite_schema_tests {
         let error = ensure_sqlite_state_schema_for_path(&connection, &path)
             .expect_err("singleton response-board schema must be rejected");
         let rendered = format!("{error:#}");
-        assert!(rendered.contains("table `board_cards` has missing columns"), "{rendered}");
+        assert!(
+            rendered.contains("table `board_cards` has missing columns"),
+            "{rendered}"
+        );
         assert!(rendered.contains("has_canvas_position"), "{rendered}");
         assert!(rendered.contains("placement"), "{rendered}");
         assert!(rendered.contains("tab_id"), "{rendered}");
         assert!(rendered.contains("not migrated"), "{rendered}");
-        assert!(rendered.contains("Move or delete `termal.sqlite`"), "{rendered}");
+        assert!(
+            rendered.contains("Move or delete `termal.sqlite`"),
+            "{rendered}"
+        );
         drop(connection);
         assert_eq!(
             fs::read(&path).expect("rejected response-board database should remain readable"),
@@ -2367,12 +2365,10 @@ mod sqlite_schema_tests {
             .collect::<rusqlite::Result<Vec<_>>>()
             .expect("range query plan rows should decode");
         assert!(
-            range_plan
-                .iter()
-                .any(|detail| {
-                    detail.contains("SEARCH messages USING INDEX")
-                        && detail.contains("session_id=? AND position>? AND position<?")
-                }),
+            range_plan.iter().any(|detail| {
+                detail.contains("SEARCH messages USING INDEX")
+                    && detail.contains("session_id=? AND position>? AND position<?")
+            }),
             "range query must search the (session_id, position) index: {range_plan:?}"
         );
         assert!(
@@ -2405,11 +2401,12 @@ mod sqlite_schema_tests {
             "cursor query must use the unique (session_id, message_id) index: {cursor_plan:?}"
         );
         assert!(
-            cursor_plan.iter().all(|detail| !detail.contains("SCAN messages")),
+            cursor_plan
+                .iter()
+                .all(|detail| !detail.contains("SCAN messages")),
             "cursor query must not scan messages: {cursor_plan:?}"
         );
     }
-
 }
 
 fn load_state_from_sqlite_with_connection(
@@ -2417,11 +2414,7 @@ fn load_state_from_sqlite_with_connection(
 ) -> Result<(Option<StateInner>, rusqlite::Connection)> {
     let connection = open_sqlite_state_connection_unconfigured(path)?;
     let persisted = ensure_sqlite_state_schema_for_load_path(&connection, path)?;
-    let (
-        mut session_records,
-        mut quarantined_session_ids,
-        mut skipped_session_records,
-    ) =
+    let (mut session_records, mut quarantined_session_ids, mut skipped_session_records) =
         load_session_records_from_sqlite_with_skipped(&connection, path)?;
     let (delegation_records, quarantined_delegation_ids) =
         load_delegation_records_from_sqlite(&connection, path)?;
@@ -2461,9 +2454,9 @@ fn load_state_from_sqlite_with_connection(
     persisted.quarantined_persisted_session_ids = quarantined_session_ids;
     persisted.quarantined_persisted_delegation_ids = quarantined_delegation_ids;
     persisted.delegations = delegation_records;
-    let inner = persisted.into_inner().with_context(|| {
-        format!("failed to validate state from `{}`", path.display())
-    })?;
+    let inner = persisted
+        .into_inner()
+        .with_context(|| format!("failed to validate state from `{}`", path.display()))?;
     Ok((Some(inner), connection))
 }
 
@@ -2472,8 +2465,7 @@ fn load_session_records_from_sqlite(
     connection: &rusqlite::Connection,
     path: &FsPath,
 ) -> Result<Vec<PersistedSessionRecord>> {
-    load_session_records_from_sqlite_with_skipped(connection, path)
-        .map(|(records, _, _)| records)
+    load_session_records_from_sqlite_with_skipped(connection, path).map(|(records, _, _)| records)
 }
 
 fn load_session_records_from_sqlite_with_skipped(
@@ -2564,7 +2556,8 @@ fn load_session_records_from_sqlite_with_skipped(
         }
         eprintln!(
             "persist> history info: loaded empty composer history for {missing_history_count} session(s) with user messages and no normalized history row; sessions=[{}], store=`{}`; this is expected when every stored user prompt is empty or exceeds the history size limit (also possible for non-text user messages or partial-window updates); otherwise the normalized row is absent",
-            missing_history_sample.join(", "), path.display()
+            missing_history_sample.join(", "),
+            path.display()
         );
     }
     Ok((records, quarantined_ids, skipped))
@@ -2772,10 +2765,9 @@ fn persisted_message_position_with_connection(
         rusqlite::params![session_id, message_id],
         |row| row.get::<_, i64>(0),
     ) {
-        Ok(position) => Ok(Some(
-            usize::try_from(position)
-                .context("persisted transcript cursor position is negative or too large")?,
-        )),
+        Ok(position) => Ok(Some(usize::try_from(position).context(
+            "persisted transcript cursor position is negative or too large",
+        )?)),
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
         Err(err) => Err(err).with_context(|| {
             format!("failed to resolve transcript cursor for session `{session_id}`")
@@ -2794,12 +2786,7 @@ fn load_persisted_message_range(
         return Ok(Vec::new());
     }
     let connection = open_sqlite_state_read_connection(path)?;
-    load_persisted_message_range_with_connection(
-        &connection,
-        session_id,
-        start_index,
-        end_index,
-    )
+    load_persisted_message_range_with_connection(&connection, session_id, start_index, end_index)
 }
 
 fn load_persisted_message_range_with_connection(
@@ -2818,9 +2805,7 @@ fn load_persisted_message_range_with_connection(
              WHERE session_id = ?1 AND position >= ?2 AND position < ?3
              ORDER BY position ASC",
         )
-        .with_context(|| {
-            format!("failed to prepare transcript page for session `{session_id}`")
-        })?;
+        .with_context(|| format!("failed to prepare transcript page for session `{session_id}`"))?;
     let rows = statement
         .query_map(
             rusqlite::params![
@@ -2841,8 +2826,9 @@ fn load_persisted_message_range_with_connection(
         .with_context(|| format!("failed to query transcript page for session `{session_id}`"))?;
     let mut messages = Vec::new();
     for row in rows {
-        let (position, message_id, encoded) = row
-            .with_context(|| format!("failed to read transcript page for session `{session_id}`"))?;
+        let (position, message_id, encoded) = row.with_context(|| {
+            format!("failed to read transcript page for session `{session_id}`")
+        })?;
         let position = usize::try_from(position)
             .context("persisted transcript position is negative or too large")?;
         let message: Message = serde_json::from_str(&encoded).with_context(|| {
@@ -2901,8 +2887,7 @@ fn load_persisted_message_overview_with_connection(
         let kind_index = conversation_overview_kind_index(kind);
         kind_counts[bucket_index][kind_index] =
             kind_counts[bucket_index][kind_index].saturating_add(1);
-        user_counts[bucket_index] =
-            user_counts[bucket_index].saturating_add(u32::from(is_user));
+        user_counts[bucket_index] = user_counts[bucket_index].saturating_add(u32::from(is_user));
     }
     let mut overview = Vec::with_capacity(bucket_count.saturating_mul(2));
     for bucket_index in 0..bucket_count {
@@ -2933,7 +2918,12 @@ fn load_delegation_records_from_sqlite(
 ) -> Result<(Vec<DelegationRecord>, BTreeSet<String>)> {
     let mut statement = connection
         .prepare("SELECT id, value_json FROM delegations ORDER BY rowid")
-        .with_context(|| format!("failed to prepare delegation load from `{}`", path.display()))?;
+        .with_context(|| {
+            format!(
+                "failed to prepare delegation load from `{}`",
+                path.display()
+            )
+        })?;
     let rows = statement
         .query_map([], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
@@ -3048,8 +3038,8 @@ fn serialize_persisted_session(
     metadata.session.messages_loaded = total_message_count == 0;
     metadata.message_start_index = 0;
 
-    let value_json =
-        serde_json::to_string(&metadata).context("failed to serialize persisted session metadata")?;
+    let value_json = serde_json::to_string(&metadata)
+        .context("failed to serialize persisted session metadata")?;
     let messages = record
         .session
         .messages
@@ -3214,12 +3204,9 @@ fn write_serialized_persisted_session(
         prefix.reserve(session.messages.len());
         prefix
     };
-    overview_blob.extend(
-        session
-            .messages
-            .iter()
-            .map(|message| encode_conversation_overview_message(message.overview_kind, message.is_user)),
-    );
+    overview_blob.extend(session.messages.iter().map(|message| {
+        encode_conversation_overview_message(message.overview_kind, message.is_user)
+    }));
     if overview_blob.len() != session.message_count {
         bail!(
             "persisted transcript overview for `{}` has {} positions but metadata expects {}",
@@ -3406,16 +3393,13 @@ fn persist_state_parts_via_connection(
             .iter()
             .map(|session| session.session.id.as_str())
             .collect::<HashSet<_>>();
-        remove_missing_persisted_sessions(
-            &tx,
-            &retained_session_ids,
-            quarantined_session_ids,
-        )
+        remove_missing_persisted_sessions(&tx, &retained_session_ids, quarantined_session_ids)
             .with_context(|| format!("failed to replace sessions in `{}`", path.display()))?;
     }
     for session in &serialized_sessions {
-        write_serialized_persisted_session(&tx, session)
-            .with_context(|| format!("failed to write persisted session to `{}`", path.display()))?;
+        write_serialized_persisted_session(&tx, session).with_context(|| {
+            format!("failed to write persisted session to `{}`", path.display())
+        })?;
     }
     if replace_delegations {
         let retained_delegation_ids = serialized_delegations
@@ -3486,9 +3470,7 @@ impl SqlitePersistConnectionCache {
     /// startup state. Ownership moves into the persistence thread without a
     /// zero-connection interval, so SQLite never performs last-close sidecar
     /// cleanup on the startup thread.
-    fn from_validated_connection(
-        validated: Option<(PathBuf, rusqlite::Connection)>,
-    ) -> Self {
+    fn from_validated_connection(validated: Option<(PathBuf, rusqlite::Connection)>) -> Self {
         match validated {
             Some((path, connection)) => Self {
                 path: Some(path),
@@ -3598,8 +3580,7 @@ fn persist_delta_via_cache_inner(
 ) -> Result<Vec<String>> {
     let metadata_json = serde_json::to_string(&delta.metadata)
         .context("failed to serialize persisted state metadata")?;
-    let serialized_sessions =
-        serialize_persisted_sessions_with_isolation(&delta.changed_sessions);
+    let serialized_sessions = serialize_persisted_sessions_with_isolation(&delta.changed_sessions);
     let persisted_session_ids = serialized_sessions
         .iter()
         .map(|session| session.session_id.clone())
@@ -3634,12 +3615,7 @@ fn persist_delta_via_cache_inner(
          ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json",
         rusqlite::params![SQLITE_METADATA_KEY, metadata_json],
     )
-    .with_context(|| {
-        format!(
-            "failed to write state metadata to `{}`",
-            path.display()
-        )
-    })?;
+    .with_context(|| format!("failed to write state metadata to `{}`", path.display()))?;
     for session_id in &delta.removed_session_ids {
         tx.execute(
             "DELETE FROM sessions WHERE id = ?1",
@@ -3689,12 +3665,8 @@ fn persist_delta_via_cache_inner(
             )
         })?;
     }
-    tx.commit().with_context(|| {
-        format!(
-            "failed to commit persisted state to `{}`",
-            path.display()
-        )
-    })?;
+    tx.commit()
+        .with_context(|| format!("failed to commit persisted state to `{}`", path.display()))?;
     drop(write_guard);
     // Keep post-commit redirection and owner-only permission verification
     // fatal. The chmod helper itself honors

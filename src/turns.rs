@@ -68,7 +68,6 @@ fn run_turn_blocking(config: TurnConfig, recorder: &mut dyn TurnRecorder) -> Res
     }
 }
 
-
 /// Runs ACP turn.
 fn run_acp_turn(
     agent: AcpAgent,
@@ -162,7 +161,10 @@ fn run_codex_turn(
                 )
             })
             .with_context(|| {
-                format!("{}; model discovery failed", unresolved_codex_fast_error(model))
+                format!(
+                    "{}; model discovery failed",
+                    unresolved_codex_fast_error(model)
+                )
             })?
         } else {
             Vec::new()
@@ -284,7 +286,6 @@ fn run_codex_turn(
         }
     }
 }
-
 
 /// Returns the default Codex sandbox mode.
 fn default_codex_sandbox_mode() -> CodexSandboxMode {
@@ -410,10 +411,7 @@ struct AppPreferences {
     default_gemini_model: String,
     #[serde(default = "default_model_preference")]
     default_kimi_model: String,
-    #[serde(
-        default = "default_model_preference",
-        rename = "defaultOpenCodeModel"
-    )]
+    #[serde(default = "default_model_preference", rename = "defaultOpenCodeModel")]
     default_opencode_model: String,
     #[serde(default, rename = "defaultOpenCodeApprovalMode")]
     default_opencode_approval_mode: OpenCodeApprovalMode,
@@ -558,7 +556,6 @@ fn default_gemini_approval_mode() -> GeminiApprovalMode {
 fn log_unhandled_codex_event(context: &str, message: &Value) {
     eprintln!("codex diagnostic> {context}: {message}");
 }
-
 
 fn flatten_structured_patch(patches: &[Value]) -> String {
     patches

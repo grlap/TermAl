@@ -183,10 +183,16 @@ fn expected_coordination_schema_objects() -> Result<Vec<CoordinationSchemaObject
     expected_coordination_schema_objects_for_version(COORDINATION_SQLITE_SCHEMA_VERSION)
 }
 
-fn expected_coordination_schema_objects_for_version(version: &str) -> Result<Vec<CoordinationSchemaObject>> {
+fn expected_coordination_schema_objects_for_version(
+    version: &str,
+) -> Result<Vec<CoordinationSchemaObject>> {
     match version {
-        "1" | "2" => {},
-        _ => return Err(reject_unsupported_coordination_schema(format!("unknown version {version}"))),
+        "1" | "2" => {}
+        _ => {
+            return Err(reject_unsupported_coordination_schema(format!(
+                "unknown version {version}"
+            )));
+        }
     }
     let connection = rusqlite::Connection::open_in_memory()
         .context("failed to open the canonical coordination schema database")?;
@@ -203,7 +209,8 @@ fn initialize_current_coordination_schema(transaction: &rusqlite::Transaction<'_
     transaction
         .execute_batch(COORDINATION_SCHEMA_V1_SQL)
         .context("failed to initialize current SQLite coordination schema")?;
-    transaction.execute_batch(MAILBOX_READ_PAGES_SCHEMA_SQL)
+    transaction
+        .execute_batch(MAILBOX_READ_PAGES_SCHEMA_SQL)
         .context("failed to initialize mailbox read receipts")?;
     transaction
         .execute(
@@ -225,7 +232,10 @@ fn validate_current_coordination_schema(connection: &rusqlite::Connection) -> Re
     validate_coordination_schema_version(connection, COORDINATION_SQLITE_SCHEMA_VERSION)
 }
 
-fn validate_coordination_schema_version(connection: &rusqlite::Connection, version: &str) -> Result<()> {
+fn validate_coordination_schema_version(
+    connection: &rusqlite::Connection,
+    version: &str,
+) -> Result<()> {
     let expected_schema = if version == COORDINATION_SQLITE_SCHEMA_VERSION {
         expected_coordination_schema_objects()?
     } else {
@@ -284,7 +294,8 @@ fn ensure_sqlite_coordination_schema(connection: &rusqlite::Connection) -> Resul
         let version_one_schema = expected_coordination_schema_objects_for_version("1")?;
         if actual_schema == version_one_schema {
             let transaction = rusqlite::Transaction::new_unchecked(
-                connection, rusqlite::TransactionBehavior::Immediate,
+                connection,
+                rusqlite::TransactionBehavior::Immediate,
             )?;
             // Another process may have upgraded while we waited for SQLite.
             if coordination_schema_objects(&transaction)? == version_one_schema {
@@ -330,7 +341,8 @@ fn ensure_sqlite_coordination_schema_for_path(
             .execute_batch("PRAGMA foreign_keys = ON;")
             .context("failed to enable coordination foreign keys")?;
         ensure_sqlite_coordination_schema(connection)
-    })().with_context(|| {
+    })()
+    .with_context(|| {
         format!(
             "failed to open or validate coordination database `{}`",
             path.display()
@@ -370,11 +382,19 @@ mod sqlite_coordination_tests {
         // Independent pin of the shipped v1 SQL, not another invocation of the
         // schema builder used by migrations. Whitespace normalization matches
         // the on-disk comparison contract; token/punctuation changes fail.
-        let normalized = COORDINATION_SCHEMA_V1_SQL.split_whitespace().collect::<Vec<_>>().join(" ");
-        assert_eq!(format!("{:x}", Sha256::digest(normalized.as_bytes())),
-            "185e9fbf25eafe9ae4a45a58654a54712853e60ab1f31e1d762f330431eca0b0");
+        let normalized = COORDINATION_SCHEMA_V1_SQL
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert_eq!(
+            format!("{:x}", Sha256::digest(normalized.as_bytes())),
+            "185e9fbf25eafe9ae4a45a58654a54712853e60ab1f31e1d762f330431eca0b0"
+        );
         for version in ["", "0", "3", "future"] {
-            assert!(expected_coordination_schema_objects_for_version(version).is_err(), "{version}");
+            assert!(
+                expected_coordination_schema_objects_for_version(version).is_err(),
+                "{version}"
+            );
         }
         assert!(expected_coordination_schema_objects_for_version("1").is_ok());
         assert!(expected_coordination_schema_objects_for_version("2").is_ok());
@@ -387,21 +407,32 @@ mod sqlite_coordination_tests {
         let path = root.path().join("coordination.sqlite");
         for _ in 0..2 {
             let connection = open_sqlite_state_connection_unconfigured(&path).unwrap();
-            connection.execute_batch("PRAGMA foreign_keys = OFF;").unwrap();
+            connection
+                .execute_batch("PRAGMA foreign_keys = OFF;")
+                .unwrap();
             ensure_sqlite_coordination_schema_for_path(&connection, &path).unwrap();
             assert_eq!(
-                connection.query_row("PRAGMA foreign_keys", [], |row| row.get::<_, i32>(0)).unwrap(),
+                connection
+                    .query_row("PRAGMA foreign_keys", [], |row| row.get::<_, i32>(0))
+                    .unwrap(),
                 1
             );
-            connection.execute_batch(
-                "INSERT INTO mailboxes(id, participant_key, created_at, next_sequence)
+            connection
+                .execute_batch(
+                    "INSERT INTO mailboxes(id, participant_key, created_at, next_sequence)
                  VALUES('parent', 'participants', 'now', 1);
                  INSERT INTO mailbox_participants(mailbox_id, session_id, display_name, joined_at)
                  VALUES('parent', 'session', 'Participant', 'now');
-                 DELETE FROM mailboxes WHERE id = 'parent';"
-            ).unwrap();
+                 DELETE FROM mailboxes WHERE id = 'parent';",
+                )
+                .unwrap();
             assert_eq!(
-                connection.query_row("SELECT COUNT(*) FROM mailbox_participants", [], |row| row.get::<_, i64>(0)).unwrap(),
+                connection
+                    .query_row("SELECT COUNT(*) FROM mailbox_participants", [], |row| row
+                        .get::<_, i64>(
+                        0
+                    ))
+                    .unwrap(),
                 0,
                 "participant deletion must cascade on fresh and reopened handles"
             );
@@ -417,22 +448,44 @@ mod sqlite_coordination_tests {
             let path = root.path().join("coordination.sqlite");
             let connection = bootstrap_coordination_database(&path).unwrap();
             if fail_schema {
-                connection.execute("UPDATE meta SET value = 'wrong' WHERE key = 'coordination_schema_version'", []).unwrap();
+                connection
+                    .execute(
+                        "UPDATE meta SET value = 'wrong' WHERE key = 'coordination_schema_version'",
+                        [],
+                    )
+                    .unwrap();
             } else {
-                connection.execute("UPDATE meta SET value = value", []).unwrap();
+                connection
+                    .execute("UPDATE meta SET value = value", [])
+                    .unwrap();
             }
-            let sidecars = [sqlite_sidecar_path(&path, "-wal"), sqlite_sidecar_path(&path, "-shm")];
+            let sidecars = [
+                sqlite_sidecar_path(&path, "-wal"),
+                sqlite_sidecar_path(&path, "-shm"),
+            ];
             for file in &sidecars {
                 assert!(file.is_file());
                 fs::set_permissions(file, fs::Permissions::from_mode(0o666)).unwrap();
             }
-            let expected_error = ensure_sqlite_coordination_schema(&connection).err().map(|error| format!(
-                "failed to open or validate coordination database `{}`: {error:#}", path.display()
-            ));
+            let expected_error =
+                ensure_sqlite_coordination_schema(&connection)
+                    .err()
+                    .map(|error| {
+                        format!(
+                            "failed to open or validate coordination database `{}`: {error:#}",
+                            path.display()
+                        )
+                    });
             let result = ensure_sqlite_coordination_schema_for_path(&connection, &path);
-            assert_eq!(result.err().map(|error| format!("{error:#}")), expected_error);
+            assert_eq!(
+                result.err().map(|error| format!("{error:#}")),
+                expected_error
+            );
             for file in &sidecars {
-                assert_eq!(fs::metadata(file).unwrap().permissions().mode() & 0o777, 0o600);
+                assert_eq!(
+                    fs::metadata(file).unwrap().permissions().mode() & 0o777,
+                    0o600
+                );
             }
         }
     }
@@ -637,69 +690,74 @@ mod sqlite_coordination_tests {
         }
 
         for upgrade in [false, true] {
-        let root = TestTempRoot::create("termal-current-coordination-schema");
-        let path = root.path().join("coordination.sqlite");
-        if upgrade {
-            let connection = rusqlite::Connection::open(&path).unwrap();
-            connection.execute_batch(COORDINATION_SCHEMA_V1_SQL).unwrap();
-            connection.execute_batch("INSERT INTO meta VALUES('coordination_schema_version', '1');").unwrap();
-        }
-        let go = root.path().join("go");
-        let test_executable = std::env::current_exe().expect("test executable should resolve");
-        let test_module = module_path!()
-            .split_once("::")
-            .map_or(module_path!(), |(_, module)| module);
-        let exact_test_filter = format!("{test_module}::{TEST_NAME}");
-        let mut children = Vec::new();
-        let mut ready_paths = Vec::new();
-        for index in 0..2 {
-            let ready = root.path().join(format!("ready-{index}"));
-            let child = Command::new(&test_executable)
-                .arg("--exact")
-                .arg(&exact_test_filter)
-                .arg("--nocapture")
-                .env(DATABASE_ENV, &path)
-                .env(READY_ENV, &ready)
-                .env(GO_ENV, &go)
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn()
-                .expect("schema initialization child should spawn");
-            children.push(SchemaInitializationChild::new(child));
-            ready_paths.push(ready);
-        }
-        for ready in &ready_paths {
-            wait_for_child_readiness(
-                ready,
-                "schema initialization child readiness marker",
-                &mut children,
-            );
-        }
-        fs::write(&go, b"go").expect("schema initialization release marker should write");
-        for child in children {
-            let output = child.wait_with_output("schema initialization child");
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            assert!(
-                output.status.success(),
-                "schema initialization child failed with {}\nstdout:\n{}\nstderr:\n{}",
-                output.status,
-                stdout,
-                String::from_utf8_lossy(&output.stderr)
-            );
-            assert!(
-                stdout.contains("running 1 test"),
-                "exact child filter `{exact_test_filter}` did not select one test\nstdout:\n{stdout}"
-            );
-        }
+            let root = TestTempRoot::create("termal-current-coordination-schema");
+            let path = root.path().join("coordination.sqlite");
+            if upgrade {
+                let connection = rusqlite::Connection::open(&path).unwrap();
+                connection
+                    .execute_batch(COORDINATION_SCHEMA_V1_SQL)
+                    .unwrap();
+                connection
+                    .execute_batch("INSERT INTO meta VALUES('coordination_schema_version', '1');")
+                    .unwrap();
+            }
+            let go = root.path().join("go");
+            let test_executable = std::env::current_exe().expect("test executable should resolve");
+            let test_module = module_path!()
+                .split_once("::")
+                .map_or(module_path!(), |(_, module)| module);
+            let exact_test_filter = format!("{test_module}::{TEST_NAME}");
+            let mut children = Vec::new();
+            let mut ready_paths = Vec::new();
+            for index in 0..2 {
+                let ready = root.path().join(format!("ready-{index}"));
+                let child = Command::new(&test_executable)
+                    .arg("--exact")
+                    .arg(&exact_test_filter)
+                    .arg("--nocapture")
+                    .env(DATABASE_ENV, &path)
+                    .env(READY_ENV, &ready)
+                    .env(GO_ENV, &go)
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .spawn()
+                    .expect("schema initialization child should spawn");
+                children.push(SchemaInitializationChild::new(child));
+                ready_paths.push(ready);
+            }
+            for ready in &ready_paths {
+                wait_for_child_readiness(
+                    ready,
+                    "schema initialization child readiness marker",
+                    &mut children,
+                );
+            }
+            fs::write(&go, b"go").expect("schema initialization release marker should write");
+            for child in children {
+                let output = child.wait_with_output("schema initialization child");
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                assert!(
+                    output.status.success(),
+                    "schema initialization child failed with {}\nstdout:\n{}\nstderr:\n{}",
+                    output.status,
+                    stdout,
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                assert!(
+                    stdout.contains("running 1 test"),
+                    "exact child filter `{exact_test_filter}` did not select one test\nstdout:\n{stdout}"
+                );
+            }
 
-        let connection = rusqlite::Connection::open(&path).expect("schema database should reopen");
-        validate_current_coordination_schema(&connection)
-            .expect("concurrently initialized schema should be current");
-        let metadata_count: u32 = connection
-            .query_row("SELECT COUNT(*) FROM meta", [], |row| row.get(0))
-            .expect("metadata count should read");
-        assert_eq!(metadata_count, 1);
-        drop(connection);
+            let connection =
+                rusqlite::Connection::open(&path).expect("schema database should reopen");
+            validate_current_coordination_schema(&connection)
+                .expect("concurrently initialized schema should be current");
+            let metadata_count: u32 = connection
+                .query_row("SELECT COUNT(*) FROM meta", [], |row| row.get(0))
+                .expect("metadata count should read");
+            assert_eq!(metadata_count, 1);
+            drop(connection);
         }
     }
 

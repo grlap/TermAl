@@ -32,8 +32,7 @@ impl AppState {
         child_session_id: &str,
         request: SubmitDelegationReviewResultRequest,
     ) -> std::result::Result<MailboxAppendReceipt, ApiError> {
-        let submission =
-            self.validate_delegation_review_submission(child_session_id, request)?;
+        let submission = self.validate_delegation_review_submission(child_session_id, request)?;
         self.persist_validated_delegation_review_submission(&submission)
     }
 
@@ -80,14 +79,14 @@ impl AppState {
         record_result?;
 
         if !receipt.duplicate {
-            match self.mailbox_store.record_initial_dispatch_outcome(
-                &receipt.message_id,
-                "durableButNotWoken",
-            ) {
+            match self
+                .mailbox_store
+                .record_initial_dispatch_outcome(&receipt.message_id, "durableButNotWoken")
+            {
                 Ok(MailboxDispatchOutcomeRecord::Recorded { .. }) => {}
-                Ok(MailboxDispatchOutcomeRecord::AlreadyFinalized {
-                    dispatch_outcome,
-                }) => receipt.notification_disposition = dispatch_outcome,
+                Ok(MailboxDispatchOutcomeRecord::AlreadyFinalized { dispatch_outcome }) => {
+                    receipt.notification_disposition = dispatch_outcome
+                }
                 Err(err) => {
                     eprintln!(
                         "mailbox> review result {} committed, but its non-waking disposition could not be finalized: {err:#}",
@@ -111,8 +110,8 @@ impl AppState {
         recovery_error: Option<String>,
     ) -> std::result::Result<(), ApiError> {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
-        let Some(delegation_index) = inner
-            .find_delegation_index_by_child_session_id(child_session_id)
+        let Some(delegation_index) =
+            inner.find_delegation_index_by_child_session_id(child_session_id)
         else {
             return Ok(());
         };
@@ -176,8 +175,8 @@ impl AppState {
         }
         let recovery = {
             let inner = self.inner.lock().expect("state mutex poisoned");
-            let Some(delegation_index) = inner
-                .find_delegation_index_by_child_session_id(child_session_id)
+            let Some(delegation_index) =
+                inner.find_delegation_index_by_child_session_id(child_session_id)
             else {
                 return Ok(());
             };
@@ -212,8 +211,8 @@ impl AppState {
             delegation_review_result_idempotency_key(&delegation_id, submission_attempt);
         {
             let inner = self.inner.lock().expect("state mutex poisoned");
-            let Some(delegation_index) = inner
-                .find_delegation_index_by_child_session_id(child_session_id)
+            let Some(delegation_index) =
+                inner.find_delegation_index_by_child_session_id(child_session_id)
             else {
                 return Ok(());
             };
@@ -241,9 +240,7 @@ impl AppState {
             || stored.topic.as_deref() != Some(DELEGATION_REVIEW_RESULT_TOPIC)
             || stored.state_stamp.as_deref() != Some(expected_state_stamp.as_str())
         {
-            Some(
-                "envelope metadata does not match its delegation attempt".to_owned(),
-            )
+            Some("envelope metadata does not match its delegation attempt".to_owned())
         } else {
             match serde_json::from_str::<DelegationReviewMailboxResult>(&stored.body) {
                 Ok(envelope)
@@ -300,10 +297,10 @@ impl AppState {
                 Some(reason),
             )?;
         }
-        match self.mailbox_store.record_initial_dispatch_outcome(
-            &stored.message_id,
-            "durableButNotWoken",
-        ) {
+        match self
+            .mailbox_store
+            .record_initial_dispatch_outcome(&stored.message_id, "durableButNotWoken")
+        {
             Ok(MailboxDispatchOutcomeRecord::Recorded { .. })
             | Ok(MailboxDispatchOutcomeRecord::AlreadyFinalized { .. }) => {}
             Err(err) => eprintln!(
@@ -329,9 +326,7 @@ impl AppState {
                 .collect::<Vec<_>>()
         };
         for child_session_id in child_session_ids {
-            if let Err(err) =
-                self.recover_durable_delegation_review_submission(&child_session_id)
-            {
+            if let Err(err) = self.recover_durable_delegation_review_submission(&child_session_id) {
                 eprintln!(
                     "delegation review> failed recovering durable result for child `{child_session_id}`: {}",
                     err.message
@@ -356,9 +351,7 @@ impl AppState {
         let delegation_index = inner
             .find_delegation_index_by_child_session_id(child_session_id)
             .ok_or_else(|| {
-                ApiError::bad_request(
-                    "structured review results require a linked delegation child",
-                )
+                ApiError::bad_request("structured review results require a linked delegation child")
             })?;
         let delegation = &inner.delegations[delegation_index];
         if delegation.child_session_id != child_session_id
@@ -388,8 +381,7 @@ impl AppState {
         let parent = &inner.sessions[parent_index];
         if child.hidden
             || !child.is_local_session()
-            || child.session.parent_delegation_id.as_deref()
-                != Some(delegation.id.as_str())
+            || child.session.parent_delegation_id.as_deref() != Some(delegation.id.as_str())
         {
             return Err(ApiError::bad_request(
                 "review result sender is not the linked local delegation child",
@@ -719,10 +711,9 @@ fn terminalize_submitted_review_result_locked(
     let terminal_at = stamp_now();
     let public_summary = compact_delegation_public_summary(&result.summary);
     let (card_status, lifecycle_status) = match result.status {
-        DelegationStatus::Completed => (
-            ParallelAgentStatus::Completed,
-            DelegationStatus::Completed,
-        ),
+        DelegationStatus::Completed => {
+            (ParallelAgentStatus::Completed, DelegationStatus::Completed)
+        }
         DelegationStatus::Failed => (ParallelAgentStatus::Error, DelegationStatus::Failed),
         _ => return None,
     };
@@ -746,12 +737,8 @@ fn terminalize_submitted_review_result_locked(
         SessionStatus::Idle,
         &public_summary,
     );
-    let parent_card_delta = update_parent_delegation_card_locked(
-        inner,
-        delegation,
-        card_status,
-        public_summary,
-    );
+    let parent_card_delta =
+        update_parent_delegation_card_locked(inner, delegation, card_status, public_summary);
     Some(match lifecycle_status {
         DelegationStatus::Completed => DelegationLifecycleDelta::Completed {
             delegation_id: delegation.id.clone(),

@@ -93,30 +93,57 @@ impl AppState {
             .ok_or_else(|| ApiError::not_found("session not found"))?;
         let engram_developer_name = inner.preferences.engram.developer_name.clone();
         let record = &inner.sessions[index];
-        let requested_model = request.model.as_deref().map(str::trim)
+        let requested_model = request
+            .model
+            .as_deref()
+            .map(str::trim)
             .filter(|value| !value.is_empty())
-            .map(|value| matching_session_model_option_value(value, &record.session.model_options)
-                .unwrap_or_else(|| value.to_owned()));
+            .map(|value| {
+                matching_session_model_option_value(value, &record.session.model_options)
+                    .unwrap_or_else(|| value.to_owned())
+            });
         if request.kimi_effort.is_some() && record.session.agent != Agent::Kimi {
-            return Err(ApiError::bad_request("kimiEffort is only supported by Kimi"));
+            return Err(ApiError::bad_request(
+                "kimiEffort is only supported by Kimi",
+            ));
         }
-        if record.session.agent == Agent::Kimi && (request.model.is_some() || request.kimi_effort.is_some())
-            && matches!(record.session.status, SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping)
+        if record.session.agent == Agent::Kimi
+            && (request.model.is_some() || request.kimi_effort.is_some())
+            && matches!(
+                record.session.status,
+                SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
+            )
         {
-            return Err(ApiError::conflict("Stop the Kimi turn before changing its model or reasoning effort"));
+            return Err(ApiError::conflict(
+                "Stop the Kimi turn before changing its model or reasoning effort",
+            ));
         }
         if let Some(effort) = request.kimi_effort.as_deref() {
             if effort != "auto" {
-                if requested_model.as_deref().is_some_and(|model| model != record.session.model) {
-                    return Err(ApiError::bad_request("Change the Kimi model first, then refresh its reasoning choices before selecting an effort"));
+                if requested_model
+                    .as_deref()
+                    .is_some_and(|model| model != record.session.model)
+                {
+                    return Err(ApiError::bad_request(
+                        "Change the Kimi model first, then refresh its reasoning choices before selecting an effort",
+                    ));
                 }
-                if !record.session.kimi_effort_options.iter().any(|option| option.value == effort) {
-                    return Err(ApiError::bad_request("Kimi did not advertise this reasoning effort; refresh its choices first"));
+                if !record
+                    .session
+                    .kimi_effort_options
+                    .iter()
+                    .any(|option| option.value == effort)
+                {
+                    return Err(ApiError::bad_request(
+                        "Kimi did not advertise this reasoning effort; refresh its choices first",
+                    ));
                 }
             }
         }
         if request.opencode_approval_mode.is_some() && record.session.agent != Agent::OpenCode {
-            return Err(ApiError::bad_request("opencodeApprovalMode is only supported by OpenCode"));
+            return Err(ApiError::bad_request(
+                "opencodeApprovalMode is only supported by OpenCode",
+            ));
         }
         // This is a payload contract, including repeated/current values and
         // sessions without a live runtime. Validate before any record mutation;
@@ -130,11 +157,17 @@ impl AppState {
                 "Change opencodeApprovalMode separately from model, opencodeEffort, and opencodeMode",
             ));
         }
-        if request.opencode_approval_mode.is_some_and(|mode|
-            mode != record.session.opencode_approval_mode.unwrap_or_default())
-            && matches!(record.session.status, SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping)
+        if request
+            .opencode_approval_mode
+            .is_some_and(|mode| mode != record.session.opencode_approval_mode.unwrap_or_default())
+            && matches!(
+                record.session.status,
+                SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
+            )
         {
-            return Err(ApiError::conflict("Stop the OpenCode turn before changing its approval mode"));
+            return Err(ApiError::conflict(
+                "Stop the OpenCode turn before changing its approval mode",
+            ));
         }
         // Mutable access advances the session's mutation stamp, so even that
         // access must follow the approval-policy payload validation above.
@@ -248,7 +281,9 @@ impl AppState {
                     || request.opencode_effort.is_some()
                     || request.opencode_mode.is_some()
                 {
-                    return Err(ApiError::bad_request("Kimi sessions only support model and reasoning effort settings"));
+                    return Err(ApiError::bad_request(
+                        "Kimi sessions only support model and reasoning effort settings",
+                    ));
                 }
             }
             agent => {
@@ -368,9 +403,7 @@ impl AppState {
                         &record.session.opencode_mode_options,
                     )
                     .ok_or_else(|| {
-                        ApiError::bad_request(format!(
-                            "OpenCode no longer offers mode `{value}`"
-                        ))
+                        ApiError::bad_request(format!("OpenCode no longer offers mode `{value}`"))
                     })
                 })
                 .transpose()?
@@ -393,9 +426,9 @@ impl AppState {
                 let changed_effort = requested_opencode_effort.clone().filter(|effort| {
                     record.session.opencode_effort.as_deref() != Some(effort.as_str())
                 });
-                let changed_mode = requested_opencode_mode.clone().filter(|mode| {
-                    record.session.opencode_mode.as_deref() != Some(mode.as_str())
-                });
+                let changed_mode = requested_opencode_mode
+                    .clone()
+                    .filter(|mode| record.session.opencode_mode.as_deref() != Some(mode.as_str()));
                 let engram_identity_change_requested = record.engram_mcp_installed.is_some()
                     && (changed_model.is_some() || changed_effort.is_some());
                 if engram_identity_change_requested {
@@ -423,9 +456,8 @@ impl AppState {
                         // when the request did not change its stored string.
                         OpenCodeConfigSelections {
                             model: changed_model,
-                            effort: requested_opencode_effort.or_else(|| {
-                                record.session.opencode_effort.clone()
-                            }),
+                            effort: requested_opencode_effort
+                                .or_else(|| record.session.opencode_effort.clone()),
                             mode: requested_opencode_mode
                                 .or_else(|| record.session.opencode_mode.clone()),
                         }
@@ -459,8 +491,8 @@ impl AppState {
                 let model_changed = next_model != record.session.model;
                 let next_model_supports_fast =
                     codex_model_supports_fast(&next_model, &record.session.model_options);
-                let actively_enabling_fast = request.codex_fast_mode == Some(true)
-                    && !record.session.codex_fast_mode;
+                let actively_enabling_fast =
+                    request.codex_fast_mode == Some(true) && !record.session.codex_fast_mode;
                 if actively_enabling_fast && !next_model_supports_fast {
                     if record.session.model_options.is_empty() {
                         return Err(ApiError::bad_request(
@@ -653,15 +685,14 @@ impl AppState {
             _ => {}
         }
 
-        let engram_process_identity_changed = previous_engram_process_identity.is_some_and(
-            |previous| {
+        let engram_process_identity_changed =
+            previous_engram_process_identity.is_some_and(|previous| {
                 previous
                     != (
                         engram_seat_id(&engram_developer_name, &record.session),
                         engram_actor_context(&record.session),
                     )
-            },
-        );
+            });
         if force_engram_process_rotation || engram_process_identity_changed {
             // The descriptor supplied to the current agent process and its MCP
             // child is immutable. Do not hot-apply a model/config update that
@@ -699,9 +730,8 @@ impl AppState {
         const REQUEST_TIMEOUT_SECONDS: u64 = 55;
         const RESPONSE_HANDOFF_SLACK_SECONDS: u64 = 1;
         const REQUEST_TIMEOUT: Duration = Duration::from_secs(REQUEST_TIMEOUT_SECONDS);
-        const EXECUTION_TIMEOUT: Duration = Duration::from_secs(
-            REQUEST_TIMEOUT_SECONDS - RESPONSE_HANDOFF_SLACK_SECONDS,
-        );
+        const EXECUTION_TIMEOUT: Duration =
+            Duration::from_secs(REQUEST_TIMEOUT_SECONDS - RESPONSE_HANDOFF_SLACK_SECONDS);
         let request_started_at = std::time::Instant::now();
         let deadline = request_started_at + REQUEST_TIMEOUT;
         let execution_deadline = request_started_at + EXECUTION_TIMEOUT;
@@ -750,8 +780,7 @@ impl AppState {
         // four-second model-options notification fit after the bounded
         // five-second scheduling window, while the reserved second prevents a
         // completed/expired writer result from racing the API timeout.
-        let acknowledgement_budget =
-            deadline.saturating_duration_since(std::time::Instant::now());
+        let acknowledgement_budget = deadline.saturating_duration_since(std::time::Instant::now());
         match response_rx.recv_timeout(acknowledgement_budget) {
             Ok(Ok(())) => Ok(self.snapshot()),
             Ok(Err(detail)) => Err(ApiError::conflict(format!(
@@ -1047,12 +1076,14 @@ impl AppState {
                 }
                 SessionRuntime::Acp(_) => {
                     return Err(ApiError::internal(format!(
-                        "unexpected ACP runtime attached to {} session", agent.name()
+                        "unexpected ACP runtime attached to {} session",
+                        agent.name()
                     )));
                 }
                 SessionRuntime::Claude(_) | SessionRuntime::Codex(_) => {
                     return Err(ApiError::internal(format!(
-                        "unexpected non-ACP runtime attached to {} session", agent.name()
+                        "unexpected non-ACP runtime attached to {} session",
+                        agent.name()
                     )));
                 }
                 SessionRuntime::None => {}
@@ -1077,19 +1108,20 @@ impl AppState {
                 ));
             }
             SessionRuntime::None => {
-                let handle = self.start_acp_runtime_for_turn(
-                    record.session.id.clone(),
-                    record.session.workdir.clone(),
-                    expected_acp_agent,
-                    record.session.gemini_approval_mode,
-                    engram_mcp.as_ref().map(|config| &config.stdio),
-                )
-                .map_err(|err| {
-                    ApiError::internal(format!(
-                        "failed to start persistent {} session: {err:#}",
-                        agent.name()
-                    ))
-                })?;
+                let handle = self
+                    .start_acp_runtime_for_turn(
+                        record.session.id.clone(),
+                        record.session.workdir.clone(),
+                        expected_acp_agent,
+                        record.session.gemini_approval_mode,
+                        engram_mcp.as_ref().map(|config| &config.stdio),
+                    )
+                    .map_err(|err| {
+                        ApiError::internal(format!(
+                            "failed to start persistent {} session: {err:#}",
+                            agent.name()
+                        ))
+                    })?;
                 record.runtime = SessionRuntime::Acp(handle.clone());
                 record.engram_mcp_installed =
                     engram_mcp.as_ref().map(|config| config.installed.clone());
@@ -1147,5 +1179,4 @@ impl AppState {
             ))),
         }
     }
-
 }

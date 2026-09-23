@@ -36,7 +36,6 @@
 //   event dispatcher can silently drop them when a session has been
 //   torn down mid-flight.
 
-
 /// Resets the per-turn scratch state so nothing leaks into the next
 /// turn: current agent-message id, streamed text/item-id caches,
 /// buffered subagent results, the assistant-output-started flag, and

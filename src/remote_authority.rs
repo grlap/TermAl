@@ -63,9 +63,7 @@ fn ensure_remote_routing_config(
     let current = current
         .ok_or_else(|| ApiError::bad_request(format!("unknown remote `{}`", expected.id)))?;
     if !same_remote_routing_config(current, expected) {
-        return Err(ApiError::conflict(
-            REMOTE_CONNECTION_CHANGED_BEFORE_REQUEST,
-        ));
+        return Err(ApiError::conflict(REMOTE_CONNECTION_CHANGED_BEFORE_REQUEST));
     }
     Ok(())
 }
@@ -187,11 +185,7 @@ impl AppState {
         inner: &StateInner,
         lease: &RemoteRequestLease,
     ) -> Result<(), ApiError> {
-        self.ensure_remote_apply_authority_locked(
-            inner,
-            &lease.pinned,
-            Some(&lease.connection),
-        )?;
+        self.ensure_remote_apply_authority_locked(inner, &lease.pinned, Some(&lease.connection))?;
         lease
             .connection
             .ensure_state_continuity_generation(lease.state_continuity_generation)
@@ -219,12 +213,8 @@ impl AppState {
         // `retired` detect same-bytes retirement such as A -> B -> A or a
         // display-name-only publication.
         self.ensure_remote_route_current_locked(inner, expected_remote)?;
-        if expected_connection
-            .is_some_and(|connection| connection.retired.load(Ordering::SeqCst))
-        {
-            return Err(ApiError::conflict(
-                REMOTE_CONNECTION_CHANGED_BEFORE_REQUEST,
-            ));
+        if expected_connection.is_some_and(|connection| connection.retired.load(Ordering::SeqCst)) {
+            return Err(ApiError::conflict(REMOTE_CONNECTION_CHANGED_BEFORE_REQUEST));
         }
         Ok(())
     }

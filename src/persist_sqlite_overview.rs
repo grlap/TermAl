@@ -4,17 +4,12 @@
 // schema lifecycle work out of the core persistence connection/load/write
 // module.
 
-fn encode_conversation_overview_message(
-    kind: ConversationOverviewKind,
-    is_user: bool,
-) -> u8 {
+fn encode_conversation_overview_message(kind: ConversationOverviewKind, is_user: bool) -> u8 {
     u8::try_from(conversation_overview_kind_index(kind)).unwrap_or_default()
         | (u8::from(is_user) << 2)
 }
 
-fn decode_conversation_overview_message(
-    encoded: u8,
-) -> Result<(ConversationOverviewKind, bool)> {
+fn decode_conversation_overview_message(encoded: u8) -> Result<(ConversationOverviewKind, bool)> {
     if encoded & !0b111 != 0 {
         bail!("conversation overview message byte {encoded} has unsupported flags");
     }
@@ -28,9 +23,7 @@ fn decode_conversation_overview_message(
     Ok((kind, encoded & 0b100 != 0))
 }
 
-fn ensure_sqlite_message_overview_columns(
-    connection: &rusqlite::Connection,
-) -> Result<()> {
+fn ensure_sqlite_message_overview_columns(connection: &rusqlite::Connection) -> Result<()> {
     let existing_columns = {
         let mut statement = connection
             .prepare("PRAGMA table_info(messages)")
@@ -87,9 +80,7 @@ fn ensure_sqlite_message_overview_columns(
     Ok(())
 }
 
-fn backfill_missing_sqlite_session_overviews(
-    connection: &rusqlite::Connection,
-) -> Result<()> {
+fn backfill_missing_sqlite_session_overviews(connection: &rusqlite::Connection) -> Result<()> {
     let sessions = {
         let mut statement = connection
             .prepare(
@@ -169,18 +160,17 @@ fn backfill_missing_sqlite_session_overviews(
             continue;
         }
 
-        let value_blob =
-            match build_sqlite_session_overview_blob(&mut load_messages, &session_id) {
-                Ok(value_blob) => value_blob,
-                Err(err) => {
-                    skipped_sessions += 1;
-                    eprintln!(
-                        "persist> skipping transcript overview backfill for invalid session \
+        let value_blob = match build_sqlite_session_overview_blob(&mut load_messages, &session_id) {
+            Ok(value_blob) => value_blob,
+            Err(err) => {
+                skipped_sessions += 1;
+                eprintln!(
+                    "persist> skipping transcript overview backfill for invalid session \
                          `{session_id}`: {err:#}"
-                    );
-                    continue;
-                }
-            };
+                );
+                continue;
+            }
+        };
         insert
             .execute(rusqlite::params![session_id, value_blob])
             .with_context(|| {
@@ -188,9 +178,7 @@ fn backfill_missing_sqlite_session_overviews(
             })?;
     }
     if skipped_sessions > 0 {
-        eprintln!(
-            "persist> skipped {skipped_sessions} invalid transcript overview session(s)"
-        );
+        eprintln!("persist> skipped {skipped_sessions} invalid transcript overview session(s)");
     }
     Ok(())
 }

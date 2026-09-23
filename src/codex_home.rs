@@ -34,7 +34,6 @@ fn termal_codex_agents_section() -> String {
     )
 }
 
-
 /// Resolves source Codex home dir.
 fn resolve_source_codex_home_dir() -> Result<PathBuf> {
     if let Some(path) = std::env::var_os("CODEX_HOME") {

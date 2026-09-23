@@ -146,10 +146,8 @@ impl CoordinationCleanupRetryState {
     fn record_pending(&mut self, pending: bool) {
         if pending {
             self.retry_pending = true;
-            self.retry_delay = std::cmp::min(
-                self.retry_delay * 2,
-                COORDINATION_CLEANUP_RETRY_MAX_DELAY,
-            );
+            self.retry_delay =
+                std::cmp::min(self.retry_delay * 2, COORDINATION_CLEANUP_RETRY_MAX_DELAY);
         } else {
             self.retry_pending = false;
             self.retry_delay = COORDINATION_CLEANUP_RETRY_SEED_DELAY;
@@ -159,7 +157,10 @@ impl CoordinationCleanupRetryState {
 
 impl PersistWorkerRetryState {
     fn next_tick_delay(&self) -> Option<Duration> {
-        match (self.retry_after_failure.then_some(self.retry_delay), self.fence_retry_delay) {
+        match (
+            self.retry_after_failure.then_some(self.retry_delay),
+            self.fence_retry_delay,
+        ) {
             (Some(failure), Some(fence)) => Some(failure.min(fence)),
             (failure, fence) => failure.or(fence),
         }
@@ -172,14 +173,18 @@ impl PersistWorkerRetryState {
     ) -> PersistWorkerWaitOutcome {
         self.wait_for_next_tick_using(fences, |delay| match delay {
             Some(delay) => persist_rx.recv_timeout(delay),
-            None => persist_rx.recv().map_err(|_| mpsc::RecvTimeoutError::Disconnected),
+            None => persist_rx
+                .recv()
+                .map_err(|_| mpsc::RecvTimeoutError::Disconnected),
         })
     }
 
     fn wait_for_next_tick_using(
         &self,
         fences: &mut PersistFenceBatch,
-        receive: impl FnOnce(Option<Duration>) -> std::result::Result<PersistRequest, mpsc::RecvTimeoutError>,
+        receive: impl FnOnce(
+            Option<Duration>,
+        ) -> std::result::Result<PersistRequest, mpsc::RecvTimeoutError>,
     ) -> PersistWorkerWaitOutcome {
         match receive(self.next_tick_delay()) {
             Ok(request) => fences.accept(request),
@@ -191,8 +196,7 @@ impl PersistWorkerRetryState {
     fn record_result(&mut self, result: &Result<()>) {
         if result.is_err() {
             self.retry_after_failure = true;
-            self.retry_delay =
-                std::cmp::min(self.retry_delay * 2, PERSIST_RETRY_MAX_DELAY);
+            self.retry_delay = std::cmp::min(self.retry_delay * 2, PERSIST_RETRY_MAX_DELAY);
         } else {
             self.retry_after_failure = false;
             self.retry_delay = PERSIST_RETRY_SEED_DELAY;
@@ -226,9 +230,10 @@ impl PersistWorkerRetryState {
         // cannot reset its cadence. New channel messages still wake immediately.
         fences.expire_resolved();
         self.fence_retry_delay = fences.has_pending().then(|| {
-            self.fence_retry_delay.map_or(PERSIST_FENCE_RETRY_SEED_DELAY, |delay| {
-                (delay * 2).min(PERSIST_FENCE_RETRY_MAX_DELAY)
-            })
+            self.fence_retry_delay
+                .map_or(PERSIST_FENCE_RETRY_SEED_DELAY, |delay| {
+                    (delay * 2).min(PERSIST_FENCE_RETRY_MAX_DELAY)
+                })
         });
         false
     }
@@ -308,9 +313,7 @@ where
             .expect("state mutex poisoned")
             .pending_response_board_project_detachments
             .iter()
-            .map(|(project_id, last_project_name)| {
-                (project_id.clone(), last_project_name.clone())
-            })
+            .map(|(project_id, last_project_name)| (project_id.clone(), last_project_name.clone()))
             .collect::<Vec<_>>()
     };
     let mut completed = Vec::new();
@@ -342,9 +345,7 @@ where
     }
     CoordinationCleanupPass {
         completed: completed_count,
-        pending: !inner
-            .pending_response_board_project_detachments
-            .is_empty(),
+        pending: !inner.pending_response_board_project_detachments.is_empty(),
     }
 }
 
@@ -378,8 +379,8 @@ fn run_coordination_cleanup_worker(
 
         let coordination_pass =
             process_pending_coordination_scope_deletions(&inner, |scope_project_id| {
-            coordination_board_store.delete_scope_for_project_lifecycle(scope_project_id)
-        });
+                coordination_board_store.delete_scope_for_project_lifecycle(scope_project_id)
+            });
         let response_board_pass = process_pending_response_board_project_detachments(
             &inner,
             |project_id, last_project_name| {
@@ -437,10 +438,9 @@ impl AppState {
     ) -> Result<Self> {
         // Defensive: tests and other direct callers may pass an un-normalized workdir.
         let default_workdir = normalize_local_user_facing_path(&default_workdir);
-        let (loaded_state, boot_persistence_connection) =
-            load_state_for_boot(&persistence_path)?;
-        let mut inner = loaded_state
-            .unwrap_or_else(|| bootstrap_default_local_state(&default_workdir));
+        let (loaded_state, boot_persistence_connection) = load_state_for_boot(&persistence_path)?;
+        let mut inner =
+            loaded_state.unwrap_or_else(|| bootstrap_default_local_state(&default_workdir));
         #[cfg(test)]
         TEST_ENGRAM_BOOT_TRANSPORT.with(|slot| {
             if let Some(transport) = slot.borrow().clone() {
@@ -480,8 +480,7 @@ impl AppState {
         // Mailboxes and the level-triggered board deliberately share the small
         // coordination database and its FIFO writer admission, while session
         // and transcript persistence remain isolated in termal.sqlite.
-        let coordination_board_store =
-            Arc::new(CoordinationBoardStore::open(&coordination_path)?);
+        let coordination_board_store = Arc::new(CoordinationBoardStore::open(&coordination_path)?);
         // `AppState::inner` is built here (rather than inside the struct
         // literal further below) so we can share an `Arc` clone with the
         // background persist thread. The thread briefly re-locks it on
@@ -537,13 +536,14 @@ impl AppState {
         // every queued write — previously every persist opened a fresh
         // connection and re-ran the schema validation and maintenance
         // checks.
-        let boot_persist_cache_seed = boot_persistence_connection
-            .map(|connection| (persistence_path.clone(), connection));
+        let boot_persist_cache_seed =
+            boot_persistence_connection.map(|connection| (persistence_path.clone(), connection));
         let persist_thread_handle = std::thread::Builder::new()
             .name("termal-persist".to_owned())
             .spawn(move || {
-                let mut cache =
-                    SqlitePersistConnectionCache::from_validated_connection(boot_persist_cache_seed);
+                let mut cache = SqlitePersistConnectionCache::from_validated_connection(
+                    boot_persist_cache_seed,
+                );
                 let mut watermark: u64 = 0;
                 let mut prompt_history_carry = BTreeSet::new();
                 let mut retry_state = PersistWorkerRetryState::default();
@@ -568,11 +568,12 @@ impl AppState {
                     should_exit_after_tick = fences.drain(&persist_rx, should_exit_after_tick);
 
                     let result: Result<()> = (|| {
-                        let delta = collect_persist_delta_from_shared_state_with_prompt_history_carry(
-                            &inner_for_persist,
-                            watermark,
-                            &prompt_history_carry,
-                        );
+                        let delta =
+                            collect_persist_delta_from_shared_state_with_prompt_history_carry(
+                                &inner_for_persist,
+                                watermark,
+                                &prompt_history_carry,
+                            );
                         let next_watermark = delta.watermark;
                         let next_prompt_history_carry = delta
                             .deferred_prompt_history_session_ids
@@ -640,8 +641,7 @@ impl AppState {
                             }
                         };
                         {
-                            let mut inner =
-                                inner_for_persist.lock().expect("state mutex poisoned");
+                            let mut inner = inner_for_persist.lock().expect("state mutex poisoned");
                             inner.trim_persisted_session_tails(
                                 next_watermark,
                                 &persisted_session_ids,
@@ -656,8 +656,8 @@ impl AppState {
                             // secondary cleanup. The dedicated worker removes
                             // completed outbox items in memory and wakes this
                             // worker again to persist that bookkeeping.
-                            let _ = coordination_cleanup_tx
-                                .send(CoordinationCleanupRequest::Process);
+                            let _ =
+                                coordination_cleanup_tx.send(CoordinationCleanupRequest::Process);
                         }
                         Ok(())
                     })();
@@ -665,7 +665,8 @@ impl AppState {
                     if let Err(err) = &result {
                         eprintln!("[termal] background persist failed: {err:#}");
                     }
-                    if retry_state.finish_fenced_tick(&result, should_exit_after_tick, &mut fences) {
+                    if retry_state.finish_fenced_tick(&result, should_exit_after_tick, &mut fences)
+                    {
                         break;
                     }
                 }
@@ -787,7 +788,9 @@ impl AppState {
             state.persist_internal_locked(&inner)?;
             // Seed settings-owned registry authority before any restored bridge
             // can issue a remote request after restart.
-            state.remote_registry.publish_configs(&inner.preferences.remotes)
+            state
+                .remote_registry
+                .publish_configs(&inner.preferences.remotes)
         };
         let bridges_to_restart = state
             .remote_registry

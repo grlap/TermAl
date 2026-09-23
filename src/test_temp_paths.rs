@@ -2,11 +2,19 @@
 // wrapper launches. Does not own production paths or retry failed removals.
 // New module, extracted from the raw OS-temp lookup in TestTempRoot.
 
-fn resolve_test_temp_directory(user_temp: &FsPath, run_root: Option<&FsPath>) -> io::Result<PathBuf> {
+fn resolve_test_temp_directory(
+    user_temp: &FsPath,
+    run_root: Option<&FsPath>,
+) -> io::Result<PathBuf> {
     if !user_temp.is_absolute()
-        || user_temp.components().any(|part| matches!(part, std::path::Component::ParentDir))
+        || user_temp
+            .components()
+            .any(|part| matches!(part, std::path::Component::ParentDir))
     {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, "user temp must be absolute without parent traversal"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "user temp must be absolute without parent traversal",
+        ));
     }
     // Same lexical contract as scripts/test-temp-root.mjs: normalize dot and
     // separator spelling, but do not canonicalize OS-temp filesystem aliases.
@@ -15,11 +23,22 @@ fn resolve_test_temp_directory(user_temp: &FsPath, run_root: Option<&FsPath>) ->
     let product = user_temp.join("termal").join("tests");
     match run_root {
         None => Ok(product),
-        Some(run) if run.is_absolute()
-            && run.parent() == Some(product.as_path())
-            && run.file_name().is_some_and(|name| name.to_string_lossy().starts_with("run-"))
-            && !run.components().any(|part| matches!(part, std::path::Component::ParentDir)) => Ok(run.components().collect()),
-        Some(_) => Err(io::Error::new(io::ErrorKind::InvalidInput, "test run root must be a direct run-* child of the product test directory")),
+        Some(run)
+            if run.is_absolute()
+                && run.parent() == Some(product.as_path())
+                && run
+                    .file_name()
+                    .is_some_and(|name| name.to_string_lossy().starts_with("run-"))
+                && !run
+                    .components()
+                    .any(|part| matches!(part, std::path::Component::ParentDir)) =>
+        {
+            Ok(run.components().collect())
+        }
+        Some(_) => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "test run root must be a direct run-* child of the product test directory",
+        )),
     }
 }
 
@@ -31,7 +50,13 @@ fn ensure_plain_test_directory(path: &FsPath) -> io::Result<()> {
     }
     let metadata = fs::symlink_metadata(path)?;
     if !metadata.is_dir() || metadata.file_type().is_symlink() {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, format!("test directory is not a plain directory: {}", path.display())));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "test directory is not a plain directory: {}",
+                path.display()
+            ),
+        ));
     }
     Ok(())
 }
@@ -45,7 +70,11 @@ fn test_temp_dir() -> PathBuf {
     let target = resolve_test_temp_directory(&user_temp, run_root.as_deref())
         .expect("valid product test temporary directory");
     // Validate one component at a time, before creating anything below it.
-    for path in [user_temp.join("termal"), user_temp.join("termal").join("tests"), target.clone()] {
+    for path in [
+        user_temp.join("termal"),
+        user_temp.join("termal").join("tests"),
+        target.clone(),
+    ] {
         ensure_plain_test_directory(&path)
             .unwrap_or_else(|error| panic!("test temporary directory {}: {error}", path.display()));
     }
@@ -55,7 +84,13 @@ fn test_temp_dir() -> PathBuf {
         // runs are retained here; the Node launcher owns their PID checks.
         if run_root.is_none() {
             let removed = sweep_unmarked_test_fixtures(&target, std::time::SystemTime::now())
-                .map_err(|error| format!("test startup sweep {}: {error}; os={:?}", target.display(), error.raw_os_error()))?;
+                .map_err(|error| {
+                    format!(
+                        "test startup sweep {}: {error}; os={:?}",
+                        target.display(),
+                        error.raw_os_error()
+                    )
+                })?;
             for path in removed {
                 eprintln!("removed stale test fixture: {}", path.display());
             }
@@ -70,7 +105,10 @@ fn test_temp_dir() -> PathBuf {
     target
 }
 
-fn stale_unmarked_test_fixture(path: &FsPath, now: std::time::SystemTime) -> io::Result<Option<fs::FileType>> {
+fn stale_unmarked_test_fixture(
+    path: &FsPath,
+    now: std::time::SystemTime,
+) -> io::Result<Option<fs::FileType>> {
     let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -86,14 +124,23 @@ fn stale_unmarked_test_fixture(path: &FsPath, now: std::time::SystemTime) -> io:
             Err(error) => return Err(error),
         }
     }
-    Ok(now.duration_since(metadata.modified()?).is_ok_and(|age| age > Duration::from_secs(48 * 60 * 60)).then_some(metadata.file_type()))
+    Ok(now
+        .duration_since(metadata.modified()?)
+        .is_ok_and(|age| age > Duration::from_secs(48 * 60 * 60))
+        .then_some(metadata.file_type()))
 }
 
-fn sweep_unmarked_test_fixtures(root: &FsPath, now: std::time::SystemTime) -> io::Result<Vec<PathBuf>> {
+fn sweep_unmarked_test_fixtures(
+    root: &FsPath,
+    now: std::time::SystemTime,
+) -> io::Result<Vec<PathBuf>> {
     let plain_root = || -> io::Result<()> {
         let metadata = fs::symlink_metadata(root)?;
         if !metadata.is_dir() || metadata.file_type().is_symlink() {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, format!("sweep root is not a plain directory: {}", root.display())));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("sweep root is not a plain directory: {}", root.display()),
+            ));
         }
         Ok(())
     };
@@ -122,7 +169,16 @@ fn sweep_unmarked_test_fixtures(root: &FsPath, now: std::time::SystemTime) -> io
         match removal {
             Ok(()) => removed.push(path),
             Err(error) if error.kind() == io::ErrorKind::NotFound => (),
-            Err(error) => return Err(io::Error::new(error.kind(), format!("stale fixture {}: {error}; os={:?}", path.display(), error.raw_os_error()))),
+            Err(error) => {
+                return Err(io::Error::new(
+                    error.kind(),
+                    format!(
+                        "stale fixture {}: {error}; os={:?}",
+                        path.display(),
+                        error.raw_os_error()
+                    ),
+                ));
+            }
         }
     }
     Ok(removed)
@@ -137,8 +193,12 @@ fn remove_test_directory(path: impl AsRef<FsPath>) {
         if error.kind() == io::ErrorKind::NotFound {
             return;
         }
-        let detail = format!("test directory not removed: {} ({error}; kind={:?}; os={:?})",
-            path.display(), error.kind(), error.raw_os_error());
+        let detail = format!(
+            "test directory not removed: {} ({error}; kind={:?}; os={:?})",
+            path.display(),
+            error.kind(),
+            error.raw_os_error()
+        );
         if std::thread::panicking() {
             eprintln!("{detail}");
         } else {

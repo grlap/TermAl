@@ -133,10 +133,7 @@ fn drain_telegram_updates_then_sync_replies(
             "telegram> capped oversized update batch at {TELEGRAM_MAX_UPDATES_PER_ITERATION} of {update_count} updates"
         );
     }
-    for update in updates
-        .into_iter()
-        .take(TELEGRAM_MAX_UPDATES_PER_ITERATION)
-    {
+    for update in updates.into_iter().take(TELEGRAM_MAX_UPDATES_PER_ITERATION) {
         if telegram_relay_shutdown_requested(shutdown) {
             break;
         }
@@ -222,8 +219,7 @@ impl TelegramBotConfig {
         if project_id.is_empty() {
             return Err(TelegramRelayConfigUnavailableReason::MissingProjectTarget);
         }
-        let subscribed_project_ids =
-            telegram_effective_subscribed_project_ids(config, &project_id);
+        let subscribed_project_ids = telegram_effective_subscribed_project_ids(config, &project_id);
         let state_path = resolve_termal_data_dir(default_workdir).join("telegram-bot.json");
 
         Ok(Self {
@@ -529,7 +525,9 @@ impl AppState {
             .lock()
             .expect("telegram relay runtime mutex poisoned");
         runtime.running = false;
-        runtime.actions.push(TelegramRelayRuntimeActionForTest::Stop);
+        runtime
+            .actions
+            .push(TelegramRelayRuntimeActionForTest::Stop);
     }
 
     fn reset_telegram_relay_runtime_actions_for_tests(&self) {

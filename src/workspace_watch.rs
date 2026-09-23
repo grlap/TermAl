@@ -201,7 +201,9 @@ fn canonical_workspace_file_watch_root(root: &str) -> Option<PathBuf> {
     }
 
     let canonical = fs::canonicalize(trimmed).ok()?;
-    canonical.is_dir().then(|| normalize_user_facing_path(&canonical))
+    canonical
+        .is_dir()
+        .then(|| normalize_user_facing_path(&canonical))
 }
 
 fn prune_nested_workspace_file_watch_roots(mut roots: Vec<PathBuf>) -> Vec<PathBuf> {

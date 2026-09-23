@@ -836,44 +836,42 @@ impl AppState {
 
         for session_id in session_ids {
             match self.start_orphaned_workflow_turn(&session_id) {
-                Ok(Some(started)) => {
-                    match deliver_turn_dispatch(self, started.dispatch) {
-                        TurnDispatchDeliveryOutcome::Rejected(err) => {
-                            eprintln!(
-                                "startup> failed dispatching orphaned workflow prompt for `{session_id}`: {}",
-                                err.message
-                            );
-                            match started.queued.source {
-                                QueuedPromptSource::Mailbox => {
-                                    self.retry_orphaned_workflow_after_rejected_mailbox_wake(
+                Ok(Some(started)) => match deliver_turn_dispatch(self, started.dispatch) {
+                    TurnDispatchDeliveryOutcome::Rejected(err) => {
+                        eprintln!(
+                            "startup> failed dispatching orphaned workflow prompt for `{session_id}`: {}",
+                            err.message
+                        );
+                        match started.queued.source {
+                            QueuedPromptSource::Mailbox => {
+                                self.retry_orphaned_workflow_after_rejected_mailbox_wake(
+                                    &session_id,
+                                );
+                            }
+                            QueuedPromptSource::Orchestrator => {
+                                if let Err(requeue_err) = self
+                                    .requeue_rejected_orphaned_workflow_prompt(
                                         &session_id,
+                                        started.queued,
+                                    )
+                                {
+                                    eprintln!(
+                                        "startup> failed restoring rejected orphaned workflow prompt for `{session_id}`: {requeue_err:#}"
                                     );
                                 }
-                                QueuedPromptSource::Orchestrator => {
-                                    if let Err(requeue_err) = self
-                                        .requeue_rejected_orphaned_workflow_prompt(
-                                            &session_id,
-                                            started.queued,
-                                        )
-                                    {
-                                        eprintln!(
-                                            "startup> failed restoring rejected orphaned workflow prompt for `{session_id}`: {requeue_err:#}"
-                                        );
-                                    }
-                                }
-                                QueuedPromptSource::User => {}
                             }
+                            QueuedPromptSource::User => {}
                         }
-                        TurnDispatchDeliveryOutcome::Held { error: Some(error) } => eprintln!(
-                            "startup> retained orphaned workflow prompt for `{session_id}` after uncertain persistence: {}",
-                            error.message
-                        ),
-                        TurnDispatchDeliveryOutcome::Delivered
-                        | TurnDispatchDeliveryOutcome::Scheduled
-                        | TurnDispatchDeliveryOutcome::Held { error: None }
-                        | TurnDispatchDeliveryOutcome::Superseded => {}
                     }
-                }
+                    TurnDispatchDeliveryOutcome::Held { error: Some(error) } => eprintln!(
+                        "startup> retained orphaned workflow prompt for `{session_id}` after uncertain persistence: {}",
+                        error.message
+                    ),
+                    TurnDispatchDeliveryOutcome::Delivered
+                    | TurnDispatchDeliveryOutcome::Scheduled
+                    | TurnDispatchDeliveryOutcome::Held { error: None }
+                    | TurnDispatchDeliveryOutcome::Superseded => {}
+                },
                 Ok(None) => {}
                 Err(err) => {
                     eprintln!(
@@ -950,33 +948,31 @@ impl AppState {
     /// respawning a broken runtime.
     fn retry_orphaned_workflow_after_rejected_mailbox_wake(&self, session_id: &str) {
         match self.start_orphaned_workflow_turn(session_id) {
-            Ok(Some(started)) => {
-                match deliver_turn_dispatch(self, started.dispatch) {
-                    TurnDispatchDeliveryOutcome::Rejected(err) => {
-                        eprintln!(
-                            "startup> failed retrying recovered mailbox wake before orphaned workflow for `{session_id}`: {}",
-                            err.message
-                        );
-                        if started.queued.source == QueuedPromptSource::Orchestrator {
-                            if let Err(requeue_err) = self
-                                .requeue_rejected_orphaned_workflow_prompt(session_id, started.queued)
-                            {
-                                eprintln!(
-                                    "startup> failed restoring workflow prompt rejected during mailbox recovery retry for `{session_id}`: {requeue_err:#}"
-                                );
-                            }
+            Ok(Some(started)) => match deliver_turn_dispatch(self, started.dispatch) {
+                TurnDispatchDeliveryOutcome::Rejected(err) => {
+                    eprintln!(
+                        "startup> failed retrying recovered mailbox wake before orphaned workflow for `{session_id}`: {}",
+                        err.message
+                    );
+                    if started.queued.source == QueuedPromptSource::Orchestrator {
+                        if let Err(requeue_err) = self
+                            .requeue_rejected_orphaned_workflow_prompt(session_id, started.queued)
+                        {
+                            eprintln!(
+                                "startup> failed restoring workflow prompt rejected during mailbox recovery retry for `{session_id}`: {requeue_err:#}"
+                            );
                         }
                     }
-                    TurnDispatchDeliveryOutcome::Held { error: Some(error) } => eprintln!(
-                        "startup> retained recovered mailbox/workflow prompt for `{session_id}` after uncertain persistence: {}",
-                        error.message
-                    ),
-                    TurnDispatchDeliveryOutcome::Delivered
-                    | TurnDispatchDeliveryOutcome::Scheduled
-                    | TurnDispatchDeliveryOutcome::Held { error: None }
-                    | TurnDispatchDeliveryOutcome::Superseded => {}
                 }
-            }
+                TurnDispatchDeliveryOutcome::Held { error: Some(error) } => eprintln!(
+                    "startup> retained recovered mailbox/workflow prompt for `{session_id}` after uncertain persistence: {}",
+                    error.message
+                ),
+                TurnDispatchDeliveryOutcome::Delivered
+                | TurnDispatchDeliveryOutcome::Scheduled
+                | TurnDispatchDeliveryOutcome::Held { error: None }
+                | TurnDispatchDeliveryOutcome::Superseded => {}
+            },
             Ok(None) => {}
             Err(err) => {
                 eprintln!(
@@ -1202,9 +1198,9 @@ impl AppState {
         let bypass_owner = allow_blocked_dispatch
             .then(|| {
                 let inner = self.inner.lock().expect("state mutex poisoned");
-                inner.find_session_index(session_id).and_then(|index| {
-                    EngramQueuedAdmissionOwner::capture(&inner.sessions[index])
-                })
+                inner
+                    .find_session_index(session_id)
+                    .and_then(|index| EngramQueuedAdmissionOwner::capture(&inner.sessions[index]))
             })
             .flatten();
         let mut context_preparation = self.prepare_engram_context_nudge_off_lock(session_id);
@@ -1547,13 +1543,14 @@ impl AppState {
                         None => err,
                     };
                     let err = err.context("failed to persist the promoted queue head");
-                    let retained = inner.sessions[index]
-                        .queued_prompts
-                        .front()
-                        .is_some_and(|queued| {
-                            queued.pending_prompt.id == queued_prompt_id
-                                && queued.is_engram_retained()
-                        });
+                    let retained =
+                        inner.sessions[index]
+                            .queued_prompts
+                            .front()
+                            .is_some_and(|queued| {
+                                queued.pending_prompt.id == queued_prompt_id
+                                    && queued.is_engram_retained()
+                            });
                     return if retained {
                         Err(err.context(RetainedQueuedPromotionPersistenceUnknown {
                             prompt_id: queued_prompt_id,

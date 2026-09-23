@@ -84,11 +84,7 @@ fn remote_delta_session_transcript_metadata(
             message_count,
             session_mutation_stamp,
             ..
-        } => Some((
-            session_id.as_str(),
-            *message_count,
-            *session_mutation_stamp,
-        )),
+        } => Some((session_id.as_str(), *message_count, *session_mutation_stamp)),
         _ => None,
     }
 }
@@ -410,14 +406,17 @@ fn apply_remote_session_to_record(
     let local_session_id = record.session.id.clone();
     let preserve_cached_messages =
         !remote_session.messages_loaded && remote_session.messages.is_empty();
-    let previous_messages =
-        preserve_cached_messages.then(|| record.session.messages.clone());
+    let previous_messages = preserve_cached_messages.then(|| record.session.messages.clone());
     let previous_message_start_index = record.message_start_index;
     let previous_messages_loaded = record.session.messages_loaded;
     let previous_prompt_history = record.session.prompt_history.clone();
     let previous_remote_mutation_stamp = record.session.session_mutation_stamp;
-    record.session =
-        localize_remote_session(remote_id, &local_session_id, local_project_id, remote_session);
+    record.session = localize_remote_session(
+        remote_id,
+        &local_session_id,
+        local_project_id,
+        remote_session,
+    );
     record.engram_boot_recovery_pending = remote_session.engram_boot_recovery_pending;
     if remote_session.session_mutation_stamp.is_none() {
         record.session.session_mutation_stamp = previous_remote_mutation_stamp;
@@ -429,10 +428,8 @@ fn apply_remote_session_to_record(
     }
     if let Some(messages) = previous_messages {
         let count_matches = record.session.message_count
-            == u32::try_from(
-                previous_message_start_index.saturating_add(messages.len()),
-            )
-            .unwrap_or(u32::MAX);
+            == u32::try_from(previous_message_start_index.saturating_add(messages.len()))
+                .unwrap_or(u32::MAX);
         let remote_mutation_stamp_matches = remote_mutation_stamp_allows_cached_transcript(
             previous_remote_mutation_stamp,
             remote_session.session_mutation_stamp,
@@ -963,12 +960,14 @@ fn local_session_id_for_remote_session(
         remote_session.project_id.as_deref(),
     )
     .or_else(|| fallback_local_project_id.map(LocalProjectId::from));
-    Some(LocalSessionId::from(upsert_remote_proxy_session_summary_record(
-        inner,
-        remote_id,
-        remote_session,
-        local_project_id.map(LocalProjectId::into_inner),
-    )))
+    Some(LocalSessionId::from(
+        upsert_remote_proxy_session_summary_record(
+            inner,
+            remote_id,
+            remote_session,
+            local_project_id.map(LocalProjectId::into_inner),
+        ),
+    ))
 }
 
 /// Localizes a remote orchestrator instance. All the `local_*` ids
@@ -1279,13 +1278,7 @@ fn process_remote_event_stream_reader<R: BufRead>(
     recovery: &mut RemoteEventStreamRecovery,
 ) -> Result<()> {
     process_remote_event_stream_reader_with_authority(
-        state,
-        remote_id,
-        None,
-        reader,
-        event_name,
-        data_lines,
-        recovery,
+        state, remote_id, None, reader, event_name, data_lines, recovery,
     )
 }
 
@@ -1370,12 +1363,7 @@ fn dispatch_remote_event_with_recovery(
     recovery: &mut RemoteEventStreamRecovery,
 ) -> Result<()> {
     dispatch_remote_event_with_recovery_and_authority(
-        state,
-        remote_id,
-        None,
-        event_name,
-        data_lines,
-        recovery,
+        state, remote_id, None, event_name, data_lines, recovery,
     )
 }
 
@@ -1400,11 +1388,7 @@ fn dispatch_remote_event_with_recovery_and_authority(
                 let inner = state.inner.lock().expect("state mutex poisoned");
                 if let Some((remote, connection)) = bridge_authority {
                     state
-                        .ensure_remote_apply_authority_locked(
-                            &inner,
-                            remote,
-                            Some(connection),
-                        )
+                        .ensure_remote_apply_authority_locked(&inner, remote, Some(connection))
                         .map_err(|err| anyhow!(err.message))?;
                 }
                 inner
@@ -1486,10 +1470,7 @@ fn dispatch_remote_event_with_recovery_and_authority(
                         )
                         .map_err(|err| anyhow!(err.message))?;
                 } else {
-                    state.note_remote_sse_fallback_resync(
-                        remote_id,
-                        remote_payload.state.revision,
-                    );
+                    state.note_remote_sse_fallback_resync(remote_id, remote_payload.state.revision);
                 }
                 return Ok(());
             }
@@ -1538,9 +1519,7 @@ fn dispatch_remote_event_with_recovery_and_authority(
                 }
                 let repair_result = if let Some((remote, connection)) = bridge_authority {
                     state.repair_remote_session_tail_after_delta_error_for_bridge(
-                        remote,
-                        connection,
-                        &delta,
+                        remote, connection, &delta,
                     )
                 } else {
                     state.repair_remote_session_tail_after_delta_error(remote_id, &delta)

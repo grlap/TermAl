@@ -137,7 +137,10 @@ fn persist_telegram_bot_state(path: &FsPath, state: &TelegramBotState) -> Result
     match fs::read(path) {
         Ok(raw) => {
             serde_json::from_slice::<TelegramBotState>(&raw).with_context(|| {
-                format!("failed to parse existing Telegram bot file `{}` before saving relay state", path.display())
+                format!(
+                    "failed to parse existing Telegram bot file `{}` before saving relay state",
+                    path.display()
+                )
             })?;
         }
         Err(err) if err.kind() == io::ErrorKind::NotFound => {}

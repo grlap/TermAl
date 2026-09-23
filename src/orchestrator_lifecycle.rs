@@ -36,7 +36,6 @@
 // instance-level state machine that routes transitions into that
 // machinery.
 
-
 impl AppState {
     /// Pauses orchestrator instance.
     fn pause_orchestrator_instance(&self, instance_id: &str) -> Result<StateResponse, ApiError> {
@@ -451,10 +450,10 @@ impl AppState {
                         continue;
                     };
                     clear_stopped_orchestrator_queued_prompts(
-                    inner
-                        .session_mut_by_index(session_index)
-                        .expect("session index should be valid"),
-                );
+                        inner
+                            .session_mut_by_index(session_index)
+                            .expect("session index should be valid"),
+                    );
                 }
                 self.commit_persisted_delta_locked(&mut inner)
                     .map_err(|err| {
@@ -635,7 +634,9 @@ impl AppState {
                 .ok_or_else(|| {
                     anyhow!("queued orchestrator transition prompt disappeared before dispatch")
                 })?;
-            if let Err(err) = deliver_turn_dispatch(self, dispatch).into_background_result("orchestrator lifecycle") {
+            if let Err(err) = deliver_turn_dispatch(self, dispatch)
+                .into_background_result("orchestrator lifecycle")
+            {
                 eprintln!(
                     "orchestrator transition warning> failed to dispatch queued prompt for session `{}`: {}",
                     destination_session_id, err.message

@@ -191,7 +191,12 @@ fn validate_response_board_coordinate(label: &str, value: f64) -> Result<(), Api
     Ok(())
 }
 
-fn validate_response_board_size(label: &str, value: f64, min: f64, max: f64) -> Result<(), ApiError> {
+fn validate_response_board_size(
+    label: &str,
+    value: f64,
+    min: f64,
+    max: f64,
+) -> Result<(), ApiError> {
     if !value.is_finite() || !(min..=max).contains(&value) {
         return Err(ApiError::bad_request(format!(
             "{label} must be between {min} and {max}"
@@ -252,11 +257,7 @@ fn decode_response_board_card_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<R
     let snapshot_json: String = row.get(8)?;
     let snapshot_record: ResponseBoardSnapshotRecord = serde_json::from_str(&snapshot_json)
         .map_err(|err| {
-            rusqlite::Error::FromSqlConversionFailure(
-                8,
-                rusqlite::types::Type::Text,
-                Box::new(err),
-            )
+            rusqlite::Error::FromSqlConversionFailure(8, rusqlite::types::Type::Text, Box::new(err))
         })?;
     Ok(ResponseBoardCard {
         id: row.get(0)?,
@@ -582,7 +583,11 @@ fn patch_response_board_card(
         )
         .map_err(|err| response_board_storage_error("update the response-board card", err))?;
     let card = transaction
-        .query_row(&sql, rusqlite::params![card_id], decode_response_board_card_row)
+        .query_row(
+            &sql,
+            rusqlite::params![card_id],
+            decode_response_board_card_row,
+        )
         .map_err(|err| response_board_storage_error("read the updated response-board card", err))?;
     transaction
         .commit()
@@ -608,9 +613,7 @@ fn remove_response_board_card(path: &FsPath, card_id: &str) -> Result<(), ApiErr
     Ok(())
 }
 
-fn list_response_board_tabs_from_storage(
-    path: &FsPath,
-) -> Result<ResponseBoardTabs, ApiError> {
+fn list_response_board_tabs_from_storage(path: &FsPath) -> Result<ResponseBoardTabs, ApiError> {
     let connection = open_sqlite_state_read_connection(path)
         .map_err(|err| response_board_storage_error("open response-board tabs", err))?;
     let sql = format!(
@@ -659,10 +662,7 @@ fn query_response_board_tab(
         })
 }
 
-fn load_response_board_tab(
-    path: &FsPath,
-    tab_id: &str,
-) -> Result<ResponseBoardTabView, ApiError> {
+fn load_response_board_tab(path: &FsPath, tab_id: &str) -> Result<ResponseBoardTabView, ApiError> {
     validate_response_board_identifier("tab id", tab_id)?;
     let connection = open_sqlite_state_read_connection(path)
         .map_err(|err| response_board_storage_error("open the response-board tab", err))?;
@@ -676,10 +676,7 @@ fn load_response_board_tab(
         .prepare(&placed_sql)
         .map_err(|err| response_board_storage_error("prepare response-board cards", err))?;
     let cards = statement
-        .query_map(
-            rusqlite::params![tab_id],
-            decode_response_board_card_row,
-        )
+        .query_map(rusqlite::params![tab_id], decode_response_board_card_row)
         .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
         .map_err(|err| response_board_storage_error("read response-board cards", err))?;
     let staged_sql = format!(
@@ -782,7 +779,9 @@ fn rename_response_board_tab(
 fn remove_response_board_tab(path: &FsPath, tab_id: &str) -> Result<(), ApiError> {
     validate_response_board_identifier("tab id", tab_id)?;
     if tab_id == RESPONSE_BOARD_DEFAULT_TAB_ID {
-        return Err(ApiError::conflict("the default response-board tab cannot be deleted"));
+        return Err(ApiError::conflict(
+            "the default response-board tab cannot be deleted",
+        ));
     }
     let connection = open_sqlite_state_connection(path)
         .map_err(|err| response_board_storage_error("open the response-board tab", err))?;
@@ -790,7 +789,9 @@ fn remove_response_board_tab(path: &FsPath, tab_id: &str) -> Result<(), ApiError
     let _write_guard = lock_sqlite_state_writer(&write_lock);
     let tab = query_response_board_tab(&connection, tab_id)?;
     if tab.kind == ResponseBoardTabKind::ProjectDefault {
-        return Err(ApiError::conflict("project response-board tabs cannot be deleted"));
+        return Err(ApiError::conflict(
+            "project response-board tabs cannot be deleted",
+        ));
     }
     if tab.placed_card_count > 0 {
         return Err(ApiError::conflict("move or delete this tab's cards first"));
@@ -837,7 +838,9 @@ fn reorder_response_board_tabs_in_storage(
         })
         .map_err(|err| response_board_storage_error("read response-board tab order", err))?;
     let requested_ids = request.tab_ids;
-    let unique_ids = requested_ids.iter().collect::<std::collections::HashSet<_>>();
+    let unique_ids = requested_ids
+        .iter()
+        .collect::<std::collections::HashSet<_>>();
     if requested_ids.len() != existing_ids.len()
         || unique_ids.len() != requested_ids.len()
         || !existing_ids.iter().all(|id| unique_ids.contains(id))
@@ -1056,11 +1059,8 @@ fn stage_response_board_card_in_storage(
         return Ok((StatusCode::OK, card));
     }
 
-    let snapshot = prepare_response_board_snapshot(
-        &transaction,
-        &request.session_id,
-        &request.message_id,
-    )?;
+    let snapshot =
+        prepare_response_board_snapshot(&transaction, &request.session_id, &request.message_id)?;
     let (has_canvas_position, x, y) = match requested_position {
         Some((x, y)) => (true, x, y),
         None => (false, 0.0, 0.0),
@@ -1157,9 +1157,7 @@ fn convert_deleted_project_response_board_tab(
     Ok(())
 }
 
-fn response_board_project_names(
-    state: &AppState,
-) -> Result<HashMap<String, String>, ApiError> {
+fn response_board_project_names(state: &AppState) -> Result<HashMap<String, String>, ApiError> {
     let inner = state
         .inner
         .lock()
@@ -1245,8 +1243,8 @@ async fn reorder_response_board_tabs(
     State(state): State<AppState>,
     request: Result<Json<ReorderResponseBoardTabsRequest>, JsonRejection>,
 ) -> Result<Json<ResponseBoardTabs>, ApiError> {
-    let Json(request) = request
-        .map_err(|rejection| api_json_rejection("response-board tab order", rejection))?;
+    let Json(request) =
+        request.map_err(|rejection| api_json_rejection("response-board tab order", rejection))?;
     let project_names = response_board_project_names(&state)?;
     let path = state.persistence_path.as_ref().clone();
     let mut tabs =
@@ -1283,10 +1281,9 @@ async fn stage_response_board_card(
         None
     };
     let path = state.persistence_path.as_ref().clone();
-    let (status, card) = run_blocking_api(move || {
-        stage_response_board_card_in_storage(&path, request, project)
-    })
-    .await?;
+    let (status, card) =
+        run_blocking_api(move || stage_response_board_card_in_storage(&path, request, project))
+            .await?;
     Ok((status, Json(card)))
 }
 

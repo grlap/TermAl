@@ -96,18 +96,14 @@ fn resolve_board_scope_for_session(
     // control character. Store a safe, bounded display snapshot; the stable
     // author_session_id remains the authoritative identity.
     let author_name = coordination_board_author_name(&record.session.name);
-    let project_id = record
-        .session
-        .project_id
-        .clone()
-        .ok_or_else(|| {
-            ApiError::bad_request(
-                "session has no project; the coordination board is scoped to a project",
-            )
-        })?;
-    let project = inner.find_project(&project_id).ok_or_else(|| {
-        ApiError::bad_request(format!("unknown project `{project_id}`"))
+    let project_id = record.session.project_id.clone().ok_or_else(|| {
+        ApiError::bad_request(
+            "session has no project; the coordination board is scoped to a project",
+        )
     })?;
+    let project = inner
+        .find_project(&project_id)
+        .ok_or_else(|| ApiError::bad_request(format!("unknown project `{project_id}`")))?;
     if project.remote_id != default_local_remote_id() {
         return Err(ApiError::bad_request(
             "the coordination board is local-authoritative in v1; remote projects are not \
@@ -147,8 +143,8 @@ async fn list_coordination_board(
     State(state): State<AppState>,
     query: Result<Query<BoardListQuery>, QueryRejection>,
 ) -> Result<Json<CoordinationBoardListPage>, ApiError> {
-    let Query(query) =
-        query.map_err(|rejection| api_query_rejection("coordination board list query", rejection))?;
+    let Query(query) = query
+        .map_err(|rejection| api_query_rejection("coordination board list query", rejection))?;
     let page = run_blocking_api(move || {
         let (scope_project_id, _) = resolve_board_scope_for_session(&state, &session_id)?;
         state
@@ -189,8 +185,7 @@ async fn set_coordination_board_key(
     let Json(request) =
         request.map_err(|rejection| api_json_rejection("coordination board set", rejection))?;
     let receipt = run_blocking_api(move || {
-        let (scope_project_id, author_name) =
-            resolve_board_scope_for_session(&state, &session_id)?;
+        let (scope_project_id, author_name) = resolve_board_scope_for_session(&state, &session_id)?;
         let value = match (request.value, request.delete) {
             (Some(_), true) => {
                 return Err(ApiError::bad_request(

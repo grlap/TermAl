@@ -185,7 +185,10 @@ fn read_codex_model_options(
             "limit": 100,
         }))?;
         options.extend(codex_model_options(&result));
-        cursor = result.get("nextCursor").and_then(Value::as_str).map(str::to_owned);
+        cursor = result
+            .get("nextCursor")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
         if cursor.is_none() {
             return Ok(options);
         }
@@ -261,9 +264,11 @@ fn fire_codex_model_list_page(
                     let _ = response_tx.send(Ok(model_options));
                 }
             }
-            Err(CodexResponseError::JsonRpc(detail)
+            Err(
+                CodexResponseError::JsonRpc(detail)
                 | CodexResponseError::Timeout(detail)
-                | CodexResponseError::Transport(detail)) => {
+                | CodexResponseError::Transport(detail),
+            ) => {
                 let _ = response_tx.send(Err(detail));
             }
         }
