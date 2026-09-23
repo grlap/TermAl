@@ -66,18 +66,33 @@ async fn memory_beads_http_lists_and_recalls_only_readonly_project_entries() {
     let _binary = with_beads_binary(Some(&binary));
     let (state, project, root) = beads_fixture("memories");
     let app = app_router(state)
-        .layer(axum::Extension(BeadsReadLimiter(Arc::new(tokio::sync::Semaphore::new(1)))))
+        .layer(axum::Extension(BeadsReadLimiter(Arc::new(
+            tokio::sync::Semaphore::new(1),
+        ))))
         .layer(axum::Extension(BeadsReadOptions::for_tests()));
     for suffix in ["", "?key=guide"] {
-        let (status, response): (StatusCode, Value) = request_json(&app, Request::builder()
-            .uri(format!("/api/projects/{project}/work-memories/beads{suffix}"))
-            .body(Body::empty()).unwrap()).await;
+        let (status, response): (StatusCode, Value) = request_json(
+            &app,
+            Request::builder()
+                .uri(format!(
+                    "/api/projects/{project}/work-memories/beads{suffix}"
+                ))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
         assert_eq!(status, StatusCode::OK, "{response}");
         assert_eq!(response["items"][0]["key"], "guide");
         assert_eq!(response["items"][0]["body"].is_null(), suffix.is_empty());
     }
     let commands = fs::read_to_string(root.join("beads-read-args-log.txt")).unwrap();
-    assert_eq!(commands.lines().collect::<Vec<_>>(), ["--readonly --json memories", "--readonly --json recall -- guide"]);
+    assert_eq!(
+        commands.lines().collect::<Vec<_>>(),
+        [
+            "--readonly --json memories",
+            "--readonly --json recall -- guide"
+        ]
+    );
 }
 
 #[test]

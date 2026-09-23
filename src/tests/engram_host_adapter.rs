@@ -15965,11 +15965,8 @@ fn dispatch_card_persist_failure_withholds_granted_delivery() {
     let durable_path = state.persistence_path.clone();
     {
         let inner = state.inner.lock().expect("state mutex poisoned");
-        persist_state_from_persisted(
-            durable_path.as_path(),
-            &PersistedState::from_inner(&inner),
-        )
-        .expect("the old authorization intent should be durable before fault injection");
+        persist_state_from_persisted(durable_path.as_path(), &PersistedState::from_inner(&inner))
+            .expect("the old authorization intent should be durable before fault injection");
     }
     state.shutdown_persist_blocking();
     let failing_persistence_path = root.join("dispatch-card-persist-failure.sqlite");
@@ -16024,10 +16021,12 @@ fn dispatch_card_persist_failure_withholds_granted_delivery() {
         .find(|session| session["id"] == child_id)
         .expect("published snapshot should include the retained child");
     assert_eq!(published_child["queuePaused"], true);
-    assert!(published_child["preview"]
-        .as_str()
-        .unwrap()
-        .contains("persistence unknown"));
+    assert!(
+        published_child["preview"]
+            .as_str()
+            .unwrap()
+            .contains("persistence unknown")
+    );
 
     let inner = state.inner.lock().expect("state mutex poisoned");
     let child = inner
@@ -16064,7 +16063,10 @@ fn dispatch_card_persist_failure_withholds_granted_delivery() {
         "persistence uncertainty must not terminalize delegated work"
     );
     drop(inner);
-    assert!(runtime_rx.try_recv().is_err(), "provider delivery stays withheld");
+    assert!(
+        runtime_rx.try_recv().is_err(),
+        "provider delivery stays withheld"
+    );
 
     let durable = load_state(durable_path.as_path())
         .expect("old persistence should remain readable")

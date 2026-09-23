@@ -15,8 +15,12 @@ fn kimi_model_thinking_catalog(model: &str, effort: &str) -> Value {
 fn kimi_current_runtime_partial_thinking_requires_explicit_model_evidence() {
     let state = test_app_state();
     let id = test_session_id(&state, Agent::Kimi);
-    state.update_session_settings(&id,
-        serde_json::from_value(json!({"model":"removed-model"})).unwrap()).unwrap();
+    state
+        .update_session_settings(
+            &id,
+            serde_json::from_value(json!({"model":"removed-model"})).unwrap(),
+        )
+        .unwrap();
     let (runtime, _rx) = test_acp_runtime_handle(AcpAgent::Kimi, "kimi-current-discovery");
     let token = RuntimeToken::Acp(runtime.runtime_id.clone());
     let tx = runtime.input_tx.clone();
@@ -27,29 +31,67 @@ fn kimi_current_runtime_partial_thinking_requires_explicit_model_evidence() {
         inner.sessions[index].runtime_reset_required = false;
     }
     let pending = Arc::new(Mutex::new(HashMap::new()));
-    let mut writer = KimiReplyWriter { pending: pending.clone(), buffer: vec![], frames: vec![],
-        reply: kimi_model_thinking_catalog("model-a", "low"), error: None };
-    handle_acp_session_config_refresh_inner(&mut writer, &pending, &state, &id,
-        &kimi_test_runtime(), AcpEngramMcpSource::Runtime { token: &token, engram: None },
-        AcpAgent::Kimi, kimi_test_command(&state, "removed-model", false)).unwrap();
+    let mut writer = KimiReplyWriter {
+        pending: pending.clone(),
+        buffer: vec![],
+        frames: vec![],
+        reply: kimi_model_thinking_catalog("model-a", "low"),
+        error: None,
+    };
+    handle_acp_session_config_refresh_inner(
+        &mut writer,
+        &pending,
+        &state,
+        &id,
+        &kimi_test_runtime(),
+        AcpEngramMcpSource::Runtime {
+            token: &token,
+            engram: None,
+        },
+        AcpAgent::Kimi,
+        kimi_test_command(&state, "removed-model", false),
+    )
+    .unwrap();
     let notify = |state: &AppState, id: &str| {
         let update = json!({"sessionUpdate":"config_option_update", "configOptions":[{
             "id":"thinking", "currentValue":"low", "options":[{"value":"low", "name":"Low"}]
         }]});
-        handle_acp_notification("session/update", &json!({"params":{"update":update}}),
-            state, id, &token, &kimi_test_runtime(), &tx, &mut AcpTurnState::default(),
-            &mut SessionRecorder::new(state.clone(), id.to_owned()), AcpAgent::Kimi).unwrap();
+        handle_acp_notification(
+            "session/update",
+            &json!({"params":{"update":update}}),
+            state,
+            id,
+            &token,
+            &kimi_test_runtime(),
+            &tx,
+            &mut AcpTurnState::default(),
+            &mut SessionRecorder::new(state.clone(), id.to_owned()),
+            AcpAgent::Kimi,
+        )
+        .unwrap();
     };
     let before = state.snapshot().revision;
     notify(&state, &id);
     assert_eq!(state.snapshot().revision, before);
-    assert_eq!(state.update_session_settings(&id,
-        serde_json::from_value(json!({"kimiEffort":"low"})).unwrap()).err().unwrap().status,
-        StatusCode::BAD_REQUEST);
+    assert_eq!(
+        state
+            .update_session_settings(
+                &id,
+                serde_json::from_value(json!({"kimiEffort":"low"})).unwrap()
+            )
+            .err()
+            .unwrap()
+            .status,
+        StatusCode::BAD_REQUEST
+    );
 
     // The same ambiguity exists before a valid model setter is acknowledged.
-    state.update_session_settings(&id,
-        serde_json::from_value(json!({"model":"model-b"})).unwrap()).unwrap();
+    state
+        .update_session_settings(
+            &id,
+            serde_json::from_value(json!({"model":"model-b"})).unwrap(),
+        )
+        .unwrap();
     {
         let mut inner = state.inner.lock().unwrap();
         let index = inner.find_session_index(&id).unwrap();
@@ -59,24 +101,58 @@ fn kimi_current_runtime_partial_thinking_requires_explicit_model_evidence() {
     notify(&state, &id);
     assert_eq!(state.snapshot().revision, before_ack);
     writer.reply = kimi_model_thinking_catalog("model-b", "max");
-    let verified = discover_kimi_thinking_config(&mut writer, &pending, "external",
-        "model-b", &kimi_model_thinking_catalog("model-a", "low")).unwrap().unwrap();
-    state.sync_kimi_config_observation(&id, &verified, Some("model-b"), Some(&token), false).unwrap();
+    let verified = discover_kimi_thinking_config(
+        &mut writer,
+        &pending,
+        "external",
+        "model-b",
+        &kimi_model_thinking_catalog("model-a", "low"),
+    )
+    .unwrap()
+    .unwrap();
+    state
+        .sync_kimi_config_observation(&id, &verified, Some("model-b"), Some(&token), false)
+        .unwrap();
     let after_ack = state.snapshot().revision;
     notify(&state, &id);
-    assert_eq!(state.snapshot().revision, after_ack, "partial events preserve verified explicit-model choices");
+    assert_eq!(
+        state.snapshot().revision,
+        after_ack,
+        "partial events preserve verified explicit-model choices"
+    );
     let snapshot = state.snapshot();
-    let session = snapshot.sessions.iter().find(|session| session.id == id).unwrap();
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|session| session.id == id)
+        .unwrap();
     assert_eq!(session.kimi_current_effort.as_deref(), Some("max"));
-    assert_eq!(session.kimi_effort_options, vec![SessionModelOption::plain("max", "max")]);
+    assert_eq!(
+        session.kimi_effort_options,
+        vec![SessionModelOption::plain("max", "max")]
+    );
 }
 
 #[test]
 fn kimi_refresh_budget_covers_fresh_worker_and_model_discovery() {
-    assert!(KIMI_MODEL_REFRESH_TIMEOUT > ACP_INITIALIZE_TIMEOUT + ACP_AUTH_TIMEOUT
-        + ACP_SESSION_SETUP_TIMEOUT + KIMI_MODEL_SET_TIMEOUT);
-    assert_eq!(remote_model_refresh_timeout(Agent::Kimi), Duration::from_secs(100));
-    for agent in [Agent::Claude, Agent::Codex, Agent::Cursor, Agent::Gemini, Agent::OpenCode] {
+    assert!(
+        KIMI_MODEL_REFRESH_TIMEOUT
+            > ACP_INITIALIZE_TIMEOUT
+                + ACP_AUTH_TIMEOUT
+                + ACP_SESSION_SETUP_TIMEOUT
+                + KIMI_MODEL_SET_TIMEOUT
+    );
+    assert_eq!(
+        remote_model_refresh_timeout(Agent::Kimi),
+        Duration::from_secs(100)
+    );
+    for agent in [
+        Agent::Claude,
+        Agent::Codex,
+        Agent::Cursor,
+        Agent::Gemini,
+        Agent::OpenCode,
+    ] {
         assert_eq!(remote_model_refresh_timeout(agent), Duration::from_secs(30));
     }
 }
@@ -86,10 +162,21 @@ fn kimi_config_update_without_runtime_identity_is_refused() {
     let state = test_app_state();
     let id = test_session_id(&state, Agent::Kimi);
     let (tx, _rx) = mpsc::channel();
-    let result = handle_acp_session_update(&json!({"sessionUpdate":"config_option_update"}),
-        &state, &id, &tx, &mut AcpTurnState::default(),
-        &mut SessionRecorder::new(state.clone(), id.clone()), AcpAgent::Kimi);
-    assert!(result.unwrap_err().to_string().contains("require runtime identity"));
+    let result = handle_acp_session_update(
+        &json!({"sessionUpdate":"config_option_update"}),
+        &state,
+        &id,
+        &tx,
+        &mut AcpTurnState::default(),
+        &mut SessionRecorder::new(state.clone(), id.clone()),
+        AcpAgent::Kimi,
+    );
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("require runtime identity")
+    );
 }
 
 #[test]
@@ -112,20 +199,57 @@ fn kimi_replaced_runtime_cannot_publish_partial_thinking_and_current_updates_are
     let mut recorder = SessionRecorder::new(state.clone(), id.clone());
     let mut turn = AcpTurnState::default();
     let runtime_state = kimi_test_runtime();
-    handle_acp_notification("session/update", &json!({"params":{"update":partial}}),
-        &state, &id, &old, &runtime_state, &tx, &mut turn, &mut recorder, AcpAgent::Kimi).unwrap();
+    handle_acp_notification(
+        "session/update",
+        &json!({"params":{"update":partial}}),
+        &state,
+        &id,
+        &old,
+        &runtime_state,
+        &tx,
+        &mut turn,
+        &mut recorder,
+        AcpAgent::Kimi,
+    )
+    .unwrap();
     assert_eq!(state.snapshot().revision, before);
     let mut combined = kimi_model_thinking_catalog("model-b", "max");
     combined["sessionUpdate"] = json!("config_option_update");
-    handle_acp_notification("session/update", &json!({"params":{"update":combined}}),
-        &state, &id, &token, &runtime_state, &tx, &mut turn, &mut recorder, AcpAgent::Kimi).unwrap();
+    handle_acp_notification(
+        "session/update",
+        &json!({"params":{"update":combined}}),
+        &state,
+        &id,
+        &token,
+        &runtime_state,
+        &tx,
+        &mut turn,
+        &mut recorder,
+        AcpAgent::Kimi,
+    )
+    .unwrap();
     let snapshot = state.snapshot();
-    assert_eq!(snapshot.revision, before + 1, "one combined notification, one commit");
+    assert_eq!(
+        snapshot.revision,
+        before + 1,
+        "one combined notification, one commit"
+    );
     let session = snapshot.sessions.iter().find(|s| s.id == id).unwrap();
     assert_eq!(session.kimi_current_effort.as_deref(), Some("max"));
     assert!(!session.model_options.is_empty());
-    handle_acp_notification("session/update", &json!({"params":{"update":partial}}),
-        &state, &id, &old, &runtime_state, &tx, &mut turn, &mut recorder, AcpAgent::Kimi).unwrap();
+    handle_acp_notification(
+        "session/update",
+        &json!({"params":{"update":partial}}),
+        &state,
+        &id,
+        &old,
+        &runtime_state,
+        &tx,
+        &mut turn,
+        &mut recorder,
+        AcpAgent::Kimi,
+    )
+    .unwrap();
     assert_eq!(state.snapshot().revision, snapshot.revision);
     drop(tx_rx);
 }
@@ -135,8 +259,17 @@ fn kimi_invalid_model_refresh_clears_observations_and_bad_discovery_ack_refuses(
     for invalid_model in [true, false] {
         let state = test_app_state();
         let id = test_session_id(&state, Agent::Kimi);
-        let requested = if invalid_model { "removed-model" } else { "model-b" };
-        state.update_session_settings(&id, serde_json::from_value(json!({"model":requested})).unwrap()).unwrap();
+        let requested = if invalid_model {
+            "removed-model"
+        } else {
+            "model-b"
+        };
+        state
+            .update_session_settings(
+                &id,
+                serde_json::from_value(json!({"model":requested})).unwrap(),
+            )
+            .unwrap();
         {
             let mut inner = state.inner.lock().unwrap();
             let index = inner.find_session_index(&id).unwrap();
@@ -147,22 +280,43 @@ fn kimi_invalid_model_refresh_clears_observations_and_bad_discovery_ack_refuses(
         }
         let pending = Arc::new(Mutex::new(HashMap::new()));
         let mut writer = KimiSequencedWriter {
-            inner: KimiReplyWriter { pending: pending.clone(), buffer: vec![], frames: vec![], reply: json!({}), error: None },
+            inner: KimiReplyWriter {
+                pending: pending.clone(),
+                buffer: vec![],
+                frames: vec![],
+                reply: json!({}),
+                error: None,
+            },
             replies: VecDeque::from([kimi_model_thinking_catalog("model-a", "low"), json!({})]),
             before_reply: None,
         };
-        let result = handle_acp_session_config_refresh_inner(&mut writer, &pending, &state, &id,
-            &kimi_test_runtime(), AcpEngramMcpSource::LiveState, AcpAgent::Kimi,
-            kimi_test_command(&state, requested, false));
+        let result = handle_acp_session_config_refresh_inner(
+            &mut writer,
+            &pending,
+            &state,
+            &id,
+            &kimi_test_runtime(),
+            AcpEngramMcpSource::LiveState,
+            AcpAgent::Kimi,
+            kimi_test_command(&state, requested, false),
+        );
         if invalid_model {
             result.unwrap();
             assert_eq!(writer.inner.frames.len(), 1);
         } else {
-            assert!(result.unwrap_err().to_string().contains("did not acknowledge requested model"));
+            assert!(
+                result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("did not acknowledge requested model")
+            );
         }
         let snapshot = state.snapshot();
         let session = snapshot.sessions.iter().find(|s| s.id == id).unwrap();
-        assert!(!session.model_options.is_empty(), "model recovery catalog remains available");
+        assert!(
+            !session.model_options.is_empty(),
+            "model recovery catalog remains available"
+        );
         assert_eq!(session.kimi_effort.as_deref(), Some("max"));
         if invalid_model {
             assert!(session.kimi_effort_options.is_empty());
@@ -183,7 +337,12 @@ fn kimi_combined_effort_patch_accepts_a_label_for_the_unchanged_model() {
         session.model_options = vec![SessionModelOption::plain("Model B", "model-b")];
         session.kimi_effort_options = vec![SessionModelOption::plain("Max", "max")];
     }
-    state.update_session_settings(&id, serde_json::from_value(json!({"model":"Model B", "kimiEffort":"max"})).unwrap()).unwrap();
+    state
+        .update_session_settings(
+            &id,
+            serde_json::from_value(json!({"model":"Model B", "kimiEffort":"max"})).unwrap(),
+        )
+        .unwrap();
     let snapshot = state.snapshot();
     let session = snapshot.sessions.iter().find(|s| s.id == id).unwrap();
     assert_eq!(session.model, "model-b");
@@ -366,9 +525,11 @@ fn kimi_effort_can_be_cleared_after_model_catalog_removal() {
         reply: json!({}),
         error: None,
     };
-    assert!(state
-        .admit_kimi_thinking(&mut writer, &pending, &id, "external", &config, None)
-        .is_err());
+    assert!(
+        state
+            .admit_kimi_thinking(&mut writer, &pending, &id, "external", &config, None)
+            .is_err()
+    );
     state
         .update_session_settings(
             &id,
@@ -385,14 +546,16 @@ fn kimi_effort_can_be_cleared_after_model_catalog_removal() {
     let persisted = load_state(state.persistence_path.as_path())
         .unwrap()
         .unwrap();
-    assert!(persisted
-        .sessions
-        .iter()
-        .find(|r| r.session.id == id)
-        .unwrap()
-        .session
-        .kimi_effort
-        .is_none());
+    assert!(
+        persisted
+            .sessions
+            .iter()
+            .find(|r| r.session.id == id)
+            .unwrap()
+            .session
+            .kimi_effort
+            .is_none()
+    );
 }
 
 #[test]
@@ -622,7 +785,11 @@ fn kimi_effort_is_admitted_before_every_prompt_and_bad_ack_never_prompts() {
         let pending = Arc::new(Mutex::new(HashMap::new()));
         let lifecycle: AcpTurnLifecycle = Arc::new((Mutex::new(true), Condvar::new()));
         for _ in 0..2 {
-            let mut catalog = kimi_thinking_config(if outcome == "already-applied" { "max" } else { "high" });
+            let mut catalog = kimi_thinking_config(if outcome == "already-applied" {
+                "max"
+            } else {
+                "high"
+            });
             if outcome == "removed" {
                 catalog["configOptions"][1]["options"] = json!([]);
             }
@@ -693,9 +860,11 @@ fn kimi_effort_is_admitted_before_every_prompt_and_bad_ack_never_prompts() {
                 assert!(!*active);
             } else {
                 assert!(result.is_err(), "{outcome}");
-                assert!(frames
-                    .iter()
-                    .all(|frame| frame["method"] != "session/prompt"));
+                assert!(
+                    frames
+                        .iter()
+                        .all(|frame| frame["method"] != "session/prompt")
+                );
                 assert!(!*lifecycle.0.lock().unwrap());
             }
         }
@@ -978,7 +1147,10 @@ fn kimi_manual_mode_requires_explicit_acknowledgment() {
         writer.frames.last().unwrap()["params"],
         json!({"sessionId":"saved-session", "configId":"mode", "value":"default"})
     );
-    assert!(is_acp_config_update_kind("config_option_update", AcpAgent::Kimi));
+    assert!(is_acp_config_update_kind(
+        "config_option_update",
+        AcpAgent::Kimi
+    ));
 }
 
 #[tokio::test]
@@ -1123,14 +1295,29 @@ async fn kimi_creation_rejects_unsupported_constraints_without_allocating_sessio
         body[field] = json!(value);
         let (status, response): (StatusCode, ErrorResponse) = request_json(
             &app,
-            Request::builder().method("POST").uri("/api/sessions")
+            Request::builder()
+                .method("POST")
+                .uri("/api/sessions")
                 .header("content-type", "application/json")
-                .body(Body::from(serde_json::to_vec(&body).unwrap())).unwrap(),
-        ).await;
-        assert_eq!(status, StatusCode::BAD_REQUEST, "{field}: {}", response.error);
-        assert!(response.error.contains(if field == "opencodeApprovalMode" {
-            "only supported by OpenCode"
-        } else { "Kimi sessions only support model" }), "{field}: {}", response.error);
+                .body(Body::from(serde_json::to_vec(&body).unwrap()))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::BAD_REQUEST,
+            "{field}: {}",
+            response.error
+        );
+        assert!(
+            response.error.contains(if field == "opencodeApprovalMode" {
+                "only supported by OpenCode"
+            } else {
+                "Kimi sessions only support model"
+            }),
+            "{field}: {}",
+            response.error
+        );
         assert_eq!(state.inner.lock().unwrap().sessions.len(), before);
     }
 }
@@ -1139,7 +1326,9 @@ async fn kimi_creation_rejects_unsupported_constraints_without_allocating_sessio
 fn kimi_repeated_refresh_reconnects_and_preserves_external_conversation() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Kimi);
-    state.set_external_session_id(&session_id, "saved-kimi-refresh".to_owned()).unwrap();
+    state
+        .set_external_session_id(&session_id, "saved-kimi-refresh".to_owned())
+        .unwrap();
     for revision in 1..=2 {
         let runtime_id = format!("kimi-refresh-{revision}");
         let (runtime, input_rx) = test_acp_runtime_handle(AcpAgent::Kimi, &runtime_id);
@@ -1150,15 +1339,25 @@ fn kimi_repeated_refresh_reconnects_and_preserves_external_conversation() {
         let expected = model.clone();
         let responder = std::thread::spawn(move || {
             match recv_within_guard(&input_rx, "Kimi fresh config handshake").unwrap() {
-                AcpRuntimeCommand::RefreshSessionConfig { command, response_tx } => {
-                    assert_eq!(command.resume_session_id.as_deref(), Some("saved-kimi-refresh"));
+                AcpRuntimeCommand::RefreshSessionConfig {
+                    command,
+                    response_tx,
+                } => {
+                    assert_eq!(
+                        command.resume_session_id.as_deref(),
+                        Some("saved-kimi-refresh")
+                    );
                     let config = json!({"configOptions":[{
                         "id":"model", "currentValue":model,
                         "options":[{"value":model,"name":model}]
                     }]});
-                    responder_state.sync_session_model_options(
-                        &responder_session, Some(model), acp_model_options(&config, AcpAgent::Kimi),
-                    ).unwrap();
+                    responder_state
+                        .sync_session_model_options(
+                            &responder_session,
+                            Some(model),
+                            acp_model_options(&config, AcpAgent::Kimi),
+                        )
+                        .unwrap();
                     response_tx.send(Ok(())).unwrap();
                 }
                 _ => panic!("refresh must use a fresh handshake"),
@@ -1167,9 +1366,16 @@ fn kimi_repeated_refresh_reconnects_and_preserves_external_conversation() {
         state.refresh_session_model_options(&session_id).unwrap();
         responder.join().unwrap();
         let inner = state.inner.lock().unwrap();
-        let record = inner.sessions.iter().find(|r| r.session.id == session_id).unwrap();
+        let record = inner
+            .sessions
+            .iter()
+            .find(|r| r.session.id == session_id)
+            .unwrap();
         assert_eq!(record.session.model_options[0].value, expected);
-        assert_eq!(record.external_session_id.as_deref(), Some("saved-kimi-refresh"));
+        assert_eq!(
+            record.external_session_id.as_deref(),
+            Some("saved-kimi-refresh")
+        );
         assert!(matches!(&record.runtime, SessionRuntime::Acp(h) if h.runtime_id == runtime_id));
     }
 }
@@ -1185,22 +1391,52 @@ fn kimi_partial_config_notifications_preserve_models_but_present_lists_replace_t
         "id":"model", "currentValue":"kimi-code/k3",
         "options":[{"value":"kimi-code/k3","name":"K3"}]
     }]});
-    for update in [full, json!({"sessionUpdate":"config_option_update","configOptions":[{
-        "id":"mode", "currentValue":"default", "options":[]
-    }]})] {
-        kimi_test_session_update(&update, &state, &session_id, &input_tx, &mut turn,
-            &mut recorder, AcpAgent::Kimi).unwrap();
+    for update in [
+        full,
+        json!({"sessionUpdate":"config_option_update","configOptions":[{
+            "id":"mode", "currentValue":"default", "options":[]
+        }]}),
+    ] {
+        kimi_test_session_update(
+            &update,
+            &state,
+            &session_id,
+            &input_tx,
+            &mut turn,
+            &mut recorder,
+            AcpAgent::Kimi,
+        )
+        .unwrap();
         let inner = state.inner.lock().unwrap();
-        let session = &inner.sessions.iter().find(|r| r.session.id == session_id).unwrap().session;
-        assert_eq!(session.model, "auto", "runtime reports must preserve requested Auto");
+        let session = &inner
+            .sessions
+            .iter()
+            .find(|r| r.session.id == session_id)
+            .unwrap()
+            .session;
+        assert_eq!(
+            session.model, "auto",
+            "runtime reports must preserve requested Auto"
+        );
         assert_eq!(session.model_options.len(), 1);
     }
     kimi_test_session_update(
         &json!({"sessionUpdate":"config_option_update","configOptions":[{"id":"model","options":[]}]}),
         &state, &session_id, &input_tx, &mut turn, &mut recorder, AcpAgent::Kimi,
     ).unwrap();
-    assert!(state.inner.lock().unwrap().sessions.iter()
-        .find(|r| r.session.id == session_id).unwrap().session.model_options.is_empty());
+    assert!(
+        state
+            .inner
+            .lock()
+            .unwrap()
+            .sessions
+            .iter()
+            .find(|r| r.session.id == session_id)
+            .unwrap()
+            .session
+            .model_options
+            .is_empty()
+    );
 }
 
 #[test]
@@ -1210,11 +1446,17 @@ fn kimi_user_stop_cancels_before_process_teardown() {
     let (input_tx, input_rx) = mpsc::channel();
     let lifecycle: AcpTurnLifecycle = Arc::new((Mutex::new(true), Condvar::new()));
     let runtime = AcpRuntimeHandle {
-        agent: AcpAgent::Kimi, runtime_id: "kimi-stop".to_owned(), input_tx,
-        process: process.clone(), turn_lifecycle: lifecycle.clone(),
+        agent: AcpAgent::Kimi,
+        runtime_id: "kimi-stop".to_owned(),
+        input_tx,
+        process: process.clone(),
+        turn_lifecycle: lifecycle.clone(),
     };
     let responder = std::thread::spawn(move || {
-        assert!(matches!(recv_within_guard(&input_rx, "Kimi cancel before kill").unwrap(), AcpRuntimeCommand::Cancel));
+        assert!(matches!(
+            recv_within_guard(&input_rx, "Kimi cancel before kill").unwrap(),
+            AcpRuntimeCommand::Cancel
+        ));
         set_acp_turn_active(&lifecycle, false);
     });
     shutdown_stopped_runtime(KillableRuntime::Acp(runtime), "Kimi Stop regression").unwrap();
@@ -1227,44 +1469,86 @@ fn kimi_prompt_rechecks_manual_mode_and_deactivates_on_refusal() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Kimi);
     let runtime = Arc::new(Mutex::new(AcpRuntimeState {
-        current_session_id: Some("saved-kimi".to_owned()), ..Default::default()
+        current_session_id: Some("saved-kimi".to_owned()),
+        ..Default::default()
     }));
     let pending = Arc::new(Mutex::new(HashMap::new()));
     let lifecycle: AcpTurnLifecycle = Arc::new((Mutex::new(true), Condvar::new()));
     let mut writer = KimiReplyWriter {
-        pending: pending.clone(), buffer: vec![], frames: vec![], error: None,
+        pending: pending.clone(),
+        buffer: vec![],
+        frames: vec![],
+        error: None,
         reply: json!({"configOptions":[{"id":"mode","currentValue":"yolo"}]}),
     };
     for _ in 0..2 {
         set_acp_turn_active(&lifecycle, true);
         let err = handle_acp_prompt_command(
-            &mut writer, &pending, &state, &session_id, &runtime, &lifecycle,
-            &RuntimeToken::Acp("kimi-mode-test".to_owned()), None, AcpAgent::Kimi,
-            AcpPromptCommand { cwd: state.default_workdir.clone(), cursor_mode: None,
-                model: "auto".to_owned(), opencode_effort: None, opencode_mode: None,
-                prompt: "Never sent".to_owned(), resume_session_id: Some("saved-kimi".to_owned()) },
-        ).unwrap_err();
+            &mut writer,
+            &pending,
+            &state,
+            &session_id,
+            &runtime,
+            &lifecycle,
+            &RuntimeToken::Acp("kimi-mode-test".to_owned()),
+            None,
+            AcpAgent::Kimi,
+            AcpPromptCommand {
+                cwd: state.default_workdir.clone(),
+                cursor_mode: None,
+                model: "auto".to_owned(),
+                opencode_effort: None,
+                opencode_mode: None,
+                prompt: "Never sent".to_owned(),
+                resume_session_id: Some("saved-kimi".to_owned()),
+            },
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("manual"));
         assert!(!*lifecycle.0.lock().unwrap());
     }
     assert_eq!(writer.frames.len(), 2);
-    assert!(writer.frames.iter().all(|f| f["method"] == "session/set_config_option"));
+    assert!(
+        writer
+            .frames
+            .iter()
+            .all(|f| f["method"] == "session/set_config_option")
+    );
     writer.reply = json!({"configOptions":[{"id":"mode","currentValue":"default"}],
         "stopReason":"end_turn"});
     for _ in 0..2 {
         let before = writer.frames.len();
         handle_acp_prompt_command(
-            &mut writer, &pending, &state, &session_id, &runtime, &lifecycle,
-            &RuntimeToken::Acp("kimi-mode-test".to_owned()), None, AcpAgent::Kimi,
-            AcpPromptCommand { cwd: state.default_workdir.clone(), cursor_mode: None,
-                model: "auto".to_owned(), opencode_effort: None, opencode_mode: None,
-                prompt: "Scripted prompt".to_owned(), resume_session_id: Some("saved-kimi".to_owned()) },
-        ).unwrap();
+            &mut writer,
+            &pending,
+            &state,
+            &session_id,
+            &runtime,
+            &lifecycle,
+            &RuntimeToken::Acp("kimi-mode-test".to_owned()),
+            None,
+            AcpAgent::Kimi,
+            AcpPromptCommand {
+                cwd: state.default_workdir.clone(),
+                cursor_mode: None,
+                model: "auto".to_owned(),
+                opencode_effort: None,
+                opencode_mode: None,
+                prompt: "Scripted prompt".to_owned(),
+                resume_session_id: Some("saved-kimi".to_owned()),
+            },
+        )
+        .unwrap();
         assert_eq!(writer.frames[before]["method"], "session/set_config_option");
         assert_eq!(writer.frames[before + 1]["method"], "session/prompt");
-        let (active, _) = lifecycle.1.wait_timeout_while(
-            lifecycle.0.lock().unwrap(), phase_sync::DEADLOCK_GUARD, |active| *active,
-        ).unwrap();
+        let (active, _) = lifecycle
+            .1
+            .wait_timeout_while(
+                lifecycle.0.lock().unwrap(),
+                phase_sync::DEADLOCK_GUARD,
+                |active| *active,
+            )
+            .unwrap();
         assert!(!*active, "scripted prompt must settle");
     }
 }
@@ -1274,10 +1558,21 @@ fn kimi_auth_failure_has_login_remedy_and_model_failure_cannot_cache_ready_sessi
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Kimi);
     let pending = Arc::new(Mutex::new(HashMap::new()));
-    let mut writer = KimiReplyWriter { pending: pending.clone(), buffer: vec![], frames: vec![],
-        reply: json!({}), error: Some("credential refused".to_owned()) };
-    let err = maybe_authenticate_acp_runtime(&mut writer, &pending,
-        &json!({"authMethods":[{"id":"login"}]}), AcpAgent::Kimi, &state.default_workdir).unwrap_err();
+    let mut writer = KimiReplyWriter {
+        pending: pending.clone(),
+        buffer: vec![],
+        frames: vec![],
+        reply: json!({}),
+        error: Some("credential refused".to_owned()),
+    };
+    let err = maybe_authenticate_acp_runtime(
+        &mut writer,
+        &pending,
+        &json!({"authMethods":[{"id":"login"}]}),
+        AcpAgent::Kimi,
+        &state.default_workdir,
+    )
+    .unwrap_err();
     assert!(format!("{err:#}").contains("kimi login"));
     writer.error = None;
     // A nonconforming continuation without advertised model options must fail
@@ -1285,17 +1580,38 @@ fn kimi_auth_failure_has_login_remedy_and_model_failure_cannot_cache_ready_sessi
     // and loads include the full configOptions array (see feature brief).
     for resume in [true, false] {
         let runtime = Arc::new(Mutex::new(AcpRuntimeState {
-            capabilities: Some(AcpCapabilities { supports_session_resume: Some(resume),
-                supports_session_load: Some(true) }), ..Default::default()
+            capabilities: Some(AcpCapabilities {
+                supports_session_resume: Some(resume),
+                supports_session_load: Some(true),
+            }),
+            ..Default::default()
         }));
-        let command = AcpPromptCommand { cwd: state.default_workdir.clone(), cursor_mode: None,
-            model: "kimi-code/k3".to_owned(), opencode_effort: None, opencode_mode: None,
-            prompt: String::new(), resume_session_id: Some("saved-kimi".to_owned()) };
+        let command = AcpPromptCommand {
+            cwd: state.default_workdir.clone(),
+            cursor_mode: None,
+            model: "kimi-code/k3".to_owned(),
+            opencode_effort: None,
+            opencode_mode: None,
+            prompt: String::new(),
+            resume_session_id: Some("saved-kimi".to_owned()),
+        };
         for _ in 0..2 {
-            let err = ensure_acp_session_ready_inner(&mut writer, &pending, &state, &session_id,
-                &runtime, AcpEngramMcpSource::LiveState, AcpAgent::Kimi, &command,
-                AcpSessionPurpose::Prompt).unwrap_err();
-            assert!(err.to_string().contains("did not advertise requested model"));
+            let err = ensure_acp_session_ready_inner(
+                &mut writer,
+                &pending,
+                &state,
+                &session_id,
+                &runtime,
+                AcpEngramMcpSource::LiveState,
+                AcpAgent::Kimi,
+                &command,
+                AcpSessionPurpose::Prompt,
+            )
+            .unwrap_err();
+            assert!(
+                err.to_string()
+                    .contains("did not advertise requested model")
+            );
             assert!(runtime.lock().unwrap().current_session_id.is_none());
         }
         // Observed 2.0.2 continuation shape: configOptions on both resume/load.
@@ -1303,10 +1619,22 @@ fn kimi_auth_failure_has_login_remedy_and_model_failure_cannot_cache_ready_sessi
             "id":"model", "currentValue":"kimi-code/k3",
             "options":[{"value":"kimi-code/k3","name":"K3"}]
         }], "modes":{"currentModeId":"default"}});
-        ensure_acp_session_ready_inner(&mut writer, &pending, &state, &session_id,
-            &runtime, AcpEngramMcpSource::LiveState, AcpAgent::Kimi, &command,
-            AcpSessionPurpose::Prompt).unwrap();
-        assert_eq!(runtime.lock().unwrap().current_session_id.as_deref(), Some("saved-kimi"));
+        ensure_acp_session_ready_inner(
+            &mut writer,
+            &pending,
+            &state,
+            &session_id,
+            &runtime,
+            AcpEngramMcpSource::LiveState,
+            AcpAgent::Kimi,
+            &command,
+            AcpSessionPurpose::Prompt,
+        )
+        .unwrap();
+        assert_eq!(
+            runtime.lock().unwrap().current_session_id.as_deref(),
+            Some("saved-kimi")
+        );
         writer.reply = json!({});
     }
 }
@@ -1314,8 +1642,12 @@ fn kimi_auth_failure_has_login_remedy_and_model_failure_cannot_cache_ready_sessi
 #[test]
 fn kimi_orchestrator_auto_approval_is_rejected_explicitly() {
     let template = OrchestratorSessionTemplate {
-        id: "kimi".to_owned(), name: "Kimi".to_owned(), agent: Agent::Kimi,
-        model: None, instructions: String::new(), auto_approve: true,
+        id: "kimi".to_owned(),
+        name: "Kimi".to_owned(),
+        agent: Agent::Kimi,
+        model: None,
+        instructions: String::new(),
+        auto_approve: true,
         input_mode: OrchestratorSessionInputMode::Queue,
         position: OrchestratorNodePosition { x: 0.0, y: 0.0 },
     };
@@ -1323,9 +1655,13 @@ fn kimi_orchestrator_auto_approval_is_rejected_explicitly() {
     assert_eq!(error.status, StatusCode::BAD_REQUEST);
     assert!(error.message.contains("manual tool approvals"));
     assert!(validate_orchestrator_manual_approval_policy(&template).is_err());
-    assert!(normalize_orchestrator_session_template(OrchestratorSessionTemplate {
-        auto_approve: false, ..template
-    }).is_ok());
+    assert!(
+        normalize_orchestrator_session_template(OrchestratorSessionTemplate {
+            auto_approve: false,
+            ..template
+        })
+        .is_ok()
+    );
 }
 
 fn kimi_model_catalog(current: &str) -> Value {
@@ -1339,8 +1675,12 @@ fn kimi_model_catalog(current: &str) -> Value {
 
 fn kimi_test_command(state: &AppState, model: &str, resume: bool) -> AcpPromptCommand {
     AcpPromptCommand {
-        cwd: state.default_workdir.clone(), cursor_mode: None, model: model.to_owned(),
-        opencode_effort: None, opencode_mode: None, prompt: String::new(),
+        cwd: state.default_workdir.clone(),
+        cursor_mode: None,
+        model: model.to_owned(),
+        opencode_effort: None,
+        opencode_mode: None,
+        prompt: String::new(),
         resume_session_id: resume.then(|| "saved-kimi-catalog".to_owned()),
     }
 }
@@ -1348,8 +1688,10 @@ fn kimi_test_command(state: &AppState, model: &str, resume: bool) -> AcpPromptCo
 fn kimi_test_runtime() -> Arc<Mutex<AcpRuntimeState>> {
     Arc::new(Mutex::new(AcpRuntimeState {
         capabilities: Some(AcpCapabilities {
-            supports_session_load: Some(true), supports_session_resume: Some(true),
-        }), ..Default::default()
+            supports_session_load: Some(true),
+            supports_session_resume: Some(true),
+        }),
+        ..Default::default()
     }))
 }
 
@@ -1358,40 +1700,104 @@ fn kimi_discovery_recovers_invalid_initial_and_removed_models_without_admitting_
     for (model, resume) in [("typo-model", false), ("removed-model", true)] {
         let state = test_app_state();
         let session_id = test_session_id(&state, Agent::Kimi);
-        state.update_session_settings(&session_id,
-            serde_json::from_value(json!({"model":model})).unwrap()).unwrap();
+        state
+            .update_session_settings(
+                &session_id,
+                serde_json::from_value(json!({"model":model})).unwrap(),
+            )
+            .unwrap();
         if resume {
-            state.set_external_session_id(&session_id, "saved-kimi-catalog".to_owned()).unwrap();
-            state.sync_session_model_options(&session_id, None,
-                vec![SessionModelOption::plain("Removed model", model)]).unwrap();
+            state
+                .set_external_session_id(&session_id, "saved-kimi-catalog".to_owned())
+                .unwrap();
+            state
+                .sync_session_model_options(
+                    &session_id,
+                    None,
+                    vec![SessionModelOption::plain("Removed model", model)],
+                )
+                .unwrap();
         }
         let pending = Arc::new(Mutex::new(HashMap::new()));
-        let mut writer = KimiReplyWriter { pending: pending.clone(), buffer: vec![], frames: vec![],
-            reply: kimi_model_catalog("model-a"), error: None };
+        let mut writer = KimiReplyWriter {
+            pending: pending.clone(),
+            buffer: vec![],
+            frames: vec![],
+            reply: kimi_model_catalog("model-a"),
+            error: None,
+        };
         let runtime = kimi_test_runtime();
-        handle_acp_session_config_refresh_inner(&mut writer, &pending, &state, &session_id,
-            &runtime, AcpEngramMcpSource::LiveState, AcpAgent::Kimi,
-            kimi_test_command(&state, model, resume)).unwrap();
-        assert!(runtime.lock().unwrap().current_session_id.is_none(), "discovery is not prompt admission");
-        assert_eq!(writer.frames.len(), 1, "discovery must not apply the invalid selection");
+        handle_acp_session_config_refresh_inner(
+            &mut writer,
+            &pending,
+            &state,
+            &session_id,
+            &runtime,
+            AcpEngramMcpSource::LiveState,
+            AcpAgent::Kimi,
+            kimi_test_command(&state, model, resume),
+        )
+        .unwrap();
+        assert!(
+            runtime.lock().unwrap().current_session_id.is_none(),
+            "discovery is not prompt admission"
+        );
+        assert_eq!(
+            writer.frames.len(),
+            1,
+            "discovery must not apply the invalid selection"
+        );
         {
             let inner = state.inner.lock().unwrap();
-            let record = inner.sessions.iter().find(|r| r.session.id == session_id).unwrap();
+            let record = inner
+                .sessions
+                .iter()
+                .find(|r| r.session.id == session_id)
+                .unwrap();
             assert_eq!(record.session.model, model);
             assert_eq!(record.session.model_options.len(), 2);
             assert_eq!(record.session.model_options[0].value, "model-a");
         }
-        let error = ensure_acp_session_ready_inner(&mut writer, &pending, &state, &session_id,
-            &runtime, AcpEngramMcpSource::LiveState, AcpAgent::Kimi,
-            &kimi_test_command(&state, model, true), AcpSessionPurpose::Prompt).unwrap_err();
-        assert!(error.to_string().contains("did not advertise requested model"));
+        let error = ensure_acp_session_ready_inner(
+            &mut writer,
+            &pending,
+            &state,
+            &session_id,
+            &runtime,
+            AcpEngramMcpSource::LiveState,
+            AcpAgent::Kimi,
+            &kimi_test_command(&state, model, true),
+            AcpSessionPurpose::Prompt,
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("did not advertise requested model")
+        );
         assert!(runtime.lock().unwrap().current_session_id.is_none());
-        state.update_session_settings(&session_id,
-            serde_json::from_value(json!({"model":"model-a"})).unwrap()).unwrap();
-        ensure_acp_session_ready_inner(&mut writer, &pending, &state, &session_id,
-            &runtime, AcpEngramMcpSource::LiveState, AcpAgent::Kimi,
-            &kimi_test_command(&state, "model-a", true), AcpSessionPurpose::Prompt).unwrap();
-        assert_eq!(runtime.lock().unwrap().current_session_id.as_deref(), Some("saved-kimi-catalog"));
+        state
+            .update_session_settings(
+                &session_id,
+                serde_json::from_value(json!({"model":"model-a"})).unwrap(),
+            )
+            .unwrap();
+        ensure_acp_session_ready_inner(
+            &mut writer,
+            &pending,
+            &state,
+            &session_id,
+            &runtime,
+            AcpEngramMcpSource::LiveState,
+            AcpAgent::Kimi,
+            &kimi_test_command(&state, "model-a", true),
+            AcpSessionPurpose::Prompt,
+        )
+        .unwrap();
+        assert_eq!(
+            runtime.lock().unwrap().current_session_id.as_deref(),
+            Some("saved-kimi-catalog")
+        );
     }
 }
 
@@ -1404,9 +1810,13 @@ struct KimiSequencedWriter {
 }
 
 impl Write for KimiSequencedWriter {
-    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> { self.inner.write(bytes) }
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.inner.write(bytes)
+    }
     fn flush(&mut self) -> std::io::Result<()> {
-        if let Some(before_reply) = self.before_reply.take() { before_reply(); }
+        if let Some(before_reply) = self.before_reply.take() {
+            before_reply();
+        }
         self.inner.reply = self.replies.pop_front().expect("scripted RPC reply");
         self.inner.flush()
     }
@@ -1416,9 +1826,15 @@ impl Write for KimiSequencedWriter {
 fn kimi_refresh_and_notifications_cannot_overwrite_a_concurrent_model_patch() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Kimi);
-    state.update_session_settings(&session_id,
-        serde_json::from_value(json!({"model":"model-a"})).unwrap()).unwrap();
-    state.set_external_session_id(&session_id, "saved-kimi-catalog".to_owned()).unwrap();
+    state
+        .update_session_settings(
+            &session_id,
+            serde_json::from_value(json!({"model":"model-a"})).unwrap(),
+        )
+        .unwrap();
+    state
+        .set_external_session_id(&session_id, "saved-kimi-catalog".to_owned())
+        .unwrap();
     let (runtime, input_rx) = test_acp_runtime_handle(AcpAgent::Kimi, "kimi-interleaved-refresh");
     state.install_test_acp_runtime_override(AcpAgent::Kimi, runtime);
     let (paused_tx, paused_rx) = mpsc::channel();
@@ -1426,44 +1842,78 @@ fn kimi_refresh_and_notifications_cannot_overwrite_a_concurrent_model_patch() {
     let worker_state = state.clone();
     let worker_session = session_id.clone();
     let worker = std::thread::spawn(move || {
-        let AcpRuntimeCommand::RefreshSessionConfig { command, response_tx } =
-            recv_within_guard(&input_rx, "Kimi refresh command").unwrap()
-        else { panic!("expected refresh command") };
+        let AcpRuntimeCommand::RefreshSessionConfig {
+            command,
+            response_tx,
+        } = recv_within_guard(&input_rx, "Kimi refresh command").unwrap()
+        else {
+            panic!("expected refresh command")
+        };
         assert_eq!(command.model, "model-a");
         let pending = Arc::new(Mutex::new(HashMap::new()));
         let runtime = kimi_test_runtime();
         let mut writer = KimiSequencedWriter {
-            inner: KimiReplyWriter { pending: pending.clone(), buffer: vec![], frames: vec![],
-                reply: json!({}), error: None },
+            inner: KimiReplyWriter {
+                pending: pending.clone(),
+                buffer: vec![],
+                frames: vec![],
+                reply: json!({}),
+                error: None,
+            },
             replies: VecDeque::from([kimi_model_catalog("model-a")]),
             before_reply: Some(Box::new(move || {
                 paused_tx.send(()).unwrap();
                 recv_within_guard(&release_rx, "release Kimi refresh response").unwrap();
             })),
         };
-        handle_acp_session_config_refresh_inner(&mut writer, &pending, &worker_state,
-            &worker_session, &runtime, AcpEngramMcpSource::LiveState, AcpAgent::Kimi, command).unwrap();
+        handle_acp_session_config_refresh_inner(
+            &mut writer,
+            &pending,
+            &worker_state,
+            &worker_session,
+            &runtime,
+            AcpEngramMcpSource::LiveState,
+            AcpAgent::Kimi,
+            command,
+        )
+        .unwrap();
         // A late notification from the same discovery must not undo the PATCH either.
         let mut update = kimi_model_catalog("model-a");
         update["sessionUpdate"] = json!("config_option_update");
         let (tx, _rx) = mpsc::channel();
-        kimi_test_session_update(&update, &worker_state, &worker_session, &tx,
-            &mut AcpTurnState::default(), &mut SessionRecorder::new(worker_state.clone(), worker_session.clone()),
-            AcpAgent::Kimi).unwrap();
+        kimi_test_session_update(
+            &update,
+            &worker_state,
+            &worker_session,
+            &tx,
+            &mut AcpTurnState::default(),
+            &mut SessionRecorder::new(worker_state.clone(), worker_session.clone()),
+            AcpAgent::Kimi,
+        )
+        .unwrap();
         response_tx.send(Ok(())).unwrap();
     });
     let refresh_state = state.clone();
     let refresh_session = session_id.clone();
-    let refresh = std::thread::spawn(move || refresh_state.refresh_session_model_options(&refresh_session));
+    let refresh =
+        std::thread::spawn(move || refresh_state.refresh_session_model_options(&refresh_session));
     recv_within_guard(&paused_rx, "Kimi response paused after snapshot of A").unwrap();
-    state.update_session_settings(&session_id,
-        serde_json::from_value(json!({"model":"model-b"})).unwrap()).unwrap();
+    state
+        .update_session_settings(
+            &session_id,
+            serde_json::from_value(json!({"model":"model-b"})).unwrap(),
+        )
+        .unwrap();
     release_tx.send(()).unwrap();
     refresh.join().unwrap().unwrap();
     worker.join().unwrap();
     {
         let inner = state.inner.lock().unwrap();
-        let record = inner.sessions.iter().find(|r| r.session.id == session_id).unwrap();
+        let record = inner
+            .sessions
+            .iter()
+            .find(|r| r.session.id == session_id)
+            .unwrap();
         assert_eq!(record.session.model, "model-b");
         assert!(record.runtime_reset_required);
     }
@@ -1471,63 +1921,176 @@ fn kimi_refresh_and_notifications_cannot_overwrite_a_concurrent_model_patch() {
     // provider's still-effective A or a ready-session cache left by discovery.
     let pending = Arc::new(Mutex::new(HashMap::new()));
     let mut writer = KimiSequencedWriter {
-        inner: KimiReplyWriter { pending: pending.clone(), buffer: vec![], frames: vec![],
-            reply: json!({}), error: None },
+        inner: KimiReplyWriter {
+            pending: pending.clone(),
+            buffer: vec![],
+            frames: vec![],
+            reply: json!({}),
+            error: None,
+        },
         replies: VecDeque::from([kimi_model_catalog("model-a"), kimi_model_catalog("model-b")]),
         before_reply: None,
     };
-    ensure_acp_session_ready_inner(&mut writer, &pending, &state, &session_id,
-        &kimi_test_runtime(), AcpEngramMcpSource::LiveState, AcpAgent::Kimi,
-        &kimi_test_command(&state, "model-b", true), AcpSessionPurpose::Prompt).unwrap();
-    assert_eq!(writer.inner.frames[1]["method"], "session/set_config_option");
+    ensure_acp_session_ready_inner(
+        &mut writer,
+        &pending,
+        &state,
+        &session_id,
+        &kimi_test_runtime(),
+        AcpEngramMcpSource::LiveState,
+        AcpAgent::Kimi,
+        &kimi_test_command(&state, "model-b", true),
+        AcpSessionPurpose::Prompt,
+    )
+    .unwrap();
+    assert_eq!(
+        writer.inner.frames[1]["method"],
+        "session/set_config_option"
+    );
     assert_eq!(writer.inner.frames[1]["params"]["value"], "model-b");
-    assert_eq!(state.inner.lock().unwrap().sessions.iter().find(|r| r.session.id == session_id)
-        .unwrap().session.model, "model-b");
+    assert_eq!(
+        state
+            .inner
+            .lock()
+            .unwrap()
+            .sessions
+            .iter()
+            .find(|r| r.session.id == session_id)
+            .unwrap()
+            .session
+            .model,
+        "model-b"
+    );
 }
 
 #[test]
 fn kimi_notification_extensions_do_not_change_existing_acp_adapters() {
-    for (agent, acp) in [(Agent::Cursor, AcpAgent::Cursor), (Agent::Gemini, AcpAgent::Gemini),
-        (Agent::OpenCode, AcpAgent::OpenCode)] {
+    for (agent, acp) in [
+        (Agent::Cursor, AcpAgent::Cursor),
+        (Agent::Gemini, AcpAgent::Gemini),
+        (Agent::OpenCode, AcpAgent::OpenCode),
+    ] {
         let state = test_app_state();
         let session_id = test_session_id(&state, agent);
-        state.sync_session_model_options(&session_id, Some("model-a".to_owned()),
-            acp_model_options(&kimi_model_catalog("model-a"), acp)).unwrap();
+        state
+            .sync_session_model_options(
+                &session_id,
+                Some("model-a".to_owned()),
+                acp_model_options(&kimi_model_catalog("model-a"), acp),
+            )
+            .unwrap();
         let (tx, rx) = mpsc::channel();
         let mut turn = AcpTurnState::default();
         let mut recorder = SessionRecorder::new(state.clone(), session_id.clone());
         let mut update = kimi_model_catalog("model-b");
         update["sessionUpdate"] = json!("config_option_update");
-        kimi_test_session_update(&update, &state, &session_id, &tx, &mut turn, &mut recorder, acp).unwrap();
-        assert!(matches!(rx.try_recv(), Err(mpsc::TryRecvError::Empty)), "no OpenCode reconciliation queued");
-        assert_eq!(state.inner.lock().unwrap().sessions.iter().find(|r| r.session.id == session_id)
-            .unwrap().session.model, "model-a");
+        kimi_test_session_update(
+            &update,
+            &state,
+            &session_id,
+            &tx,
+            &mut turn,
+            &mut recorder,
+            acp,
+        )
+        .unwrap();
+        assert!(
+            matches!(rx.try_recv(), Err(mpsc::TryRecvError::Empty)),
+            "no OpenCode reconciliation queued"
+        );
+        assert_eq!(
+            state
+                .inner
+                .lock()
+                .unwrap()
+                .sessions
+                .iter()
+                .find(|r| r.session.id == session_id)
+                .unwrap()
+                .session
+                .model,
+            "model-a"
+        );
         if acp != AcpAgent::OpenCode {
-            kimi_test_session_update(&json!({"sessionUpdate":"config_update", "configOptions":[
-                {"id":"mode", "currentValue":"default"}
-            ]}), &state, &session_id, &tx, &mut turn, &mut recorder, acp).unwrap();
-            assert!(state.inner.lock().unwrap().sessions.iter().find(|r| r.session.id == session_id)
-                .unwrap().session.model_options.is_empty(), "legacy partial update behavior unchanged");
+            kimi_test_session_update(
+                &json!({"sessionUpdate":"config_update", "configOptions":[
+                    {"id":"mode", "currentValue":"default"}
+                ]}),
+                &state,
+                &session_id,
+                &tx,
+                &mut turn,
+                &mut recorder,
+                acp,
+            )
+            .unwrap();
+            assert!(
+                state
+                    .inner
+                    .lock()
+                    .unwrap()
+                    .sessions
+                    .iter()
+                    .find(|r| r.session.id == session_id)
+                    .unwrap()
+                    .session
+                    .model_options
+                    .is_empty(),
+                "legacy partial update behavior unchanged"
+            );
         }
         if acp == AcpAgent::Cursor {
-            let before = state.inner.lock().unwrap().sessions.iter().find(|r| r.session.id == session_id)
-                .unwrap().session.cursor_mode;
-            kimi_test_session_update(&json!({"sessionUpdate":"current_mode_update", "currentModeId":"plan"}),
-                &state, &session_id, &tx, &mut turn, &mut recorder, acp).unwrap();
-            assert_eq!(state.inner.lock().unwrap().sessions.iter().find(|r| r.session.id == session_id)
-                .unwrap().session.cursor_mode, before);
+            let before = state
+                .inner
+                .lock()
+                .unwrap()
+                .sessions
+                .iter()
+                .find(|r| r.session.id == session_id)
+                .unwrap()
+                .session
+                .cursor_mode;
+            kimi_test_session_update(
+                &json!({"sessionUpdate":"current_mode_update", "currentModeId":"plan"}),
+                &state,
+                &session_id,
+                &tx,
+                &mut turn,
+                &mut recorder,
+                acp,
+            )
+            .unwrap();
+            assert_eq!(
+                state
+                    .inner
+                    .lock()
+                    .unwrap()
+                    .sessions
+                    .iter()
+                    .find(|r| r.session.id == session_id)
+                    .unwrap()
+                    .session
+                    .cursor_mode,
+                before
+            );
         }
     }
 }
 // Drive Kimi config fixtures through the production notification boundary,
 // including its source-runtime fence. Other agents keep their shared dispatcher.
 fn kimi_test_session_update(
-    update: &Value, state: &AppState, session_id: &str,
-    input_tx: &Sender<AcpRuntimeCommand>, turn: &mut AcpTurnState,
-    recorder: &mut SessionRecorder, agent: AcpAgent,
+    update: &Value,
+    state: &AppState,
+    session_id: &str,
+    input_tx: &Sender<AcpRuntimeCommand>,
+    turn: &mut AcpTurnState,
+    recorder: &mut SessionRecorder,
+    agent: AcpAgent,
 ) -> Result<()> {
     if agent != AcpAgent::Kimi {
-        return handle_acp_session_update(update, state, session_id, input_tx, turn, recorder, agent);
+        return handle_acp_session_update(
+            update, state, session_id, input_tx, turn, recorder, agent,
+        );
     }
     let mut fixture_receiver = None;
     let token = {
@@ -1540,8 +2103,18 @@ fn kimi_test_session_update(
         }
         inner.sessions[index].runtime.runtime_token().unwrap()
     };
-    let result = handle_acp_notification("session/update", &json!({"params":{"update":update}}),
-        state, session_id, &token, &kimi_test_runtime(), input_tx, turn, recorder, agent);
+    let result = handle_acp_notification(
+        "session/update",
+        &json!({"params":{"update":update}}),
+        state,
+        session_id,
+        &token,
+        &kimi_test_runtime(),
+        input_tx,
+        turn,
+        recorder,
+        agent,
+    );
     drop(fixture_receiver);
     result
 }

@@ -65,7 +65,9 @@ fn authority_command() {
     if args[4..] == ["readiness", "--json"] {
         let database = work_database_path(root, mode.trim());
         fs::create_dir_all(database.parent().unwrap()).unwrap();
-        if !database.exists() { fs::write(&database, "fixture database").unwrap(); }
+        if !database.exists() {
+            fs::write(&database, "fixture database").unwrap();
+        }
         let response = serde_json::json!({
             "schema_version": 1, "scope": "readiness", "ready": true,
             "full_audit": "not_run", "mutation_enabled": false, "work_schema_version": 1,

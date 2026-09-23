@@ -1730,12 +1730,9 @@ fn retained_followup_promotion_uncertainty_preserves_running_wait_and_exact_queu
             let (state, runtime_rx) = test_app_state_with_delegation_codex_runtime(
                 "retained-followup-promotion-uncertainty",
             );
-            let root = state
-                .test_temp_root
-                .as_ref()
-                .unwrap()
-                .path()
-                .join(format!("retained-followup-{live_reservation}-{lost_operation}"));
+            let root = state.test_temp_root.as_ref().unwrap().path().join(format!(
+                "retained-followup-{live_reservation}-{lost_operation}"
+            ));
             fs::create_dir_all(&root).unwrap();
             let project = create_test_project(&state, &root, "Retained follow-up");
             let parent = create_test_project_session(&state, Agent::Codex, &project, &root);
@@ -1920,7 +1917,10 @@ fn retained_followup_promotion_uncertainty_preserves_running_wait_and_exact_queu
                     "{error:#}"
                 );
             }
-            assert!(runtime_rx.try_recv().is_err(), "provider handoff is forbidden");
+            assert!(
+                runtime_rx.try_recv().is_err(),
+                "provider handoff is forbidden"
+            );
 
             let inner = state.inner.lock().unwrap();
             let running = &inner.delegations[inner.find_delegation_index(&delegation).unwrap()];
@@ -1930,8 +1930,17 @@ fn retained_followup_promotion_uncertainty_preserves_running_wait_and_exact_queu
                 running.queued_followup_prompt_id.as_deref(),
                 Some(prompt_id.as_str())
             );
-            assert!(!inner.delegation_followup_admissions.contains_key(&delegation));
-            assert!(inner.delegation_waits.iter().any(|item| item.id == wait.wait.id));
+            assert!(
+                !inner
+                    .delegation_followup_admissions
+                    .contains_key(&delegation)
+            );
+            assert!(
+                inner
+                    .delegation_waits
+                    .iter()
+                    .any(|item| item.id == wait.wait.id)
+            );
             let record = &inner.sessions[inner.find_session_index(&child).unwrap()];
             assert_eq!(record.session.status, SessionStatus::Idle);
             assert!(record.orchestrator_auto_dispatch_blocked);
@@ -1939,7 +1948,11 @@ fn retained_followup_promotion_uncertainty_preserves_running_wait_and_exact_queu
             assert_eq!(record.queued_prompts[0].pending_prompt.id, prompt_id);
             assert_eq!(record.queued_prompts[1].pending_prompt.id, successor_id);
             let prepared = if lost_operation == "session_bind" {
-                &record.queued_prompts[0].engram_bind.as_ref().unwrap().request
+                &record.queued_prompts[0]
+                    .engram_bind
+                    .as_ref()
+                    .unwrap()
+                    .request
             } else {
                 &record.queued_prompts[0]
                     .engram_evaluate
@@ -1966,9 +1979,8 @@ fn retained_followup_promotion_uncertainty_preserves_running_wait_and_exact_queu
 #[test]
 fn disabled_no_intent_promotion_failure_uses_ordinary_followup_settlement() {
     for live_reservation in [true, false] {
-        let (state, runtime_rx) = test_app_state_with_delegation_codex_runtime(
-            "ordinary-followup-promotion-failure",
-        );
+        let (state, runtime_rx) =
+            test_app_state_with_delegation_codex_runtime("ordinary-followup-promotion-failure");
         let root = state
             .test_temp_root
             .as_ref()
@@ -2080,10 +2092,16 @@ fn disabled_no_intent_promotion_failure_uses_ordinary_followup_settlement() {
             "an uncommitted live reservation rolls back to its prior terminal record; a committed first follow-up settles terminally"
         );
         assert!(failed.result.is_some());
-        assert!(!inner.delegation_followup_admissions.contains_key(&delegation));
-        assert!(inner.sessions[inner.find_session_index(&child).unwrap()]
-            .queued_prompts
-            .is_empty());
+        assert!(
+            !inner
+                .delegation_followup_admissions
+                .contains_key(&delegation)
+        );
+        assert!(
+            inner.sessions[inner.find_session_index(&child).unwrap()]
+                .queued_prompts
+                .is_empty()
+        );
         if let Some(wait_id) = wait_id {
             assert!(
                 inner.delegation_waits.iter().any(|wait| wait.id == wait_id),

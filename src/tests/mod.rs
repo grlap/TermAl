@@ -18,14 +18,11 @@ use tower::util::ServiceExt;
 
 mod acceptance_evaluation;
 mod acceptance_settings;
-mod engram_readiness;
 mod acp_gemini;
 mod acp_tool_status;
 mod agent_commands;
 mod agent_readiness;
-mod kimi;
 mod bounded_read_process;
-mod work_memories;
 mod claude;
 mod claude_permission_boundary;
 mod cli;
@@ -56,11 +53,13 @@ mod delegations;
 mod engram_authority_fixture;
 mod engram_compaction;
 mod engram_host_adapter;
+mod engram_readiness;
 mod file_changes;
 mod git;
 mod http_routes;
 mod instruction_search;
 mod json_rpc;
+mod kimi;
 mod mailboxes;
 mod opencode_approvals;
 mod opencode_config;
@@ -68,6 +67,7 @@ mod orchestrator;
 mod phase_sync;
 mod review_freeze;
 mod test_temp_paths;
+mod work_memories;
 pub use orchestrator::{
     sample_deadlocked_orchestrator_template_draft, sample_orchestrator_template_draft,
 };

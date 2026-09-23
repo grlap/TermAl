@@ -1125,8 +1125,7 @@ fn late_cold_status_cannot_interrupt_or_clear_recovery_on_a_replacement_head() {
                 .adapter
         };
         std::thread::scope(|scope| {
-            let worker =
-                scope.spawn(|| state.restore_queued_engram_target(&mut target, &owner));
+            let worker = scope.spawn(|| state.restore_queued_engram_target(&mut target, &owner));
             gate.wait();
             state.cancel_queued_prompt(&session, &original_id).unwrap();
             queue_test_engram_prompt(
@@ -1254,7 +1253,10 @@ fn legacy_operation_generation_parses_only_anchored_host_keys() {
         "termal-evaluate:session-legacy:41",
         "termal-reevaluate:session-legacy:41:",
     ] {
-        assert_eq!(legacy_queued_engram_operation_generation(session, key), None);
+        assert_eq!(
+            legacy_queued_engram_operation_generation(session, key),
+            None
+        );
     }
 }
 

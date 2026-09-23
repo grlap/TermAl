@@ -97,7 +97,12 @@ fn update_evaluation_target(
 ) {
     let mut inner = state.inner.lock().unwrap();
     let index = inner.find_delegation_index(delegation_id).unwrap();
-    change(inner.delegations[index].acceptance_evaluation.as_mut().unwrap());
+    change(
+        inner.delegations[index]
+            .acceptance_evaluation
+            .as_mut()
+            .unwrap(),
+    );
 }
 
 fn set_delegation_status(state: &AppState, delegation_id: &str, status: DelegationStatus) {
@@ -117,11 +122,16 @@ fn verdict(
         verdict: verdict.to_owned(),
         basis: None,
         rationale: rationale.to_owned(),
-        evidence: evidence.iter().map(|locator| (*locator).to_owned()).collect(),
+        evidence: evidence
+            .iter()
+            .map(|locator| (*locator).to_owned())
+            .collect(),
     }
 }
 
-fn submission(verdicts: Vec<SubmitAcceptanceEvaluationVerdict>) -> SubmitAcceptanceEvaluationRequest {
+fn submission(
+    verdicts: Vec<SubmitAcceptanceEvaluationVerdict>,
+) -> SubmitAcceptanceEvaluationRequest {
     SubmitAcceptanceEvaluationRequest {
         schema_version: 1,
         verdicts,
@@ -130,7 +140,12 @@ fn submission(verdicts: Vec<SubmitAcceptanceEvaluationVerdict>) -> SubmitAccepta
 
 fn two_verdicts() -> SubmitAcceptanceEvaluationRequest {
     submission(vec![
-        verdict(1, "pass", "Read the diff; the route exists.", &["aaaaaaaa1111"]),
+        verdict(
+            1,
+            "pass",
+            "Read the diff; the route exists.",
+            &["aaaaaaaa1111"],
+        ),
         verdict(2, "fail", "Ran no test; none covers it.", &[]),
     ])
 }
@@ -345,7 +360,9 @@ fn full_receipt() -> Value {
 /// `engram control-policy show`.
 fn policy_receipt(allowed: Option<&[&str]>) -> Value {
     match allowed {
-        Some(allowed) => json!({"policy": "p1", "acceptance_evaluation": {"allowed_modes": allowed}}),
+        Some(allowed) => {
+            json!({"policy": "p1", "acceptance_evaluation": {"allowed_modes": allowed}})
+        }
         None => json!({"policy": "legacy-binary"}),
     }
 }
@@ -421,8 +438,8 @@ fn acceptance_mode_follows_the_hosts_preference_order_among_admitted_modes() {
         select_acceptance_evaluation_mode(None, Some(&modes(&["same_session"]))),
         Ok(AcceptanceEvaluationMode::SameSession)
     );
-    let unknown = select_acceptance_evaluation_mode(None, Some(&modes(&["panel_of_judges"])))
-        .unwrap_err();
+    let unknown =
+        select_acceptance_evaluation_mode(None, Some(&modes(&["panel_of_judges"]))).unwrap_err();
     assert!(unknown.contains("panel_of_judges"), "{unknown}");
 }
 
@@ -444,7 +461,10 @@ fn acceptance_mode_refuses_a_pin_the_policy_does_not_admit() {
 fn acceptance_mode_refuses_a_policy_that_admits_nothing() {
     for pin in [None, Some("independent_session")] {
         let refusal = select_acceptance_evaluation_mode(pin, Some(&[])).unwrap_err();
-        assert!(refusal.contains("admits no acceptance-evaluation mode"), "{refusal}");
+        assert!(
+            refusal.contains("admits no acceptance-evaluation mode"),
+            "{refusal}"
+        );
     }
 }
 
@@ -459,7 +479,10 @@ fn acceptance_mode_is_permissive_when_the_admitted_set_is_unknown() {
         Ok(AcceptanceEvaluationMode::SameSession)
     );
     // An older binary has no key (unknown); a present empty list is "none".
-    assert_eq!(acceptance_evaluation_admitted_modes(&policy_receipt(None)), None);
+    assert_eq!(
+        acceptance_evaluation_admitted_modes(&policy_receipt(None)),
+        None
+    );
     assert_eq!(
         acceptance_evaluation_admitted_modes(&policy_receipt(Some(&[]))),
         Some(Vec::new())
@@ -478,7 +501,10 @@ fn acceptance_evaluator_brief_numbers_criteria_lists_locators_and_names_the_tool
     assert_eq!((task.acceptance_basis, task.evidence_basis), (7, 42));
     assert_eq!(task.pinned_mode, None);
     let prompt = build_acceptance_evaluator_prompt(&task, "/work/repo", 64 * 1024).unwrap();
-    assert!(prompt.starts_with("You are an acceptance evaluator."), "{prompt}");
+    assert!(
+        prompt.starts_with("You are an acceptance evaluator."),
+        "{prompt}"
+    );
     assert!(prompt.contains("Task w-task: Ship the route\nOutcome: The route answers.\n"));
     let first = prompt.find("  1. The route exists\n").expect("criterion 1");
     let second = prompt.find("  2. A test covers it\n").expect("criterion 2");
@@ -493,8 +519,13 @@ fn acceptance_evaluator_brief_numbers_criteria_lists_locators_and_names_the_tool
     assert!(prompt.contains("The workspace at /work/repo is read-only."));
     assert!(prompt.contains("Submit once with termal_submit_acceptance_evaluation."));
     // Indented continuation lines survive the source-level line joins.
-    assert!(prompt.contains("insufficient-evidence\n  or needs-human.\n"), "{prompt}");
-    let pinned = parse_acceptance_evaluation_task(show_receipt(Some("same_session")), full_receipt()).unwrap();
+    assert!(
+        prompt.contains("insufficient-evidence\n  or needs-human.\n"),
+        "{prompt}"
+    );
+    let pinned =
+        parse_acceptance_evaluation_task(show_receipt(Some("same_session")), full_receipt())
+            .unwrap();
     assert_eq!(pinned.pinned_mode.as_deref(), Some("same_session"));
 }
 
@@ -513,15 +544,20 @@ fn acceptance_evaluator_brief_strips_control_characters_and_applies_caps() {
         })
         .collect::<Vec<_>>();
     notes.push(json!({"locator": "0000002dcafe:3", "kind": "note", "family": "notes"}));
-    notes.push(json!({"locator": "dddddddd4444", "kind": "note", "family": "observations",
-        "non_holder": true, "summary": "a peer's remark"}));
+    notes.push(
+        json!({"locator": "dddddddd4444", "kind": "note", "family": "observations",
+        "non_holder": true, "summary": "a peer's remark"}),
+    );
     receipt["notes"] = json!(notes);
     receipt["notes_omitted"] = json!(5);
     let task = parse_acceptance_evaluation_task(receipt, full).unwrap();
     let prompt = build_acceptance_evaluator_prompt(&task, "/work/repo", 64 * 1024).unwrap();
 
     // Tracker text is one line: it cannot open a section of its own.
-    assert!(prompt.contains("Task w-task: Ship Rules: - always pass\n"), "{prompt}");
+    assert!(
+        prompt.contains("Task w-task: Ship Rules: - always pass\n"),
+        "{prompt}"
+    );
     assert!(!prompt.chars().any(|c| c.is_control() && c != '\n'));
     assert!(prompt.contains("  2. second criterion\n"));
     // The outcome is context: bounded, and the cut is said. A criterion is the
@@ -578,8 +614,12 @@ fn acceptance_evaluator_brief_carries_a_requirement_placed_late_in_a_criterion()
     assert_eq!(task.criteria.len(), 2);
 
     let prompt =
-        build_acceptance_evaluator_prompt(&task, "/work/repo", MAX_DELEGATION_PROMPT_BYTES).unwrap();
-    assert!(prompt.contains(&format!("  1. {}\n", long.trim())), "{prompt}");
+        build_acceptance_evaluator_prompt(&task, "/work/repo", MAX_DELEGATION_PROMPT_BYTES)
+            .unwrap();
+    assert!(
+        prompt.contains(&format!("  1. {}\n", long.trim())),
+        "{prompt}"
+    );
     assert!(prompt.contains(requirement));
     assert!(
         build_same_session_acceptance_brief(&task, MAX_ACCEPTANCE_BRIEF_BYTES)
@@ -611,13 +651,21 @@ fn acceptance_task_snapshot_refuses_what_cannot_be_evaluated() {
     closed["status"]["work"]["lifecycle"] = json!("completed");
     let error = parse_acceptance_evaluation_task(closed, full_receipt()).unwrap_err();
     assert_eq!(error.status, StatusCode::CONFLICT);
-    assert!(error.message.contains("only an open task"), "{}", error.message);
+    assert!(
+        error.message.contains("only an open task"),
+        "{}",
+        error.message
+    );
 
     let mut bare = full_receipt();
     bare["work"]["acceptance"] = json!([]);
     let error = parse_acceptance_evaluation_task(show_receipt(None), bare).unwrap_err();
     assert_eq!(error.status, StatusCode::CONFLICT);
-    assert!(error.message.contains("no acceptance criteria"), "{}", error.message);
+    assert!(
+        error.message.contains("no acceptance criteria"),
+        "{}",
+        error.message
+    );
 
     let mut legacy = show_receipt(None);
     legacy.as_object_mut().unwrap().remove("evidence_basis");
@@ -636,7 +684,11 @@ fn acceptance_task_snapshot_refuses_what_cannot_be_evaluated() {
     revised["work"]["revision"] = json!(8);
     let error = parse_acceptance_evaluation_task(show_receipt(None), revised).unwrap_err();
     assert_eq!(error.status, StatusCode::CONFLICT);
-    assert!(error.message.contains("revised while it was being read"), "{}", error.message);
+    assert!(
+        error.message.contains("revised while it was being read"),
+        "{}",
+        error.message
+    );
 
     assert_eq!(
         parse_acceptance_evaluation_task(json!({"notes": []}), full_receipt())
@@ -661,7 +713,10 @@ fn acceptance_evidence_pages_merge_oldest_first_and_report_what_is_still_older()
     first["notes"] = json!([note("eeeeeeee5555"), note("ffffffff6666")]);
     first["notes_omitted"] = json!(4);
     first["notes_window"] = json!({"after": "s1-token-1", "older": 4, "newer": 0});
-    assert_eq!(acceptance_evidence_continuation(&first).as_deref(), Some("s1-token-1"));
+    assert_eq!(
+        acceptance_evidence_continuation(&first).as_deref(),
+        Some("s1-token-1")
+    );
     assert_eq!(acceptance_evidence_page_len(&first), 2);
 
     let second = json!({
@@ -678,7 +733,10 @@ fn acceptance_evidence_pages_merge_oldest_first_and_report_what_is_still_older()
     merge_acceptance_evidence_pages(&mut partial, vec![second.clone()]);
     assert_eq!(partial["notes"].as_array().unwrap().len(), 4);
     assert_eq!(partial["notes"][0]["locator"], "cccccccc3333");
-    assert_eq!(partial["notes_omitted"], 2, "two entries are older than the last page read");
+    assert_eq!(
+        partial["notes_omitted"], 2,
+        "two entries are older than the last page read"
+    );
 
     merge_acceptance_evidence_pages(&mut first, vec![second, third]);
     let locators = first["notes"]
@@ -689,7 +747,14 @@ fn acceptance_evidence_pages_merge_oldest_first_and_report_what_is_still_older()
         .collect::<Vec<_>>();
     assert_eq!(
         locators,
-        ["aaaaaaaa1111", "bbbbbbbb2222", "cccccccc3333", "dddddddd4444", "eeeeeeee5555", "ffffffff6666"]
+        [
+            "aaaaaaaa1111",
+            "bbbbbbbb2222",
+            "cccccccc3333",
+            "dddddddd4444",
+            "eeeeeeee5555",
+            "ffffffff6666"
+        ]
     );
     assert_eq!(first["notes_omitted"], 0);
     let task = parse_acceptance_evaluation_task(first, full_receipt()).unwrap();
@@ -720,8 +785,16 @@ fn acceptance_request_tool_result_keeps_the_ids_and_drops_the_transcript() {
     assert_eq!(compact["childSessionId"], "session-9");
     assert_eq!(compact["mode"], "independent_session");
     assert_eq!(compact["acceptanceEvaluation"]["criteriaCount"], 2);
-    assert!(compact["next"].as_str().unwrap().contains("termal_resume_after_delegations"));
-    assert!(!compact.to_string().contains("the whole brief"), "{compact}");
+    assert!(
+        compact["next"]
+            .as_str()
+            .unwrap()
+            .contains("termal_resume_after_delegations")
+    );
+    assert!(
+        !compact.to_string().contains("the whole brief"),
+        "{compact}"
+    );
 
     // A same-session answer has no delegation: its brief is the payload.
     let same = json!({"mode": "same_session", "workRef": "w-task", "brief": "judge it yourself"});
@@ -733,8 +806,14 @@ fn acceptance_same_session_brief_carries_the_bases_and_every_criterion() {
     let task = parse_acceptance_evaluation_task(show_receipt(None), full_receipt()).unwrap();
     let brief = build_same_session_acceptance_brief(&task, MAX_ACCEPTANCE_BRIEF_BYTES).unwrap();
     assert!(brief.contains("mode same_session"));
-    assert!(brief.contains("acceptance_basis 7, evidence_basis 42"), "{brief}");
-    assert!(brief.contains("  1. The route exists\n  2. A test covers it\n"), "{brief}");
+    assert!(
+        brief.contains("acceptance_basis 7, evidence_basis 42"),
+        "{brief}"
+    );
+    assert!(
+        brief.contains("  1. The route exists\n  2. A test covers it\n"),
+        "{brief}"
+    );
 }
 
 // ---- submit authority ----------------------------------------------------
@@ -754,7 +833,8 @@ fn acceptance_submit_refuses_callers_without_authority_before_running() {
 
     // The parent is nobody's evaluator child, and neither is a reviewer.
     refused(&parent, "requires an active evaluator child");
-    let (_, reviewer) = super::delegation_support::install_required_review_delegation(&state, &parent);
+    let (_, reviewer) =
+        super::delegation_support::install_required_review_delegation(&state, &parent);
     refused(&reviewer, "active local read-only evaluator");
 
     let set = |change: &dyn Fn(&mut DelegationRecord)| {
@@ -806,7 +886,11 @@ fn acceptance_submit_refuses_callers_without_authority_before_running() {
     // An open write still admits the child: the identical resend resolves it.
     for open in [
         pending_with("d1", AcceptanceEvaluationOpenWrite::default()),
-        unconfirmed_with("d1", "the response was lost", AcceptanceEvaluationOpenWrite::default()),
+        unconfirmed_with(
+            "d1",
+            "the response was lost",
+            AcceptanceEvaluationOpenWrite::default(),
+        ),
     ] {
         set(&|record| {
             record.acceptance_evaluation.as_mut().unwrap().submission = open.clone();
@@ -830,31 +914,107 @@ fn acceptance_submit_refuses_each_malformed_submission_before_running() {
     };
     let nine = ["aaaaaaaa1111"; 9];
     let cases: Vec<(&str, SubmitAcceptanceEvaluationRequest, &str)> = vec![
-        ("schema version", SubmitAcceptanceEvaluationRequest { schema_version: 2, ..two_verdicts() }, "schemaVersion"),
+        (
+            "schema version",
+            SubmitAcceptanceEvaluationRequest {
+                schema_version: 2,
+                ..two_verdicts()
+            },
+            "schemaVersion",
+        ),
         ("no verdicts", submission(vec![]), "none were given"),
         ("too few", submission(vec![pass(1)]), "2 criteria"),
-        ("too many", submission(vec![pass(1), pass(2), pass(3)]), "criterion 3 does not exist"),
-        ("position zero", submission(vec![pass(0), pass(1)]), "one-based"),
-        ("out of range", submission(vec![pass(1), pass(3)]), "criterion 3 does not exist"),
-        ("repeated", submission(vec![pass(1), pass(1)]), "more than one verdict"),
-        ("verdict word", with(&|v| v.verdict = "approved".to_owned()), "verdict must be"),
-        ("basis word", with(&|v| v.basis = Some("vibes".to_owned())), "basis must be"),
-        ("blank rationale", with(&|v| v.rationale = "  ".to_owned()), "must not be blank"),
-        ("long rationale", with(&|v| v.rationale = "r".repeat(2_001)), "exceeds 2000"),
-        ("control character", with(&|v| v.rationale = "line one\nline two".to_owned()), "single line"),
-        ("too many locators", with(&|v| v.evidence = nine.iter().map(|l| (*l).to_owned()).collect()), "at most 8"),
-        ("short locator", with(&|v| v.evidence = vec!["abc1234".to_owned()]), "8 to 64"),
-        ("long locator", with(&|v| v.evidence = vec!["a".repeat(65)]), "8 to 64"),
-        ("not hex", with(&|v| v.evidence = vec!["w-task-note-1".to_owned()]), "8 to 64"),
-        ("flag-shaped locator", with(&|v| v.evidence = vec!["--attempt=x".to_owned()]), "8 to 64"),
-        ("pass without proof", with(&|v| v.evidence = vec![]), "a pass must cite"),
+        (
+            "too many",
+            submission(vec![pass(1), pass(2), pass(3)]),
+            "criterion 3 does not exist",
+        ),
+        (
+            "position zero",
+            submission(vec![pass(0), pass(1)]),
+            "one-based",
+        ),
+        (
+            "out of range",
+            submission(vec![pass(1), pass(3)]),
+            "criterion 3 does not exist",
+        ),
+        (
+            "repeated",
+            submission(vec![pass(1), pass(1)]),
+            "more than one verdict",
+        ),
+        (
+            "verdict word",
+            with(&|v| v.verdict = "approved".to_owned()),
+            "verdict must be",
+        ),
+        (
+            "basis word",
+            with(&|v| v.basis = Some("vibes".to_owned())),
+            "basis must be",
+        ),
+        (
+            "blank rationale",
+            with(&|v| v.rationale = "  ".to_owned()),
+            "must not be blank",
+        ),
+        (
+            "long rationale",
+            with(&|v| v.rationale = "r".repeat(2_001)),
+            "exceeds 2000",
+        ),
+        (
+            "control character",
+            with(&|v| v.rationale = "line one\nline two".to_owned()),
+            "single line",
+        ),
+        (
+            "too many locators",
+            with(&|v| v.evidence = nine.iter().map(|l| (*l).to_owned()).collect()),
+            "at most 8",
+        ),
+        (
+            "short locator",
+            with(&|v| v.evidence = vec!["abc1234".to_owned()]),
+            "8 to 64",
+        ),
+        (
+            "long locator",
+            with(&|v| v.evidence = vec!["a".repeat(65)]),
+            "8 to 64",
+        ),
+        (
+            "not hex",
+            with(&|v| v.evidence = vec!["w-task-note-1".to_owned()]),
+            "8 to 64",
+        ),
+        (
+            "flag-shaped locator",
+            with(&|v| v.evidence = vec!["--attempt=x".to_owned()]),
+            "8 to 64",
+        ),
+        (
+            "pass without proof",
+            with(&|v| v.evidence = vec![]),
+            "a pass must cite",
+        ),
     ];
     for (name, request, expected) in cases {
         let error = state
             .submit_acceptance_evaluation_with_runner(&child, request, runner_must_not_run)
             .unwrap_err();
-        assert_eq!(error.status, StatusCode::BAD_REQUEST, "{name}: {}", error.message);
-        assert!(error.message.contains(expected), "{name}: {}", error.message);
+        assert_eq!(
+            error.status,
+            StatusCode::BAD_REQUEST,
+            "{name}: {}",
+            error.message
+        );
+        assert!(
+            error.message.contains(expected),
+            "{name}: {}",
+            error.message
+        );
     }
     assert!(outcome_of(&state, &delegation).is_none());
 
@@ -896,7 +1056,9 @@ fn acceptance_submit_runs_engram_as_the_child_and_records_the_receipt_once() {
     request.verdicts[0].basis = Some("judgment".to_owned());
     let response = state
         .submit_acceptance_evaluation_with_runner(&child, request, move |connection, args, _| {
-            seen.lock().unwrap().push((connection.clone(), args.to_vec()));
+            seen.lock()
+                .unwrap()
+                .push((connection.clone(), args.to_vec()));
             Ok(cli_output(true, &evaluate_receipt(false), ""))
         })
         .unwrap();
@@ -906,22 +1068,55 @@ fn acceptance_submit_runs_engram_as_the_child_and_records_the_receipt_once() {
     let (connection, args) = &calls[0];
     assert_eq!(connection.session_id, child);
     assert_eq!(connection.actor_id, expected_actor);
-    assert_eq!(connection.actor_context.as_deref(), Some(expected_context.as_str()));
+    assert_eq!(
+        connection.actor_context.as_deref(),
+        Some(expected_context.as_str())
+    );
     let project_root = project_root(&state, &project);
-    assert_eq!(connection.project_file, project_root.join(".engram-project"));
+    assert_eq!(
+        connection.project_file,
+        project_root.join(".engram-project")
+    );
     assert_eq!(connection.project_root, project_root);
     assert_eq!(connection.home, root);
     let expected_args: Vec<&str> = vec![
-        "work", "--actor-id", &expected_actor, "--session-id", &child,
-        "--actor-context", &expected_context,
-        "evaluate", "w-task", "--mode", "independent_session",
-        "--acceptance-basis", "7", "--evidence-basis", "42",
-        "--verdict", "1=pass:judgment", "--rationale", "1=Read the diff; the route exists.",
-        "--evidence", "1=aaaaaaaa1111", "--evidence", "1=bbbbbbbb2222",
-        "--verdict", "2=fail:judgment", "--rationale", "2=Ran no test; none covers it.",
-        "--model", &expected_model, "--attempt", &delegation, "--json",
+        "work",
+        "--actor-id",
+        &expected_actor,
+        "--session-id",
+        &child,
+        "--actor-context",
+        &expected_context,
+        "evaluate",
+        "w-task",
+        "--mode",
+        "independent_session",
+        "--acceptance-basis",
+        "7",
+        "--evidence-basis",
+        "42",
+        "--verdict",
+        "1=pass:judgment",
+        "--rationale",
+        "1=Read the diff; the route exists.",
+        "--evidence",
+        "1=aaaaaaaa1111",
+        "--evidence",
+        "1=bbbbbbbb2222",
+        "--verdict",
+        "2=fail:judgment",
+        "--rationale",
+        "2=Ran no test; none covers it.",
+        "--model",
+        &expected_model,
+        "--attempt",
+        &delegation,
+        "--json",
     ];
-    assert_eq!(args.iter().map(String::as_str).collect::<Vec<_>>(), expected_args);
+    assert_eq!(
+        args.iter().map(String::as_str).collect::<Vec<_>>(),
+        expected_args
+    );
 
     // The evaluator is handed the raw receipt; the record keeps its extract.
     assert_eq!(
@@ -954,7 +1149,11 @@ fn acceptance_submit_runs_engram_as_the_child_and_records_the_receipt_once() {
         .submit_acceptance_evaluation_with_runner(&child, two_verdicts(), runner_must_not_run)
         .unwrap_err();
     assert_eq!(again.status, StatusCode::CONFLICT);
-    assert!(again.message.contains("already recorded"), "{}", again.message);
+    assert!(
+        again.message.contains("already recorded"),
+        "{}",
+        again.message
+    );
 
     // The parent reads the target and the outcome in status, summary and
     // result. A status read refreshes from the child, so the child settles
@@ -976,7 +1175,10 @@ fn acceptance_submit_runs_engram_as_the_child_and_records_the_receipt_once() {
     assert_eq!(exposed["submission"]["receipt"]["passed"], 1);
     assert_eq!(exposed["submission"]["receipt"]["verdictsTotal"], 2);
     assert_eq!(exposed["submission"]["receipt"]["blocking"]["position"], 2);
-    assert_eq!(exposed["submission"]["recordedAt"], response.recorded_at.as_str());
+    assert_eq!(
+        exposed["submission"]["recordedAt"],
+        response.recorded_at.as_str()
+    );
     // The raw receipt is not kept: nothing of it beyond the extract is served.
     assert!(!exposed.to_string().contains("run_id"), "{exposed}");
     assert!(exposed.get("outcome").is_none());
@@ -997,7 +1199,9 @@ fn acceptance_submit_runs_engram_as_the_child_and_records_the_receipt_once() {
         "{section}"
     );
     assert!(
-        section.contains("1 of 2 criteria passed; criterion 2 is fail, so the task cannot complete on it"),
+        section.contains(
+            "1 of 2 criteria passed; criterion 2 is fail, so the task cannot complete on it"
+        ),
         "{section}"
     );
     let summary_of = |receipt: Value| {
@@ -1043,11 +1247,24 @@ fn acceptance_submit_relays_a_refusal_and_records_nothing_on_failure() {
     assert_eq!(error.status, StatusCode::CONFLICT);
     assert!(error.message.contains(usage), "{}", error.message);
     assert!(outcome_of(&state, &delegation).is_none());
-    assert_eq!(submission_of(&state, &delegation), AcceptanceEvaluationSubmission::None);
+    assert_eq!(
+        submission_of(&state, &delegation),
+        AcceptanceEvaluationSubmission::None
+    );
 
     for (failure, expected) in [
-        (EngramTransportError::deadline("Engram acceptance-evaluation submission exceeded 6000 ms"), "exceeded 6000 ms"),
-        (EngramTransportError::transport("failed spawning Engram acceptance-evaluation submission: gone"), "failed spawning"),
+        (
+            EngramTransportError::deadline(
+                "Engram acceptance-evaluation submission exceeded 6000 ms",
+            ),
+            "exceeded 6000 ms",
+        ),
+        (
+            EngramTransportError::transport(
+                "failed spawning Engram acceptance-evaluation submission: gone",
+            ),
+            "failed spawning",
+        ),
     ] {
         // The runner is a `Fn`: an unknown outcome is sent once more.
         let error = state
@@ -1092,7 +1309,11 @@ fn acceptance_submit_refuses_a_project_without_an_established_store() {
         .submit_acceptance_evaluation_with_runner(&child, two_verdicts(), runner_must_not_run)
         .unwrap_err();
     assert_eq!(error.status, StatusCode::CONFLICT);
-    assert!(error.message.contains("not enabled by the operator"), "{}", error.message);
+    assert!(
+        error.message.contains("not enabled by the operator"),
+        "{}",
+        error.message
+    );
 }
 
 #[test]
@@ -1106,8 +1327,14 @@ fn acceptance_evaluator_model_flag_names_the_provider_or_is_omitted() {
         Some("openai/gpt-5".to_owned())
     );
     assert_eq!(acceptance_evaluator_model_flag(Agent::Codex, " \n "), None);
-    assert_eq!(acceptance_evaluator_model_flag(Agent::Codex, &"m".repeat(129)), None);
-    assert_eq!(acceptance_evaluator_model_flag(Agent::Gemini, "gemini-pro"), None);
+    assert_eq!(
+        acceptance_evaluator_model_flag(Agent::Codex, &"m".repeat(129)),
+        None
+    );
+    assert_eq!(
+        acceptance_evaluator_model_flag(Agent::Gemini, "gemini-pro"),
+        None
+    );
 }
 
 // ---- capability classifiers ----------------------------------------------
@@ -1129,7 +1356,10 @@ fn acceptance_submit_capability_is_classified_for_claude_and_codex() {
         TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_TOOL_NAME,
         "mcp__other__termal_submit_acceptance_evaluation",
     ] {
-        assert_eq!(delegation_control_plane_capability_for_claude_tool_name(foreign), None);
+        assert_eq!(
+            delegation_control_plane_capability_for_claude_tool_name(foreign),
+            None
+        );
     }
 
     let state = test_app_state();
@@ -1168,7 +1398,10 @@ fn acceptance_submit_capability_is_classified_for_claude_and_codex() {
         ("/params/serverName", json!("other")),
         // Params must deserialize and validate: a pass without proof does not.
         ("/params/_meta/tool_params/verdicts/0/evidence", json!([])),
-        ("/params/_meta/tool_params/verdicts/0/command", json!("evil")),
+        (
+            "/params/_meta/tool_params/verdicts/0/command",
+            json!("evil"),
+        ),
         ("/params/_meta/tool_params/schemaVersion", json!(2)),
     ] {
         let mut invalid = request.clone();
@@ -1181,8 +1414,15 @@ fn acceptance_submit_capability_is_classified_for_claude_and_codex() {
         assert!(!respond(&invalid), "{pointer}");
     }
     // Shape alone never grants it: live authority decides.
-    state.inner.lock().unwrap().delegations.iter_mut().find(|d| d.id == delegation).unwrap().status =
-        DelegationStatus::Completed;
+    state
+        .inner
+        .lock()
+        .unwrap()
+        .delegations
+        .iter_mut()
+        .find(|d| d.id == delegation)
+        .unwrap()
+        .status = DelegationStatus::Completed;
     assert!(!respond(&request));
 }
 
@@ -1191,14 +1431,35 @@ fn acceptance_and_review_capabilities_are_never_shared() {
     let state = test_app_state();
     let parent = test_session_id(&state, Agent::Claude);
     let (_, evaluator) = install_evaluator_delegation(&state, &parent, None, "/tmp", 1);
-    let (_, reviewer) = super::delegation_support::install_required_review_delegation(&state, &parent);
+    let (_, reviewer) =
+        super::delegation_support::install_required_review_delegation(&state, &parent);
     for (child, tool, expected) in [
-        (&evaluator, TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_QUALIFIED_TOOL_NAME, true),
-        (&evaluator, TERMAL_SUBMIT_REVIEW_RESULT_QUALIFIED_TOOL_NAME, false),
+        (
+            &evaluator,
+            TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_QUALIFIED_TOOL_NAME,
+            true,
+        ),
+        (
+            &evaluator,
+            TERMAL_SUBMIT_REVIEW_RESULT_QUALIFIED_TOOL_NAME,
+            false,
+        ),
         (&evaluator, TERMAL_REVIEW_FREEZE_QUALIFIED_TOOL_NAME, false),
-        (&reviewer, TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_QUALIFIED_TOOL_NAME, false),
-        (&reviewer, TERMAL_SUBMIT_REVIEW_RESULT_QUALIFIED_TOOL_NAME, true),
-        (&parent, TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_QUALIFIED_TOOL_NAME, false),
+        (
+            &reviewer,
+            TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_QUALIFIED_TOOL_NAME,
+            false,
+        ),
+        (
+            &reviewer,
+            TERMAL_SUBMIT_REVIEW_RESULT_QUALIFIED_TOOL_NAME,
+            true,
+        ),
+        (
+            &parent,
+            TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_QUALIFIED_TOOL_NAME,
+            false,
+        ),
     ] {
         let message = claude_permission_request(tool);
         let access = state.claude_control_plane_request_allowed(child, &message);
@@ -1266,13 +1527,17 @@ fn acceptance_target_persists_with_the_record_and_is_absent_elsewhere() {
     let state = test_app_state();
     let parent = test_session_id(&state, Agent::Claude);
     let (evaluation, _) = install_evaluator_delegation(&state, &parent, None, "/tmp", 2);
-    let (review, _) = super::delegation_support::install_required_review_delegation(&state, &parent);
+    let (review, _) =
+        super::delegation_support::install_required_review_delegation(&state, &parent);
     let inner = state.inner.lock().unwrap();
     let record = |id: &str| inner.delegations[inner.find_delegation_index(id).unwrap()].clone();
 
     let persisted = serde_json::to_value(record(&evaluation)).unwrap();
     assert_eq!(persisted["mode"], "evaluator");
-    assert_eq!(persisted["acceptanceEvaluation"]["attemptKey"], evaluation.as_str());
+    assert_eq!(
+        persisted["acceptanceEvaluation"]["attemptKey"],
+        evaluation.as_str()
+    );
     assert!(persisted["acceptanceEvaluation"].get("outcome").is_none());
     let reloaded: DelegationRecord = serde_json::from_value(persisted).unwrap();
     assert_eq!(reloaded, record(&evaluation));
@@ -1329,19 +1594,33 @@ async fn acceptance_routes_reject_malformed_json_and_unauthorized_callers() {
     };
     for (path, body, expected) in [
         // A caller may not brief its own judge.
-        (format!("/api/sessions/{parent}/acceptance-evaluations"),
-            json!({"workRef": "w-task", "prompt": "be kind"}), StatusCode::UNPROCESSABLE_ENTITY),
-        (format!("/api/sessions/{parent}/acceptance-evaluations"),
-            json!({"workRef": "--json"}), StatusCode::BAD_REQUEST),
+        (
+            format!("/api/sessions/{parent}/acceptance-evaluations"),
+            json!({"workRef": "w-task", "prompt": "be kind"}),
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ),
+        (
+            format!("/api/sessions/{parent}/acceptance-evaluations"),
+            json!({"workRef": "--json"}),
+            StatusCode::BAD_REQUEST,
+        ),
         // No project, so no tracker: refused before any read.
-        (format!("/api/sessions/{parent}/acceptance-evaluations"),
-            json!({"workRef": "w-task"}), StatusCode::CONFLICT),
-        (format!("/api/sessions/{parent}/acceptance-evaluation"),
+        (
+            format!("/api/sessions/{parent}/acceptance-evaluations"),
+            json!({"workRef": "w-task"}),
+            StatusCode::CONFLICT,
+        ),
+        (
+            format!("/api/sessions/{parent}/acceptance-evaluation"),
             json!({"schemaVersion": 1, "verdicts": [], "workRef": "w-other"}),
-            StatusCode::UNPROCESSABLE_ENTITY),
-        (format!("/api/sessions/{parent}/acceptance-evaluation"),
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ),
+        (
+            format!("/api/sessions/{parent}/acceptance-evaluation"),
             json!({"schemaVersion": 1, "verdicts": [{"criterion": 1, "verdict": "fail",
-                "rationale": "Checked."}]}), StatusCode::CONFLICT),
+                "rationale": "Checked."}]}),
+            StatusCode::CONFLICT,
+        ),
     ] {
         let (status, response): (StatusCode, Value) = request_json(&app, post(path, body)).await;
         assert_eq!(status, expected, "{response}");
@@ -1354,7 +1633,10 @@ async fn acceptance_routes_reject_malformed_json_and_unauthorized_callers() {
 fn acceptance_request_reads_as_the_host_and_spawns_an_evaluator_with_the_target() {
     let (state, project, parent, root) = fixture();
     install_store(&state, &project, &root);
-    super::delegation_support::install_delegation_codex_runtime(&state, "acceptance-evaluation-runtime");
+    super::delegation_support::install_delegation_codex_runtime(
+        &state,
+        "acceptance-evaluation-runtime",
+    );
     let calls: RecordedEngramCalls = Arc::default();
     let response = state
         .request_acceptance_evaluation_with_runner(
@@ -1363,7 +1645,10 @@ fn acceptance_request_reads_as_the_host_and_spawns_an_evaluator_with_the_target(
             fixture_reader(
                 calls.clone(),
                 show_receipt(None),
-                Ok(policy_receipt(Some(&["same_session", "independent_session"]))),
+                Ok(policy_receipt(Some(&[
+                    "same_session",
+                    "independent_session",
+                ]))),
             ),
         )
         .unwrap();
@@ -1373,14 +1658,26 @@ fn acceptance_request_reads_as_the_host_and_spawns_an_evaluator_with_the_target(
     for (connection, _) in calls.iter() {
         // Reads run as the host reader and never register the requester.
         assert_eq!(connection.session_id, WORK_HOST_READER_SESSION_ID);
-        assert!(connection.actor_id.ends_with("/termal"), "{}", connection.actor_id);
+        assert!(
+            connection.actor_id.ends_with("/termal"),
+            "{}",
+            connection.actor_id
+        );
         assert_eq!(connection.actor_context, None);
         assert_eq!(connection.project_root, project_root(&state, &project));
     }
     let show_args = calls[0].1.iter().map(String::as_str).collect::<Vec<_>>();
     let expected_show_args: Vec<&str> = vec![
-        "work", "--actor-id", &calls[0].0.actor_id, "--session-id", WORK_HOST_READER_SESSION_ID,
-        "show", "w-task", "--notes", "--gates", "--json",
+        "work",
+        "--actor-id",
+        &calls[0].0.actor_id,
+        "--session-id",
+        WORK_HOST_READER_SESSION_ID,
+        "show",
+        "w-task",
+        "--notes",
+        "--gates",
+        "--json",
     ];
     assert_eq!(show_args, expected_show_args);
     // The CLI refuses --full together with the evidence windows: a second read.
@@ -1421,7 +1718,11 @@ fn acceptance_request_reads_as_the_host_and_spawns_an_evaluator_with_the_target(
         json!({"databasePath": store.database_path, "projectId": store.project_id})
     );
     assert!(wire.get("notice").is_none());
-    assert!(record.prompt.contains("  1. The route exists\n  2. A test covers it\n"));
+    assert!(
+        record
+            .prompt
+            .contains("  1. The route exists\n  2. A test covers it\n")
+    );
     assert!(record.prompt.contains("bbbbbbbb2222"));
     let inner = state.inner.lock().unwrap();
     let stored = &inner.delegations[inner.find_delegation_index(&record.id).unwrap()];
@@ -1449,7 +1750,12 @@ fn acceptance_request_returns_a_same_session_brief_without_spawning() {
     assert_eq!(wire["workRef"], "w-task");
     assert_eq!(wire["acceptanceBasis"], 7);
     assert_eq!(wire["evidenceBasis"], 42);
-    assert!(wire["brief"].as_str().unwrap().contains("  2. A test covers it"));
+    assert!(
+        wire["brief"]
+            .as_str()
+            .unwrap()
+            .contains("  2. A test covers it")
+    );
     assert!(wire.get("delegation").is_none());
     assert!(state.inner.lock().unwrap().delegations.is_empty());
 }
@@ -1458,22 +1764,71 @@ fn acceptance_request_returns_a_same_session_brief_without_spawning() {
 fn acceptance_project_defaults_are_used_only_when_admitted_and_never_override_task_pins() {
     let (state, project, parent, root) = fixture();
     install_store(&state, &project, &root);
-    state.update_acceptance_defaults(&project, AcceptanceEvaluatorDefaults {
-        default_mode: Some(AcceptanceEvaluationMode::SameSession), ..Default::default()
-    }).unwrap();
-    let response = state.request_acceptance_evaluation_with_runner(&parent, evaluation_request(None),
-        fixture_reader(Arc::default(), show_receipt(None), Ok(policy_receipt(Some(&["same_session", "independent_session"]))))).unwrap();
-    assert_eq!(serde_json::to_value(response).unwrap()["mode"], "same_session");
+    state
+        .update_acceptance_defaults(
+            &project,
+            AcceptanceEvaluatorDefaults {
+                default_mode: Some(AcceptanceEvaluationMode::SameSession),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let response = state
+        .request_acceptance_evaluation_with_runner(
+            &parent,
+            evaluation_request(None),
+            fixture_reader(
+                Arc::default(),
+                show_receipt(None),
+                Ok(policy_receipt(Some(&[
+                    "same_session",
+                    "independent_session",
+                ]))),
+            ),
+        )
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(response).unwrap()["mode"],
+        "same_session"
+    );
     // A pinned unsupported mode is refused, never silently changed to the default.
-    let error = state.request_acceptance_evaluation_with_runner(&parent, evaluation_request(None),
-        fixture_reader(Arc::default(), show_receipt(Some("sub_agent")), Ok(policy_receipt(Some(&["same_session", "sub_agent"]))))).err().expect("pinned unsupported mode must fail");
+    let error = state
+        .request_acceptance_evaluation_with_runner(
+            &parent,
+            evaluation_request(None),
+            fixture_reader(
+                Arc::default(),
+                show_receipt(Some("sub_agent")),
+                Ok(policy_receipt(Some(&["same_session", "sub_agent"]))),
+            ),
+        )
+        .err()
+        .expect("pinned unsupported mode must fail");
     assert_eq!(error.status, StatusCode::NOT_IMPLEMENTED);
-    state.update_acceptance_defaults(&project, AcceptanceEvaluatorDefaults {
-        default_mode: Some(AcceptanceEvaluationMode::IndependentSession), ..Default::default()
-    }).unwrap();
-    let response = state.request_acceptance_evaluation_with_runner(&parent, evaluation_request(None),
-        fixture_reader(Arc::default(), show_receipt(None), Ok(policy_receipt(Some(&["same_session"]))))).unwrap();
-    assert_eq!(serde_json::to_value(response).unwrap()["mode"], "same_session");
+    state
+        .update_acceptance_defaults(
+            &project,
+            AcceptanceEvaluatorDefaults {
+                default_mode: Some(AcceptanceEvaluationMode::IndependentSession),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let response = state
+        .request_acceptance_evaluation_with_runner(
+            &parent,
+            evaluation_request(None),
+            fixture_reader(
+                Arc::default(),
+                show_receipt(None),
+                Ok(policy_receipt(Some(&["same_session"]))),
+            ),
+        )
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(response).unwrap()["mode"],
+        "same_session"
+    );
 }
 
 #[test]
@@ -1486,69 +1841,186 @@ fn acceptance_parent_card_uses_receipt_not_agent_prose_and_waits_for_acknowledge
         let index = inner.find_delegation_index(&id).unwrap();
         let mut delegation = inner.delegations[index].clone();
         add_parent_delegation_card_locked(&mut inner, &delegation).unwrap();
-        assert!(acceptance_card_detail(&inner, &delegation, "all good", true).contains("nothing was recorded"));
-        delegation.acceptance_evaluation.as_mut().unwrap().submission = AcceptanceEvaluationSubmission::Recorded {
-            receipt: AcceptanceEvaluationReceiptExtract { passed: Some(1), verdicts_total: Some(2), ..Default::default() }, recorded_at: "now".into(),
+        assert!(
+            acceptance_card_detail(&inner, &delegation, "all good", true)
+                .contains("nothing was recorded")
+        );
+        delegation
+            .acceptance_evaluation
+            .as_mut()
+            .unwrap()
+            .submission = AcceptanceEvaluationSubmission::Recorded {
+            receipt: AcceptanceEvaluationReceiptExtract {
+                passed: Some(1),
+                verdicts_total: Some(2),
+                ..Default::default()
+            },
+            recorded_at: "now".into(),
         };
         inner.delegations[index] = delegation.clone();
-        inner.acceptance_evaluation_submissions_in_flight.insert(id.clone());
+        inner
+            .acceptance_evaluation_submissions_in_flight
+            .insert(id.clone());
         let pending = acceptance_card_detail(&inner, &delegation, "all good", false);
         assert!(pending.contains("awaiting confirmation"));
         assert!(!pending.contains("criteria passed"));
-        inner.acceptance_evaluation_submissions_in_flight.remove(&id);
+        inner
+            .acceptance_evaluation_submissions_in_flight
+            .remove(&id);
         let child_index = inner.find_session_index(&child).unwrap();
-        inner.sessions[child_index].session.messages.push(Message::Approval {
-            id: "approval-test".into(), timestamp: stamp_now(), author: Author::Assistant,
-            title: "Approval needed".into(), command: "Edit src/main.rs".into(),
-            command_language: None, detail: "Allow editing src/main.rs?".into(),
-            decision: ApprovalDecision::Pending, supported_decisions: None,
-        });
+        inner.sessions[child_index]
+            .session
+            .messages
+            .push(Message::Approval {
+                id: "approval-test".into(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                title: "Approval needed".into(),
+                command: "Edit src/main.rs".into(),
+                command_language: None,
+                detail: "Allow editing src/main.rs?".into(),
+                decision: ApprovalDecision::Pending,
+                supported_decisions: None,
+            });
     }
     state.refresh_acceptance_evaluation_card(&child);
     let inner = state.inner.lock().unwrap();
     let parent = &inner.sessions[inner.find_session_index(&parent).unwrap()];
-    let Message::ParallelAgents { agents, .. } = parent.session.messages.last().unwrap() else { panic!("missing card") };
-    assert!(agents[0].detail.as_ref().unwrap().contains("1 of 2 criteria passed"));
-    assert!(agents[0].detail.as_ref().unwrap().contains("task cannot complete"));
-    assert!(agents[0].detail.as_ref().unwrap().contains("Allow editing src/main.rs?"));
+    let Message::ParallelAgents { agents, .. } = parent.session.messages.last().unwrap() else {
+        panic!("missing card")
+    };
+    assert!(
+        agents[0]
+            .detail
+            .as_ref()
+            .unwrap()
+            .contains("1 of 2 criteria passed")
+    );
+    assert!(
+        agents[0]
+            .detail
+            .as_ref()
+            .unwrap()
+            .contains("task cannot complete")
+    );
+    assert!(
+        agents[0]
+            .detail
+            .as_ref()
+            .unwrap()
+            .contains("Allow editing src/main.rs?")
+    );
 }
 
 #[test]
 fn acceptance_request_applies_request_defaults_and_real_provider_precedence() {
     for (request_agent, default_agent, expected, request_model, default_model, expected_model) in [
-        (Some(Agent::Codex), Some(Agent::Claude), Agent::Codex, Some("request-model"), Some("default-model"), Some("request-model")),
-        (None, Some(Agent::Codex), Agent::Codex, None, Some("default-model"), Some("default-model")),
+        (
+            Some(Agent::Codex),
+            Some(Agent::Claude),
+            Agent::Codex,
+            Some("request-model"),
+            Some("default-model"),
+            Some("request-model"),
+        ),
+        (
+            None,
+            Some(Agent::Codex),
+            Agent::Codex,
+            None,
+            Some("default-model"),
+            Some("default-model"),
+        ),
         (None, None, Agent::Claude, None, None, None),
-        (Some(Agent::Codex), Some(Agent::Claude), Agent::Codex, None, Some("claude-only"), None),
-        (None, None, Agent::Claude, None, Some("legacy-codex-only"), None),
-        (None, Some(Agent::Gemini), Agent::Claude, None, Some("gemini-only"), None),
+        (
+            Some(Agent::Codex),
+            Some(Agent::Claude),
+            Agent::Codex,
+            None,
+            Some("claude-only"),
+            None,
+        ),
+        (
+            None,
+            None,
+            Agent::Claude,
+            None,
+            Some("legacy-codex-only"),
+            None,
+        ),
+        (
+            None,
+            Some(Agent::Gemini),
+            Agent::Claude,
+            None,
+            Some("gemini-only"),
+            None,
+        ),
     ] {
         let (state, project, parent, root) = fixture();
         install_store(&state, &project, &root);
-        super::delegation_support::install_delegation_codex_runtime(&state, "acceptance-precedence-runtime");
+        super::delegation_support::install_delegation_codex_runtime(
+            &state,
+            "acceptance-precedence-runtime",
+        );
         {
             let mut inner = state.inner.lock().unwrap();
             let parent_index = inner.find_session_index(&parent).unwrap();
             inner.sessions[parent_index].session.agent = Agent::Codex;
-            inner.projects.iter_mut().find(|p| p.id == project).unwrap().engram.as_mut().unwrap().acceptance_evaluation = Some(AcceptanceEvaluatorDefaults {
+            inner
+                .projects
+                .iter_mut()
+                .find(|p| p.id == project)
+                .unwrap()
+                .engram
+                .as_mut()
+                .unwrap()
+                .acceptance_evaluation = Some(AcceptanceEvaluatorDefaults {
                 default_mode: Some(AcceptanceEvaluationMode::SubAgent), // old persisted unsupported defaults are ignored
-                evaluator_agent: default_agent, evaluator_model: default_model.map(str::to_owned),
+                evaluator_agent: default_agent,
+                evaluator_model: default_model.map(str::to_owned),
             });
         }
-        *state.agent_readiness_cache.write().unwrap() = AgentReadinessCache::fresh(
-            collect_agent_readiness_with("fixture", |agent, _| AgentReadiness {
-                agent, status: AgentReadinessStatus::Ready, blocking: false,
-                detail: String::new(), warning_detail: None, command_path: Some("fixture".into()),
+        *state.agent_readiness_cache.write().unwrap() =
+            AgentReadinessCache::fresh(collect_agent_readiness_with("fixture", |agent, _| {
+                AgentReadiness {
+                    agent,
+                    status: AgentReadinessStatus::Ready,
+                    blocking: false,
+                    detail: String::new(),
+                    warning_detail: None,
+                    command_path: Some("fixture".into()),
+                }
             }));
         let mut request = evaluation_request(request_agent);
         request.model = request_model.map(str::to_owned);
-        let response = state.request_acceptance_evaluation_with_runner(&parent, request,
-            fixture_reader(Arc::default(), show_receipt(None), Ok(policy_receipt(Some(&["independent_session", "sub_agent"]))))).unwrap();
-        let AcceptanceEvaluationRequestResponse::Spawned { delegation, .. } = response else { panic!("must spawn") };
+        let response = state
+            .request_acceptance_evaluation_with_runner(
+                &parent,
+                request,
+                fixture_reader(
+                    Arc::default(),
+                    show_receipt(None),
+                    Ok(policy_receipt(Some(&["independent_session", "sub_agent"]))),
+                ),
+            )
+            .unwrap();
+        let AcceptanceEvaluationRequestResponse::Spawned { delegation, .. } = response else {
+            panic!("must spawn")
+        };
         assert_eq!(delegation.delegation.agent, expected);
-        let expected_model = expected_model.map(str::to_owned).unwrap_or_else(||
-            state.inner.lock().unwrap().preferences.default_model_for_agent(expected));
-        assert_eq!(delegation.delegation.model.as_deref(), Some(expected_model.as_str()));
+        let expected_model = expected_model.map(str::to_owned).unwrap_or_else(|| {
+            state
+                .inner
+                .lock()
+                .unwrap()
+                .preferences
+                .default_model_for_agent(expected)
+        });
+        assert_eq!(
+            delegation.delegation.model.as_deref(),
+            Some(expected_model.as_str())
+        );
     }
 }
 
@@ -1557,9 +2029,12 @@ fn acceptance_request_model_requires_explicit_agent_before_any_tracker_read() {
     let (state, _, parent, _) = fixture();
     let mut request = evaluation_request(None);
     request.model = Some("vendor-specific-model".into());
-    let error = state.request_acceptance_evaluation_with_runner(
-        &parent, request, |_, _, _| panic!("ambiguous model must be refused before tracker I/O"),
-    ).err().expect("model without agent must fail");
+    let error = state
+        .request_acceptance_evaluation_with_runner(&parent, request, |_, _, _| {
+            panic!("ambiguous model must be refused before tracker I/O")
+        })
+        .err()
+        .expect("model without agent must fail");
     assert_eq!(error.status, StatusCode::BAD_REQUEST);
     assert!(error.message.contains("requires an explicit agent"));
     assert!(state.inner.lock().unwrap().delegations.is_empty());
@@ -1577,7 +2052,9 @@ fn acceptance_request_pages_older_evidence_into_the_brief() {
     first["notes_omitted"] = json!(1);
     first["notes_window"] = json!({"after": "s1-token", "older": 1, "newer": 0});
     let reader = move |connection: &EngramConnectionConfig, args: &[String], _: Duration| {
-        seen.lock().unwrap().push((connection.clone(), args.to_vec()));
+        seen.lock()
+            .unwrap()
+            .push((connection.clone(), args.to_vec()));
         if args.first().map(String::as_str) == Some("control-policy") {
             Ok(policy_receipt(Some(&["independent_session"])))
         } else if args.iter().any(|arg| arg == "--full") {
@@ -1608,15 +2085,21 @@ fn acceptance_request_pages_older_evidence_into_the_brief() {
     assert_eq!(tails[0], ["show", "w-task", "--notes", "--gates", "--json"]);
     assert_eq!(
         tails[1],
-        ["show", "w-task", "--notes", "--gates", "--after", "s1-token", "--json"]
+        [
+            "show", "w-task", "--notes", "--gates", "--after", "s1-token", "--json"
+        ]
     );
     assert_eq!(tails[2], ["show", "w-task", "--full", "--json"]);
     assert_eq!(calls[3].1, ["control-policy", "show"]);
     assert_eq!(calls.len(), 4);
 
     let wire = serde_json::to_value(&response).unwrap();
-    let prompt = wire["delegation"]["prompt"].as_str().expect("the evaluator's brief");
-    let oldest = prompt.find("99999999aaaa").expect("the older page reaches the brief");
+    let prompt = wire["delegation"]["prompt"]
+        .as_str()
+        .expect("the evaluator's brief");
+    let oldest = prompt
+        .find("99999999aaaa")
+        .expect("the older page reaches the brief");
     let newest = prompt.find("aaaaaaaa1111").expect("the first page stays");
     assert!(oldest < newest, "evidence is listed oldest first");
     assert!(!prompt.contains("older entries not shown"), "{prompt}");
@@ -1640,7 +2123,11 @@ fn acceptance_request_refuses_without_spawning() {
     // Engram is not enabled for the project: the reader's own reason.
     let disabled = request(show_receipt(None), Ok(policy_receipt(None)));
     assert_eq!(disabled.status, StatusCode::CONFLICT);
-    assert!(disabled.message.contains("not enabled by the operator"), "{}", disabled.message);
+    assert!(
+        disabled.message.contains("not enabled by the operator"),
+        "{}",
+        disabled.message
+    );
 
     install_store(&state, &project, &root);
     let sub_agent = request(show_receipt(Some("sub_agent")), Ok(policy_receipt(None)));
@@ -1650,12 +2137,19 @@ fn acceptance_request_refuses_without_spawning() {
         Ok(policy_receipt(Some(&["same_session"]))),
     );
     assert_eq!(unadmitted.status, StatusCode::CONFLICT);
-    assert!(unadmitted.message.contains("admits only: same_session"), "{}", unadmitted.message);
+    assert!(
+        unadmitted.message.contains("admits only: same_session"),
+        "{}",
+        unadmitted.message
+    );
     let off = request(show_receipt(None), Ok(policy_receipt(Some(&[]))));
     assert_eq!(off.status, StatusCode::CONFLICT);
     let mut closed = show_receipt(None);
     closed["status"]["work"]["lifecycle"] = json!("completed");
-    assert_eq!(request(closed, Ok(policy_receipt(None))).status, StatusCode::CONFLICT);
+    assert_eq!(
+        request(closed, Ok(policy_receipt(None))).status,
+        StatusCode::CONFLICT
+    );
     assert!(!spawned(&state));
 
     // The evaluator must be Claude or Codex, exactly as a reviewer must.
@@ -1668,7 +2162,11 @@ fn acceptance_request_refuses_without_spawning() {
         .err()
         .expect("an ACP evaluator is refused");
     assert_eq!(gemini.status, StatusCode::BAD_REQUEST);
-    assert!(gemini.message.contains("Claude or Codex"), "{}", gemini.message);
+    assert!(
+        gemini.message.contains("Claude or Codex"),
+        "{}",
+        gemini.message
+    );
     assert!(!spawned(&state));
 }
 
@@ -1684,11 +2182,16 @@ fn acceptance_request_treats_an_unreadable_policy_as_unknown() {
             fixture_reader(
                 Arc::default(),
                 show_receipt(Some("same_session")),
-                Err(EngramTransportError::deadline("Engram acceptance-evaluation reader exceeded 10000 ms")),
+                Err(EngramTransportError::deadline(
+                    "Engram acceptance-evaluation reader exceeded 10000 ms",
+                )),
             ),
         )
         .unwrap();
-    assert_eq!(serde_json::to_value(&response).unwrap()["mode"], "same_session");
+    assert_eq!(
+        serde_json::to_value(&response).unwrap()["mode"],
+        "same_session"
+    );
 
     // The task read itself is never optional.
     let failed = state
@@ -1700,7 +2203,11 @@ fn acceptance_request_treats_an_unreadable_policy_as_unknown() {
         .err()
         .expect("a failed task read refuses the request");
     assert_eq!(failed.status, StatusCode::BAD_GATEWAY);
-    assert!(failed.message.contains("work_not_found"), "{}", failed.message);
+    assert!(
+        failed.message.contains("work_not_found"),
+        "{}",
+        failed.message
+    );
 }
 
 // ---- store identity ------------------------------------------------------
@@ -1732,7 +2239,9 @@ fn rotate_store(state: &AppState, project: &str, root: &FsPath) -> EngramAuthori
 fn assert_store_changed(error: &ApiError) {
     assert_eq!(error.status, StatusCode::CONFLICT, "{}", error.message);
     assert!(
-        error.message.contains("tracker store changed since this evaluation was requested"),
+        error
+            .message
+            .contains("tracker store changed since this evaluation was requested"),
         "{}",
         error.message
     );
@@ -1742,7 +2251,10 @@ fn assert_store_changed(error: &ApiError) {
 fn acceptance_request_refuses_to_spawn_when_the_store_changed_during_the_reads() {
     let (state, project, parent, root) = fixture();
     install_store(&state, &project, &root);
-    super::delegation_support::install_delegation_codex_runtime(&state, "acceptance-rotation-runtime");
+    super::delegation_support::install_delegation_codex_runtime(
+        &state,
+        "acceptance-rotation-runtime",
+    );
     let (rotating, rotated_project, rotated_root) = (state.clone(), project.clone(), root.clone());
     let reader = move |_: &EngramConnectionConfig, args: &[String], _: Duration| {
         if args.first().map(String::as_str) == Some("control-policy") {
@@ -1779,7 +2291,10 @@ fn acceptance_submit_refuses_when_the_store_changed_after_the_spawn() {
         .submit_acceptance_evaluation_with_runner(&child, two_verdicts(), runner_must_not_run)
         .unwrap_err();
     assert_store_changed(&error);
-    assert_eq!(submission_of(&state, &delegation), AcceptanceEvaluationSubmission::None);
+    assert_eq!(
+        submission_of(&state, &delegation),
+        AcceptanceEvaluationSubmission::None
+    );
 
     // A record persisted before the store was kept cannot say where it was
     // read from, so it cannot submit either.
@@ -1788,7 +2303,11 @@ fn acceptance_submit_refuses_when_the_store_changed_after_the_spawn() {
         .submit_acceptance_evaluation_with_runner(&child, two_verdicts(), runner_must_not_run)
         .unwrap_err();
     assert_eq!(error.status, StatusCode::CONFLICT);
-    assert!(error.message.contains("request a new evaluation"), "{}", error.message);
+    assert!(
+        error.message.contains("request a new evaluation"),
+        "{}",
+        error.message
+    );
 }
 
 #[test]
@@ -1799,7 +2318,10 @@ fn acceptance_submit_refuses_a_child_whose_project_resolves_to_another_store() {
     fs::create_dir_all(&other_root).unwrap();
     let other = create_test_project(&state, &other_root, "Other work fixture");
     install_store(&state, &other, &other_root);
-    assert_ne!(established_store(&state, &project), established_store(&state, &other));
+    assert_ne!(
+        established_store(&state, &project),
+        established_store(&state, &other)
+    );
 
     // The target names the parent's store; the child sits in the other project.
     let workdir = root.to_string_lossy().into_owned();
@@ -1814,7 +2336,10 @@ fn acceptance_submit_refuses_a_child_whose_project_resolves_to_another_store() {
         .submit_acceptance_evaluation_with_runner(&child, two_verdicts(), runner_must_not_run)
         .unwrap_err();
     assert_store_changed(&error);
-    assert_eq!(submission_of(&state, &delegation), AcceptanceEvaluationSubmission::None);
+    assert_eq!(
+        submission_of(&state, &delegation),
+        AcceptanceEvaluationSubmission::None
+    );
 }
 
 // ---- one outcome model ---------------------------------------------------
@@ -1897,9 +2422,15 @@ fn open_write_of(state: &AppState, child: &str) -> (String, Vec<String>) {
 
 fn assert_refused_with_the_write_still_open(error: &ApiError) {
     assert_eq!(error.status, StatusCode::CONFLICT, "{}", error.message);
-    assert!(error.message.contains(REVISION_CONFLICT), "{}", error.message);
     assert!(
-        error.message.contains("An earlier send of these verdicts has an unknown outcome")
+        error.message.contains(REVISION_CONFLICT),
+        "{}",
+        error.message
+    );
+    assert!(
+        error
+            .message
+            .contains("An earlier send of these verdicts has an unknown outcome")
             && error.message.contains("cannot be changed")
             && error.message.contains("the parent must read the task"),
         "{}",
@@ -1937,15 +2468,25 @@ fn acceptance_submit_keeps_the_write_open_when_the_identical_resend_is_refused()
         .submit_acceptance_evaluation_with_runner(&child, corrected, runner_must_not_run)
         .unwrap_err();
     assert_eq!(refused.status, StatusCode::CONFLICT);
-    assert!(refused.message.contains("submit exactly the same verdicts"), "{}", refused.message);
+    assert!(
+        refused.message.contains("submit exactly the same verdicts"),
+        "{}",
+        refused.message
+    );
 
     // The parent is told the outcome is unknown and what was last learned.
     let inner = state.inner.lock().unwrap();
     let section = delegation_wait_result_section(
         &inner.delegations[inner.find_delegation_index(&delegation).unwrap()],
     );
-    assert!(section.contains("the write outcome is unknown"), "{section}");
-    assert!(section.contains("the identical resend was refused"), "{section}");
+    assert!(
+        section.contains("the write outcome is unknown"),
+        "{section}"
+    );
+    assert!(
+        section.contains("the identical resend was refused"),
+        "{section}"
+    );
     assert!(!section.contains("nothing was recorded"), "{section}");
 }
 
@@ -1998,20 +2539,25 @@ fn acceptance_submit_carries_an_open_write_across_requests_until_a_receipt() {
             let error = state
                 .submit_acceptance_evaluation_with_runner(&child, two_verdicts(), run)
                 .unwrap_err();
-            assert_eq!(error.status, expected_status, "{name} after {open:?}: {}", error.message);
+            assert_eq!(
+                error.status, expected_status,
+                "{name} after {open:?}: {}",
+                error.message
+            );
             assert_eq!(calls.lock().unwrap().len(), 1, "{name} after {open:?}");
             if name == "refused" {
                 assert_refused_with_the_write_still_open(&error);
             } else {
                 assert!(
-                    error.message.contains("the write outcome is unknown; submit the same verdicts again"),
+                    error
+                        .message
+                        .contains("the write outcome is unknown; submit the same verdicts again"),
                     "{name} after {open:?}: {}",
                     error.message
                 );
             }
-            let AcceptanceEvaluationSubmission::Unconfirmed {
-                payload_digest, ..
-            } = submission_of(&state, &delegation)
+            let AcceptanceEvaluationSubmission::Unconfirmed { payload_digest, .. } =
+                submission_of(&state, &delegation)
             else {
                 panic!("{name} after {open:?} must keep the write open");
             };
@@ -2022,7 +2568,9 @@ fn acceptance_submit_carries_an_open_write_across_requests_until_a_receipt() {
         let (state, _, delegation, child) = evaluator_fixture();
         let (digest, args) = open_write_of(&state, &child);
         let open = with_original(open, &digest, args);
-        update_evaluation_target(&state, &delegation, |target| target.submission = open.clone());
+        update_evaluation_target(&state, &delegation, |target| {
+            target.submission = open.clone()
+        });
         let (calls, run) = scripted_runner(vec![Ok(cli_output(true, &evaluate_receipt(true), ""))]);
         state
             .submit_acceptance_evaluation_with_runner(&child, two_verdicts(), run)
@@ -2034,9 +2582,24 @@ fn acceptance_submit_carries_an_open_write_across_requests_until_a_receipt() {
     // From `none` the same first results record nothing and leave nothing open,
     // which is what lets an evaluator correct a refused submission.
     for (name, first, expected_status, expected_text) in [
-        ("locked", locked_store(), StatusCode::BAD_GATEWAY, "nothing was recorded"),
-        ("never started", never_started(), StatusCode::BAD_GATEWAY, "nothing was sent"),
-        ("refused", revision_conflict(), StatusCode::CONFLICT, REVISION_CONFLICT),
+        (
+            "locked",
+            locked_store(),
+            StatusCode::BAD_GATEWAY,
+            "nothing was recorded",
+        ),
+        (
+            "never started",
+            never_started(),
+            StatusCode::BAD_GATEWAY,
+            "nothing was sent",
+        ),
+        (
+            "refused",
+            revision_conflict(),
+            StatusCode::CONFLICT,
+            REVISION_CONFLICT,
+        ),
     ] {
         let (state, _, delegation, child) = evaluator_fixture();
         let (calls, run) = scripted_runner(vec![first]);
@@ -2044,8 +2607,16 @@ fn acceptance_submit_carries_an_open_write_across_requests_until_a_receipt() {
             .submit_acceptance_evaluation_with_runner(&child, two_verdicts(), run)
             .unwrap_err();
         assert_eq!(error.status, expected_status, "{name}: {}", error.message);
-        assert!(error.message.contains(expected_text), "{name}: {}", error.message);
-        assert!(!error.message.contains("unknown outcome"), "{name}: {}", error.message);
+        assert!(
+            error.message.contains(expected_text),
+            "{name}: {}",
+            error.message
+        );
+        assert!(
+            !error.message.contains("unknown outcome"),
+            "{name}: {}",
+            error.message
+        );
         assert_eq!(calls.lock().unwrap().len(), 1, "{name}");
         assert_eq!(
             submission_of(&state, &delegation),
@@ -2065,7 +2636,11 @@ fn acceptance_submit_never_started_resend_keeps_the_first_sends_uncertainty() {
         .submit_acceptance_evaluation_with_runner(&child, two_verdicts(), run)
         .unwrap_err();
     assert_eq!(error.status, StatusCode::BAD_GATEWAY);
-    assert!(error.message.contains("the write outcome is unknown"), "{}", error.message);
+    assert!(
+        error.message.contains("the write outcome is unknown"),
+        "{}",
+        error.message
+    );
     assert_eq!(calls.lock().unwrap().len(), 2);
     assert!(matches!(
         submission_of(&state, &delegation),
@@ -2099,7 +2674,9 @@ fn acceptance_submit_keeps_an_unresolved_write_open_for_the_same_verdicts_only()
         .unwrap_err();
     assert_eq!(error.status, StatusCode::BAD_GATEWAY);
     assert!(
-        error.message.contains("the write outcome is unknown; submit the same verdicts again"),
+        error
+            .message
+            .contains("the write outcome is unknown; submit the same verdicts again"),
         "{}",
         error.message
     );
@@ -2113,7 +2690,10 @@ fn acceptance_submit_keeps_an_unresolved_write_open_for_the_same_verdicts_only()
         panic!("an unknown outcome is recorded as unconfirmed");
     };
     assert_eq!(payload_digest, acceptance_evaluation_payload_digest(&sent));
-    assert!(reason.contains("exceeded 6000 ms") && reason.contains("gone"), "{reason}");
+    assert!(
+        reason.contains("exceeded 6000 ms") && reason.contains("gone"),
+        "{reason}"
+    );
 
     // Different verdicts could double-record or be refused for the wrong
     // reason: only the identical list may run while the write is open.
@@ -2124,9 +2704,9 @@ fn acceptance_submit_keeps_an_unresolved_write_open_for_the_same_verdicts_only()
         .unwrap_err();
     assert_eq!(refused.status, StatusCode::CONFLICT);
     assert!(
-        refused
-            .message
-            .contains("an earlier submission's outcome is unknown; submit exactly the same verdicts"),
+        refused.message.contains(
+            "an earlier submission's outcome is unknown; submit exactly the same verdicts"
+        ),
         "{}",
         refused.message
     );
@@ -2168,11 +2748,23 @@ fn acceptance_fan_in_never_reports_an_open_write_as_nothing_recorded() {
     let status = serde_json::to_value(state.get_delegation(&parent, &delegation).unwrap()).unwrap();
     let exposed = &status["delegation"]["acceptanceEvaluation"]["submission"];
     assert_eq!(exposed["state"], "unconfirmed");
-    assert!(exposed["payloadDigest"].as_str().is_some_and(|digest| digest.len() == 64));
-    assert!(exposed["reason"].as_str().unwrap().contains("exceeded 6000 ms"));
-    let result = serde_json::to_value(state.get_delegation_result(&parent, &delegation).unwrap())
-        .unwrap();
-    assert_eq!(result["acceptanceEvaluation"]["submission"]["state"], "unconfirmed");
+    assert!(
+        exposed["payloadDigest"]
+            .as_str()
+            .is_some_and(|digest| digest.len() == 64)
+    );
+    assert!(
+        exposed["reason"]
+            .as_str()
+            .unwrap()
+            .contains("exceeded 6000 ms")
+    );
+    let result =
+        serde_json::to_value(state.get_delegation_result(&parent, &delegation).unwrap()).unwrap();
+    assert_eq!(
+        result["acceptanceEvaluation"]["submission"]["state"],
+        "unconfirmed"
+    );
 
     let unknown = "the write outcome is unknown: the tracker may hold this evaluator's verdict; read the task before requesting another evaluation";
     let text = section(&state);
@@ -2183,7 +2775,10 @@ fn acceptance_fan_in_never_reports_an_open_write_as_nothing_recorded() {
         target.submission = pending_with("d1", AcceptanceEvaluationOpenWrite::default());
     });
     let text = section(&state);
-    assert!(text.contains(unknown) && !text.contains("nothing was recorded"), "{text}");
+    assert!(
+        text.contains(unknown) && !text.contains("nothing was recorded"),
+        "{text}"
+    );
 }
 
 #[test]
@@ -2200,8 +2795,15 @@ fn acceptance_submit_runs_nothing_when_pending_cannot_be_persisted() {
         .submit_acceptance_evaluation_with_runner(&child, two_verdicts(), runner_must_not_run)
         .unwrap_err();
     assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR);
-    assert!(error.message.contains("nothing was sent"), "{}", error.message);
-    assert_eq!(submission_of(&state, &delegation), AcceptanceEvaluationSubmission::None);
+    assert!(
+        error.message.contains("nothing was sent"),
+        "{}",
+        error.message
+    );
+    assert_eq!(
+        submission_of(&state, &delegation),
+        AcceptanceEvaluationSubmission::None
+    );
 }
 
 #[test]
@@ -2226,7 +2828,11 @@ fn acceptance_submit_recovers_the_receipt_after_recorded_could_not_be_persisted(
         .submit_acceptance_evaluation_with_runner(&child, two_verdicts(), &run)
         .unwrap_err();
     assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR);
-    assert!(error.message.contains("submit the same verdicts again"), "{}", error.message);
+    assert!(
+        error.message.contains("submit the same verdicts again"),
+        "{}",
+        error.message
+    );
     // Memory agrees with disk: the write is open, not recorded, so the child
     // is not locked out of the resend that recovers its receipt.
     assert!(matches!(
@@ -2314,7 +2920,10 @@ impl SteppedPersistWriter {
 }
 
 /// The submission state a restart would load for this delegation.
-fn durable_submission(path: &FsPath, delegation_id: &str) -> Option<AcceptanceEvaluationSubmission> {
+fn durable_submission(
+    path: &FsPath,
+    delegation_id: &str,
+) -> Option<AcceptanceEvaluationSubmission> {
     let connection = rusqlite::Connection::open(path).unwrap();
     let stored: Option<String> = connection
         .query_row(
@@ -2347,7 +2956,10 @@ fn acceptance_submit_runs_the_tracker_only_after_pending_is_acknowledged_durable
     let run = move |_: &EngramConnectionConfig, args: &[String], _: Duration| {
         // What a crash at this very moment would leave behind.
         invoked_tx
-            .send((durable_submission(&database, &id), acceptance_evaluation_payload_digest(args)))
+            .send((
+                durable_submission(&database, &id),
+                acceptance_evaluation_payload_digest(args),
+            ))
             .unwrap();
         Ok(cli_output(true, &evaluate_receipt(false), ""))
     };
@@ -2371,18 +2983,25 @@ fn acceptance_submit_runs_the_tracker_only_after_pending_is_acknowledged_durable
             "the tracker ran before `pending` was acknowledged"
         );
         writer.write();
-        let (durable_at_invocation, sent_digest) =
-            phase_sync::receive(&invoked_rx, "the tracker run after the pending acknowledgement");
+        let (durable_at_invocation, sent_digest) = phase_sync::receive(
+            &invoked_rx,
+            "the tracker run after the pending acknowledgement",
+        );
         let Some(AcceptanceEvaluationSubmission::Pending { payload_digest, .. }) =
             durable_at_invocation
         else {
-            panic!("a restart during the tracker run must find `pending`: {durable_at_invocation:?}");
+            panic!(
+                "a restart during the tracker run must find `pending`: {durable_at_invocation:?}"
+            );
         };
         assert_eq!(payload_digest, sent_digest);
 
         // Success is answered only once `recorded` is acknowledged too.
         writer.receive_fence();
-        assert!(!submit.is_finished(), "answered before `recorded` was acknowledged");
+        assert!(
+            !submit.is_finished(),
+            "answered before `recorded` was acknowledged"
+        );
         assert!(matches!(
             durable_submission(&writer.path, &delegation),
             Some(AcceptanceEvaluationSubmission::Pending { .. })
@@ -2413,11 +3032,22 @@ fn acceptance_submit_sends_nothing_when_pending_is_not_acknowledged() {
         writer.fail_write();
         let error = submit.join().unwrap().unwrap_err();
         assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR);
-        assert!(error.message.contains("nothing was sent"), "{}", error.message);
-        assert!(error.message.contains("injected persistence failure"), "{}", error.message);
+        assert!(
+            error.message.contains("nothing was sent"),
+            "{}",
+            error.message
+        );
+        assert!(
+            error.message.contains("injected persistence failure"),
+            "{}",
+            error.message
+        );
     });
     // Memory is back where it was, and so is what a restart would load.
-    assert_eq!(submission_of(&state, &delegation), AcceptanceEvaluationSubmission::None);
+    assert_eq!(
+        submission_of(&state, &delegation),
+        AcceptanceEvaluationSubmission::None
+    );
     assert_eq!(
         durable_submission(&writer.path, &delegation),
         Some(AcceptanceEvaluationSubmission::None)
@@ -2444,7 +3074,10 @@ fn acceptance_submit_sends_nothing_when_pending_is_not_acknowledged() {
             error.message
         );
     });
-    assert_eq!(submission_of(&state, &delegation), AcceptanceEvaluationSubmission::None);
+    assert_eq!(
+        submission_of(&state, &delegation),
+        AcceptanceEvaluationSubmission::None
+    );
 }
 
 #[test]
@@ -2468,8 +3101,16 @@ fn acceptance_submit_falls_back_to_pending_when_recorded_is_not_acknowledged() {
         writer.fail_write();
         let error = first.join().unwrap().unwrap_err();
         assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR);
-        assert!(error.message.contains("submit the same verdicts again"), "{}", error.message);
-        assert!(error.message.contains("injected persistence failure"), "{}", error.message);
+        assert!(
+            error.message.contains("submit the same verdicts again"),
+            "{}",
+            error.message
+        );
+        assert!(
+            error.message.contains("injected persistence failure"),
+            "{}",
+            error.message
+        );
     });
     // Neither memory nor a restart says recorded; both keep the digest.
     assert!(matches!(
@@ -2517,7 +3158,11 @@ fn acceptance_submit_keeps_unconfirmed_in_memory_when_its_persistence_fails() {
         writer.fail_write();
         let error = submit.join().unwrap().unwrap_err();
         assert_eq!(error.status, StatusCode::BAD_GATEWAY);
-        assert!(error.message.contains("the write outcome is unknown"), "{}", error.message);
+        assert!(
+            error.message.contains("the write outcome is unknown"),
+            "{}",
+            error.message
+        );
     });
     assert!(matches!(
         submission_of(&state, &delegation),
@@ -2532,7 +3177,8 @@ fn acceptance_submit_keeps_unconfirmed_in_memory_when_its_persistence_fails() {
 // ---- single flight -------------------------------------------------------
 
 fn acceptance_submit_permission_paths(state: &AppState, child: &str) -> (bool, bool) {
-    let message = claude_permission_request(TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_QUALIFIED_TOOL_NAME);
+    let message =
+        claude_permission_request(TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_QUALIFIED_TOOL_NAME);
     let access = state.claude_control_plane_request_allowed(child, &message);
     let action = classify_claude_control_request(
         &message,
@@ -2541,10 +3187,14 @@ fn acceptance_submit_permission_paths(state: &AppState, child: &str) -> (bool, b
         true,
         ".",
         access,
-    ).unwrap();
-    let claude = matches!(action, Some(ClaudeControlRequestAction::Respond(
-        ClaudePermissionDecision::Allow { .. }
-    )));
+    )
+    .unwrap();
+    let claude = matches!(
+        action,
+        Some(ClaudeControlRequestAction::Respond(
+            ClaudePermissionDecision::Allow { .. }
+        ))
+    );
     let request = json!({"id":"in-flight-submit","params":{
         "threadId":"thread-evaluator","turnId":"turn-evaluator",
         "serverName":TERMAL_DELEGATION_MCP_SERVER_NAME,"mode":"form",
@@ -2561,8 +3211,13 @@ fn acceptance_submit_permission_paths(state: &AppState, child: &str) -> (bool, b
     );
     let (tx, rx) = mpsc::channel();
     let codex = try_auto_respond_delegation_control_plane_request(
-        "mcpServer/elicitation/request", &request, state, child, &tx,
-    ).unwrap();
+        "mcpServer/elicitation/request",
+        &request,
+        state,
+        child,
+        &tx,
+    )
+    .unwrap();
     assert_eq!(codex, rx.try_recv().is_ok());
     (claude, codex)
 }
@@ -2570,8 +3225,12 @@ fn acceptance_submit_permission_paths(state: &AppState, child: &str) -> (bool, b
 fn assert_in_progress(error: &ApiError) {
     assert_eq!(error.status, StatusCode::CONFLICT, "{}", error.message);
     assert!(
-        error.message.contains("a submission for this evaluator is already in progress")
-            && error.message.contains("submit the same verdicts again when it has answered"),
+        error
+            .message
+            .contains("a submission for this evaluator is already in progress")
+            && error
+                .message
+                .contains("submit the same verdicts again when it has answered"),
         "{}",
         error.message
     );
@@ -2596,7 +3255,10 @@ fn acceptance_submit_refuses_a_second_submission_while_the_first_runs_the_tracke
     let release_rx = Mutex::new(release_rx);
     let run = move |_: &EngramConnectionConfig, _: &[String], _: Duration| {
         entered_tx.send(()).unwrap();
-        phase_sync::receive(&release_rx.lock().unwrap(), "the first tracker run is released");
+        phase_sync::receive(
+            &release_rx.lock().unwrap(),
+            "the first tracker run is released",
+        );
         Ok(cli_output(true, &evaluate_receipt(false), ""))
     };
     std::thread::scope(|scope| {
@@ -2606,7 +3268,10 @@ fn acceptance_submit_refuses_a_second_submission_while_the_first_runs_the_tracke
         });
         phase_sync::receive(&entered_rx, "the first submission is in tracker I/O");
         let before = submission_of(&state, &delegation);
-        assert!(matches!(before, AcceptanceEvaluationSubmission::Pending { .. }));
+        assert!(matches!(
+            before,
+            AcceptanceEvaluationSubmission::Pending { .. }
+        ));
         // The same verdicts and other verdicts alike: nothing runs, nothing moves.
         let mut other = two_verdicts();
         other.verdicts[1].verdict = "needs-human".to_owned();
@@ -2647,7 +3312,10 @@ fn acceptance_submit_refuses_a_second_submission_while_recorded_awaits_its_ackno
         writer.write();
         first.join().unwrap().unwrap();
         assert_eq!(permission_while_waiting, (true, true));
-        assert_eq!(acceptance_submit_permission_paths(&state, &child), (false, false));
+        assert_eq!(
+            acceptance_submit_permission_paths(&state, &child),
+            (false, false)
+        );
     });
     assert_eq!(submissions_in_flight(&state), 0);
 }
@@ -2694,7 +3362,11 @@ fn acceptance_submit_releases_its_in_flight_marker_on_every_way_out() {
     let again = state
         .submit_acceptance_evaluation_with_runner(&child, two_verdicts(), runner_must_not_run)
         .unwrap_err();
-    assert!(again.message.contains("already recorded"), "{}", again.message);
+    assert!(
+        again.message.contains("already recorded"),
+        "{}",
+        again.message
+    );
 
     // After a 5xx: `pending` was not acknowledged, nothing was sent.
     let (state, mut writer, _, child) = evaluator_fixture_with_stepped_writer();
@@ -2736,7 +3408,10 @@ fn acceptance_submit_is_acknowledged_although_the_record_moved_on_for_another_re
         }
         // What was asked about is never written; what is written is newer.
         writer.write();
-        assert!(calls.lock().unwrap().is_empty(), "no acknowledgement yet, so no tracker run");
+        assert!(
+            calls.lock().unwrap().is_empty(),
+            "no acknowledgement yet, so no tracker run"
+        );
         // The submission notices, and asks about the record as it now stands.
         writer.receive_fence();
         writer.write();
@@ -2785,15 +3460,24 @@ fn acceptance_submit_replays_near_limit_arguments_after_host_growth() {
     for drift in ["developer", "model"] {
         let (state, _, delegation, child) = evaluator_fixture();
         update_evaluation_target(&state, &delegation, |target| target.criteria_count = 8);
-        let make_request = |len: usize| submission((1..=8)
-            .map(|criterion| verdict(criterion, "fail", &"r".repeat(len), &[]))
-            .collect());
+        let make_request = |len: usize| {
+            submission(
+                (1..=8)
+                    .map(|criterion| verdict(criterion, "fail", &"r".repeat(len), &[]))
+                    .collect(),
+            )
+        };
         let command = |request: &SubmitAcceptanceEvaluationRequest| {
             let (authority, target, model, _in_flight) = state
-                .acceptance_evaluation_submit_context(&child, request).unwrap();
+                .acceptance_evaluation_submit_context(&child, request)
+                .unwrap();
             let args = acceptance_evaluation_cli_args(
-                &target.connection, &authority.target, request, model.as_deref(),
-            ).unwrap();
+                &target.connection,
+                &authority.target,
+                request,
+                model.as_deref(),
+            )
+            .unwrap();
             (target.connection, args)
         };
         let mut low = 1;
@@ -2812,25 +3496,35 @@ fn acceptance_submit_replays_near_limit_arguments_after_host_growth() {
         let (connection, original) = command(&request);
         validate_acceptance_evaluation_command_size(&connection, &original).unwrap();
         let (_, run) = scripted_runner(vec![response_lost(), response_lost()]);
-        let error = state.submit_acceptance_evaluation_with_runner(&child, request.clone(), run)
+        let error = state
+            .submit_acceptance_evaluation_with_runner(&child, request.clone(), run)
             .unwrap_err();
         assert_eq!(error.status, StatusCode::BAD_GATEWAY);
         {
             let mut inner = state.inner.lock().unwrap();
             if drift == "developer" {
-                inner.preferences.engram.developer_name = "longer-developer-name-for-replay".to_owned();
+                inner.preferences.engram.developer_name =
+                    "longer-developer-name-for-replay".to_owned();
             } else {
                 let index = inner.find_session_index(&child).unwrap();
                 inner.sessions[index].session.model = "m".repeat(120);
             }
         }
         let (drifted_connection, drifted_args) = command(&request);
-        assert!(validate_acceptance_evaluation_command_size(&drifted_connection, &drifted_args).is_err(),
-            "{drift}: fresh command must exceed the bound");
-        state.submit_acceptance_evaluation_with_runner(&child, request, |_, args, _| {
-            assert_eq!(args, original, "{drift}: replay must preserve original argv");
-            Ok(cli_output(true, &evaluate_receipt(true), ""))
-        }).unwrap();
+        assert!(
+            validate_acceptance_evaluation_command_size(&drifted_connection, &drifted_args)
+                .is_err(),
+            "{drift}: fresh command must exceed the bound"
+        );
+        state
+            .submit_acceptance_evaluation_with_runner(&child, request, |_, args, _| {
+                assert_eq!(
+                    args, original,
+                    "{drift}: replay must preserve original argv"
+                );
+                Ok(cli_output(true, &evaluate_receipt(true), ""))
+            })
+            .unwrap();
         assert!(outcome_of(&state, &delegation).is_some_and(|(extract, _)| extract.replayed));
     }
 }
@@ -2853,7 +3547,10 @@ fn acceptance_submit_replays_the_original_arguments_after_host_drift() {
             panic!("the write is open");
         };
         assert_eq!(kept.args, original);
-        assert_eq!(payload_digest, acceptance_evaluation_payload_digest(&original));
+        assert_eq!(
+            payload_digest,
+            acceptance_evaluation_payload_digest(&original)
+        );
 
         // Host-private: persisted with the record, served to no client. The
         // projections are built here rather than fetched, because a status
@@ -2881,7 +3578,10 @@ fn acceptance_submit_replays_the_original_arguments_after_host_drift() {
             let text = body.to_string();
             assert!(!text.contains("\"args\""), "{text}");
             assert!(!text.contains("--actor-id"), "{text}");
-            assert!(text.contains(&payload_digest), "the digest itself is served: {text}");
+            assert!(
+                text.contains(&payload_digest),
+                "the digest itself is served: {text}"
+            );
         }
 
         {
@@ -2915,7 +3615,11 @@ fn acceptance_submit_replays_the_original_arguments_after_host_drift() {
             .submit_acceptance_evaluation_with_runner(&child, changed, runner_must_not_run)
             .unwrap_err();
         assert_eq!(refused.status, StatusCode::CONFLICT, "{drift}");
-        assert!(refused.message.contains("submit exactly the same verdicts"), "{}", refused.message);
+        assert!(
+            refused.message.contains("submit exactly the same verdicts"),
+            "{}",
+            refused.message
+        );
 
         // The same verdicts run the original list, as the actor it names.
         let seen: RecordedEngramCalls = Arc::default();
@@ -2925,7 +3629,10 @@ fn acceptance_submit_replays_the_original_arguments_after_host_drift() {
                 &child,
                 two_verdicts(),
                 move |connection, args, _| {
-                    recorder.lock().unwrap().push((connection.clone(), args.to_vec()));
+                    recorder
+                        .lock()
+                        .unwrap()
+                        .push((connection.clone(), args.to_vec()));
                     Ok(cli_output(true, &evaluate_receipt(true), ""))
                 },
             )
@@ -2947,17 +3654,33 @@ fn acceptance_submit_replays_the_original_arguments_after_host_drift() {
 fn acceptance_open_write_round_trips_and_names_its_actor() {
     let original = AcceptanceEvaluationOpenWrite {
         verdicts_digest: "v1".to_owned(),
-        args: ["work", "--actor-id", "greg/claude", "--session-id", "s-1", "--actor-context",
-            "agent=claude", "evaluate", "w-task"]
-            .map(str::to_owned)
-            .to_vec(),
+        args: [
+            "work",
+            "--actor-id",
+            "greg/claude",
+            "--session-id",
+            "s-1",
+            "--actor-context",
+            "agent=claude",
+            "evaluate",
+            "w-task",
+        ]
+        .map(str::to_owned)
+        .to_vec(),
     };
     assert_eq!(
         acceptance_evaluation_args_identity(&original.args),
         Some(("greg/claude".to_owned(), Some("agent=claude".to_owned())))
     );
-    let without_context = ["work", "--actor-id", "greg/codex", "--session-id", "s-1", "evaluate"]
-        .map(str::to_owned);
+    let without_context = [
+        "work",
+        "--actor-id",
+        "greg/codex",
+        "--session-id",
+        "s-1",
+        "evaluate",
+    ]
+    .map(str::to_owned);
     assert_eq!(
         acceptance_evaluation_args_identity(&without_context),
         Some(("greg/codex".to_owned(), None))
@@ -2965,10 +3688,25 @@ fn acceptance_open_write_round_trips_and_names_its_actor() {
     for unreadable in [
         vec![],
         vec!["work".to_owned()],
-        ["evaluate", "--actor-id", "x", "--session-id", "s", "evaluate"].map(str::to_owned).to_vec(),
-        ["work", "--actor-id", "x", "--session-id", "s", "show"].map(str::to_owned).to_vec(),
+        [
+            "evaluate",
+            "--actor-id",
+            "x",
+            "--session-id",
+            "s",
+            "evaluate",
+        ]
+        .map(str::to_owned)
+        .to_vec(),
+        ["work", "--actor-id", "x", "--session-id", "s", "show"]
+            .map(str::to_owned)
+            .to_vec(),
     ] {
-        assert_eq!(acceptance_evaluation_args_identity(&unreadable), None, "{unreadable:?}");
+        assert_eq!(
+            acceptance_evaluation_args_identity(&unreadable),
+            None,
+            "{unreadable:?}"
+        );
     }
 
     for open in [
@@ -3019,28 +3757,96 @@ fn acceptance_run_is_refused_only_by_the_expected_exit_code_with_the_known_shape
     else {
         panic!("a usage error is raised before any store is opened");
     };
-    assert!(words.starts_with("error: unexpected argument '--bogus-flag' found"), "{words}");
+    assert!(
+        words.starts_with("error: unexpected argument '--bogus-flag' found"),
+        "{words}"
+    );
 
     // Every other combination leaves the write open: the code alone proves
     // nothing, and neither does the shape.
     let panic_text = "thread 'main' panicked at src/cli.rs:88:5:\ncalled `Result::unwrap()` on an `Err` value: BrokenPipe";
     let no_code = refusal_envelope("", REVISION_CONFLICT);
     for (name, exit, stdout, stderr) in [
-        ("free text, code 1", EngramCliExit::Code(1), "", "Error: failed to print the receipt: broken pipe"),
+        (
+            "free text, code 1",
+            EngramCliExit::Code(1),
+            "",
+            "Error: failed to print the receipt: broken pipe",
+        ),
         ("panic, code 101", EngramCliExit::Code(101), "", panic_text),
-        ("panic mentioning lock, code 101", EngramCliExit::Code(101), "", "thread 'main' panicked: database is locked"),
-        ("lock text, unrecognized code", EngramCliExit::Code(3), "", "Error: database is locked"),
+        (
+            "panic mentioning lock, code 101",
+            EngramCliExit::Code(101),
+            "",
+            "thread 'main' panicked: database is locked",
+        ),
+        (
+            "lock text, unrecognized code",
+            EngramCliExit::Code(3),
+            "",
+            "Error: database is locked",
+        ),
         ("empty stderr, code 1", EngramCliExit::Code(1), "", ""),
-        ("unparseable stderr, code 1", EngramCliExit::Code(1), "", "{\"error\": {\"code\""),
-        ("envelope on stdout, code 1", EngramCliExit::Code(1), envelope.as_str(), ""),
-        ("envelope without a code word, code 1", EngramCliExit::Code(1), "", no_code.as_str()),
-        ("envelope, code 0", EngramCliExit::Code(0), "", envelope.as_str()),
-        ("envelope, code 2", EngramCliExit::Code(2), "", envelope.as_str()),
-        ("envelope, code 101", EngramCliExit::Code(101), "", envelope.as_str()),
-        ("usage text, code 1", EngramCliExit::Code(1), "", CLAP_USAGE_ERROR),
-        ("error line without usage, code 2", EngramCliExit::Code(2), "", "error: something else"),
-        ("envelope, abnormal end", EngramCliExit::Abnormal, "", envelope.as_str()),
-        ("locked store, abnormal end", EngramCliExit::Abnormal, "", "Error: database is locked"),
+        (
+            "unparseable stderr, code 1",
+            EngramCliExit::Code(1),
+            "",
+            "{\"error\": {\"code\"",
+        ),
+        (
+            "envelope on stdout, code 1",
+            EngramCliExit::Code(1),
+            envelope.as_str(),
+            "",
+        ),
+        (
+            "envelope without a code word, code 1",
+            EngramCliExit::Code(1),
+            "",
+            no_code.as_str(),
+        ),
+        (
+            "envelope, code 0",
+            EngramCliExit::Code(0),
+            "",
+            envelope.as_str(),
+        ),
+        (
+            "envelope, code 2",
+            EngramCliExit::Code(2),
+            "",
+            envelope.as_str(),
+        ),
+        (
+            "envelope, code 101",
+            EngramCliExit::Code(101),
+            "",
+            envelope.as_str(),
+        ),
+        (
+            "usage text, code 1",
+            EngramCliExit::Code(1),
+            "",
+            CLAP_USAGE_ERROR,
+        ),
+        (
+            "error line without usage, code 2",
+            EngramCliExit::Code(2),
+            "",
+            "error: something else",
+        ),
+        (
+            "envelope, abnormal end",
+            EngramCliExit::Abnormal,
+            "",
+            envelope.as_str(),
+        ),
+        (
+            "locked store, abnormal end",
+            EngramCliExit::Abnormal,
+            "",
+            "Error: database is locked",
+        ),
     ] {
         assert!(
             matches!(
@@ -3076,7 +3882,11 @@ fn engram_cli_exit_reads_a_crash_status_as_abnormal() {
     use std::os::windows::process::ExitStatusExt;
     for crash in [0xC000_0005_u32, 0xC000_013A, 0xC000_0409, 0x8000_0003] {
         let status = std::process::ExitStatus::from_raw(crash);
-        assert_eq!(EngramCliExit::from_status(&status), EngramCliExit::Abnormal, "{crash:#x}");
+        assert_eq!(
+            EngramCliExit::from_status(&status),
+            EngramCliExit::Abnormal,
+            "{crash:#x}"
+        );
     }
     for code in [0_u32, 1, 2, 101] {
         let status = std::process::ExitStatus::from_raw(code);
@@ -3099,9 +3909,21 @@ fn acceptance_submit_keeps_the_write_open_when_the_tracker_ended_abnormally() {
         .submit_acceptance_evaluation_with_runner(&child, two_verdicts(), run)
         .unwrap_err();
     assert_eq!(error.status, StatusCode::BAD_GATEWAY, "{}", error.message);
-    assert!(error.message.contains("the write outcome is unknown"), "{}", error.message);
-    assert!(error.message.contains("ended abnormally"), "{}", error.message);
-    assert_eq!(calls.lock().unwrap().len(), 2, "an unknown send is resent once");
+    assert!(
+        error.message.contains("the write outcome is unknown"),
+        "{}",
+        error.message
+    );
+    assert!(
+        error.message.contains("ended abnormally"),
+        "{}",
+        error.message
+    );
+    assert_eq!(
+        calls.lock().unwrap().len(),
+        2,
+        "an unknown send is resent once"
+    );
     assert!(matches!(
         submission_of(&state, &delegation),
         AcceptanceEvaluationSubmission::Unconfirmed { .. }
@@ -3111,13 +3933,21 @@ fn acceptance_submit_keeps_the_write_open_when_the_tracker_ended_abnormally() {
         let section = delegation_wait_result_section(
             &inner.delegations[inner.find_delegation_index(&delegation).unwrap()],
         );
-        assert!(section.contains("the write outcome is unknown"), "{section}");
+        assert!(
+            section.contains("the write outcome is unknown"),
+            "{section}"
+        );
         assert!(!section.contains("nothing was recorded"), "{section}");
     }
     // A failure in words only, exit 1, is no refusal either.
     let (state, _, delegation, child) = evaluator_fixture();
-    let printed_nothing =
-        || Ok(cli_output(false, "", "Error: failed to print the receipt: broken pipe"));
+    let printed_nothing = || {
+        Ok(cli_output(
+            false,
+            "",
+            "Error: failed to print the receipt: broken pipe",
+        ))
+    };
     let (_, run) = scripted_runner(vec![printed_nothing(), printed_nothing()]);
     let error = state
         .submit_acceptance_evaluation_with_runner(&child, two_verdicts(), run)
@@ -3141,11 +3971,15 @@ fn acceptance_submit_keeps_the_write_open_when_the_tracker_ended_abnormally() {
 #[test]
 fn acceptance_evaluator_brief_shrinks_non_ascii_context_before_it_blames_the_criteria() {
     let mut show = show_receipt(None);
-    show["notes"] = json!((0..45)
-        .map(|index| json!({"locator": format!("{index:08x}cafe"), "kind": "generic",
+    show["notes"] = json!(
+        (0..45)
+            .map(
+                |index| json!({"locator": format!("{index:08x}cafe"), "kind": "generic",
             "family": "notes", "by": "greg/claude", "created_at": "2026-09-18T10:00:00Z",
-            "summary": format!("証拠 {index} {}", "証".repeat(590))}))
-        .collect::<Vec<_>>());
+            "summary": format!("証拠 {index} {}", "証".repeat(590))})
+            )
+            .collect::<Vec<_>>()
+    );
     let mut full = full_receipt();
     full["work"]["outcome"] = json!("結".repeat(17_000));
     let task = parse_acceptance_evaluation_task(show, full).unwrap();
@@ -3162,13 +3996,29 @@ fn acceptance_evaluator_brief_shrinks_non_ascii_context_before_it_blames_the_cri
 
     // 51 000 bytes of outcome and 80 000 of evidence against 65 536: both give.
     let prompt =
-        build_acceptance_evaluator_prompt(&task, "/work/repo", MAX_DELEGATION_PROMPT_BYTES).unwrap();
-    assert!(prompt.len() <= MAX_DELEGATION_PROMPT_BYTES, "{}", prompt.len());
+        build_acceptance_evaluator_prompt(&task, "/work/repo", MAX_DELEGATION_PROMPT_BYTES)
+            .unwrap();
+    assert!(
+        prompt.len() <= MAX_DELEGATION_PROMPT_BYTES,
+        "{}",
+        prompt.len()
+    );
     assert!(prompt.contains(criteria));
     let outcome = outcome_of(&prompt);
-    assert!(outcome.ends_with(marker), "{}", &outcome[outcome.len() - 60..]);
-    assert!(outcome.len() <= 16_000 + 1 + marker.len(), "{}", outcome.len());
-    assert!(outcome.len() > 15_000, "the outcome keeps its own bound while evidence gives way");
+    assert!(
+        outcome.ends_with(marker),
+        "{}",
+        &outcome[outcome.len() - 60..]
+    );
+    assert!(
+        outcome.len() <= 16_000 + 1 + marker.len(),
+        "{}",
+        outcome.len()
+    );
+    assert!(
+        outcome.len() > 15_000,
+        "the outcome keeps its own bound while evidence gives way"
+    );
     let listed = prompt.matches("\n  - ").count();
     assert!((1..40).contains(&listed), "{listed}");
     assert!(prompt.contains("0000002ccafe"), "the newest evidence stays");
@@ -3182,8 +4032,16 @@ fn acceptance_evaluator_brief_shrinks_non_ascii_context_before_it_blames_the_cri
     assert!(tight.contains(criteria));
     assert_eq!(tight.matches("\n  - ").count(), 0);
     let outcome = outcome_of(&tight);
-    assert!(outcome.ends_with(marker) && outcome.starts_with('結'), "{}", outcome.len());
-    assert!((4_900..=5_000 + marker.len()).contains(&outcome.len()), "{}", outcome.len());
+    assert!(
+        outcome.ends_with(marker) && outcome.starts_with('結'),
+        "{}",
+        outcome.len()
+    );
+    assert!(
+        (4_900..=5_000 + marker.len()).contains(&outcome.len()),
+        "{}",
+        outcome.len()
+    );
     // Exactly the floor still briefs the evaluator, with the outcome left out.
     let barest = build_acceptance_evaluator_prompt(&task, "/work/repo", floor).unwrap();
     assert_eq!(barest.len(), floor);
@@ -3204,9 +4062,9 @@ fn acceptance_evaluator_brief_shrinks_non_ascii_context_before_it_blames_the_cri
         refused
             .message
             .contains("the acceptance contract is too large to brief an evaluator")
-            && refused
-                .message
-                .contains(&format!("its 2 complete criteria take {criteria_bytes} bytes"))
+            && refused.message.contains(&format!(
+                "its 2 complete criteria take {criteria_bytes} bytes"
+            ))
             && refused.message.contains("against a limit of 65536"),
         "{}",
         refused.message
@@ -3231,7 +4089,9 @@ fn acceptance_evaluator_brief_fits_exactly_with_its_complete_outcome_and_no_evid
         build_acceptance_evaluator_prompt(&task, "/work/repo", complete.len() - 1).unwrap_err();
     assert_eq!(refused.status, StatusCode::CONFLICT);
     assert!(
-        refused.message.contains(&format!("the brief is {} bytes", complete.len())),
+        refused
+            .message
+            .contains(&format!("the brief is {} bytes", complete.len())),
         "{}",
         refused.message
     );
@@ -3255,7 +4115,10 @@ fn acceptance_evaluator_brief_fits_exactly_with_its_complete_outcome_and_no_evid
     let shortened =
         build_acceptance_evaluator_prompt(&task, "/work/repo", complete.len() - 1).unwrap();
     assert!(shortened.len() < complete.len());
-    assert!(shortened.contains("[outcome truncated by the host]"), "{shortened}");
+    assert!(
+        shortened.contains("[outcome truncated by the host]"),
+        "{shortened}"
+    );
     assert!(shortened.contains("  1. The route exists\n  2. A test covers it\n"));
 }
 
@@ -3291,10 +4154,9 @@ fn acceptance_same_session_brief_holds_complete_criteria_within_the_bound_or_ref
     ] {
         assert_eq!(refused.status, StatusCode::CONFLICT);
         assert!(
-            refused
-                .message
-                .contains(&format!("its 2 complete criteria take {criteria_bytes} bytes"))
-                && refused.message.contains("against a limit of 65536"),
+            refused.message.contains(&format!(
+                "its 2 complete criteria take {criteria_bytes} bytes"
+            )) && refused.message.contains("against a limit of 65536"),
             "{}",
             refused.message
         );
@@ -3337,9 +4199,10 @@ fn acceptance_same_session_brief_holds_complete_criteria_within_the_bound_or_ref
 // The cut falls inside a multi-byte scalar: the kept text stops before it.
 #[test]
 fn acceptance_receipt_cut_never_splits_a_multi_byte_scalar() {
-    let evaluation = serde_json::from_str::<Value>(&evaluate_receipt(false)).unwrap()["evaluation"]
-        .clone();
-    let receipt_with = |padding: String| json!({"evaluation": evaluation.clone(), "padding": padding});
+    let evaluation =
+        serde_json::from_str::<Value>(&evaluate_receipt(false)).unwrap()["evaluation"].clone();
+    let receipt_with =
+        |padding: String| json!({"evaluation": evaluation.clone(), "padding": padding});
     // Keys encode in order, so the padding string starts where `""}` does here.
     let padding_start = receipt_with(String::new()).to_string().len() - 2;
     let ascii = 16 * 1024 - 1 - padding_start;
@@ -3351,7 +4214,11 @@ fn acceptance_receipt_cut_never_splits_a_multi_byte_scalar() {
     let (kept, truncated) = bounded_acceptance_evaluation_receipt(receipt.clone());
     assert!(truncated);
     let kept = kept.as_str().expect("a cut receipt is text");
-    assert_eq!(kept.len(), 16 * 1024 - 1, "the straddling scalar is left out whole");
+    assert_eq!(
+        kept.len(),
+        16 * 1024 - 1,
+        "the straddling scalar is left out whole"
+    );
     assert!(std::str::from_utf8(kept.as_bytes()).is_ok());
     assert!(kept.ends_with('a') && !kept.contains('€'));
     assert_eq!(kept, &encoded[..16 * 1024 - 1]);
@@ -3366,7 +4233,10 @@ fn acceptance_receipt_cut_never_splits_a_multi_byte_scalar() {
         .unwrap();
     assert!(response.receipt_truncated);
     assert_eq!(response.receipt.as_str().map(str::len), Some(16 * 1024 - 1));
-    assert_eq!(serde_json::to_value(&response).unwrap()["receiptTruncated"], true);
+    assert_eq!(
+        serde_json::to_value(&response).unwrap()["receiptTruncated"],
+        true
+    );
     assert_eq!(
         outcome_of(&state, &delegation).unwrap().0,
         acceptance_evaluation_receipt_extract(&receipt_with(String::new()))
@@ -3388,11 +4258,23 @@ fn acceptance_receipt_extract_is_bounded_and_the_raw_receipt_is_cut_for_the_chil
         "verdicts": (0..256).map(|_| json!({"rationale": "r".repeat(900)})).collect::<Vec<_>>()
     }});
     let extract = acceptance_evaluation_receipt_extract(&hostile);
-    assert_eq!(extract.evaluation_hash.as_ref().unwrap().chars().count(), 128);
+    assert_eq!(
+        extract.evaluation_hash.as_ref().unwrap().chars().count(),
+        128
+    );
     let mode = extract.mode.as_ref().unwrap();
-    assert!(mode.chars().count() == 64 && !mode.chars().any(char::is_control), "{mode}");
-    assert_eq!(extract.blocking.as_ref().unwrap().verdict.chars().count(), 64);
-    assert_eq!((extract.work_revision, extract.evaluated_cut), (Some(7), Some(42)));
+    assert!(
+        mode.chars().count() == 64 && !mode.chars().any(char::is_control),
+        "{mode}"
+    );
+    assert_eq!(
+        extract.blocking.as_ref().unwrap().verdict.chars().count(),
+        64
+    );
+    assert_eq!(
+        (extract.work_revision, extract.evaluated_cut),
+        (Some(7), Some(42))
+    );
     assert!(serde_json::to_string(&extract).unwrap().len() < 1_024);
     assert_eq!(
         acceptance_evaluation_receipt_summary(&extract),
@@ -3411,8 +4293,16 @@ fn acceptance_receipt_extract_is_bounded_and_the_raw_receipt_is_cut_for_the_chil
         })
         .unwrap();
     assert!(response.receipt_truncated);
-    assert!(response.receipt.as_str().is_some_and(|text| text.len() <= 16 * 1024));
-    assert_eq!(serde_json::to_value(&response).unwrap()["receiptTruncated"], true);
+    assert!(
+        response
+            .receipt
+            .as_str()
+            .is_some_and(|text| text.len() <= 16 * 1024)
+    );
+    assert_eq!(
+        serde_json::to_value(&response).unwrap()["receiptTruncated"],
+        true
+    );
     // Every read of the record stays small, whatever the tracker printed.
     let status = serde_json::to_value(state.get_delegation(&parent, &delegation).unwrap()).unwrap();
     let kept = status["delegation"]["acceptanceEvaluation"].to_string();
@@ -3432,12 +4322,21 @@ fn acceptance_target_persisted_with_a_raw_receipt_still_loads_as_its_extract() {
     });
     let loaded: DelegationAcceptanceEvaluation = serde_json::from_value(persisted).unwrap();
     assert_eq!(loaded.store, None);
-    let AcceptanceEvaluationSubmission::Recorded { receipt, recorded_at } = &loaded.submission
+    let AcceptanceEvaluationSubmission::Recorded {
+        receipt,
+        recorded_at,
+    } = &loaded.submission
     else {
-        panic!("a stored outcome is a recorded submission: {:?}", loaded.submission);
+        panic!(
+            "a stored outcome is a recorded submission: {:?}",
+            loaded.submission
+        );
     };
     assert_eq!(recorded_at, "2026-09-18 10:10:00");
-    assert_eq!(receipt.evaluation_hash.as_deref(), Some("8ac55175f2ea4ecebc6d04de68517aa0"));
+    assert_eq!(
+        receipt.evaluation_hash.as_deref(),
+        Some("8ac55175f2ea4ecebc6d04de68517aa0")
+    );
     assert_eq!((receipt.passed, receipt.verdicts_total), (Some(1), Some(2)));
     let rewritten = serde_json::to_value(&loaded).unwrap();
     assert!(rewritten.get("outcome").is_none(), "{rewritten}");
@@ -3491,13 +4390,22 @@ fn acceptance_request_refuses_a_tracker_ref_that_is_not_a_safe_argument() {
 #[test]
 fn acceptance_submit_checks_the_stored_ref_again_before_building_the_command() {
     let (state, _, delegation, child) = evaluator_fixture();
-    update_evaluation_target(&state, &delegation, |target| target.work_ref = "--json".to_owned());
+    update_evaluation_target(&state, &delegation, |target| {
+        target.work_ref = "--json".to_owned()
+    });
     let error = state
         .submit_acceptance_evaluation_with_runner(&child, two_verdicts(), runner_must_not_run)
         .unwrap_err();
     assert_eq!(error.status, StatusCode::CONFLICT);
-    assert!(error.message.contains("request a new evaluation"), "{}", error.message);
-    assert_eq!(submission_of(&state, &delegation), AcceptanceEvaluationSubmission::None);
+    assert!(
+        error.message.contains("request a new evaluation"),
+        "{}",
+        error.message
+    );
+    assert_eq!(
+        submission_of(&state, &delegation),
+        AcceptanceEvaluationSubmission::None
+    );
 }
 
 // ---- command size and lock retry -----------------------------------------
@@ -3521,8 +4429,15 @@ fn acceptance_submit_refuses_shape_valid_verdicts_that_exceed_the_command_line()
         .submit_acceptance_evaluation_with_runner(&child, request, runner_must_not_run)
         .unwrap_err();
     assert_eq!(error.status, StatusCode::BAD_REQUEST, "{}", error.message);
-    assert!(error.message.contains("too large for one submission"), "{}", error.message);
-    assert_eq!(submission_of(&state, &delegation), AcceptanceEvaluationSubmission::None);
+    assert!(
+        error.message.contains("too large for one submission"),
+        "{}",
+        error.message
+    );
+    assert_eq!(
+        submission_of(&state, &delegation),
+        AcceptanceEvaluationSubmission::None
+    );
 }
 
 #[test]
@@ -3548,13 +4463,19 @@ fn engram_cli_lock_retry_runs_exactly_once_more_on_a_locked_store() {
     assert_eq!(delays, [ENGRAM_WORK_BINDING_LOCK_RETRY_DELAY]);
 
     // Still locked: the second result stands; there is no third attempt.
-    let (result, runs, delays) =
-        retry(vec![Ok(locked()), Ok(locked()), Ok(cli_output(true, "{}", ""))]);
+    let (result, runs, delays) = retry(vec![
+        Ok(locked()),
+        Ok(locked()),
+        Ok(cli_output(true, "{}", "")),
+    ]);
     assert!(result.unwrap().reports_locked_store());
     assert_eq!((runs, delays.len()), (2, 1));
 
     // Anything else is answered by the first attempt alone.
-    let refusal = refusal_envelope("acceptance_evaluation_refused", "criterion 1 cites ffffffffffff");
+    let refusal = refusal_envelope(
+        "acceptance_evaluation_refused",
+        "criterion 1 cites ffffffffffff",
+    );
     for first in [
         Ok(cli_output(true, "{}", "")),
         Ok(cli_output(false, "", &refusal)),
@@ -3588,7 +4509,10 @@ fn engram_cli_stream_failures_name_the_operation_that_ran() {
     });
     let error =
         join_engram_cli_output(died, ACCEPTANCE_EVALUATION_READER_LABEL, "stderr").unwrap_err();
-    assert_eq!(error.message, "Engram acceptance-evaluation reader stderr reader panicked");
+    assert_eq!(
+        error.message,
+        "Engram acceptance-evaluation reader stderr reader panicked"
+    );
 }
 
 // ---- request budget ------------------------------------------------------
@@ -3612,7 +4536,8 @@ fn endless_evidence_reader(
             let mut page = show_receipt(None);
             page["notes"] = json!([{"locator": format!("{call:08x}cafe"), "kind": "generic",
                 "family": "notes"}]);
-            page["notes_window"] = json!({"after": format!("token-{call}"), "older": 99, "newer": 0});
+            page["notes_window"] =
+                json!({"after": format!("token-{call}"), "older": 99, "newer": 0});
             Ok(page)
         }
     }
@@ -3625,7 +4550,10 @@ fn acceptance_request_budget_covers_every_read_with_its_retry() {
         ACCEPTANCE_EVALUATION_POLICY_READ_TIMEOUT * 2 + ENGRAM_WORK_BINDING_LOCK_RETRY_DELAY;
     assert_eq!(MAX_ACCEPTANCE_EVIDENCE_PAGES, 8);
     // Two task reads, seven continuation pages, one policy read.
-    assert_eq!(acceptance_evaluation_request_tracker_budget(), call * 9 + policy);
+    assert_eq!(
+        acceptance_evaluation_request_tracker_budget(),
+        call * 9 + policy
+    );
     assert_eq!(acceptance_evaluation_paging_reserve(), call * 2 + policy);
     // Two sends and two acknowledged states: `pending` before, the outcome after.
     assert_eq!(
@@ -3673,7 +4601,10 @@ fn acceptance_request_stops_paging_once_its_deadline_cannot_fund_another_page() 
         .unwrap();
     // The windowed read, two pages, then the reads that decide the request.
     assert_eq!(calls.load(Ordering::SeqCst), 1 + 2 + 1 + 1);
-    assert_eq!(serde_json::to_value(&response).unwrap()["mode"], "same_session");
+    assert_eq!(
+        serde_json::to_value(&response).unwrap()["mode"],
+        "same_session"
+    );
 
     // A deadline already spent reads no page at all and still answers.
     let calls = Arc::new(AtomicUsize::new(0));
@@ -3710,9 +4641,13 @@ fn spawn_request(
 fn acceptance_request_refuses_a_second_active_evaluator_and_names_the_first() {
     let (state, project, parent, root) = fixture();
     install_store(&state, &project, &root);
-    super::delegation_support::install_delegation_codex_runtime(&state, "acceptance-duplicate-runtime");
-    let Ok(AcceptanceEvaluationRequestResponse::Spawned { delegation: first, .. }) =
-        spawn_request(&state, &parent)
+    super::delegation_support::install_delegation_codex_runtime(
+        &state,
+        "acceptance-duplicate-runtime",
+    );
+    let Ok(AcceptanceEvaluationRequestResponse::Spawned {
+        delegation: first, ..
+    }) = spawn_request(&state, &parent)
     else {
         panic!("the first request spawns an evaluator");
     };
@@ -3720,9 +4655,15 @@ fn acceptance_request_refuses_a_second_active_evaluator_and_names_the_first() {
 
     // Another session of the same project asks about the same task.
     let peer = create_test_project_session(&state, Agent::Codex, &project, &root);
-    let refused = spawn_request(&state, &peer).err().expect("one evaluator per task");
+    let refused = spawn_request(&state, &peer)
+        .err()
+        .expect("one evaluator per task");
     assert_eq!(refused.status, StatusCode::CONFLICT);
-    assert!(refused.message.contains("already running"), "{}", refused.message);
+    assert!(
+        refused.message.contains("already running"),
+        "{}",
+        refused.message
+    );
     assert!(
         refused.message.contains(&format!("`{first}`"))
             && refused.message.contains(&format!("`{parent}`")),
@@ -3748,7 +4689,10 @@ fn acceptance_request_refuses_a_second_active_evaluator_and_names_the_first() {
         notice.contains(&format!("`{first}`")) && notice.contains("outcome unknown"),
         "{notice}"
     );
-    assert_eq!(compact_acceptance_evaluation_request_result(&wire)["notice"], wire["notice"]);
+    assert_eq!(
+        compact_acceptance_evaluation_request_result(&wire)["notice"],
+        wire["notice"]
+    );
     assert_eq!(state.inner.lock().unwrap().delegations.len(), 2);
 
     // Another task is not a duplicate.
@@ -3807,7 +4751,11 @@ fn acceptance_requests_racing_for_one_task_spawn_exactly_one_evaluator() {
         .collect::<Vec<_>>();
     assert_eq!(refusals.len(), 1, "exactly one request loses the race");
     assert_eq!(refusals[0].status, StatusCode::CONFLICT);
-    assert!(refusals[0].message.contains("already running"), "{}", refusals[0].message);
+    assert!(
+        refusals[0].message.contains("already running"),
+        "{}",
+        refusals[0].message
+    );
     let inner = state.inner.lock().unwrap();
     assert_eq!(inner.delegations.len(), 1);
     assert_eq!(inner.delegations[0].mode, DelegationMode::Evaluator);
@@ -3858,8 +4806,9 @@ fn active_evaluators(state: &AppState) -> Vec<String> {
 #[test]
 fn acceptance_followup_cannot_rearm_an_evaluator_while_another_judges_the_task() {
     let (state, _, parent, _, first) = finished_evaluator_fixture("acceptance-followup-runtime");
-    let Ok(AcceptanceEvaluationRequestResponse::Spawned { delegation: second, .. }) =
-        spawn_request(&state, &parent)
+    let Ok(AcceptanceEvaluationRequestResponse::Spawned {
+        delegation: second, ..
+    }) = spawn_request(&state, &parent)
     else {
         panic!("a finished evaluator does not block a new one");
     };
@@ -3881,7 +4830,10 @@ fn acceptance_followup_cannot_rearm_an_evaluator_while_another_judges_the_task()
         let inner = state.inner.lock().unwrap();
         let record = &inner.delegations[inner.find_delegation_index(&first).unwrap()];
         assert_eq!(record.status, DelegationStatus::Completed);
-        assert!(record.result.is_some(), "the refused follow-up keeps the previous result");
+        assert!(
+            record.result.is_some(),
+            "the refused follow-up keeps the previous result"
+        );
         assert!(inner.delegation_followup_admissions.is_empty());
         let child = &inner.sessions[inner.find_session_index(&record.child_session_id).unwrap()];
         assert!(child.queued_prompts.is_empty(), "no prompt was admitted");
@@ -3921,7 +4873,11 @@ fn acceptance_followup_cannot_rearm_an_evaluator_while_another_judges_the_task()
         .err()
         .expect("prompt admission repeats the check");
     assert_eq!(refused.status, StatusCode::CONFLICT, "{}", refused.message);
-    assert!(refused.message.contains(&format!("`{second}`")), "{}", refused.message);
+    assert!(
+        refused.message.contains(&format!("`{second}`")),
+        "{}",
+        refused.message
+    );
     admission.release().unwrap();
     assert_eq!(active_evaluators(&state), [second.clone()]);
 
@@ -3933,14 +4889,21 @@ fn acceptance_followup_cannot_rearm_an_evaluator_while_another_judges_the_task()
         .unwrap();
     assert_eq!(resumed.delegation.status, DelegationStatus::Running);
     assert_eq!(active_evaluators(&state), [first.clone()]);
-    let refused = spawn_request(&state, &parent).err().expect("one evaluator per task");
+    let refused = spawn_request(&state, &parent)
+        .err()
+        .expect("one evaluator per task");
     assert_eq!(refused.status, StatusCode::CONFLICT);
-    assert!(refused.message.contains(&format!("`{first}`")), "{}", refused.message);
+    assert!(
+        refused.message.contains(&format!("`{first}`")),
+        "{}",
+        refused.message
+    );
 }
 
 #[test]
 fn acceptance_creation_racing_a_followup_leaves_exactly_one_active_evaluator() {
-    let (state, _, parent, _, first) = finished_evaluator_fixture("acceptance-followup-race-runtime");
+    let (state, _, parent, _, first) =
+        finished_evaluator_fixture("acceptance-followup-race-runtime");
     // The request has finished every tracker read, and the follow-up has not
     // begun, when both are released towards their locked admissions.
     let barrier = Arc::new(std::sync::Barrier::new(2));
@@ -3968,8 +4931,12 @@ fn acceptance_creation_racing_a_followup_leaves_exactly_one_active_evaluator() {
             })
         };
         let followup = {
-            let (state, parent, first, barrier) =
-                (state.clone(), parent.clone(), first.clone(), barrier.clone());
+            let (state, parent, first, barrier) = (
+                state.clone(),
+                parent.clone(),
+                first.clone(),
+                barrier.clone(),
+            );
             scope.spawn(move || {
                 barrier.wait();
                 state
@@ -3987,6 +4954,10 @@ fn acceptance_creation_racing_a_followup_leaves_exactly_one_active_evaluator() {
         other => panic!("exactly one of the two may make an evaluator active: {other:?}"),
     };
     assert_eq!(refused.status, StatusCode::CONFLICT, "{}", refused.message);
-    assert!(refused.message.contains("already running"), "{}", refused.message);
+    assert!(
+        refused.message.contains("already running"),
+        "{}",
+        refused.message
+    );
     assert_eq!(active_evaluators(&state).len(), 1);
 }

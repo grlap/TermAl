@@ -16,7 +16,12 @@ use super::*;
 fn remote_kimi_summary_preserves_requested_and_observed_thinking() {
     let state = test_app_state();
     let id = test_session_id(&state, Agent::Kimi);
-    let mut summary = state.snapshot().sessions.into_iter().find(|s| s.id == id).unwrap();
+    let mut summary = state
+        .snapshot()
+        .sessions
+        .into_iter()
+        .find(|s| s.id == id)
+        .unwrap();
     summary.kimi_effort = Some("max".to_owned());
     summary.kimi_current_effort = Some("high".to_owned());
     summary.kimi_effort_options = vec![SessionModelOption::plain("Max", "max")];

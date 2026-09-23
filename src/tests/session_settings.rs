@@ -66,7 +66,8 @@ fn remote_session_settings_payload_includes_agent_dependents_and_timeout_slack()
     assert_eq!(payload["codexFastMode"], true);
     assert!(REMOTE_SESSION_SETTINGS_TIMEOUT > Duration::from_secs(55));
     for effort in ["max", "auto"] {
-        let request: UpdateSessionSettingsRequest = serde_json::from_value(json!({"kimiEffort":effort})).unwrap();
+        let request: UpdateSessionSettingsRequest =
+            serde_json::from_value(json!({"kimiEffort":effort})).unwrap();
         assert_eq!(serde_json::to_value(request).unwrap()["kimiEffort"], effort);
     }
 }
@@ -245,7 +246,8 @@ fn model_refresh_rejects_busy_or_runtime_stop_owned_sessions_without_replacing_r
             (Agent::Gemini, SessionRuntime::Acp(runtime))
         },
         {
-            let (runtime, _rx) = test_acp_runtime_handle(AcpAgent::OpenCode, "refresh-fence-opencode");
+            let (runtime, _rx) =
+                test_acp_runtime_handle(AcpAgent::OpenCode, "refresh-fence-opencode");
             (Agent::OpenCode, SessionRuntime::Acp(runtime))
         },
     ] {
@@ -266,13 +268,19 @@ fn model_refresh_rejects_busy_or_runtime_stop_owned_sessions_without_replacing_r
             record.session.status = SessionStatus::Active;
         }
 
-        for status in [SessionStatus::Active, SessionStatus::Approval, SessionStatus::Stopping] {
+        for status in [
+            SessionStatus::Active,
+            SessionStatus::Approval,
+            SessionStatus::Stopping,
+        ] {
             {
                 let mut inner = state.inner.lock().expect("state mutex poisoned");
                 let index = inner.find_session_index(&session_id).unwrap();
                 inner.sessions[index].session.status = status;
-                assert!(!inner.sessions[index].runtime_stop_in_progress,
-                    "status alone must fence refresh before a stop owner is attached");
+                assert!(
+                    !inner.sessions[index].runtime_stop_in_progress,
+                    "status alone must fence refresh before a stop owner is attached"
+                );
             }
             let error = match state.refresh_session_model_options(&session_id) {
                 Ok(_) => panic!("busy refresh must not replace a live runtime"),
@@ -968,7 +976,13 @@ fn default_model_preference_canonicalizes_default_sentinel_case() {
 
 #[test]
 fn default_model_preference_validation_covers_agents_and_boundaries() {
-    for agent in [Agent::Codex, Agent::Claude, Agent::Cursor, Agent::Gemini, Agent::Kimi] {
+    for agent in [
+        Agent::Codex,
+        Agent::Claude,
+        Agent::Cursor,
+        Agent::Gemini,
+        Agent::Kimi,
+    ] {
         let state = test_app_state();
         let boundary_model = "m".repeat(MAX_DEFAULT_MODEL_CHARS);
         let updated = state
@@ -2486,19 +2500,28 @@ fn kimi_effort_changes_rotate_only_an_installed_engram_identity() {
                 let record = &mut inner.sessions[index];
                 record.session.kimi_effort = Some("high".to_owned());
                 record.session.kimi_effort_options = vec![
-                    SessionModelOption::plain("High", "high"), SessionModelOption::plain("Max", "max"),
+                    SessionModelOption::plain("High", "high"),
+                    SessionModelOption::plain("Max", "max"),
                 ];
                 record.runtime = SessionRuntime::Acp(runtime);
                 if installed {
-                    record.engram_mcp_installed = Some(test_engram_mcp_installed_descriptor(&record.session));
+                    record.engram_mcp_installed =
+                        Some(test_engram_mcp_installed_descriptor(&record.session));
                 }
                 record.runtime_reset_required = false;
             }
-            state.update_session_settings(&id,
-                serde_json::from_value(json!({"kimiEffort":requested})).unwrap()).unwrap();
+            state
+                .update_session_settings(
+                    &id,
+                    serde_json::from_value(json!({"kimiEffort":requested})).unwrap(),
+                )
+                .unwrap();
             let inner = state.inner.lock().unwrap();
             let record = &inner.sessions[inner.find_session_index(&id).unwrap()];
-            assert_eq!(record.runtime_reset_required, installed && requested != "high");
+            assert_eq!(
+                record.runtime_reset_required,
+                installed && requested != "high"
+            );
             let context = engram_actor_context(&record.session).unwrap();
             if requested == "auto" {
                 assert!(!context.contains("reasoning="));
@@ -2507,8 +2530,14 @@ fn kimi_effort_changes_rotate_only_an_installed_engram_identity() {
                 assert!(context.contains(&format!("reasoning={requested}")));
             }
             if let Some(descriptor) = &record.engram_mcp_installed {
-                assert!(descriptor.actor_context.as_deref().unwrap().contains("reasoning=high"),
-                    "installed context stays immutable until next-turn rotation");
+                assert!(
+                    descriptor
+                        .actor_context
+                        .as_deref()
+                        .unwrap()
+                        .contains("reasoning=high"),
+                    "installed context stays immutable until next-turn rotation"
+                );
             }
         }
     }

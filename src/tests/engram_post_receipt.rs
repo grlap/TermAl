@@ -89,9 +89,8 @@ fn failed_grant_fence_and_interruption_commit_publish_one_fail_closed_owner() {
             persist_rx.recv_timeout(phase_sync::DEADLOCK_GUARD).unwrap(),
             PersistRequest::Delta
         ));
-        let PersistRequest::Fence(fence) = persist_rx
-            .recv_timeout(phase_sync::DEADLOCK_GUARD)
-            .unwrap()
+        let PersistRequest::Fence(fence) =
+            persist_rx.recv_timeout(phase_sync::DEADLOCK_GUARD).unwrap()
         else {
             panic!("grant durability must request its exact-content fence")
         };
@@ -124,10 +123,12 @@ fn failed_grant_fence_and_interruption_commit_publish_one_fail_closed_owner() {
     assert_eq!(published_session["queuePaused"], true);
     assert_eq!(published_session["status"], "idle");
     assert!(published_session["liveActivity"].is_null());
-    assert!(published_session["preview"]
-        .as_str()
-        .unwrap()
-        .contains("interrupted/unknown"));
+    assert!(
+        published_session["preview"]
+            .as_str()
+            .unwrap()
+            .contains("interrupted/unknown")
+    );
     let inner = state.inner.lock().unwrap();
     let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
     assert_eq!(record.engram.dispatch_generation, generation);
@@ -339,16 +340,17 @@ fn initial_child_post_begin_persistence_unknown_retains_running_delegation_and_e
     for fail_card_commit in [true, false] {
         let (mut state, parent, receiver, _) = root_fixture([]);
         state.shutdown_persist_blocking();
-        let failing_path = state
-            .test_temp_root
-            .as_ref()
-            .unwrap()
-            .path()
-            .join(if fail_card_commit {
-                "child-card-commit-is-directory"
-            } else {
-                "child-fence-unused-directory"
-            });
+        let failing_path =
+            state
+                .test_temp_root
+                .as_ref()
+                .unwrap()
+                .path()
+                .join(if fail_card_commit {
+                    "child-card-commit-is-directory"
+                } else {
+                    "child-fence-unused-directory"
+                });
         fs::create_dir_all(&failing_path).unwrap();
         if fail_card_commit {
             state.persistence_path = Arc::new(failing_path.clone());

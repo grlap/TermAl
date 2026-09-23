@@ -261,10 +261,7 @@ async fn shutdown_signal() {
 
 /// Builds the application router.
 fn app_router(state: AppState) -> Router {
-    app_router_with_acceptance_policy_limiter(
-        state,
-        AcceptancePolicyLimiter::new(2, 1),
-    )
+    app_router_with_acceptance_policy_limiter(state, AcceptancePolicyLimiter::new(2, 1))
 }
 
 fn app_router_with_acceptance_policy_limiter(
@@ -363,13 +360,28 @@ fn app_router_with_acceptance_policy_limiter(
             "/api/projects/{id}/engram/verify",
             post(verify_project_engram_settings),
         )
-        .route("/api/projects/{id}/engram/audit", post(full_audit_project_engram))
+        .route(
+            "/api/projects/{id}/engram/audit",
+            post(full_audit_project_engram),
+        )
         .route("/api/projects/{id}/digest", get(get_project_digest))
-        .route("/api/projects/{id}/engram/control-policy", get(get_project_acceptance_policy))
-        .route("/api/projects/{id}/engram/acceptance-evaluation-defaults", patch(patch_project_acceptance_defaults))
-        .route("/api/projects/{id}/engram/acceptance-evaluation-policy", post(post_project_acceptance_policy))
+        .route(
+            "/api/projects/{id}/engram/control-policy",
+            get(get_project_acceptance_policy),
+        )
+        .route(
+            "/api/projects/{id}/engram/acceptance-evaluation-defaults",
+            patch(patch_project_acceptance_defaults),
+        )
+        .route(
+            "/api/projects/{id}/engram/acceptance-evaluation-policy",
+            post(post_project_acceptance_policy),
+        )
         .route("/api/projects/{id}/work", get(get_project_work))
-        .route("/api/projects/{id}/work-memories/{source}", get(get_project_work_memories))
+        .route(
+            "/api/projects/{id}/work-memories/{source}",
+            get(get_project_work_memories),
+        )
         .route(
             "/api/projects/{id}/work/engram/{work_ref}",
             get(get_project_work_detail),
@@ -557,8 +569,12 @@ fn app_router_with_acceptance_policy_limiter(
         )
         .with_state(state)
         .layer(axum::Extension(policy_limiter))
-        .layer(axum::Extension(EngramAuditLimiter(Arc::new(tokio::sync::Semaphore::new(1)))))
-        .layer(axum::Extension(EngramReadinessLimiter(Arc::new(tokio::sync::Semaphore::new(2)))))
+        .layer(axum::Extension(EngramAuditLimiter(Arc::new(
+            tokio::sync::Semaphore::new(1),
+        ))))
+        .layer(axum::Extension(EngramReadinessLimiter(Arc::new(
+            tokio::sync::Semaphore::new(2),
+        ))))
         // One 10 MiB image expands to about 13.4 MiB when base64-encoded.
         .layer(DefaultBodyLimit::max(MAX_JSON_REQUEST_BODY_BYTES))
         // The bounded conversation overview intentionally favors a stable,

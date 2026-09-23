@@ -177,7 +177,9 @@ fn cancel_supersedes_the_exact_explicit_resume_owner_and_all_old_wakes() {
             // A competing explicit drain records a wake on the same owner.
             // It must not authorize the successor after cancellation either.
             state.resume_session_queue(&session).unwrap();
-            state.cancel_queued_prompt(&session, &canceled_prompt).unwrap();
+            state
+                .cancel_queued_prompt(&session, &canceled_prompt)
+                .unwrap();
             release_tx.send(()).unwrap();
             first_resume.join().unwrap().unwrap();
         });
@@ -264,13 +266,10 @@ fn stale_bind_reply_cannot_reprepare_an_exact_retained_successor() {
         let retained_bind = {
             let mut inner = state.inner.lock().unwrap();
             let index = inner.find_session_index(&session).unwrap();
-            let target = AppState::engram_binding_target_for_session_shape_locked(
-                &inner,
-                &session,
-                true,
-            )
-            .unwrap()
-            .unwrap();
+            let target =
+                AppState::engram_binding_target_for_session_shape_locked(&inner, &session, true)
+                    .unwrap()
+                    .unwrap();
             let generation = inner.sessions[index]
                 .engram
                 .dispatch_generation
@@ -414,7 +413,10 @@ fn restart_replays_cached_defer_then_resume_uses_a_fresh_evaluate_identity() {
     ));
 
     state.resume_session_queue(&session).unwrap();
-    assert!(receiver.try_recv().is_err(), "cached Defer must not deliver");
+    assert!(
+        receiver.try_recv().is_err(),
+        "cached Defer must not deliver"
+    );
     {
         let inner = state.inner.lock().unwrap();
         let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
@@ -443,13 +445,11 @@ fn restart_replays_cached_defer_then_resume_uses_a_fresh_evaluate_identity() {
         first_evaluate["idempotency_key"]
     );
     assert_eq!(
-        evaluate_requests[1]["idempotency_key"],
-        first_evaluate["idempotency_key"],
+        evaluate_requests[1]["idempotency_key"], first_evaluate["idempotency_key"],
         "restart must replay the exact remotely cached operation"
     );
     assert_ne!(
-        evaluate_requests[2]["idempotency_key"],
-        first_evaluate["idempotency_key"],
+        evaluate_requests[2]["idempotency_key"], first_evaluate["idempotency_key"],
         "terminal Defer retirement must give the later Resume a fresh identity"
     );
 }
@@ -546,7 +546,10 @@ fn writer_backed_first_defer_commit_is_already_a_visible_held_operation() {
         assert_eq!(emitted["revision"], pre_defer_revision + 1);
         assert_eq!(emitted["sessionQueue"]["queuePaused"], true);
         assert!(emitted["sessionQueue"]["queueProjectionHash"].is_string());
-        assert_eq!(emitted["sessionQueue"]["pendingPrompts"][0]["id"], prompt_id);
+        assert_eq!(
+            emitted["sessionQueue"]["pendingPrompts"][0]["id"],
+            prompt_id
+        );
         assert_eq!(
             emitted["sessionQueue"]["pendingPrompts"][0]["isEngramRetained"],
             true
@@ -577,10 +580,7 @@ fn writer_backed_first_defer_commit_is_already_a_visible_held_operation() {
             (inner.revision, record.mutation_stamp)
         };
         assert_eq!(emitted["revision"], committed_revision);
-        assert_eq!(
-            emitted["sessionMutationStamp"],
-            committed_mutation_stamp
-        );
+        assert_eq!(emitted["sessionMutationStamp"], committed_mutation_stamp);
         persist_delta_with_fences(
             &mut cache,
             state.persistence_path.as_path(),
@@ -626,8 +626,14 @@ fn writer_backed_first_defer_commit_is_already_a_visible_held_operation() {
         .map(|request| request.request)
         .collect::<Vec<_>>();
     assert_eq!(evaluations.len(), 2);
-    assert_eq!(evaluations[0]["intent_fingerprint"], evaluations[1]["intent_fingerprint"]);
-    assert_ne!(evaluations[0]["idempotency_key"], evaluations[1]["idempotency_key"]);
+    assert_eq!(
+        evaluations[0]["intent_fingerprint"],
+        evaluations[1]["intent_fingerprint"]
+    );
+    assert_ne!(
+        evaluations[0]["idempotency_key"],
+        evaluations[1]["idempotency_key"]
+    );
     let inner = state.inner.lock().unwrap();
     let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
     assert!(record.queued_prompts.is_empty());
@@ -705,11 +711,8 @@ fn failed_legacy_unknown_park_is_published_and_never_falls_through() {
     let durable_path = state.persistence_path.clone();
     {
         let inner = state.inner.lock().unwrap();
-        persist_state_from_persisted(
-            durable_path.as_path(),
-            &PersistedState::from_inner(&inner),
-        )
-        .unwrap();
+        persist_state_from_persisted(durable_path.as_path(), &PersistedState::from_inner(&inner))
+            .unwrap();
     }
     state.shutdown_persist_blocking();
     let failing_path = durable_path.with_extension("park-is-directory");
@@ -745,10 +748,12 @@ fn failed_legacy_unknown_park_is_published_and_never_falls_through() {
         .unwrap();
     assert_eq!(published_session["status"], "idle");
     assert_eq!(published_session["queuePaused"], true);
-    assert!(published_session["preview"]
-        .as_str()
-        .unwrap()
-        .contains("Waiting/Unknown"));
+    assert!(
+        published_session["preview"]
+            .as_str()
+            .unwrap()
+            .contains("Waiting/Unknown")
+    );
     {
         let inner = state.inner.lock().unwrap();
         let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
@@ -833,11 +838,8 @@ fn failed_defer_card_commit_keeps_the_durable_evaluation_recovery_anchor() {
     let durable_path = state.persistence_path.clone();
     {
         let inner = state.inner.lock().unwrap();
-        persist_state_from_persisted(
-            durable_path.as_path(),
-            &PersistedState::from_inner(&inner),
-        )
-        .unwrap();
+        persist_state_from_persisted(durable_path.as_path(), &PersistedState::from_inner(&inner))
+            .unwrap();
     }
     state.shutdown_persist_blocking();
     let failing_path = durable_path.with_extension("defer-card-is-directory");
@@ -899,14 +901,16 @@ fn failed_defer_card_commit_keeps_the_durable_evaluation_recovery_anchor() {
         assert_eq!(record.engram.dispatch_generation, generation);
         assert!(record.queued_prompts[0].engram_interrupted);
         assert!(record.queued_prompts[0].engram_waiting);
-        assert!(record.queued_prompts[0]
-            .engram_evaluate
-            .as_ref()
-            .is_some_and(|prepared| matches!(
-                &prepared.request,
-                EngramControlRequest::TurnEvaluate { idempotency_key, .. }
-                    if idempotency_key == "defer-persist-old-key"
-            )));
+        assert!(
+            record.queued_prompts[0]
+                .engram_evaluate
+                .as_ref()
+                .is_some_and(|prepared| matches!(
+                    &prepared.request,
+                    EngramControlRequest::TurnEvaluate { idempotency_key, .. }
+                        if idempotency_key == "defer-persist-old-key"
+                ))
+        );
     }
     assert!(receiver.try_recv().is_err());
 
@@ -914,14 +918,16 @@ fn failed_defer_card_commit_keeps_the_durable_evaluation_recovery_anchor() {
     let loaded_record = &loaded.sessions[loaded.find_session_index(&session).unwrap()];
     assert_eq!(loaded_record.engram.dispatch_generation, generation);
     assert!(loaded_record.engram.recovered_admission);
-    assert!(loaded_record.queued_prompts[0]
-        .engram_evaluate
-        .as_ref()
-        .is_some_and(|prepared| matches!(
-            &prepared.request,
-            EngramControlRequest::TurnEvaluate { idempotency_key, .. }
-                if idempotency_key == "defer-persist-old-key"
-        )));
+    assert!(
+        loaded_record.queued_prompts[0]
+            .engram_evaluate
+            .as_ref()
+            .is_some_and(|prepared| matches!(
+                &prepared.request,
+                EngramControlRequest::TurnEvaluate { idempotency_key, .. }
+                    if idempotency_key == "defer-persist-old-key"
+            ))
+    );
 
     fs::remove_dir_all(failing_path).unwrap();
     state.persistence_path = durable_path;
@@ -1245,9 +1251,7 @@ fn definite_refusal_retires_head_instead_of_hiding_it() {
             assert_eq!(projected[0]["text"], "successor remains queued");
         }
         assert_eq!(refusal_delta["sessionQueue"]["queuePaused"], false);
-        assert!(
-            refusal_delta["sessionQueue"]["queueProjectionHash"].is_string()
-        );
+        assert!(refusal_delta["sessionQueue"]["queueProjectionHash"].is_string());
         assert_eq!(
             state
                 .get_session(&session)
@@ -1385,9 +1389,7 @@ fn writer_backed_trimmed_unpromoted_admission_replays_after_restart() {
         let blocking_transport = Arc::new(BlockedAdmissionTransport {
             inner: transport.clone(),
             operation: lost_operation,
-            blocked_error: EngramTransportError::deadline(format!(
-                "lost {lost_operation} reply"
-            )),
+            blocked_error: EngramTransportError::deadline(format!("lost {lost_operation} reply")),
             observed_tx: Mutex::new(Some(observed_tx)),
             release_rx: Mutex::new(release_rx),
         });
@@ -1568,7 +1570,13 @@ fn promotion_persist_failure_preserves_exact_prepared_engram_intent_for_public_r
             media_type: "image/png".to_owned(),
         };
         let source = MessageSource::peer("peer-session".to_owned(), "Peer agent".to_owned());
-        let (prompt_id, successor_id, baseline_history, baseline_message_count, baseline_generation) = {
+        let (
+            prompt_id,
+            successor_id,
+            baseline_history,
+            baseline_message_count,
+            baseline_generation,
+        ) = {
             let mut inner = state.inner.lock().unwrap();
             let prompt_id = inner.next_message_id();
             let successor_id = inner.next_message_id();
@@ -1638,7 +1646,10 @@ fn promotion_persist_failure_preserves_exact_prepared_engram_intent_for_public_r
             "{error:#}"
         );
         let rollback_revision = state.snapshot().revision;
-        assert!(receiver.try_recv().is_err(), "no provider handoff is durable yet");
+        assert!(
+            receiver.try_recv().is_err(),
+            "no provider handoff is durable yet"
+        );
 
         let rollback_snapshot = std::iter::from_fn(|| state_events.try_recv().ok())
             .filter_map(|payload| serde_json::from_str::<Value>(&payload).ok())
@@ -1650,11 +1661,9 @@ fn promotion_persist_failure_preserves_exact_prepared_engram_intent_for_public_r
                         .flatten()
                         .any(|candidate| {
                             candidate["id"] == session
-                                && candidate["preview"]
-                                    .as_str()
-                                    .is_some_and(|preview| {
-                                        preview.contains("promotion was not persisted")
-                                    })
+                                && candidate["preview"].as_str().is_some_and(|preview| {
+                                    preview.contains("promotion was not persisted")
+                                })
                         })
             })
             .expect("promotion rollback must publish its restored projection immediately");
@@ -1673,10 +1682,7 @@ fn promotion_persist_failure_preserves_exact_prepared_engram_intent_for_public_r
         let hydrated = serde_json::to_value(state.get_session(&session).unwrap()).unwrap();
         let hydrated_prompt = &hydrated["session"]["pendingPrompts"][0];
         assert_eq!(hydrated_prompt["id"], prompt_id);
-        assert_eq!(
-            hydrated_prompt["isEngramRetained"],
-            true
-        );
+        assert_eq!(hydrated_prompt["isEngramRetained"], true);
         assert!(
             hydrated_prompt.get("engramBind").is_none()
                 && hydrated_prompt.get("engramEvaluate").is_none(),
@@ -1695,7 +1701,12 @@ fn promotion_persist_failure_preserves_exact_prepared_engram_intent_for_public_r
             assert_eq!(record.session.status, SessionStatus::Idle);
             assert!(record.orchestrator_auto_dispatch_blocked);
             assert!(record.session.queue_paused);
-            assert!(record.session.preview.contains("promotion was not persisted"));
+            assert!(
+                record
+                    .session
+                    .preview
+                    .contains("promotion was not persisted")
+            );
             assert_eq!(record.active_turn_generation, baseline_generation);
             assert_eq!(record.session.prompt_history, baseline_history);
             assert_eq!(record.session.message_count, baseline_message_count);
@@ -1723,7 +1734,9 @@ fn promotion_persist_failure_preserves_exact_prepared_engram_intent_for_public_r
             serde_json::to_value(&record.queued_prompts).unwrap()
         };
 
-        connection.execute_batch("DROP TRIGGER reject_engram_promotion;").unwrap();
+        connection
+            .execute_batch("DROP TRIGGER reject_engram_promotion;")
+            .unwrap();
         drop(connection);
         let mut loaded = load_state(state.persistence_path.as_path())
             .unwrap()
@@ -1731,7 +1744,10 @@ fn promotion_persist_failure_preserves_exact_prepared_engram_intent_for_public_r
         {
             let index = loaded.find_session_index(&session).unwrap();
             let record = loaded.session_mut_by_index(index).unwrap();
-            assert_eq!(serde_json::to_value(&record.queued_prompts).unwrap(), failed_queue);
+            assert_eq!(
+                serde_json::to_value(&record.queued_prompts).unwrap(),
+                failed_queue
+            );
             assert!(record.orchestrator_auto_dispatch_blocked);
             assert!(record.session.queue_paused);
             assert_eq!(record.session.status, SessionStatus::Idle);
@@ -1760,7 +1776,11 @@ fn promotion_persist_failure_preserves_exact_prepared_engram_intent_for_public_r
         let CodexRuntimeCommand::Prompt { command, .. } = receiver.try_recv().unwrap() else {
             panic!("public Resume should hand off the exact retained prompt once");
         };
-        assert!(command.prompt.contains("expanded exact prepared rollback prompt"));
+        assert!(
+            command
+                .prompt
+                .contains("expanded exact prepared rollback prompt")
+        );
         assert!(command.prompt.contains("Peer agent"));
         assert!(command.prompt.contains("peer-session"));
         assert_eq!(command.attachments.len(), 1);
@@ -1773,7 +1793,10 @@ fn promotion_persist_failure_preserves_exact_prepared_engram_intent_for_public_r
             .collect::<Vec<_>>();
         assert_eq!(replayed.len(), 2);
         assert_eq!(replayed[0], issued);
-        assert_eq!(replayed[1], issued, "Resume must replay the exact request and key");
+        assert_eq!(
+            replayed[1], issued,
+            "Resume must replay the exact request and key"
+        );
         let inner = state.inner.lock().unwrap();
         let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
         assert_eq!(record.queued_prompts.len(), 1);
@@ -1851,10 +1874,12 @@ fn writer_backed_initial_explorer_admission_is_barriered_before_boot_settlement(
         assert!(record.orchestrator_auto_dispatch_blocked);
         assert!(record.session.queue_paused);
         assert_eq!(record.queued_prompts.len(), 1);
-        assert!(record.queued_prompts[0]
-            .pending_prompt
-            .text
-            .contains("initial Explorer prompt retained across restart"));
+        assert!(
+            record.queued_prompts[0]
+                .pending_prompt
+                .text
+                .contains("initial Explorer prompt retained across restart")
+        );
         assert_eq!(
             loaded.delegations[loaded.find_delegation_index(&delegation).unwrap()].status,
             DelegationStatus::Running,
@@ -1873,9 +1898,11 @@ fn writer_backed_initial_explorer_admission_is_barriered_before_boot_settlement(
     let CodexRuntimeCommand::Prompt { command, .. } = receiver.try_recv().unwrap() else {
         panic!("public Resume should deliver the retained child prompt");
     };
-    assert!(command
-        .prompt
-        .contains("initial Explorer prompt retained across restart"));
+    assert!(
+        command
+            .prompt
+            .contains("initial Explorer prompt retained across restart")
+    );
     assert!(receiver.try_recv().is_err());
     let replayed = retry_transport
         .requests()
@@ -1951,7 +1978,12 @@ fn writer_backed_begun_prehandoff_restart_never_resends_provider_prompt() {
 #[test]
 fn writer_backed_ordinary_queue_restart_does_not_gain_engram_barrier() {
     let (state, _) = test_app_state_with_delegation_codex_runtime("ordinary-restart-runtime");
-    let root = state.test_temp_root.as_ref().unwrap().path().join("ordinary-project");
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .unwrap()
+        .path()
+        .join("ordinary-project");
     fs::create_dir_all(&root).unwrap();
     let project = create_test_project(&state, &root, "Ordinary project");
     let session = create_test_project_session(&state, Agent::Codex, &project, &root);
@@ -1978,7 +2010,10 @@ fn writer_backed_ordinary_queue_restart_does_not_gain_engram_barrier() {
     assert!(!record.engram.recovered_admission);
     assert!(!record.orchestrator_auto_dispatch_blocked);
     assert!(!record.session.queue_paused);
-    assert_eq!(record.queued_prompts[0].pending_prompt.text, "ordinary queued prompt");
+    assert_eq!(
+        record.queued_prompts[0].pending_prompt.text,
+        "ordinary queued prompt"
+    );
 }
 
 #[test]
