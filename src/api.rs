@@ -1492,21 +1492,6 @@ async fn verify_project_engram_settings(
     Ok(Json(response))
 }
 
-/// Waives one exact open Engram obligation on the session's currently bound
-/// work run. Policy refusals remain typed successful responses; routing and
-/// idempotency faults surface as conflicts.
-async fn waive_engram_obligation(
-    AxumPath(session_id): AxumPath<String>,
-    State(state): State<AppState>,
-    request: Result<Json<WaiveEngramObligationRequest>, JsonRejection>,
-) -> Result<Json<EngramObligationWaiverDecisionResponse>, ApiError> {
-    let Json(request) =
-        request.map_err(|rejection| api_json_rejection("Engram obligation waiver", rejection))?;
-    let response =
-        run_blocking_api(move || state.waive_engram_obligation(&session_id, request)).await?;
-    Ok(Json(response))
-}
-
 /// Updates the machine-scoped Engram executable and home. Repository
 /// declarations and per-project tier selection are separate contracts.
 async fn update_engram_host_settings(

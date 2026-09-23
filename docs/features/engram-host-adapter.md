@@ -318,8 +318,8 @@ while genuinely newer inbound sequences remain separate.
 
 The default timeout for an individual control call is also ten seconds (or the
 configured project call timeout). Outside admission this bounds each completion,
-project-reset or stale-begin checkpoint and obligation waiver independently;
-these calls do not share the admission deadline. A completion checkpoint can
+project-reset or stale-begin checkpoint independently; these calls do not share
+the admission deadline. A completion checkpoint can
 therefore delay the next queued turn by that call timeout. Admission itself still
 uses one shared ten-second budget, not ten seconds per step.
 
@@ -413,36 +413,12 @@ policy-floor reduction, rebinding or grant expiration is part of inspection.
 This does not cover active/attached sessions or arbitrary checkpoint refusals.
 See the [settings API](../architecture.md#http-api).
 
-## Human obligation waiver
+## Obligation waivers
 
-`POST /api/sessions/{id}/engram/obligations/waive` is a host-private operator
-action for an idle premium session already bound to the obligation's live
-WorkRun. A live turn retains exclusive ownership of its checkpoint lifecycle,
-so TermAl rejects a waiver while that turn, its grant, or Stop is active.
-The request contains the obligation UUID, expected definition hash, displayed
-human `waivedBy` identity, redactor-inspected reason, and idempotency key.
-TermAl resolves the routing token and sends the strict cut-B frame:
-
-```text
-obligation_waive(routing_token, obligation_id, expected_definition,
-                 waived_by, reason, idempotency_key)
-```
-
-Exact replay returns the same typed decision; a changed intent under one key
-surfaces `control_operation_idempotency_conflict`. Policy refusals are
-successful typed responses (`waiver_not_admitted`, `obligation_not_open`, or
-`definition_changed`) and retain Engram's remedy. Waived receipts expose the
-human attribution but omit the reason.
-
-This cut exposes the waiver as an API-only operator action; the settings UI does
-not yet provide a waiver form. Like the rest of TermAl's unauthenticated local
-API, this is a trusted-operator surface rather than an isolation boundary from
-processes running as the same OS user. Every successful waiver therefore also
-adds an idempotent durable audit card to the session transcript. The route holds
-the same project lifecycle fence as settings transitions, resumes prompts
-parked behind that fence when it releases, honors the adapter circuit breaker,
-and rejects any receipt or refusal that does not correlate to the submitted
-obligation.
+Obligation waivers are not a host operation. Engram removed the host-private
+`obligation_waive` control call together with resource leases and the
+finalizer turn; an operator waives an obligation with the Engram CLI
+(`waive-obligation`), and TermAl neither forwards nor audits such a waiver.
 
 ## Acceptance evaluation
 

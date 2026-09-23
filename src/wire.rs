@@ -1838,19 +1838,6 @@ struct UpdateEngramHostSettingsRequest {
     boot_recovery_budget_ms: u64,
 }
 
-/// Host-private human waiver of one exact obligation on the session's bound
-/// Engram work run. The backend supplies the routing token; callers never see
-/// or persist it.
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct WaiveEngramObligationRequest {
-    obligation_id: String,
-    expected_definition: String,
-    waived_by: String,
-    reason: String,
-    idempotency_key: String,
-}
-
 impl UpdateProjectEngramSettingsRequest {
     fn into_settings(self) -> EngramProjectSettings {
         EngramProjectSettings {

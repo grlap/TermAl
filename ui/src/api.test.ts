@@ -31,7 +31,6 @@ import {
   updateTelegramConfig,
   upgradeRemoteTermal,
   verifyProjectEngramSettings,
-  waiveEngramObligation,
 } from "./api";
 import {
   runTerminalCommand,
@@ -223,63 +222,6 @@ describe("verifyProjectEngramSettings", () => {
       turnGatedControl: true,
       binaryPath: "engram",
       home: "%USERPROFILE%\\.engram",
-    });
-  });
-});
-
-describe("waiveEngramObligation", () => {
-  const originalFetch = globalThis.fetch;
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-    if (originalFetch === undefined) {
-      delete (globalThis as Partial<typeof globalThis>).fetch;
-      return;
-    }
-    globalThis.fetch = originalFetch;
-  });
-
-  it("posts the exact human waiver frame to the encoded session route", async () => {
-    const result = {
-      decision: "waived",
-      receipt: {
-        obligationId: "obligation-1",
-        definition: "a".repeat(64),
-        resolution: "b".repeat(64),
-        state: "waived",
-        waivedBy: "Greg",
-        waivedAt: "2026-09-02T00:00:00Z",
-      },
-    };
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify(result), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-
-    await expect(
-      waiveEngramObligation("session/one two", {
-        obligationId: "obligation-1",
-        expectedDefinition: "a".repeat(64),
-        waivedBy: "Greg",
-        reason: "Operator approved this exception.",
-        idempotencyKey: "waive-obligation-1",
-      }),
-    ).resolves.toEqual(result);
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/sessions/session%2Fone%20two/engram/obligations/waive",
-      expect.objectContaining({ method: "POST" }),
-    );
-    const [, init] = fetchMock.mock.calls[0] ?? [];
-    expect(JSON.parse(String(init?.body))).toEqual({
-      obligationId: "obligation-1",
-      expectedDefinition: "a".repeat(64),
-      waivedBy: "Greg",
-      reason: "Operator approved this exception.",
-      idempotencyKey: "waive-obligation-1",
     });
   });
 });

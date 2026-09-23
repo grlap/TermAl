@@ -380,7 +380,6 @@ All routes are under `/api`. The backend serves JSON, and the frontend proxies r
 | GET | `/api/sessions/{id}` | Fetch one bounded recent suffix -> `SessionResponse { revision, serverInstanceId, session }`. The default is 20 messages; `?tail=N` accepts `1..=64`. There is no unbounded transcript response or summary fallback. Remote-proxy sessions forward the same bounded tail request to the owner. |
 | GET | `/api/sessions/{id}/history` | Fetch one ascending transcript page by exclusive `before`/`after` cursor, true start, centered global `around` position, or latest tail -> `SessionHistoryResponse`. `limit` defaults to and is capped at 64. |
 | GET | `/api/sessions/{id}/overview` | Fetch one whole-conversation position map -> `SessionOverviewResponse`. `buckets` defaults to 200 and accepts `1..=512`; repeated bucket JSON is gzip-compressed on the wire. |
-| POST | `/api/sessions/{id}/engram/obligations/waive` | Submit one strict host-private human-attributed waiver against the premium session's bound WorkRun. The backend supplies the routing token; request fields are obligation id, expected definition, `waivedBy`, reason, and idempotency key. |
 | POST | `/api/sessions/{id}/settings` | Update session config |
 | POST | `/api/sessions/{id}/model-options/refresh` | Refresh live model list/options |
 | GET | `/api/sessions/{id}/codex/mcp-servers` | List sanitized Codex MCP server/tool status |
