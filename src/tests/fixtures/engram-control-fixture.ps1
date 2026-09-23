@@ -25,6 +25,30 @@ for ($index = 0; $index -lt $args.Count - 1; $index += 1) {
 if (-not $projectFile -or -not $engramHome) {
     exit 2
 }
+# This fixture writes a placeholder store and marker files under --home. Every
+# TermAl test temp root lives below <user temp>\termal\tests, with the user
+# temp derived as test_temp_dir() derives it: TERMAL_TEST_USER_TEMP, else the
+# platform temp directory (GetTempPath here, GetTempPath2 in Rust; the two
+# differ only for a SYSTEM-account process, where only the launcher's
+# TERMAL_TEST_USER_TEMP keeps them aligned). Any other home is a real Engram
+# home (a developer's ~/.engram received one once). Refuse before any write; exit 4
+# is used by no other exit in either fixture script. Containment is checked on
+# the normalised absolute path at a component boundary, and any `..` segment is
+# refused outright so the check never leans on normalisation. Case-insensitive
+# comparison is deliberate: this script only runs on Windows. A \\?\-prefixed
+# home is refused too (GetFullPath leaves it unnormalised; TestTempRoot never
+# produces one).
+$userTemp = if ($env:TERMAL_TEST_USER_TEMP) { $env:TERMAL_TEST_USER_TEMP } else { [System.IO.Path]::GetTempPath() }
+$testRoot = [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($userTemp, 'termal', 'tests'))
+$resolvedHome = [System.IO.Path]::GetFullPath($engramHome)
+$homeContained = (
+    $resolvedHome.Equals($testRoot, [System.StringComparison]::OrdinalIgnoreCase) -or
+    $resolvedHome.StartsWith($testRoot + '\', [System.StringComparison]::OrdinalIgnoreCase)
+)
+if ((($engramHome -split '[\\/]') -contains '..') -or -not $homeContained) {
+    [Console]::Error.WriteLine("engram-control-fixture: refusing --home outside a TermAl test temp root ($testRoot): $engramHome")
+    exit 4
+}
 
 $workIndex = [Array]::IndexOf($args, "work")
 if ($args -contains "control-session-inspect") {

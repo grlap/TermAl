@@ -52,6 +52,38 @@ while [ "$#" -gt 0 ]; do
 done
 [ -n "$project_file" ] || exit 2
 [ -n "$engram_home" ] || exit 2
+# This fixture writes a placeholder store and marker files under --home. Every
+# TermAl test temp root lives below <user temp>/termal/tests, with the user
+# temp derived as test_temp_dir() derives it: TERMAL_TEST_USER_TEMP, else
+# std::env::temp_dir(), which is TMPDIR when set, else the confstr
+# DARWIN_USER_TEMP_DIR directory on macOS, else /tmp. Any other home is a real
+# Engram home (a developer's ~/.engram received one once). Refuse before any
+# write; exit 4 is used by no other exit in either fixture script. The root is
+# normalised with a logical cd (dot and trailing-slash spelling, no symlink
+# resolution, matching the Rust side); the home is compared at a component
+# boundary and any `..` segment is refused outright, since nothing normalises
+# the home here.
+refuse_engram_home() {
+  echo "engram-control-fixture: refusing --home outside a TermAl test temp root ($test_root): $engram_home" >&2
+  exit 4
+}
+user_temp=${TERMAL_TEST_USER_TEMP:-${TMPDIR:-}}
+if [ -z "$user_temp" ]; then
+  case "$(uname -s 2>/dev/null || true)" in
+    Darwin) user_temp=$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null || true) ;;
+  esac
+  [ -n "$user_temp" ] || user_temp=/tmp
+fi
+test_root=$(cd "$user_temp" 2>/dev/null && pwd) || test_root=""
+[ -n "$test_root" ] || refuse_engram_home
+test_root="${test_root%/}/termal/tests"
+case "/$engram_home/" in
+  */../*) refuse_engram_home ;;
+esac
+case "$engram_home" in
+  "$test_root"|"$test_root"/*) ;;
+  *) refuse_engram_home ;;
+esac
 
 case " $original_args " in
   *" control-session-inspect "*)

@@ -12,6 +12,9 @@ mod root_recovery_live;
 #[path = "engram_control_transport.rs"]
 mod control_transport;
 
+#[path = "engram_fixture_contracts.rs"]
+mod fixture_contracts;
+
 use self::control_transport::{
     assert_engram_control_descendant_was_terminated, prepare_engram_control_process_tree_fixture,
 };
@@ -4802,6 +4805,14 @@ fn engram_mcp_home_alias_keeps_the_current_store_authority() {
 
 #[test]
 fn engram_enabled_settings_default_blank_home_and_reject_relative_home() {
+    // A blank home resolves through USERPROFILE/HOME, and the save verifies
+    // the connection by running the (fixture) binary against that home. Scope
+    // both variables to the test root under the home-env mutex, as every
+    // home-redirecting test does: unscoped, this test once wrote the fixture's
+    // placeholder store into the developer's real ~/.engram (tm-47g6).
+    let _env_lock = TEST_HOME_ENV_MUTEX
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let state = test_app_state();
     let root = state
         .test_temp_root
@@ -4812,16 +4823,22 @@ fn engram_enabled_settings_default_blank_home_and_reject_relative_home() {
     fs::create_dir_all(&root).expect("project root should exist");
     fs::write(root.join(".engram-project"), "fixture-ready\n").expect("fixture mode should write");
     let project_id = create_test_project(&state, &root, "Engram invalid home");
+    let scoped_user_home = root.join("user-home");
+    let scoped_engram_home = scoped_user_home.join(".engram");
+    fs::create_dir_all(&scoped_engram_home).expect("scoped default Engram home should exist");
+    let _home_env = ScopedEnvVar::set_home_dir(&scoped_user_home);
+    assert_eq!(
+        default_engram_home_path().expect("the scoped user home should resolve"),
+        scoped_engram_home,
+        "the default home must follow the scoped USERPROFILE/HOME"
+    );
 
     let mut blank_home = real_fixture_engram_settings(&root);
     blank_home.home = Some(String::new());
     state
         .update_project_engram_settings(&project_id, blank_home)
         .expect("an enabled blank home should use the documented default");
-    let expected_home = default_engram_home_path()
-        .expect("test process should expose a user home")
-        .to_string_lossy()
-        .into_owned();
+    let expected_home = scoped_engram_home.to_string_lossy().into_owned();
     assert_eq!(
         state
             .inner
@@ -4831,6 +4848,16 @@ fn engram_enabled_settings_default_blank_home_and_reject_relative_home() {
             .and_then(|project| project.engram.as_ref())
             .and_then(|settings| settings.home.as_deref()),
         Some(expected_home.as_str())
+    );
+    // The verification ran the fixture against the scoped default home: its
+    // placeholder store is here, inside the test root, and nowhere else.
+    assert!(
+        scoped_engram_home
+            .join("projects")
+            .join(sha256_hex(b"fixture-ready"))
+            .join("engram.db")
+            .is_file(),
+        "the fixture store must be created under the scoped default home"
     );
 
     let mut relative_home = real_fixture_engram_settings(&root);
