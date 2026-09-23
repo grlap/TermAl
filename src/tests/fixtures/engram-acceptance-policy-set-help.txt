@@ -1,15 +1,15 @@
-Captured 2026-09-21T06:33:44.800Z from engram 0.1.0 build e364f61f49a4
-(exe 9901adc9123b, schema 025fb9bb102f).
+Captured 2026-09-23T19:42:04.551Z from engram 0.1.0 build df134a518b60
+(exe 5354cae34957, schema 81b4b805acfb).
 Command: engram control-policy set-acceptance-evaluation --help
-Read-only CLI usage query; no store was opened or mutated.
+Read-only CLI usage query; no store was opened or mutated; trailing whitespace trimmed on 1 line(s).
 
-Activate the acceptance-evaluation policy: which evaluator modes may record verdicts, what backs a mechanical pass, and whether completion must present a fresh host source fingerprint. An empty mode list restores legacy self-asserted completion through the same audited transition
+Activate the acceptance-evaluation policy: which evaluator modes may record verdicts, what backs a mechanical pass, and whether completion must present a fresh host source fingerprint. An empty mode list restores self-asserted completion through the same audited transition
 
 Usage: engram.exe control-policy set-acceptance-evaluation [OPTIONS] --authorized-by <AUTHORIZED_BY> --idempotency-key <IDEMPOTENCY_KEY>
 
 Options:
       --modes [<MODE[,MODE]>...]
-          Allowed evaluator modes, comma-separated: same-session, sub-agent, independent-session. Omit for the legacy self-asserted path
+          Allowed evaluator modes, comma-separated: same-session, sub-agent, independent-session. Omit for the self-asserted path
 
       --mechanical-basis <MECHANICAL_BASIS>
           What an observed or asserted mechanical pass may cite

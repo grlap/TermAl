@@ -745,7 +745,7 @@ Unsupported evaluator modes remain visible but disabled.
 Changing store policy is a separate operator action, submitted with the
 "Confirm policy change" button; no additional confirmation checkbox is required.
 No justification field is collected or sent; policy administration uses the reason-free Engram CLI.
-The captured setter help fixture records build `e364f61f49a4` (2026-09-21);
+The captured setter help fixture records build `df134a518b60` (2026-09-23);
 default tests check both advertised and required flags. On 2026-09-21, isolated
 real-binary tests also passed against build `d7d8caddc923`, schema `025fb9bb102f`,
 SHA-256 `11c88b50b5602f226694e3da79e8ad5adde93d0c7f50690448d88084b6ccf444`:
