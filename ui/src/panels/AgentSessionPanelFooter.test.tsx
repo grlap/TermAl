@@ -628,12 +628,22 @@ describe("AgentSessionPanelFooter", () => {
     const textarea = screen.getByLabelText(`Message ${sessionId}`);
     fireEvent.change(textarea, { target: { value: "draft in progress" } });
 
-    rerender(
-      renderFooter({
+    // Production syncs the composer store before the prop update lands
+    // (app-live-state.ts adoptSessions: syncComposerSessionsStoreIncremental,
+    // then setSessions inside startTransition), so the mounted composer first
+    // renders the new session snapshot against the old props. renderFooter
+    // performs that store sync while building the element: run it in its own
+    // act scope, check the intermediate render, then apply the new props.
+    let streamedFooter!: ReturnType<typeof renderFooter>;
+    act(() => {
+      streamedFooter = renderFooter({
         onDraftCommit: nextCommit,
         session: makeSession(sessionId, { preview: "streamed preview", status: "active" }),
-      }),
-    );
+      });
+    });
+    expect(initialCommit).not.toHaveBeenCalled();
+    expect(screen.getByLabelText(`Message ${sessionId}`)).toHaveValue("draft in progress");
+    rerender(streamedFooter);
 
     expect(initialCommit).not.toHaveBeenCalled();
     expect(nextCommit).not.toHaveBeenCalled();
@@ -4899,13 +4909,22 @@ Please add tests.`,
     expect(onRefreshSessionModelOptions).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Refresh live models" })).toBeDisabled();
 
-    rerender(
-      renderFooter({
+    // Production syncs the composer store before the prop update lands, so
+    // the composer first sees the idle session while isSessionBusy is still
+    // true and must not refresh yet. renderFooter performs that store sync
+    // while building the element: run it in its own act scope, check the
+    // intermediate render, then apply the new props.
+    let idleFooter!: ReturnType<typeof renderFooter>;
+    act(() => {
+      idleFooter = renderFooter({
         isSessionBusy: false,
         onRefreshSessionModelOptions,
         session: { ...activeSession, status: "idle" },
-      }),
-    );
+      });
+    });
+    expect(onRefreshSessionModelOptions).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Refresh live models" })).toBeDisabled();
+    rerender(idleFooter);
     await waitFor(() => {
       expect(onRefreshSessionModelOptions).toHaveBeenCalledTimes(1);
     });

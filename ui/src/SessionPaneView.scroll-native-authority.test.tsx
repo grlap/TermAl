@@ -256,11 +256,17 @@ describe("native scroll attachment authority", () => {
     expect(view.node.scrollTop).toBe(restoredTop);
   });
 
-  it.each(["wheel", "follow", "tab", "handle"] as const)("lets %s navigation replace a missing reader restore", (navigation) => {
+  it.each(["wheel", "follow", "tab", "handle"] as const)("lets %s navigation replace a missing reader restore", async (navigation) => {
     const anchor = { messageId: "returning-reader-message", viewportOffsetPx: -12.25 };
     const view = renderNativeConversation(false, 400, { anchor });
     view.frames.drainAnimationFrames();
-    if (navigation === "wheel") fireEvent.wheel(view.node, { deltaY: -60 });
+    if (navigation === "wheel") {
+      fireEvent.wheel(view.node, { deltaY: -60 });
+      // The virtualizer syncs its viewport state in a microtask after the
+      // wheel intent. Flush it inside act so the update commits within the
+      // test instead of escaping after the last assertion.
+      await act(async () => {});
+    }
     if (navigation === "follow") act(() => view.state.scrollMessageStackToBoundary("bottom"));
     if (navigation === "tab") view.update({ visible: false });
     if (navigation === "handle") act(() => { view.state.virtualizerHandleRef.current!.beginUserScrollNavigation(); });
