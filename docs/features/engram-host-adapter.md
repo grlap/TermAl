@@ -817,7 +817,15 @@ evidence through the control checkpoint; and Work-panel evaluation actions.
 Boot recovery applies only to visible local premium control sessions with a
 routing token, an active grant or a rebind marker, including roots that have
 never created a delegation. Never-bound sessions are not eagerly bound or
-readiness-fenced: their first turn performs normal lazy admission. TermAl publishes
+readiness-fenced: their first turn performs normal lazy admission. A child of a
+completed delegation that holds no begun grant is skipped: completion is only
+assigned once the child's outcome is no longer running, by which point a
+prepared begin is either persisted as queued intent or mirrored as the child's
+active grant (a failed checkpoint keeps it mirrored, so the child remains a
+target), and its stale token stays in place for the ordinary rebind path of a
+later follow-up. Failed and canceled children keep eager recovery, because
+cancellation or failure can interrupt at any moment, including a turn begin
+whose outcome only the retained token can settle. TermAl publishes
 `engramBootRecoveryPending` before recovering bindings, bounds the overall
 work by `bootRecoveryBudgetMs`, and retries an unfinished target lazily on the
 next targeted read or prompt. Base MCP/context injection does not bind a

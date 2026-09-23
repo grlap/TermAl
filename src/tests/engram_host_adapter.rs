@@ -15,6 +15,9 @@ mod control_transport;
 #[path = "engram_fixture_contracts.rs"]
 mod fixture_contracts;
 
+#[path = "engram_boot_recovery_targets.rs"]
+mod boot_recovery_targets;
+
 use self::control_transport::{
     assert_engram_control_descendant_was_terminated, prepare_engram_control_process_tree_fixture,
 };

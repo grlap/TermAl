@@ -2848,22 +2848,53 @@ impl AppState {
         }
     }
 
+    /// Sessions whose existing control state boot recovery would rebind:
+    /// roots can own begun grants without ever creating a delegation, so
+    /// recover only existing control state. Never-used sessions bind lazily
+    /// at admission instead of consuming boot workers and readiness fences.
+    fn engram_boot_recovery_candidate_locked(record: &SessionRecord) -> bool {
+        !record.hidden
+            && record.is_local_session()
+            // Exact queued operations recover before any fresh bind.
+            && !record.queued_prompts.iter().any(QueuedPromptRecord::has_engram_intent)
+            && (record.engram.routing_token.is_some()
+                || record.engram.active_grant_id.is_some()
+                || record.engram.rebind_required)
+    }
+
+    /// Children of delegations that completed. Completion is assigned only
+    /// once the child's outcome is no longer running, and by then a prepared
+    /// begin is either persisted as queued Engram intent (which the candidate
+    /// filter already excludes) or mirrored in `active_grant_id` (a failed
+    /// turn-end checkpoint keeps it); a completed child without a mirrored
+    /// grant therefore has nothing left to recover. Failed and canceled
+    /// children are deliberately absent: cancellation or failure can
+    /// interrupt at any moment, including a turn begin whose outcome only the
+    /// retained routing token can settle, so they keep eager recovery.
+    fn engram_completed_delegation_children_locked(inner: &StateInner) -> HashSet<&str> {
+        inner
+            .delegations
+            .iter()
+            .filter(|delegation| delegation.status == DelegationStatus::Completed)
+            .map(|delegation| delegation.child_session_id.as_str())
+            .collect()
+    }
+
     fn engram_boot_recovery_targets_locked(inner: &StateInner) -> Vec<EngramBindingTarget> {
-        // Roots can own begun grants without ever creating a delegation.
-        // Recover only existing control state. Never-used sessions bind lazily
-        // at admission instead of consuming boot workers and readiness fences.
-        // Retain child-shaped authority for children.
+        // Retain child-shaped authority for children. A completed delegation
+        // child is skipped unless it still holds a begun grant: hundreds of
+        // historical review children would otherwise each cost a bind and a
+        // short-lived sidecar on every boot (tm-cr0i). Its stale token stays
+        // in place; a later follow-up reconciles it through the ordinary
+        // rebind path at admission, exactly as a lazily retried target does.
+        let completed_children = Self::engram_completed_delegation_children_locked(inner);
         inner
             .sessions
             .iter()
+            .filter(|record| Self::engram_boot_recovery_candidate_locked(record))
             .filter(|record| {
-                !record.hidden
-                    && record.is_local_session()
-                    // Exact queued operations recover before any fresh bind.
-                    && !record.queued_prompts.iter().any(QueuedPromptRecord::has_engram_intent)
-                    && (record.engram.routing_token.is_some()
-                        || record.engram.active_grant_id.is_some()
-                        || record.engram.rebind_required)
+                record.engram.active_grant_id.is_some()
+                    || !completed_children.contains(record.session.id.as_str())
             })
             .filter_map(|record| {
                 Self::engram_binding_target_for_session_shape_locked(
