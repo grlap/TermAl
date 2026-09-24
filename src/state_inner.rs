@@ -383,10 +383,11 @@ impl StateInner {
     ///
     /// Use when the caller already has the index (e.g., from a loop or a
     /// prior `find_session_index`) and needs to re-stamp the slot
-    /// WITHOUT using the resulting `&mut SessionRecord`. The sole
-    /// production caller today is `import_discovered_codex_threads` in
-    /// `state_boot.rs`, which swaps an owned record into the slot via
-    /// `*slot = record` and then re-stamps the slot so the SQLite
+    /// WITHOUT using the resulting `&mut SessionRecord`. Production
+    /// callers: `import_discovered_codex_threads` in `state_boot.rs`,
+    /// which swaps an owned record into the slot via `*slot = record`,
+    /// and the stale-begin settlement in `engram_host_adapter.rs`, which
+    /// edits the slot in place; both then re-stamp the slot so the SQLite
     /// delta persist picks up the row. Returns the assigned stamp,
     /// or `None` if the index is out of bounds.
     fn stamp_session_at_index(&mut self, index: usize) -> Option<u64> {

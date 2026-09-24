@@ -265,6 +265,13 @@ struct PersistedSessionRecord {
     engram_routing_token: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     engram_open_grant_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    engram_uncertain_grant_id: Option<String>,
+    /// Absent from records written before uncertain begins were recorded, so
+    /// such a record loads as not yet settled and boot recovery keeps
+    /// recovering it until an accepted bind sets this.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    engram_begins_recorded: bool,
     #[serde(default)]
     engram_dispatch_generation: u64,
     #[serde(skip)]
@@ -354,6 +361,8 @@ impl PersistedSessionRecord {
             orchestrator_auto_dispatch_blocked: record.orchestrator_auto_dispatch_blocked,
             engram_routing_token: record.engram.routing_token.clone(),
             engram_open_grant_id: record.engram.active_grant_id.clone(),
+            engram_uncertain_grant_id: record.engram.uncertain_grant_id.clone(),
+            engram_begins_recorded: record.engram.begins_recorded,
             engram_dispatch_generation: record.engram.dispatch_generation,
             message_start_index: record.message_start_index,
             persist_prompt_history: true,
@@ -432,6 +441,8 @@ impl PersistedSessionRecord {
                 recovered_admission,
                 routing_token: self.engram_routing_token.clone(),
                 active_grant_id: self.engram_open_grant_id,
+                uncertain_grant_id: self.engram_uncertain_grant_id,
+                begins_recorded: self.engram_begins_recorded,
                 dispatch_generation: self.engram_dispatch_generation,
                 rebind_required: self.engram_routing_token.is_some(),
                 ..EngramSessionState::default()

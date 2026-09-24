@@ -3496,7 +3496,9 @@ fn clear_delegation_child_queue_locked(inner: &mut StateInner, child_session_id:
     let child = inner
         .session_mut_by_index(child_index)
         .expect("child session index should be valid");
+    let dropped_begin = dropped_engram_intent_grant(child, child.queued_prompts.iter());
     child.queued_prompts.clear();
+    record_dropped_engram_intent(child, dropped_begin);
     sync_pending_prompts(child);
 }
 
@@ -3556,7 +3558,9 @@ fn detach_delegation_child_runtime_locked(
     child.active_turn_start_message_count = None;
     child.active_turn_file_changes.clear();
     child.active_turn_file_change_grace_deadline = None;
+    let dropped_begin = dropped_engram_intent_grant(child, child.queued_prompts.iter());
     child.queued_prompts.clear();
+    record_dropped_engram_intent(child, dropped_begin);
     sync_pending_prompts(child);
     clear_all_pending_requests(child);
     let changed_message_indices = cancel_pending_interaction_messages(&mut child.session.messages);

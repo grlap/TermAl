@@ -815,17 +815,48 @@ evidence through the control checkpoint; and Work-panel evaluation actions.
 ## Premium boot recovery and lazy retry
 
 Boot recovery applies only to visible local premium control sessions with a
-routing token, an active grant or a rebind marker, including roots that have
-never created a delegation. Never-bound sessions are not eagerly bound or
-readiness-fenced: their first turn performs normal lazy admission. A child of a
-completed delegation that holds no begun grant is skipped: completion is only
-assigned once the child's outcome is no longer running, by which point a
-prepared begin is either persisted as queued intent or mirrored as the child's
-active grant (a failed checkpoint keeps it mirrored, so the child remains a
-target), and its stale token stays in place for the ordinary rebind path of a
-later follow-up. Failed and canceled children keep eager recovery, because
-cancellation or failure can interrupt at any moment, including a turn begin
-whose outcome only the retained token can settle. TermAl publishes
+routing token, an active grant, an uncertain grant or a rebind marker,
+including roots that have never created a delegation. Never-bound sessions
+are not eagerly bound or readiness-fenced: their first turn performs normal
+lazy admission. A child of a delegation that already ended (completed, failed
+or canceled) is skipped unless it still holds a mirrored or uncertain grant,
+which recovery checkpoints or clears as before. That skip is safe because
+every grant that may be open on Engram is recorded locally:
+
+- **What is recorded.** A begun turn is mirrored when its dispatch record
+  commits (a failed turn-end checkpoint keeps it). A begin whose outcome never
+  arrived is recorded as uncertain: abandoned in flight by a stop or a
+  cancellation, failed in transport, answered for another grant, or its
+  durable queued intent dropped by a cancellation after a restart (then only
+  an unknown-grant marker). A live runtime marker naming the exact grant wins
+  over the intent; an intent this process issued whose marker sent no begin
+  records nothing, so only a restored or interrupted intent can. Retiring a
+  promoted head for a terminal callback or a Stop records the intent it
+  carried first, and a dispatch record keeps a begin its released marker
+  still names when it mirrored nothing.
+- **What settles it.** Only the status-authoritative paths: a clean session
+  status or an accepted fresh bind clears it; an open grant reported by
+  status is checkpointed and cleared on a receipt that names it (a receipt
+  for another grant settles nothing, and recovery asks again later); a begin
+  that completes for the still-current dispatch mirrors it as begun; and the
+  released begin's own compensating checkpoint clears it on a receipt or
+  keeps it on failure, taking a settled begin off its marker. Turn-end, stop
+  and reset checkpoints ignore it. The unknown marker is cleared by a clean
+  status or by the accepted bind that follows a checkpoint.
+- **Project reset.** On the same authority store the reset keeps an uncertain
+  grant, a record whose begins may be unrecorded, or retained queued intent
+  that may be the only evidence of a begin, with the token that can ask about
+  it, for the session's next bind to settle; a home change drops it with the
+  binding.
+- **Records written before begins were recorded.** A failed or canceled
+  child loaded from such a store may hide a begin, so it keeps being
+  recovered, after the live sessions, until one accepted bind settles it and
+  marks it recorded; each bounded boot settles as many such records as its
+  budget allows. A completed child's turn ran, so its begin was mirrored
+  before the outcome, and it stays skipped whatever its record says.
+
+The skipped child's stale token stays in place for the ordinary rebind path
+of a later follow-up. TermAl publishes
 `engramBootRecoveryPending` before recovering bindings, bounds the overall
 work by `bootRecoveryBudgetMs`, and retries an unfinished target lazily on the
 next targeted read or prompt. Base MCP/context injection does not bind a

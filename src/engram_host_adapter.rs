@@ -2122,6 +2122,20 @@ struct EngramSessionState {
     recovered_admission: bool,
     routing_token: Option<String>,
     active_grant_id: Option<String>,
+    /// A grant whose `turn_begin` outcome the host never learned: the request
+    /// was handed to the transport and then abandoned, failed in transport,
+    /// or was answered for another grant. Engram may hold it begun. Only the
+    /// status-authoritative paths (restart recovery and the rebind at
+    /// admission) confirm or clear it; turn-end, stop and reset checkpoints
+    /// ignore it, because a merely issued grant refuses a checkpoint.
+    uncertain_grant_id: Option<String>,
+    /// Every begin this record has issued is accounted for by
+    /// `active_grant_id` or `uncertain_grant_id`. True for records created
+    /// since begins were recorded that way and for any record an accepted
+    /// bind has settled since; false for records loaded from a store written
+    /// before, which may hide a begin nothing recorded. Boot recovery keeps
+    /// recovering such a record until one accepted bind settles it.
+    begins_recorded: bool,
     dispatch_generation: u64,
     consecutive_transport_failures: u8,
     circuit_open: bool,
@@ -2164,6 +2178,8 @@ impl Default for EngramSessionState {
             recovered_admission: false,
             routing_token: None,
             active_grant_id: None,
+            uncertain_grant_id: None,
+            begins_recorded: true,
             dispatch_generation: 0,
             consecutive_transport_failures: 0,
             circuit_open: false,
@@ -2250,6 +2266,12 @@ struct EngramPendingDispatch {
     evaluate_latency_ms: u64,
     started_at: std::time::Instant,
     awaiting_runtime_stop_resolution: bool,
+    /// The grant whose `turn_begin` has been handed to the transport, which
+    /// after a re-evaluation is not the originally evaluated one. Set under
+    /// the state lock together with the owner check that authorizes the
+    /// request, so an abandon that races the in-flight begin knows exactly
+    /// which grant Engram may have begun.
+    begin_requested: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -2301,7 +2323,11 @@ enum EngramDispatchEvaluation {
 /// Engram keeps an evaluated grant open, and that grant cannot be checkpointed;
 /// the next dispatch must therefore rebind so Engram expires it before issuing
 /// another grant. Advancing the generation also prevents the abandoned
-/// evaluate idempotency key from being reused.
+/// evaluate idempotency key from being reused. When a begin request was
+/// already handed to the transport, Engram may have begun that grant before
+/// this abandon: it is then recorded as uncertain, so restart recovery and
+/// the next admission settle it from local state, and a canceled or failed
+/// child's persisted record carries that evidence on its own.
 fn abandon_engram_pending_dispatch(
     record: &mut SessionRecord,
     pending: Option<EngramPendingDispatch>,
@@ -2330,15 +2356,115 @@ fn abandon_engram_pending_dispatch(
     if matches!(pending.evaluated, EngramDispatchEvaluation::Grant { .. }) {
         record.engram.rebind_required = true;
     }
+    if let Some(grant_id) = pending.begin_requested
+        && record.engram.active_grant_id.is_none()
+        && record.engram.uncertain_grant_id.is_none()
+    {
+        record.engram.uncertain_grant_id = Some(grant_id);
+    }
     true
 }
 
 fn take_and_abandon_engram_pending_dispatch(record: &mut SessionRecord) -> bool {
+    // The retired head's durable intent may be the only evidence of a begin
+    // an earlier process lost, when this dispatch's own recovery could not
+    // ask Engram and degraded without a begin of its own. It is found while
+    // the marker is still in place, so a begin the marker names wins, and
+    // the abandon below then records that same grant or nothing.
+    let retired_head_begin = record
+        .engram
+        .pending_dispatch
+        .as_ref()
+        .filter(|pending| promoted_engram_head_matches(record, &pending.intent_fingerprint))
+        .and_then(|_| dropped_engram_intent_grant(record, record.queued_prompts.front()));
     let pending = record.engram.pending_dispatch.take();
     if let Some(pending) = &pending {
         retire_promoted_engram_head(record, &pending.intent_fingerprint);
     }
+    record_dropped_engram_intent(record, retired_head_begin);
     abandon_engram_pending_dispatch(record, pending)
+}
+
+/// Detaches the runtime pending marker without retiring the prepared request
+/// or advancing the operation generation, for callers that own those steps
+/// themselves, while keeping the one fact the marker alone carries: a begin
+/// already handed to the transport may have begun its grant on Engram.
+fn detach_engram_pending_dispatch_keeping_uncertain_begin(record: &mut SessionRecord) {
+    if let Some(pending) = record.engram.pending_dispatch.take()
+        && let Some(grant_id) = pending.begin_requested
+        && record.engram.active_grant_id.is_none()
+        && record.engram.uncertain_grant_id.is_none()
+    {
+        record.engram.uncertain_grant_id = Some(grant_id);
+        // Only a session status can settle it, so the next use must rebind.
+        record.engram.rebind_required = true;
+    }
+}
+
+/// The uncertain grant of a begin whose grant id was never persisted: the
+/// queued evaluate intent that owned it was dropped before its exact recovery
+/// could run, for example after a restart. Only a session status can settle
+/// it: a clean status clears the marker whatever its value, and so does the
+/// accepted fresh bind that follows a status naming an open grant, since the
+/// receipt of that grant's checkpoint cannot match this marker.
+const ENGRAM_UNCERTAIN_GRANT_UNKNOWN: &str = "unknown";
+
+/// The begin a queued prompt about to be dropped may have issued. Durable
+/// evaluate intent means Engram may have issued a grant and the host may
+/// have begun it before it lost the reply; once the intent is gone, nothing
+/// else lets recovery ask. A live runtime marker names the exact grant
+/// handed to the transport and wins over the intent, whatever order the
+/// caller drops the queue and detaches the marker in. Without one, only an
+/// intent whose begin outcome this process never learned may own a begin:
+/// one restored from an earlier process whose exact recovery has not
+/// answered yet, or one retained as interrupted after an unknown delivery.
+/// It yields the begun grant noted on the intent, else the unknown marker.
+/// An intent this process issued yields nothing: its marker sent no begin,
+/// or recorded the one it sent when it was released. Computed over
+/// borrowed prompts before they are dropped, then recorded with
+/// [`record_dropped_engram_intent`], so no prompt is cloned to remember one
+/// grant id.
+fn dropped_engram_intent_grant<'a>(
+    record: &SessionRecord,
+    dropped: impl IntoIterator<Item = &'a QueuedPromptRecord>,
+) -> Option<String> {
+    if record.engram.active_grant_id.is_some() || record.engram.uncertain_grant_id.is_some() {
+        return None;
+    }
+    let queued = dropped
+        .into_iter()
+        .find(|queued| queued.engram_evaluate.is_some())?;
+    let intent = queued.engram_evaluate.as_ref()?;
+    if let Some(grant_id) = record
+        .engram
+        .pending_dispatch
+        .as_ref()
+        .and_then(|pending| pending.begin_requested.clone())
+    {
+        return Some(grant_id);
+    }
+    if !record.engram.recovered_admission && !queued.engram_interrupted {
+        return None;
+    }
+    Some(
+        intent
+            .begun_grant_id
+            .clone()
+            .unwrap_or_else(|| ENGRAM_UNCERTAIN_GRANT_UNKNOWN.to_owned()),
+    )
+}
+
+/// Records the grant [`dropped_engram_intent_grant`] found, unless a grant
+/// was mirrored or recorded in between.
+fn record_dropped_engram_intent(record: &mut SessionRecord, grant_id: Option<String>) {
+    if let Some(grant_id) = grant_id
+        && record.engram.active_grant_id.is_none()
+        && record.engram.uncertain_grant_id.is_none()
+    {
+        record.engram.uncertain_grant_id = Some(grant_id);
+        // Only a session status can settle it, so the next use must rebind.
+        record.engram.rebind_required = true;
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -2590,6 +2716,7 @@ struct EngramBindingTarget {
     effects: Vec<EngramEffect>,
     routing_token: Option<String>,
     active_grant_id: Option<String>,
+    uncertain_grant_id: Option<String>,
     rebind_required: bool,
     circuit_open: bool,
     next_bind_retry_at: Option<std::time::Instant>,
@@ -2859,44 +2986,64 @@ impl AppState {
             && !record.queued_prompts.iter().any(QueuedPromptRecord::has_engram_intent)
             && (record.engram.routing_token.is_some()
                 || record.engram.active_grant_id.is_some()
+                || record.engram.uncertain_grant_id.is_some()
                 || record.engram.rebind_required)
     }
 
-    /// Children of delegations that completed. Completion is assigned only
-    /// once the child's outcome is no longer running, and by then a prepared
-    /// begin is either persisted as queued Engram intent (which the candidate
-    /// filter already excludes) or mirrored in `active_grant_id` (a failed
-    /// turn-end checkpoint keeps it); a completed child without a mirrored
-    /// grant therefore has nothing left to recover. Failed and canceled
-    /// children are deliberately absent: cancellation or failure can
-    /// interrupt at any moment, including a turn begin whose outcome only the
-    /// retained routing token can settle, so they keep eager recovery.
-    fn engram_completed_delegation_children_locked(inner: &StateInner) -> HashSet<&str> {
+    /// Children of delegations that already reached a terminal status. Such a
+    /// child has no turn left to recover unless a grant may still be open on
+    /// Engram, and every such grant is recorded locally: a begun turn is
+    /// mirrored when its dispatch record commits, a begin whose outcome never
+    /// arrived is recorded as uncertain (by the abandon or detach that raced
+    /// it, by the transport failure, by a failed compensating checkpoint, or
+    /// when the queued intent that owned it is dropped), and durable queued
+    /// intent is excluded by the candidate filter and recovers exactly. A
+    /// terminal child with neither a mirrored nor an uncertain grant, whose
+    /// begins are all recorded that way, therefore needs no boot-time control
+    /// request, whether it completed, failed or was canceled.
+    fn engram_finished_delegation_children_locked(
+        inner: &StateInner,
+    ) -> HashMap<&str, DelegationStatus> {
         inner
             .delegations
             .iter()
-            .filter(|delegation| delegation.status == DelegationStatus::Completed)
-            .map(|delegation| delegation.child_session_id.as_str())
+            .filter(|delegation| delegation_is_terminal(delegation.status))
+            .map(|delegation| (delegation.child_session_id.as_str(), delegation.status))
             .collect()
     }
 
     fn engram_boot_recovery_targets_locked(inner: &StateInner) -> Vec<EngramBindingTarget> {
-        // Retain child-shaped authority for children. A completed delegation
-        // child is skipped unless it still holds a begun grant: hundreds of
-        // historical review children would otherwise each cost a bind and a
-        // short-lived sidecar on every boot (tm-cr0i). Its stale token stays
-        // in place; a later follow-up reconciles it through the ordinary
-        // rebind path at admission, exactly as a lazily retried target does.
-        let completed_children = Self::engram_completed_delegation_children_locked(inner);
-        inner
+        // Retain child-shaped authority for children. A finished delegation
+        // child is skipped unless it still holds a mirrored or uncertain
+        // grant: hundreds of historical review children would otherwise each
+        // cost a bind and a short-lived sidecar on every boot (tm-cr0i). Its
+        // stale token stays in place; a later follow-up reconciles it through
+        // the ordinary rebind path at admission, exactly as a lazily retried
+        // target does. A record written before begins were recorded may hide
+        // one, so it keeps recovering until an accepted bind settles it; such
+        // records come last so live sessions get the budget first, and each
+        // bounded boot settles as many of them as it can. That settlement is
+        // owed only by the statuses that can interrupt a begin, failed and
+        // canceled: a completed child's turn ran, so its begin was mirrored
+        // before the outcome, and completed children were skipped whatever
+        // their record said before begins were recorded, so an unrecorded one
+        // stays skipped rather than bringing that cost back.
+        let finished_children = Self::engram_finished_delegation_children_locked(inner);
+        let mut settled_first = inner
             .sessions
             .iter()
             .filter(|record| Self::engram_boot_recovery_candidate_locked(record))
-            .filter(|record| {
-                record.engram.active_grant_id.is_some()
-                    || !completed_children.contains(record.session.id.as_str())
-            })
             .filter_map(|record| {
+                let finished = finished_children.get(record.session.id.as_str()).copied();
+                let unsettled = !record.engram.begins_recorded
+                    && finished.is_some_and(|status| status != DelegationStatus::Completed);
+                if finished.is_some()
+                    && !unsettled
+                    && record.engram.active_grant_id.is_none()
+                    && record.engram.uncertain_grant_id.is_none()
+                {
+                    return None;
+                }
                 Self::engram_binding_target_for_session_shape_locked(
                     inner,
                     &record.session.id,
@@ -2904,7 +3051,13 @@ impl AppState {
                 )
                 .ok()
                 .flatten()
+                .map(|target| (unsettled, target))
             })
+            .collect::<Vec<_>>();
+        settled_first.sort_by_key(|(unsettled_finished_child, _)| *unsettled_finished_child);
+        settled_first
+            .into_iter()
+            .map(|(_, target)| target)
             .collect()
     }
 
@@ -3660,6 +3813,10 @@ impl AppState {
         // cannot be checkpointed: the next attempt must rebind so Engram can
         // expire the issued-but-unbegun grant.
         let mut issued_unbegun_grant_id = None;
+        // A begin whose outcome never arrived, or arrived for another grant,
+        // leaves this grant possibly begun on Engram. Recorded on the session
+        // when the dispatch record is finished, so recovery settles it later.
+        let mut uncertain_grant_id: Option<String> = None;
 
         let (decision, refusal_code, directives, delivered_range, fail_mode) = loop {
             match evaluation {
@@ -3699,10 +3856,14 @@ impl AppState {
                         );
                     };
                     let begin_started = std::time::Instant::now();
-                    if !admission_owner
-                        .as_ref()
-                        .is_some_and(|owner| self.queued_engram_owner_is_current(session_id, owner))
-                    {
+                    if !admission_owner.as_ref().is_some_and(|owner| {
+                        self.mark_engram_begin_requested_if_current(
+                            session_id,
+                            owner,
+                            pending.dispatch_generation,
+                            &grant_id,
+                        )
+                    }) {
                         break (
                             EngramControlCardDecision::Degraded,
                             Some("authorization_superseded".to_owned()),
@@ -3733,11 +3894,26 @@ impl AppState {
                         .as_ref()
                         .is_some_and(|owner| self.queued_engram_owner_is_current(session_id, owner))
                     {
-                        if let Ok(EngramTurnBeginResponse::Begin { receipt }) = &begin
-                            && receipt.grant_id == grant_id
-                        {
-                            active_grant_id = Some(grant_id.clone());
-                            issued_unbegun_grant_id = None;
+                        match &begin {
+                            Ok(EngramTurnBeginResponse::Begin { receipt })
+                                if receipt.grant_id == grant_id =>
+                            {
+                                active_grant_id = Some(grant_id.clone());
+                                issued_unbegun_grant_id = None;
+                            }
+                            // A definitive refusal begun nothing.
+                            Ok(EngramTurnBeginResponse::Refuse { .. }) => {
+                                self.clear_engram_begin_requested_if_current(
+                                    session_id,
+                                    pending.dispatch_generation,
+                                );
+                            }
+                            // A lost reply or a receipt for another grant
+                            // leaves this grant possibly begun, whoever now
+                            // owns the queue. Whatever superseded the owner
+                            // may have recorded it from the marker already;
+                            // the record keeps one.
+                            _ => uncertain_grant_id = Some(grant_id.clone()),
                         }
                         break (
                             EngramControlCardDecision::Degraded,
@@ -3754,6 +3930,7 @@ impl AppState {
                                 admission_owner.as_ref(),
                             );
                             if receipt.grant_id != grant_id {
+                                uncertain_grant_id = Some(grant_id.clone());
                                 break (
                                     EngramControlCardDecision::Degraded,
                                     Some("begin_grant_mismatch".to_owned()),
@@ -3787,6 +3964,10 @@ impl AppState {
                             // grant. Only a subsequent re-evaluate grant needs
                             // orphan recovery if begin cannot complete.
                             issued_unbegun_grant_id = None;
+                            self.clear_engram_begin_requested_if_current(
+                                session_id,
+                                pending.dispatch_generation,
+                            );
                             let reevaluate_target = if code == "stale_fence" {
                                 if self
                                     .retire_queued_engram_evaluation(
@@ -4003,6 +4184,11 @@ impl AppState {
                                 session_id,
                                 admission_owner.as_ref(),
                             );
+                            // A refusal is definitive: nothing was begun.
+                            self.clear_engram_begin_requested_if_current(
+                                session_id,
+                                pending.dispatch_generation,
+                            );
                             if engram_begin_refusal_allows_reevaluation(&code) {
                                 // A second moved-basis refusal is not retried,
                                 // but Engram has still expired that grant.
@@ -4026,6 +4212,13 @@ impl AppState {
                                 admission_owner.as_ref(),
                             );
                             let code = self.engram_failure_card_code(session_id, &error);
+                            // The request may have reached Engram before the
+                            // failure, so the grant is possibly begun. That
+                            // holds for a structured error reply too: it does
+                            // not say whether the begin was applied first, so
+                            // it is recorded deliberately and a session status
+                            // settles the ones that were not.
+                            uncertain_grant_id = Some(grant_id.clone());
                             break (
                                 EngramControlCardDecision::Degraded,
                                 Some(code),
@@ -4127,6 +4320,7 @@ impl AppState {
                 session_id,
                 pending.dispatch_generation,
                 active_grant_id.clone(),
+                uncertain_grant_id.clone(),
                 card.clone(),
             ) {
                 EngramDispatchRecordFinish::Ready => {
@@ -4197,31 +4391,87 @@ impl AppState {
             // project was disabled or reconfigured while it was in flight, the
             // begun grant belongs to the old Engram store and must be closed
             // there before that sidecar is reaped.
-            let _ = target.adapter.request(
-                &target.connection,
-                &EngramControlRequest::TurnCheckpoint {
-                    routing_token: routing_token.clone(),
-                    grant_id: grant_id.clone(),
-                    next_intent: EngramNextIntent::Exit,
-                    observations: Vec::new(),
-                    idempotency_key: engram_checkpoint_idempotency_key(
-                        format!("termal-stale-begin-checkpoint:{session_id}:{grant_id}"),
-                        &[],
-                    ),
-                },
-                target.settings.call_timeout(),
-            );
+            let checkpoint = target
+                .adapter
+                .request(
+                    &target.connection,
+                    &EngramControlRequest::TurnCheckpoint {
+                        routing_token: routing_token.clone(),
+                        grant_id: grant_id.clone(),
+                        next_intent: EngramNextIntent::Exit,
+                        observations: Vec::new(),
+                        idempotency_key: engram_checkpoint_idempotency_key(
+                            format!("termal-stale-begin-checkpoint:{session_id}:{grant_id}"),
+                            &[],
+                        ),
+                    },
+                    target.settings.call_timeout(),
+                )
+                .and_then(parse_engram_result::<EngramTurnCheckpointResponse>);
+            // A matching receipt, or Engram's word that the grant was never
+            // begun, settles it. Anything else leaves the grant possibly open
+            // on Engram: keep it recorded as uncertain so restart recovery and
+            // the next admission close it from local state alone.
+            let settled = match &checkpoint {
+                Ok(EngramTurnCheckpointResponse::Checkpointed { receipt }) => {
+                    receipt.grant_id == grant_id
+                }
+                Ok(EngramTurnCheckpointResponse::Refuse { code }) => {
+                    engram_grant_code_was_issued_but_not_begun(code)
+                }
+                Err(error) => engram_grant_was_issued_but_not_begun(error),
+            };
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             if let Some(index) = inner.find_session_index(session_id) {
-                let record = inner
-                    .session_mut_by_index(index)
-                    .expect("session index should be valid");
-                if admission_owner
-                    .as_ref()
-                    .is_some_and(|owner| owner.matches(record))
-                    && record.engram.routing_token.as_deref() == Some(routing_token.as_str())
-                {
-                    record.engram.rebind_required = true;
+                let changed = {
+                    let record = &mut inner.sessions[index];
+                    let mut changed = false;
+                    if record.engram.routing_token.as_deref() == Some(routing_token.as_str()) {
+                        if settled {
+                            if record.engram.uncertain_grant_id.as_deref()
+                                == Some(grant_id.as_str())
+                            {
+                                record.engram.uncertain_grant_id = None;
+                                changed = true;
+                            }
+                            // A marker still naming this begin no longer
+                            // names a possibly begun grant: its later
+                            // release must not record what this checkpoint
+                            // closed.
+                            if let Some(pending) = record.engram.pending_dispatch.as_mut()
+                                && pending.begin_requested.as_deref() == Some(grant_id.as_str())
+                            {
+                                pending.begin_requested = None;
+                            }
+                        } else if record.engram.active_grant_id.is_none()
+                            && record.engram.uncertain_grant_id.is_none()
+                        {
+                            record.engram.uncertain_grant_id = Some(grant_id.clone());
+                            changed = true;
+                        }
+                        if admission_owner
+                            .as_ref()
+                            .is_some_and(|owner| owner.matches(record))
+                            && !record.engram.rebind_required
+                        {
+                            record.engram.rebind_required = true;
+                            changed = true;
+                        }
+                    }
+                    changed
+                };
+                if changed {
+                    // The slot was edited in place above; stamp it so the
+                    // delta persister writes the settlement.
+                    inner
+                        .stamp_session_at_index(index)
+                        .expect("session index should be valid");
+                    if let Err(error) = self.persist_internal_locked(&inner) {
+                        eprintln!(
+                            "engram> session={session_id} failed persisting the stale begin \
+                             settlement: {error:#}"
+                        );
+                    }
                 }
             }
         }
@@ -4233,18 +4483,34 @@ impl AppState {
             // untouched.
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             if let Some(index) = inner.find_session_index(session_id) {
-                let record = inner
-                    .session_mut_by_index(index)
-                    .expect("session index should be valid");
-                if record
-                    .engram
-                    .pending_dispatch
-                    .as_ref()
-                    .is_some_and(|current| {
-                        current.dispatch_generation == pending.dispatch_generation
-                    })
-                {
-                    record.engram.pending_dispatch = None;
+                let recorded = {
+                    let record = inner
+                        .session_mut_by_index(index)
+                        .expect("session index should be valid");
+                    let releases_marker =
+                        record
+                            .engram
+                            .pending_dispatch
+                            .as_ref()
+                            .is_some_and(|current| {
+                                current.dispatch_generation == pending.dispatch_generation
+                            });
+                    let recorded_before = record.engram.uncertain_grant_id.is_some();
+                    if releases_marker {
+                        detach_engram_pending_dispatch_keeping_uncertain_begin(record);
+                    }
+                    releases_marker
+                        && !recorded_before
+                        && record.engram.uncertain_grant_id.is_some()
+                };
+                // The marker was the only evidence of that begin. A finished
+                // child's boot recovery relies on the record alone, so the
+                // evidence must not wait for a later commit.
+                if recorded && let Err(error) = self.persist_internal_locked(&inner) {
+                    eprintln!(
+                        "engram> session={session_id} failed persisting the released begin: \
+                         {error:#}"
+                    );
                 }
             }
         }
@@ -4256,6 +4522,7 @@ impl AppState {
         session_id: &str,
         dispatch_generation: u64,
         active_grant_id: Option<String>,
+        uncertain_grant_id: Option<String>,
         card: EngramControlCard,
     ) -> EngramDispatchRecordFinish {
         let (revision, creates) = {
@@ -4381,7 +4648,11 @@ impl AppState {
                     retire_promoted_engram_head(record, &pending.intent_fingerprint);
                 }
             }
-            record.engram.pending_dispatch = None;
+            let released_begin = record
+                .engram
+                .pending_dispatch
+                .take()
+                .and_then(|pending| pending.begin_requested);
             if let Some(grant_id) = active_grant_id {
                 if let Some(prepared) = record
                     .queued_prompts
@@ -4390,7 +4661,23 @@ impl AppState {
                 {
                     prepared.begun_grant_id = Some(grant_id.clone());
                 }
+                // A begin recorded as uncertain while it was in flight has
+                // its outcome now: begun and mirrored, so the turn-end
+                // checkpoint closes it like any other.
+                if record.engram.uncertain_grant_id.as_deref() == Some(grant_id.as_str()) {
+                    record.engram.uncertain_grant_id = None;
+                }
                 record.engram.active_grant_id = Some(grant_id);
+            }
+            // A begin handed to the transport whose outcome this record does
+            // not settle stays uncertain: the caller found it out, or the
+            // released marker alone still names it (a refusal clears the
+            // marker's begin; a mirrored grant is its outcome).
+            if let Some(grant_id) = uncertain_grant_id.or(released_begin)
+                && record.engram.active_grant_id.is_none()
+                && record.engram.uncertain_grant_id.is_none()
+            {
+                record.engram.uncertain_grant_id = Some(grant_id);
             }
             let message_index = push_message_on_record(record, message);
             let mut creates = message_created_delta_parts_for_indices(record, vec![message_index]);
@@ -4653,6 +4940,7 @@ impl AppState {
             effects: engram_effects_for_write_policy(&delegation.write_policy),
             routing_token: child.engram.routing_token.clone(),
             active_grant_id: child.engram.active_grant_id.clone(),
+            uncertain_grant_id: child.engram.uncertain_grant_id.clone(),
             rebind_required: child.engram.rebind_required,
             circuit_open: child.engram.circuit_open,
             next_bind_retry_at: child.engram.next_bind_retry_at,
@@ -4742,6 +5030,7 @@ impl AppState {
             effects: vec![EngramEffect::Observe, EngramEffect::Communicate],
             routing_token: parent.engram.routing_token.clone(),
             active_grant_id: parent.engram.active_grant_id.clone(),
+            uncertain_grant_id: parent.engram.uncertain_grant_id.clone(),
             rebind_required: parent.engram.rebind_required,
             circuit_open: parent.engram.circuit_open,
             next_bind_retry_at: parent.engram.next_bind_retry_at,
@@ -4922,8 +5211,11 @@ impl AppState {
         let recovery_started_at = target
             .admission_started_at
             .unwrap_or_else(std::time::Instant::now);
-        let was_rebind = target.rebind_required || target.circuit_open;
-        if target.rebind_required || target.circuit_open {
+        // An uncertain grant can only be settled by a session status, so it
+        // takes the rebind path even when nothing else asked for one.
+        let was_rebind =
+            target.rebind_required || target.circuit_open || target.uncertain_grant_id.is_some();
+        if was_rebind {
             if let Some(routing_token) = target.routing_token.clone() {
                 let timeout = target
                     .remaining_dispatch_timeout(recovery_started_at)
@@ -4982,8 +5274,11 @@ impl AppState {
                 if let Some(status) = status {
                     // Engram is authoritative about whether a grant is open.
                     // A stale local grant must not be checkpointed after the
-                    // control plane reports a clean session.
-                    if status.open_grant_id.is_none() && target.active_grant_id.is_some() {
+                    // control plane reports a clean session, and a clean
+                    // session settles an uncertain begin as never begun.
+                    if status.open_grant_id.is_none()
+                        && (target.active_grant_id.is_some() || target.uncertain_grant_id.is_some())
+                    {
                         self.clear_engram_stale_binding_record(
                             &target.connection.session_id,
                             &routing_token,
@@ -4991,6 +5286,7 @@ impl AppState {
                             owner,
                         )?;
                         target.active_grant_id = None;
+                        target.uncertain_grant_id = None;
                     }
                     if let Some(grant_id) = status.open_grant_id.as_deref() {
                         let timeout = target
@@ -5045,7 +5341,26 @@ impl AppState {
                         let checkpoint = match checkpoint {
                             Err(error) if engram_grant_was_issued_but_not_begun(&error) => None,
                             Err(error) => return Err(error),
-                            Ok(EngramTurnCheckpointResponse::Checkpointed { .. }) => Some(()),
+                            Ok(EngramTurnCheckpointResponse::Checkpointed { receipt })
+                                if receipt.grant_id == grant_id =>
+                            {
+                                Some(())
+                            }
+                            Ok(EngramTurnCheckpointResponse::Checkpointed { receipt }) => {
+                                // A receipt for another grant settles nothing
+                                // about the one status reported open. The
+                                // local record keeps its grant, mirrored or
+                                // uncertain, and the next recovery or
+                                // admission asks again.
+                                return Err(EngramTransportError::remote(EngramControlErrorBody {
+                                    code: "restart_checkpoint_receipt_mismatch".to_owned(),
+                                    message: format!(
+                                        "Engram restart checkpoint receipt names grant `{}` \
+                                         instead of `{grant_id}`",
+                                        receipt.grant_id
+                                    ),
+                                }));
+                            }
                             Ok(EngramTurnCheckpointResponse::Refuse { code })
                                 if engram_grant_code_was_issued_but_not_begun(&code) =>
                             {
@@ -5086,8 +5401,17 @@ impl AppState {
                                         "Recovered checkpoint no longer owns the queued prompt",
                                     ));
                                 }
-                                if record.engram.active_grant_id.as_deref() == Some(grant_id) {
+                                let mirrored_active =
+                                    record.engram.active_grant_id.as_deref() == Some(grant_id);
+                                let mirrored_uncertain =
+                                    record.engram.uncertain_grant_id.as_deref() == Some(grant_id);
+                                if mirrored_active {
                                     record.engram.active_grant_id = None;
+                                }
+                                if mirrored_uncertain {
+                                    record.engram.uncertain_grant_id = None;
+                                }
+                                if mirrored_active || mirrored_uncertain {
                                     self.persist_internal_locked(&inner).map_err(
                                         |error| {
                                             EngramTransportError::transport(format!(
@@ -5276,6 +5600,11 @@ impl AppState {
                 .front()
                 .is_some_and(QueuedPromptRecord::is_engram_retained);
             record.engram.routing_token = Some(routing_token.clone());
+            // Engram refuses a bind while a grant is begun, so an accepted
+            // bind settles any uncertain begin on the old binding, including
+            // one a record written before begins were recorded may hide.
+            record.engram.uncertain_grant_id = None;
+            record.engram.begins_recorded = true;
             if target.admission_started_at.is_some() {
                 if let Some(queued) = record.queued_prompts.front_mut() {
                     if queued.engram_bind.as_ref().is_some_and(|prepared| {
@@ -5359,6 +5688,7 @@ impl AppState {
             record.engram.routing_token = None;
         }
         record.engram.active_grant_id = None;
+        record.engram.uncertain_grant_id = None;
         self.persist_internal_locked(&inner).map_err(|error| {
             EngramTransportError::transport(format!(
                 "failed persisting stale Engram binding cleanup: {error:#}"
@@ -5493,6 +5823,7 @@ impl AppState {
                 evaluate_latency_ms: duration_millis(started_at.elapsed()),
                 started_at,
                 awaiting_runtime_stop_resolution: false,
+                begin_requested: None,
             });
         }
         let mut target = match self.ensure_engram_session_bound_with_budget_off_lock(
@@ -5519,6 +5850,7 @@ impl AppState {
                     evaluate_latency_ms: duration_millis(started_at.elapsed()),
                     started_at,
                     awaiting_runtime_stop_resolution: false,
+                    begin_requested: None,
                 });
             }
         };
@@ -5735,6 +6067,7 @@ impl AppState {
             evaluate_latency_ms: duration_millis(started_at.elapsed()),
             started_at,
             awaiting_runtime_stop_resolution: false,
+            begin_requested: None,
         })
     }
 

@@ -313,6 +313,15 @@ impl AppState {
             queued.pending_prompt.id == prompt_id
                 && (queued.is_engram_retained() || record.engram.admission_in_progress.is_some())
         });
+        // The runtime marker names the exact grant in flight; the durable
+        // intent alone, as after a restart, only says a begin may exist.
+        let dropped_begin = dropped_engram_intent_grant(
+            record,
+            record
+                .queued_prompts
+                .iter()
+                .filter(|queued| queued.pending_prompt.id == prompt_id),
+        );
         record
             .queued_prompts
             .retain(|queued| queued.pending_prompt.id != prompt_id);
@@ -322,7 +331,7 @@ impl AppState {
         if cancel_admission {
             record.engram.dispatch_generation = record.engram.dispatch_generation.saturating_add(1);
             record.engram.recovered_admission = false;
-            record.engram.pending_dispatch = None;
+            detach_engram_pending_dispatch_keeping_uncertain_begin(record);
             record.engram.rebind_required = true;
             record.set_auto_dispatch_blocked(true);
             record.session.status = SessionStatus::Idle;
@@ -333,6 +342,10 @@ impl AppState {
             clear_active_turn_file_change_tracking(record);
             record.session.preview = "Engram authorization canceled.".to_owned();
         }
+        // Wherever the canceled prompt sat, the begin its intent may own is
+        // recorded; a head canceled under admission had its marker's exact
+        // begin found first, so that one wins.
+        record_dropped_engram_intent(record, dropped_begin);
         sync_pending_prompts(record);
 
         let lifecycle = reconcile_removed_followup_prompt_locked(&mut inner, session_id, prompt_id);
@@ -974,7 +987,13 @@ impl AppState {
                 .as_ref()
                 .is_some_and(|owner| owner.matches(record))
             {
+                // The head's durable intent may be the only evidence of a
+                // begin an earlier process lost; a begin the marker names
+                // wins, and the abandon below records that same grant.
+                let retired_head_begin =
+                    dropped_engram_intent_grant(record, record.queued_prompts.front());
                 record.queued_prompts.pop_front();
+                record_dropped_engram_intent(record, retired_head_begin);
                 sync_pending_prompts(record);
                 self.commit_locked(&mut inner).map_err(|error| {
                     ApiError::internal(format!(

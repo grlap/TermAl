@@ -214,8 +214,10 @@ impl Drop for EngramAdmissionGuard<'_> {
 
 // Stop/terminalization of a promoted turn must not leave that same turn as a
 // runnable successor. Unknown admission is parked separately, before retry.
-fn retire_promoted_engram_head(record: &mut SessionRecord, fingerprint: &str) {
-    let retire = record.queued_prompts.front().is_some_and(|queued| {
+/// Whether the queued head is the promoted prompt of the dispatch carrying
+/// `fingerprint`: the one [`retire_promoted_engram_head`] removes.
+fn promoted_engram_head_matches(record: &SessionRecord, fingerprint: &str) -> bool {
+    record.queued_prompts.front().is_some_and(|queued| {
         queued.promoted_message_index.is_some()
             && engram_turn_intent_fingerprint(
                 &queued.pending_prompt.text,
@@ -224,8 +226,11 @@ fn retire_promoted_engram_head(record: &mut SessionRecord, fingerprint: &str) {
                 queued.pending_prompt.source.as_ref(),
                 queued.source,
             ) == fingerprint
-    });
-    if retire {
+    })
+}
+
+fn retire_promoted_engram_head(record: &mut SessionRecord, fingerprint: &str) {
+    if promoted_engram_head_matches(record, fingerprint) {
         record.queued_prompts.pop_front();
         sync_pending_prompts(record);
     }
@@ -241,6 +246,50 @@ impl AppState {
         inner
             .find_session_index(session_id)
             .is_some_and(|index| owner.matches(&inner.sessions[index]))
+    }
+
+    /// Proves the owner still holds the prompt and, under that same lock,
+    /// records which grant its dispatch is handing to `turn_begin`, so an
+    /// abandon racing the in-flight request mirrors exactly that grant as
+    /// possibly begun instead of assuming Engram never saw it. A begin whose
+    /// uncertainty cannot be recorded, because the dispatch is no longer
+    /// pending, is not authorized.
+    fn mark_engram_begin_requested_if_current(
+        &self,
+        session_id: &str,
+        owner: &EngramQueuedAdmissionOwner,
+        dispatch_generation: u64,
+        grant_id: &str,
+    ) -> bool {
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let Some(index) = inner.find_session_index(session_id) else {
+            return false;
+        };
+        if !owner.matches(&inner.sessions[index]) {
+            return false;
+        }
+        match inner.sessions[index].engram.pending_dispatch.as_mut() {
+            Some(pending) if pending.dispatch_generation == dispatch_generation => {
+                pending.begin_requested = Some(grant_id.to_owned());
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Forgets the recorded begin once Engram has definitively refused it, so
+    /// an abandon that races the re-evaluation, or the gap before the record
+    /// is finished, does not record a grant Engram never began as uncertain.
+    fn clear_engram_begin_requested_if_current(&self, session_id: &str, dispatch_generation: u64) {
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let Some(index) = inner.find_session_index(session_id) else {
+            return;
+        };
+        if let Some(pending) = inner.sessions[index].engram.pending_dispatch.as_mut()
+            && pending.dispatch_generation == dispatch_generation
+        {
+            pending.begin_requested = None;
+        }
     }
 
     fn require_queued_engram_owner(
@@ -432,7 +481,7 @@ impl AppState {
             return Ok(false);
         }
         record.engram.dispatch_generation = record.engram.dispatch_generation.saturating_add(1);
-        record.engram.pending_dispatch = None;
+        detach_engram_pending_dispatch_keeping_uncertain_begin(record);
         record.engram.rebind_required = true;
         if let Some(queued) = record.queued_prompts.front_mut() {
             queued.engram_interrupted = true;

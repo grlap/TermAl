@@ -700,10 +700,18 @@ fn prioritize_user_queued_prompts(record: &mut SessionRecord) {
 /// Clears queued prompts by source.
 fn clear_queued_prompts_by_source(record: &mut SessionRecord, source: QueuedPromptSource) {
     let original_len = record.queued_prompts.len();
+    let dropped_begin = dropped_engram_intent_grant(
+        record,
+        record
+            .queued_prompts
+            .iter()
+            .filter(|queued| queued.source == source),
+    );
     record
         .queued_prompts
         .retain(|queued| queued.source != source);
     if record.queued_prompts.len() != original_len {
+        record_dropped_engram_intent(record, dropped_begin);
         sync_pending_prompts(record);
     }
 }
@@ -719,14 +727,29 @@ fn clear_queued_prompts_by_source_except_admission_owner(
         && record.queued_prompts.front().is_some_and(|queued| {
             queued.source == source && queued.promoted_message_index.is_some()
         });
+    // One predicate decides both what is dropped and what stays, so the
+    // begin recorded below is found over exactly the prompts that go.
+    let keep = |index: usize, queued: &QueuedPromptRecord| {
+        queued.source != source || (index == 0 && preserve_head)
+    };
     let original_len = record.queued_prompts.len();
+    let dropped_begin = dropped_engram_intent_grant(
+        record,
+        record
+            .queued_prompts
+            .iter()
+            .enumerate()
+            .filter(|(index, queued)| !keep(*index, queued))
+            .map(|(_, queued)| queued),
+    );
     let mut index = 0usize;
     record.queued_prompts.retain(|queued| {
-        let retain = queued.source != source || (index == 0 && preserve_head);
+        let retain = keep(index, queued);
         index = index.saturating_add(1);
         retain
     });
     if record.queued_prompts.len() != original_len {
+        record_dropped_engram_intent(record, dropped_begin);
         sync_pending_prompts(record);
     }
 }

@@ -832,6 +832,7 @@ fn failed_defer_card_commit_keeps_the_durable_evaluation_recovery_anchor() {
             evaluate_latency_ms: 0,
             started_at: std::time::Instant::now(),
             awaiting_runtime_stop_resolution: false,
+            begin_requested: None,
         });
         record.engram.dispatch_generation
     };
@@ -851,6 +852,7 @@ fn failed_defer_card_commit_keeps_the_durable_evaluation_recovery_anchor() {
         state.finish_engram_dispatch_record(
             &session,
             generation,
+            None,
             None,
             EngramControlCard {
                 schema_version: ENGRAM_CONTROL_SCHEMA_VERSION,

@@ -1852,7 +1852,7 @@ impl SessionRecord {
             // failed promotion commit did not make a provider handoff real,
             // so detach only its runtime pending marker without retiring the
             // prepared request or advancing the operation generation.
-            self.engram.pending_dispatch = None;
+            detach_engram_pending_dispatch_keeping_uncertain_begin(self);
         } else {
             take_and_abandon_engram_pending_dispatch(self);
         }

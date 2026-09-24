@@ -2634,18 +2634,18 @@ impl AppState {
         // therefore best-effort after the durable settings commit. Merely
         // retrying older ledger work must not weaken an otherwise strict reset.
         let best_effort_checkpoint_cleanup = disabling || authority_retirement_reason.is_some();
-        let preserve_checkpoint_recovery = best_effort_checkpoint_cleanup
-            && project_snapshot.engram.as_ref().is_some_and(|current| {
-                match (current.home.as_deref(), settings.home.as_deref()) {
-                    (Some(current_home), Some(next_home)) => engram_authority_stores_match(
-                        current.authority_store_key.as_ref(),
-                        current_home,
-                        settings.authority_store_key.as_ref(),
-                        next_home,
-                    ),
-                    _ => false,
-                }
-            });
+        let same_authority_store = project_snapshot.engram.as_ref().is_some_and(|current| {
+            match (current.home.as_deref(), settings.home.as_deref()) {
+                (Some(current_home), Some(next_home)) => engram_authority_stores_match(
+                    current.authority_store_key.as_ref(),
+                    current_home,
+                    settings.authority_store_key.as_ref(),
+                    next_home,
+                ),
+                _ => false,
+            }
+        });
+        let preserve_checkpoint_recovery = best_effort_checkpoint_cleanup && same_authority_store;
         let mut checkpoint_failures = Vec::new();
         let mut checkpoint_recovery = Vec::new();
         let mut checkpointed = Vec::new();
@@ -2888,8 +2888,48 @@ impl AppState {
                     let record = inner
                         .session_mut_by_index(index)
                         .expect("session index should be valid");
+                    // The reset checkpoints mirrored grants only. A grant
+                    // whose begin outcome the host never learned may still be
+                    // begun on Engram, and only a session status can say; a
+                    // record loaded from a store written before begins were
+                    // recorded may hide such a grant; and the retained queued
+                    // intent this reset keeps may be the only evidence of
+                    // one, which the cancellation that drops it turns into a
+                    // recorded marker. On the same authority store the record
+                    // keeps that evidence with the token that can ask, much
+                    // as a best-effort reset keeps the grant of a failed
+                    // checkpoint below; unlike that failure record it applies
+                    // to strict resets too, since it defers a settlement the
+                    // reset never attempts. The session's next bind, or boot
+                    // recovery of a finished child, settles it; after an
+                    // upgrade, the first same-store reset therefore keeps the
+                    // token of every record loaded unrecorded, and their next
+                    // bind settles them. A home change cannot carry that
+                    // identity into the new store.
+                    let same_store_carry_over = (same_authority_store
+                        && (record.engram.uncertain_grant_id.is_some()
+                            || !record.engram.begins_recorded
+                            || record
+                                .queued_prompts
+                                .iter()
+                                .any(QueuedPromptRecord::has_engram_intent)))
+                    .then(|| {
+                        (
+                            record.engram.routing_token.clone(),
+                            record.engram.uncertain_grant_id.clone(),
+                            record.engram.begins_recorded,
+                        )
+                    });
                     record.engram = EngramSessionState::default();
                     record.engram.dispatch_generation = dispatch_generation;
+                    if let Some((routing_token, uncertain_grant_id, begins_recorded)) =
+                        same_store_carry_over
+                    {
+                        record.engram.routing_token = routing_token;
+                        record.engram.uncertain_grant_id = uncertain_grant_id;
+                        record.engram.begins_recorded = begins_recorded;
+                        record.engram.rebind_required = true;
+                    }
                     // Resetting a binding is not proof that a retained prompt
                     // was never delivered. Preserve the durable queue barrier.
                     if let Some(queued) = record
@@ -3323,6 +3363,7 @@ impl AppState {
                     .expect("session index should be valid");
                 target.routing_token = record.engram.routing_token.clone();
                 target.active_grant_id = record.engram.active_grant_id.clone();
+                target.uncertain_grant_id = record.engram.uncertain_grant_id.clone();
                 target.project_reset_owner_generation = Some(owner_generation);
                 if target.active_grant_id.is_none() {
                     let idle = !record.engram.bind_in_progress

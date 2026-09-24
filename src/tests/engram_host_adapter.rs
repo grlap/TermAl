@@ -18,6 +18,9 @@ mod fixture_contracts;
 #[path = "engram_boot_recovery_targets.rs"]
 mod boot_recovery_targets;
 
+#[path = "engram_uncertain_begin.rs"]
+mod uncertain_begin;
+
 use self::control_transport::{
     assert_engram_control_descendant_was_terminated, prepare_engram_control_process_tree_fixture,
 };
@@ -790,6 +793,7 @@ fn pending_engram_grant(
         evaluate_latency_ms: 0,
         started_at: std::time::Instant::now(),
         awaiting_runtime_stop_resolution: false,
+        begin_requested: None,
     }
 }
 
@@ -11069,6 +11073,7 @@ fn api_rejection_guard_ignores_a_dispatch_marker_replaced_after_finish() {
         &child_id,
         stale_generation,
         Some("api-rejection-stale-grant".to_owned()),
+        None,
         EngramControlCard {
             schema_version: ENGRAM_CONTROL_SCHEMA_VERSION,
             stage: EngramControlStage::Dispatch,
@@ -12225,6 +12230,10 @@ fn assert_terminal_callback_abandons_blocked_begin(
                 .map(|pending| pending.dispatch_generation),
             Some(successor_generation),
             "the stale begin must not clear or replace the successor pending dispatch"
+        );
+        assert_eq!(
+            child.engram.uncertain_grant_id, None,
+            "the stale begin's checkpoint ran against a superseded binding and must record nothing"
         );
     }
 
@@ -15399,12 +15408,14 @@ fn circuit_breaker_and_fatal_protocol_errors_update_only_the_effective_child() {
             evaluate_latency_ms: 0,
             started_at: std::time::Instant::now(),
             awaiting_runtime_stop_resolution: false,
+            begin_requested: None,
         });
         record.engram.dispatch_generation
     };
     let accepted = state.finish_engram_dispatch_record(
         &child_id,
         dispatch_generation,
+        None,
         None,
         EngramControlCard {
             schema_version: ENGRAM_CONTROL_SCHEMA_VERSION,
@@ -15538,6 +15549,7 @@ fn dispatch_card_persist_failure_withholds_granted_delivery() {
             evaluate_latency_ms: 0,
             started_at: std::time::Instant::now(),
             awaiting_runtime_stop_resolution: false,
+            begin_requested: None,
         });
         record.engram.dispatch_generation
     };
@@ -15559,6 +15571,7 @@ fn dispatch_card_persist_failure_withholds_granted_delivery() {
         &child_id,
         dispatch_generation,
         Some("persist-failure-grant".to_owned()),
+        None,
         EngramControlCard {
             schema_version: ENGRAM_CONTROL_SCHEMA_VERSION,
             stage: EngramControlStage::Dispatch,
