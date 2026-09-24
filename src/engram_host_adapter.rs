@@ -2121,7 +2121,31 @@ struct EngramSessionState {
     admission_in_progress: Option<Arc<std::sync::atomic::AtomicBool>>,
     recovered_admission: bool,
     routing_token: Option<String>,
+    /// The work binding the accepted bind for `routing_token` carried, if
+    /// any: the claimed work Engram ties this control session to. Engram
+    /// admits host evidence on a checkpoint only through such a binding, so
+    /// an unbound session's checkpoints report nothing. In memory only; every
+    /// restart rebinds and refreshes it.
+    work_binding: Option<EngramControlWorkBinding>,
     active_grant_id: Option<String>,
+    /// The intent fingerprint of the turn `active_grant_id` was issued for,
+    /// reported as the action fingerprint of the execution observation on
+    /// that turn's end-of-turn checkpoint. In memory only: a grant that
+    /// outlives the process is closed by restart recovery, which reports no
+    /// observation because it never saw the turn end.
+    active_turn_intent_fingerprint: Option<String>,
+    /// The source basis of the session's workspace when the turn
+    /// `active_grant_id` begins started, taken before its prompt was
+    /// delivered. Compared with the end-time basis, it decides whether the
+    /// turn changed the workspace's content. In memory only.
+    active_turn_start_basis: Option<EngramExecutionSourceBasis>,
+    /// What the first closing checkpoint of the named grant reported for its
+    /// turn, reused verbatim by every retry of that checkpoint so the
+    /// idempotency key repeats: one observation, or none when the turn
+    /// changed source under a grant that mediates no local mutation. Keyed
+    /// by the grant so a stale report is never replayed under another one.
+    /// In memory only, cleared when the next grant is mirrored.
+    active_turn_report: Option<(String, Vec<EngramExecutionObservationInput>)>,
     /// A grant whose `turn_begin` outcome the host never learned: the request
     /// was handed to the transport and then abandoned, failed in transport,
     /// or was answered for another grant. Engram may hold it begun. Only the
@@ -2177,7 +2201,11 @@ impl Default for EngramSessionState {
             admission_in_progress: None,
             recovered_admission: false,
             routing_token: None,
+            work_binding: None,
             active_grant_id: None,
+            active_turn_intent_fingerprint: None,
+            active_turn_start_basis: None,
+            active_turn_report: None,
             uncertain_grant_id: None,
             begins_recorded: true,
             dispatch_generation: 0,
@@ -3497,57 +3525,119 @@ impl AppState {
         self.publish_message_created_delta_parts(revision, creates);
     }
 
+    /// The grant a checkpoint for `session_id` would close, with the target
+    /// that closes it, when the caller's runtime token and turn generation
+    /// and the session's own state still admit one; `None` skips it.
+    fn engram_checkpoint_grant_locked(
+        inner: &StateInner,
+        session_id: &str,
+        runtime_token: Option<&RuntimeToken>,
+        active_turn_generation: Option<u64>,
+        project_reset_owner_generation: Option<u64>,
+    ) -> Option<(usize, String, Option<EngramBindingTarget>)> {
+        let index = inner.find_session_index(session_id)?;
+        let record = &inner.sessions[index];
+        if runtime_token.is_some_and(|token| !record.runtime.matches_runtime_token(token)) {
+            return None;
+        }
+        if active_turn_generation
+            .is_some_and(|generation| record.active_turn_generation != generation)
+        {
+            return None;
+        }
+        if runtime_token.is_some() && record.runtime_stop_in_progress {
+            return None;
+        }
+        let grant_id = record.engram.active_grant_id.clone()?;
+        // A global/project kill switch prevents new evaluate/bind calls, but
+        // it must not strand a grant that was already begun. Resolve the
+        // captured old connection even while runtime enablement is off so a
+        // terminal transition can checkpoint it exactly once.
+        let target = Self::engram_binding_target_for_session_shape_with_reset_access_locked(
+            inner,
+            session_id,
+            false,
+            project_reset_owner_generation,
+        )
+        .ok()
+        .flatten();
+        if target
+            .as_ref()
+            .is_some_and(|target| !target.settings.enabled)
+        {
+            // A project disable already made its one bounded checkpoint
+            // attempt. If that attempt failed, retain the authority for
+            // same-store recovery instead of retrying it from ordinary
+            // shadow-runtime lifecycle transitions. Global disable still
+            // reaches this path because the persisted project setting is
+            // enabled in that case.
+            return None;
+        }
+        Some((index, grant_id, target))
+    }
+
+    /// Closes the session's begun grant with one checkpoint. `turn_outcome`
+    /// names how the mediated turn ended and makes the checkpoint report that
+    /// turn's execution observation; `None` closes a grant whose turn this
+    /// process never saw end, such as restart recovery, and reports nothing.
     fn checkpoint_engram_turn_off_lock(
         &self,
         session_id: &str,
         runtime_token: Option<&RuntimeToken>,
         active_turn_generation: Option<u64>,
         next_intent: EngramNextIntent,
+        turn_outcome: Option<EngramExecutionOutcome>,
         project_reset_owner_generation: Option<u64>,
     ) -> EngramCheckpointOutcome {
-        let snapshot = {
-            let mut inner = self.inner.lock().expect("state mutex poisoned");
-            let Some(index) = inner.find_session_index(session_id) else {
-                return EngramCheckpointOutcome::Skipped;
-            };
-            if runtime_token
-                .is_some_and(|token| !inner.sessions[index].runtime.matches_runtime_token(token))
-            {
-                return EngramCheckpointOutcome::Skipped;
-            }
-            if active_turn_generation.is_some_and(|generation| {
-                inner.sessions[index].active_turn_generation != generation
-            }) {
-                return EngramCheckpointOutcome::Skipped;
-            }
-            if runtime_token.is_some() && inner.sessions[index].runtime_stop_in_progress {
-                return EngramCheckpointOutcome::Skipped;
-            }
-            let Some(grant_id) = inner.sessions[index].engram.active_grant_id.clone() else {
-                return EngramCheckpointOutcome::Skipped;
-            };
-            // A global/project kill switch prevents new evaluate/bind calls, but
-            // it must not strand a grant that was already begun. Resolve the
-            // captured old connection even while runtime enablement is off so a
-            // terminal transition can checkpoint it exactly once.
-            let target = Self::engram_binding_target_for_session_shape_with_reset_access_locked(
+        // First, under the lock: which grant this checkpoint would close and
+        // whether its report needs a fresh basis. Nothing is claimed yet, so
+        // the bounded basis capture that follows runs outside the
+        // checkpoint_in_progress window that session teardown waits for.
+        let (planned_grant_id, capture_workdir) = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            let Some((index, grant_id, _)) = Self::engram_checkpoint_grant_locked(
                 &inner,
                 session_id,
-                false,
+                runtime_token,
+                active_turn_generation,
                 project_reset_owner_generation,
-            )
-            .ok()
-            .flatten();
-            if target
-                .as_ref()
-                .is_some_and(|target| !target.settings.enabled)
-            {
-                // A project disable already made its one bounded checkpoint
-                // attempt. If that attempt failed, retain the authority for
-                // same-store recovery instead of retrying it from ordinary
-                // shadow-runtime lifecycle transitions. Global disable still
-                // reaches this path because the persisted project setting is
-                // enabled in that case.
+            ) else {
+                return EngramCheckpointOutcome::Skipped;
+            };
+            if inner.sessions[index].engram.checkpoint_in_progress {
+                // The claim below would refuse; skip before paying for a
+                // capture this attempt could never report.
+                return EngramCheckpointOutcome::Skipped;
+            }
+            let capture_workdir =
+                match engram_turn_report_plan(&inner.sessions[index], &grant_id, turn_outcome) {
+                    EngramTurnReportPlan::Fresh { workdir, .. } => Some(workdir),
+                    EngramTurnReportPlan::Nothing | EngramTurnReportPlan::Cached(_) => None,
+                };
+            (grant_id, capture_workdir)
+        };
+        let end_basis = capture_workdir
+            .as_deref()
+            .and_then(|workdir| engram_execution_source_basis(FsPath::new(workdir)));
+        #[cfg(test)]
+        wait_at_test_engram_turn_report_gate(self, session_id);
+        // Then, under the lock again: the same conditions must still admit a
+        // checkpoint of the same grant; it is claimed, and the report is built
+        // before the terminal transition clears the turn's file-change
+        // tracking.
+        let snapshot = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let Some((index, grant_id, target)) = Self::engram_checkpoint_grant_locked(
+                &inner,
+                session_id,
+                runtime_token,
+                active_turn_generation,
+                project_reset_owner_generation,
+            ) else {
+                return EngramCheckpointOutcome::Skipped;
+            };
+            if grant_id != planned_grant_id {
+                // Another turn began meanwhile; its own close reports it.
                 return EngramCheckpointOutcome::Skipped;
             }
             if !inner
@@ -3558,9 +3648,39 @@ impl AppState {
             {
                 return EngramCheckpointOutcome::Skipped;
             }
-            (grant_id, target)
+            // The plan is taken again under the claim: another closer of the
+            // same grant may have built and cached the report while this
+            // attempt captured its basis, and the cache wins so every
+            // checkpoint of the grant repeats the first report verbatim.
+            let plan = engram_turn_report_plan(&inner.sessions[index], &grant_id, turn_outcome);
+            let observations = match plan {
+                EngramTurnReportPlan::Nothing => Vec::new(),
+                EngramTurnReportPlan::Cached(observations) => observations,
+                EngramTurnReportPlan::Fresh { outcome, .. } => {
+                    let mutation_granted = target.as_ref().is_some_and(|target| {
+                        target
+                            .effects
+                            .iter()
+                            .any(|effect| matches!(effect, EngramEffect::MutateLocal))
+                    });
+                    let observations = engram_turn_execution_observation(
+                        &inner.sessions[index],
+                        session_id,
+                        &grant_id,
+                        outcome,
+                        mutation_granted,
+                        end_basis,
+                    )
+                    .into_iter()
+                    .collect::<Vec<_>>();
+                    inner.sessions[index].engram.active_turn_report =
+                        Some((grant_id.clone(), observations.clone()));
+                    observations
+                }
+            };
+            (grant_id, target, observations)
         };
-        let (grant_id, target) = snapshot;
+        let (grant_id, target, observations) = snapshot;
         let started_at = std::time::Instant::now();
         let outcome = match target {
             Some(target) => match target.routing_token.as_ref() {
@@ -3572,7 +3692,7 @@ impl AppState {
                             routing_token: routing_token.clone(),
                             grant_id: grant_id.clone(),
                             next_intent,
-                            observations: Vec::new(),
+                            observations: observations.clone(),
                             idempotency_key: engram_checkpoint_idempotency_key(
                                 format!(
                                     "termal-checkpoint:{}:{}:{}",
@@ -3580,7 +3700,7 @@ impl AppState {
                                     grant_id,
                                     next_intent.as_idempotency_component()
                                 ),
-                                &[],
+                                &observations,
                             ),
                         },
                         target.settings.call_timeout(),
@@ -3615,6 +3735,12 @@ impl AppState {
         match &outcome {
             Ok(()) => self.record_engram_transport_success(session_id),
             Err(error) => self.record_engram_transport_failure(session_id, error),
+        }
+        if let Err(error) = &outcome
+            && error.kind == EngramTransportErrorKind::Remote
+            && !observations.is_empty()
+        {
+            self.forget_refused_engram_turn_report(session_id, &grant_id, error.code.as_deref());
         }
         let failure_detail = outcome.as_ref().err().map(|error| format!("{error:#}"));
         let (decision, refusal_code, fail_mode) = match outcome {
@@ -3771,6 +3897,7 @@ impl AppState {
             Some(runtime_token),
             active_turn_generation,
             next_intent,
+            Some(EngramExecutionOutcome::Succeeded),
             None,
         );
     }
@@ -4352,11 +4479,16 @@ impl AppState {
                         }
                         break EngramTurnDeliveryPreparation::PersistenceUnknown;
                     }
-                    break if delivery_is_authorized {
-                        EngramTurnDeliveryPreparation::Ready
-                    } else {
-                        EngramTurnDeliveryPreparation::Rejected
-                    };
+                    if delivery_is_authorized {
+                        // The turn's begin-time source basis, before the
+                        // prompt reaches the runtime; its closing checkpoint
+                        // compares the end-time basis with it.
+                        if let Some(grant_id) = active_grant_id.as_deref() {
+                            self.record_engram_turn_start_basis_off_lock(session_id, grant_id);
+                        }
+                        break EngramTurnDeliveryPreparation::Ready;
+                    }
+                    break EngramTurnDeliveryPreparation::Rejected;
                 }
                 EngramDispatchRecordFinish::Superseded => {
                     break EngramTurnDeliveryPreparation::Superseded;
@@ -4648,11 +4780,11 @@ impl AppState {
                     retire_promoted_engram_head(record, &pending.intent_fingerprint);
                 }
             }
-            let released_begin = record
-                .engram
-                .pending_dispatch
-                .take()
-                .and_then(|pending| pending.begin_requested);
+            let released = record.engram.pending_dispatch.take();
+            let released_begin = released
+                .as_ref()
+                .and_then(|pending| pending.begin_requested.clone());
+            let released_intent = released.map(|pending| pending.intent_fingerprint);
             if let Some(grant_id) = active_grant_id {
                 if let Some(prepared) = record
                     .queued_prompts
@@ -4661,6 +4793,11 @@ impl AppState {
                 {
                     prepared.begun_grant_id = Some(grant_id.clone());
                 }
+                // The turn this grant begins is observed on its end-of-turn
+                // checkpoint under the intent it was issued for.
+                record.engram.active_turn_intent_fingerprint = released_intent;
+                record.engram.active_turn_start_basis = None;
+                record.engram.active_turn_report = None;
                 // A begin recorded as uncertain while it was in flight has
                 // its outcome now: begun and mirrored, so the turn-end
                 // checkpoint closes it like any other.
@@ -5302,6 +5439,13 @@ impl AppState {
                                 "Engram recovery checkpoint",
                             )?;
                         }
+                        // A report this process already built for the grant
+                        // (a closing checkpoint that failed before Engram
+                        // accepted it) travels with the checkpoint that now
+                        // closes it. After a restart there is none, and the
+                        // grant closes bare.
+                        let observations =
+                            self.cached_engram_turn_report(&target.connection.session_id, grant_id);
                         let checkpoint = target
                             .adapter
                             .request(
@@ -5310,18 +5454,30 @@ impl AppState {
                                     routing_token: routing_token.clone(),
                                     grant_id: grant_id.to_owned(),
                                     next_intent: EngramNextIntent::Wait,
-                                    observations: Vec::new(),
+                                    observations: observations.clone(),
                                     idempotency_key: engram_checkpoint_idempotency_key(
                                         format!(
                                             "termal-restart-checkpoint:{}:{}",
                                             target.connection.session_id, grant_id
                                         ),
-                                        &[],
+                                        &observations,
                                     ),
                                 },
                                 timeout,
                             )
                             .and_then(parse_engram_result::<EngramTurnCheckpointResponse>);
+                        // A refused report is dropped before anything else can
+                        // end this attempt, a lost queue owner included, so
+                        // no later recovery resends it.
+                        if !observations.is_empty()
+                            && let Some(code) = engram_recovery_checkpoint_refusal(&checkpoint)
+                        {
+                            self.forget_refused_engram_turn_report(
+                                &target.connection.session_id,
+                                grant_id,
+                                code,
+                            );
+                        }
                         if let Some(owner) = owner {
                             self.require_queued_engram_owner(
                                 &target.connection.session_id,
@@ -5600,6 +5756,10 @@ impl AppState {
                 .front()
                 .is_some_and(QueuedPromptRecord::is_engram_retained);
             record.engram.routing_token = Some(routing_token.clone());
+            record.engram.work_binding = match &bound_request {
+                EngramControlRequest::SessionBind { work_binding, .. } => work_binding.clone(),
+                _ => None,
+            };
             // Engram refuses a bind while a grant is begun, so an accepted
             // bind settles any uncertain begin on the old binding, including
             // one a record written before begins were recorded may hide.
@@ -5686,6 +5846,7 @@ impl AppState {
         }
         if clear_routing_token {
             record.engram.routing_token = None;
+            record.engram.work_binding = None;
         }
         record.engram.active_grant_id = None;
         record.engram.uncertain_grant_id = None;

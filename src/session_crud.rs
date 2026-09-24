@@ -1530,6 +1530,7 @@ impl AppState {
                     None,
                     None,
                     EngramNextIntent::Exit,
+                    Some(EngramExecutionOutcome::Unknown),
                     None,
                 );
             }

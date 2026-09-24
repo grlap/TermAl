@@ -275,6 +275,70 @@ path. For each eligible turn TermAl:
 4. delivers the prompt only after the matching begin receipt; and
 5. checkpoints the begun turn on completion, Stop, failure, reset, or deletion.
 
+The checkpoint that closes a turn reports one execution observation for it:
+the outcome of the transition that closed it (succeeded on completion; failed
+on a failed or errored turn, an exit that reported an error, or a confirmed
+failure of a matching runtime through the atomic terminalization path;
+unknown for Stop, termination, reset, a silent exit, a missing runtime or a
+rejected delivery); `source_changed`, reported with the `mutate_local` effect
+Engram requires for it, else `observe`; the intent fingerprint the grant was
+issued for as the action fingerprint; and, when the session's workspace is a
+worktree root, the canonical workspace root with the schema-1 review-freeze
+fingerprint of its full working content as the source basis, together with
+the observation time. `source_changed` is decided by content: the same
+fingerprint is taken before the prompt reaches the runtime and again at the
+close, and a difference is a source change; the turn's file-change tracking,
+a debounced hint that can arrive late or skip ignored paths, only adds to
+that and decides alone when the closing basis is missing; a turn whose
+begin-time basis is missing but whose closing basis exists cannot be cleared
+by the comparison and is reported as a change under a grant that mediates
+local mutation, the conservative answer. Each capture
+runs under the reviewer's shared twenty-second freeze budget, the bound the
+same fingerprint of the same workspace already runs under, because a turn
+closes at the host's busiest moment and a tighter bound would drop the basis
+when Git is merely slow; at the close the capture is taken before the
+checkpoint is claimed, so session teardown's settle wait for a checkpoint
+still covers only the control call. Two limits are known and tracked
+separately. The captures run on the thread that dispatches or closes the
+turn, and for a shared Codex runtime that is the app-server's event reader,
+which every Codex session on that runtime shares: a capture (typically under
+a second, at most the freeze budget) delays their streamed events for as
+long as it runs, on top of the control call that already ran there. On the
+teardown paths (Stop, termination, reset, revocation) the capture is taken
+while the runtime may still be running and before it is shut down, so a
+write the runtime makes between the capture and its shutdown is not
+attributed to the turn. The comparison is also workspace-scoped, like the
+file-change tracking it extends: an edit another session makes in the same
+workspace during the turn counts as this turn's change, which withholds a
+read-only child's observation and, where mutation is granted, attributes the
+edit to the turn; over-reporting is the conservative direction, but children
+sharing a busy workspace will often report nothing. That fingerprint is what a
+later host-run check reports as its revision, so the two compare equal
+exactly when nothing changed in between. The first closing attempt builds
+the report and the record keeps it for that grant; a retried checkpoint
+repeats it verbatim, and the observation is folded into the idempotency key.
+A closing checkpoint that failed before Engram accepted it leaves the grant
+open, and the same-process rebind that follows closes it with the report the
+record still holds, while restart recovery, which has none, closes it bare.
+A report Engram refuses (an answer, not a lost or timed-out call), whether on
+the turn's own close or on a rebind's recovery checkpoint, is not resent: it
+is dropped and logged, and the grant's next closing attempt goes bare, as
+every checkpoint did before turns reported observations. Any refusal counts,
+not only one about the payload, because a refused report resent forever
+would hold the grant, and the session's queued prompts, until a restart;
+dropping it costs at most that turn's evidence. A closer that finds another
+checkpoint of the session already in progress skips at once, without taking
+a capture it could never report.
+Only a session bound to claimed work reports it: Engram admits host evidence
+solely through an exact work binding, so an unbound session's checkpoint
+carries no observation rather than one the evidence gate would reject.
+A turn that changed source under a grant that mediates no local mutation
+(today every root session and every read-only child) reports nothing rather
+than an observe-only claim, and logs the omission. Restart recovery, the
+compensating checkpoint of a superseded begin and the project-reset exit
+checkpoint close grants whose turn this process never saw end and report no
+observation.
+
 Refuse, defer, protocol/transport degradation, missing binding, begin refusal,
 or dispatch-budget exhaustion withhold the prompt and produce a durable Engram
 control card. Turning the premium flag off fences the transition, checkpoints

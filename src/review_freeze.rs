@@ -355,6 +355,17 @@ fn capture_review_freeze(git: &ReviewFreezeGit) -> Result<String> {
     Ok(format!("{:x}", hash.finalize()))
 }
 
+/// The schema-1 review-freeze fingerprint of the worktree at `root`: its full
+/// working content, tracked and untracked, taken under the same pinned Git
+/// configuration and shared [`REVIEW_FREEZE_TIMEOUT`] budget the freeze
+/// verifier uses. `root` must be a worktree root; the canonical root the
+/// fingerprint was taken on is returned with it.
+fn review_freeze_fingerprint(root: &FsPath) -> Result<(PathBuf, String)> {
+    let git = ReviewFreezeGit::new(root)?;
+    let fingerprint = capture_review_freeze(&git)?;
+    Ok((git.root.clone(), fingerprint))
+}
+
 fn check_review_freeze(cwd: &FsPath, request: &ReviewFreezeRequest) -> Result<String> {
     request.validate()?;
     let git = ReviewFreezeGit::new(cwd)?;

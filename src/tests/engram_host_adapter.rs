@@ -21,6 +21,9 @@ mod boot_recovery_targets;
 #[path = "engram_uncertain_begin.rs"]
 mod uncertain_begin;
 
+#[path = "engram_turn_observations.rs"]
+mod turn_observations;
+
 use self::control_transport::{
     assert_engram_control_descendant_was_terminated, prepare_engram_control_process_tree_fixture,
 };
@@ -5729,6 +5732,7 @@ fn engram_mcp_grant_clear_waits_for_a_lifecycle_checkpoint_before_teardown() {
             None,
             EngramNextIntent::Wait,
             None,
+            None,
         );
     });
     checkpoint_gate.wait();
@@ -5803,6 +5807,7 @@ fn project_reset_release_does_not_clear_a_lifecycle_owned_checkpoint() {
             None,
             EngramNextIntent::Wait,
             None,
+            None,
         );
     });
     checkpoint_gate.wait();
@@ -5843,6 +5848,7 @@ fn project_reset_release_does_not_clear_a_lifecycle_owned_checkpoint() {
         None,
         None,
         EngramNextIntent::Wait,
+        None,
         None,
     );
     assert_eq!(transport.requests().len(), 1);
@@ -9250,16 +9256,24 @@ fn timed_out_wait_checkpoint_and_later_exit_use_distinct_idempotency_keys() {
     let parent_session_id = create_test_project_session(&state, Agent::Codex, &project_id, &root);
     enable_test_project_engram(&state, &project_id, &root);
     let grant_id = "checkpoint-intent-grant";
-    let transport = ScriptedEngramControlTransport::new([
-        bind_reply("checkpoint-intent-parent-token"),
-        bind_reply("checkpoint-intent-child-token"),
-        grant_reply(grant_id),
-        begin_reply(grant_id),
-        ScriptedEngramControlResponse::Reply(Err(EngramTransportError::deadline(
-            "wait checkpoint timed out after Engram may have accepted it",
-        ))),
-        checkpoint_reply(grant_id),
-    ]);
+    // The child is bound to claimed work, so its checkpoints carry the
+    // turn's observation and its keys fold it.
+    let transport = ScriptedEngramControlTransport::new_with_work_bindings(
+        [
+            bind_reply("checkpoint-intent-parent-token"),
+            bind_reply("checkpoint-intent-child-token"),
+            grant_reply(grant_id),
+            begin_reply(grant_id),
+            ScriptedEngramControlResponse::Reply(Err(EngramTransportError::deadline(
+                "wait checkpoint timed out after Engram may have accepted it",
+            ))),
+            checkpoint_reply(grant_id),
+        ],
+        [
+            Ok(None),
+            Ok(Some(test_control_work_binding("checkpoint-intent", 1))),
+        ],
+    );
     install_control_only_transport(&state, transport.clone());
 
     let created = state
@@ -9308,17 +9322,26 @@ fn timed_out_wait_checkpoint_and_later_exit_use_distinct_idempotency_keys() {
     assert_eq!(checkpoints[1].request["grant_id"], grant_id);
     assert_eq!(checkpoints[0].request["next_intent"], "wait");
     assert_eq!(checkpoints[1].request["next_intent"], "exit");
-    assert_eq!(
-        checkpoints[0].request["idempotency_key"],
-        format!("termal-checkpoint:{child_id}:{grant_id}:wait")
+    // Each key folds the turn's observation behind its intent component.
+    assert!(
+        checkpoints[0].request["idempotency_key"]
+            .as_str()
+            .expect("idempotency key")
+            .starts_with(&format!("termal-checkpoint:{child_id}:{grant_id}:wait:")),
     );
-    assert_eq!(
-        checkpoints[1].request["idempotency_key"],
-        format!("termal-checkpoint:{child_id}:{grant_id}:exit")
+    assert!(
+        checkpoints[1].request["idempotency_key"]
+            .as_str()
+            .expect("idempotency key")
+            .starts_with(&format!("termal-checkpoint:{child_id}:{grant_id}:exit:")),
     );
     assert_ne!(
         checkpoints[0].request["idempotency_key"], checkpoints[1].request["idempotency_key"],
         "Engram fingerprints next_intent, so wait and exit must not reuse a key"
+    );
+    assert_eq!(
+        checkpoints[0].request["observations"], checkpoints[1].request["observations"],
+        "the exit retry repeats the observation the timed-out wait built"
     );
 }
 

@@ -837,6 +837,7 @@ impl AppState {
             Some(token),
             expected_active_turn_generation,
             EngramNextIntent::Wait,
+            Some(EngramExecutionOutcome::Failed),
             None,
         );
         let cleaned = error_message.trim();
@@ -1275,11 +1276,20 @@ impl AppState {
             if rejected_engram_owner.is_some() && !rejected_engram_owner_durably_interrupted {
                 EngramCheckpointOutcome::Skipped
             } else {
+                // A matching runtime reported a confirmed failure; a missing
+                // runtime or a rejected delivery leaves the ending unknown.
                 self.checkpoint_engram_turn_off_lock(
                     session_id,
                     checkpoint_token,
                     None,
                     EngramNextIntent::Wait,
+                    Some(
+                        if matches!(mode, AtomicTurnFailureMode::MatchingRuntime { .. }) {
+                            EngramExecutionOutcome::Failed
+                        } else {
+                            EngramExecutionOutcome::Unknown
+                        },
+                    ),
                     None,
                 )
             };
@@ -1727,6 +1737,7 @@ impl AppState {
             Some(token),
             expected_active_turn_generation,
             EngramNextIntent::Wait,
+            Some(EngramExecutionOutcome::Failed),
             None,
         );
         let cleaned = error_message.trim();
@@ -2027,11 +2038,18 @@ impl AppState {
                 })
         };
         if !is_quarantined_exit {
+            // An exit that reports an error failed the turn; a silent exit
+            // leaves its outcome unknown.
             self.checkpoint_engram_turn_off_lock(
                 session_id,
                 Some(token),
                 expected_active_turn_generation,
                 EngramNextIntent::Wait,
+                Some(if error_message.is_some() {
+                    EngramExecutionOutcome::Failed
+                } else {
+                    EngramExecutionOutcome::Unknown
+                }),
                 None,
             );
         }

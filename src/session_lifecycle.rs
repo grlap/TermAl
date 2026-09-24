@@ -183,6 +183,7 @@ impl AppState {
                 None,
                 None,
                 EngramNextIntent::Exit,
+                Some(EngramExecutionOutcome::Unknown),
                 None,
             );
             self.wait_for_engram_checkpoint_completion(terminating_session_id);
@@ -1007,6 +1008,7 @@ impl AppState {
             None,
             None,
             EngramNextIntent::Wait,
+            Some(EngramExecutionOutcome::Unknown),
             None,
         ) {
             EngramCheckpointOutcome::Failed(detail) => Some(detail),
