@@ -326,6 +326,359 @@ fn operations(transport: &ScriptedEngramControlTransport) -> Vec<String> {
         .collect()
 }
 
+/// Engram's refusal of a turn that asked for an effect outside the
+/// session's declared mediation envelope: the one form of
+/// `control_assurance_insufficient` a rebind declaring the current set cures.
+fn envelope_refusal_reply(effect: &str, declared: &[&str]) -> ScriptedEngramControlResponse {
+    assurance_refusal_reply(effect, "turn_gated", declared)
+}
+
+/// A `control_assurance_insufficient` refusal naming `effect`, the assurance
+/// its rule requires, and the session's declared set.
+fn assurance_refusal_reply(
+    effect: &str,
+    required_assurance: &str,
+    declared: &[&str],
+) -> ScriptedEngramControlResponse {
+    ScriptedEngramControlResponse::Reply(Ok(json!({
+        "decision": "refuse",
+        "directive": {
+            "directive_id": format!("directive-envelope-{effect}"),
+            "code": "control_assurance_insufficient",
+            "effect": effect,
+            "required_assurance": required_assurance,
+            "declared_mediated_effects": declared,
+            "effective_mediated_effects": declared,
+            "target": "host",
+            "satisfaction": "rebind declaring the requested effect"
+        }
+    })))
+}
+
+#[test]
+fn root_bound_under_an_older_effect_set_rebinds_and_reevaluates_once() {
+    // A session bound before roots mediated local mutation (a retained bind
+    // replayed across the upgrade) keeps that set until its next bind, and
+    // Engram refuses a turn that asks for an effect outside it.
+    // Admission rebinds with the current set and re-evaluates once, so the
+    // prompt still reaches the runtime, on the direct and the queued path.
+    for queued in [false, true] {
+        let (state, session, receiver, transport) = root_fixture([
+            bind_reply("root-token"),
+            envelope_refusal_reply("mutate_local", &["observe", "communicate"]),
+            status_reply("ready"),
+            rebind_reply("root-token-rebound"),
+            grant_reply("healed-grant"),
+            begin_reply("healed-grant"),
+        ]);
+        let dispatch = root_dispatch(&state, &session, queued);
+        deliver_turn_dispatch(&state, dispatch).expect("the healed root turn should be delivered");
+        assert!(matches!(
+            receiver.try_recv().expect("one provider prompt"),
+            CodexRuntimeCommand::Prompt { .. }
+        ));
+        assert!(receiver.try_recv().is_err(), "exactly one provider prompt");
+        assert_eq!(
+            operations(&transport),
+            [
+                "session_bind",
+                "turn_evaluate",
+                "session_status",
+                "session_bind",
+                "turn_evaluate",
+                "turn_begin"
+            ],
+            "queued={queued}"
+        );
+        let requests = transport.requests();
+        assert_eq!(requests[1].request["routing_token"], "root-token");
+        assert_eq!(requests[4].request["routing_token"], "root-token-rebound");
+        assert_eq!(
+            requests[3].request["mediated_effects"],
+            json!(["observe", "communicate", "mutate_local"]),
+            "the rebind is a fresh bind declaring the current set (queued={queued})"
+        );
+        assert_ne!(
+            requests[0].request["idempotency_key"], requests[3].request["idempotency_key"],
+            "the rebind is not a replay of the first bind (queued={queued})"
+        );
+        assert_ne!(
+            requests[1].request["idempotency_key"], requests[4].request["idempotency_key"],
+            "the re-evaluation is a new evaluation (queued={queued})"
+        );
+        let inner = state.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+        assert_eq!(
+            record.engram.active_grant_id.as_deref(),
+            Some("healed-grant")
+        );
+    }
+}
+
+#[test]
+fn root_heal_effect_names_match_their_wire_form() {
+    // The heal compares Engram's wire string with wire_name(); a name that
+    // drifted from the serde form would silently stop the heal matching.
+    for effect in [
+        EngramEffect::Observe,
+        EngramEffect::Communicate,
+        EngramEffect::MutateLocal,
+    ] {
+        assert_eq!(
+            serde_json::to_value(&effect).expect("effect serializes"),
+            json!(effect.wire_name())
+        );
+    }
+}
+
+#[test]
+fn root_heal_assurance_coverage_follows_the_declared_level() {
+    // Coverage is computed from the assurance TermAl declares, so raising
+    // the declaration moves it; today that is turn_gated.
+    assert_eq!(ENGRAM_CONTROL_ASSURANCE, "turn_gated");
+    assert!(engram_host_assurance_covers("advisory"));
+    assert!(engram_host_assurance_covers("turn_gated"));
+    assert!(!engram_host_assurance_covers("action_gated"));
+    assert!(!engram_host_assurance_covers("unknown_level"));
+}
+
+#[test]
+fn root_heal_classifies_each_envelope_refusal_form() {
+    let current = [
+        EngramEffect::Observe,
+        EngramEffect::Communicate,
+        EngramEffect::MutateLocal,
+    ];
+    let envelope =
+        |effect: &str, required: Option<&str>, declared: &[&str]| EngramDirectiveResponse {
+            directive_id: "directive".to_owned(),
+            code: "control_assurance_insufficient".to_owned(),
+            target: "host".to_owned(),
+            satisfaction: "rebind".to_owned(),
+            effect: Some(effect.to_owned()),
+            required_assurance: required.map(str::to_owned),
+            declared_mediated_effects: Some(
+                declared.iter().map(|name| (*name).to_owned()).collect(),
+            ),
+        };
+    let old_set = ["observe", "communicate"];
+    assert!(
+        engram_evaluation_refusal_heals_by_rebind(
+            &envelope("mutate_local", Some("turn_gated"), &old_set),
+            &current
+        ),
+        "an effect the old set lacks and the current set has is healed"
+    );
+    assert!(
+        engram_evaluation_refusal_heals_by_rebind(
+            &envelope("mutate_local", None, &old_set),
+            &current
+        ),
+        "an envelope refusal naming no assurance counts as covered"
+    );
+    assert!(
+        !engram_evaluation_refusal_heals_by_rebind(
+            &envelope("mutate_shared", Some("turn_gated"), &old_set),
+            &current
+        ),
+        "an effect the current set lacks too is not rebound for"
+    );
+    assert!(
+        !engram_evaluation_refusal_heals_by_rebind(
+            &envelope("mutate_local", Some("action_gated"), &old_set),
+            &current
+        ),
+        "an effect needing more assurance than declared is not rebound for"
+    );
+}
+
+#[test]
+fn root_refused_by_policy_or_assurance_is_not_rebound() {
+    // control_assurance_insufficient also covers refusals no rebind can cure:
+    // a project policy stricter than the host (no effect named), an effect
+    // the session already declares, and an effect missing from the declared
+    // set that needs more assurance than the host declares. Those are
+    // reported at once, without a rebind.
+    for refusal in [
+        evaluation_refusal_reply("control_assurance_insufficient"),
+        envelope_refusal_reply("mutate_local", &["observe", "communicate", "mutate_local"]),
+        assurance_refusal_reply("mutate_local", "action_gated", &["observe", "communicate"]),
+    ] {
+        let (state, session, receiver, transport) =
+            root_fixture([bind_reply("root-token"), refusal]);
+        let dispatch = root_dispatch(&state, &session, false);
+        let _ = deliver_turn_dispatch(&state, dispatch);
+        assert!(
+            receiver.try_recv().is_err(),
+            "a refused turn never reaches the runtime"
+        );
+        assert_eq!(
+            operations(&transport),
+            ["session_bind", "turn_evaluate"],
+            "no rebind for a refusal a rebind cannot cure"
+        );
+    }
+}
+
+#[test]
+fn root_begin_reevaluation_asks_again_for_what_the_refused_grant_asked() {
+    // A retained evaluate prepared before roots mediated local mutation is
+    // replayed under the old binding and granted; its begin is refused as
+    // expired. The re-evaluation runs under the same binding, so it asks
+    // again for the older set instead of one that binding would refuse, and
+    // the prompt still reaches the runtime.
+    assert_begin_reevaluation_after_replayed_old_set(
+        "grant_expired",
+        json!(["observe", "communicate"]),
+        false,
+    );
+}
+
+#[test]
+fn root_begin_stale_fence_reevaluation_asks_for_the_current_set() {
+    // A stale_fence begin refusal rebinds first, declaring the current set,
+    // so its re-evaluation asks for the current set even though the refused
+    // grant's retained evaluate asked for the older one.
+    assert_begin_reevaluation_after_replayed_old_set(
+        "stale_fence",
+        json!(["observe", "communicate", "mutate_local"]),
+        true,
+    );
+}
+
+/// A retained evaluate prepared under the older root set is replayed under
+/// the old binding and granted, and its begin is refused with
+/// `begin_refusal`. The re-evaluation must ask for `expected_effects`, the
+/// grant must be recorded with whether that re-evaluation requested
+/// mutation, and the prompt must still reach the runtime.
+fn assert_begin_reevaluation_after_replayed_old_set(
+    begin_refusal: &str,
+    expected_effects: Value,
+    expected_mutates: bool,
+) {
+    let rebinds = begin_refusal == "stale_fence";
+    let mut responses = vec![
+        bind_reply("root-token"),
+        ScriptedEngramControlResponse::Reply(Err(EngramTransportError::deadline(
+            "evaluate reply lost",
+        ))),
+        grant_reply("replayed-grant"),
+        checkpoint_refusal_reply(begin_refusal),
+    ];
+    if rebinds {
+        responses.push(status_reply("ready"));
+        responses.push(rebind_reply("root-token-rebound"));
+    }
+    responses.push(grant_reply("reevaluated-grant"));
+    responses.push(begin_reply("reevaluated-grant"));
+    let (state, session, receiver, transport) = root_fixture(responses);
+    let dispatch = root_dispatch(&state, &session, false);
+    deliver_turn_dispatch(&state, dispatch).expect("an unknown admission retains the prompt");
+    assert!(receiver.try_recv().is_err());
+    {
+        let mut inner = state.inner.lock().unwrap();
+        let index = inner.find_session_index(&session).unwrap();
+        let prepared = inner.sessions[index]
+            .queued_prompts
+            .front_mut()
+            .and_then(|queued| queued.engram_evaluate.as_mut())
+            .expect("the unknown evaluate is retained for replay");
+        let EngramControlRequest::TurnEvaluate {
+            requested_effects, ..
+        } = &mut prepared.request
+        else {
+            panic!("the retained request is an evaluate");
+        };
+        // As prepared before the upgrade, under the older root set.
+        *requested_effects = vec![EngramEffect::Observe, EngramEffect::Communicate];
+    }
+
+    state
+        .resume_session_queue(&session)
+        .expect("the retained evaluate replays");
+    assert!(matches!(
+        receiver
+            .try_recv()
+            .expect("the re-evaluated turn reaches the runtime"),
+        CodexRuntimeCommand::Prompt { .. }
+    ));
+    assert!(receiver.try_recv().is_err(), "exactly one provider prompt");
+    let mut expected_operations = vec![
+        "session_bind",
+        "turn_evaluate",
+        "turn_evaluate",
+        "turn_begin",
+    ];
+    if rebinds {
+        expected_operations.extend(["session_status", "session_bind"]);
+    }
+    expected_operations.extend(["turn_evaluate", "turn_begin"]);
+    assert_eq!(
+        operations(&transport),
+        expected_operations,
+        "{begin_refusal}: a rebind only for stale_fence"
+    );
+    let requests = transport.requests();
+    let reevaluation = requests
+        .iter()
+        .filter(|request| request.request["operation"] == "turn_evaluate")
+        .last()
+        .expect("the turn is re-evaluated");
+    assert_eq!(
+        reevaluation.request["requested_effects"], expected_effects,
+        "{begin_refusal}: the re-evaluation's requested effects"
+    );
+    let inner = state.inner.lock().unwrap();
+    let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+    assert_eq!(
+        record.engram.active_grant_id.as_deref(),
+        Some("reevaluated-grant")
+    );
+    assert_eq!(
+        record.engram.active_turn_grant_mutates,
+        Some(("reevaluated-grant".to_owned(), expected_mutates)),
+        "{begin_refusal}: the grant is recorded with what its re-evaluation requested"
+    );
+}
+
+#[test]
+fn root_that_stays_refused_after_the_rebind_reports_the_refusal() {
+    // The rebind is attempted once; a refusal that survives it is final and
+    // the prompt is withheld rather than retried again.
+    let (state, session, receiver, transport) = root_fixture([
+        bind_reply("root-token"),
+        envelope_refusal_reply("mutate_local", &["observe", "communicate"]),
+        status_reply("ready"),
+        rebind_reply("root-token-rebound"),
+        envelope_refusal_reply("mutate_local", &["observe", "communicate"]),
+    ]);
+    let dispatch = root_dispatch(&state, &session, false);
+    let _ = deliver_turn_dispatch(&state, dispatch);
+    assert!(
+        receiver.try_recv().is_err(),
+        "a refused turn never reaches the runtime"
+    );
+    assert_eq!(
+        operations(&transport),
+        [
+            "session_bind",
+            "turn_evaluate",
+            "session_status",
+            "session_bind",
+            "turn_evaluate"
+        ],
+        "one rebind and one re-evaluation, no more"
+    );
+    let inner = state.inner.lock().unwrap();
+    let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+    assert!(record.session.messages.iter().any(|message| matches!(
+        message,
+        Message::EngramControl { card, .. }
+            if card.decision == EngramControlCardDecision::Refuse
+                && card.refusal_code.as_deref() == Some("control_assurance_insufficient")
+    )));
+}
+
 #[test]
 fn root_direct_and_queued_turns_bind_evaluate_begin_and_complete() {
     for queued in [false, true] {
@@ -378,7 +731,8 @@ fn root_direct_and_queued_turns_bind_evaluate_begin_and_complete() {
         );
         assert_eq!(
             requests[0].request["mediated_effects"],
-            json!(["observe", "communicate"])
+            json!(["observe", "communicate", "mutate_local"]),
+            "a root session edits its own workspace, so it mediates local mutation"
         );
         assert_eq!(
             requests[1].request["requested_effects"],

@@ -15,6 +15,28 @@ Premium admission covers both ordinary root sessions and delegation children,
 including direct sends and queued user, mailbox, and orchestrator turns. A root
 uses its session-shaped binding; a child retains its delegation-shaped effects
 and cannot fall back to root authority if its delegation metadata is missing.
+A root session binds and requests `observe`, `communicate` and `mutate_local`,
+because it edits its own workspace; a child mediates `mutate_local` only when
+its write policy lets it write (a shared or isolated worktree), so a read-only
+child never requests mutation. A session keeps the set it was bound with until
+its next bind, and every restart rebinds, so a changed set takes effect on the
+first bind after an upgrade. A session still bound under an earlier set, such
+as one whose retained bind was replayed across the upgrade, is refused with
+`control_assurance_insufficient` naming an effect its declared set lacks;
+when the current set includes that effect and it needs no more assurance than
+the host declares, admission rebinds with the current set and re-evaluates
+once, as it does for `stale_fence`, and a refusal that survives the rebind is
+final. The same code's other forms, a project policy stricter than the host's
+assurance or an effect that needs more assurance than the host declares, no
+rebind can cure, so they are reported at once. A retained evaluate replayed
+across the upgrade is granted the effects it requested, and when that grant's
+begin is refused the re-evaluation asks again for the same effects, since it
+runs under the same binding; only a `stale_fence` re-evaluation, which
+rebinds, asks for the current set, and the session otherwise takes the
+current set at its next admission. The turn's
+observation is judged against that grant's effects, which Engram checks it
+against, not against the session's current set, so a turn that changed
+source under such a grant reports nothing.
 Evaluate grants do not dispatch a provider prompt until begin succeeds, and
 successful completion checkpoints the begun grant. Refusal, deferral, unavailable
 binding, and failed recovery withhold the prompt rather than bypassing control.
@@ -332,9 +354,10 @@ a capture it could never report.
 Only a session bound to claimed work reports it: Engram admits host evidence
 solely through an exact work binding, so an unbound session's checkpoint
 carries no observation rather than one the evidence gate would reject.
-A turn that changed source under a grant that mediates no local mutation
-(today every root session and every read-only child) reports nothing rather
-than an observe-only claim, and logs the omission. Restart recovery, the
+A turn that changed source under a grant that mediates no local mutation (a
+read-only child's, or one issued from a retained evaluate prepared under an
+earlier effect set, as described under admission above) reports nothing
+rather than an observe-only claim, and logs the omission. Restart recovery, the
 compensating checkpoint of a superseded begin and the project-reset exit
 checkpoint close grants whose turn this process never saw end and report no
 observation.

@@ -522,6 +522,17 @@ enum EngramEffect {
     MutateLocal,
 }
 
+impl EngramEffect {
+    /// The effect's name on the wire, as its serde form spells it.
+    fn wire_name(&self) -> &'static str {
+        match self {
+            Self::Observe => "observe",
+            Self::Communicate => "communicate",
+            Self::MutateLocal => "mutate_local",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum EngramNextIntent {
@@ -688,6 +699,18 @@ struct EngramDirectiveResponse {
     code: String,
     target: String,
     satisfaction: String,
+    /// The effect an effect-specific refusal names; absent on project-wide
+    /// ones. Kept as the wire string so an effect class TermAl never
+    /// requests cannot fail the whole refusal's parse.
+    #[serde(default)]
+    effect: Option<String>,
+    /// The assurance the failed rule requires, as its wire string.
+    #[serde(default)]
+    required_assurance: Option<String>,
+    /// The effects the session was bound declaring, when the refusal is tied
+    /// to that mediation envelope.
+    #[serde(default)]
+    declared_mediated_effects: Option<Vec<String>>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -2146,6 +2169,14 @@ struct EngramSessionState {
     /// by the grant so a stale report is never replayed under another one.
     /// In memory only, cleared when the next grant is mirrored.
     active_turn_report: Option<(String, Vec<EngramExecutionObservationInput>)>,
+    /// For the named grant, whether the evaluate that issued it requested
+    /// `mutate_local`, read from the prepared evaluate when the grant is
+    /// mirrored. Engram checks an observation's effect against the grant's
+    /// own requested effects, which a grant issued from a retained evaluate
+    /// replayed across an effect-set change may not share with the session's
+    /// current set. Keyed by the grant so it never applies to another one;
+    /// absent or for another grant, the current set decides. In memory only.
+    active_turn_grant_mutates: Option<(String, bool)>,
     /// A grant whose `turn_begin` outcome the host never learned: the request
     /// was handed to the transport and then abandoned, failed in transport,
     /// or was answered for another grant. Engram may hold it begun. Only the
@@ -2206,6 +2237,7 @@ impl Default for EngramSessionState {
             active_turn_intent_fingerprint: None,
             active_turn_start_basis: None,
             active_turn_report: None,
+            active_turn_grant_mutates: None,
             uncertain_grant_id: None,
             begins_recorded: true,
             dispatch_generation: 0,
@@ -3657,12 +3689,11 @@ impl AppState {
                 EngramTurnReportPlan::Nothing => Vec::new(),
                 EngramTurnReportPlan::Cached(observations) => observations,
                 EngramTurnReportPlan::Fresh { outcome, .. } => {
-                    let mutation_granted = target.as_ref().is_some_and(|target| {
-                        target
-                            .effects
-                            .iter()
-                            .any(|effect| matches!(effect, EngramEffect::MutateLocal))
-                    });
+                    let mutation_granted = engram_turn_mutation_granted(
+                        &inner.sessions[index],
+                        &grant_id,
+                        target.as_ref(),
+                    );
                     let observations = engram_turn_execution_observation(
                         &inner.sessions[index],
                         session_id,
@@ -4170,6 +4201,32 @@ impl AppState {
                                     EngramControlFailMode::Degraded,
                                 );
                             };
+                            // The re-evaluation asks again for what the refused
+                            // grant's evaluate asked: the binding it runs under
+                            // is unchanged, so a set that binding lacks (the
+                            // current one, when a retained evaluate from before
+                            // an effect-set change was replayed) would only be
+                            // refused. The session takes the current set at its
+                            // next admission. A stale_fence re-evaluation has
+                            // just rebound, declaring the current set, and
+                            // requests it.
+                            let reevaluate_effects = if code == "stale_fence" {
+                                reevaluate_target.effects.clone()
+                            } else {
+                                let inner = self.inner.lock().expect("state mutex poisoned");
+                                inner
+                                    .find_session_index(session_id)
+                                    .and_then(|index| inner.sessions[index].queued_prompts.front())
+                                    .and_then(|queued| queued.engram_evaluate.as_ref())
+                                    .and_then(|prepared| {
+                                        engram_evaluate_requested_effects(
+                                            &prepared.request,
+                                            &pending.intent_fingerprint,
+                                        )
+                                    })
+                                    .map(<[EngramEffect]>::to_vec)
+                                    .unwrap_or_else(|| reevaluate_target.effects.clone())
+                            };
                             let reevaluate_started = std::time::Instant::now();
                             let mut reevaluated = self
                                 .retire_queued_engram_evaluation(
@@ -4197,7 +4254,7 @@ impl AppState {
                                             ),
                                             intent_fingerprint: pending.intent_fingerprint.clone(),
                                             purpose: "ordinary".to_owned(),
-                                            requested_effects: reevaluate_target.effects.clone(),
+                                            requested_effects: reevaluate_effects,
                                             resource_intents: Vec::new(),
                                         },
                                     )
@@ -4786,6 +4843,9 @@ impl AppState {
                 .and_then(|pending| pending.begin_requested.clone());
             let released_intent = released.map(|pending| pending.intent_fingerprint);
             if let Some(grant_id) = active_grant_id {
+                record.engram.active_turn_grant_mutates =
+                    engram_prepared_evaluate_requests_mutation(record, released_intent.as_deref())
+                        .map(|mutates| (grant_id.clone(), mutates));
                 if let Some(prepared) = record
                     .queued_prompts
                     .front_mut()
@@ -5164,7 +5224,15 @@ impl AppState {
             project_reset_owner_generation,
             external_ref: format!("termal:session:{parent_session_id}"),
             title: parent.session.name.clone(),
-            effects: vec![EngramEffect::Observe, EngramEffect::Communicate],
+            // A root session edits its own workspace, so its turns mediate
+            // local mutation too; that is what lets a root's turn report a
+            // source change (Engram w-108a13d58018). A child mediates it only
+            // when its write policy lets it write.
+            effects: vec![
+                EngramEffect::Observe,
+                EngramEffect::Communicate,
+                EngramEffect::MutateLocal,
+            ],
             routing_token: parent.engram.routing_token.clone(),
             active_grant_id: parent.engram.active_grant_id.clone(),
             uncertain_grant_id: parent.engram.uncertain_grant_id.clone(),
@@ -6016,6 +6084,8 @@ impl AppState {
             }
         };
         // Binding, work-focus, evaluate and begin share one admission budget.
+        // One rebind-and-re-evaluate per admission, whichever curable refusal
+        // (engram_evaluation_refusal_heals_by_rebind) asked for it.
         let mut stale_retry_used = false;
         let evaluated = loop {
             let routing_token = target
@@ -6024,6 +6094,9 @@ impl AppState {
                 .expect("ensured Engram target should carry a routing token");
             let request = EngramControlRequest::TurnEvaluate {
                 routing_token,
+                // "stale-re" is the historical prefix of every rebind
+                // re-evaluation, whichever curable refusal asked for it; it
+                // is kept because the keys are on the wire.
                 idempotency_key: format!(
                     "termal-{}evaluate:{}:{}:{}",
                     if stale_retry_used { "stale-re" } else { "" },
@@ -6125,7 +6198,8 @@ impl AppState {
                     };
                 }
                 Ok(EngramTurnDecisionResponse::Refuse { directive })
-                    if directive.code == "stale_fence" && !stale_retry_used =>
+                    if engram_evaluation_refusal_heals_by_rebind(&directive, &target.effects)
+                        && !stale_retry_used =>
                 {
                     if let Err(error) = self.retire_queued_engram_evaluation(
                         &intent.session_id,
@@ -6157,7 +6231,7 @@ impl AppState {
                         Ok(None) => {
                             break EngramDispatchEvaluation::Degraded {
                                 code: "binding_unavailable".to_owned(),
-                                detail: "Engram binding disappeared during stale-fence recovery"
+                                detail: "Engram binding disappeared during rebind recovery"
                                     .to_owned(),
                             };
                         }

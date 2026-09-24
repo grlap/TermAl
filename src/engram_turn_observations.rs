@@ -2,10 +2,12 @@
 // closes its Engram grant (Engram w-108a13d58018, tm-winf). Owns the turn
 // report: what one observation says, how the source basis is taken and
 // bounded, how a begin-time basis makes `source_changed` authoritative, and
-// how the record keeps the report for retries. Does not own the checkpoint
-// request, the grant lifecycle or the work binding, which stay in
-// `engram_host_adapter.rs`. New fragment beside that file, created instead
-// of growing it.
+// how the record keeps the report for retries. Also hosts
+// `engram_evaluate_requested_effects`, the reader of a prepared evaluate's
+// requested effects, which admission's begin-refusal re-evaluation shares.
+// Does not own the checkpoint request, the grant lifecycle or the work
+// binding, which stay in `engram_host_adapter.rs`. New fragment beside that
+// file, created instead of growing it.
 
 /// What a checkpoint's report needs. Taken twice under the lock: once before
 /// the off-lock basis capture, to decide whether one is needed, and again
@@ -50,6 +52,82 @@ fn engram_turn_report_plan(
             workdir: record.session.workdir.clone(),
             outcome,
         },
+    }
+}
+
+/// Whether `grant_id`, the grant closing now, mediates local mutation, which
+/// is what Engram checks an observation's effect against: the effects its
+/// own evaluate requested when recorded for this very grant, otherwise the
+/// session's current set.
+fn engram_turn_mutation_granted(
+    record: &SessionRecord,
+    grant_id: &str,
+    target: Option<&EngramBindingTarget>,
+) -> bool {
+    engram_grant_mediates_mutation(
+        record.engram.active_turn_grant_mutates.as_ref(),
+        grant_id,
+        target.is_some_and(|target| {
+            target
+                .effects
+                .iter()
+                .any(|effect| matches!(effect, EngramEffect::MutateLocal))
+        }),
+    )
+}
+
+/// The rule behind [`engram_turn_mutation_granted`]: a flag recorded for this
+/// very grant decides; one recorded for another grant, or none, leaves it to
+/// whether the session's current set mediates mutation.
+fn engram_grant_mediates_mutation(
+    recorded: Option<&(String, bool)>,
+    grant_id: &str,
+    current_set_mutates: bool,
+) -> bool {
+    match recorded {
+        Some((recorded_grant_id, mutates)) if recorded_grant_id == grant_id => *mutates,
+        _ => current_set_mutates,
+    }
+}
+
+/// Whether the prepared evaluate on the session's queued head requested
+/// `mutate_local`, when that evaluate is the one the mirrored grant was
+/// issued for (its intent is `released_intent`); `None` when no such
+/// evaluate is there to say, and the current set decides.
+fn engram_prepared_evaluate_requests_mutation(
+    record: &SessionRecord,
+    released_intent: Option<&str>,
+) -> Option<bool> {
+    let prepared = record.queued_prompts.front()?.engram_evaluate.as_ref()?;
+    engram_evaluate_requests_mutation(&prepared.request, released_intent?)
+}
+
+/// Whether `request`, an evaluate issued for `intent`, requested
+/// `mutate_local`; `None` for any other request, or one for another intent.
+fn engram_evaluate_requests_mutation(
+    request: &EngramControlRequest,
+    intent: &str,
+) -> Option<bool> {
+    engram_evaluate_requested_effects(request, intent).map(|requested_effects| {
+        requested_effects
+            .iter()
+            .any(|effect| matches!(effect, EngramEffect::MutateLocal))
+    })
+}
+
+/// The effects `request`, an evaluate issued for `intent`, requested; `None`
+/// for any other request, or one for another intent.
+fn engram_evaluate_requested_effects<'a>(
+    request: &'a EngramControlRequest,
+    intent: &str,
+) -> Option<&'a [EngramEffect]> {
+    match request {
+        EngramControlRequest::TurnEvaluate {
+            requested_effects,
+            intent_fingerprint,
+            ..
+        } if intent_fingerprint == intent => Some(requested_effects),
+        _ => None,
     }
 }
 

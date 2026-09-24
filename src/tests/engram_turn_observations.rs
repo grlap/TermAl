@@ -443,6 +443,185 @@ fn a_completed_turn_that_changed_source_reports_a_mutating_observation_with_its_
     );
 }
 
+/// A root session, bound to claimed work, in a Git repository of its own,
+/// behind a scripted control plane answering `responses`.
+struct ClaimedRoot {
+    state: AppState,
+    session_id: String,
+    root: PathBuf,
+    transport: Arc<ScriptedEngramControlTransport>,
+    runtime_rx: std::sync::mpsc::Receiver<CodexRuntimeCommand>,
+}
+
+impl ClaimedRoot {
+    fn new(label: &str, responses: Vec<ScriptedEngramControlResponse>) -> Self {
+        let (state, runtime_rx) = test_app_state_with_delegation_codex_runtime(&format!(
+            "engram-turn-observation-{label}"
+        ));
+        let root = state
+            .test_temp_root
+            .as_ref()
+            .expect("test root should exist")
+            .path()
+            .join(format!("engram-turn-observation-{label}-project"));
+        fs::create_dir_all(&root).expect("project root should exist");
+        init_git_repository(&root);
+        let project_id = create_test_project(&state, &root, "Engram root turn observation");
+        let session_id = create_test_project_session(&state, Agent::Codex, &project_id, &root);
+        enable_test_project_engram(&state, &project_id, &root);
+        {
+            let mut inner = state.inner.lock().expect("state mutex poisoned");
+            let index = inner
+                .find_session_index(&session_id)
+                .expect("root should exist");
+            // These tests are about the checkpoint, not the context reader.
+            inner.sessions[index].engram.context_nudge_pending = false;
+        }
+        let transport = ScriptedEngramControlTransport::new_with_work_bindings(
+            responses,
+            [Ok(Some(test_control_work_binding(
+                &format!("turn-observation-{label}"),
+                1,
+            )))],
+        );
+        install_control_only_transport(&state, transport.clone());
+        Self {
+            state,
+            session_id,
+            root,
+            transport,
+            runtime_rx,
+        }
+    }
+
+    fn dispatch(&self) -> TurnDispatch {
+        match self
+            .state
+            .dispatch_turn(
+                &self.session_id,
+                SendMessageRequest {
+                    text: "Change the root workspace.".to_owned(),
+                    expanded_text: None,
+                    attachments: Vec::new(),
+                    source_session_id: None,
+                    source_mailbox: None,
+                },
+            )
+            .expect("root should reach admission")
+        {
+            DispatchTurnResult::Dispatched(dispatch)
+            | DispatchTurnResult::DispatchedAfterQueue(dispatch) => dispatch,
+            DispatchTurnResult::Queued => panic!("an idle root should dispatch"),
+        }
+    }
+
+    fn runtime_token(&self) -> RuntimeToken {
+        let inner = self.state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&self.session_id)
+            .expect("root should exist");
+        inner.sessions[index]
+            .runtime
+            .runtime_token()
+            .expect("root runtime should be active")
+    }
+
+    fn record<T>(&self, read: impl FnOnce(&mut SessionRecord) -> T) -> T {
+        let mut inner = self.state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&self.session_id)
+            .expect("root should exist");
+        read(
+            inner
+                .session_mut_by_index(index)
+                .expect("session index should be valid"),
+        )
+    }
+}
+
+#[test]
+fn a_root_session_on_claimed_work_reports_the_source_change_its_turn_made() {
+    // A root session edits its own workspace, so its grant mediates local
+    // mutation and a turn that changed source reports it, rather than being
+    // withheld as a read-only child's would be.
+    let grant_id = "turn-observation-root-grant";
+    let claimed = ClaimedRoot::new(
+        "root",
+        vec![
+            bind_reply("turn-observation-root-token"),
+            grant_reply(grant_id),
+            begin_reply(grant_id),
+            checkpoint_reply(grant_id),
+        ],
+    );
+    let (state, session_id, root, transport) = (
+        &claimed.state,
+        &claimed.session_id,
+        &claimed.root,
+        &claimed.transport,
+    );
+    deliver_turn_dispatch(state, claimed.dispatch())
+        .expect("the begun root turn should reach the runtime");
+    assert!(matches!(
+        receive(
+            &claimed.runtime_rx,
+            "runtime should receive the root prompt"
+        ),
+        CodexRuntimeCommand::Prompt { .. }
+    ));
+    let runtime_token = claimed.runtime_token();
+    // Content only, with no watcher event: the fingerprints decide.
+    fs::write(root.join("README.md"), "changed by the root turn\n")
+        .expect("tracked file should change");
+
+    state
+        .finish_turn_ok_if_runtime_matches(session_id, &runtime_token)
+        .expect("root turn should complete");
+
+    let requests = transport.requests();
+    let bind = requests
+        .iter()
+        .find(|request| request.request["operation"] == "session_bind")
+        .expect("the root binds");
+    assert_eq!(
+        bind.request["mediated_effects"],
+        json!(["observe", "communicate", "mutate_local"])
+    );
+    let evaluation = requests
+        .iter()
+        .find(|request| request.request["operation"] == "turn_evaluate")
+        .expect("the root turn is evaluated");
+    assert_eq!(
+        evaluation.request["requested_effects"],
+        bind.request["mediated_effects"]
+    );
+    let checkpoint = requests
+        .iter()
+        .find(|request| request.request["operation"] == "turn_checkpoint")
+        .expect("the root turn is checkpointed")
+        .request
+        .clone();
+    let observations = checkpoint["observations"]
+        .as_array()
+        .expect("the root turn reports its observation");
+    assert_eq!(observations.len(), 1);
+    let observation = &observations[0];
+    assert_eq!(observation["outcome"], "succeeded");
+    assert_eq!(observation["source_changed"], true);
+    assert_eq!(observation["effect"], "mutate_local");
+    assert_eq!(
+        observation["action_fingerprint"],
+        evaluation.request["intent_fingerprint"]
+    );
+    assert_eq!(
+        observation["source_basis"]["source_revision"]
+            .as_str()
+            .expect("source revision"),
+        freeze_fingerprint(root),
+        "the basis is the root workspace's changed content"
+    );
+}
+
 #[test]
 fn a_completed_turn_that_changed_nothing_reports_an_observing_observation() {
     let turn = start_mediated_turn(
@@ -753,6 +932,149 @@ fn assert_a_refused_recovery_checkpoint_closes_bare_next_time(
     assert_eq!(
         inner.sessions[index].engram.active_grant_id, None,
         "the recovered grant is closed"
+    );
+}
+
+#[test]
+fn a_recorded_mutation_flag_applies_only_to_its_own_grant() {
+    let recorded = ("grant-a".to_owned(), false);
+    assert!(
+        !engram_grant_mediates_mutation(Some(&recorded), "grant-a", true),
+        "the flag recorded for this grant decides over the current set"
+    );
+    assert!(
+        engram_grant_mediates_mutation(Some(&recorded), "grant-b", true),
+        "a flag recorded for another grant never applies; the current set decides"
+    );
+    assert!(
+        !engram_grant_mediates_mutation(Some(&recorded), "grant-b", false),
+        "the current set decides both ways"
+    );
+    assert!(
+        engram_grant_mediates_mutation(None, "grant-a", true),
+        "with nothing recorded the current set decides"
+    );
+}
+
+#[test]
+fn a_prepared_evaluate_speaks_only_for_the_intent_it_was_issued_for() {
+    let evaluate = |intent: &str, effects: Vec<EngramEffect>| EngramControlRequest::TurnEvaluate {
+        routing_token: "token".to_owned(),
+        idempotency_key: "key".to_owned(),
+        intent_fingerprint: intent.to_owned(),
+        purpose: "ordinary".to_owned(),
+        requested_effects: effects,
+        resource_intents: Vec::new(),
+    };
+    let old_set = vec![EngramEffect::Observe, EngramEffect::Communicate];
+    let new_set = vec![
+        EngramEffect::Observe,
+        EngramEffect::Communicate,
+        EngramEffect::MutateLocal,
+    ];
+    assert_eq!(
+        engram_evaluate_requests_mutation(&evaluate("intent-a", old_set), "intent-a"),
+        Some(false)
+    );
+    assert_eq!(
+        engram_evaluate_requests_mutation(&evaluate("intent-a", new_set.clone()), "intent-a"),
+        Some(true)
+    );
+    assert_eq!(
+        engram_evaluate_requests_mutation(&evaluate("intent-b", new_set), "intent-a"),
+        None,
+        "another prompt's evaluate says nothing about this grant"
+    );
+}
+
+#[test]
+fn a_turn_is_judged_by_the_effects_its_own_grant_requested() {
+    // Engram checks an observation's effect against the grant's requested
+    // effects. A retained evaluate prepared under the older root set and
+    // replayed after the upgrade is granted without mutate_local, so a turn
+    // that changed source under that grant reports nothing rather than a
+    // mutate_local claim the grant never covered.
+    let grant_id = "turn-observation-replayed-grant";
+    let claimed = ClaimedRoot::new(
+        "replayed-evaluate",
+        vec![
+            bind_reply("turn-observation-replayed-token"),
+            ScriptedEngramControlResponse::Reply(Err(EngramTransportError::deadline(
+                "evaluate reply lost",
+            ))),
+            grant_reply(grant_id),
+            begin_reply(grant_id),
+            checkpoint_reply(grant_id),
+        ],
+    );
+    deliver_turn_dispatch(&claimed.state, claimed.dispatch())
+        .expect("an unknown admission retains the prompt");
+    assert!(claimed.runtime_rx.try_recv().is_err());
+    // The retained evaluate is the one prepared before the upgrade, under
+    // the older root set.
+    claimed.record(|record| {
+        let prepared = record
+            .queued_prompts
+            .front_mut()
+            .and_then(|queued| queued.engram_evaluate.as_mut())
+            .expect("the unknown evaluate is retained for replay");
+        let EngramControlRequest::TurnEvaluate {
+            requested_effects, ..
+        } = &mut prepared.request
+        else {
+            panic!("the retained request is an evaluate");
+        };
+        *requested_effects = vec![EngramEffect::Observe, EngramEffect::Communicate];
+    });
+
+    claimed
+        .state
+        .resume_session_queue(&claimed.session_id)
+        .expect("the retained evaluate replays");
+    assert!(matches!(
+        receive(&claimed.runtime_rx, "the replayed turn reaches the runtime"),
+        CodexRuntimeCommand::Prompt { .. }
+    ));
+    assert_eq!(
+        claimed.record(|record| record.engram.active_turn_grant_mutates.clone()),
+        Some((grant_id.to_owned(), false)),
+        "the grant is recorded, under its own id, with what its replayed evaluate requested"
+    );
+    let runtime_token = claimed.runtime_token();
+    fs::write(
+        claimed.root.join("README.md"),
+        "changed under the old grant\n",
+    )
+    .expect("tracked file should change");
+
+    claimed
+        .state
+        .finish_turn_ok_if_runtime_matches(&claimed.session_id, &runtime_token)
+        .expect("the replayed turn should complete");
+
+    let requests = claimed.transport.requests();
+    let evaluations = requests
+        .iter()
+        .filter(|request| request.request["operation"] == "turn_evaluate")
+        .collect::<Vec<_>>();
+    assert_eq!(
+        evaluations.last().expect("the replay is evaluated").request["requested_effects"],
+        json!(["observe", "communicate"]),
+        "the replay is the retained request, older set and all"
+    );
+    let checkpoint = requests
+        .iter()
+        .find(|request| request.request["operation"] == "turn_checkpoint")
+        .expect("the replayed turn is checkpointed")
+        .request
+        .clone();
+    assert!(
+        checkpoint.get("observations").is_none(),
+        "the grant never covered mutation, so nothing is claimed for it"
+    );
+    assert_eq!(
+        checkpoint["idempotency_key"],
+        format!("termal-checkpoint:{}:{grant_id}:wait", claimed.session_id)
     );
 }
 
