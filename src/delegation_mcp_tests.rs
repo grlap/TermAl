@@ -787,6 +787,37 @@ fn split_mcp_agent_command_tail_pins_note_separator_edges() {
         ("staged -- -- second", Some("staged"), Some("-- second")),
         ("staged ---x", Some("staged ---x"), None),
         (
+            "compare `git diff --no-index -- <round1> <current>`",
+            Some("compare `git diff --no-index -- <round1> <current>`"),
+            None,
+        ),
+        (
+            "compare `git diff -- a b` -- include tests",
+            Some("compare `git diff -- a b`"),
+            Some("include tests"),
+        ),
+        (
+            "compare ``literal ` -- example`` -- include tests",
+            Some("compare ``literal ` -- example``"),
+            Some("include tests"),
+        ),
+        (
+            "unfinished `git diff -- a b",
+            Some("unfinished `git diff -- a b"),
+            None,
+        ),
+        ("`` -- note", Some("`` -- note"), None),
+        (
+            "compare `a -- b` and `c -- d` -- note",
+            Some("compare `a -- b` and `c -- d`"),
+            Some("note"),
+        ),
+        (
+            "review → `diff -- a b`",
+            Some("review → `diff -- a b`"),
+            None,
+        ),
+        (
             "staged-- include tests",
             Some("staged-- include tests"),
             None,
@@ -2462,6 +2493,47 @@ fn delegation_mcp_spawn_session_resolves_known_slash_command_prompt() {
         requests.lock().expect("request log mutex poisoned").len(),
         2
     );
+}
+
+#[test]
+fn delegation_mcp_native_resolution_preserves_backticked_diff_arguments() {
+    let arguments = "Compare round 1 → round 2 using `git diff --no-index -- <round1> <current>`; preserve identity.";
+    let prompt = format!("/review-code {arguments}");
+    let parsed = parse_mcp_slash_command_prompt(&prompt).expect("slash prompt should parse");
+    let (base_url, _, server) = spawn_test_mcp_http_server(1, move |request| {
+        assert_eq!(request.method, "POST");
+        assert_eq!(
+            request.path,
+            "/api/sessions/session-parent/agent-commands/review-code/resolve"
+        );
+        let body: Value = serde_json::from_str(&request.body).unwrap();
+        assert_eq!(body["arguments"], arguments);
+        assert!(body.get("note").is_none(), "code must not become a note");
+        let response = resolve_agent_command_payload(
+            AgentCommand {
+                kind: AgentCommandKind::NativeSlash,
+                name: "review-code".to_owned(),
+                description: "Review changes".to_owned(),
+                content: "/review-code".to_owned(),
+                source: "claude/native".to_owned(),
+                argument_hint: None,
+                resolver_frontmatter: None,
+                resolver_frontmatter_trusted: false,
+            },
+            serde_json::from_value(body).unwrap(),
+            None,
+        )
+        .expect("native resolver must accept literal code in arguments");
+        (200, serde_json::to_value(response).unwrap())
+    });
+    let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
+        .expect("bridge should initialize");
+    let resolved = bridge
+        .resolve_agent_command_for_spawn("review-code", &parsed, None)
+        .expect("resolve request should succeed without a synthetic note");
+    assert_eq!(resolved["visiblePrompt"], prompt);
+    assert_eq!(resolved["expandedPrompt"], Value::Null);
+    server.join().expect("test server should join");
 }
 
 #[test]

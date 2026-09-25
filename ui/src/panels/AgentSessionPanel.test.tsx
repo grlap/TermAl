@@ -503,6 +503,33 @@ describe("splitAgentCommandResolverTail", () => {
     ],
     ["empty trailing note", "3 --", { argumentsText: "3" }],
     ["attached dash is an argument", "3 --flag", { argumentsText: "3 --flag" }],
+    [
+      "command example",
+      "compare `git diff --no-index -- <round1> <current>`",
+      { argumentsText: "compare `git diff --no-index -- <round1> <current>`" },
+    ],
+    [
+      "note after command example",
+      "compare `git diff -- a b` -- include tests",
+      { argumentsText: "compare `git diff -- a b`", noteText: "include tests" },
+    ],
+    [
+      "matching backtick widths",
+      "compare ``literal ` -- example`` -- include tests",
+      { argumentsText: "compare ``literal ` -- example``", noteText: "include tests" },
+    ],
+    [
+      "unfinished example",
+      "unfinished `git diff -- a b",
+      { argumentsText: "unfinished `git diff -- a b" },
+    ],
+    ["unfinished double backtick", "`` -- note", { argumentsText: "`` -- note" }],
+    [
+      "multiple examples",
+      "compare `a -- b` and `c -- d` -- note",
+      { argumentsText: "compare `a -- b` and `c -- d`", noteText: "note" },
+    ],
+    ["Unicode text", "review → `diff -- a b`", { argumentsText: "review → `diff -- a b`" }],
   ])("splits %s separators", (_caseName, input, expected) => {
     expect(splitAgentCommandResolverTail(input)).toEqual(expected);
   });

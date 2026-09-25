@@ -27,8 +27,6 @@ type AgentCommandSubmissionResolution =
       noteText?: string;
     };
 
-const AGENT_COMMAND_NOTE_SEPARATOR_PATTERN = /(^|\s)--(?=\s|$)/u;
-
 /** @internal Exported for focused parser regression tests. */
 export function splitAgentCommandResolverTail(argumentsText: string): {
   argumentsText: string;
@@ -39,17 +37,32 @@ export function splitAgentCommandResolverTail(argumentsText: string): {
     return { argumentsText: "" };
   }
 
-  const separatorMatch = AGENT_COMMAND_NOTE_SEPARATOR_PATTERN.exec(trimmed);
-  if (!separatorMatch) {
-    return { argumentsText: trimmed };
+  // Match the MCP parser: code examples (including unfinished ones) are literal,
+  // and only an equal-width backtick run closes a code span.
+  let backtickWidth: number | undefined;
+  for (let index = 0; index < trimmed.length; index += 1) {
+    if (trimmed[index] === "`") {
+      const start = index;
+      while (trimmed[index + 1] === "`") index += 1;
+      const width = index - start + 1;
+      if (backtickWidth === undefined) backtickWidth = width;
+      else if (backtickWidth === width) backtickWidth = undefined;
+      continue;
+    }
+    if (
+      backtickWidth === undefined &&
+      trimmed.startsWith("--", index) &&
+      (index === 0 || /\s/u.test(trimmed[index - 1])) &&
+      (index + 2 === trimmed.length || /\s/u.test(trimmed[index + 2]))
+    ) {
+      const noteText = trimmed.slice(index + 2).trim();
+      return {
+        argumentsText: trimmed.slice(0, index).trim(),
+        ...(noteText ? { noteText } : {}),
+      };
+    }
   }
-
-  const separatorStart = separatorMatch.index + (separatorMatch[1]?.length ?? 0);
-  const noteText = trimmed.slice(separatorStart + 2).trim();
-  return {
-    argumentsText: trimmed.slice(0, separatorMatch.index).trim(),
-    ...(noteText ? { noteText } : {}),
-  };
+  return { argumentsText: trimmed };
 }
 
 export function prepareAgentCommandSubmission(

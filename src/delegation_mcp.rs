@@ -2857,6 +2857,8 @@ fn parse_mcp_slash_command_prompt(prompt: &str) -> Option<McpSlashCommandPrompt>
 }
 
 /// Splits slash-command tail text using the same `--` note separator as the UI.
+/// Backtick-delimited examples are literal: only a run of the same width closes
+/// them. An unfinished example keeps the remaining tail literal as well.
 fn split_mcp_agent_command_tail(tail: &str) -> (Option<String>, Option<String>) {
     let trimmed = tail.trim();
     if trimmed.is_empty() {
@@ -2864,8 +2866,23 @@ fn split_mcp_agent_command_tail(tail: &str) -> (Option<String>, Option<String>) 
     }
     let bytes = trimmed.as_bytes();
     let mut index = 0;
+    let mut backtick_width = None;
     while index + 1 < bytes.len() {
-        if bytes[index] == b'-'
+        if bytes[index] == b'`' {
+            let start = index;
+            while index < bytes.len() && bytes[index] == b'`' {
+                index += 1;
+            }
+            let width = index - start;
+            match backtick_width {
+                None => backtick_width = Some(width),
+                Some(open_width) if open_width == width => backtick_width = None,
+                _ => {}
+            }
+            continue;
+        }
+        if backtick_width.is_none()
+            && bytes[index] == b'-'
             && bytes[index + 1] == b'-'
             && (index == 0 || bytes[index - 1].is_ascii_whitespace())
             && (index + 2 == bytes.len() || bytes[index + 2].is_ascii_whitespace())

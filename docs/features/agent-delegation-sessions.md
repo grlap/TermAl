@@ -686,6 +686,12 @@ Required contract:
   If the command exists in the parent workdir but not the requested `cwd`, the
   spawn fails instead of sending an unexpanded slash command to the child.
   Literal prompts and truly unknown slash-like prompts remain unchanged.
+- A whitespace-delimited `--` outside a backtick-delimited example separates
+  slash-command arguments from additional notes. Backtick runs close only at
+  the same width; an unfinished example keeps the remaining tail literal.
+  For example, `` /review-code compare `git diff --no-index -- a b` `` keeps
+  the whole comparison instruction as arguments. A subsequent top-level `--`
+  still introduces notes; native commands continue to reject explicit notes.
 - Caller-supplied MCP spawn options (`title`, `mode`, and `writePolicy`) override
   resolver-provided defaults. Omit those fields to use trusted command metadata.
 
