@@ -75,7 +75,10 @@ Keep the run directory from the launch receipt. On completion, read only:
 Report failures and warnings with log paths; inspect bounded log excerpts only
 to diagnose them. Missing terminal evidence is UNKNOWN, not PASS. Notification
 recovery uses `node scripts/test-launcher.mjs notify RUN_DIRECTORY`, never a
-new test run. Reuse completed evidence for unchanged input; do not edit tested
+new test run. A run whose launcher died without a terminal result is settled
+with `node scripts/test-launcher.mjs recover RUN_DIRECTORY`: it becomes an
+interrupted failure, never a pass, and only the run's owner sends its
+completion. Reuse completed evidence for unchanged input; do not edit tested
 input while running. Only a successful full run for the current input permits
 Step 3. See docs/test.md for the launcher contract, not an alternate gate plan.
 

@@ -24,6 +24,7 @@ import {
   fingerprintComponentNames,
   isolatedGitEnvironment,
 } from "./review-freeze-fingerprint.mjs";
+import { processMayBeAlive } from "./test-temp-root.mjs";
 
 const script = fileURLToPath(import.meta.url);
 const repository = resolve(dirname(script), "..");
@@ -54,6 +55,13 @@ function save(path, value) {
       if (error.code !== "ENOENT") throw error;
     }
   }
+}
+
+// A result is terminal once it records how the run ended; anything else is
+// UNKNOWN (running or interrupted), never a pass.
+function isTerminal(result) {
+  return ["passed", "failed"].includes(result?.state) &&
+    Boolean(result.ended) && Number.isInteger(result.exitCode);
 }
 
 function failureInvestigation(runDir) {
@@ -600,8 +608,7 @@ export async function executeRun(runDir, env = process.env, { onReady } = {}) {
 
 export async function summarize(runDir) {
   const result = readJson(join(runDir, "results.json"));
-  const terminal = ["passed", "failed"].includes(result.state) &&
-    result.ended && Number.isInteger(result.exitCode);
+  const terminal = isTerminal(result);
   const lines = [
     `${terminal ? result.state === "passed" ? "PASS" : "FAIL" : "UNKNOWN (no terminal result; running or interrupted)"} ${result.runId} exit=${terminal ? result.exitCode : "unknown"}`,
     `results: ${join(runDir, "results.json")}`,
@@ -646,8 +653,11 @@ export async function summarize(runDir) {
 export async function notifyRun(runDir, env = process.env, send = runCommand) {
   const request = readJson(join(runDir, "request.json"));
   const result = readJson(join(runDir, "results.json"));
-  if (!["passed", "failed"].includes(result.state) || !result.ended) {
+  if (!isTerminal(result)) {
     throw new Error("cannot notify before terminal results are saved");
+  }
+  if (result.notificationEligible === false) {
+    throw new Error("this run's request failed validation, so no completion may be sent for it");
   }
   const { cli, notifyTo } = validateNotification(request, env);
   const messageFile = join(runDir, "notification.message.txt");
@@ -699,6 +709,141 @@ export async function notifyRun(runDir, env = process.env, send = runCommand) {
   return receipt;
 }
 
+function notificationDelivered(runDir) {
+  const path = join(runDir, "notification.json");
+  if (!existsSync(path)) return false;
+  const receipt = readJson(path);
+  return receipt?.code === 0 && !receipt.error;
+}
+
+// One best-effort message from an admitted runner that could not save a
+// terminal result, so its coordinator is not left waiting. It says UNKNOWN,
+// never PASS, and uses its own idempotency key: the run's completion key stays
+// free for the genuine result a later `recover` sends.
+export async function notifyRunnerFailure(runDir, error, env = process.env, send = runCommand) {
+  const request = readJson(join(runDir, "request.json"));
+  if (request.notifyTo === undefined) return undefined;
+  const { cli, notifyTo } = validateNotification(request, env);
+  const messageFile = join(runDir, "notification.runner-error.txt");
+  writeFileSync(messageFile, [
+    `UNKNOWN ${request.runId}: the runner could not save a terminal result: ${error.message}`.slice(0, diagnosticLimit),
+    "Nothing here is a PASS, and no stage was rerun.",
+    `Inspect: node scripts/test-launcher.mjs summary "${runDir}"`,
+    `Once the worker has exited, settle the run: node scripts/test-launcher.mjs recover "${runDir}"`,
+    "If results.json itself cannot be written, recover fails the same way and the run stays UNKNOWN.",
+    "",
+  ].join("\n"));
+  const args = [
+    "mailbox",
+    "send",
+    "--to",
+    notifyTo,
+    "--message-file",
+    messageFile,
+    "--idempotency-key",
+    `termal-tests:${request.runId}:runner-error`,
+    "--json",
+  ];
+  return send(cli, args, {
+    cwd: request.root,
+    env,
+    log: join(runDir, `notification-runner-error-${randomUUID()}.log`),
+  });
+}
+
+// Settles a run whose worker is gone, once, on request: nothing watches or
+// polls for it. It never runs a stage. It refuses while the recorded worker
+// may be alive (only proof of its death counts), and for a run no process ever
+// took ownership of: no stage ran under it. A settled run is failed and marked
+// interrupted; a stage that was running has an unknown outcome, never a pass.
+// `recovery.lock` serialises settlement and is released after every attempt,
+// so a failed write can be retried; the result is read again under it, so a
+// terminal result the worker saved meanwhile is kept, not overwritten. The
+// completion then goes out as `notify` would send it, under the run's own key,
+// and only from the session that owns the run.
+export async function recoverRun(runDir, env = process.env, {
+  send = runCommand,
+  isAlive = processMayBeAlive,
+  saveResult = save,
+} = {}) {
+  const resultPath = join(runDir, "results.json");
+  const request = readJson(join(runDir, "request.json"));
+  const readResult = () => {
+    const current = readJson(resultPath);
+    if (!current || typeof current !== "object" || current.runId !== basename(runDir) ||
+        !Array.isArray(current.stages)) {
+      throw new Error(`results.json does not describe run ${basename(runDir)}`);
+    }
+    return current;
+  };
+  let result = readResult();
+  let settled = false;
+  if (!isTerminal(result)) {
+    if (!Number.isSafeInteger(result.pid) || result.pid <= 0) {
+      throw new Error("no process ever took ownership of this run (it never started, or died before admission), so no stage ran under it; inspect it with summary");
+    }
+    if (isAlive(result.pid)) {
+      throw new Error(`worker pid ${result.pid} may still be running; wait for its completion, or see docs/test.md if that pid now belongs to another process`);
+    }
+    const lock = join(runDir, "recovery.lock");
+    let locked = false;
+    try {
+      closeSync(openSync(lock, "wx"));
+      locked = true;
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
+    }
+    try {
+      // Read again under the lock: the worker, or a concurrent recovery,
+      // may have saved a terminal result since the first read.
+      result = readResult();
+      if (!isTerminal(result) && !locked) {
+        throw new Error(`another recovery of this run is in progress, or one was killed before releasing ${lock}`);
+      }
+      if (!isTerminal(result)) {
+        const interruption = `worker ${result.pid} exited without saving a terminal result`;
+        for (const stage of result.stages) {
+          if (stage.state === "running") {
+            stage.state = "failed";
+            stage.error = `interrupted: ${interruption}; this stage's outcome is unknown`;
+          }
+        }
+        Object.assign(result, {
+          state: "failed",
+          exitCode: 1,
+          interrupted: true,
+          error: `interrupted: ${interruption}; no stage was rerun`,
+          ended: new Date().toISOString(),
+        });
+        attachFailureInvestigation(result, runDir);
+        saveResult(resultPath, result);
+        settled = true;
+      }
+    } finally {
+      if (locked) {
+        try {
+          unlinkSync(lock);
+        } catch (error) {
+          if (error.code !== "ENOENT") throw error;
+        }
+      }
+    }
+  }
+  let notification = "not requested";
+  if (request.notifyTo !== undefined) {
+    if (result.notificationEligible === false) {
+      notification = "not sent: the run's request failed validation";
+    } else if (notificationDelivered(runDir)) notification = "already delivered";
+    else if (env.TERMAL_SESSION_ID?.trim() !== request.owner) {
+      notification = "not sent: only the session that owns the run may send its completion";
+    } else {
+      await notifyRun(runDir, env, send);
+      notification = "sent";
+    }
+  }
+  return { settled, notification };
+}
+
 async function sendWorkerReady(runDir) {
   if (typeof process.send !== "function") {
     throw new Error("detached worker has no readiness IPC channel");
@@ -712,9 +857,50 @@ async function sendWorkerReady(runDir) {
 }
 
 async function finish(runDir, { workerHandshake = false } = {}) {
-  const result = await executeRun(runDir, process.env, {
-    onReady: workerHandshake ? () => sendWorkerReady(runDir) : undefined,
-  });
+  // Admission is the point after which this process owns the run: a failure
+  // before it (another owner's lock) must not speak for the run.
+  let admitted = false;
+  let result;
+  try {
+    result = await executeRun(runDir, process.env, {
+      onReady: async () => {
+        admitted = true;
+        if (workerHandshake) await sendWorkerReady(runDir);
+      },
+    });
+  } catch (error) {
+    process.exitCode = 1;
+    // A terminal result may already be on disk (a later annotation failed):
+    // then the run's own completion goes out, not an UNKNOWN notice.
+    let saved;
+    try {
+      const current = readJson(join(runDir, "results.json"));
+      if (isTerminal(current)) saved = current;
+    } catch {
+      // Unreadable results are exactly what the UNKNOWN notice reports.
+    }
+    process.stderr.write(!admitted
+      ? `FAIL launcher: failed before admission: ${error.message}\n`
+      : saved
+        ? `FAIL launcher: runner error after its terminal result was saved: ${error.message}\n`
+        : `FAIL launcher: no terminal result was saved: ${error.message}\n`);
+    if (admitted) {
+      try {
+        if (!saved) {
+          const outcome = await notifyRunnerFailure(runDir, error);
+          if (outcome && (outcome.code !== 0 || outcome.error)) {
+            process.stderr.write(`runner-failure notification failed: ${outcome.error ?? `exit ${outcome.code}`}\n`);
+          }
+        } else if (saved.notificationEligible !== false &&
+            readJson(join(runDir, "request.json")).notifyTo) {
+          await notifyRun(runDir);
+        }
+      } catch (notifyError) {
+        process.stderr.write(`notification failed: ${notifyError.message}\n`);
+      }
+    }
+    return;
+  }
   process.stdout.write(await summarize(runDir));
   process.exitCode = result.exitCode;
   if (result.notificationEligible !== false && readJson(join(runDir, "request.json")).notifyTo) {
@@ -808,7 +994,7 @@ function parseCommon(args) {
 
 async function main(args) {
   const mode = args.shift();
-  if (["summary", "notify", "_run"].includes(mode)) {
+  if (["summary", "notify", "recover", "_run"].includes(mode)) {
     if (args.length !== 1) throw new Error(`${mode} requires one run directory`);
     const runDir = resolve(args[0]);
     if (mode === "summary") {
@@ -820,11 +1006,17 @@ async function main(args) {
       console.log(`Notification sent; tests not rerun. ${runDir}`);
       return;
     }
+    if (mode === "recover") {
+      const { settled, notification } = await recoverRun(runDir);
+      process.stdout.write(await summarize(runDir));
+      console.log(`${settled ? "Settled as interrupted" : "Already terminal"}; notification ${notification}; tests not rerun.`);
+      return;
+    }
     await finish(runDir, { workerHandshake: true });
     return;
   }
   if (!["full", "focused", "live"].includes(mode)) {
-    throw new Error("usage: test-launcher.mjs full|focused|live [--notify SESSION] [--detach] [--require-binary-env NAME] [--engram-binary ABSOLUTE --engram-sha256 SHA256] [-- COMMAND ARGS...] | summary|notify RUN_DIR");
+    throw new Error("usage: test-launcher.mjs full|focused|live [--notify SESSION] [--detach] [--require-binary-env NAME] [--engram-binary ABSOLUTE --engram-sha256 SHA256] [-- COMMAND ARGS...] | summary|notify|recover RUN_DIR");
   }
   const options = parseCommon(args);
   if (mode === "full" && options.rest.length) throw new Error("full takes no command");
@@ -855,6 +1047,9 @@ async function main(args) {
     full: mode === "full",
   });
   if (!options.detach) {
+    // The run directory is known before any stage executes, so an interrupted
+    // host wait can still inspect or settle this run without rerunning it.
+    console.log(`RUN ${runDir}`);
     await finish(runDir);
     return;
   }

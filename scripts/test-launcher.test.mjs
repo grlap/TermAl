@@ -1,9 +1,10 @@
 // Exercises the shared test-launcher contract without running product gates.
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   chmodSync,
+  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -23,6 +24,7 @@ import {
   helperTestFiles,
   liveStage,
   notifyRun,
+  recoverRun,
   requiredFiles,
   requiredStages,
   runCommand,
@@ -819,4 +821,470 @@ test("live binary hash mismatch is terminal and precedes the stage", async (t) =
     assert.match(result.error, /SHA-256 mismatch/u);
     assert.equal(result.liveEngram.observedSha256, actual);
   });
+});
+
+test("an admitted worker that cannot save its terminal result sends one UNKNOWN notice under its own key", async (t) => {
+  await isolatedDetachedRepository(t, async (root, env, notificationMarker) => {
+    // The stage turns results.json into a directory, so every later save fails.
+    const runDir = await createRun({
+      root,
+      stages: [stage("break-results", [
+        "const fs = require('node:fs');",
+        "const path = require('node:path');",
+        "const base = path.join('.git', 'review-runs');",
+        "const [run] = fs.readdirSync(base);",
+        "const results = path.join(base, run, 'results.json');",
+        "fs.rmSync(results);",
+        "fs.mkdirSync(results);",
+      ].join(" "))],
+      notifyTo: "Termal::Codex",
+    }, env);
+    const detached = await within(startDetachedRun(runDir, env), "detached readiness");
+    assert.deepEqual(await within(detached.completion, "detached completion"), {
+      code: 1,
+      signal: null,
+    });
+    const calls = readFileSync(notificationMarker, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    assert.equal(calls.length, 1);
+    const { args, body } = calls[0];
+    assert.equal(args[args.indexOf("--to") + 1], "Termal::Codex");
+    assert.equal(
+      args[args.indexOf("--idempotency-key") + 1],
+      `termal-tests:${basename(runDir)}:runner-error`,
+    );
+    assert.match(body, /^UNKNOWN /u);
+    assert.match(body, /Nothing here is a PASS/u);
+    assert.match(body, /recover/u);
+    assert.match(body, /recover fails the same way and the run stays UNKNOWN/u);
+    assert.equal(existsSync(join(runDir, "notification.json")), false);
+  });
+});
+
+test("recover refuses a live worker and a run no worker ever owned", async (t) => {
+  await repository(t, async (root) => {
+    const runDir = await createRun({
+      root,
+      stages: [stage("unrun")],
+      notifyTo: "fixture-parent",
+    }, fixtureEnv);
+    let sent = false;
+    const send = async () => { sent = true; return { code: 0, signal: null }; };
+    await assert.rejects(recoverRun(runDir, fixtureEnv, { send }), /no process ever took ownership/u);
+    const resultPath = join(runDir, "results.json");
+    const result = json(resultPath);
+    result.pid = process.pid;
+    writeFileSync(resultPath, `${JSON.stringify(result, null, 2)}\n`);
+    const bytes = readFileSync(resultPath, "utf8");
+    await assert.rejects(
+      recoverRun(runDir, fixtureEnv, { send }),
+      new RegExp(`worker pid ${process.pid} may still be running`, "u"),
+    );
+    assert.equal(readFileSync(resultPath, "utf8"), bytes);
+    assert.equal(existsSync(join(runDir, "recovery.lock")), false);
+    assert.equal(sent, false);
+  });
+});
+
+test("recover settles a dead worker's run as interrupted, and only the owner notifies, once", async (t) => {
+  await repository(t, async (root) => {
+    const runDir = await createRun({
+      root,
+      stages: [stage("done"), stage("interrupted"), stage("never-started")],
+      notifyTo: "fixture-parent",
+    }, fixtureEnv);
+    const resultPath = join(runDir, "results.json");
+    const running = json(resultPath);
+    running.pid = 4242;
+    Object.assign(running.stages[0], { state: "passed", code: 0 });
+    running.stages[1].state = "running";
+    writeFileSync(resultPath, `${JSON.stringify(running, null, 2)}\n`);
+    const calls = [];
+    const send = async (command, args) => {
+      calls.push(args);
+      return { code: 0, signal: null };
+    };
+    const gone = () => false;
+
+    // The waiting coordinator may settle the run but cannot speak for its owner.
+    const coordinator = { ...fixtureEnv, TERMAL_SESSION_ID: "fixture-parent" };
+    assert.deepEqual(await recoverRun(runDir, coordinator, { send, isAlive: gone }), {
+      settled: true,
+      notification: "not sent: only the session that owns the run may send its completion",
+    });
+    const settled = json(resultPath);
+    assert.equal(settled.state, "failed");
+    assert.equal(settled.exitCode, 1);
+    assert.equal(settled.interrupted, true);
+    assert.match(settled.error, /worker 4242 exited without saving a terminal result/u);
+    assert.deepEqual(settled.stages.map(({ state }) => state), ["passed", "failed", "unrun"]);
+    assert.match(settled.stages[1].error, /outcome is unknown/u);
+    assert.equal(settled.failureInvestigation.status, "required");
+    assert.match(await summarize(runDir), /^FAIL /u);
+    assert.equal(calls.length, 0);
+
+    assert.deepEqual(await recoverRun(runDir, fixtureEnv, { send, isAlive: gone }), {
+      settled: false,
+      notification: "sent",
+    });
+    assert.equal(calls.length, 1);
+    assert.equal(
+      calls[0][calls[0].indexOf("--idempotency-key") + 1],
+      `termal-tests:${basename(runDir)}`,
+    );
+    assert.match(readFileSync(join(runDir, "notification.message.txt"), "utf8"), /interrupted/u);
+
+    const bytes = readFileSync(resultPath, "utf8");
+    assert.deepEqual(await recoverRun(runDir, fixtureEnv, { send, isAlive: gone }), {
+      settled: false,
+      notification: "already delivered",
+    });
+    assert.equal(calls.length, 1);
+    assert.equal(readFileSync(resultPath, "utf8"), bytes);
+  });
+});
+
+test("a foreground run prints its run receipt before any stage completes", async (t) => {
+  await repository(t, async (root, env) => {
+    // The launcher roots its runs at its own repository, so run a copy of it
+    // from inside the fixture.
+    const scripts = join(root, "scripts");
+    mkdirSync(scripts);
+    for (const name of ["test-launcher.mjs", "review-freeze-fingerprint.mjs", "test-temp-root.mjs"]) {
+      copyFileSync(join(projectRoot, "scripts", name), join(scripts, name));
+    }
+    const gate = mkdtempSync(join(testTempDirectory(), "launcher-receipt-"));
+    t.after(() => rmSync(gate, { recursive: true, force: true }));
+    const release = join(gate, "release");
+    const child = spawn(process.execPath, [
+      join(scripts, "test-launcher.mjs"),
+      "focused",
+      "--",
+      process.execPath,
+      "-e",
+      [
+        "const fs = require('node:fs');",
+        "const deadline = Date.now() + 10000;",
+        `while (!fs.existsSync(${JSON.stringify(release)})) {`,
+        "  if (Date.now() > deadline) process.exit(3);",
+        "  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);",
+        "}",
+      ].join(" "),
+    ], { cwd: root, env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+    let stdout = "";
+    let stderr = "";
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    const exited = new Promise((resolveExit) => child.once("close", (code) => resolveExit(code)));
+    try {
+      const receipt = await within(new Promise((resolveReceipt, rejectReceipt) => {
+        child.stdout.on("data", (chunk) => {
+          stdout += chunk;
+          if (stdout.includes("\n")) resolveReceipt(stdout.split("\n")[0].trim());
+        });
+        child.once("close", () => {
+          rejectReceipt(new Error(`launcher exited before a receipt: ${stdout}${stderr}`));
+        });
+      }), "foreground receipt");
+      const match = /^RUN (.+)$/u.exec(receipt);
+      assert.ok(match, receipt);
+      const runDir = match[1];
+      // The stage cannot finish before `release` exists, so no verdict may
+      // have been printed yet. results.json is not read here, so the test
+      // cannot race the launcher's own replacement of it.
+      assert.doesNotMatch(stdout, /^(?:PASS|FAIL) /mu, stdout);
+      writeFileSync(release, "go\n");
+      assert.equal(await within(exited, "foreground completion"), 0, `${stdout}${stderr}`);
+      assert.match(stdout, new RegExp(`^RUN .+\\r?\\n(?:.*\\r?\\n)*PASS ${basename(runDir)} exit=0`, "u"));
+    } finally {
+      // Never leave the launcher running in the fixture directory, which the
+      // fixture removes next: release its stage and wait for it to end.
+      if (!existsSync(release)) writeFileSync(release, "go\n");
+      await within(exited, "launcher shutdown");
+    }
+  });
+});
+
+// Rewrites a run's results.json in place, as a fixture for recovery states.
+function rewriteResult(runDir, change) {
+  const path = join(runDir, "results.json");
+  const result = json(path);
+  change(result);
+  writeFileSync(path, `${JSON.stringify(result, null, 2)}\n`);
+  return result;
+}
+
+const recordingSend = (calls) => async (command, args) => {
+  calls.push(args);
+  return { code: 0, signal: null };
+};
+
+test("recover keeps a terminal result the worker saved after recovery first read the run", async (t) => {
+  await repository(t, async (root) => {
+    const runDir = await createRun({
+      root,
+      stages: [stage("finishing")],
+      notifyTo: "fixture-parent",
+    }, fixtureEnv);
+    const running = rewriteResult(runDir, (result) => {
+      result.pid = 4242;
+      result.stages[0].state = "running";
+    });
+    const calls = [];
+    // The worker saves its terminal result between recovery's first read and
+    // its liveness check, then exits.
+    const finishesThenExits = () => {
+      writeFileSync(join(runDir, "results.json"), `${JSON.stringify({
+        ...running,
+        state: "passed",
+        exitCode: 0,
+        ended: new Date().toISOString(),
+        stages: [{ ...running.stages[0], state: "passed", code: 0 }],
+      }, null, 2)}\n`);
+      return false;
+    };
+    assert.deepEqual(
+      await recoverRun(runDir, fixtureEnv, { send: recordingSend(calls), isAlive: finishesThenExits }),
+      { settled: false, notification: "sent" },
+    );
+    const kept = json(join(runDir, "results.json"));
+    assert.equal(kept.state, "passed");
+    assert.equal(kept.interrupted, undefined);
+    assert.equal(calls.length, 1);
+    assert.match(readFileSync(join(runDir, "notification.message.txt"), "utf8"), /^PASS /u);
+    assert.equal(existsSync(join(runDir, "recovery.lock")), false);
+  });
+});
+
+test("a recovery whose settlement write fails releases its lock and can be retried", async (t) => {
+  await repository(t, async (root) => {
+    const runDir = await createRun({
+      root,
+      stages: [stage("interrupted")],
+      notifyTo: "fixture-parent",
+    }, fixtureEnv);
+    rewriteResult(runDir, (result) => {
+      result.pid = 4242;
+      result.stages[0].state = "running";
+    });
+    const calls = [];
+    let failures = 1;
+    const failingOnce = (path, value) => {
+      if (failures > 0) {
+        failures -= 1;
+        throw Object.assign(new Error("fixture: disk full"), { code: "ENOSPC" });
+      }
+      writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
+    };
+    const options = { send: recordingSend(calls), isAlive: () => false, saveResult: failingOnce };
+    await assert.rejects(recoverRun(runDir, fixtureEnv, options), /disk full/u);
+    assert.equal(existsSync(join(runDir, "recovery.lock")), false);
+    assert.equal(json(join(runDir, "results.json")).state, "running");
+    assert.equal(calls.length, 0);
+    assert.deepEqual(await recoverRun(runDir, fixtureEnv, options), {
+      settled: true,
+      notification: "sent",
+    });
+    assert.equal(json(join(runDir, "results.json")).state, "failed");
+    assert.equal(calls.length, 1);
+  });
+});
+
+test("recover leaves a recovery lock it does not own and settles nothing behind it", async (t) => {
+  await repository(t, async (root) => {
+    const runDir = await createRun({
+      root,
+      stages: [stage("interrupted")],
+      notifyTo: "fixture-parent",
+    }, fixtureEnv);
+    const running = rewriteResult(runDir, (result) => {
+      result.pid = 4242;
+      result.stages[0].state = "running";
+    });
+    const lock = join(runDir, "recovery.lock");
+    writeFileSync(lock, "another recovery\n");
+    const calls = [];
+    await assert.rejects(
+      recoverRun(runDir, fixtureEnv, { send: recordingSend(calls), isAlive: () => false }),
+      /another recovery of this run is in progress/u,
+    );
+    assert.equal(existsSync(lock), true);
+    assert.equal(json(join(runDir, "results.json")).state, "running");
+    // Once the other recovery has saved a terminal result, this one sends it.
+    const settledElsewhere = () => {
+      writeFileSync(join(runDir, "results.json"), `${JSON.stringify({
+        ...running,
+        state: "failed",
+        exitCode: 1,
+        interrupted: true,
+        error: "interrupted: settled by the other recovery",
+        ended: new Date().toISOString(),
+      }, null, 2)}\n`);
+      return false;
+    };
+    assert.deepEqual(
+      await recoverRun(runDir, fixtureEnv, { send: recordingSend(calls), isAlive: settledElsewhere }),
+      { settled: false, notification: "sent" },
+    );
+    assert.equal(existsSync(lock), true);
+    assert.equal(calls.length, 1);
+  });
+});
+
+test("a run whose request failed validation gets no completion from notify or recover", async (t) => {
+  await repository(t, async (root) => {
+    const runDir = await createRun({
+      root,
+      stages: [stage("never-run")],
+      notifyTo: "fixture-parent",
+    }, fixtureEnv);
+    rewriteResult(runDir, (result) => {
+      Object.assign(result, {
+        state: "failed",
+        exitCode: 1,
+        ended: new Date().toISOString(),
+        error: "worker startup failed before readiness: fixture",
+        notificationEligible: false,
+      });
+    });
+    const calls = [];
+    await assert.rejects(notifyRun(runDir, fixtureEnv, recordingSend(calls)), /failed validation/u);
+    assert.deepEqual(
+      await recoverRun(runDir, fixtureEnv, { send: recordingSend(calls), isAlive: () => false }),
+      { settled: false, notification: "not sent: the run's request failed validation" },
+    );
+    assert.equal(calls.length, 0);
+    assert.equal(existsSync(join(runDir, "notification.message.txt")), false);
+  });
+});
+
+test("recover without a notification route settles and says nothing was requested", async (t) => {
+  await repository(t, async (root) => {
+    const runDir = await createRun({ root, stages: [stage("interrupted")] }, fixtureEnv);
+    rewriteResult(runDir, (result) => {
+      result.pid = 4242;
+      result.stages[0].state = "running";
+    });
+    const calls = [];
+    assert.deepEqual(
+      await recoverRun(runDir, fixtureEnv, { send: recordingSend(calls), isAlive: () => false }),
+      { settled: true, notification: "not requested" },
+    );
+    assert.equal(calls.length, 0);
+  });
+});
+
+test("a worker refused admission never speaks for the run", async (t) => {
+  await isolatedDetachedRepository(t, async (root, env, notificationMarker) => {
+    const runDir = await createRun({
+      root,
+      stages: [stage("must-not-run")],
+      notifyTo: "Termal::Codex",
+    }, env);
+    const resultBytes = readFileSync(join(runDir, "results.json"), "utf8");
+    writeFileSync(join(runDir, "execution.lock"), "owned\n");
+    const log = join(root, ".git", "unadmitted-worker.log");
+    const outcome = await within(
+      runCommand(process.execPath, [launcherScript, "_run", runDir], { cwd: root, env, log }),
+      "unadmitted worker",
+    );
+    assert.equal(outcome.code, 1);
+    assert.match(readFileSync(log, "utf8"), /failed before admission/u);
+    assert.equal(existsSync(notificationMarker), false);
+    assert.equal(readFileSync(join(runDir, "results.json"), "utf8"), resultBytes);
+  });
+});
+
+test("an admitted worker that fails after a terminal result was saved sends that result, not an UNKNOWN notice", async (t) => {
+  if (process.platform !== "win32") {
+    // The fault must fail the follow-up save while results.json stays
+    // readable and the run directory writable (admission creates
+    // execution.lock there). POSIX replaces a read-only file freely; Windows
+    // refuses to, which is exactly that fault.
+    t.skip("needs Windows' refusal to replace a read-only results.json");
+    return;
+  }
+  await isolatedDetachedRepository(t, async (root, env, notificationMarker) => {
+    const runDir = await createRun({
+      root,
+      stages: [stage("must-not-run")],
+      notifyTo: "Termal::Codex",
+    }, env);
+    // A run is already terminal when its worker starts if creation failed it.
+    rewriteResult(runDir, (result) => {
+      Object.assign(result, {
+        state: "failed",
+        exitCode: 1,
+        ended: new Date().toISOString(),
+        error: "fixture: failed at creation",
+        notificationEligible: true,
+      });
+    });
+    const resultPath = join(runDir, "results.json");
+    const resultBytes = readFileSync(resultPath, "utf8");
+    // Run as a plain child, the worker has no readiness IPC channel, so its
+    // readiness fails after admission. The read-only results.json then
+    // refuses the readiness-failure annotation, and the worker errors with
+    // the creation failure still saved.
+    chmodSync(resultPath, 0o444);
+    const log = join(root, ".git", "readiness-worker.log");
+    let outcome;
+    try {
+      outcome = await within(
+        runCommand(process.execPath, [launcherScript, "_run", runDir], { cwd: root, env, log }),
+        "worker whose readiness fails",
+      );
+    } finally {
+      chmodSync(resultPath, 0o644);
+    }
+    assert.equal(outcome.code, 1);
+    const output = readFileSync(log, "utf8");
+    assert.match(output, /runner error after its terminal result was saved/u);
+    assert.doesNotMatch(output, /no terminal result was saved/u);
+    assert.equal(readFileSync(resultPath, "utf8"), resultBytes);
+    const calls = readFileSync(notificationMarker, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    assert.equal(calls.length, 1, "one completion and no runner-error notice");
+    const { args, body } = calls[0];
+    assert.equal(args[args.indexOf("--to") + 1], "Termal::Codex");
+    assert.equal(args[args.indexOf("--idempotency-key") + 1], `termal-tests:${basename(runDir)}`);
+    assert.equal(body, await summarize(runDir));
+  });
+});
+
+test("the recover command reports an already terminal run without changing it", async (t) => {
+  await repository(t, async (root) => {
+    const runDir = await createRun({ root, stages: [stage("clean")] }, fixtureEnv);
+    assert.equal((await executeRun(runDir, fixtureEnv)).state, "passed");
+    const resultPath = join(runDir, "results.json");
+    const resultBytes = readFileSync(resultPath, "utf8");
+    const log = join(root, ".git", "recover-command.log");
+    const outcome = await within(
+      runCommand(process.execPath, [launcherScript, "recover", runDir], {
+        cwd: root,
+        env: fixtureEnv,
+        log,
+      }),
+      "recover command",
+    );
+    const output = readFileSync(log, "utf8");
+    assert.equal(outcome.code, 0, output);
+    assert.match(output, /^PASS /mu);
+    assert.match(output, /Already terminal; notification not requested; tests not rerun\./u);
+    assert.equal(readFileSync(resultPath, "utf8"), resultBytes);
+  });
+});
+
+test("CI runs every maintained helper test suite on each platform", () => {
+  const workflow = readFileSync(
+    join(projectRoot, ".github", "workflows", "review-freeze.yml"),
+    "utf8",
+  );
+  const run = /run: node --test (.+)$/mu.exec(workflow);
+  assert.ok(run, "the workflow runs node --test");
+  assert.deepEqual(run[1].trim().split(/\s+/u), [...helperTestFiles]);
+  assert.match(workflow, /os: \[ubuntu-latest, macos-latest, windows-latest\]/u);
 });

@@ -68,6 +68,8 @@ builds the production UI, touches `ui/dist`, restarts a host, or accesses live
 store policy.
 
 Each run owns a unique directory below Git's `review-runs` metadata directory.
+A foreground run prints `RUN RUN_DIRECTORY` before any stage executes, so an
+interrupted host wait can still inspect or settle the run without rerunning it.
 `request.json` records the exact plan and captured source fingerprint;
 `results.json` records actual process exits, explicit unrun stages, timestamps,
 and full log paths. Terminal JSON replacement is atomic for concurrent readers
@@ -76,6 +78,16 @@ Diagnostic extraction is bounded and does not decide success. A missing
 terminal result is `UNKNOWN`, never a pass. Source/index drift before or during
 execution invalidates the run, and `execution.lock` prevents rerunning the same
 plan.
+
+The fingerprint's own Git calls ignore system and global Git configuration
+(`GIT_CONFIG_NOSYSTEM`, and `GIT_CONFIG_GLOBAL` pointing at the null device), so
+the same working tree always hashes the same way whatever the machine's Git
+settings. Two consequences follow. A file ignored only through a global
+`core.excludesFile` still counts as untracked source, so creating or changing it
+during a run is drift. And the recorded index and working-tree state are those
+the isolated Git reports, which can differ from an ordinary `git status` where
+system settings such as `core.autocrlf` apply. A drift error names the changed
+fingerprint components, not the paths within them.
 
 An existing root worker may deliver completion to a different coordinator:
 
@@ -96,6 +108,44 @@ node scripts/test-launcher.mjs notify RUN_DIRECTORY
 
 `notify` reuses the saved message and stable idempotency key. It never executes
 the test stages again.
+
+If the worker dies after `STARTED`, no completion arrives. Nothing watches for
+that. Settle such a run on request with:
+
+```bash
+node scripts/test-launcher.mjs recover RUN_DIRECTORY
+```
+
+`recover` refuses while the launcher pid recorded in `results.json` may still
+be alive (only proof of its exit counts), and refuses a run no process ever took
+ownership of, since no stage ran under it. Otherwise it records the run as
+failed and interrupted: a stage that was running gets an unknown outcome, never
+a pass, and no stage runs again. The result is read again under
+`recovery.lock`, so a terminal result the worker saved in the meantime is kept,
+and the lock is released after every attempt, so a failed write can simply be
+retried. It then sends the completion under the run's own key, but only when run
+by the session that owns the run; a coordinator may settle and read the run but
+not speak for its owner. A second `recover` changes nothing and never resends a
+delivered completion.
+
+Only the launcher's own pid is checked. A stage process that outlived a killed
+foreground launcher is not waited for: its exit status and diagnostics are never
+recorded, but it keeps its log open and can go on appending to it until it
+exits, so a settled run's raw log is not necessarily final.
+If the recorded pid has been reused by an unrelated process, `recover` keeps
+refusing and the run stays `UNKNOWN`, which is never a pass: start a new run
+instead of editing its evidence. If a killed `recover` left `recovery.lock`
+behind, remove that file by hand once no other `recover` is running.
+
+If an admitted worker cannot save its terminal result, for example because
+`results.json` cannot be replaced, it sends one best-effort `UNKNOWN` notice
+under the separate key `termal-tests:RUN_ID:runner-error`. That notice points to
+`summary` and `recover`, and leaves the run's own completion key unused for the
+settled result. While `results.json` itself cannot be written, `recover` fails
+the same way and the run stays `UNKNOWN`. If the terminal result was already
+saved and only a later step failed, the worker sends the run's normal
+completion instead. Neither `notify` nor `recover` sends a completion for a run
+whose request failed validation.
 
 When a run fails, `results.json`, the compact summary, and any mailbox
 completion contain an `INVESTIGATION REQUIRED` handoff. That handoff does not
@@ -157,7 +207,10 @@ helpers require absolute paths without `..` components. A manually supplied
 Paths are normalized lexically, not canonicalized through filesystem aliases;
 product and run directory components must not be symlinks or junctions.
 
-The review-integrity helper tests run on Linux, macOS, and Windows in CI. The
+The review-integrity helper tests run on Linux, macOS, and Windows in CI: the
+same four maintained suites as the full gate's `fingerprint-tests` stage
+(`helperTestFiles` in `scripts/test-launcher.mjs`), which a launcher test keeps
+in step with the workflow. The
 Vitest resource preflight itself uses three fixed CPU samples and the median,
 so one scheduler spike does not reject a gate while sustained starvation still
 fails before frontend tests start. Windows reports process CPU availability

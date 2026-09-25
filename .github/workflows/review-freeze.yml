@@ -22,5 +22,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+      # The launcher suite preflights `cargo` from PATH and, on Windows, Git
+      # Bash at its default Program Files path; GitHub-hosted images have both.
       - name: Test review integrity helpers
-        run: node --test scripts/review-freeze-fingerprint.test.mjs scripts/vitest-resource-preflight.test.mjs
+        run: node --test scripts/review-freeze-fingerprint.test.mjs scripts/test-launcher.test.mjs scripts/test-temp-root.test.mjs scripts/vitest-resource-preflight.test.mjs

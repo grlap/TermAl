@@ -1,6 +1,9 @@
-// Owns test-process temporary storage, crash leftovers and escape detection.
-// Does not delete historical artifacts outside the product directory or retry
-// failed removals. Shared by the Rust launcher and Node fixture tests.
+// Owns test-process temporary storage, crash leftovers and escape detection,
+// and the process-liveness check they rely on (`processMayBeAlive`: only
+// ESRCH proves a process gone; EPERM or an invalid pid counts as alive), which
+// the test launcher's `recover` shares. Does not delete historical artifacts
+// outside the product directory or retry failed removals. Shared by the Rust
+// launcher and Node fixture tests.
 import {
   lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync,
   rmSync, writeFileSync,
@@ -57,7 +60,7 @@ function validProcessId(pid) {
   return Number.isSafeInteger(pid) && pid > 0;
 }
 
-function processMayBeAlive(pid) {
+export function processMayBeAlive(pid) {
   if (!validProcessId(pid)) return true;
   try {
     process.kill(pid, 0);

@@ -65,7 +65,9 @@ results under Git metadata, while context receives only a bounded summary.
 Detached runs require a different coordinator via `--notify`; after `STARTED`,
 end the turn and wait for the mailbox wake—do not poll status or tail logs.
 Use `summary RUN_DIRECTORY` or `notify RUN_DIRECTORY` to recover an existing
-run without rerunning tests. Pinned disposable Engram checks use `live` with an
+run without rerunning tests; a foreground run prints `RUN RUN_DIRECTORY` first,
+and `recover RUN_DIRECTORY` settles a run whose launcher died without a result
+(see `docs/test.md`). Pinned disposable Engram checks use `live` with an
 absolute `--engram-binary` and `--engram-sha256`; never substitute an unpinned
 binary. The launcher never installs, builds production UI, mutates `ui/dist`,
 restarts a host, or changes live-store policy.
