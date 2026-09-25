@@ -511,6 +511,7 @@ mod state_broadcast_mailbox_tests {
             sessions: Vec::new(),
             delegations: Vec::new(),
             delegation_waits: Vec::new(),
+            test_runs: Vec::new(),
             pending_engram_mcp_revocation_session_ids: Vec::new(),
         }
     }
@@ -1432,6 +1433,9 @@ struct StateInner {
     /// restart has no request in flight, and the persisted `pending` already
     /// carries what such a request left open.
     acceptance_evaluation_submissions_in_flight: HashSet<String>,
+    /// The test launcher's runs, mirrored from their run directories by the
+    /// rescan in `test_runs.rs`. Memory only: disk stays the record.
+    test_runs: TestRunIndex,
     /// Durable delegation rows isolated during startup validation. See
     /// `quarantined_persisted_session_ids` for the preservation contract.
     quarantined_persisted_delegation_ids: BTreeSet<String>,
@@ -1494,6 +1498,7 @@ impl StateInner {
             delegations: Vec::new(),
             delegation_followup_admissions: HashMap::new(),
             acceptance_evaluation_submissions_in_flight: HashSet::new(),
+            test_runs: TestRunIndex::default(),
             quarantined_persisted_delegation_ids: BTreeSet::new(),
             delegation_waits: Vec::new(),
             delegation_mutation_stamps: BTreeMap::new(),

@@ -11,6 +11,8 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { isDialogBackdropDismissMouseDown } from "./dialog-backdrop-dismiss";
+import { TestRunsProvider } from "./test-runs-context";
+import { openTestRunsInWorkspaceState } from "./workspace";
 import { DialogCloseIcon } from "./message-card-icons";
 import type { OpenCodeApprovalMode } from "./types";
 import {
@@ -881,6 +883,7 @@ export default function App() {
 
   const {
     adoptState,
+    testRuns,
     adoptCreatedSessionResponse,
     syncPreferencesFromState,
     clearHydrationMismatchSessionIds,
@@ -2087,6 +2090,12 @@ export default function App() {
   }
 
   return (
+    <TestRunsProvider runs={testRuns} open={(sessionId = null) => {
+      setWorkspace(current => applyControlPanelLayout(openTestRunsInWorkspaceState(
+        current, current.activePaneId, sessionId ?? activeSession?.id ?? null,
+        sessionId ? null : activeSession?.projectId ?? null, sessionId,
+      )));
+    }}>
     <div className="shell">
       <div className="background-orbit background-orbit-left" />
       <div className="background-orbit background-orbit-right" />
@@ -2371,5 +2380,6 @@ export default function App() {
         setDefaultClaudeApprovalMode={handleDefaultClaudeApprovalModeChange}
       />
     </div>
+    </TestRunsProvider>
   );
 }

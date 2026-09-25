@@ -60,6 +60,7 @@ type AppLiveStateTransportEventHandlersContext = {
   hasPartialTailAppendProof?: (sessionId?: string) => boolean;
   adoptState: (state: StateResponse, options?: AdoptStateOptions) => boolean;
   applyDelegationWaitDeltaLocally: (delta: DeltaEvent) => void;
+  applyTestRunDeltaLocally?: (delta: DeltaEvent) => void;
   beginBadLiveEventRecovery: () => void;
   cancelStaleSendResponseRecoveryPollForSessions: (
     sessionIds: Iterable<string>,
@@ -174,6 +175,7 @@ export function createAppLiveStateTransportEventHandlers(
   const {
     adoptState,
     applyDelegationWaitDeltaLocally,
+    applyTestRunDeltaLocally,
     beginBadLiveEventRecovery,
     cancelStaleSendResponseRecoveryPollForSessions,
     clearForceAdoptNextStateEvent,
@@ -600,6 +602,15 @@ export function createAppLiveStateTransportEventHandlers(
         latestStateRevisionRef.current = delta.revision;
         codexStateRef.current = delta.codex;
         scheduleCodexStateRender();
+        setBackendConnectionIssueDetail(null);
+        clearRecoveredBackendRequestError();
+        return;
+      }
+
+      if (delta.type === "testRunChanged" || delta.type === "testRunRemoved") {
+        void confirmReconnectRecoveryFromDeltaEvent();
+        latestStateRevisionRef.current = delta.revision;
+        applyTestRunDeltaLocally?.(delta);
         setBackendConnectionIssueDetail(null);
         clearRecoveredBackendRequestError();
         return;

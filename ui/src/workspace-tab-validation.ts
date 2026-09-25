@@ -26,6 +26,7 @@ const PANE_VIEW_MODES: readonly PaneViewMode[] = [
   "mailbox",
   "responseBoard",
   "work",
+  "testRuns",
   "instructionDebugger",
   "diffPreview",
 ];
@@ -86,7 +87,9 @@ export function isWorkspaceTab(value: unknown): value is WorkspaceTab {
         isOptionalResponseBoardViews(value.boardViews)
       );
     case "work":
+    case "testRuns":
       return (
+        (value.kind !== "testRuns" || isNullableString(value.filterSessionId)) &&
         isNullableString(value.originSessionId) &&
         isString(value.refreshToken) &&
         isOptionalNullableString(value.originProjectId)

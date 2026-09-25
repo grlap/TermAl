@@ -19,6 +19,7 @@ Related:
 - [Concurrent Session Link Cards](./concurrent-session-link-cards.md)
 - [Diff Review Workflow](./diff-review-workflow.md)
 - [Code Navigation MCP](./code-navigation-mcp.md)
+- [Test Runs](./test-runs.md) — read-only launcher visibility; notification targets are not delegation waits.
 
 ## Completed Codex child thread lifecycle
 

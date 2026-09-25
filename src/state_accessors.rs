@@ -1487,6 +1487,7 @@ impl AppState {
                 .map(delegation_state_summary_from_record)
                 .collect(),
             delegation_waits: inner.delegation_waits.clone(),
+            test_runs: inner.test_runs.summaries(),
             pending_engram_mcp_revocation_session_ids:
                 Self::pending_engram_mcp_revocation_session_ids(inner),
         }

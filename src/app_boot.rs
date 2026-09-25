@@ -807,6 +807,8 @@ impl AppState {
         state.restore_remote_event_bridges();
         #[cfg(not(test))]
         state.spawn_workspace_file_watcher();
+        #[cfg(not(test))]
+        state.spawn_test_run_index();
         // Runtime-resuming boot work is deferred to `run_post_listen_boot`, invoked by
         // `run_server` only AFTER the HTTP listener is bound and the base URL is published.
         // Resuming a Codex session launches the shared app-server, which bakes a TermAl MCP

@@ -79,6 +79,7 @@ type UseAppLiveStateTransportParams = {
   hasPartialTailAppendProof?: (sessionId?: string) => boolean;
   adoptState: (state: StateResponse, options?: AdoptStateOptions) => boolean;
   applyDelegationWaitDeltaLocally: (delta: DeltaEvent) => void;
+  applyTestRunDeltaLocally?: (delta: DeltaEvent) => void;
   cancelStaleSendResponseRecoveryPollForSessions: (
     sessionIds: Iterable<string>,
   ) => void;
@@ -155,6 +156,7 @@ export function useAppLiveStateTransport(
     hasPartialTailAppendProof,
     adoptState,
     applyDelegationWaitDeltaLocally,
+    applyTestRunDeltaLocally,
     cancelStaleSendResponseRecoveryPollForSessions,
     clearRecoveredBackendRequestError,
     codexStateRef,
@@ -1141,6 +1143,7 @@ export function useAppLiveStateTransport(
       hasPartialTailAppendProof,
       adoptState,
       applyDelegationWaitDeltaLocally,
+      applyTestRunDeltaLocally,
       beginBadLiveEventRecovery,
       cancelStaleSendResponseRecoveryPollForSessions,
       clearForceAdoptNextStateEvent,

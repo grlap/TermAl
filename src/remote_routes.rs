@@ -813,7 +813,9 @@ impl AppState {
             | DeltaEvent::DelegationUpdated { .. }
             | DeltaEvent::DelegationCompleted { .. }
             | DeltaEvent::DelegationFailed { .. }
-            | DeltaEvent::DelegationCanceled { .. } => return None,
+            | DeltaEvent::DelegationCanceled { .. }
+            | DeltaEvent::TestRunChanged { .. }
+            | DeltaEvent::TestRunRemoved { .. } => return None,
         };
         Some(RemoteDeltaReplayKey {
             remote_id: remote_id.to_owned(),

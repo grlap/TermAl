@@ -284,6 +284,7 @@ export function resolveControlSurfaceSectionIdForWorkspaceTab(
     case "mailbox":
     case "responseBoard":
     case "work":
+    case "testRuns":
     case "instructionDebugger":
     case "diffPreview":
       return null;

@@ -1446,10 +1446,14 @@ impl AppState {
             | DeltaEvent::DelegationUpdated { .. }
             | DeltaEvent::DelegationCompleted { .. }
             | DeltaEvent::DelegationFailed { .. }
-            | DeltaEvent::DelegationCanceled { .. } => {
+            | DeltaEvent::DelegationCanceled { .. }
+            | DeltaEvent::TestRunChanged { .. }
+            | DeltaEvent::TestRunRemoved { .. } => {
                 // Delegations are local parent/child session relationships.
                 // Cross-machine delegation is a non-goal for this phase, so
                 // consume the remote revision without mirroring the payload.
+                // Test runs are indexed from this host's own disk; a remote's
+                // runs are not mirrored in slice 1.
                 #[cfg(test)]
                 self.remote_registry
                     .run_test_before_remote_informational_delta_watermark();

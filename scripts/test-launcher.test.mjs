@@ -749,6 +749,20 @@ test("detached worker reaches readiness, runs once, and sends one notification",
   });
 });
 
+test("a run records whether it is detached and which process created it", async (t) => {
+  await repository(t, async (root) => {
+    const foreground = json(join(await createRun({ root, stages: [stage("clean")] }, fixtureEnv), "request.json"));
+    assert.equal(foreground.detached, false);
+    assert.equal(foreground.creatorPid, process.pid);
+    const runDir = await createRun({ root, stages: [stage("clean")], detached: true }, fixtureEnv);
+    const detached = json(join(runDir, "request.json"));
+    assert.equal(detached.detached, true);
+    assert.equal(detached.creatorPid, process.pid);
+    // The fields are metadata for TermAl's index; the worker ignores them.
+    assert.equal((await executeRun(runDir, fixtureEnv)).state, "passed");
+  });
+});
+
 test("detached lock contention closes before readiness without changing results", async (t) => {
   await isolatedDetachedRepository(t, async (root, env, notificationMarker) => {
     const counter = join(root, ".git", "execution-count");
@@ -994,6 +1008,10 @@ test("a foreground run prints its run receipt before any stage completes", async
       // have been printed yet. results.json is not read here, so the test
       // cannot race the launcher's own replacement of it.
       assert.doesNotMatch(stdout, /^(?:PASS|FAIL) /mu, stdout);
+      // request.json is final once createRun returns, before the receipt.
+      const request = json(join(runDir, "request.json"));
+      assert.equal(request.detached, false);
+      assert.equal(request.creatorPid, child.pid, "the foreground launcher runs its own stages");
       writeFileSync(release, "go\n");
       assert.equal(await within(exited, "foreground completion"), 0, `${stdout}${stderr}`);
       assert.match(stdout, new RegExp(`^RUN .+\\r?\\n(?:.*\\r?\\n)*PASS ${basename(runDir)} exit=0`, "u"));

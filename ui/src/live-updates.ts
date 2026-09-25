@@ -119,6 +119,8 @@ export function pruneLiveTransportActivitySessions(
 export type SessionDeltaEvent = Exclude<
   DeltaEvent,
   | { type: "codexUpdated" }
+  | { type: "testRunChanged" }
+  | { type: "testRunRemoved" }
   | { type: "orchestratorsUpdated" }
   | { type: "delegationCreated" }
   | { type: "delegationWaitCreated" }

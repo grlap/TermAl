@@ -1,6 +1,6 @@
 import { ApiRequestError } from "./api-request";
 import { act, render, waitFor } from "@testing-library/react";
-import { createElement } from "react";
+import { createElement, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import * as api from "./api";
@@ -394,10 +394,13 @@ function renderLiveStateHarness(
       messagesLoaded: false,
     },
   ],
+  reactiveSessions = false,
 ) {
   function Harness() {
+    const [, setSessions] = useState(params.adoptionRefs.sessionsRef.current);
     const hook = useAppLiveState({
       ...params,
+      stateSetters: reactiveSessions ? { ...params.stateSetters, setSessions } : params.stateSetters,
       visibleSessionHydrationTargets: getVisibleSessionHydrationTargets(),
     });
     capture(hook);
@@ -1284,7 +1287,7 @@ describe("deferred session-store sync", () => {
     ).toBe(true);
   });
 
-  it("hydrates opaque queue additions, replacements, and removals without unrelated fetches", async () => {
+  it.each([false, true])("hydrates opaque queue changes independently of visible transcript repair (visible=%s)", async (visible) => {
     vi.stubGlobal(
       "EventSource",
       EventSourceMock as unknown as typeof EventSource,
@@ -1305,10 +1308,19 @@ describe("deferred session-store sync", () => {
       queueProjectionHash: "queue-empty-1",
     });
     const params = makeLiveStateParams(initialSession);
+    if (!visible) {
+      params.activeSession = null;
+      params.activeTranscriptSessionId = null;
+    }
     params.adoptionRefs.latestStateRevisionRef.current = 2;
     params.adoptionRefs.sessionsRef.current = [initialSession];
 
-    renderLiveStateHarness(params, () => {});
+    // Use the actual React setter: snapshot adoption must schedule the visible
+    // repair effect even when unrelated Test Runs state retains its identity.
+    renderLiveStateHarness(params, () => {}, () =>
+      visible ? [{ id: initialSession.id, messagesLoaded: false }] : [],
+      true,
+    );
     const eventSource =
       EventSourceMock.instances[EventSourceMock.instances.length - 1];
     fetchSessionTail.mockReset();
@@ -1354,6 +1366,23 @@ describe("deferred session-store sync", () => {
     await emitQueueProjection(4, 3, "queue-b", "prompt-b");
     expect(fetchSessionTail).toHaveBeenCalledTimes(2);
 
+    // An unchanged queue hash requires no queue-body refresh. Advancing the
+    // session mutation still invalidates transcript authority, however, so a
+    // visible transcript independently needs one tail repair. The old harness
+    // used no-op session setters and accidentally depended on no rerender here.
+    if (visible) {
+      fetchSessionTail.mockResolvedValueOnce({
+        revision: 5,
+        serverInstanceId: "server-a",
+        session: makeSession({
+          messagesLoaded: true,
+          messageCount: 0,
+          pendingPrompts: [{ id: "prompt-b", timestamp: "10:00", text: "prompt-b" }],
+          sessionMutationStamp: 4,
+          queueProjectionHash: "queue-b",
+        }),
+      });
+    }
     act(() => {
       eventSource?.dispatchNamedEvent(
         "state",
@@ -1369,7 +1398,10 @@ describe("deferred session-store sync", () => {
     await act(async () => {
       await Promise.resolve();
     });
-    expect(fetchSessionTail).toHaveBeenCalledTimes(2);
+    const requestsAfterUnchangedQueue = visible ? 3 : 2;
+    expect(fetchSessionTail).toHaveBeenCalledTimes(requestsAfterUnchangedQueue);
+    expect(params.adoptionRefs.sessionsRef.current[0]?.messagesLoaded).toBe(visible);
+    expect(params.adoptionRefs.sessionsRef.current[0]?.pendingPrompts?.[0]?.id).toBe("prompt-b");
 
     act(() => {
       eventSource?.dispatchNamedEvent(
@@ -1386,10 +1418,46 @@ describe("deferred session-store sync", () => {
     await act(async () => {
       await Promise.resolve();
     });
-    expect(fetchSessionTail).toHaveBeenCalledTimes(2);
+    expect(fetchSessionTail).toHaveBeenCalledTimes(requestsAfterUnchangedQueue);
 
     await emitQueueProjection(6, 5, "queue-empty-2", null);
-    expect(fetchSessionTail).toHaveBeenCalledTimes(3);
+    expect(fetchSessionTail).toHaveBeenCalledTimes(requestsAfterUnchangedQueue + 1);
+  });
+
+  it("repairs an invalidated visible transcript on an unrelated rerender without a Test Runs update", async () => {
+    vi.stubGlobal("EventSource", EventSourceMock as unknown as typeof EventSource);
+    vi.spyOn(api, "fetchState").mockImplementation(
+      () => new Promise<StateResponse>(() => {}),
+    );
+    const initialSession = makeSession({
+      messagesLoaded: true,
+      messageCount: 0,
+      sessionMutationStamp: 1,
+    });
+    const fetchSessionTail = vi.spyOn(api, "fetchSessionTail").mockResolvedValue({
+      revision: 2,
+      serverInstanceId: "server-a",
+      session: { ...initialSession, sessionMutationStamp: 2 },
+    });
+    const params = makeLiveStateParams(initialSession);
+    params.adoptionRefs.latestStateRevisionRef.current = 2;
+    const harness = renderLiveStateHarness(params, () => {});
+    expect(fetchSessionTail).not.toHaveBeenCalled();
+
+    // Model already-adopted transcript invalidation without dispatching any
+    // snapshot or Test Runs event. An ordinary parent render must repair it.
+    params.adoptionRefs.sessionsRef.current = [{
+      ...initialSession,
+      sessionMutationStamp: 2,
+      messagesLoaded: false,
+    }];
+    harness.rerenderLiveState();
+    await waitFor(() => {
+      expect(params.adoptionRefs.sessionsRef.current[0]?.messagesLoaded).toBe(true);
+    });
+    expect(fetchSessionTail).toHaveBeenCalledTimes(1);
+    harness.rerenderLiveState();
+    expect(fetchSessionTail).toHaveBeenCalledTimes(1);
   });
 
   it("keeps reconnecting when automatic fallback adopts a newer idle snapshot", async () => {

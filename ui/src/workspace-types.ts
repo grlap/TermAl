@@ -25,6 +25,7 @@ export type PaneViewMode =
   | "mailbox"
   | "responseBoard"
   | "work"
+  | "testRuns"
   | "instructionDebugger"
   | "diffPreview";
 
@@ -92,6 +93,13 @@ export type WorkspaceResponseBoardView = {
   panX: number;
   panY: number;
   zoom: number;
+};
+
+/** Read-only launcher history, at most one tab per pane. filterSessionId
+ * selects either the owner or notification recipient at panel mount. */
+export type WorkspaceTestRunsTab = Omit<WorkspaceWorkTab, "kind"> & {
+  kind: "testRuns";
+  filterSessionId: string | null;
 };
 
 /**
@@ -198,6 +206,7 @@ export type WorkspaceTab =
   | WorkspaceMailboxTab
   | WorkspaceResponseBoardTab
   | WorkspaceWorkTab
+  | WorkspaceTestRunsTab
   | WorkspaceControlPanelTab
   | WorkspaceOrchestratorListTab
   | WorkspaceCanvasTab

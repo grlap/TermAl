@@ -9,6 +9,7 @@
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { AgentIcon } from "../agent-icon";
+import { TestRunSessionMarker } from "../test-runs-context";
 import {
   dataTransferHasSessionDragType,
   readSessionDragData,
@@ -490,6 +491,7 @@ export function SessionCanvasPanel({
                 </div>
 
                 <div className="session-canvas-card-body">
+                  <TestRunSessionMarker sessionId={session.id} />
                   <div className="session-canvas-card-meta">
                     <span>{session.agent}</span>
                     <span>{session.model}</span>

@@ -196,6 +196,7 @@ export async function createRun({
   needsCargo = false,
   liveEngram,
   full = false,
+  detached = false,
 }, env = process.env) {
   const normalizedRoot = resolve(root);
   const gitEnv = isolatedGitEnvironment(env);
@@ -223,6 +224,11 @@ export async function createRun({
     needsCargo,
     liveEngram,
     full,
+    // Read by TermAl's run index (docs/features/test-runs.md): whether the
+    // stages run in a detached worker, and the process that stands for the
+    // run until a worker records its own pid in results.json.
+    detached,
+    creatorPid: process.pid,
     owner: notification?.owner ?? env.TERMAL_SESSION_ID ?? null,
     started: new Date().toISOString(),
   };
@@ -1045,6 +1051,7 @@ async function main(args) {
       ? { path: options.liveBinary, expectedSha256: options.liveSha256 }
       : undefined,
     full: mode === "full",
+    detached: Boolean(options.detach),
   });
   if (!options.detach) {
     // The run directory is known before any stage executes, so an interrupted

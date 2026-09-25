@@ -18,6 +18,9 @@ import {
   withVerifiedNoReactActWarnings,
 } from "./app-test-harness";
 import { SessionPaneView } from "./SessionPaneView";
+import { TestRunsProvider } from "./test-runs-context";
+import { makeTestRun } from "./test-runs-fixtures";
+import type { TestRunSummary } from "./test-runs";
 import {
   resetSessionStoreForTesting,
   syncComposerSessionsStore,
@@ -213,6 +216,7 @@ function renderSessionPaneView({
   expectComposer = true,
   isStopping = false,
   pane,
+  testRuns = [],
 }: {
   session: Session;
   draft: string;
@@ -222,6 +226,7 @@ function renderSessionPaneView({
   expectComposer?: boolean;
   isStopping?: boolean;
   pane?: WorkspacePane;
+  testRuns?: TestRunSummary[];
 }) {
   syncComposerSessionsStore({
     sessions: [session],
@@ -315,12 +320,16 @@ function renderSessionPaneView({
     backendConnectionState: "connected",
   };
 
-  render(<SessionPaneView {...props} />);
+  const openTestRuns = vi.fn();
+  const view = (runs: TestRunSummary[]) => <TestRunsProvider runs={runs} open={openTestRuns}><SessionPaneView {...props} /></TestRunsProvider>;
+  const rendered = render(view(testRuns));
 
   return {
     onComposerError,
     onDraftCommit,
     onStopSession: props.onStopSession,
+    openTestRuns,
+    rerenderRuns: (runs: TestRunSummary[]) => rendered.rerender(view(runs)),
     textarea: expectComposer
       ? (screen.getByLabelText(`Message ${session.name}`) as HTMLTextAreaElement)
       : null,
@@ -679,6 +688,41 @@ describe("SessionPaneView composer delegation click-through", () => {
     });
 
     expect(onStopSession).toHaveBeenCalledWith("child-session-1");
+  });
+
+  it("places the test-run marker in the existing toolbar without changing strip adjacency", async () => {
+    const session = makeSession();
+    const context = renderSessionPaneView({ session, draft: "", testRuns: [makeTestRun({ ownerSessionId: session.id })] });
+    await settleAsyncUi();
+    const stack = document.querySelector(".message-stack")!;
+    const strip = stack.nextElementSibling;
+    const button = screen.getByRole("button", { name: "running tests · rust-tests" });
+    expect(button.closest(".pane-view-strip")).not.toBeNull();
+    expect(button.closest(".message-stack, .session-activity-strip")).toBeNull();
+    expect(strip).toHaveClass("session-activity-strip");
+    expect(strip?.nextElementSibling).toHaveClass("composer");
+    button.focus();
+    expect(button).toHaveFocus();
+    fireEvent.click(button);
+    expect(context.openTestRuns).toHaveBeenCalledWith(session.id);
+    context.rerenderRuns([]);
+    expect(screen.queryByRole("button", { name: "running tests · rust-tests" })).not.toBeInTheDocument();
+    expect(stack.nextElementSibling).toBe(strip);
+    expect(document.querySelector(".test-run-session-chrome")).toBeNull();
+  });
+
+  it("does not render the session-mode footer in a Test Runs tab", async () => {
+    const session = makeSession();
+    const pane: WorkspacePane = {
+      ...makePane(session.id),
+      tabs: [{ id: "tab-runs", kind: "testRuns", originSessionId: session.id, originProjectId: session.projectId, refreshToken: "one", filterSessionId: null }],
+      activeTabId: "tab-runs", viewMode: "testRuns",
+    };
+    renderSessionPaneView({ session, draft: "", pane, expectComposer: false });
+    await settleAsyncUi();
+    expect(screen.getByRole("heading", { name: "Test Runs" })).toBeInTheDocument();
+    expect(document.querySelector(".composer")).toBeNull();
+    expect(screen.queryByText(/This tile is in/)).not.toBeInTheDocument();
   });
 
   it("hides delegated child footer on non-session tabs", async () => {

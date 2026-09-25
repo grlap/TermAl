@@ -512,4 +512,5 @@ Both columns are part of the current schema from database creation onward;
 there is no legacy dispatch-outcome backfill.
 
 See [Architecture](../architecture.md) for the system-level API and persistence
-overview.
+overview. [Test Runs](./test-runs.md) covers the launcher's `--notify`
+completion messages and the host-owned wake that replaces them inside TermAl.

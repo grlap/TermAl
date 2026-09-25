@@ -158,6 +158,15 @@ export function createResponseBoardTab(
   };
 }
 
+export function createTestRunsTab(
+  originSessionId: string | null = null,
+  originProjectId: string | null = null,
+  filterSessionId: string | null = null,
+): import("./workspace-types").WorkspaceTestRunsTab {
+  return { ...createWorkTab(originSessionId, originProjectId), kind: "testRuns",
+    filterSessionId: normalizeWorkspaceIdentifier(filterSessionId) };
+}
+
 export function createWorkTab(
   originSessionId: string | null = null,
   originProjectId: string | null = null,

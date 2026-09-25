@@ -51,6 +51,7 @@ import {
 } from "./api-request";
 
 export type StateResponse = {
+  testRuns?: import("./test-runs").TestRunSummary[];
   revision: number;
   /**
    * Per-process UUID generated at `AppState::new_with_paths` boot on

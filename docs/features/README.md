@@ -47,3 +47,4 @@ design decisions, and future plans.
 - [Territory Visualization](./territory-visualization.md)
 - [WhatsApp Integration](./whatsapp-integration.md)
 - [Engram Host Adapter](./engram-host-adapter.md)
+- [Test Runs](./test-runs.md)

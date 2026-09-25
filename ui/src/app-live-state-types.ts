@@ -209,6 +209,7 @@ export type UseAppLiveStateParams = {
 };
 
 export type UseAppLiveStateReturn = {
+  testRuns: import("./test-runs").TestRunSummary[];
   adoptState: (
     nextState: StateResponse,
     options?: AdoptStateOptions,

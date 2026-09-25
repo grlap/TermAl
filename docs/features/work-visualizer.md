@@ -439,3 +439,5 @@ Response Board pins of a Work table query and verified holder-to-session jumps
 are the remaining 1b items. Closed items are not listed by default from either source
 (Engram `ls` without `--all`, `bd list` default); an explicit closed-history
 view would be a separate read with its own cap, for both sources at once.
+
+The [Test Runs](./test-runs.md) tab follows this tab's pattern.

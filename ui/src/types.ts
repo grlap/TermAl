@@ -1235,6 +1235,7 @@ export type WorkspaceFilesChangedEvent = {
 };
 
 export type DeltaEvent =
+  | import("./test-runs").TestRunDelta
   | SessionCreatedEvent
   | MessageCreatedEvent
   | MessageUpdatedEvent

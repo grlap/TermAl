@@ -390,6 +390,12 @@ fn app_router_with_acceptance_policy_limiter(
             "/api/projects/{id}/work/beads/{issue_id}",
             get(get_project_work_beads_detail),
         )
+        .route("/api/test-runs", get(get_test_runs))
+        .route("/api/test-runs/{run_id}", get(get_test_run))
+        .route(
+            "/api/test-runs/{run_id}/stages/{stage}/log",
+            get(get_test_run_stage_log),
+        )
         .route(
             "/api/projects/{id}/actions/{action_id}",
             post(dispatch_project_action),
@@ -757,6 +763,9 @@ include!("work_visualizer.rs");
 include!("work_visualizer_detail.rs");
 include!("work_visualizer_beads.rs");
 include!("work_memories.rs");
+include!("test_runs.rs");
+include!("test_runs_disk.rs");
+include!("test_runs_api.rs");
 include!("session_runtime.rs");
 include!("session_interaction.rs");
 include!("engram_queued_admission.rs");

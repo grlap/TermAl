@@ -1,0 +1,27 @@
+.test-runs-panel { display: flex; flex-direction: column; gap: .8rem; padding: .8rem; min-width: 0; overflow: auto; container-type: inline-size; color: var(--ink); }
+.message-stack.test-runs-panel-stack { padding: 0; overflow: hidden; }
+.message-stack.test-runs-panel-stack > .test-runs-panel { flex: 1 1 0; min-height: 0; width: 100%; }
+.test-runs-panel h2, .test-runs-panel h3, .test-runs-panel p { margin: 0; overflow-wrap: anywhere; }
+.test-runs-panel button, .test-runs-panel select, .test-run-session-marker { font: inherit; color: var(--ink); background: var(--paper-strong); border: 1px solid var(--line); border-radius: var(--button-radius-tight); padding: .35rem .5rem; }
+.test-runs-panel button, .test-run-session-marker { cursor: pointer; }
+.test-runs-panel :focus-visible, .test-run-session-marker:focus-visible { outline: 2px solid var(--signal-blue); outline-offset: 2px; }
+.test-runs-panel button:disabled { opacity: .55; cursor: default; }
+.test-runs-filters { display: flex; gap: .6rem; flex-wrap: wrap; }
+.test-runs-filters label { display: flex; flex-direction: column; min-width: 0; max-width: 100%; gap: .25rem; }
+.test-runs-filters select { max-width: 100%; }
+.test-runs-layout { display: grid; grid-template-columns: minmax(14rem, 1fr) minmax(0, 2fr); gap: 1rem; align-items: start; }
+.test-runs-list, .test-run-details { display: flex; flex-direction: column; gap: .6rem; min-width: 0; }
+.test-runs-panel .test-run-row { display: flex; flex-direction: column; gap: .25rem; text-align: left; overflow-wrap: anywhere; }
+.test-run-row[aria-pressed="true"] { border-color: var(--signal-blue); }
+.test-run-state { align-self: flex-start; border: 1px solid currentColor; border-radius: .3rem; padding: .1rem .3rem; }
+.test-run-state.is-running { color: var(--signal-blue); }
+.test-run-state.is-failed { font-weight: bold; }
+.test-run-details pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 24rem; overflow: auto; background: var(--paper-strong); padding: .5rem; }
+.test-run-details dd { overflow-wrap: anywhere; margin-left: .5rem; }
+.test-run-table-scroll { overflow: auto; }
+.test-run-details table { border-collapse: collapse; width: 100%; }
+.test-run-details th, .test-run-details td { text-align: left; padding: .4rem; border-bottom: 1px solid var(--line); }
+.test-run-session-marker { max-width: 100%; font-size: .8em; overflow-wrap: anywhere; }
+/* The existing horizontal toolbar owns overflow; no new transcript-height row. */
+.pane-view-strip .test-run-session-marker { flex: 0 0 auto; max-width: 16rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@container (max-width: 650px) { .test-runs-layout { grid-template-columns: minmax(0, 1fr); } }

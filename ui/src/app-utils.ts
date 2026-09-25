@@ -98,6 +98,8 @@ export function labelForPaneViewMode(viewMode: PaneViewMode) {
       return "Response board";
     case "work":
       return "Work";
+    case "testRuns":
+      return "Test Runs";
     case "instructionDebugger":
       return "Instructions";
     case "diffPreview":

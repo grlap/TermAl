@@ -70,8 +70,10 @@ store policy.
 Each run owns a unique directory below Git's `review-runs` metadata directory.
 A foreground run prints `RUN RUN_DIRECTORY` before any stage executes, so an
 interrupted host wait can still inspect or settle the run without rerunning it.
-`request.json` records the exact plan and captured source fingerprint;
-`results.json` records actual process exits, explicit unrun stages, timestamps,
+`request.json` records the exact plan and captured source fingerprint, plus
+`detached` and the creating process's `creatorPid`, which TermAl's test-run
+index reads (see [test runs](features/test-runs.md)); `results.json` records
+actual process exits, explicit unrun stages, timestamps,
 and full log paths. Terminal JSON replacement is atomic for concurrent readers
 on the same filesystem; it is not a claim of power-loss or crash durability.
 Diagnostic extraction is bounded and does not decide success. A missing

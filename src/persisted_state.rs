@@ -182,6 +182,7 @@ impl PersistedState {
             delegations: self.delegations,
             delegation_followup_admissions: HashMap::new(),
             acceptance_evaluation_submissions_in_flight: HashSet::new(),
+            test_runs: TestRunIndex::default(),
             delegation_waits: self.delegation_waits,
             delegation_mutation_stamps: BTreeMap::new(),
             removed_delegation_ids: BTreeMap::new(),

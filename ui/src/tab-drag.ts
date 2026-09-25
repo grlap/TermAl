@@ -112,6 +112,8 @@ function formatWorkspaceTabDragLabel(drag: WorkspaceTabDrag) {
       return "TermAl response board";
     case "work":
       return "TermAl work";
+    case "testRuns":
+      return "TermAl test runs";
     case "controlPanel":
       return "TermAl control panel";
     case "orchestratorList":

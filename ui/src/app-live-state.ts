@@ -82,6 +82,7 @@ import {
   resolveAppPreferences,
 } from "./session-model-utils";
 import { resolveAdoptedStateSlices } from "./state-adoption";
+import { applyTestRunDelta, reconcileTestRunSnapshot, type TestRunSummary } from "./test-runs";
 import { ALL_PROJECTS_FILTER_ID } from "./project-filters";
 import {
   isServerInstanceMismatch,
@@ -279,6 +280,7 @@ export function useAppLiveState(
   } = preferenceSetters;
 
   const hydratingSessionIdsRef = useRef<Set<string>>(new Set());
+  const [testRuns, setTestRuns] = useState<TestRunSummary[]>([]);
   const partialTailAppendProofsRef = useRef(
     new Map<string, PartialTailAppendProof>(),
   );
@@ -1533,6 +1535,7 @@ export function useAppLiveState(
     }
 
     latestStateRevisionRef.current = nextState.revision;
+    setTestRuns(current => reconcileTestRunSnapshot(current, nextState.testRuns ?? []));
     setHasAdoptedStateSnapshot(true);
     if (nextState.serverInstanceId) {
       rememberServerInstanceId(
@@ -1706,6 +1709,11 @@ export function useAppLiveState(
   }
 
   useAppLiveStateTransport({
+    applyTestRunDeltaLocally: delta => {
+      if (delta.type === "testRunChanged" || delta.type === "testRunRemoved") {
+        setTestRuns(current => applyTestRunDelta(current, delta));
+      }
+    },
     observeHydrationDelta,
     hasPartialTailAppendProof,
     adoptState,
@@ -1779,6 +1787,7 @@ export function useAppLiveState(
 
   return {
     adoptState,
+    testRuns,
     adoptCreatedSessionResponse,
     syncPreferencesFromState,
     clearHydrationMismatchSessionIds,

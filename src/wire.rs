@@ -2381,6 +2381,9 @@ struct StateResponse {
     delegations: Vec<DelegationStateSummary>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     delegation_waits: Vec<DelegationWaitRecord>,
+    /// The test launcher's runs, in list order (docs/features/test-runs.md).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    test_runs: Vec<TestRunSummary>,
     /// Sessions whose stale Engram MCP runtime will be revoked by the Stop
     /// operation that already owns their runtime fence. Normal snapshots and
     /// SSE state events preserve this durable-in-memory pending state so a
@@ -3075,4 +3078,8 @@ enum DeltaEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reason: Option<String>,
     },
+    /// A test run's summary or detail changed, or the run is new.
+    TestRunChanged { revision: u64, run: TestRunSummary },
+    /// A test run left the index.
+    TestRunRemoved { revision: u64, run_id: String },
 }

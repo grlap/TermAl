@@ -55,6 +55,8 @@ import {
   AgentSessionPanelFooter,
 } from "./panels/AgentSessionPanel";
 import { SessionActivityStrip } from "./panels/session-activity-cards";
+import { TestRunSessionMarker } from "./test-runs-context";
+import { TestRunsPanel } from "./panels/TestRunsPanel";
 import { TranscriptActivitySlot } from "./transcript-activity-slot";
 import { useSessionRecordSnapshot } from "./session-store";
 import { DiffPanel } from "./panels/DiffPanel";
@@ -272,6 +274,8 @@ export function SessionPaneView({
     nextSessionLookup.set(storeActiveSession.id, storeActiveSession);
     return nextSessionLookup;
   }, [sessionLookup, storeActiveSession]);
+  const testRunProjects = useMemo(() => Array.from(projectLookup.values()), [projectLookup]);
+  const testRunSessions = useMemo(() => Array.from(sessionLookup.values()), [sessionLookup]);
   const handlePinResponseBoardMessage = useCallback(
     async (sessionId: string, messageId: string) => {
       try {
@@ -1257,6 +1261,7 @@ export function SessionPaneView({
         <div className="pane-view-strip">
           {activeTab?.kind === "session" ? (
             <div className="pane-view-strip-left">
+              {activeSession ? <TestRunSessionMarker sessionId={activeSession.id} /> : null}
               {(
                 [
                   "session",
@@ -1385,7 +1390,7 @@ export function SessionPaneView({
 
       <section
         ref={messageStackRef}
-        className={`message-stack${activeTab?.kind === "session" && pane.viewMode === "session" && liveTailPinned ? " is-tail-following" : ""}${activeControlSurfaceTab || activeOrchestratorCanvasTab ? " control-panel-stack" : ""}${activeSourceTab || activeDiffPreviewTab ? " editor-panel-stack" : ""}${activeTerminalTab ? " terminal-panel-stack" : ""}${activeMailboxTab ? " mailbox-panel-stack" : ""}${activeResponseBoardTab ? " response-board-panel-stack" : ""}${activeWorkTab ? " work-panel-stack" : ""}`}
+        className={`message-stack${activeTab?.kind === "session" && pane.viewMode === "session" && liveTailPinned ? " is-tail-following" : ""}${activeControlSurfaceTab || activeOrchestratorCanvasTab ? " control-panel-stack" : ""}${activeSourceTab || activeDiffPreviewTab ? " editor-panel-stack" : ""}${activeTerminalTab ? " terminal-panel-stack" : ""}${activeMailboxTab ? " mailbox-panel-stack" : ""}${activeResponseBoardTab ? " response-board-panel-stack" : ""}${activeWorkTab ? " work-panel-stack" : ""}${activeTab?.kind === "testRuns" ? " test-runs-panel-stack" : ""}`}
         tabIndex={
           activeTab?.kind === "session" && pane.viewMode === "session"
             ? 0
@@ -1690,6 +1695,10 @@ export function SessionPaneView({
             onWorkspaceStateChange={onSetResponseBoardWorkspaceState}
             onOpenSource={handleOpenResponseBoardSource}
           />
+        ) : activeTab?.kind === "testRuns" ? (
+          <TestRunsPanel key={`${activeTab.id}:${activeTab.refreshToken}`}
+            projects={testRunProjects} sessions={testRunSessions}
+            initialProjectId={activeTab.originProjectId ?? null} initialSessionId={activeTab.filterSessionId} />
         ) : activeWorkTab ? (
           <WorkPanel
             key={`${activeWorkTab.id}:${activeWorkTab.refreshToken}`}
@@ -2003,6 +2012,7 @@ export function SessionPaneView({
         activeMailboxTab ||
         activeResponseBoardTab ||
         activeWorkTab ||
+        activeTab?.kind === "testRuns" ||
         activeInstructionDebuggerTab ||
         activeDiffPreviewTab ||
         isDelegatedChildSession ? null : (

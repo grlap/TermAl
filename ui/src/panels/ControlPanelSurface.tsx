@@ -1,5 +1,6 @@
 import {
   forwardRef,
+  useContext,
   useEffect,
   useImperativeHandle,
   useRef,
@@ -8,6 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { GitHubMark } from "../github-mark";
+import { TestRunsOpenContext } from "../test-runs-context";
 import { OrchestratorIcon } from "../orchestrator-icon";
 import {
   TAB_DRAG_MIME_TYPE,
@@ -94,6 +96,11 @@ const WORK_ACTION: ControlPanelActionDefinition = {
   icon: <WorkIcon />,
 };
 
+const TEST_RUNS_ACTION: ControlPanelActionDefinition = {
+  label: "Open Test Runs",
+  icon: <span aria-hidden="true">✓</span>,
+};
+
 export function ControlPanelSectionIcon({ sectionId }: { sectionId: ControlPanelSectionId }) {
   switch (sectionId) {
     case "workspaces":
@@ -128,6 +135,7 @@ export const ControlPanelSurface = forwardRef<ControlPanelSurfaceHandle, Control
   windowId,
   launcherPaneId,
 }, ref): JSX.Element {
+  const openTestRuns = useContext(TestRunsOpenContext);
   const [activeSection, setActiveSection] = useState<ControlPanelSectionId>(fixedSection ?? "sessions");
   const [sectionOrder, setSectionOrder] = useState<ControlPanelSectionId[]>(() => getStoredControlPanelSectionOrder());
   const [draggedSectionId, setDraggedSectionId] = useState<ControlPanelSectionId | null>(null);
@@ -257,6 +265,7 @@ export const ControlPanelSurface = forwardRef<ControlPanelSurfaceHandle, Control
       {fixedSection ? null : (
         <nav className="control-panel-activity-rail" aria-label="Control panel dock">
           <div className="control-panel-activity-group">
+            {openTestRuns ? <ControlPanelActionButton definition={TEST_RUNS_ACTION} onClick={() => openTestRuns()} /> : null}
             {sectionDefinitions.map((definition) => (
               <ControlPanelActivityButton
                 key={definition.id}

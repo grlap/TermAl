@@ -103,6 +103,7 @@ mod telegram_relay_lifecycle;
 mod telegram_settings;
 mod telegram_support;
 mod terminal;
+mod test_runs;
 mod turns;
 mod work_visualizer;
 mod work_visualizer_beads;
@@ -1312,6 +1313,7 @@ fn sample_remote_orchestrator_state(
             sessions: Vec::new(),
             delegations: Vec::new(),
             delegation_waits: Vec::new(),
+            test_runs: Vec::new(),
             pending_engram_mcp_revocation_session_ids: Vec::new(),
         },
     }

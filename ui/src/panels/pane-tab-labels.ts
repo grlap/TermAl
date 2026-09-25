@@ -87,6 +87,9 @@ export function formatTabLabel(
   if (tab.kind === "work") {
     return "Work";
   }
+  if (tab.kind === "testRuns") {
+    return "Test Runs";
+  }
 
   if (tab.kind === "controlPanel") {
     return "Control panel";
