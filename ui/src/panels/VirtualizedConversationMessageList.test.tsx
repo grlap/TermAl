@@ -49,6 +49,8 @@ import {
 } from "../message-stack-scroll-sync";
 import { mountedPrependRestoreIsCurrent } from "./virtualized-conversation-mounted-range";
 import type { Message } from "../types";
+import { DeferredHeavyContent } from "../deferred-heavy-content";
+import { DeferredHeavyContentActivationProvider } from "../deferred-heavy-content-activation";
 
 function makeTextMessages(count: number): Message[] {
   return Array.from({ length: count }, (_, index) => ({
@@ -144,8 +146,10 @@ type VirtualizedHarnessOptions = {
   tailFollowIntent?: boolean;
   tailFollowIntentIsAuthoritative?: boolean;
   committedDomGeometry?: boolean;
+  committedSlotHeight?: (slot: HTMLElement) => number;
   manualAnimationFrames?: boolean;
   modelPaneActivation?: boolean;
+  onBeforeActivationRestore?: (node: HTMLElement) => void;
   virtualizerHandleRef?: VirtualizedConversationMessageListHandleRef;
 };
 
@@ -200,8 +204,10 @@ function renderVirtualizedHarness({
   tailFollowIntent = false,
   tailFollowIntentIsAuthoritative = false,
   committedDomGeometry = false,
+  committedSlotHeight,
   manualAnimationFrames = false,
   modelPaneActivation = false,
+  onBeforeActivationRestore,
   virtualizerHandleRef,
 }: VirtualizedHarnessOptions) {
   let clientHeight = initialClientHeight;
@@ -251,7 +257,8 @@ function renderVirtualizedHarness({
         const pageSlots = Array.from(element.querySelectorAll<HTMLElement>(".virtualized-message-slot"));
         pageSlots.forEach((slot, index) => {
           const card = slot.querySelector<HTMLElement>("[data-fixture-height]");
-          const slotExtent = Number.parseFloat(card?.dataset.fixtureHeight ?? "0") || 0;
+          const slotExtent = committedSlotHeight?.(slot) ??
+            (Number.parseFloat(card?.dataset.fixtureHeight ?? "0") || 0);
           slots.set(slot, { top: height, height: slotExtent });
           height += slotExtent;
           if (index + 1 < pageSlots.length) height += VIRTUALIZED_MESSAGE_GAP_PX;
@@ -457,6 +464,7 @@ function renderVirtualizedHarness({
       if (!modelPaneActivation || !active) return;
       // The pane restores a saved FOLLOW tab after its child layout effects,
       // then requests the virtualized bottom again from its first frame.
+      onBeforeActivationRestore?.(scrollNode);
       const pin = () => {
         if (!tailFollowIntent) return;
         scrollNode.scrollTop = Math.max(scrollNode.scrollHeight - clientHeight, 0);
@@ -1891,6 +1899,103 @@ describe("VirtualizedConversationMessageList foundation", () => {
     }
   });
 
+  it("adopts equal hydrated references in unmeasured page estimates", () => {
+    const messages = makeTextMessages(240);
+    const retiredTextRead = vi.fn(() => "Unmeasured long table text");
+    messages[160] = {
+      ...messages[160]!,
+      get text() { return retiredTextRead(); },
+    } as Message;
+    const virtualizerHandleRef: VirtualizedConversationMessageListHandleRef = { current: null };
+    const harness = renderVirtualizedHarness({
+      messages,
+      manualAnimationFrames: true,
+      virtualizerHandleRef,
+    });
+    try {
+      const before = virtualizerHandleRef.current!.getLayoutSnapshot();
+      expect(before.messages[160]!.measuredPageHeightPx).toBeNull();
+      const hydrated = messages.map((message) => ({ ...message }));
+      retiredTextRead.mockClear();
+      harness.rerenderWithMessages(hydrated);
+      expect(retiredTextRead).toHaveBeenCalled();
+      const after = virtualizerHandleRef.current!.getLayoutSnapshot();
+      expect(after.messages[160]!.measuredPageHeightPx).toBeNull();
+      expect(after.estimatedTotalHeightPx).toBe(before.estimatedTotalHeightPx);
+
+      retiredTextRead.mockClear();
+      harness.rerenderWithMessages(hydrated.map((message, index) =>
+        index === 239 && message.type === "text"
+          ? { ...message, text: `${message.text} streamed word` }
+          : message,
+      ));
+      expect(retiredTextRead).not.toHaveBeenCalled();
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it.each(["detached", "bottom"] as const)(
+    "keeps a measured tall offscreen page when unchanged messages are rehydrated (%s)",
+    async (position) => {
+      vi.useFakeTimers();
+      const messages = makeTextMessages(240);
+      const virtualizerHandleRef: VirtualizedConversationMessageListHandleRef = {
+        current: null,
+      };
+      // Model the geometry of a tall table followed by ordinary text. This
+      // isolates measurement identity; it does not simulate browser table layout.
+      const harness = renderVirtualizedHarness({
+        messages,
+        clientHeight: 500,
+        slotHeight: (message) => message.id === "message-1" ? 4_000 : 80,
+        committedDomGeometry: true,
+        manualAnimationFrames: true,
+        virtualizerHandleRef,
+      });
+      try {
+        const measuredTablePageHeight = virtualizerHandleRef.current!
+          .getLayoutSnapshot().messages[0]!.measuredPageHeightPx;
+        expect(measuredTablePageHeight).toBeGreaterThan(4_000);
+        act(() => {
+          notifyMessageStackUserScrollIntent(harness.scrollNode, {
+            direction: "down", scrollKind: "incremental", viewportCanMove: true,
+          });
+          // Move beyond both the viewport reserve and idle page hysteresis;
+          // merely hiding a page does not necessarily evict its DOM band.
+          harness.setScrollTop(16_000);
+          fireEvent.scroll(harness.scrollNode);
+        });
+        await advanceIdleMountedRangeCompaction();
+        harness.advanceAnimationFrame();
+        expect(harness.container.querySelector(
+          '.virtualized-message-slot[data-message-id="message-1"]',
+        )).toBeNull();
+        expect(virtualizerHandleRef.current!.getLayoutSnapshot()
+          .messages[0]!.measuredPageHeightPx).toBe(measuredTablePageHeight);
+
+        if (position === "bottom") {
+          act(() => {
+            harness.scrollNode.scrollTop = harness.scrollNode.scrollHeight - 500;
+            notifyMessageStackScrollWrite(harness.scrollNode, { scrollKind: "bottom_pin" });
+          });
+          harness.advanceAnimationFrame();
+        }
+        const before = harness.capturePaint();
+        harness.rerenderWithMessages(messages.map((message) => ({ ...message })));
+        const after = harness.capturePaint();
+        expect(virtualizerHandleRef.current!.getLayoutSnapshot()
+          .messages[0]!.measuredPageHeightPx).toBe(measuredTablePageHeight);
+        expect(after.visible.map(({ id, top }) => ({ id, top })))
+          .toEqual(before.visible.map(({ id, top }) => ({ id, top })));
+        // Check the immediate geometry, not only a later bottom correction.
+        expect(after.bottomGap).toBe(before.bottomGap);
+      } finally {
+        harness.restore();
+      }
+    },
+  );
+
   it("releases same-key measurements across pinned expansion, replacement, and eviction", async () => {
     const virtualizerHandleRef: VirtualizedConversationMessageListHandleRef = {
       current: null,
@@ -2681,6 +2786,174 @@ describe("VirtualizedConversationMessageList foundation", () => {
         );
       });
       expect(harness.resizeObserveCount).toBe(observeCountAfterInitialMeasure);
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it.each(["bottom", "detached"] as const)("does not shrink a measured heavy page to a placeholder on tab return (%s)", async (position) => {
+    vi.useFakeTimers();
+    const messages = makeTextMessages(48);
+    const harness = renderVirtualizedHarness({
+      messages,
+      committedDomGeometry: true,
+      manualAnimationFrames: true,
+      modelPaneActivation: true,
+      tailFollowIntent: position === "bottom",
+      tailFollowIntentIsAuthoritative: true,
+      committedSlotHeight: (slot) => slot.dataset.messageId === "message-41"
+        ? (slot.querySelector("[data-heavy-placeholder]") ? 1000 : 4400)
+        : 80,
+      renderMessageCard: (message, preferImmediateRender) => message.id === "message-41"
+        ? <DeferredHeavyContent
+            estimatedHeight={1000}
+            preferImmediateRender={preferImmediateRender}
+            placeholder={<div data-heavy-placeholder>Table preview</div>}
+          ><article>Full tall table</article></DeferredHeavyContent>
+        : <article>{message.id}</article>,
+    });
+    try {
+      act(() => {
+        harness.scrollNode.scrollTop = harness.scrollNode.scrollHeight;
+        notifyMessageStackScrollWrite(harness.scrollNode, { scrollKind: "bottom_pin" });
+        fireEvent.scroll(harness.scrollNode);
+      });
+      harness.advanceAnimationFrame();
+      await advanceIdleMountedRangeCompaction();
+      if (position === "detached") {
+        act(() => {
+          notifyMessageStackUserScrollIntent(harness.scrollNode, {
+            direction: "up",
+            scrollKind: "incremental",
+            viewportCanMove: true,
+          });
+          harness.scrollNode.scrollTop -= 200;
+          fireEvent.scroll(harness.scrollNode);
+        });
+        await advanceIdleMountedRangeCompaction();
+      }
+      const before = harness.capturePaint();
+      expect(harness.container.querySelector('[data-message-id="message-41"]')).not.toBeNull();
+      harness.rerenderActive(false);
+      harness.nativeClamps.length = 0;
+      harness.rerenderActive(true);
+      const after = harness.capturePaint();
+      expect(harness.nativeClamps).toEqual([]);
+      expect(after.bottomGap).toBe(before.bottomGap);
+      expect(after.visible.map(({ id, top }) => ({ id, top }))).toEqual(
+        before.visible.map(({ id, top }) => ({ id, top })),
+      );
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it.each([
+    ["bottom", false], ["detached", false],
+    ["bottom", true], ["detached", true],
+  ] as const)("restores measured previews before pane follow authority (%s, mixed page=%s)", (position, mixedPage) => {
+    vi.useFakeTimers();
+    const messages = makeTextMessages(48);
+    const virtualizerHandleRef: VirtualizedConversationMessageListHandleRef = { current: null };
+    const activationContent: { preview: boolean; expanded: boolean; existing: boolean }[] = [];
+    const harness = renderVirtualizedHarness({
+      messages,
+      virtualizerHandleRef,
+      committedDomGeometry: true,
+      manualAnimationFrames: true,
+      modelPaneActivation: true,
+      onBeforeActivationRestore: (node) => activationContent.push({
+        preview: node.querySelector('[data-message-id="message-41"] [data-heavy-placeholder]') !== null,
+        expanded: node.querySelector('[data-full-table="new"]') !== null,
+        existing: node.querySelector('[data-full-table="existing"]') !== null,
+      }),
+      // Establish measurements before choosing FOLLOW or detached ownership.
+      tailFollowIntent: false,
+      tailFollowIntentIsAuthoritative: true,
+      committedSlotHeight: (slot) => slot.querySelector("[data-heavy-placeholder]")
+        ? 1000 : slot.querySelector("[data-full-table]") ? 4400 : 80,
+      renderMessageCard: (message, preferImmediateRender) =>
+        mixedPage && message.id === "message-42"
+          ? <DeferredHeavyContentActivationProvider allowActivation>
+              <DeferredHeavyContent
+                estimatedHeight={1000}
+                preferImmediateRender={preferImmediateRender}
+                placeholder={<div data-heavy-placeholder>Previously rendered table preview</div>}
+              ><article data-full-table="existing">Already rendered tall table</article></DeferredHeavyContent>
+            </DeferredHeavyContentActivationProvider>
+          : message.type === "text" && message.text === "Deferred table"
+          // Isolate an overscan block whose viewport observer has not activated
+          // it. Immediate preference bypasses this real deferred-context gate.
+          ? <DeferredHeavyContentActivationProvider allowActivation={false}>
+              <DeferredHeavyContent
+                estimatedHeight={1000}
+                preferImmediateRender={preferImmediateRender}
+                placeholder={<div data-heavy-placeholder>Table preview</div>}
+              ><article data-full-table="new">Full tall table</article></DeferredHeavyContent>
+            </DeferredHeavyContentActivationProvider>
+          : <article>{message.id}</article>,
+    });
+    try {
+      // A streamed heavy block first appears in mounted overscan during direct
+      // scrolling, so it is measured as a preview, never as the full table.
+      // Use the tail band: the first page can be evicted by the bottom seek,
+      // which would test an absent card instead of placeholder restoration.
+      act(() => {
+        harness.scrollNode.scrollTop = harness.scrollNode.scrollHeight - 500;
+        notifyMessageStackScrollWrite(harness.scrollNode, { scrollKind: "bottom_pin" });
+        fireEvent.scroll(harness.scrollNode);
+      });
+      expect(harness.container.querySelector('[data-message-id="message-41"]')).not.toBeNull();
+      // Upward input is consumable at the bottom; a downward wheel there does
+      // not claim scroll ownership and cannot suspend eager heavy rendering.
+      act(() => fireEvent.wheel(harness.scrollNode, { deltaY: -100 }));
+      harness.rerenderWithMessages(messages.map((message, index) =>
+        index === 40 ? { ...message, text: "Deferred table" } as Message : message,
+      ));
+      expect(harness.container.querySelector("[data-heavy-placeholder]")).not.toBeNull();
+      expect(virtualizerHandleRef.current!.getLayoutSnapshot()
+        .messages[40]!.measuredPageHeightPx).toBe(mixedPage ? 5964 : 1644);
+      harness.rerenderWithFollowIntent(position === "bottom");
+      act(() => {
+        // Native geometry can move before its queued scroll event. Do not
+        // issue bottom_pin here: that explicit command ends the scroll gesture
+        // and intentionally activates every heavy card before we switch tabs.
+        harness.scrollNode.scrollTop = harness.scrollNode.scrollHeight - 500;
+      });
+      if (position === "detached") {
+        act(() => {
+          notifyMessageStackUserScrollIntent(harness.scrollNode, {
+            direction: "up", scrollKind: "incremental", viewportCanMove: true,
+          });
+          harness.scrollNode.scrollTop -= 200;
+          fireEvent.scroll(harness.scrollNode);
+        });
+      }
+      const before = harness.capturePaint();
+      expect(harness.container.querySelector('[data-message-id="message-41"] [data-heavy-placeholder]')).not.toBeNull();
+      activationContent.length = 0;
+      harness.rerenderActive(false);
+      harness.rerenderActive(true);
+      const after = harness.capturePaint();
+      // Check restoration before the pane's explicit bottom_pin: that command
+      // intentionally clears gesture ownership and enables immediate rendering.
+      // Requiring a preview after that separate action tests the wrong contract.
+      expect(activationContent).toEqual([
+        { preview: true, expanded: false, existing: mixedPage },
+      ]);
+      if (position === "detached") {
+        expect(harness.container.querySelector("[data-heavy-placeholder]")).not.toBeNull();
+        expect(harness.container.querySelector('[data-full-table="new"]')).toBeNull();
+      } else {
+        expect(harness.container.querySelector('[data-full-table="new"]')).not.toBeNull();
+      }
+      if (mixedPage) {
+        expect(harness.container.querySelector('[data-full-table="existing"]')).not.toBeNull();
+      }
+      expect(after.visible.map(({ id, top }) => ({ id, top }))).toEqual(
+        before.visible.map(({ id, top }) => ({ id, top })),
+      );
+      expect(after.bottomGap).toBe(before.bottomGap);
     } finally {
       harness.restore();
     }

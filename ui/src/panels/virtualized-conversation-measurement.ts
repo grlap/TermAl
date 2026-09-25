@@ -49,7 +49,38 @@ export type EstimatedPageHeightEntry = {
 export type PageMeasurementIdentity = {
   hasTrailingGap: boolean;
   messages: readonly Message[];
+  // DOM measurement provenance, not wire-content identity. A placeholder's
+  // height is useful geometry, but is not proof its heavy content was rendered.
+  fullyRenderedMessageIds?: readonly string[];
 };
+
+// Hydration can replace a message object without changing anything rendered.
+// Reference identity is the fast path, not evidence that a measured page has
+// changed. Compare all wire fields on replacement so attachments, command
+// state, and future message variants cannot silently reuse stale geometry.
+// Compare values directly rather than serializing large transcripts twice.
+function sameMeasurementContent(previous: unknown, next: unknown): boolean {
+  if (previous === next) return true;
+  if (
+    previous === null || next === null ||
+    typeof previous !== "object" || typeof next !== "object"
+  ) return false;
+  if (Array.isArray(previous)) {
+    return (
+      Array.isArray(next) && previous.length === next.length &&
+      previous.every((value, index) => sameMeasurementContent(value, next[index]))
+    );
+  }
+  if (Array.isArray(next)) return false;
+  const before = previous as Record<string, unknown>;
+  const after = next as Record<string, unknown>;
+  const keys = Object.keys(before);
+  return (
+    keys.length === Object.keys(after).length && keys.every((key) =>
+      Object.prototype.hasOwnProperty.call(after, key) &&
+      sameMeasurementContent(before[key], after[key]))
+  );
+}
 
 export function pageMatchesMeasurement(
   page: MessagePage,
@@ -60,7 +91,7 @@ export function pageMatchesMeasurement(
     page.hasTrailingGap === identity.hasTrailingGap &&
     page.messages.length === identity.messages.length &&
     page.messages.every(
-      (message, index) => message === identity.messages[index],
+      (message, index) => sameMeasurementContent(message, identity.messages[index]),
     )
   );
 }

@@ -744,6 +744,13 @@ export function VirtualizedConversationMessageList({
             measuredPageIdentityRef.current[page.key],
           )
         ) {
+          // Only value-equal references are adopted during render; even an
+          // abandoned render cannot change the cached geometry or content.
+          measuredPageIdentityRef.current[page.key] = {
+            ...measuredPageIdentityRef.current[page.key],
+            hasTrailingGap: page.hasTrailingGap,
+            messages: page.messages,
+          };
           return measuredHeight;
         }
         const measuredIdentity = measuredPageIdentityRef.current[page.key];
@@ -775,6 +782,10 @@ export function VirtualizedConversationMessageList({
           cachedEstimate?.cacheKey === cacheKey &&
           pageMatchesMeasurement(page, cachedEstimate.identity)
         ) {
+          cachedEstimate.identity = {
+            hasTrailingGap: page.hasTrailingGap,
+            messages: page.messages,
+          };
           return cachedEstimate.height;
         }
 
@@ -2131,6 +2142,14 @@ export function VirtualizedConversationMessageList({
           isActive={isActive}
           page={page}
           preferImmediateHeavyRender={preferImmediateHeavyRender}
+          // Restore full measured cards before native scroll clamping, but do
+          // not promote overscan previews merely because they were measured.
+          restoredFullMessageIds={
+            (isActivatingWithMessages || isMeasuringPostActivation) &&
+            pageMatchesMeasurement(page, measuredPageIdentityRef.current[page.key])
+              ? measuredPageIdentityRef.current[page.key]?.fullyRenderedMessageIds
+              : undefined
+          }
           deferMeasurementUntilNextFrame={shouldUseEstimatedBottomViewport}
           allowDeferredHeavyActivation={allowDeferredHeavyActivation}
           renderMessageCard={renderMessageCard}

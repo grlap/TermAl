@@ -26,6 +26,7 @@ export const MeasuredPageBand = memo(function MeasuredPageBand({
   isActive,
   page,
   preferImmediateHeavyRender,
+  restoredFullMessageIds,
   deferMeasurementUntilNextFrame,
   allowDeferredHeavyActivation,
   renderMessageCard,
@@ -42,6 +43,7 @@ export const MeasuredPageBand = memo(function MeasuredPageBand({
   isActive: boolean;
   page: MessagePage;
   preferImmediateHeavyRender: boolean;
+  restoredFullMessageIds?: readonly string[];
   deferMeasurementUntilNextFrame: boolean;
   allowDeferredHeavyActivation: boolean;
   renderMessageCard: RenderMessageCard;
@@ -63,6 +65,14 @@ export const MeasuredPageBand = memo(function MeasuredPageBand({
 }) {
   const pageRef = useRef<HTMLDivElement | null>(null);
   const committedPageRef = useCommittedRef(page);
+  const committedRenderPolicyRef = useCommittedRef({
+    preferImmediateHeavyRender,
+    restoredFullMessageIds,
+  });
+  const lastMeasuredRenderPolicyRef = useRef<{
+    preferImmediateHeavyRender: boolean;
+    restoredFullMessageIds?: readonly string[];
+  } | undefined>(undefined);
   const lastMeasurementRef = useRef<PageMeasurementIdentity | undefined>(undefined);
   const measureNowRef = useRef<(() => void) | null>(null);
 
@@ -114,6 +124,7 @@ export const MeasuredPageBand = memo(function MeasuredPageBand({
         hasTrailingGap: currentPage.hasTrailingGap,
         messages: currentPage.messages,
       };
+      lastMeasuredRenderPolicyRef.current = committedRenderPolicyRef.current;
       onHeightChange(
         currentPage.key,
         currentPage.pageIndex,
@@ -193,6 +204,7 @@ export const MeasuredPageBand = memo(function MeasuredPageBand({
       disposed = true;
       measureNowRef.current = null;
       lastMeasurementRef.current = undefined;
+      lastMeasuredRenderPolicyRef.current = undefined;
       resizeObserver?.disconnect();
       if (frameId !== 0) {
         window.cancelAnimationFrame(frameId);
@@ -209,18 +221,29 @@ export const MeasuredPageBand = memo(function MeasuredPageBand({
   ]);
 
   useLayoutEffect(() => {
-    if (
-      isActive &&
-      !deferMeasurementUntilNextFrame &&
-      !pageMatchesMeasurement(page, lastMeasurementRef.current)
-    ) {
-      // Content changes keep their DOM/last real height during render. Measure
-      // that committed content before paint, even when wrapping did not change
+    if (!isActive || deferMeasurementUntilNextFrame) return;
+    const lastPolicy = lastMeasuredRenderPolicyRef.current;
+    const renderPreferenceChanged = !lastPolicy || page.messages.some(({ id }) =>
+      (preferImmediateHeavyRender || restoredFullMessageIds?.includes(id) === true) !==
+      (lastPolicy.preferImmediateHeavyRender || lastPolicy.restoredFullMessageIds?.includes(id) === true),
+    );
+    if (!renderPreferenceChanged && pageMatchesMeasurement(page, lastMeasurementRef.current)) {
+      // Hydration replaced equal objects. Keep later streamed page rebuilds
+      // on the reference fast path without reading layout again.
+      lastMeasurementRef.current = {
+        hasTrailingGap: page.hasTrailingGap,
+        messages: page.messages,
+      };
+    } else {
+      // A pane-owned bottom pin can expand previews without changing any wire
+      // messages. Measure that render-policy change before paint as well, so
+      // the height owner restores bottom against the expanded DOM immediately.
+      // Content changes also need measurement even when wrapping did not change
       // enough to trigger ResizeObserver. Unchanged pages neither remeasure nor
       // reconnect their observers for another page's streamed update.
       measureNowRef.current?.();
     }
-  }, [isActive, deferMeasurementUntilNextFrame, page]);
+  }, [isActive, deferMeasurementUntilNextFrame, page, preferImmediateHeavyRender, restoredFullMessageIds]);
 
   return (
     <div ref={pageRef} className="virtualized-message-page" data-page-key={page.key}>
@@ -242,7 +265,7 @@ export const MeasuredPageBand = memo(function MeasuredPageBand({
               >
                 {renderMessageCard(
                   message,
-                  preferImmediateHeavyRender,
+                  preferImmediateHeavyRender || restoredFullMessageIds?.includes(message.id) === true,
                   onApprovalDecision,
                   onUserInputSubmit,
                   onMcpElicitationSubmit,

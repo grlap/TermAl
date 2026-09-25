@@ -8,6 +8,7 @@ import {
   shouldFlushVirtualizedPageHeightLayout,
   useVirtualizedConversationPageHeightChange,
 } from "./virtualized-conversation-page-heights";
+import type { PageMeasurementIdentity } from "./virtualized-conversation-measurement";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -100,6 +101,7 @@ function RecentBottomReentryHarness({
       pageNode?: HTMLElement | null,
       flushLayout?: boolean,
     ) => void,
+    measurements: Record<string, PageMeasurementIdentity>,
   ) => void;
   scheduleDeferredBottomRestoreLayoutVersion: (delayMs: number) => void;
   scrollNode: HTMLElement;
@@ -108,6 +110,7 @@ function RecentBottomReentryHarness({
     nextScrollTop: number,
   ) => void;
 }) {
+  const measurements = useRef<Record<string, PageMeasurementIdentity>>({});
   const handlePageHeightChange = useVirtualizedConversationPageHeightChange({
     bumpLayoutVersion,
     clearPendingDeferredBottomRestore: vi.fn(),
@@ -120,7 +123,7 @@ function RecentBottomReentryHarness({
     lastUserScrollInputTimeRef: useRef(900),
     latestVisibleMessageAnchorRef: useRef(null),
     layoutPageHeightsRef: useRef({ "page-0": 100 }),
-    measuredPageIdentityRef: useRef({}),
+    measuredPageIdentityRef: measurements,
     pageHeightsRef: useRef({}),
     currentPageIdentityRef: useRef({
       "page-0": { hasTrailingGap: false, messages: [] },
@@ -135,11 +138,31 @@ function RecentBottomReentryHarness({
     writeScrollTopAndSyncViewport,
   });
 
-  useLayoutEffect(() => onReady(handlePageHeightChange), [handlePageHeightChange, onReady]);
+  useLayoutEffect(() => onReady(handlePageHeightChange, measurements.current), [handlePageHeightChange, onReady]);
   return null;
 }
 
 describe("useVirtualizedConversationPageHeightChange", () => {
+  it("refreshes full-content provenance even when placeholder activation does not change height", () => {
+    const node = document.createElement("section");
+    const band = document.createElement("div");
+    band.innerHTML = '<div class="virtualized-message-slot" data-message-id="full"></div>' +
+      '<div class="virtualized-message-slot" data-message-id="preview"><div data-deferred-content-pending="true"></div></div>';
+    render(<RecentBottomReentryHarness
+      bumpLayoutVersion={vi.fn()}
+      scheduleDeferredBottomRestoreLayoutVersion={vi.fn()}
+      scrollNode={node}
+      writeScrollTopAndSyncViewport={vi.fn()}
+      onReady={(measure, identities) => {
+        measure("page-0", 0, 100, band);
+        expect(identities["page-0"]!.fullyRenderedMessageIds).toEqual(["full"]);
+        band.querySelector("[data-deferred-content-pending]")!.removeAttribute("data-deferred-content-pending");
+        measure("page-0", 0, 100, band);
+        expect(identities["page-0"]!.fullyRenderedMessageIds).toEqual(["full", "preview"]);
+      }}
+    />);
+  });
+
   it("uses the committed active state during descendant layout measurement", () => {
     const observations: boolean[] = [];
     const scrollNode = document.createElement("section");

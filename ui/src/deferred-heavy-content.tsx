@@ -149,6 +149,7 @@ export function DeferredHeavyContent({
     <div
       ref={containerRef}
       className="deferred-heavy-content"
+      data-deferred-content-pending={shouldRenderContent ? undefined : "true"}
       style={
         shouldRenderContent
           ? undefined

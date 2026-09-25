@@ -108,9 +108,18 @@ export function useVirtualizedConversationPageHeightChange({
       // reintroduce its height under a key now owned by different content.
       return;
     }
+    const measuredIdentity: PageMeasurementIdentity = {
+      ...currentPageIdentity,
+      fullyRenderedMessageIds: pageNode
+        ? Array.from(pageNode.querySelectorAll<HTMLElement>(
+            ".virtualized-message-slot[data-message-id]",
+          )).filter((slot) => !slot.querySelector('[data-deferred-content-pending="true"]'))
+            .map((slot) => slot.dataset.messageId!)
+        : undefined,
+    };
     const previousHeight = pageHeightsRef.current[pageKey];
     if (previousHeight !== undefined && Math.abs(previousHeight - roundedHeight) < 1) {
-      measuredPageIdentityRef.current[pageKey] = currentPageIdentity;
+      measuredPageIdentityRef.current[pageKey] = measuredIdentity;
       return;
     }
 
@@ -122,7 +131,7 @@ export function useVirtualizedConversationPageHeightChange({
         ? roundedHeight - previousLayoutHeight
         : 0;
     pageHeightsRef.current[pageKey] = roundedHeight;
-    measuredPageIdentityRef.current[pageKey] = currentPageIdentity;
+    measuredPageIdentityRef.current[pageKey] = measuredIdentity;
     layoutPageHeightsRef.current[pageKey] = roundedHeight;
 
     const node = scrollContainerRef.current;

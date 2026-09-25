@@ -31,6 +31,104 @@ afterEach(() => {
 });
 
 describe("MeasuredPageBand", () => {
+  it.each(["immediate", "restored"] as const)("remeasures unchanged messages before paint when %s rendering expands a preview", (mode) => {
+    const requestFrame = vi.fn(() => 1);
+    vi.stubGlobal("requestAnimationFrame", requestFrame);
+    const observe = vi.fn();
+    const disconnect = vi.fn();
+    vi.stubGlobal("ResizeObserver", class {
+      observe = observe;
+      disconnect = disconnect;
+    });
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+      return { height: this.querySelector("[data-full-table]") ? 4400 : 1000 } as DOMRect;
+    });
+    const onHeightChange = vi.fn();
+    const renderPage = (expanded: boolean) => (
+      <MeasuredPageBand
+        isActive
+        page={page}
+        preferImmediateHeavyRender={mode === "immediate" && expanded}
+        restoredFullMessageIds={mode === "restored" && expanded ? [message.id] : undefined}
+        deferMeasurementUntilNextFrame={false}
+        allowDeferredHeavyActivation={false}
+        renderMessageCard={(_, immediate) => immediate
+          ? <article data-full-table>Full table</article>
+          : <article>Preview</article>}
+        conversationSearchMatchedItemKeys={new Set()}
+        onSearchItemMount={() => {}}
+        onApprovalDecision={() => {}}
+        onUserInputSubmit={async () => {}}
+        onMcpElicitationSubmit={() => {}}
+        onCodexAppRequestSubmit={() => {}}
+        onHeightChange={onHeightChange}
+      />
+    );
+    const { rerender } = render(renderPage(false));
+    expect(onHeightChange).toHaveBeenLastCalledWith(
+      page.key, page.pageIndex, 1000, expect.any(HTMLElement), false,
+    );
+    const observationCount = observe.mock.calls.length;
+    onHeightChange.mockClear();
+    rerender(renderPage(true));
+    expect(onHeightChange).toHaveBeenCalledExactlyOnceWith(
+      page.key, page.pageIndex, 4400, expect.any(HTMLElement), false,
+    );
+    expect(requestFrame).not.toHaveBeenCalled();
+    expect(observe).toHaveBeenCalledTimes(observationCount);
+    expect(disconnect).not.toHaveBeenCalled();
+    onHeightChange.mockClear();
+    // A fresh but value-equal list of restored IDs is not another layout change.
+    rerender(renderPage(true));
+    expect(onHeightChange).not.toHaveBeenCalled();
+  });
+
+  it("adopts equal hydrated references without repeating content comparisons or measurements", () => {
+    vi.stubGlobal("ResizeObserver", class {
+      observe() {}
+      disconnect() {}
+    });
+    const geometryRead = vi.spyOn(Element.prototype, "getBoundingClientRect")
+      .mockReturnValue({ height: 40 } as DOMRect);
+    // Reading a retired object's field reveals a repeated structural comparison
+    // without exposing the component's private cache through a test-only API.
+    const retiredTextRead = vi.fn(() => message.text);
+    const original = { ...message, get text() { return retiredTextRead(); } };
+    const hydrated = { ...message };
+    const onHeightChange = vi.fn();
+    const renderPage = (item: Message) => (
+      <MeasuredPageBand
+        isActive
+        page={{ ...page, messages: [item] }}
+        preferImmediateHeavyRender
+        deferMeasurementUntilNextFrame={false}
+        allowDeferredHeavyActivation
+        renderMessageCard={(value) => <article>{value.id}</article>}
+        conversationSearchMatchedItemKeys={new Set()}
+        onSearchItemMount={() => {}}
+        onApprovalDecision={() => {}}
+        onUserInputSubmit={async () => {}}
+        onMcpElicitationSubmit={() => {}}
+        onCodexAppRequestSubmit={() => {}}
+        onHeightChange={onHeightChange}
+      />
+    );
+    const { rerender } = render(renderPage(original));
+    geometryRead.mockClear();
+    onHeightChange.mockClear();
+    retiredTextRead.mockClear();
+    rerender(renderPage(hydrated));
+    expect(retiredTextRead).toHaveBeenCalled();
+    expect(onHeightChange).not.toHaveBeenCalled();
+    expect(geometryRead).not.toHaveBeenCalled();
+
+    retiredTextRead.mockClear();
+    rerender(renderPage(hydrated));
+    expect(retiredTextRead).not.toHaveBeenCalled();
+    expect(onHeightChange).not.toHaveBeenCalled();
+    expect(geometryRead).not.toHaveBeenCalled();
+  });
+
   it("remeasures changed text before a frame without reconnecting stable observers", () => {
     const requestFrame = vi.fn(() => 1);
     vi.stubGlobal("requestAnimationFrame", requestFrame);
