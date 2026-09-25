@@ -33,6 +33,9 @@ mod turn_checks;
 #[path = "engram_held_claims.rs"]
 mod held_claims;
 
+#[path = "engram_phase_compat.rs"]
+mod phase_compat;
+
 use self::control_transport::{
     assert_engram_control_descendant_was_terminated, prepare_engram_control_process_tree_fixture,
 };

@@ -668,6 +668,21 @@ struct EngramSessionStatusResponse {
     _confirmed_cursor: Option<i64>,
 }
 
+/// Whether an Engram session phase holds no turn and can be granted one.
+/// Engram builds before the grant-page removal (Engram w-106de4b03b57) report
+/// `sync_required` after a bind or a retired grant; later builds report
+/// `ready` for the same state. Both are accepted so either build works.
+/// `turn_open` holds a turn and `exited` can take none.
+fn engram_phase_holds_no_turn(phase: &str) -> bool {
+    matches!(phase, "ready" | "sync_required")
+}
+
+/// Whether a status reply proves Engram retired a session's issued grant: no
+/// grant is open and the session holds no turn.
+fn engram_status_proves_grant_retired(status: &EngramSessionStatusResponse) -> bool {
+    status.open_grant_id.is_none() && engram_phase_holds_no_turn(&status.phase)
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(tag = "decision", rename_all = "snake_case")]
 enum EngramTurnDecisionResponse {
@@ -5867,9 +5882,9 @@ impl AppState {
                 Ok(binding) => break (binding, request),
             }
         };
-        if was_rebind && binding.status.phase != "sync_required" {
+        if was_rebind && !engram_phase_holds_no_turn(&binding.status.phase) {
             return Err(EngramTransportError::protocol(format!(
-                "Engram rebind returned phase `{}` instead of `sync_required`",
+                "Engram rebind returned phase `{}` instead of `ready` or `sync_required`",
                 binding.status.phase
             )));
         }

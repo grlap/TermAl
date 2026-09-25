@@ -339,8 +339,9 @@ impl AppState {
         }) {
             return false;
         }
-        matches!(response,
-            Ok(status) if status.open_grant_id.is_none() && status.phase == "sync_required")
+        response
+            .as_ref()
+            .is_ok_and(engram_status_proves_grant_retired)
     }
 
     fn confirm_engram_admission_durable(
