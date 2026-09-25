@@ -181,6 +181,14 @@ fn review_freeze_git_failure(
 }
 
 fn review_freeze_file(path: &FsPath, limit: usize) -> Result<Vec<u8>> {
+    review_freeze_file_versioned(path, limit).map(|(bytes, _)| bytes)
+}
+
+/// `review_freeze_file`, plus the metadata of the one file version the bytes
+/// were read from: the path, the opened handle and the path again after the
+/// read all showed that same entry, so the metadata belongs to these bytes
+/// and not to an earlier or later replacement.
+fn review_freeze_file_versioned(path: &FsPath, limit: usize) -> Result<(Vec<u8>, fs::Metadata)> {
     use std::io::Read;
     let before = fs::symlink_metadata(path)?;
     if !before.is_file() || before.file_type().is_symlink() || before.len() > limit as u64 {
@@ -200,7 +208,7 @@ fn review_freeze_file(path: &FsPath, limit: usize) -> Result<Vec<u8>> {
     {
         bail!("review input changed while reading");
     }
-    Ok(bytes)
+    Ok((bytes, before))
 }
 
 fn review_freeze_same_entry(a: &fs::Metadata, b: &fs::Metadata) -> bool {

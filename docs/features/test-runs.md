@@ -100,7 +100,23 @@ Remote projects are not indexed in slice 1.
 - `running`: `results.json` is readable and not terminal, and a responsible
   process may be alive. That process is `results.json`'s `pid` when present,
   otherwise `request.json`'s `creatorPid`. "May be alive" is the launcher's
-  `processMayBeAlive` rule: only proof of exit counts.
+  `processMayBeAlive` rule: only proof of exit counts. A reused pid is also
+  proof. The process that wrote a pid into a file existed when it wrote it. So
+  if the live process at that pid was created more than 2 s after the carrying
+  file (`results.json` for `pid`, `request.json` for `creatorPid`) was last
+  modified, it is not the run's process. That case reads `unknown`, never
+  `running`, for runs recorded before any launcher change as well. The pid and
+  the modification time always come from the same version of the file, so a
+  replacement during the read cannot pair a new pid with an older time. Creation
+  times are read on Windows, Linux and macOS; where one cannot be read, or a
+  modification time leaves no room for the margin, the pid rule alone applies.
+  Both times are wall-clock times. A clock step can therefore make a live run
+  read `unknown` until its next write. On Linux, a forward step moves the boot
+  time that creation times are computed from. On any platform, a backward step
+  of more than 2 s between the writer's start and its last write has the same
+  effect. The error is only ever `running` shown as `unknown`, never a wrong
+  verdict. A start identity recorded by the launcher itself would remove it
+  (tm-fa5e).
 - `unknown`: everything else that is not terminal. That covers an unreadable
   `results.json`, a responsible process proven gone, or no pid recorded
   anywhere. A missing pid is never `running`.

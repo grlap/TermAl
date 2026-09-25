@@ -42,7 +42,7 @@ impl RunFixture {
     fn refresh(&self, alive: &[u32]) -> bool {
         let alive = alive.to_vec();
         self.state
-            .refresh_test_runs_with(&move |pid| alive.contains(&pid), &|event| {
+            .refresh_test_runs_with(&move |pid, _| alive.contains(&pid), &|event| {
                 self.state.publish_delta(event)
             })
     }
@@ -413,7 +413,7 @@ fn a_detail_only_change_moves_the_detail_version() {
     assert_eq!(fixture.summary("test-detail-only"), after);
     let restarted = test_app_state();
     create_test_project(&restarted, &fixture.root, "Restarted");
-    restarted.refresh_test_runs_with(&|_| false, &|event| restarted.publish_delta(event));
+    restarted.refresh_test_runs_with(&|_, _| false, &|event| restarted.publish_delta(event));
     let reindexed = restarted
         .test_run_summaries(None)
         .into_iter()
@@ -526,9 +526,9 @@ fn every_delta_is_published_under_the_lock_that_allocated_its_revision() {
     };
     fixture
         .state
-        .refresh_test_runs_with(&|pid| pid == 9, &probe);
+        .refresh_test_runs_with(&|pid, _| pid == 9, &probe);
     fs::remove_dir_all(&first).unwrap();
-    fixture.state.refresh_test_runs_with(&|_| false, &probe);
+    fixture.state.refresh_test_runs_with(&|_, _| false, &probe);
 
     let published = published.into_inner().unwrap();
     assert_eq!(published.len(), 3, "two new runs, then one removed");
@@ -1470,4 +1470,180 @@ fn remote_test_run_deltas_are_consumed_without_a_local_record() {
         "a remote's runs are not this host's"
     );
     assert_eq!(inner.remote_applied_revisions.get(&remote.id), Some(&8));
+}
+
+#[test]
+fn a_process_created_after_its_pid_was_recorded_is_not_the_runs_process() {
+    let written = std::time::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let alive = |_: u32| true;
+    let created_after = |seconds: u64| move |_: u32| Some(written + Duration::from_secs(seconds));
+    let created_before = |_: u32| Some(written - Duration::from_secs(3_600));
+    assert!(
+        test_run_writer_may_be_alive(7, Some(written), &alive, &created_before),
+        "created before the write: may be the writer"
+    );
+    assert!(
+        test_run_writer_may_be_alive(7, Some(written), &alive, &created_after(1)),
+        "within the clock margin: may be the writer"
+    );
+    assert!(
+        !test_run_writer_may_be_alive(7, Some(written), &alive, &created_after(3)),
+        "created after the write: a reused pid"
+    );
+    assert!(
+        test_run_writer_may_be_alive(7, None, &alive, &created_after(3_600)),
+        "an unknown write time proves nothing"
+    );
+    assert!(
+        test_run_writer_may_be_alive(7, Some(written), &alive, &|_| None),
+        "an unknown creation time proves nothing"
+    );
+    assert!(
+        !test_run_writer_may_be_alive(7, Some(written), &|_| false, &created_before),
+        "a dead process is not the writer"
+    );
+}
+
+#[test]
+fn a_live_process_has_a_creation_time_no_later_than_now() {
+    let created = test_run_process_created_at(std::process::id())
+        .expect("this process's creation time should be readable");
+    assert!(created <= std::time::SystemTime::now());
+}
+
+#[test]
+fn a_reused_pid_reads_unknown_while_the_real_writer_reads_running() {
+    // The current test process stands in for both cases. A run whose files
+    // were written after it started may be its run; a run whose files were
+    // last written before it existed only shares the number, like a stopped
+    // run whose pid the system later gave to another program.
+    let fixture = RunFixture::new("pid-reuse");
+    let runs = fixture.runs_dir();
+    let me = std::process::id();
+    let long_ago = std::time::UNIX_EPOCH + Duration::from_secs(1_600_000_000);
+    let backdate = |path: PathBuf| {
+        fs::File::options()
+            .write(true)
+            .open(path)
+            .expect("file should open")
+            .set_modified(long_ago)
+            .expect("modification time should be set");
+    };
+    write_run(
+        &runs,
+        "test-live-writer",
+        full_request(&fixture.root, "2026-09-25T10:00:00.000Z"),
+        Some(running_results(Some(me))),
+    );
+    let reused = write_run(
+        &runs,
+        "test-reused",
+        full_request(&fixture.root, "2026-09-25T09:00:00.000Z"),
+        Some(running_results(Some(me))),
+    );
+    backdate(reused.join("results.json"));
+    // With no pid in results.json, request.json's creatorPid stands in.
+    let mut request = full_request(&fixture.root, "2026-09-25T08:00:00.000Z");
+    request["creatorPid"] = json!(me);
+    let reused_creator = write_run(
+        &runs,
+        "test-reused-creator",
+        request,
+        Some(running_results(None)),
+    );
+    backdate(reused_creator.join("request.json"));
+
+    fixture
+        .state
+        .refresh_test_runs_with(&test_run_process_writer_may_be_alive, &|event| {
+            fixture.state.publish_delta(event)
+        });
+    assert_eq!(
+        fixture.summary("test-live-writer").state,
+        TestRunState::Running
+    );
+    assert_eq!(fixture.summary("test-reused").state, TestRunState::Unknown);
+    assert_eq!(
+        fixture.summary("test-reused-creator").state,
+        TestRunState::Unknown
+    );
+}
+
+#[test]
+fn a_pid_is_judged_against_the_results_version_it_was_read_from() {
+    // The launcher writes results without a pid before it captures the input
+    // fingerprint, and a detached worker later replaces them with its own pid.
+    // A read stamped before that replacement must not judge the worker's pid
+    // against the older version's modification time: the worker was created
+    // after that version, so it would read as a reused pid.
+    let fixture = RunFixture::new("pid-version");
+    let me = std::process::id();
+    let run_dir = write_run(
+        &fixture.runs_dir(),
+        "test-replaced",
+        full_request(&fixture.root, "2026-09-25T10:00:00.000Z"),
+        Some(running_results(None)),
+    );
+    let results_path = run_dir.join("results.json");
+    // The pid-less version was written long before this process existed.
+    fs::File::options()
+        .write(true)
+        .open(&results_path)
+        .expect("results should open")
+        .set_modified(std::time::UNIX_EPOCH + Duration::from_secs(1_600_000_000))
+        .expect("modification time should be set");
+    let replace_with_worker_results = || {
+        let mut results = running_results(Some(me));
+        results["runId"] = json!("test-replaced");
+        let staged = run_dir.join("results.json.tmp");
+        fs::write(&staged, results.to_string()).expect("staged results should write");
+        fs::rename(&staged, &results_path).expect("results should be replaced");
+    };
+
+    let disk = TestRunDisk::read_pausing(&run_dir, None, &replace_with_worker_results)
+        .expect("the run should read");
+
+    assert_eq!(
+        disk.results.as_ref().and_then(|results| results.pid),
+        Some(me),
+        "the read saw the worker's version"
+    );
+    assert_eq!(
+        disk.state(&test_run_process_writer_may_be_alive),
+        TestRunState::Running,
+        "the worker's pid is judged against its own version's write"
+    );
+}
+
+#[test]
+fn a_write_time_too_late_for_the_margin_proves_nothing() {
+    // A file's modification time can be set to anything. The latest time this
+    // platform can represent leaves no room for the margin, which must neither
+    // panic nor turn the run unknown.
+    let representable = |seconds: u64| {
+        std::time::UNIX_EPOCH
+            .checked_add(Duration::from_secs(seconds))
+            .is_some()
+    };
+    let (mut low, mut high) = (0_u64, u64::MAX);
+    while high - low > 1 {
+        let middle = low + (high - low) / 2;
+        if representable(middle) {
+            low = middle;
+        } else {
+            high = middle;
+        }
+    }
+    let latest = std::time::UNIX_EPOCH + Duration::from_secs(low);
+    assert!(
+        latest.checked_add(TEST_RUN_PID_REUSE_MARGIN).is_none(),
+        "the fixture needs a write time with no room for the margin"
+    );
+    let created = |_: u32| Some(std::time::UNIX_EPOCH + Duration::from_secs(1_700_000_000));
+    assert!(test_run_writer_may_be_alive(
+        7,
+        Some(latest),
+        &|_| true,
+        &created
+    ));
 }

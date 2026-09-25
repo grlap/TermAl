@@ -139,8 +139,11 @@ fn test_run_truncate(text: &str, max: usize) -> String {
 
 /// One read of a run's JSON file.
 enum TestRunJson {
-    /// The parsed file and the digest of the bytes it was parsed from.
-    Parsed(Value, String),
+    /// The parsed file, the digest of the bytes it was parsed from, and the
+    /// stamp of the file version those bytes came from. A stamp taken before
+    /// or after the read can belong to another version when the launcher
+    /// replaces the file in between; this one cannot.
+    Parsed(Value, String, TestRunFileStamp),
     /// The file does not exist.
     Missing,
     /// The file could not be read whole or parsed: the launcher replaced it
@@ -155,9 +158,15 @@ fn test_run_read_json(path: &FsPath) -> TestRunJson {
     if fs::metadata(path).is_ok_and(|metadata| metadata.len() > TEST_RUN_JSON_MAX_BYTES as u64) {
         return TestRunJson::TooLarge;
     }
-    match review_freeze_file(path, TEST_RUN_JSON_MAX_BYTES) {
-        Ok(bytes) => match serde_json::from_slice(&bytes) {
-            Ok(value) => TestRunJson::Parsed(value, file_content_hash(&bytes)),
+    match review_freeze_file_versioned(path, TEST_RUN_JSON_MAX_BYTES) {
+        Ok((bytes, version)) => match serde_json::from_slice(&bytes) {
+            Ok(value) => {
+                let stamp = version
+                    .modified()
+                    .ok()
+                    .map(|modified| (version.len(), modified));
+                TestRunJson::Parsed(value, file_content_hash(&bytes), stamp)
+            }
             Err(_) => TestRunJson::Failed,
         },
         Err(err)
@@ -338,15 +347,24 @@ impl TestRunDisk {
     /// results, and every failed read is tried again on the next rescan.
     /// `None` when the run has no readable request to report.
     fn read(run_dir: &FsPath, previous: Option<&Self>) -> Option<Self> {
+        Self::read_pausing(run_dir, previous, &|| {})
+    }
+
+    /// `read`, calling `after_stamp` between the stamp taken before the reads
+    /// and the reads themselves: the window in which the launcher can replace
+    /// a file, which a test uses to replace one deterministically.
+    fn read_pausing(run_dir: &FsPath, previous: Option<&Self>, after_stamp: &dyn Fn()) -> Option<Self> {
         let request_path = run_dir.join("request.json");
         let results_path = run_dir.join("results.json");
-        let request_stamp = test_run_file_stamp(&request_path);
+        // Stamped before the read: it is kept only when there are no parsed
+        // results, which carry the stamp of their own version.
         let results_stamp = test_run_file_stamp(&results_path);
+        after_stamp();
         // Only evidence from a good read earns the grace.
         let grace = previous.filter(|previous| previous.read_failures == 0);
         let failures = previous.map_or(1, |previous| previous.read_failures.saturating_add(1));
-        let request = match test_run_read_json(&request_path) {
-            TestRunJson::Parsed(request, _) => request,
+        let (request, request_stamp) = match test_run_read_json(&request_path) {
+            TestRunJson::Parsed(request, _, stamp) => (request, stamp),
             // The run directory is still listed (a removed directory leaves
             // the index at once), so a missing request is a failed read like
             // any other.
@@ -411,10 +429,11 @@ impl TestRunDisk {
         };
         let mut read_failures = 0;
         let (results, results_stamp) = match test_run_read_json(&results_path) {
-            TestRunJson::Parsed(results, digest) => (
-                Some(TestRunResultsExtract::new(&results, digest)),
-                results_stamp,
-            ),
+            // The pid in these results is judged against when this version
+            // was written, never against a stamp of a replaced version.
+            TestRunJson::Parsed(results, digest, stamp) => {
+                (Some(TestRunResultsExtract::new(&results, digest)), stamp)
+            }
             // A run is created with both files, but a reader may still find
             // no results. Missing results are an answer only while no good
             // read ever found them; results that vanished are a failed read.
@@ -492,20 +511,24 @@ impl TestRunDisk {
             .is_some_and(|results| results.terminal_state.is_some())
     }
 
-    /// The process responsible for a non-terminal run: `results.json`'s pid,
-    /// else the process that created the run.
-    fn responsible_pid(&self) -> Option<u32> {
-        self.results
-            .as_ref()
-            .and_then(|results| results.pid)
-            .or(self.creator_pid)
+    /// The process responsible for a non-terminal run, with when the file
+    /// that recorded its pid was last written: `results.json`'s pid, else the
+    /// process that created the run (`request.json`'s `creatorPid`).
+    fn responsible_pid(&self) -> Option<(u32, Option<std::time::SystemTime>)> {
+        let written = |stamp: TestRunFileStamp| stamp.map(|(_, modified)| modified);
+        match self.results.as_ref().and_then(|results| results.pid) {
+            Some(pid) => Some((pid, written(self.results_stamp))),
+            None => self
+                .creator_pid
+                .map(|pid| (pid, written(self.request_stamp))),
+        }
     }
 
     /// The run's state. Passed and failed come only from a terminal
     /// `results.json`; a non-terminal run is running while its responsible
-    /// process may be alive, and unknown otherwise, including when no pid was
-    /// recorded anywhere.
-    fn state(&self, may_be_alive: &dyn Fn(u32) -> bool) -> TestRunState {
+    /// process may still be the one that recorded its pid, and unknown
+    /// otherwise, including when no pid was recorded anywhere.
+    fn state(&self, writer_may_be_alive: &TestRunLiveness) -> TestRunState {
         if let Some(terminal) = self
             .results
             .as_ref()
@@ -514,7 +537,9 @@ impl TestRunDisk {
             return terminal;
         }
         match (self.results.as_ref(), self.responsible_pid()) {
-            (Some(_), Some(pid)) if may_be_alive(pid) => TestRunState::Running,
+            (Some(_), Some((pid, written))) if writer_may_be_alive(pid, written) => {
+                TestRunState::Running
+            }
             _ => TestRunState::Unknown,
         }
     }
@@ -605,7 +630,7 @@ fn test_run_results_too_large() -> ApiError {
 /// run has no results yet; 409 when they exist but could not be read.
 fn test_run_detail(run_dir: &FsPath) -> Result<TestRunDetail, ApiError> {
     let results = match test_run_read_json(&run_dir.join("results.json")) {
-        TestRunJson::Parsed(results, _) => results,
+        TestRunJson::Parsed(results, _, _) => results,
         TestRunJson::Missing => return Ok(TestRunDetail::default()),
         TestRunJson::Failed => return Err(test_run_results_unreadable()),
         TestRunJson::TooLarge => return Err(test_run_results_too_large()),
@@ -675,7 +700,7 @@ fn test_run_stage_log_tail(
         return Err(ApiError::bad_request("invalid stage name"));
     }
     let results = match test_run_read_json(&run_dir.join("results.json")) {
-        TestRunJson::Parsed(results, _) => results,
+        TestRunJson::Parsed(results, _, _) => results,
         TestRunJson::Missing => return Err(ApiError::not_found("run results are unavailable")),
         TestRunJson::Failed => return Err(test_run_results_unreadable()),
         TestRunJson::TooLarge => return Err(test_run_results_too_large()),
@@ -734,6 +759,140 @@ fn test_run_stage_log_tail(
         truncated: start > 0,
         size,
     })
+}
+
+/// Judges whether the process at a recorded pid may still be the one that
+/// recorded it: the pid, and when the file carrying it was last written.
+type TestRunLiveness = dyn Fn(u32, Option<std::time::SystemTime>) -> bool;
+
+/// Slack between a file's modification time and the creation time of the
+/// process that wrote it, for coarse file and boot-time resolution.
+const TEST_RUN_PID_REUSE_MARGIN: Duration = Duration::from_secs(2);
+
+/// Whether the process at `pid` may still be the one that wrote the file
+/// carrying `pid` at `written_at`. It must be alive, as far as anything
+/// proves, and it must not have been created after that write: the process
+/// that wrote a pid existed when it wrote it, so a process created later
+/// only reuses the number. Only proof counts: when either time is unknown,
+/// the process may be the writer. This only ever turns running into unknown,
+/// and never decides passed or failed.
+fn test_run_writer_may_be_alive(
+    pid: u32,
+    written_at: Option<std::time::SystemTime>,
+    may_be_alive: &dyn Fn(u32) -> bool,
+    created_at: &dyn Fn(u32) -> Option<std::time::SystemTime>,
+) -> bool {
+    if !may_be_alive(pid) {
+        return false;
+    }
+    // A modification time can be set to anything; one too late to add the
+    // margin to proves nothing, so it cannot turn the run unknown.
+    match (
+        written_at.and_then(|written| written.checked_add(TEST_RUN_PID_REUSE_MARGIN)),
+        created_at(pid),
+    ) {
+        (Some(latest_writer_creation), Some(created)) => created <= latest_writer_creation,
+        _ => true,
+    }
+}
+
+/// `test_run_writer_may_be_alive` against the real process table.
+fn test_run_process_writer_may_be_alive(
+    pid: u32,
+    written_at: Option<std::time::SystemTime>,
+) -> bool {
+    test_run_writer_may_be_alive(
+        pid,
+        written_at,
+        &test_run_process_may_be_alive,
+        &test_run_process_created_at,
+    )
+}
+
+/// When the live process `pid` was created, if that can be read.
+#[cfg(windows)]
+fn test_run_process_created_at(pid: u32) -> Option<std::time::SystemTime> {
+    use windows_sys::Win32::Foundation::{CloseHandle, FILETIME};
+    use windows_sys::Win32::System::Threading::{
+        GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    // FILETIME counts 100 ns intervals since 1601-01-01.
+    const UNIX_EPOCH_FILETIME: u64 = 116_444_736_000_000_000;
+    let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+    if handle.is_null() {
+        return None;
+    }
+    let zero = FILETIME {
+        dwLowDateTime: 0,
+        dwHighDateTime: 0,
+    };
+    let (mut created, mut exited, mut kernel, mut user) = (zero, zero, zero, zero);
+    let read =
+        unsafe { GetProcessTimes(handle, &mut created, &mut exited, &mut kernel, &mut user) };
+    unsafe { CloseHandle(handle) };
+    if read == 0 {
+        return None;
+    }
+    let intervals = (u64::from(created.dwHighDateTime) << 32) | u64::from(created.dwLowDateTime);
+    let since_unix = intervals.checked_sub(UNIX_EPOCH_FILETIME)?;
+    std::time::UNIX_EPOCH.checked_add(Duration::from_nanos(since_unix.checked_mul(100)?))
+}
+
+/// When the live process `pid` was created, if that can be read: its start
+/// time in clock ticks after boot (`/proc/<pid>/stat` field 22) plus the boot
+/// time (`btime` in `/proc/stat`, whole seconds, so never later than true).
+#[cfg(target_os = "linux")]
+fn test_run_process_created_at(pid: u32) -> Option<std::time::SystemTime> {
+    let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    // The command name is parenthesised and may itself hold spaces or
+    // parentheses; the fields after it start at field 3.
+    let after_command = stat.get(stat.rfind(')')? + 1..)?;
+    let start_ticks: u64 = after_command.split_whitespace().nth(22 - 3)?.parse().ok()?;
+    let boot_seconds: u64 = fs::read_to_string("/proc/stat")
+        .ok()?
+        .lines()
+        .find_map(|line| line.strip_prefix("btime "))?
+        .trim()
+        .parse()
+        .ok()?;
+    let ticks_per_second = u64::try_from(unsafe { libc::sysconf(libc::_SC_CLK_TCK) }).ok()?;
+    if ticks_per_second == 0 {
+        return None;
+    }
+    let since_boot = Duration::from_secs(start_ticks / ticks_per_second)
+        + Duration::from_nanos((start_ticks % ticks_per_second) * 1_000_000_000 / ticks_per_second);
+    std::time::UNIX_EPOCH
+        .checked_add(Duration::from_secs(boot_seconds))?
+        .checked_add(since_boot)
+}
+
+/// When the live process `pid` was created, if that can be read.
+#[cfg(target_os = "macos")]
+fn test_run_process_created_at(pid: u32) -> Option<std::time::SystemTime> {
+    let pid = libc::c_int::try_from(pid).ok()?;
+    let size = libc::c_int::try_from(std::mem::size_of::<libc::proc_bsdinfo>()).ok()?;
+    let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+    let read = unsafe {
+        libc::proc_pidinfo(
+            pid,
+            libc::PROC_PIDTBSDINFO,
+            0,
+            (&mut info as *mut libc::proc_bsdinfo).cast(),
+            size,
+        )
+    };
+    if read != size {
+        return None;
+    }
+    std::time::UNIX_EPOCH
+        .checked_add(Duration::from_secs(info.pbi_start_tvsec))?
+        .checked_add(Duration::from_micros(info.pbi_start_tvusec))
+}
+
+/// Elsewhere the creation time is not read, so pid reuse is not detected.
+#[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
+fn test_run_process_created_at(_pid: u32) -> Option<std::time::SystemTime> {
+    None
 }
 
 /// Whether process `pid` may be alive. Only proof of exit counts, as in the

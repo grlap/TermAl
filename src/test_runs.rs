@@ -320,18 +320,19 @@ impl AppState {
     /// next rescan's interval.
     #[cfg(not(test))]
     fn refresh_test_runs(&self) -> bool {
-        self.refresh_test_runs_with(&test_run_process_may_be_alive, &|event| {
+        self.refresh_test_runs_with(&test_run_process_writer_may_be_alive, &|event| {
             self.publish_delta(event)
         })
     }
 
     /// The rescan with process liveness and delta publication injected, so
     /// tests can fix which pids are alive and observe each publication.
-    /// `publish` is called under the state lock that allocated the event's
-    /// revision.
+    /// `writer_may_be_alive` gets a recorded pid and when the file carrying
+    /// it was last written. `publish` is called under the state lock that
+    /// allocated the event's revision.
     fn refresh_test_runs_with(
         &self,
-        may_be_alive: &dyn Fn(u32) -> bool,
+        writer_may_be_alive: &TestRunLiveness,
         publish: &dyn Fn(&DeltaEvent),
     ) -> bool {
         // Project roots and the previous parses, taken under the lock; all
@@ -395,7 +396,7 @@ impl AppState {
                 if !seen.insert(disk.run_id.clone()) {
                     continue;
                 }
-                let state = disk.state(may_be_alive);
+                let state = disk.state(writer_may_be_alive);
                 let project_id =
                     test_run_project_id(&test_run_path_key(&disk.worktree), &projects, common_key);
                 scanned.push(TestRunScanned {
