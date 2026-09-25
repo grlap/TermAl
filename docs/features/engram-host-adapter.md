@@ -712,7 +712,16 @@ report whole, and evidence adds ways to be refused, so a refused report that
 carries checks falls back once to the turn's own observation alone, judged
 against its begin-time basis as before checks were reported; a refused
 fallback, or a refused report without checks, is dropped, as for the turn's
-own observation.
+own observation. The refusals the evidence itself adds are
+`environment_fingerprint_mismatch` (a fingerprint its components do not
+give), `environment_evidence_not_found` (a reference to no environment
+record) and `environment_basis_mismatch` (an environment recorded under
+another capability-map revision, or cited from another run or source
+revision). TermAl keeps no list of them: the fallback is decided by the
+kind of error alone, an answer from Engram as against a lost call, and
+never by the message text, so these three take it like any other refusal
+and a lost call naming one keeps the evidence for the retry. The stable
+code is shown on the checkpoint's control card.
 
 Refuse, defer, protocol/transport degradation, missing binding, begin refusal,
 or dispatch-budget exhaustion withhold the prompt and produce a durable Engram

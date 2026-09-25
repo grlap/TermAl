@@ -3565,3 +3565,121 @@ fn a_refused_report_with_evidence_is_retried_as_the_turns_own_observation() {
     assert!(!key(retry).contains(":evidence:"));
     assert_ne!(key(&refused), key(retry));
 }
+
+/// Engram refuses evidence it cannot tie to the checkpoint with one of three
+/// stable codes: a fingerprint that is not the one its components give
+/// (`environment_fingerprint_mismatch`), a reference to no environment record
+/// (`environment_evidence_not_found`), and an environment recorded under
+/// another capability-map revision, or cited from another run or source
+/// revision (`environment_basis_mismatch`). TermAl lists none of them: each
+/// is a remote answer, and any remote answer refusing a report drops its
+/// evidence, so the grant is closed with the turn's own observation. The
+/// checkpoint card names the code. The message reads like a lost call, so
+/// nothing here can depend on its text; the lost-call counterpart is
+/// `a_lost_checkpoint_naming_an_environment_code_keeps_the_evidence`.
+#[test]
+fn environment_evidence_refusals_fall_back_and_name_their_code_on_the_card() {
+    for code in [
+        "environment_fingerprint_mismatch",
+        "environment_evidence_not_found",
+        "environment_basis_mismatch",
+    ] {
+        let refusal = ScriptedEngramControlResponse::Reply(Err(EngramTransportError::remote(
+            EngramControlErrorBody {
+                code: code.to_owned(),
+                message: "the connection was reset while reading the reply".to_owned(),
+            },
+        )));
+        let turn = CheckedTurn::start_with(
+            &code.replace('_', "-"),
+            true,
+            None,
+            vec![refusal, checkpoint_reply(CHECK_GRANT)],
+        );
+        turn.run("check-1", SIZE_TEST, EngramCommandExit::Code(0), || {});
+        let refused = turn.finish();
+        assert!(
+            refused.get("verification_evidence").is_some()
+                && refused.get("environment_evidence").is_some(),
+            "{code}: {refused:#}"
+        );
+        assert!(
+            turn.record(|record| {
+                record.session.messages.iter().any(|message| {
+                    matches!(
+                        message,
+                        Message::EngramControl { card, .. }
+                            if card.stage == EngramControlStage::Checkpoint
+                                && card.decision == EngramControlCardDecision::Degraded
+                                && card.refusal_code.as_deref() == Some(code)
+                    )
+                })
+            }),
+            "{code}: the checkpoint card names the stable code"
+        );
+        turn.state
+            .kill_session(&turn.session_id)
+            .expect("terminal cleanup closes the grant again");
+
+        let closes = checkpoints(&turn);
+        assert_eq!(closes.len(), 2, "{code}");
+        let retry = &closes[1];
+        assert!(
+            retry.get("verification_evidence").is_none()
+                && retry.get("environment_evidence").is_none(),
+            "{code}: {retry:#}"
+        );
+        assert_eq!(
+            observations(retry).len(),
+            1,
+            "{code}: the turn's own observation only"
+        );
+    }
+}
+
+/// The counterpart of
+/// `environment_evidence_refusals_fall_back_and_name_their_code_on_the_card`:
+/// a call lost in transport is not an answer, so a message naming an
+/// environment refusal code does not drop the evidence. The retry resends
+/// the report as it was.
+#[test]
+fn a_lost_checkpoint_naming_an_environment_code_keeps_the_evidence() {
+    let turn = CheckedTurn::start_with(
+        "lost-environment-code",
+        true,
+        None,
+        vec![
+            ScriptedEngramControlResponse::Reply(Err(EngramTransportError::transport(
+                "environment_fingerprint_mismatch: the reply was lost",
+            ))),
+            checkpoint_reply(CHECK_GRANT),
+        ],
+    );
+    turn.run("check-1", SIZE_TEST, EngramCommandExit::Code(0), || {});
+    let lost = turn.finish();
+    assert!(
+        lost.get("verification_evidence").is_some() && lost.get("environment_evidence").is_some(),
+        "{lost:#}"
+    );
+    turn.state
+        .kill_session(&turn.session_id)
+        .expect("terminal cleanup closes the grant again");
+
+    let closes = checkpoints(&turn);
+    assert_eq!(closes.len(), 2);
+    let retry = &closes[1];
+    for field in [
+        "observations",
+        "verification_evidence",
+        "environment_evidence",
+    ] {
+        assert_eq!(retry[field], lost[field], "{field} is resent unchanged");
+    }
+    assert!(
+        retry["idempotency_key"]
+            .as_str()
+            .expect("an idempotency key")
+            .contains(":evidence:"),
+        "{retry:#}"
+    );
+}
