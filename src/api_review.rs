@@ -100,16 +100,24 @@ async fn put_review(
             query.project_id.as_deref(),
         )?;
         let review_path = resolve_review_document_path(&review_root, &change_set_id)?;
+        // A test check open in that worktree may read the review file; the
+        // write counts as it starts and as it ends, as any write through
+        // TermAl does (outside the review lock, which the state lock never
+        // nests inside).
+        state.note_engram_host_write(&review_path);
         let persisted_review = {
             let _review_guard = state
                 .review_documents_lock
                 .lock()
                 .expect("review documents mutex poisoned");
-            let persisted =
-                prepare_review_document_for_write(&review_path, &change_set_id, review)?;
-            persist_review_document(&review_path, &persisted)?;
-            persisted
+            let persisted = prepare_review_document_for_write(&review_path, &change_set_id, review);
+            persisted.and_then(|persisted| {
+                persist_review_document(&review_path, &persisted)?;
+                Ok(persisted)
+            })
         };
+        state.note_engram_host_write(&review_path);
+        let persisted_review = persisted_review?;
         Ok(ReviewDocumentResponse {
             review_file_path: review_path.to_string_lossy().into_owned(),
             review: persisted_review,

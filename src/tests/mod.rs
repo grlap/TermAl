@@ -127,6 +127,16 @@ struct TestRecorder {
     )>,
     codex_app_requests: Vec<(String, String, String, Value, CodexPendingAppRequest)>,
     commands: Vec<(String, String, CommandStatus)>,
+    /// What each runtime handler said about a finished command's end, by key.
+    command_exits: Vec<(String, EngramCommandExit)>,
+    /// Keys of commands a handler said will never report their end.
+    abandoned_commands: Vec<String>,
+    /// What each runtime handler said about a started command, by key: the
+    /// command line it runs and the directory it runs in.
+    command_starts: Vec<(String, Option<String>, Option<String>)>,
+    /// What each runtime handler said again about a started command, by key,
+    /// without starting or ending it.
+    command_descriptions: Vec<(String, Option<String>, Option<String>)>,
     diffs: Vec<(String, String, String, ChangeType)>,
     errors: Vec<String>,
     parallel_agents: Vec<Vec<ParallelAgentProgress>>,
@@ -354,6 +364,47 @@ impl TurnRecorder for TestRecorder {
     ) -> Result<()> {
         self.commands
             .push((command.to_owned(), output.to_owned(), status));
+        Ok(())
+    }
+
+    fn command_started_in(
+        &mut self,
+        key: &str,
+        command: &str,
+        ran: Option<&str>,
+        cwd: Option<&str>,
+    ) -> Result<()> {
+        self.command_starts.push((
+            key.to_owned(),
+            ran.map(str::to_owned),
+            cwd.map(str::to_owned),
+        ));
+        self.command_started(key, command)
+    }
+
+    fn command_described(&mut self, key: &str, ran: Option<&str>, cwd: Option<&str>) -> Result<()> {
+        self.command_descriptions.push((
+            key.to_owned(),
+            ran.map(str::to_owned),
+            cwd.map(str::to_owned),
+        ));
+        Ok(())
+    }
+
+    fn command_completed_with_exit(
+        &mut self,
+        key: &str,
+        command: &str,
+        output: &str,
+        status: CommandStatus,
+        exit: EngramCommandExit,
+    ) -> Result<()> {
+        self.command_exits.push((key.to_owned(), exit));
+        self.command_completed(key, command, output, status)
+    }
+
+    fn command_abandoned(&mut self, key: &str) -> Result<()> {
+        self.abandoned_commands.push(key.to_owned());
         Ok(())
     }
 

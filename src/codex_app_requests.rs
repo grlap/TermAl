@@ -290,7 +290,8 @@ fn handle_codex_app_server_item_started(
         Some("commandExecution") => {
             if let Some(command) = item.get("command").and_then(Value::as_str) {
                 let key = item.get("id").and_then(Value::as_str).unwrap_or(command);
-                recorder.command_started(key, command)?;
+                let cwd = item.get("cwd").and_then(Value::as_str);
+                recorder.command_started_in(key, command, Some(command), cwd)?;
             }
         }
         Some("webSearch") => {
@@ -299,7 +300,8 @@ fn handle_codex_app_server_item_started(
                 .and_then(Value::as_str)
                 .unwrap_or("webSearch");
             let command = describe_codex_app_server_web_search_command(item);
-            recorder.command_started(key, &command)?;
+            // A search's description names no command line.
+            recorder.command_started_in(key, &command, None, None)?;
         }
         _ => {}
     }
@@ -489,7 +491,18 @@ fn handle_codex_app_server_item_completed(
                     Some("failed") | Some("declined") => CommandStatus::Error,
                     _ => CommandStatus::Running,
                 };
-                recorder.command_completed(key, command, output, status)?;
+                if item.get("status").and_then(Value::as_str) == Some("declined") {
+                    // A declined command never ran: a test check it started
+                    // is dropped rather than reported as unknown.
+                    recorder.command_abandoned(key)?;
+                }
+                recorder.command_completed_with_exit(
+                    key,
+                    command,
+                    output,
+                    status,
+                    engram_codex_command_exit(item),
+                )?;
             }
         }
         Some("fileChange") => {

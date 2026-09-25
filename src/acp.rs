@@ -1583,25 +1583,37 @@ fn handle_acp_session_update(
             finish_acp_thinking(recorder, turn_state, agent)?;
             recorder.finish_streaming_text()?;
             if let Some((key, command)) = acp_tool_identity(update) {
-                recorder.command_started(&key, &command)?;
+                recorder.command_started_in(
+                    &key,
+                    &command,
+                    acp_tool_command(update),
+                    acp_tool_cwd(update),
+                )?;
             }
         }
         "tool_call_update" => {
             finish_acp_thinking(recorder, turn_state, agent)?;
             if let Some((key, command)) = acp_tool_identity(update) {
+                let (ran, cwd) = (acp_tool_command(update), acp_tool_cwd(update));
                 match update.get("status").and_then(Value::as_str) {
                     Some("pending") | Some("in_progress") => {
-                        recorder.command_started(&key, &command)?;
+                        recorder.command_started_in(&key, &command, ran, cwd)?;
                     }
                     Some("completed") | Some("failed") | Some("error") => {
-                        recorder.command_completed(
+                        // What the call ran, or where, may be told only as
+                        // it ends.
+                        recorder.command_described(&key, ran, cwd)?;
+                        recorder.command_completed_with_exit(
                             &key,
                             &command,
                             &summarize_acp_tool_output(update),
                             acp_tool_status(update),
+                            engram_acp_command_exit(update),
                         )?;
                     }
-                    _ => {}
+                    // An update without a status may still say what the call
+                    // runs, or where.
+                    _ => recorder.command_described(&key, ran, cwd)?,
                 }
             }
         }
@@ -1690,9 +1702,7 @@ fn finish_acp_thinking(
 /// Handles ACP tool identity.
 fn acp_tool_identity(update: &Value) -> Option<(String, String)> {
     let key = update.get("toolCallId").and_then(Value::as_str)?.to_owned();
-    let command = update
-        .pointer("/rawInput/command")
-        .and_then(Value::as_str)
+    let command = acp_tool_command(update)
         .map(str::to_owned)
         .or_else(|| {
             let title = update.get("title").and_then(Value::as_str)?;
@@ -1704,6 +1714,17 @@ fn acp_tool_identity(update: &Value) -> Option<(String, String)> {
         })
         .unwrap_or_else(|| "Tool call".to_owned());
     Some((key, command))
+}
+
+/// The command line an ACP tool call says it runs, when it says; its title
+/// only names the call.
+fn acp_tool_command(update: &Value) -> Option<&str> {
+    update.pointer("/rawInput/command").and_then(Value::as_str)
+}
+
+/// The directory an ACP tool call says its command runs in, when it says.
+fn acp_tool_cwd(update: &Value) -> Option<&str> {
+    update.pointer("/rawInput/cwd").and_then(Value::as_str)
 }
 
 /// Summarizes ACP tool output.

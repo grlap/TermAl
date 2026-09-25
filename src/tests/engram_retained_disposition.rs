@@ -58,9 +58,11 @@ impl EngramControlTransport for LostEvaluateReplyCachingTransport {
     fn read_work_binding(
         &self,
         connection: &EngramConnectionConfig,
+        preference: EngramBindingPreference<'_>,
         timeout: Duration,
     ) -> std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError> {
-        self.inner.read_work_binding(connection, timeout)
+        self.inner
+            .read_work_binding(connection, preference, timeout)
     }
 
     fn shutdown_session(&self, session_id: &str) {
@@ -100,9 +102,11 @@ impl EngramControlTransport for BlockedAdmissionTransport {
     fn read_work_binding(
         &self,
         connection: &EngramConnectionConfig,
+        preference: EngramBindingPreference<'_>,
         timeout: Duration,
     ) -> std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError> {
-        self.inner.read_work_binding(connection, timeout)
+        self.inner
+            .read_work_binding(connection, preference, timeout)
     }
 
     fn shutdown_session(&self, session_id: &str) {
@@ -833,6 +837,7 @@ fn failed_defer_card_commit_keeps_the_durable_evaluation_recovery_anchor() {
             started_at: std::time::Instant::now(),
             awaiting_runtime_stop_resolution: false,
             begin_requested: None,
+            evaluated_work_binding: None,
         });
         record.engram.dispatch_generation
     };

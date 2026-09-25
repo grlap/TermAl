@@ -18,6 +18,26 @@
 use super::super::run_git_test_command;
 use super::*;
 
+#[test]
+fn a_worktree_root_over_engrams_basis_bound_leaves_the_report_without_a_basis() {
+    // Engram refuses a basis field over 512 bytes, and with it the whole
+    // report; such a root is reported without a basis instead.
+    let workdir = FsPath::new("C:/w");
+    let at_bound = format!("C:/{}", "w".repeat(ENGRAM_SOURCE_BASIS_MAX_BYTES - 3));
+    assert_eq!(
+        engram_bounded_source_basis(workdir, FsPath::new(&at_bound), "revision".to_owned()),
+        Some(EngramExecutionSourceBasis {
+            workspace_id: at_bound.clone(),
+            source_revision: "revision".to_owned(),
+        })
+    );
+    let over_bound = format!("{at_bound}w");
+    assert_eq!(
+        engram_bounded_source_basis(workdir, FsPath::new(&over_bound), "revision".to_owned()),
+        None
+    );
+}
+
 /// Whether the delegation child may mutate its workspace, which is what
 /// decides whether its grant mediates `mutate_local`.
 #[derive(Clone, Copy)]

@@ -297,6 +297,77 @@ path. For each eligible turn TermAl:
 4. delivers the prompt only after the matching begin receipt; and
 5. checkpoints the begun turn on completion, Stop, failure, reset, or deletion.
 
+The work binding the bind carries is read off-lock under the agent's own
+Engram session id, the one its MCP child uses, with `work core held`: one
+read-only snapshot, which selects no focus, stages or discards no delivery
+and appends nothing, listing every item the session holds a live claim on,
+newest claim first, each with its `control_binding` and whether it is the
+session's focus. A claim's binding is `null` when `session_bind` would
+refuse it (a pending handoff offer, a run no longer claimed or active); an
+absent key reads the same. A revision by the holder re-accepts its claim,
+so the item then shows a fresh binding at the new revision, which the next
+admission's read picks up and rebinds to. TermAl binds the
+focused claim if it has a binding; otherwise the claim the session is bound
+to now, while it still has one, with its current revision and fence;
+otherwise the most recently claimed one that has a binding; and without
+work when none has. Engram lists at most sixteen claims, newest first, with
+a count of those left out: when it left some out and the bound claim is not
+listed, TermAl keeps the bound claim rather than switching, and if that
+claim is in fact gone, Engram refuses the binding as stale and the refusal
+heal reads again. The read goes by claim, not by focus, because any agent
+verb that names another item moves focus: a note on another item must not
+unbind the session. A binding that is present but does not decode, or
+output without the item list, is a protocol error. A control session
+carries one binding, so a turn's evidence lands on that claim's run only.
+This read needs an Engram build that has `work core held`
+(w-ec12d89a0445); against an older build every bind fails, and the failure
+says to install a newer Engram. It replaced
+`work core next --sections focus` followed by `work core focus`, which
+selected the focused item and so could move an
+agent's focus back and discard its staged delivery page.
+
+The binding is read at every bind, and again when a new turn is admitted
+after a turn has begun since the last read. An agent claims work
+mid-session, after its session was bound without work, and Engram counts a
+session bound without work as always current, so nothing else would carry
+the claim to Engram before a restart. Only the session's own agent takes or
+releases its claim, and only during a turn, so an admission after a turn
+that never began reads nothing. A read that differs from the bound binding
+(a claim taken, released, revised or retaken) arms one rebind, which binds
+exactly what was read; an unchanged read rebinds nothing, and each rebind is
+counted in the log. The read runs off-lock inside the admission budget,
+capped at two seconds; a read that fails or times out leaves the binding in
+place and is logged, and the next admission reads again. The rebind a read
+arms is a bind like any other: if it fails or times out, the turn is
+withheld as for any bind failure, its prompt retained, rather than evaluated
+under the routing token of the binding the read found outdated; resuming it
+replays that rebind exactly, without reading again. An admission that
+loses its queued prompt while the read runs acts on nothing it read. A
+retained evaluate or bind is replayed exactly, under the binding it was
+prepared with, without a read. The turn in which the agent claims cannot
+carry evidence for the claim: Engram refuses a rebind while a turn is begun
+and admits evidence only under the binding its grant was issued with, so
+the next turn is the first that reports under the claim.
+
+Engram validates a binding against more than the read checks (the item's
+ancestors, the run's root execution, a pending handoff), so a read can offer
+a binding that every bind and evaluate refuses as stale, and resending it
+would refuse every turn. Every binding Engram refuses as stale (at bind,
+evaluate or begin) is therefore left out of the reads for five minutes from
+its own refusal: the rebind that follows binds another claim the session
+holds, in the usual order (the focused one, then the one it is bound to,
+then the newest), so focus moving to a refused claim does not unbind a
+session from a valid one, and two refused claims cannot take turns being
+sent; with no other, it binds without work, which Engram always admits, and
+the turn goes ahead without evidence. A claim that moves on (a new revision
+or fence) is another binding and is not held back, and after its five
+minutes the same binding is tried again. At most sixteen refusals are
+remembered, the oldest forgotten first. Engram's `stale_fence` always
+concerns the work binding, but at begin it names the
+binding the grant was issued under: a begin refused for a grant issued
+before the session was rebound is that grant racing the rebind, so it is
+evaluated again under the current binding and the breaker blames neither.
+
 The checkpoint that closes a turn reports one execution observation for it:
 the outcome of the transition that closed it (succeeded on completion; failed
 on a failed or errored turn, an exit that reported an error, or a confirmed
@@ -304,10 +375,11 @@ failure of a matching runtime through the atomic terminalization path;
 unknown for Stop, termination, reset, a silent exit, a missing runtime or a
 rejected delivery); `source_changed`, reported with the `mutate_local` effect
 Engram requires for it, else `observe`; the intent fingerprint the grant was
-issued for as the action fingerprint; and, when the session's workspace is a
-worktree root, the canonical workspace root with the schema-1 review-freeze
-fingerprint of its full working content as the source basis, together with
-the observation time. `source_changed` is decided by content: the same
+issued for as the action fingerprint; and, when the session's workdir lies in
+a worktree, the canonical root of that worktree (a session in a subdirectory
+shares its worktree's) with the schema-1 review-freeze fingerprint of its full
+working content as the source basis, together with the observation time.
+`source_changed` is decided by content: the same
 fingerprint is taken before the prompt reaches the runtime and again at the
 close, and a difference is a source change; the turn's file-change tracking,
 a debounced hint that can arrive late or skip ignored paths, only adds to
@@ -362,6 +434,286 @@ compensating checkpoint of a superseded begin and the project-reset exit
 checkpoint close grants whose turn this process never saw end and report no
 observation.
 
+### Test evidence
+
+A test the agent runs during a mediated turn on claimed work is reported on
+the same closing checkpoint as typed verification evidence with its
+environment, so Engram's stock source-change rule and a criterion bound with
+`--bind N=test` can be satisfied by what the host saw, not by what the agent
+says. TermAl does not run checks itself; it observes the commands the runtime
+reports.
+
+- **Which commands.** One shell wrapper is removed (`bash -lc 'X'`,
+  `pwsh -Command X`, `cmd /c X`), and the first command of the line, with
+  its first words, must name a test runner: `cargo test`,
+  `cargo nextest run`, `npm test`, `npm run test`, `pnpm test`, `yarn test`,
+  `npx vitest`, `npx jest`, `pytest`, `python -m pytest`, `go test`, or the
+  test launcher (`node …/test-launcher.mjs full|live`, or `focused -- X`
+  where X is itself a recognised test, since a focused run executes whatever
+  follows `--`) without `--detach`. A run with `--no-run`, `--list`,
+  `--collect-only` (pytest's `--co`), go's `-list` or `-c` tests nothing
+  and is not recognised. Anything else, `cd x && cargo test` included, is
+  not reported. Only a command line the runtime reports is recognised: an
+  ACP call that gives only a title (`Run tests`), or a Claude call shown by
+  its description, names no test, and a script of several lines is not one
+  test. A PowerShell or cmd script given as several words is taken as
+  written, its quoting kept, so each argument is the one the runner saw.
+- **Which worktree.** A check is credited to the session's worktree only
+  when TermAl can tell it tested that worktree: the command runs there (in
+  the directory the runtime reports, Codex's item `cwd` or ACP's
+  `rawInput.cwd`, else the session's workdir, a subdirectory included), and
+  no argument names a place outside it. Every argument, what follows each
+  `=` in it (`--flag=value`, and a setting's own value in
+  `pytest --override-ini=testpaths=../other/tests`), every value attached
+  to a one-letter option (`pytest -c../other/pytest.ini`), and each item of
+  any of them read as a list (split on whitespace or `;`, as pytest splits
+  `testpaths`) is resolved as a path from that
+  directory; one that leads out of the worktree, as an absolute path, a `..`
+  climb or a symbolic link or junction, names what the command tested (so
+  `cargo test --manifest-path ../other/Cargo.toml` is not a check), and so
+  may one starting at `~` or holding a variable anywhere
+  (`tests/${SUITE}`, `%SUITE%`, cmd's delayed `!SUITE!`, `$env:SUITE`),
+  whose value TermAl cannot see, so neither is a check either. A PowerShell
+  wrapper that starts its script elsewhere (`-WorkingDirectory`, `-wd`) is
+  not read as run in place, so its test is not a check, and its command may
+  write in any worktree. An argument is judged as the shell
+  running the line passes it on: bash drops its backslash escapes
+  (`lin\ked` is `linked`), PowerShell and cmd keep them (a Windows path,
+  and a quoted UNC `"\\server\share"` keeps its prefix; only a run of them
+  meeting a quote folds, as a Windows program splits its command line),
+  and a line no wrapper names is read both ways. It is also judged piece by
+  piece, as a PowerShell array (`a,b`) passes it, and a line holding
+  syntax a shell evaluates rather than passing on as written (an unquoted
+  `(…)`, `{…}`, backtick, `^`, or `@` starting a word, as in
+  `pytest ('../x')` under PowerShell or `pytest {a,../x}` under bash) is
+  not a check. A network path (`\\server\share`, `//server/share`) is
+  never resolved, since that can block for a network timeout: as an
+  argument, a reported directory or the session's own workdir it leads out,
+  and a `cd` to one loses the shell. On Windows, Git Bash's `cd /c/…` is
+  `C:/…`. A path is resolved through the links
+  on its longest existing part, so a test selector or glob under a link
+  (`linked/test_x.py::test`, `linked/test_*.py`) leads where the link does,
+  a node selector's file (`test_alias.py` in `test_alias.py::test_ok`) is
+  resolved on its own, since it may itself be a link, and a directory
+  spelled through an alias (`/var` for `/private/var`, a Windows short name)
+  is the directory it names. These paths are compared as the file system
+  stores them, case included, so two worktrees that differ only in case on
+  a case-sensitive volume stay two (overlap, where merging two places only
+  makes a check unknown, ignores case on Windows and macOS). A glob is matched by the runner, not by TermAl:
+  a file it matches through a link inside the worktree, like a test a runner
+  discovers there, is outside what the revision covers. A runtime that
+  starts one command more than once (ACP: the call, then pending or in
+  progress updates, each carrying only what changed) keeps the last
+  directory it reported for that call, a start that gives no command line
+  leaves the command as another start named it, one that gives a line names
+  what runs now, test or not, and a check stands only while the starts name
+  the same test in the same place: one that moves it elsewhere, even within
+  the worktree, drops it, and the call starts no check again until it ends,
+  since a new one would begin its record after writes the old one saw. A
+  test a call names only after it started (a title, then an update) began
+  before its first snapshot, so its outcome is unknown. An
+  ACP update without a status, and the one that ends the call, count the
+  same way when they say what the call runs or where, but never start a
+  check, whose first snapshot must come before its test runs. The
+  launcher's `--engram-binary`
+  value, the pinned binary a live run uses, may lie anywhere. The worktree's
+  revision covers a link inside it, not what the link points to. The
+  resolution runs off the state lock. Claude reports no directory, and its
+  shell keeps a `cd` between calls (unless it is set to return to its
+  project), so a command it runs is judged both from the workdir and from
+  where the calls before it presumably left that shell, and is a check only
+  when it tests this worktree from each. A call that starts with `cd DIR`
+  (`Set-Location`, `pushd`) for a literal DIR that exists, bash reading it as
+  written, and changes directory nowhere else, moves the presumed place
+  there once the call has succeeded: a denied call moves nothing, and one
+  that failed or ended unreported may have stopped before or after its
+  `cd`, which loses the shell, and so does a DIR whose `..` a shell takes
+  against the path as written (bash's logical `cd`) but the file system
+  takes after following a link (`/other/link/..`), since TermAl cannot say
+  which place the shell is in. A quoted script handed to another shell
+  (`bash -lc '…'`) moves nothing; any other directory change (no, a
+  computed or a network target, `popd`, one after another command, behind
+  a keyword or a loop (`then cd`, `do cd`), in a group, subshell, pipeline
+  or background job, `eval`, two at once), or any word that could name one
+  (`xargs cd`, even `echo cd`), loses the shell, and no check is kept until
+  a `cd` to an absolute path places it again or a new runtime starts its
+  shell afresh. A change made by a script a call runs or sources, or by a
+  shell function or alias, is not seen. The same holds for any command
+  whose runtime gives no directory, whichever report of an ACP call names
+  its command line. A runner that finds what it
+  tests by name (a Go import path, an installed Python package) is taken to
+  test the worktree it runs in.
+- **Check fingerprint.** The producer observation's action fingerprint, which
+  a `--bind N=test:FINGERPRINT` pin must equal, is the lowercase hex SHA-256
+  of the UTF-8 bytes of the normalised command line: the wrapper removed,
+  whitespace runs outside quotes collapsed to one space, trimmed. For
+  example
+  `cargo test --test source_file_size -- --nocapture` hashes exactly that
+  string.
+- **Outcome.** Only a simple command's own exit status can succeed or fail:
+  a line with a pipe, a list, a redirection, a backtick or a `$(`
+  substitution is reported as unknown, since `cargo test | tail` exits 0
+  when tests fail. Codex and ACP report the exit code (0 succeeded,
+  otherwise failed; none, unknown). Claude reports none: a Bash result
+  without `is_error` succeeded, one whose text starts `Exit code N` failed,
+  and any other error, or an interrupted command, is unknown. A background
+  run's result marks its launch, so it is not reported, and it counts as
+  running for the rest of the turn, taking no closing snapshot; a denied
+  command stops counting as running.
+- **Passed needs evidence.** A run that tested nothing can exit 0, so a check
+  claims success only when a result line shows tests passed: cargo's
+  `test result:` or nextest's `Summary` with more than zero passed, pytest's
+  closing banner or `-q` summary (`3 passed in 0.10s`) with passed tests, a
+  vitest or jest `Tests` total with
+  passed tests, a go package `ok` without `[no tests to run]` or
+  `[no test files]`, or a passed test stage of the launcher mode that ran:
+  a full gate's `rust-tests` or `vitest`, a live run's `engram-live`. A
+  focused launcher run never shows it, since its
+  verdict does not say how many tests the wrapped command ran. Without the
+  evidence the check is unknown, never passed. What a check attests is that
+  this command line ran in this worktree and printed passing results, not
+  that the tests it ran are genuine: the worktree decides what `npm test`
+  runs (its revision covers that), and the agent's shell decides which
+  program a name finds.
+- **Overlap.** A check is open to writes from its start until both its
+  snapshots are taken. It is unknown when, while it is open, another command
+  or a file edit from the same agent is reported, or another writable
+  session in the same worktree (any subdirectory of it, however its path is
+  spelled) starts a turn or reports a command or an edit; or when such a
+  session is in a turn as the check starts or ends. A session's command
+  counts in the worktree it runs in, not only in the session's own: the
+  directory its runtime reports, or, for a runtime that reports none, the
+  workdir and where its shell is presumed to be (a lost shell counts as
+  every worktree), and where a `cd` of its own leads, one in a script it
+  hands to a shell wrapper included. A session in a turn with such a
+  command running elsewhere counts there until the command ends; its next
+  turn forgets a background command. A command that writes elsewhere by
+  path (`git -C`, a redirection) is not seen. Each is marked on the
+  check as it happens, so a later report from that session cannot erase it,
+  and a mark made while the closing checkpoint waits for the snapshots still
+  counts. A read-only delegation child does not count. A command that
+  reuses an earlier command's key is a new command. Which worktree a
+  session works in, and each of its commands runs in, is resolved off the
+  state lock as it starts a turn and whenever it reports a command or an
+  edit, and kept on the session, and marking under the lock uses what was
+  resolved last, never the file system or a cache other sessions share; a
+  session whose worktree was never resolved for its current workdir (its
+  workdir changed since) counts as the same worktree,
+  and a network path is keyed as written, unresolved. Writes through TermAl
+  itself count the same way: a file saved
+  from the editor, a review document saved under `.termal/reviews`, a Git
+  file action, sync or commit (whose hooks may rewrite files) and a
+  terminal command, each as it starts and as it ends. A
+  command abandoned before it ran (a denied Claude call, a declined Codex
+  command) drops its check, a turn
+  keeps at most as many checks as it can report (a new one drops the oldest
+  finished one; while every kept check still runs, a new test is not
+  checked and takes no snapshots), and the closing checkpoint drops the
+  turn's checks once its
+  report holds them. A grant that ends without its report (a compensating
+  close, a project reset) leaves its checks until the next grant clears
+  them; they are never reported, so they no longer count as open.
+  What TermAl cannot see: a process an agent left running in the background
+  after its own turn, a terminal command already running when a check
+  starts that ends after the check settles, and writes from outside TermAl.
+- **Freshness.** The review-freeze fingerprint is taken when the check starts
+  and again when it ends, each on its own thread. A check whose two
+  fingerprints differ, or either is missing, is not reported: the source
+  moved while it ran. Equal fingerprints bound the window between the two
+  snapshots, not an edit that landed between the command's start and the
+  first snapshot, which is why overlapping activity makes the outcome
+  unknown. A snapshot covers the whole worktree the workdir lies in, so a
+  session in a folder under a repository at the home directory (a dotfiles
+  repository) snapshots that whole repository at each check, within the
+  freeze's budget (tm-x9fz tracks bounding it).
+- **Order.** Engram requires the evidence at or after the change it answers,
+  in time and in the feed. For each reported check, in start order: when its
+  revision differs from the last one reported (the turn's begin-time basis
+  at first), a change observation at that revision timed at the check's
+  start (only under a grant that mediates local mutation); the producer
+  observation (`observe`, timed at completion); environment evidence, shared
+  by checks on one revision and toolchain with no change reported between
+  them, so a check never cites an environment observed before the change it
+  answers; and the verification evidence
+  citing both. The turn's own observation follows; under a grant that
+  mediates local mutation it reports a change only if the source moved again
+  after the last check, judged by the revisions alone: TermAl's file-change
+  tracking, which can arrive late and would reopen a change a check
+  answered, no longer adds to it, so an edit only the tracking sees (an
+  ignored path) after the last check is not reported as a change. Under a
+  grant that does not mediate local mutation it is judged against the
+  begin-time basis, as without checks, and withheld when the source changed.
+  Observation ids include
+  the check's place in the turn, so they stay unique when a runtime reuses
+  a key.
+- **Environment.** TermAl runs the version commands itself, with its own
+  rights and outside any sandbox the check ran in, so it never runs a
+  program the workspace could have written or picked. `toolchain` is named
+  only for `cargo` run by name, which is the first `cargo` on TermAl's
+  `PATH`. When that is rustup's own proxy (rustup lies beside it), the
+  toolchain is its `+toolchain` selector, when that is a plain toolchain
+  name, or else the toolchain `rustup show active-toolchain` names in the
+  directory the check ran in (rustup reads the workspace's toolchain files
+  and overrides without running them). `rustup which` then
+  locates that
+  toolchain's `rustc` and `cargo`, which must lie outside the worktree, and
+  the label is the first line of their `-V`, each run by its path from its
+  own directory, with rustup's automatic installs off. Only a rustup of
+  1.28 or later is asked (`rustup --version` first): an older one ignores
+  that setting and may install the toolchain a workspace file names while it
+  is only asked to show it, so its checks go without a toolchain. Every version command
+  runs through the bounded reader the freeze's Git reads use, owning its
+  whole process tree (a Windows job without a console window, a Unix process
+  group). A cargo that is not rustup's proxy (a standalone install ahead of
+  rustup on the `PATH`, or no rustup) is labelled with the `rustc` beside
+  it, both outside the worktree, and a `+` selector names nothing for it. A
+  toolchain file that names a directory, a cargo run
+  by a path, and every Python, Go, Node and launcher run go without a
+  toolchain: those are commonly started through version-manager shims that
+  pick the program from files in the workspace, and naming it would mean
+  running what those files point at, or guessing. The label is TermAl's
+  resolution of the same name, so an agent shell with a different `PATH`
+  could have run another cargo. The label is taken as the check starts, on
+  its own thread, so a toolchain file edited after the check cannot relabel
+  it; each command takes at most five seconds, and the closing checkpoint
+  waits for the label within its freeze budget. When a command fails or the
+  budget runs out, the check has no environment evidence rather than a
+  guessed one. `sandbox` is the Codex sandbox mode
+  the turn ran under, and absent for other runtimes, whose approval modes are
+  no sandbox; `workspace_id` is the basis root; `capability_map_revision` is
+  the bind value. Each label is trimmed, non-empty and at most 256 bytes, so
+  a longer workspace root leaves the check without environment evidence. The
+  fingerprint is the SHA-256 of the components' RFC 8785 JSON, which Engram
+  recomputes.
+- **Text.** The summary names the command and how it ended, then only the
+  runner's result lines (cargo's `test result:` and nextest's `Summary`,
+  pytest's closing banner or `-q` summary, the vitest and jest totals, go's
+  package lines, the launcher's verdict and stage statuses without their log
+  paths), with
+  terminal codes stripped, within Engram's 4096 bytes. For cargo the lines
+  of a file-size inventory, `PATH: N physical lines (limit M)` at the start
+  of a line, count as result lines too, all or nothing: when they do not all
+  fit, every one is left out and `inventory omitted: N lines over the
+  summary budget` says so, since a partial list would misstate which paths
+  the check covered. Raw output is left out: it can carry secrets and paths,
+  and a summary Engram's redactor refuses drops the whole report. The
+  references are `command:<normalised line>`, left out when longer than
+  1024 bytes, and, when known, `exit:<code>`. The command line itself is
+  sent as the agent ran it, in the summary's first line and that reference:
+  an argument carrying a secret (`--token=…`) goes with it, and a report
+  Engram's redactor refuses falls back to the turn's own observation, as
+  below.
+- **Bounds.** At most 16 checks per turn, the latest kept, and 4 environment
+  records; a check past them is reported without one, which an unpinned
+  requirement allows. A source basis over 512 bytes is not sent.
+
+The whole report is cached per grant and resent verbatim. Engram refuses a
+report whole, and evidence adds ways to be refused, so a refused report that
+carries checks falls back once to the turn's own observation alone, judged
+against its begin-time basis as before checks were reported; a refused
+fallback, or a refused report without checks, is dropped, as for the turn's
+own observation.
+
 Refuse, defer, protocol/transport degradation, missing binding, begin refusal,
 or dispatch-budget exhaustion withhold the prompt and produce a durable Engram
 control card. Turning the premium flag off fences the transition, checkpoints
@@ -370,8 +722,9 @@ dispatch.
 
 ### Authorization timeout and retained prompts
 
-Ordinary gated admission uses one ten-second remaining-time budget across work
-focus, binding, evaluation, begin, and host persistence acknowledgements. Base
+Ordinary gated admission uses one ten-second remaining-time budget across the
+work-binding read, binding, evaluation, begin, and host persistence
+acknowledgements. Base
 context reads remain a separate operation. A timeout or unavailable transport
 does not mean policy denial: the session shows **Waiting/Unknown**, pauses its
 queue, and keeps the original prompt, attachments, source and identifier. Resume
@@ -952,7 +1305,8 @@ control session and never withholds delivery.
 Recovery diagnostics keep the stable single-line form
 `boot-recovery session=<id> command=<phase> attempt=<n> elapsed_ms=<n>
 outcome=<ok|error>`. Phases include `session_status`, `turn_checkpoint`, the
-work-focus reads, `session_bind`, and the whole target. The coordinator emits
+work-binding read (`work_core_held`), `session_bind`,
+and the whole target. The coordinator emits
 an `overall` line with elapsed time, budget, outcome, and unfinished count.
 These diagnostics contain no routing token or other host-private control data.
 

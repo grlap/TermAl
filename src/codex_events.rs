@@ -1421,7 +1421,18 @@ fn handle_shared_codex_event_item_completed(
                     Some("failed") | Some("declined") => CommandStatus::Error,
                     _ => CommandStatus::Running,
                 };
-                recorder.command_completed(key, command, output, status)?;
+                if item.get("status").and_then(Value::as_str) == Some("declined") {
+                    // A declined command never ran: a test check it started
+                    // is dropped rather than reported as unknown.
+                    recorder.command_abandoned(key)?;
+                }
+                recorder.command_completed_with_exit(
+                    key,
+                    command,
+                    output,
+                    status,
+                    engram_codex_command_exit(item),
+                )?;
             }
         }
         _ => {}

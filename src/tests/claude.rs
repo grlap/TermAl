@@ -2123,6 +2123,7 @@ fn clear_claude_turn_state_resets_all_fields() {
                 file_path: Some("README.md".to_owned()),
                 name: "bash".to_owned(),
                 subagent_type: Some("worker".to_owned()),
+                run_in_background: false,
             },
         )]),
         replay_became_unsafe: true,
@@ -2176,6 +2177,7 @@ fn reset_claude_turn_state_clears_all_fields_and_finishes_streaming_text() {
                 file_path: Some("README.md".to_owned()),
                 name: "bash".to_owned(),
                 subagent_type: Some("worker".to_owned()),
+                run_in_background: false,
             },
         )]),
         replay_became_unsafe: true,
@@ -2555,6 +2557,7 @@ fn claude_task_tool_result_resets_existing_non_tool_progress_source() {
                 file_path: None,
                 name: "Task".to_owned(),
                 subagent_type: Some("general-purpose".to_owned()),
+                run_in_background: false,
             },
         )]),
         ..ClaudeTurnState::default()
@@ -3092,6 +3095,99 @@ fn claude_tool_use_after_streamed_text_starts_followup_in_new_message() {
         session.messages.get(2),
         Some(Message::Text { text, .. }) if text == "World"
     ));
+}
+
+// Pins what a Bash result tells the recorder about the command's end, which
+// Engram test evidence relies on: success without an exit status, the exit
+// code Claude prints on failure, a background launch that has not finished,
+// and a denied call that will never report an end. Guards against a handler
+// that stops passing these through while the mapping itself stays tested.
+#[test]
+fn claude_bash_results_report_how_each_command_ended() {
+    let mut turn_state = ClaudeTurnState::default();
+    let mut recorder = TestRecorder::default();
+    let mut session_id = None;
+    let mut event = |payload: Value, recorder: &mut TestRecorder| {
+        handle_claude_event(&payload, &mut session_id, &mut turn_state, recorder).unwrap();
+    };
+    for (id, background) in [
+        ("bash-ok", false),
+        ("bash-failed", false),
+        ("bash-background", true),
+        ("bash-denied", false),
+    ] {
+        event(
+            json!({
+                "type": "assistant",
+                "message": {"content": [{
+                    "type": "tool_use",
+                    "id": id,
+                    "name": "Bash",
+                    "input": {"command": "cargo test", "run_in_background": background}
+                }]}
+            }),
+            &mut recorder,
+        );
+    }
+    // A call that shows only its description names no command line.
+    event(
+        json!({
+            "type": "assistant",
+            "message": {"content": [{
+                "type": "tool_use",
+                "id": "bash-described",
+                "name": "Bash",
+                "input": {"description": "cargo test"}
+            }]}
+        }),
+        &mut recorder,
+    );
+    for (id, is_error, content) in [
+        ("bash-ok", false, "test result: ok. 3 passed"),
+        ("bash-failed", true, "Exit code 101\nerror: test failed"),
+        ("bash-background", false, "Command running in background"),
+        (
+            "bash-denied",
+            true,
+            "Claude requested permissions to use Bash, but you haven't granted it yet.",
+        ),
+    ] {
+        event(
+            json!({
+                "type": "user",
+                "message": {"content": [{
+                    "type": "tool_result",
+                    "tool_use_id": id,
+                    "is_error": is_error,
+                    "content": content
+                }]}
+            }),
+            &mut recorder,
+        );
+    }
+
+    assert_eq!(
+        recorder.command_exits,
+        [
+            ("bash-ok".to_owned(), EngramCommandExit::ReportedSuccess),
+            ("bash-failed".to_owned(), EngramCommandExit::Code(101)),
+            ("bash-background".to_owned(), EngramCommandExit::NotFinished),
+        ]
+    );
+    assert_eq!(recorder.abandoned_commands, ["bash-denied"]);
+    let ran = |id: &str| {
+        recorder
+            .command_starts
+            .iter()
+            .find(|(key, _, _)| key == id)
+            .map(|(_, ran, cwd)| (ran.clone(), cwd.clone()))
+    };
+    assert_eq!(ran("bash-ok"), Some((Some("cargo test".to_owned()), None)));
+    assert_eq!(
+        ran("bash-described"),
+        Some((None, None)),
+        "the description stands in for the command line only as a label"
+    );
 }
 
 // Pins `handle_claude_result` draining `pending_tools` so that a

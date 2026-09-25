@@ -230,7 +230,13 @@ async fn write_file(
         if let Some(base_hash) = should_check_base {
             validate_file_base_hash(&resolved_path, base_hash)?;
         }
-        fs::write(&resolved_path, request.content.as_bytes()).map_err(|err| {
+        // The save may land under a mediated turn's open check, including one
+        // that starts while it is written, so it counts as it starts and as
+        // it ends, even when it fails part-way.
+        state.note_engram_host_write(&resolved_path);
+        let written = fs::write(&resolved_path, request.content.as_bytes());
+        state.note_engram_host_write(&resolved_path);
+        written.map_err(|err| {
             ApiError::internal(format!(
                 "failed to write file {}: {err}",
                 resolved_path.display()

@@ -760,13 +760,13 @@ impl AppState {
                                 routing_token: routing_token.clone(),
                                 grant_id: grant_id.clone(),
                                 next_intent: EngramNextIntent::Wait,
-                                observations: Vec::new(),
+                                report: EngramTurnReport::default(),
                                 idempotency_key: engram_checkpoint_idempotency_key(
                                     format!(
                                         "termal-restart-checkpoint:{}:{grant_id}",
                                         target.connection.session_id
                                     ),
-                                    &[],
+                                    &EngramTurnReport::default(),
                                 ),
                             },
                             timeout,
@@ -920,9 +920,25 @@ impl AppState {
             owner,
             "Engram work-binding read",
         )?;
-        let work_binding = target
-            .adapter
-            .read_work_binding(&target.connection, timeout)?;
+        // A rebind the admission refresh armed binds what the refresh read. A
+        // stale retry, or any other bind, reads again, and a binding Engram
+        // just refused as stale is not resent.
+        let work_binding = match (&target.refreshed_work_binding, rejected_request) {
+            (Some(refreshed), None) => refreshed.clone(),
+            _ => {
+                let (current, refused) =
+                    self.engram_work_binding_preference(&target.connection.session_id);
+                let read = target.adapter.read_work_binding(
+                    &target.connection,
+                    EngramBindingPreference {
+                        current: current.as_ref(),
+                        refused: &refused,
+                    },
+                    timeout,
+                )?;
+                self.engram_work_binding_for_bind(&target.connection.session_id, read)
+            }
+        };
         let key = queued.as_ref().map_or_else(
             || {
                 format!(

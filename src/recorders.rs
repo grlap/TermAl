@@ -94,8 +94,37 @@ trait TurnRecorder {
     }
     /// Upserts a command-execution message in the `Running` state, keyed by
     /// `key` so a later `command_completed` with the same key mutates the
-    /// same message.
+    /// same message. `command` is taken to be the command line that runs; a
+    /// caller that has only a label for it uses `command_started_in`.
     fn command_started(&mut self, key: &str, command: &str) -> Result<()>;
+    /// `command_started`, with what a mediated turn's test evidence
+    /// (`engram_turn_checks.rs`) needs to know about the command: `ran`, the
+    /// command line the runtime says runs, when it says (`None` when
+    /// `command` only names the call, as an ACP title does), and `cwd`, the
+    /// directory it runs in (Codex's item `cwd`, ACP's `rawInput.cwd`), which
+    /// credits the right worktree. Recorders that keep no such evidence start
+    /// the command alone; a recorder that forwards to another must forward
+    /// this too, or what it says is lost.
+    fn command_started_in(
+        &mut self,
+        key: &str,
+        command: &str,
+        ran: Option<&str>,
+        cwd: Option<&str>,
+    ) -> Result<()> {
+        let _ = (ran, cwd);
+        self.command_started(key, command)
+    }
+    /// The runtime said again what a started command runs (`ran`) or where
+    /// (`cwd`), without starting or ending it: an ACP update without a
+    /// status, or the one that ends it. A test check it contradicts is
+    /// dropped (`engram_turn_checks.rs`). Recorders that keep no such
+    /// evidence ignore it; a recorder that forwards to another must forward
+    /// this too.
+    fn command_described(&mut self, key: &str, ran: Option<&str>, cwd: Option<&str>) -> Result<()> {
+        let _ = (key, ran, cwd);
+        Ok(())
+    }
     /// Upserts the same command message with its captured output + final
     /// status (success / error / cancelled).
     fn command_completed(
@@ -105,6 +134,29 @@ trait TurnRecorder {
         output: &str,
         status: CommandStatus,
     ) -> Result<()>;
+    /// `command_completed`, with what the runtime said about how the command
+    /// ended, which a mediated turn's test evidence may rely on
+    /// (`engram_turn_checks.rs`). Recorders that keep no such evidence
+    /// record the completion alone; a recorder that forwards to another must
+    /// forward this too, or the exit is lost.
+    fn command_completed_with_exit(
+        &mut self,
+        key: &str,
+        command: &str,
+        output: &str,
+        status: CommandStatus,
+        exit: EngramCommandExit,
+    ) -> Result<()> {
+        let _ = exit;
+        self.command_completed(key, command, output, status)
+    }
+    /// A started command will never report its end (a denied tool call), so
+    /// it no longer counts as running beside a mediated turn's test checks.
+    /// The transcript is left as the caller leaves it.
+    fn command_abandoned(&mut self, key: &str) -> Result<()> {
+        let _ = key;
+        Ok(())
+    }
     /// Upserts a parallel-agent progress message keyed by `key` so follow-up
     /// progress events (agent completions, status changes) mutate the same
     /// group message instead of appending duplicates.
@@ -702,7 +754,9 @@ fn recorder_push_diff<R: SessionRecorderAccess>(
             language: Some("diff".to_owned()),
             change_type,
         },
-    )
+    )?;
+    state.note_engram_workspace_edit(&session_id);
+    Ok(())
 }
 
 // Closes the currently open streaming-text message by clearing the
@@ -731,6 +785,8 @@ fn recorder_command_started<R: SessionRecorderAccess>(
     recorder: &mut R,
     key: &str,
     command: &str,
+    ran: Option<&str>,
+    cwd: Option<&str>,
 ) -> Result<()> {
     let state = recorder.state().clone();
     let session_id = recorder.session_id().to_owned();
@@ -748,7 +804,9 @@ fn recorder_command_started<R: SessionRecorderAccess>(
         command,
         "",
         CommandStatus::Running,
-    )
+    )?;
+    state.note_engram_command_started(&session_id, key, ran, cwd);
+    Ok(())
 }
 
 // Upserts the same command message keyed by `key` with its captured
@@ -761,6 +819,7 @@ fn recorder_command_completed<R: SessionRecorderAccess>(
     command: &str,
     output: &str,
     status: CommandStatus,
+    exit: Option<EngramCommandExit>,
 ) -> Result<()> {
     let state = recorder.state().clone();
     let session_id = recorder.session_id().to_owned();
@@ -772,7 +831,12 @@ fn recorder_command_completed<R: SessionRecorderAccess>(
         .or_insert_with(|| state_for_entry.allocate_message_id())
         .clone();
 
-    state.upsert_command_message(&session_id, &message_id, command, output, status)
+    state.upsert_command_message(&session_id, &message_id, command, output, status)?;
+    // A completion that still reports the command running is not its end.
+    if status != CommandStatus::Running {
+        state.note_engram_command_finished(&session_id, key, command, output, exit);
+    }
+    Ok(())
 }
 
 // Upserts a `ParallelAgents` message keyed by `key` (the parallel-agent
@@ -1052,7 +1116,24 @@ impl TurnRecorder for SessionRecorder {
     }
 
     fn command_started(&mut self, key: &str, command: &str) -> Result<()> {
-        recorder_command_started(self, key, command)
+        recorder_command_started(self, key, command, Some(command), None)
+    }
+
+    fn command_started_in(
+        &mut self,
+        key: &str,
+        command: &str,
+        ran: Option<&str>,
+        cwd: Option<&str>,
+    ) -> Result<()> {
+        recorder_command_started(self, key, command, ran, cwd)
+    }
+
+    fn command_described(&mut self, key: &str, ran: Option<&str>, cwd: Option<&str>) -> Result<()> {
+        let session_id = self.session_id().to_owned();
+        self.state()
+            .note_engram_command_described(&session_id, key, ran, cwd);
+        Ok(())
     }
 
     fn command_completed(
@@ -1062,7 +1143,24 @@ impl TurnRecorder for SessionRecorder {
         output: &str,
         status: CommandStatus,
     ) -> Result<()> {
-        recorder_command_completed(self, key, command, output, status)
+        recorder_command_completed(self, key, command, output, status, None)
+    }
+
+    fn command_completed_with_exit(
+        &mut self,
+        key: &str,
+        command: &str,
+        output: &str,
+        status: CommandStatus,
+        exit: EngramCommandExit,
+    ) -> Result<()> {
+        recorder_command_completed(self, key, command, output, status, Some(exit))
+    }
+
+    fn command_abandoned(&mut self, key: &str) -> Result<()> {
+        let session_id = self.session_id().to_owned();
+        self.state().note_engram_command_abandoned(&session_id, key);
+        Ok(())
     }
 
     /// Upserts parallel agents.
@@ -1144,7 +1242,24 @@ impl TurnRecorder for BorrowedSessionRecorder<'_> {
     }
 
     fn command_started(&mut self, key: &str, command: &str) -> Result<()> {
-        recorder_command_started(self, key, command)
+        recorder_command_started(self, key, command, Some(command), None)
+    }
+
+    fn command_started_in(
+        &mut self,
+        key: &str,
+        command: &str,
+        ran: Option<&str>,
+        cwd: Option<&str>,
+    ) -> Result<()> {
+        recorder_command_started(self, key, command, ran, cwd)
+    }
+
+    fn command_described(&mut self, key: &str, ran: Option<&str>, cwd: Option<&str>) -> Result<()> {
+        let session_id = self.session_id().to_owned();
+        self.state()
+            .note_engram_command_described(&session_id, key, ran, cwd);
+        Ok(())
     }
 
     fn command_completed(
@@ -1154,7 +1269,24 @@ impl TurnRecorder for BorrowedSessionRecorder<'_> {
         output: &str,
         status: CommandStatus,
     ) -> Result<()> {
-        recorder_command_completed(self, key, command, output, status)
+        recorder_command_completed(self, key, command, output, status, None)
+    }
+
+    fn command_completed_with_exit(
+        &mut self,
+        key: &str,
+        command: &str,
+        output: &str,
+        status: CommandStatus,
+        exit: EngramCommandExit,
+    ) -> Result<()> {
+        recorder_command_completed(self, key, command, output, status, Some(exit))
+    }
+
+    fn command_abandoned(&mut self, key: &str) -> Result<()> {
+        let session_id = self.session_id().to_owned();
+        self.state().note_engram_command_abandoned(&session_id, key);
+        Ok(())
     }
 
     /// Upserts parallel agents.

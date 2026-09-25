@@ -22,6 +22,7 @@ impl EngramControlTransport for WorkFocusGate {
     fn read_work_binding(
         &self,
         _: &EngramConnectionConfig,
+        _: EngramBindingPreference<'_>,
         _: Duration,
     ) -> std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError> {
         self.entered.send(()).unwrap();

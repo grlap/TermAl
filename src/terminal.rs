@@ -138,7 +138,11 @@ async fn run_terminal_command(
             &workdir_request,
             ScopedPathMode::ExistingPath,
         )?;
-        run_terminal_shell_command(&command, &workdir)
+        // The command may write under a mediated turn's open check.
+        state.note_engram_host_write(&workdir);
+        let result = run_terminal_shell_command(&command, &workdir);
+        state.note_engram_host_write(&workdir);
+        result
     })
     .await
     .map_err(|err| ApiError::internal(format!("terminal command task failed: {err}")))??;
@@ -266,16 +270,21 @@ async fn run_terminal_command_stream(
         .await?;
         let task_tx = event_tx.clone();
         let task_cancellation = cancellation.clone();
+        let task_state = state.clone();
         spawn_terminal_stream_worker(event_tx.clone(), async move {
             let command_stream_tx = task_tx.clone();
             let result = tokio::task::spawn_blocking(move || {
                 let _permit = permit;
-                run_terminal_shell_command_streaming(
+                // The command may write under a mediated turn's open check.
+                task_state.note_engram_host_write(&workdir);
+                let result = run_terminal_shell_command_streaming(
                     &command,
                     &workdir,
                     command_stream_tx,
                     task_cancellation,
-                )
+                );
+                task_state.note_engram_host_write(&workdir);
+                result
             })
             .await
             .map_err(|err| ApiError::internal(format!("terminal command task failed: {err}")))

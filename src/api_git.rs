@@ -192,38 +192,46 @@ async fn apply_git_file_action(
             )?;
         }
 
-        match request.action {
-            GitFileAction::Stage => {
-                let pathspecs = collect_git_stage_pathspecs(
-                    &current_path,
-                    original_path.as_deref(),
-                    request.status_code.as_deref(),
-                );
-                run_git_pathspec_command(
-                    &repo_root,
-                    &["add", "-A"],
-                    &pathspecs,
-                    "failed to stage git changes",
-                )?;
+        // The action may rewrite files under a mediated turn's open check,
+        // while it runs.
+        state.note_engram_host_write(&repo_root);
+        let applied = (|| -> Result<(), ApiError> {
+            match request.action {
+                GitFileAction::Stage => {
+                    let pathspecs = collect_git_stage_pathspecs(
+                        &current_path,
+                        original_path.as_deref(),
+                        request.status_code.as_deref(),
+                    );
+                    run_git_pathspec_command(
+                        &repo_root,
+                        &["add", "-A"],
+                        &pathspecs,
+                        "failed to stage git changes",
+                    )?;
+                }
+                GitFileAction::Unstage => {
+                    let pathspecs = collect_git_pathspecs(&current_path, original_path.as_deref());
+                    run_git_pathspec_command(
+                        &repo_root,
+                        &["restore", "--staged"],
+                        &pathspecs,
+                        "failed to unstage git changes",
+                    )?;
+                }
+                GitFileAction::Revert => {
+                    revert_git_file_action(
+                        &repo_root,
+                        &current_path,
+                        original_path.as_deref(),
+                        request.status_code.as_deref(),
+                    )?;
+                }
             }
-            GitFileAction::Unstage => {
-                let pathspecs = collect_git_pathspecs(&current_path, original_path.as_deref());
-                run_git_pathspec_command(
-                    &repo_root,
-                    &["restore", "--staged"],
-                    &pathspecs,
-                    "failed to unstage git changes",
-                )?;
-            }
-            GitFileAction::Revert => {
-                revert_git_file_action(
-                    &repo_root,
-                    &current_path,
-                    original_path.as_deref(),
-                    request.status_code.as_deref(),
-                )?;
-            }
-        }
+            Ok(())
+        })();
+        state.note_engram_host_write(&repo_root);
+        applied?;
 
         Ok(load_git_status_for_path(&workdir)?)
     })
@@ -284,12 +292,17 @@ async fn commit_git_changes(
             return Err(ApiError::bad_request("no staged changes to commit"));
         }
 
+        // A commit's hooks (formatters, lint-staged) may rewrite files under a
+        // mediated turn's open check, while it runs.
+        state.note_engram_host_write(&repo_root);
         let output = git_command()
             .arg("-C")
             .arg(&repo_root)
             .args(["commit", "-m"])
             .arg(message)
-            .output()
+            .output();
+        state.note_engram_host_write(&repo_root);
+        let output = output
             .map_err(|err| ApiError::internal(format!("failed to create git commit: {err}")))?;
 
         if !output.status.success() {
@@ -398,7 +411,12 @@ async fn sync_git_changes(
                 "git sync",
             )?;
         }
-        sync_git_repo(&workdir)
+        // A pull may rewrite files under a mediated turn's open check, while
+        // it runs.
+        state.note_engram_host_write(&workdir);
+        let synced = sync_git_repo(&workdir);
+        state.note_engram_host_write(&workdir);
+        synced
     })
     .await?;
     Ok(Json(response))

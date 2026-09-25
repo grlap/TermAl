@@ -362,6 +362,9 @@ impl AppState {
                 ));
             }
         };
+        // The session may now write under a check another session of its
+        // worktree has open.
+        engram_note_turn_started(inner, index);
         let record = inner
             .session_mut_by_index(index)
             .expect("session index should be valid");
@@ -399,6 +402,11 @@ impl AppState {
     /// Returns a [`TurnDispatch`] bundling the runtime handle + a
     /// RuntimeToken the caller stores on the record for the `_if_matches`
     /// guard path later.
+    ///
+    /// Every caller must call `engram_note_turn_started` once this succeeds
+    /// (it needs the whole state, which this record-level helper does not
+    /// hold): it forgets the commands of the session's earlier turn and marks
+    /// another session's open Engram checks in its worktree as overlapped.
     fn start_turn_on_record(
         &self,
         record: &mut SessionRecord,
@@ -1023,6 +1031,9 @@ impl AppState {
         allow_blocked_dispatch: bool,
         orphaned_workflow_only: bool,
     ) -> Result<Option<StartedQueuedTurn>> {
+        // Where the session writes, for the overlap marks its turn start
+        // makes under the lock.
+        self.note_engram_session_worktree_off_lock(session_id);
         let result = self.with_queued_engram_admission(session_id, || {
             self.start_next_queued_turn_inner_off_lock(
                 session_id,
@@ -1609,6 +1620,9 @@ impl AppState {
             self.request_engram_boot_recovery_retry(session_id);
             return Err(ApiError::conflict(ENGRAM_BOOT_RECOVERY_PENDING_MESSAGE));
         }
+        // Where the session writes, for the overlap marks its turn start
+        // makes under the lock.
+        self.note_engram_session_worktree_off_lock(session_id);
         if self.remote_session_target(session_id)?.is_some() {
             if followup.is_some() {
                 return Err(ApiError::conflict(
@@ -2011,6 +2025,7 @@ impl AppState {
                     None,
                     engram_mcp,
                 )?;
+                engram_note_turn_started(&mut inner, index);
                 let revision = self
                     .commit_followup_prompt_locked(&mut inner, followup, &message_id, false)
                     .map_err(|err| {
@@ -2086,6 +2101,7 @@ impl AppState {
                 None,
                 engram_mcp,
             )?;
+            engram_note_turn_started(&mut inner, index);
             let revision = self
                 .commit_followup_prompt_locked(&mut inner, followup, &message_id, false)
                 .map_err(|err| {

@@ -9,6 +9,9 @@
 // binding, which stay in `engram_host_adapter.rs`. New fragment beside that
 // file, created instead of growing it.
 
+/// Engram's bound on each source basis field.
+const ENGRAM_SOURCE_BASIS_MAX_BYTES: usize = 512;
+
 /// What a checkpoint's report needs. Taken twice under the lock: once before
 /// the off-lock basis capture, to decide whether one is needed, and again
 /// under the checkpoint claim, to build the report from what the record holds
@@ -19,7 +22,7 @@ enum EngramTurnReportPlan {
     Nothing,
     /// An earlier attempt for this grant built the report; it is repeated
     /// verbatim so the idempotency key repeats.
-    Cached(Vec<EngramExecutionObservationInput>),
+    Cached(EngramTurnReport),
     /// A report is built for this attempt once the end basis has been read
     /// from `workdir` off-lock.
     Fresh {
@@ -45,8 +48,8 @@ fn engram_turn_report_plan(
         return EngramTurnReportPlan::Nothing;
     }
     match &record.engram.active_turn_report {
-        Some((cached_grant_id, observations)) if cached_grant_id == grant_id => {
-            EngramTurnReportPlan::Cached(observations.clone())
+        Some((cached_grant_id, report)) if cached_grant_id == grant_id => {
+            EngramTurnReportPlan::Cached(report.clone())
         }
         _ => EngramTurnReportPlan::Fresh {
             workdir: record.session.workdir.clone(),
@@ -146,6 +149,13 @@ fn engram_evaluate_requested_effects<'a>(
 /// misreported, and the omission is logged. The id is deterministic for the
 /// grant; the basis and its time are the moment's, which is why the record
 /// keeps the finished report for retries.
+///
+/// `reported_revision` is the revision of the last check the same report
+/// carries (`engram_turn_report`). The turn's changes up to that check are
+/// already reported before it, so this observation reports a change only if
+/// the closing revision moved past it, and the tracking does not add to that:
+/// it can arrive late, and would reopen a change the check answered. With no
+/// closing basis the tracking decides, as without checks.
 fn engram_turn_execution_observation(
     record: &SessionRecord,
     session_id: &str,
@@ -153,19 +163,27 @@ fn engram_turn_execution_observation(
     outcome: EngramExecutionOutcome,
     mutation_granted: bool,
     end_basis: Option<EngramExecutionSourceBasis>,
+    reported_revision: Option<String>,
 ) -> Option<EngramExecutionObservationInput> {
     let tracked_change = !record.active_turn_file_changes.is_empty();
-    let content_changed = match (&record.engram.active_turn_start_basis, &end_basis) {
-        (Some(start), Some(end)) => start.source_revision != end.source_revision,
-        // Without a begin-time basis the comparison cannot clear the turn.
-        // Under a grant that mediates local mutation the conservative answer
-        // is a change, which opens an obligation a later check can satisfy;
-        // under an observe-only grant a change could only withhold the
-        // report, so the tracking decides.
-        (None, Some(_)) => mutation_granted,
-        _ => false,
+    let source_changed = match (reported_revision, &end_basis) {
+        (Some(reported), Some(end)) => end.source_revision != reported,
+        (Some(_), None) => tracked_change,
+        (None, _) => {
+            let content_changed = match (&record.engram.active_turn_start_basis, &end_basis) {
+                (Some(start), Some(end)) => start.source_revision != end.source_revision,
+                // Without a begin-time basis the comparison cannot clear the
+                // turn. Under a grant that mediates local mutation the
+                // conservative answer is a change, which opens an obligation
+                // a later check can satisfy; under an observe-only grant a
+                // change could only withhold the report, so the tracking
+                // decides.
+                (None, Some(_)) => mutation_granted,
+                _ => false,
+            };
+            tracked_change || content_changed
+        }
     };
-    let source_changed = tracked_change || content_changed;
     if source_changed && !mutation_granted {
         eprintln!(
             "engram> session={session_id} turn changed source under a grant that mediates no \
@@ -210,16 +228,17 @@ fn engram_turn_execution_observation(
 /// often the host's busiest, so a tighter bound would drop the basis exactly
 /// when Git is slow rather than stuck. The bound is paid only in that case;
 /// the closing capture precedes the checkpoint claim, so teardown's settle
-/// wait never spans it. Absent, and logged, when the workspace is not a
-/// worktree root or the fingerprint cannot be taken in time; the contract
+/// wait never spans it. Taken on the worktree the workdir lies in, so a
+/// session in a subdirectory has its worktree's basis. Absent, and logged,
+/// outside a worktree or when the fingerprint cannot be taken in time; the
+/// contract
 /// keeps the basis optional, at the price of an obligation that can only be
 /// waived.
 fn engram_execution_source_basis(workdir: &FsPath) -> Option<EngramExecutionSourceBasis> {
-    match review_freeze_fingerprint(workdir) {
-        Ok((root, source_revision)) => Some(EngramExecutionSourceBasis {
-            workspace_id: root.to_string_lossy().into_owned(),
-            source_revision,
-        }),
+    // A session may work in a subdirectory: its source identity is its
+    // worktree's, which the fingerprint takes from the worktree root.
+    match review_freeze_fingerprint(&engram_worktree_root_path(workdir)) {
+        Ok((root, source_revision)) => engram_bounded_source_basis(workdir, &root, source_revision),
         Err(error) => {
             eprintln!(
                 "engram> no source basis for workspace {}: {error:#}",
@@ -228,6 +247,29 @@ fn engram_execution_source_basis(workdir: &FsPath) -> Option<EngramExecutionSour
             None
         }
     }
+}
+
+/// The basis of a workspace frozen at worktree `root`. Engram refuses a basis
+/// field over 512 bytes, and with it the whole report, so a root that long
+/// leaves the report without a basis, and logged, rather than refused.
+fn engram_bounded_source_basis(
+    workdir: &FsPath,
+    root: &FsPath,
+    source_revision: String,
+) -> Option<EngramExecutionSourceBasis> {
+    let workspace_id = root.to_string_lossy().into_owned();
+    if workspace_id.len() > ENGRAM_SOURCE_BASIS_MAX_BYTES {
+        eprintln!(
+            "engram> no source basis for workspace {}: its root exceeds {} bytes",
+            workdir.display(),
+            ENGRAM_SOURCE_BASIS_MAX_BYTES
+        );
+        return None;
+    }
+    Some(EngramExecutionSourceBasis {
+        workspace_id,
+        source_revision,
+    })
 }
 
 impl AppState {
@@ -263,31 +305,29 @@ impl AppState {
     /// closes the grant outside the turn's own close, such as the recovery
     /// checkpoint of a rebind. Empty when none was built, after a restart, or
     /// after Engram refused it.
-    fn cached_engram_turn_report(
-        &self,
-        session_id: &str,
-        grant_id: &str,
-    ) -> Vec<EngramExecutionObservationInput> {
+    fn cached_engram_turn_report(&self, session_id: &str, grant_id: &str) -> EngramTurnReport {
         let inner = self.inner.lock().expect("state mutex poisoned");
         inner
             .find_session_index(session_id)
             .and_then(|index| inner.sessions[index].engram.active_turn_report.as_ref())
             .filter(|(cached_grant_id, _)| cached_grant_id == grant_id)
-            .map(|(_, observations)| observations.clone())
+            .map(|(_, report)| report.clone())
             .unwrap_or_default()
     }
 
     /// Engram answered a checkpoint that carried `grant_id`'s report by
-    /// refusing it. The report is replaced by an empty one, so every later
-    /// checkpoint of the grant, the turn's own retries and a rebind's
-    /// recovery alike, goes without it, as every checkpoint did before turns
-    /// reported observations. Any refusal counts, not only one about the
-    /// payload: a refused report resent forever would hold the grant open,
-    /// and the session's queued prompts with it, until a restart, while
-    /// dropping it costs at most this turn's evidence, and nothing when the
-    /// refusal is about the grant's state after an earlier attempt was
-    /// accepted. A lost or timed-out call is not an answer; its report is
-    /// kept for the retry.
+    /// refusing it. A report with checks is replaced once by its fallback,
+    /// the turn's own observation alone, since the evidence is what adds new
+    /// ways to be refused; any other report, or the fallback when it too is
+    /// refused, is replaced by an empty one, so every later checkpoint of the
+    /// grant, the turn's own retries and a rebind's recovery alike, goes
+    /// without it, as every checkpoint did before turns reported
+    /// observations. Any refusal counts, not only one about the payload: a
+    /// refused report resent forever would hold the grant open, and the
+    /// session's queued prompts with it, until a restart, while dropping it
+    /// costs at most this turn's evidence, and nothing when the refusal is
+    /// about the grant's state after an earlier attempt was accepted. A lost
+    /// or timed-out call is not an answer; its report is kept for the retry.
     fn forget_refused_engram_turn_report(
         &self,
         session_id: &str,
@@ -298,22 +338,33 @@ impl AppState {
         let Some(index) = inner.find_session_index(session_id) else {
             return;
         };
-        let holds_report = inner.sessions[index]
-            .engram
-            .active_turn_report
-            .as_ref()
-            .is_some_and(|(cached_grant_id, observations)| {
-                cached_grant_id == grant_id && !observations.is_empty()
-            });
+        let engram = &mut inner.sessions[index].engram;
+        let holds_report =
+            engram
+                .active_turn_report
+                .as_ref()
+                .is_some_and(|(cached_grant_id, report)| {
+                    cached_grant_id == grant_id && !report.is_empty()
+                });
         if !holds_report {
             // Already dropped, or a newer grant's report: nothing to forget.
             return;
         }
-        inner.sessions[index].engram.active_turn_report = Some((grant_id.to_owned(), Vec::new()));
+        let fallback = engram
+            .active_turn_report_fallback
+            .take()
+            .filter(|(cached_grant_id, _)| cached_grant_id == grant_id)
+            .map(|(_, fallback)| fallback);
+        let next = if fallback.is_some() {
+            "goes with the turn's own observation only"
+        } else {
+            "goes without it"
+        };
+        engram.active_turn_report = Some((grant_id.to_owned(), fallback.unwrap_or_default()));
         drop(inner);
         eprintln!(
             "engram> session={session_id} Engram refused the checkpoint carrying the turn's \
-             execution observation ({}); the grant's next closing attempt goes without it",
+             report ({}); the grant's next closing attempt {next}",
             code.unwrap_or("unknown")
         );
     }

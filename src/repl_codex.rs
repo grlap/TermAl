@@ -107,6 +107,20 @@ impl TurnRecorder for DynTurnRecorderRef<'_> {
         self.inner.command_started(key, command)
     }
 
+    fn command_started_in(
+        &mut self,
+        key: &str,
+        command: &str,
+        ran: Option<&str>,
+        cwd: Option<&str>,
+    ) -> Result<()> {
+        self.inner.command_started_in(key, command, ran, cwd)
+    }
+
+    fn command_described(&mut self, key: &str, ran: Option<&str>, cwd: Option<&str>) -> Result<()> {
+        self.inner.command_described(key, ran, cwd)
+    }
+
     fn command_completed(
         &mut self,
         key: &str,
@@ -115,6 +129,22 @@ impl TurnRecorder for DynTurnRecorderRef<'_> {
         status: CommandStatus,
     ) -> Result<()> {
         self.inner.command_completed(key, command, output, status)
+    }
+
+    fn command_completed_with_exit(
+        &mut self,
+        key: &str,
+        command: &str,
+        output: &str,
+        status: CommandStatus,
+        exit: EngramCommandExit,
+    ) -> Result<()> {
+        self.inner
+            .command_completed_with_exit(key, command, output, status, exit)
+    }
+
+    fn command_abandoned(&mut self, key: &str) -> Result<()> {
+        self.inner.command_abandoned(key)
     }
 
     /// Upserts parallel agents.

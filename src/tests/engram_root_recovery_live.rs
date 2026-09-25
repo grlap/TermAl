@@ -184,17 +184,21 @@ impl EngramControlTransport for BoundaryFaultTransport {
     fn read_work_binding(
         &self,
         connection: &EngramConnectionConfig,
+        preference: EngramBindingPreference<'_>,
         timeout: Duration,
     ) -> std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError> {
-        self.inner.read_work_binding(connection, timeout)
+        self.inner
+            .read_work_binding(connection, preference, timeout)
     }
 
     fn read_work_binding_for_boot(
         &self,
         connection: &EngramConnectionConfig,
+        preference: EngramBindingPreference<'_>,
         timeout: Duration,
     ) -> std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError> {
-        self.inner.read_work_binding_for_boot(connection, timeout)
+        self.inner
+            .read_work_binding_for_boot(connection, preference, timeout)
     }
 }
 

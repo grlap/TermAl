@@ -8,7 +8,7 @@
 //! `prepare_engram_control_process_tree_fixture` and
 //! `assert_engram_control_descendant_was_terminated` until the doctor suite
 //! is extracted. Does not own the one-shot work-binding reader test
-//! (`real_process_work_binding_reader_uses_next_then_exact_focus`, tm-81vf),
+//! (`real_process_work_binding_reader_reads_the_held_claims`, tm-81vf),
 //! the live-store e2e, or `real_engram_control_fixture_path`, which stays in
 //! the parent because the readiness and compaction suites import it.
 //! Split out of `src/tests/engram_host_adapter.rs` as a pure code move
@@ -606,7 +606,7 @@ fn real_process_fixture_persists_idempotency_and_unknown_grant_semantics() {
         routing_token: fresh_token.clone(),
         grant_id: grant_id.clone(),
         next_intent: EngramNextIntent::Wait,
-        observations: Vec::new(),
+        report: EngramTurnReport::default(),
         idempotency_key: "superseded-known-checkpoint".to_owned(),
     };
     let checkpoint_scope_refusal = transport
@@ -632,7 +632,7 @@ fn real_process_fixture_persists_idempotency_and_unknown_grant_semantics() {
             routing_token: fresh_token.clone(),
             grant_id: "never-issued".to_owned(),
             next_intent: EngramNextIntent::Wait,
-            observations: Vec::new(),
+            report: EngramTurnReport::default(),
             idempotency_key: "unknown-checkpoint".to_owned(),
         },
     ] {
@@ -681,7 +681,7 @@ fn real_process_fixture_persists_idempotency_and_unknown_grant_semantics() {
         routing_token: fresh_token,
         grant_id: replacement_grant,
         next_intent: EngramNextIntent::Wait,
-        observations: Vec::new(),
+        report: EngramTurnReport::default(),
         idempotency_key: "durable-checkpoint".to_owned(),
     };
     let first = transport
@@ -766,7 +766,7 @@ fn real_process_fixture_enforces_stale_begin_and_unbegun_grant_recovery() {
                 routing_token: stale_token.clone(),
                 grant_id: fresh_grant.clone(),
                 next_intent: EngramNextIntent::Exit,
-                observations: Vec::new(),
+                report: EngramTurnReport::default(),
                 idempotency_key: "stale-fixture-cleanup".to_owned(),
             },
             Duration::from_secs(2),
@@ -824,7 +824,7 @@ fn real_process_fixture_enforces_stale_begin_and_unbegun_grant_recovery() {
                 routing_token: orphan_token.clone(),
                 grant_id: orphan_grant.clone(),
                 next_intent: EngramNextIntent::Wait,
-                observations: Vec::new(),
+                report: EngramTurnReport::default(),
                 idempotency_key: "orphan-checkpoint".to_owned(),
             },
             Duration::from_secs(2),
@@ -936,7 +936,7 @@ fn real_process_fixture_enforces_stale_begin_and_unbegun_grant_recovery() {
                 routing_token: refusal_token.clone(),
                 grant_id: refused_grant,
                 next_intent: EngramNextIntent::Wait,
-                observations: Vec::new(),
+                report: EngramTurnReport::default(),
                 idempotency_key: "non-expiring-refusal-checkpoint".to_owned(),
             },
             Duration::from_secs(2),
@@ -994,7 +994,7 @@ fn real_process_fixture_enforces_stale_begin_and_unbegun_grant_recovery() {
                 routing_token: replacement_token,
                 grant_id: replacement_grant,
                 next_intent: EngramNextIntent::Exit,
-                observations: Vec::new(),
+                report: EngramTurnReport::default(),
                 idempotency_key: "replacement-checkpoint".to_owned(),
             },
             Duration::from_secs(2),

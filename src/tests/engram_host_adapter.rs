@@ -24,6 +24,15 @@ mod uncertain_begin;
 #[path = "engram_turn_observations.rs"]
 mod turn_observations;
 
+#[path = "engram_work_binding_refresh.rs"]
+mod work_binding_refresh;
+
+#[path = "engram_turn_checks.rs"]
+mod turn_checks;
+
+#[path = "engram_held_claims.rs"]
+mod held_claims;
+
 use self::control_transport::{
     assert_engram_control_descendant_was_terminated, prepare_engram_control_process_tree_fixture,
 };
@@ -102,17 +111,21 @@ impl EngramControlTransport for ControlOnlyEngramTransport {
     fn read_work_binding(
         &self,
         connection: &EngramConnectionConfig,
+        preference: EngramBindingPreference<'_>,
         timeout: Duration,
     ) -> std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError> {
-        self.control.read_work_binding(connection, timeout)
+        self.control
+            .read_work_binding(connection, preference, timeout)
     }
 
     fn read_work_binding_for_boot(
         &self,
         connection: &EngramConnectionConfig,
+        preference: EngramBindingPreference<'_>,
         timeout: Duration,
     ) -> std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError> {
-        self.control.read_work_binding_for_boot(connection, timeout)
+        self.control
+            .read_work_binding_for_boot(connection, preference, timeout)
     }
 }
 
@@ -797,6 +810,7 @@ fn pending_engram_grant(
         started_at: std::time::Instant::now(),
         awaiting_runtime_stop_resolution: false,
         begin_requested: None,
+        evaluated_work_binding: None,
     }
 }
 
@@ -905,7 +919,7 @@ fn stateful_transport_refuses_unbegun_checkpoint_and_rebind_clears_issued_grant(
                 routing_token: routing_token.clone(),
                 grant_id: grant_id.clone(),
                 next_intent: EngramNextIntent::Wait,
-                observations: Vec::new(),
+                report: EngramTurnReport::default(),
                 idempotency_key: "checkpoint-unbegun-grant".to_owned(),
             },
             Duration::from_secs(1),
@@ -977,7 +991,7 @@ fn stateful_transport_refuses_rebind_until_a_begun_grant_is_checkpointed() {
                 routing_token,
                 grant_id,
                 next_intent: EngramNextIntent::Wait,
-                observations: Vec::new(),
+                report: EngramTurnReport::default(),
                 idempotency_key: "checkpoint-before-rebind".to_owned(),
             },
             Duration::from_secs(1),
@@ -1120,7 +1134,7 @@ fn stateful_transport_replays_bind_and_checkpoint_receipts_and_scopes_begin_toke
         routing_token,
         grant_id,
         next_intent: EngramNextIntent::Wait,
-        observations: Vec::new(),
+        report: EngramTurnReport::default(),
         idempotency_key: "durable-checkpoint-key".to_owned(),
     };
     let first = transport
@@ -1204,7 +1218,7 @@ fn stateful_transport_persists_open_turn_refusal_and_reports_unknown_grants() {
         routing_token: fresh_token.clone(),
         grant_id: grant_id.clone(),
         next_intent: EngramNextIntent::Wait,
-        observations: Vec::new(),
+        report: EngramTurnReport::default(),
         idempotency_key: "superseded-known-checkpoint".to_owned(),
     };
     let checkpoint_scope_refusal = transport
@@ -1230,7 +1244,7 @@ fn stateful_transport_persists_open_turn_refusal_and_reports_unknown_grants() {
             routing_token: fresh_token,
             grant_id: "never-issued-grant".to_owned(),
             next_intent: EngramNextIntent::Wait,
-            observations: Vec::new(),
+            report: EngramTurnReport::default(),
             idempotency_key: "unknown-checkpoint".to_owned(),
         },
     ] {
@@ -1272,7 +1286,7 @@ fn stateful_transport_replays_a_checkpoint_applied_before_timeout() {
         routing_token,
         grant_id,
         next_intent: EngramNextIntent::Wait,
-        observations: Vec::new(),
+        report: EngramTurnReport::default(),
         idempotency_key: "applied-timeout-checkpoint".to_owned(),
     };
     let timeout = transport
@@ -2087,22 +2101,40 @@ fn checkpoint_observations_are_serialized_and_participate_in_idempotency() {
     };
     let mut changed = first.clone();
     changed.outcome = EngramExecutionOutcome::Failed;
+    let observed = |observation: EngramExecutionObservationInput| EngramTurnReport {
+        observations: vec![observation],
+        ..EngramTurnReport::default()
+    };
     let base = "termal-checkpoint:session:grant:wait".to_owned();
-    let first_key = engram_checkpoint_idempotency_key(base.clone(), &[first.clone()]);
-    let replay_key = engram_checkpoint_idempotency_key(base.clone(), &[first.clone()]);
-    let changed_key = engram_checkpoint_idempotency_key(base.clone(), &[changed]);
+    let first_key = engram_checkpoint_idempotency_key(base.clone(), &observed(first.clone()));
+    let replay_key = engram_checkpoint_idempotency_key(base.clone(), &observed(first.clone()));
+    let changed_key = engram_checkpoint_idempotency_key(base.clone(), &observed(changed));
     assert_eq!(first_key, replay_key);
     assert_ne!(first_key, changed_key);
-    assert_eq!(engram_checkpoint_idempotency_key(base.clone(), &[]), base);
+    assert_eq!(
+        engram_checkpoint_idempotency_key(base.clone(), &EngramTurnReport::default()),
+        base
+    );
+    // An observation-only report keeps the key it had before evidence
+    // existed, so a retry across the upgrade repeats it.
+    assert_eq!(
+        first_key,
+        format!(
+            "{base}:observations:{}",
+            sha256_hex(&serde_json::to_vec(&[first.clone()]).unwrap())
+        )
+    );
 
     let request = serde_json::to_value(EngramControlRequest::TurnCheckpoint {
         routing_token: "routing".to_owned(),
         grant_id: "grant".to_owned(),
         next_intent: EngramNextIntent::Wait,
-        observations: vec![first],
+        report: observed(first),
         idempotency_key: first_key,
     })
     .expect("checkpoint request should serialize");
+    assert!(request.get("verification_evidence").is_none());
+    assert!(request.get("environment_evidence").is_none());
     assert_eq!(request["observations"][0]["effect"], "mutate_local");
     assert_eq!(request["observations"][0]["outcome"], "succeeded");
     assert_eq!(request["observations"][0]["source_changed"], true);
@@ -2128,106 +2160,6 @@ fn checkpoint_observations_are_serialized_and_participate_in_idempotency() {
     assert_eq!(
         observation_scope.code.as_deref(),
         Some("grant_scope_mismatch")
-    );
-}
-
-#[test]
-fn real_process_work_binding_reader_uses_next_then_exact_focus() {
-    let temp = TestTempRoot::create("termal-engram-work-binding");
-    let project_file = temp.path().join(".engram-project");
-    fs::write(&project_file, "with-focus").expect("project fixture mode should write");
-    #[cfg(windows)]
-    let binary_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("src/tests/fixtures/engram-work-binding-fixture.ps1");
-    #[cfg(not(windows))]
-    let binary_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("src/tests/fixtures/engram-work-binding-fixture.sh");
-    let connection = EngramConnectionConfig {
-        binary_path,
-        project_file: project_file.clone(),
-        home: temp.path().to_path_buf(),
-        project_root: temp.path().to_path_buf(),
-        actor_id: "dev/codex".to_owned(),
-        actor_context: Some("agent=codex;model=test;reasoning=high".to_owned()),
-        session_id: "fixture-session".to_owned(),
-    };
-    // This tests the CLI protocol, not shell startup latency. Each invocation
-    // records its actual phase; only the separate transport test expires a call.
-    let phases = temp.path().join("work-read-phases");
-    let read_binding = || {
-        fs::write(&phases, "").expect("phase journal should reset");
-        let started = std::time::Instant::now();
-        let result = read_engram_work_binding_from_cli(&connection, DEADLOCK_GUARD, false);
-        assert!(
-            !result
-                .as_ref()
-                .is_err_and(|error| error.kind == EngramTransportErrorKind::Deadline),
-            "work reader deadlock after {:?}; phases={:?}; result={result:?}",
-            started.elapsed(),
-            fs::read_to_string(&phases)
-        );
-        result
-    };
-    let binding = read_binding()
-        .expect("work binding should be read")
-        .expect("focused work should carry a binding");
-    assert_eq!(
-        binding,
-        EngramControlWorkBinding {
-            root_execution_id: "root-fixture".to_owned(),
-            work_id: "work-fixture".to_owned(),
-            run_id: "run-fixture".to_owned(),
-            work_revision: 17,
-            claim_id: "claim-fixture".to_owned(),
-            claim_fence: 23,
-        }
-    );
-    assert_eq!(
-        fs::read_to_string(&phases)
-            .unwrap()
-            .lines()
-            .collect::<Vec<_>>(),
-        ["next", "focus:work-fixture"]
-    );
-
-    fs::write(&project_file, "no-focus").expect("no-focus fixture mode should write");
-    assert_eq!(
-        read_binding().expect("no-focus read should succeed"),
-        None,
-        "no focus must omit work_binding without staging work delivery"
-    );
-    assert_eq!(fs::read_to_string(&phases).unwrap().trim(), "next");
-
-    fs::write(&project_file, "read-error-once").expect("read-error-once fixture mode should write");
-    assert!(
-        read_binding()
-            .expect("database-lock read should retry once")
-            .is_some(),
-        "the one retry should recover the exact work binding"
-    );
-    assert_eq!(
-        fs::read_to_string(&phases)
-            .unwrap()
-            .lines()
-            .collect::<Vec<_>>(),
-        ["next", "next", "focus:work-fixture"]
-    );
-
-    fs::write(&project_file, "read-error").expect("read-error fixture mode should write");
-    let error = read_binding()
-        .expect_err("a failed focus read must remain unknown instead of becoming no-focus");
-    assert_eq!(error.kind, EngramTransportErrorKind::Transport);
-    assert_eq!(
-        fs::read_to_string(&phases)
-            .unwrap()
-            .lines()
-            .collect::<Vec<_>>(),
-        ["next", "next"]
-    );
-    assert!(
-        error.message.contains("database is locked"),
-        "the reader failure should preserve its diagnostic: {}",
-        error.message
     );
 }
 
@@ -15432,6 +15364,7 @@ fn circuit_breaker_and_fatal_protocol_errors_update_only_the_effective_child() {
             started_at: std::time::Instant::now(),
             awaiting_runtime_stop_resolution: false,
             begin_requested: None,
+            evaluated_work_binding: None,
         });
         record.engram.dispatch_generation
     };
@@ -15573,6 +15506,7 @@ fn dispatch_card_persist_failure_withholds_granted_delivery() {
             started_at: std::time::Instant::now(),
             awaiting_runtime_stop_resolution: false,
             begin_requested: None,
+            evaluated_work_binding: None,
         });
         record.engram.dispatch_generation
     };

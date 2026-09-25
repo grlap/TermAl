@@ -226,17 +226,19 @@ impl EngramControlTransport for ProcessEngramControlTransport {
     fn read_work_binding(
         &self,
         connection: &EngramConnectionConfig,
+        preference: EngramBindingPreference<'_>,
         timeout: Duration,
     ) -> std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError> {
-        read_engram_work_binding_from_cli(connection, timeout, false)
+        read_engram_work_binding_from_cli(connection, preference, timeout, false)
     }
 
     fn read_work_binding_for_boot(
         &self,
         connection: &EngramConnectionConfig,
+        preference: EngramBindingPreference<'_>,
         timeout: Duration,
     ) -> std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError> {
-        read_engram_work_binding_from_cli(connection, timeout, true)
+        read_engram_work_binding_from_cli(connection, preference, timeout, true)
     }
 
     fn shutdown_session(&self, session_id: &str) {

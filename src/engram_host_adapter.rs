@@ -43,7 +43,7 @@ const ENGRAM_ENABLEMENT_DOCTOR_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 #[cfg(test)]
 const ENGRAM_ENABLEMENT_DOCTOR_TIMEOUT: Duration = Duration::from_secs(30);
 // Engram's current store-open path may wait up to five seconds on SQLite's
-// writer lock. Bound each command in the two-command focus read above that
+// writer lock. Bound the held-claims read (`engram_held_claims.rs`) above that
 // healthy contention window; a timeout or lock error remains an error, never
 // `None`.
 #[cfg(not(test))]
@@ -585,8 +585,11 @@ enum EngramControlRequest {
         routing_token: String,
         grant_id: String,
         next_intent: EngramNextIntent,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        observations: Vec<EngramExecutionObservationInput>,
+        /// The turn's observations and evidence, as the request's own
+        /// `observations`, `verification_evidence` and `environment_evidence`
+        /// lists, each left out when empty.
+        #[serde(flatten)]
+        report: EngramTurnReport,
         idempotency_key: String,
     },
 }
@@ -887,9 +890,14 @@ trait EngramControlTransport: Send + Sync {
         timeout: Duration,
     ) -> std::result::Result<Value, EngramTransportError>;
 
+    /// The work binding the session should be bound with. `preference` names
+    /// the binding it is bound with now, which the selection keeps while that
+    /// claim is still bindable, and the one Engram refused as stale, which it
+    /// leaves out (`select_engram_held_binding`).
     fn read_work_binding(
         &self,
         _connection: &EngramConnectionConfig,
+        _preference: EngramBindingPreference<'_>,
         _timeout: Duration,
     ) -> std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError> {
         Ok(None)
@@ -898,9 +906,10 @@ trait EngramControlTransport: Send + Sync {
     fn read_work_binding_for_boot(
         &self,
         connection: &EngramConnectionConfig,
+        preference: EngramBindingPreference<'_>,
         timeout: Duration,
     ) -> std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError> {
-        self.read_work_binding(connection, timeout)
+        self.read_work_binding(connection, preference, timeout)
     }
 
     fn shutdown_session(&self, session_id: &str);
@@ -933,6 +942,9 @@ struct ScriptedEngramControlTransport {
     work_bindings: Mutex<
         VecDeque<std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError>>,
     >,
+    /// The bindings each work-binding read was told Engram refused
+    /// (`EngramBindingPreference::refused`), in read order.
+    refused_at_reads: Mutex<Vec<Vec<EngramControlWorkBinding>>>,
     shutdowns: Mutex<Vec<String>>,
 }
 
@@ -943,6 +955,7 @@ impl ScriptedEngramControlTransport {
             requests: Mutex::new(Vec::new()),
             responses: Mutex::new(responses.into_iter().collect()),
             work_bindings: Mutex::new(VecDeque::new()),
+            refused_at_reads: Mutex::new(Vec::new()),
             shutdowns: Mutex::new(Vec::new()),
         })
     }
@@ -957,6 +970,7 @@ impl ScriptedEngramControlTransport {
             requests: Mutex::new(Vec::new()),
             responses: Mutex::new(responses.into_iter().collect()),
             work_bindings: Mutex::new(work_bindings.into_iter().collect()),
+            refused_at_reads: Mutex::new(Vec::new()),
             shutdowns: Mutex::new(Vec::new()),
         })
     }
@@ -973,6 +987,23 @@ impl ScriptedEngramControlTransport {
             .lock()
             .expect("scripted Engram shutdowns mutex poisoned")
             .clone()
+    }
+
+    /// The bindings each work-binding read was told Engram refused, in read
+    /// order.
+    fn refused_at_reads(&self) -> Vec<Vec<EngramControlWorkBinding>> {
+        self.refused_at_reads
+            .lock()
+            .expect("scripted Engram refused-binding mutex poisoned")
+            .clone()
+    }
+
+    /// Scripted work-binding reads no caller has taken yet.
+    fn unread_work_bindings(&self) -> usize {
+        self.work_bindings
+            .lock()
+            .expect("scripted Engram work bindings mutex poisoned")
+            .len()
     }
 }
 
@@ -1008,8 +1039,13 @@ impl EngramControlTransport for ScriptedEngramControlTransport {
     fn read_work_binding(
         &self,
         _connection: &EngramConnectionConfig,
+        preference: EngramBindingPreference<'_>,
         _timeout: Duration,
     ) -> std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError> {
+        self.refused_at_reads
+            .lock()
+            .expect("scripted Engram refused-binding mutex poisoned")
+            .push(preference.refused.to_vec());
         self.work_bindings
             .lock()
             .expect("scripted Engram work bindings mutex poisoned")
@@ -1479,94 +1515,6 @@ impl EngramProcessTree {
         self.inner.resume_after_attach(process)
     }
 }
-
-fn read_engram_work_binding_from_cli(
-    connection: &EngramConnectionConfig,
-    timeout: Duration,
-    trace_boot_recovery: bool,
-) -> std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError> {
-    let next_started_at = std::time::Instant::now();
-    let mut next_args = vec![
-        "work",
-        "--actor-id",
-        connection.actor_id.as_str(),
-        "--session-id",
-        connection.session_id.as_str(),
-    ];
-    if let Some(actor_context) = connection.actor_context.as_deref() {
-        next_args.extend(["--actor-context", actor_context]);
-    }
-    next_args.extend(["core", "next", "--sections", "focus", "--json"]);
-    let next = run_engram_json_command_with_lock_retry(
-        connection,
-        &next_args,
-        timeout,
-        ENGRAM_WORK_BINDING_READER_LABEL,
-    );
-    if trace_boot_recovery {
-        log_engram_boot_recovery_phase(
-            &connection.session_id,
-            "work_core_next",
-            1,
-            next_started_at.elapsed(),
-            &next,
-        );
-    }
-    let next = next?;
-    let Some(work_id) = next
-        .get("focus")
-        .and_then(|focus| focus.get("status"))
-        .and_then(|status| status.get("work"))
-        .and_then(|work| work.get("work_id"))
-        .and_then(Value::as_str)
-    else {
-        return Ok(None);
-    };
-    let focus_started_at = std::time::Instant::now();
-    let mut focus_args = vec![
-        "work",
-        "--actor-id",
-        connection.actor_id.as_str(),
-        "--session-id",
-        connection.session_id.as_str(),
-    ];
-    if let Some(actor_context) = connection.actor_context.as_deref() {
-        focus_args.extend(["--actor-context", actor_context]);
-    }
-    focus_args.extend(["core", "focus", work_id, "--json"]);
-    let focus = run_engram_json_command_with_lock_retry(
-        connection,
-        &focus_args,
-        timeout
-            .checked_sub(next_started_at.elapsed())
-            .filter(|remaining| !remaining.is_zero())
-            .ok_or_else(|| {
-                EngramTransportError::deadline("Work-binding budget exhausted before focus")
-            })?,
-        ENGRAM_WORK_BINDING_READER_LABEL,
-    );
-    if trace_boot_recovery {
-        log_engram_boot_recovery_phase(
-            &connection.session_id,
-            "work_core_focus",
-            1,
-            focus_started_at.elapsed(),
-            &focus,
-        );
-    }
-    let focus = focus?;
-    focus
-        .get("control_binding")
-        .cloned()
-        .map(serde_json::from_value)
-        .transpose()
-        .map_err(|error| {
-            EngramTransportError::protocol(format!("invalid Engram work control_binding: {error}"))
-        })
-}
-
-/// Names the caller in every failure message of a one-shot Engram CLI call.
-const ENGRAM_WORK_BINDING_READER_LABEL: &str = "work-binding reader";
 
 fn run_engram_json_command_with_lock_retry(
     connection: &EngramConnectionConfig,
@@ -2094,18 +2042,21 @@ impl EngramHostAdapter {
     fn read_work_binding(
         &self,
         connection: &EngramConnectionConfig,
+        preference: EngramBindingPreference<'_>,
         timeout: Duration,
     ) -> std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError> {
-        self.transport.read_work_binding(connection, timeout)
+        self.transport
+            .read_work_binding(connection, preference, timeout)
     }
 
     fn read_work_binding_for_boot(
         &self,
         connection: &EngramConnectionConfig,
+        preference: EngramBindingPreference<'_>,
         timeout: Duration,
     ) -> std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError> {
         self.transport
-            .read_work_binding_for_boot(connection, timeout)
+            .read_work_binding_for_boot(connection, preference, timeout)
     }
 
     fn shutdown_session(&self, session_id: &str) {
@@ -2150,6 +2101,66 @@ struct EngramSessionState {
     /// an unbound session's checkpoints report nothing. In memory only; every
     /// restart rebinds and refreshes it.
     work_binding: Option<EngramControlWorkBinding>,
+    /// The bindings Engram refused as stale for this session, each with when,
+    /// oldest first and bounded (`ENGRAM_REFUSED_WORK_BINDING_LIMIT`). Reads
+    /// leave out every one still within its retry window, so two refused
+    /// claims cannot take turns being sent (`engram_binding_after_refusal`).
+    /// In memory only.
+    refused_work_bindings: Vec<(EngramControlWorkBinding, std::time::Instant)>,
+    /// Rebinds the admission-time work-binding refresh has triggered in this
+    /// process, counted in its log lines so a rebind storm shows. In memory
+    /// only.
+    work_binding_refresh_rebinds: u64,
+    /// A turn has begun since the work binding was last read. Only the
+    /// session's own agent takes or releases its claim, and it acts only
+    /// during a turn, so the admission refresh reads again only then. Set
+    /// when a begin is mirrored; cleared by an accepted bind and by a refresh
+    /// that found the binding unchanged. In memory only: every restart
+    /// rebinds, which reads it.
+    turn_begun_since_binding_read: bool,
+    /// Tests the agent ran during the turn `active_grant_id` mediates, as
+    /// TermAl saw them start and end (`engram_turn_checks.rs`). In memory
+    /// only; cleared when the next grant is mirrored.
+    active_turn_checks: Vec<EngramTurnCheck>,
+    /// Commands running in that turn, so a check knows whether another
+    /// command ran beside it, each with the directory its runtime reported,
+    /// which a repeated start may leave out. In memory only.
+    running_command_keys: BTreeMap<String, Option<String>>,
+    /// The worktrees each running command of the session may write in, by
+    /// its runtime key, `None` for one TermAl could not name
+    /// (`engram_turn_checks.rs`): its reported directory's, or the ones its
+    /// shell may be in. Resolved off the state lock as the command starts,
+    /// so overlap marking under the lock knows where a command writes even
+    /// when that is not the session's workdir. Kept whether or not a turn
+    /// is mediated, until the command ends or the session starts its next
+    /// turn; bounded (`ENGRAM_RUNNING_COMMAND_LIMIT`). In memory only.
+    running_command_worktrees: Vec<(String, Vec<Option<String>>)>,
+    /// The key of the worktree the session's workdir lies in, with the
+    /// workdir it was resolved for (`engram_session_worktree`): resolved off
+    /// the state lock whenever the session reports a command or an edit, so
+    /// overlap marking under the lock knows where the session writes without
+    /// a process-wide cache that other sessions' paths could evict. In memory
+    /// only.
+    workdir_worktree: Option<(String, String)>,
+    /// Capture workers of the session's checks running now (source snapshots
+    /// and toolchain probes, `EngramCapture::spawn`), counted by each worker
+    /// until it finishes, whether or not its check is still kept. A new check
+    /// starts only while fewer than `ENGRAM_CAPTURE_WORKER_LIMIT` run. In
+    /// memory only.
+    capture_workers: Arc<std::sync::atomic::AtomicUsize>,
+    /// Running commands whose check a repeated start invalidated: they
+    /// start no check again until they end, since a new one would begin
+    /// its record after writes the old one saw. In memory only; cleared with
+    /// `running_command_keys`.
+    withheld_command_keys: BTreeSet<String>,
+    /// The place in the turn the next check takes, so check ids stay unique
+    /// after a check is dropped. Reset with `active_turn_checks`.
+    next_turn_check_sequence: usize,
+    /// Where the shell of the session's runtime is presumed to be, for
+    /// commands whose runtime reports no directory (Claude's shell keeps a
+    /// `cd`), after a command moved it (`EngramShellDirectory`). In memory
+    /// only; kept across turns, as the shell is.
+    shell_directory: Option<EngramShellDirectory>,
     active_grant_id: Option<String>,
     /// The intent fingerprint of the turn `active_grant_id` was issued for,
     /// reported as the action fingerprint of the execution observation on
@@ -2164,11 +2175,17 @@ struct EngramSessionState {
     active_turn_start_basis: Option<EngramExecutionSourceBasis>,
     /// What the first closing checkpoint of the named grant reported for its
     /// turn, reused verbatim by every retry of that checkpoint so the
-    /// idempotency key repeats: one observation, or none when the turn
+    /// idempotency key repeats: the turn's observations and the evidence of
+    /// the checks it ran (`engram_turn_report`), or nothing when the turn
     /// changed source under a grant that mediates no local mutation. Keyed
     /// by the grant so a stale report is never replayed under another one.
     /// In memory only, cleared when the next grant is mirrored.
-    active_turn_report: Option<(String, Vec<EngramExecutionObservationInput>)>,
+    active_turn_report: Option<(String, EngramTurnReport)>,
+    /// For the named grant, the report without its checks: the turn's own
+    /// observation alone, which replaces `active_turn_report` once if Engram
+    /// refuses the report the evidence travels in (`engram_turn_report`). In
+    /// memory only, like the report.
+    active_turn_report_fallback: Option<(String, EngramTurnReport)>,
     /// For the named grant, whether the evaluate that issued it requested
     /// `mutate_local`, read from the prepared evaluate when the grant is
     /// mirrored. Engram checks an observation's effect against the grant's
@@ -2233,10 +2250,22 @@ impl Default for EngramSessionState {
             recovered_admission: false,
             routing_token: None,
             work_binding: None,
+            refused_work_bindings: Vec::new(),
+            work_binding_refresh_rebinds: 0,
+            turn_begun_since_binding_read: false,
+            active_turn_checks: Vec::new(),
+            running_command_keys: BTreeMap::new(),
+            running_command_worktrees: Vec::new(),
+            workdir_worktree: None,
+            capture_workers: Arc::default(),
+            withheld_command_keys: BTreeSet::new(),
+            next_turn_check_sequence: 0,
+            shell_directory: None,
             active_grant_id: None,
             active_turn_intent_fingerprint: None,
             active_turn_start_basis: None,
             active_turn_report: None,
+            active_turn_report_fallback: None,
             active_turn_grant_mutates: None,
             uncertain_grant_id: None,
             begins_recorded: true,
@@ -2332,6 +2361,11 @@ struct EngramPendingDispatch {
     /// request, so an abandon that races the in-flight begin knows exactly
     /// which grant Engram may have begun.
     begin_requested: Option<String>,
+    /// The work binding the session was bound with when `evaluated` was
+    /// decided. A begin Engram refuses as `stale_fence` names the grant's
+    /// binding; if the session has been rebound since, that is a race, not a
+    /// refusal of the binding it holds now.
+    evaluated_work_binding: Option<EngramControlWorkBinding>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -2780,6 +2814,10 @@ struct EngramBindingTarget {
     rebind_required: bool,
     circuit_open: bool,
     next_bind_retry_at: Option<std::time::Instant>,
+    /// The binding the admission refresh read and found changed, which the
+    /// rebind it arms binds instead of reading again; `Some(None)` rebinds
+    /// without work. Set only by `refresh_engram_work_binding_off_lock`.
+    refreshed_work_binding: Option<Option<EngramControlWorkBinding>>,
 }
 
 struct EngramBootRecoveryPlan {
@@ -2821,13 +2859,13 @@ impl EngramBindingTarget {
                 routing_token: routing_token.clone(),
                 grant_id: grant_id.clone(),
                 next_intent: EngramNextIntent::Exit,
-                observations: Vec::new(),
+                report: EngramTurnReport::default(),
                 idempotency_key: engram_checkpoint_idempotency_key(
                     format!(
                         "termal-project-reset-checkpoint:{}:{}",
                         self.connection.session_id, grant_id
                     ),
-                    &[],
+                    &EngramTurnReport::default(),
                 ),
             },
             self.settings.call_timeout(),
@@ -3625,7 +3663,7 @@ impl AppState {
         // whether its report needs a fresh basis. Nothing is claimed yet, so
         // the bounded basis capture that follows runs outside the
         // checkpoint_in_progress window that session teardown waits for.
-        let (planned_grant_id, capture_workdir) = {
+        let (planned_grant_id, capture) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let Some((index, grant_id, _)) = Self::engram_checkpoint_grant_locked(
                 &inner,
@@ -3641,16 +3679,31 @@ impl AppState {
                 // capture this attempt could never report.
                 return EngramCheckpointOutcome::Skipped;
             }
-            let capture_workdir =
+            let capture =
                 match engram_turn_report_plan(&inner.sessions[index], &grant_id, turn_outcome) {
-                    EngramTurnReportPlan::Fresh { workdir, .. } => Some(workdir),
+                    EngramTurnReportPlan::Fresh { workdir, .. } => Some((
+                        workdir,
+                        inner.sessions[index].engram.active_turn_checks.clone(),
+                    )),
                     EngramTurnReportPlan::Nothing | EngramTurnReportPlan::Cached(_) => None,
                 };
-            (grant_id, capture_workdir)
+            (grant_id, capture)
         };
-        let end_basis = capture_workdir
-            .as_deref()
-            .and_then(|workdir| engram_execution_source_basis(FsPath::new(workdir)));
+        // The closing basis, and the checks the turn ran with their own
+        // snapshots and toolchain labels, all off the lock. One budget bounds
+        // the three together, so the close that gates the next prompt waits
+        // at most the freeze bound once: what is not ready by then is
+        // withheld or goes unlabelled.
+        let (end_basis, mut resolved_checks) = match capture {
+            Some((workdir, checks)) => {
+                let deadline = std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT;
+                let end_basis = engram_execution_source_basis(FsPath::new(&workdir));
+                let resolved_checks =
+                    engram_resolve_turn_checks(session_id, &planned_grant_id, checks, deadline);
+                (end_basis, resolved_checks)
+            }
+            None => (None, Vec::new()),
+        };
         #[cfg(test)]
         wait_at_test_engram_turn_report_gate(self, session_id);
         // Then, under the lock again: the same conditions must still admit a
@@ -3685,33 +3738,42 @@ impl AppState {
             // attempt captured its basis, and the cache wins so every
             // checkpoint of the grant repeats the first report verbatim.
             let plan = engram_turn_report_plan(&inner.sessions[index], &grant_id, turn_outcome);
-            let observations = match plan {
-                EngramTurnReportPlan::Nothing => Vec::new(),
-                EngramTurnReportPlan::Cached(observations) => observations,
+            let report = match plan {
+                EngramTurnReportPlan::Nothing => EngramTurnReport::default(),
+                EngramTurnReportPlan::Cached(report) => report,
                 EngramTurnReportPlan::Fresh { outcome, .. } => {
                     let mutation_granted = engram_turn_mutation_granted(
                         &inner.sessions[index],
                         &grant_id,
                         target.as_ref(),
                     );
-                    let observations = engram_turn_execution_observation(
+                    engram_merge_live_overlaps(
+                        &inner.sessions[index].engram.active_turn_checks,
+                        &mut resolved_checks,
+                    );
+                    let (report, fallback) = engram_turn_report(
                         &inner.sessions[index],
                         session_id,
                         &grant_id,
                         outcome,
                         mutation_granted,
                         end_basis,
-                    )
-                    .into_iter()
-                    .collect::<Vec<_>>();
-                    inner.sessions[index].engram.active_turn_report =
-                        Some((grant_id.clone(), observations.clone()));
-                    observations
+                        resolved_checks,
+                    );
+                    let engram = &mut inner.sessions[index].engram;
+                    engram.active_turn_report = Some((grant_id.clone(), report.clone()));
+                    engram.active_turn_report_fallback =
+                        fallback.map(|fallback| (grant_id.clone(), fallback));
+                    // The cached report now carries what the checks said;
+                    // kept, an unfinished one would stay open to writes and
+                    // keep other sessions' activity resolving worktrees.
+                    engram.active_turn_checks.clear();
+                    report
                 }
             };
-            (grant_id, target, observations)
+            (grant_id, target, report)
         };
-        let (grant_id, target, observations) = snapshot;
+        let (grant_id, target, report) = snapshot;
         let started_at = std::time::Instant::now();
         let outcome = match target {
             Some(target) => match target.routing_token.as_ref() {
@@ -3723,7 +3785,7 @@ impl AppState {
                             routing_token: routing_token.clone(),
                             grant_id: grant_id.clone(),
                             next_intent,
-                            observations: observations.clone(),
+                            report: report.clone(),
                             idempotency_key: engram_checkpoint_idempotency_key(
                                 format!(
                                     "termal-checkpoint:{}:{}:{}",
@@ -3731,7 +3793,7 @@ impl AppState {
                                     grant_id,
                                     next_intent.as_idempotency_component()
                                 ),
-                                &observations,
+                                &report,
                             ),
                         },
                         target.settings.call_timeout(),
@@ -3769,7 +3831,7 @@ impl AppState {
         }
         if let Err(error) = &outcome
             && error.kind == EngramTransportErrorKind::Remote
-            && !observations.is_empty()
+            && !report.is_empty()
         {
             self.forget_refused_engram_turn_report(session_id, &grant_id, error.code.as_deref());
         }
@@ -3976,6 +4038,10 @@ impl AppState {
         // when the dispatch record is finished, so recovery settles it later.
         let mut uncertain_grant_id: Option<String> = None;
 
+        // The binding the grant being begun was issued under: the evaluate's,
+        // then the re-evaluation's when begin recovery issues another. A stale
+        // refusal of that grant blames it (`note_engram_request_binding_refused`).
+        let mut grant_binding = pending.evaluated_work_binding.clone();
         let (decision, refusal_code, directives, delivered_range, fail_mode) = loop {
             match evaluation {
                 EngramDispatchEvaluation::Grant {
@@ -4127,6 +4193,15 @@ impl AppState {
                                 pending.dispatch_generation,
                             );
                             let reevaluate_target = if code == "stale_fence" {
+                                // Engram refused the binding the grant was
+                                // issued under. When the session has been
+                                // rebound since, the grant raced the rebind:
+                                // evaluating again under the current binding
+                                // settles it, and neither binding is to blame.
+                                self.note_engram_request_binding_refused(
+                                    session_id,
+                                    grant_binding.as_ref(),
+                                );
                                 if self
                                     .retire_queued_engram_evaluation(
                                         session_id,
@@ -4228,6 +4303,9 @@ impl AppState {
                                     .unwrap_or_else(|| reevaluate_target.effects.clone())
                             };
                             let reevaluate_started = std::time::Instant::now();
+                            // The re-evaluation, and any grant it issues, go
+                            // out under the binding the session has now.
+                            grant_binding = self.engram_bound_work_binding(session_id);
                             let mut reevaluated = self
                                 .retire_queued_engram_evaluation(
                                     session_id,
@@ -4322,6 +4400,12 @@ impl AppState {
                                         session_id,
                                         admission_owner.as_ref(),
                                     );
+                                    if directive.code == "stale_fence" {
+                                        self.note_engram_request_binding_refused(
+                                            session_id,
+                                            grant_binding.as_ref(),
+                                        );
+                                    }
                                     if engram_evaluation_refusal_requires_rebind(&directive.code) {
                                         self.mark_queued_engram_rebind_required(
                                             session_id,
@@ -4373,6 +4457,14 @@ impl AppState {
                                 session_id,
                                 pending.dispatch_generation,
                             );
+                            // A second begin refused as stale, after
+                            // recovery: the re-evaluated grant's binding.
+                            if code == "stale_fence" {
+                                self.note_engram_request_binding_refused(
+                                    session_id,
+                                    grant_binding.as_ref(),
+                                );
+                            }
                             if engram_begin_refusal_allows_reevaluation(&code) {
                                 // A second moved-basis refusal is not retried,
                                 // but Engram has still expired that grant.
@@ -4588,10 +4680,10 @@ impl AppState {
                         routing_token: routing_token.clone(),
                         grant_id: grant_id.clone(),
                         next_intent: EngramNextIntent::Exit,
-                        observations: Vec::new(),
+                        report: EngramTurnReport::default(),
                         idempotency_key: engram_checkpoint_idempotency_key(
                             format!("termal-stale-begin-checkpoint:{session_id}:{grant_id}"),
-                            &[],
+                            &EngramTurnReport::default(),
                         ),
                     },
                     target.settings.call_timeout(),
@@ -4846,6 +4938,13 @@ impl AppState {
                 record.engram.active_turn_grant_mutates =
                     engram_prepared_evaluate_requests_mutation(record, released_intent.as_deref())
                         .map(|mutates| (grant_id.clone(), mutates));
+                // The agent may take or release a claim during this turn.
+                record.engram.turn_begun_since_binding_read = true;
+                // The checks of an earlier turn belong to its own report.
+                record.engram.active_turn_checks.clear();
+                record.engram.running_command_keys.clear();
+                record.engram.withheld_command_keys.clear();
+                record.engram.next_turn_check_sequence = 0;
                 if let Some(prepared) = record
                     .queued_prompts
                     .front_mut()
@@ -4858,6 +4957,7 @@ impl AppState {
                 record.engram.active_turn_intent_fingerprint = released_intent;
                 record.engram.active_turn_start_basis = None;
                 record.engram.active_turn_report = None;
+                record.engram.active_turn_report_fallback = None;
                 // A begin recorded as uncertain while it was in flight has
                 // its outcome now: begun and mirrored, so the turn-end
                 // checkpoint closes it like any other.
@@ -5141,6 +5241,7 @@ impl AppState {
             rebind_required: child.engram.rebind_required,
             circuit_open: child.engram.circuit_open,
             next_bind_retry_at: child.engram.next_bind_retry_at,
+            refreshed_work_binding: None,
         }))
     }
 
@@ -5239,6 +5340,7 @@ impl AppState {
             rebind_required: parent.engram.rebind_required,
             circuit_open: parent.engram.circuit_open,
             next_bind_retry_at: parent.engram.next_bind_retry_at,
+            refreshed_work_binding: None,
         }))
     }
 
@@ -5512,7 +5614,7 @@ impl AppState {
                         // accepted it) travels with the checkpoint that now
                         // closes it. After a restart there is none, and the
                         // grant closes bare.
-                        let observations =
+                        let report =
                             self.cached_engram_turn_report(&target.connection.session_id, grant_id);
                         let checkpoint = target
                             .adapter
@@ -5522,13 +5624,13 @@ impl AppState {
                                     routing_token: routing_token.clone(),
                                     grant_id: grant_id.to_owned(),
                                     next_intent: EngramNextIntent::Wait,
-                                    observations: observations.clone(),
+                                    report: report.clone(),
                                     idempotency_key: engram_checkpoint_idempotency_key(
                                         format!(
                                             "termal-restart-checkpoint:{}:{}",
                                             target.connection.session_id, grant_id
                                         ),
-                                        &observations,
+                                        &report,
                                     ),
                                 },
                                 timeout,
@@ -5537,7 +5639,7 @@ impl AppState {
                         // A refused report is dropped before anything else can
                         // end this attempt, a lost queue owner included, so
                         // no later recovery resends it.
-                        if !observations.is_empty()
+                        if !report.is_empty()
                             && let Some(code) = engram_recovery_checkpoint_refusal(&checkpoint)
                         {
                             self.forget_refused_engram_turn_report(
@@ -5670,16 +5772,27 @@ impl AppState {
                     rejected_bind_request.as_ref(),
                 )?
             } else {
+                let (current, refused) =
+                    self.engram_work_binding_preference(&target.connection.session_id);
+                let preference = EngramBindingPreference {
+                    current: current.as_ref(),
+                    refused: &refused,
+                };
                 let work_binding = if trace_boot_recovery {
                     target.adapter.read_work_binding_for_boot(
                         &target.connection,
+                        preference,
                         ENGRAM_WORK_BINDING_COMMAND_TIMEOUT,
                     )
                 } else {
-                    target
-                        .adapter
-                        .read_work_binding(&target.connection, ENGRAM_WORK_BINDING_COMMAND_TIMEOUT)
+                    target.adapter.read_work_binding(
+                        &target.connection,
+                        preference,
+                        ENGRAM_WORK_BINDING_COMMAND_TIMEOUT,
+                    )
                 }?;
+                let work_binding =
+                    self.engram_work_binding_for_bind(&target.connection.session_id, work_binding);
                 EngramControlRequest::SessionBind {
                     external_ref: target.external_ref.clone(),
                     title: target.title.clone(),
@@ -5731,6 +5844,14 @@ impl AppState {
                     attempt,
                     bind_started_at.elapsed(),
                     &result,
+                );
+            }
+            if result.as_ref().is_err_and(engram_error_is_stale_fence)
+                && let EngramControlRequest::SessionBind { work_binding, .. } = &request
+            {
+                self.note_engram_refused_work_binding(
+                    &target.connection.session_id,
+                    work_binding.as_ref(),
                 );
             }
             match result {
@@ -5828,6 +5949,7 @@ impl AppState {
                 EngramControlRequest::SessionBind { work_binding, .. } => work_binding.clone(),
                 _ => None,
             };
+            record.engram.turn_begun_since_binding_read = false;
             // Engram refuses a bind while a grant is begun, so an accepted
             // bind settles any uncertain begin on the old binding, including
             // one a record written before begins were recorded may hide.
@@ -6002,6 +6124,17 @@ impl AppState {
         {
             return Ok(Some(target));
         }
+        // A new admission of a bound session reads its work binding again
+        // (`engram_work_binding_refresh.rs`); a changed one arms the rebind
+        // below. A curable refusal's heal arrives here already asking for a
+        // rebind, which reads the binding itself.
+        if let Some(started_at) = started_at
+            && target.routing_token.is_some()
+            && !target.rebind_required
+            && !target.circuit_open
+        {
+            self.refresh_engram_work_binding_off_lock(&mut target, started_at, owner)?;
+        }
         if target.routing_token.is_none() || target.rebind_required || target.circuit_open {
             if let Some(retry_at) = target.next_bind_retry_at
                 && let Some(remaining) = retry_at.checked_duration_since(std::time::Instant::now())
@@ -6053,6 +6186,7 @@ impl AppState {
                 started_at,
                 awaiting_runtime_stop_resolution: false,
                 begin_requested: None,
+                evaluated_work_binding: None,
             });
         }
         let mut target = match self.ensure_engram_session_bound_with_budget_off_lock(
@@ -6080,6 +6214,7 @@ impl AppState {
                     started_at,
                     awaiting_runtime_stop_resolution: false,
                     begin_requested: None,
+                    evaluated_work_binding: None,
                 });
             }
         };
@@ -6087,6 +6222,11 @@ impl AppState {
         // One rebind-and-re-evaluate per admission, whichever curable refusal
         // (engram_evaluation_refusal_heals_by_rebind) asked for it.
         let mut stale_retry_used = false;
+        // The binding the last evaluate went out under, a stale heal's
+        // included, so a later begin refusal is blamed on the binding the
+        // grant was issued under rather than on one a rebind put in place
+        // after the reply.
+        let mut evaluated_work_binding = None;
         let evaluated = loop {
             let routing_token = target
                 .routing_token
@@ -6157,6 +6297,7 @@ impl AppState {
                     detail: "Engram evaluation no longer owns the queued prompt".to_owned(),
                 };
             }
+            evaluated_work_binding = self.engram_bound_work_binding(&intent.session_id);
             let response = target
                 .adapter
                 .request(&target.connection, &request, timeout)
@@ -6201,6 +6342,12 @@ impl AppState {
                     if engram_evaluation_refusal_heals_by_rebind(&directive, &target.effects)
                         && !stale_retry_used =>
                 {
+                    if directive.code == "stale_fence" {
+                        self.note_engram_request_binding_refused(
+                            &intent.session_id,
+                            evaluated_work_binding.as_ref(),
+                        );
+                    }
                     if let Err(error) = self.retire_queued_engram_evaluation(
                         &intent.session_id,
                         admission_owner.as_ref(),
@@ -6254,6 +6401,12 @@ impl AppState {
                         &intent.session_id,
                         admission_owner.as_ref(),
                     );
+                    if directive.code == "stale_fence" {
+                        self.note_engram_request_binding_refused(
+                            &intent.session_id,
+                            evaluated_work_binding.as_ref(),
+                        );
+                    }
                     if engram_evaluation_refusal_requires_rebind(&directive.code) {
                         self.mark_queued_engram_rebind_required(
                             &intent.session_id,
@@ -6303,6 +6456,7 @@ impl AppState {
             started_at,
             awaiting_runtime_stop_resolution: false,
             begin_requested: None,
+            evaluated_work_binding,
         })
     }
 
@@ -6519,16 +6673,23 @@ fn format_engram_boot_recovery_phase<T>(
     }
 }
 
-fn engram_checkpoint_idempotency_key(
-    base: String,
-    observations: &[EngramExecutionObservationInput],
-) -> String {
-    if observations.is_empty() {
-        return base;
+/// The key folds the report in, so a checkpoint repeats its key exactly when
+/// it repeats its report: the observations as before evidence existed, then
+/// the evidence, when there is any.
+fn engram_checkpoint_idempotency_key(base: String, report: &EngramTurnReport) -> String {
+    let mut key = base;
+    if !report.observations.is_empty() {
+        let encoded = serde_json::to_vec(&report.observations)
+            .expect("Engram execution observation serialization should be infallible");
+        key.push_str(&format!(":observations:{}", sha256_hex(&encoded)));
     }
-    let encoded = serde_json::to_vec(observations)
-        .expect("Engram execution observation serialization should be infallible");
-    format!("{base}:observations:{}", sha256_hex(&encoded))
+    if !report.verification_evidence.is_empty() || !report.environment_evidence.is_empty() {
+        let encoded =
+            serde_json::to_vec(&(&report.verification_evidence, &report.environment_evidence))
+                .expect("Engram evidence serialization should be infallible");
+        key.push_str(&format!(":evidence:{}", sha256_hex(&encoded)));
+    }
+    key
 }
 
 fn engram_bind_retry_delay(failure_count: u8) -> Duration {

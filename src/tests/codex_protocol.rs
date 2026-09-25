@@ -987,6 +987,124 @@ fn codex_app_server_web_search_item_records_command_lifecycle() {
     );
 }
 
+// pins that both Codex paths that finish a `commandExecution` item hand the
+// recorder the item's own exit status (the typed v2 `item/completed` and the
+// shared runtime's legacy event mirror), that `item/started` hands it the
+// item's command line and `cwd`, and that the REPL's recorder wrapper forwards
+// a start, a later description, an end and an abandonment instead of falling
+// back to the trait defaults.
+// Engram test evidence relies on these; the exit mapping
+// itself is tested with the evidence. guards against a handler or wrapper
+// that stops passing the end through while every mapping test stays green.
+#[test]
+fn codex_command_items_report_their_exit_status_on_every_path() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Codex);
+    let mut recorder = TestRecorder::default();
+    let mut turn_state = CodexTurnState::default();
+    let item = |id: &str, exit_code: i64| {
+        json!({
+            "id": id,
+            "type": "commandExecution",
+            "command": "cargo test",
+            "status": "completed",
+            "exitCode": exit_code,
+            "aggregatedOutput": "test result: ok. 3 passed"
+        })
+    };
+
+    let mut started = item("typed", 0);
+    started["status"] = json!("inProgress");
+    started["cwd"] = json!("/repo/ui");
+    handle_codex_app_server_item_started(&started, &mut recorder).unwrap();
+    handle_codex_app_server_item_completed(
+        &item("typed", 0),
+        &state,
+        &session_id,
+        &mut turn_state,
+        &mut recorder,
+    )
+    .unwrap();
+    // A declined command never ran: its check is abandoned before the end is
+    // recorded.
+    let mut declined = item("declined", 0);
+    declined["status"] = json!("declined");
+    declined
+        .as_object_mut()
+        .expect("an item")
+        .remove("exitCode");
+    handle_codex_app_server_item_completed(
+        &declined,
+        &state,
+        &session_id,
+        &mut turn_state,
+        &mut recorder,
+    )
+    .unwrap();
+    let mut legacy = item("legacy", 101);
+    legacy["type"] = json!("CommandExecution");
+    handle_shared_codex_event_item_completed(
+        &json!({"params": {"msg": {"turn_id": "turn-1", "item": legacy}}}),
+        &state,
+        &session_id,
+        Some("turn-1"),
+        None,
+        &mut turn_state,
+        &mut recorder,
+    )
+    .unwrap();
+    {
+        let mut wrapped = DynTurnRecorderRef::new(&mut recorder);
+        wrapped
+            .command_started_in("repl", "cargo test", Some("cargo test"), Some("/repo"))
+            .unwrap();
+        wrapped
+            .command_described("repl", None, Some("/repo/ui"))
+            .unwrap();
+        wrapped
+            .command_completed_with_exit(
+                "repl",
+                "cargo test",
+                "",
+                CommandStatus::Error,
+                EngramCommandExit::Code(2),
+            )
+            .unwrap();
+        wrapped.command_abandoned("repl-denied").unwrap();
+    }
+
+    assert_eq!(
+        recorder.command_exits,
+        [
+            ("typed".to_owned(), EngramCommandExit::Code(0)),
+            ("declined".to_owned(), EngramCommandExit::Unknown),
+            ("legacy".to_owned(), EngramCommandExit::Code(101)),
+            ("repl".to_owned(), EngramCommandExit::Code(2)),
+        ]
+    );
+    assert_eq!(recorder.abandoned_commands, ["declined", "repl-denied"]);
+    assert_eq!(
+        recorder.command_starts,
+        [
+            (
+                "typed".to_owned(),
+                Some("cargo test".to_owned()),
+                Some("/repo/ui".to_owned())
+            ),
+            (
+                "repl".to_owned(),
+                Some("cargo test".to_owned()),
+                Some("/repo".to_owned())
+            ),
+        ],
+        "the command line and the directory a command runs in reach the recorder"
+    );
+    assert_eq!(
+        recorder.command_descriptions,
+        [("repl".to_owned(), None, Some("/repo/ui".to_owned()))]
+    );
+}
+
 // pins that a completed `fileChange` item fans out into one diff entry
 // per change, with the correct `ChangeType` (`Create` vs `Edit`), a
 // human-readable title ("Created <basename>" / "Updated <basename>"),

@@ -48,9 +48,11 @@ impl EngramControlTransport for LostFollowupAdmissionTransport {
     fn read_work_binding(
         &self,
         connection: &EngramConnectionConfig,
+        preference: EngramBindingPreference<'_>,
         timeout: Duration,
     ) -> std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError> {
-        self.inner.read_work_binding(connection, timeout)
+        self.inner
+            .read_work_binding(connection, preference, timeout)
     }
 
     fn shutdown_session(&self, session_id: &str) {

@@ -42,6 +42,9 @@ struct ClaudeToolUse {
     file_path: Option<String>,
     name: String,
     subagent_type: Option<String>,
+    /// A Bash call's `run_in_background`: its result marks the launch, not
+    /// the command's end.
+    run_in_background: bool,
 }
 
 /// Represents the Claude tool permission request payload.
@@ -1756,6 +1759,10 @@ fn register_claude_tool_use(
         })
         .and_then(Value::as_str)
         .map(str::to_owned);
+    let run_in_background = input
+        .and_then(|value| value.get("run_in_background"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
 
     state.pending_tools.insert(
         tool_id.to_owned(),
@@ -1765,6 +1772,7 @@ fn register_claude_tool_use(
             file_path,
             name: name.to_owned(),
             subagent_type: subagent_type.clone(),
+            run_in_background,
         },
     );
 
@@ -1774,7 +1782,9 @@ fn register_claude_tool_use(
                 .as_deref()
                 .or(description.as_deref())
                 .unwrap_or("Bash");
-            recorder.command_started(tool_id, command_label)?;
+            // Only the command line itself says what runs; the description
+            // shown in its place is prose.
+            recorder.command_started_in(tool_id, command_label, command.as_deref(), None)?;
         }
         "Task" => {
             if state.parallel_agent_group_key.is_none() {
@@ -2006,6 +2016,7 @@ fn handle_claude_bash_result(
 ) -> Result<()> {
     if is_error && is_permission_denial(detail) {
         state.permission_denied_this_turn = true;
+        recorder.command_abandoned(tool_use_id)?;
         record_claude_approval(
             state,
             recorder,
@@ -2049,7 +2060,9 @@ fn handle_claude_bash_result(
         CommandStatus::Success
     };
     let command = tool_use.command.as_deref().unwrap_or("Bash");
-    recorder.command_completed(tool_use_id, command, output.trim_end(), status)
+    let exit =
+        engram_claude_command_exit(is_error, interrupted, tool_use.run_in_background, detail);
+    recorder.command_completed_with_exit(tool_use_id, command, output.trim_end(), status, exit)
 }
 
 /// Handles Claude file result.
