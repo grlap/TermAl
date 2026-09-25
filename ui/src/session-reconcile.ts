@@ -338,7 +338,8 @@ function reconcileSession(
   if (
     sameSessionSummary(previous, nextSession) &&
     messages === previous.messages &&
-    pendingPrompts === previous.pendingPrompts
+    pendingPrompts === previous.pendingPrompts &&
+    (nextSession.messagesLoaded !== true || previous.messagesLoaded === true)
   ) {
     return previous;
   }

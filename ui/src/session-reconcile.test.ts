@@ -359,6 +359,32 @@ describe("reconcileSessions", () => {
     expect(merged[0].messages).toEqual(next[0].messages);
   });
 
+  it.each([0, 1])("preserves hydration completion with %s unchanged messages", (messageCount) => {
+    const previous = makeSession("session-a", {
+      messages: messageCount === 0 ? [] : [{
+        id: "message-a",
+        type: "text",
+        author: "assistant",
+        timestamp: "10:00",
+        text: "Unchanged",
+      }],
+      messagesLoaded: false,
+      messageCount,
+      sessionMutationStamp: 4,
+    });
+    const hydrated = { ...previous, messagesLoaded: true };
+
+    const merged = reconcileSingleSession(previous, hydrated, {
+      disableMutationStampFastPath: true,
+    });
+
+    expect(merged.messages).toBe(previous.messages);
+    expect(merged.messagesLoaded).toBe(true);
+    expect(reconcileSingleSession(merged, { ...hydrated }, {
+      disableMutationStampFastPath: true,
+    })).toBe(merged);
+  });
+
   it("preserves delegated child ownership through targeted hydration reconcile", () => {
     const previous = makeSession("child-session", {
       parentDelegationId: "delegation-1",
