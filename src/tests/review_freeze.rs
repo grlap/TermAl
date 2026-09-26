@@ -993,6 +993,76 @@ fn review_freeze_rejects_manifest_and_parent_literal_mismatch() {
     );
 }
 
+/// Removes the directories it owns when dropped, on success and on an
+/// assertion's unwind alike, so a direct `cargo test` leaves nothing behind.
+struct RemoveDirsOnDrop(Vec<PathBuf>);
+
+impl Drop for RemoveDirsOnDrop {
+    fn drop(&mut self) {
+        for dir in &self.0 {
+            let _ = fs::remove_dir_all(dir);
+        }
+    }
+}
+
+#[test]
+fn review_freeze_accepts_a_manifest_in_the_linked_worktrees_own_git_dir_only() {
+    let (main_root, _) = fixture();
+    let mut cleanup = RemoveDirsOnDrop(vec![main_root.clone()]);
+    let mut add_worktree = |label: &str| {
+        let path = test_temp_dir().join(format!("review-freeze-{label}-{}", Uuid::new_v4()));
+        cleanup.0.push(path.clone());
+        run_git_test_command(
+            &main_root,
+            &["worktree", "add", "--detach", &path.to_string_lossy()],
+        );
+        path
+    };
+    let linked = add_worktree("linked");
+    let sibling = add_worktree("sibling");
+    let git = ReviewFreezeGit::new(&linked).unwrap();
+    let expected = capture_review_freeze(&git).unwrap();
+    let body = serde_json::to_vec(&json!({
+        "schemaVersion": 1, "root": fs::canonicalize(&linked).unwrap(), "fingerprint": expected
+    }))
+    .unwrap();
+    let check_at = |path: &str| {
+        fs::write(path, &body).unwrap();
+        check_review_freeze(
+            &linked,
+            &ReviewFreezeRequest {
+                manifest_path: path.to_owned(),
+                expected_fingerprint: expected.clone(),
+            },
+        )
+    };
+    let git_output = |root: &FsPath, args: &[&str]| run_git_test_command_output(root, args);
+
+    // The path Engram's /review-changes resolves for a linked worktree lies
+    // outside its root, in its own Git directory.
+    let own = git_output(
+        &linked,
+        &["rev-parse", "--path-format=absolute", "--git-path", "engram-review-freeze.json"],
+    );
+    assert!(!fs::canonicalize(FsPath::new(&own).parent().unwrap())
+        .unwrap()
+        .starts_with(fs::canonicalize(&linked).unwrap()));
+    assert_eq!(check_at(&own).unwrap(), expected);
+
+    // For a linked worktree's review: not the shared common directory, nor
+    // another worktree's Git directory.
+    let common = git_output(
+        &linked,
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    );
+    let sibling_git = git_output(&sibling, &["rev-parse", "--absolute-git-dir"]);
+    for dir in [common, sibling_git] {
+        let path = FsPath::new(&dir).join("engram-review-freeze.json");
+        let error = check_at(&path.to_string_lossy()).unwrap_err().to_string();
+        assert!(error.contains("manifest must be inside"), "{dir}: {error}");
+    }
+}
+
 #[test]
 fn review_freeze_never_runs_git_filters_or_repository_node() {
     let (root, request) = fixture();

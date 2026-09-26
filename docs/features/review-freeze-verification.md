@@ -23,8 +23,18 @@ parent's frozen task context, not from the manifest at verification time.
 The backend derives the worktree from the current linked child and checks the
 attempt again after completion. Caller-supplied cwd, commands, executables,
 environment, and script text are rejected. The manifest must resolve inside
-the admitted worktree. Linked-worktree manifests outside that root are not
-supported by this initial profile.
+the admitted worktree, or inside that worktree's own Git directory
+(`git rev-parse --absolute-git-dir`, read with the checker's pinned Git
+configuration). That second place is where `git rev-parse --git-path
+engram-review-freeze.json` resolves: `<root>/.git` for a main worktree, which
+is already inside the root, and `<common>/worktrees/<name>` for a linked one,
+which is not. It keeps the manifest out of review input. For a linked
+worktree's review, the shared common Git directory and another worktree's Git
+directory are refused. For a main worktree's review they lie under the root
+and are accepted, as before. The Git directory is the one the worktree's
+`.git` file names, which the checker trusts as every Git command does. Where
+the manifest lives never decides the result: its fingerprint must equal the
+parent's independently supplied literal.
 The delegation cwd must be the Git worktree root, not a repository subdirectory.
 Delegate at the root for this capability; a subdirectory delegation cannot
 successfully use this initial freeze profile.

@@ -91,6 +91,14 @@ impl ReviewFreezeGit {
         Ok(git)
     }
 
+    /// This worktree's own Git directory, canonical: `<root>/.git` for a main
+    /// worktree, `<common>/worktrees/<name>` for a linked one. Read with the
+    /// same pinned configuration and shared deadline as every other call.
+    fn own_git_dir(&self) -> Result<PathBuf> {
+        let dir = self.run(&["rev-parse", "--absolute-git-dir"], false)?;
+        Ok(fs::canonicalize(String::from_utf8(dir)?.trim())?)
+    }
+
     fn command(&self, args: &[&str]) -> Command {
         let mut command = Command::new(&self.binary);
         for (name, _) in std::env::vars_os() {
@@ -390,8 +398,15 @@ fn check_review_freeze(cwd: &FsPath, request: &ReviewFreezeRequest) -> Result<St
         git.root.join(manifest_path)
     };
     let manifest_path = fs::canonicalize(manifest_path)?;
-    if !manifest_path.starts_with(&git.root) {
-        bail!("manifest must be inside the review worktree");
+    // The worktree's own Git directory holds a manifest outside review input:
+    // `git rev-parse --git-path` resolves there, which for a linked worktree
+    // lies outside its root (<common>/worktrees/<name>). This allowance adds
+    // only that directory, never the shared common directory or another
+    // worktree's; for a main worktree those lie under the root anyway. It
+    // trusts the worktree's `.git` file, as every Git call here does; a
+    // manifest anywhere must still match the parent's independent literal.
+    if !manifest_path.starts_with(&git.root) && !manifest_path.starts_with(git.own_git_dir()?) {
+        bail!("manifest must be inside the review worktree or its own Git directory");
     }
     let manifest_bytes = review_freeze_file(&manifest_path, 1024 * 1024)?;
     let manifest: Value = serde_json::from_slice(&manifest_bytes)?;
