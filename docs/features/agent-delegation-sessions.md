@@ -19,7 +19,7 @@ Related:
 - [Concurrent Session Link Cards](./concurrent-session-link-cards.md)
 - [Diff Review Workflow](./diff-review-workflow.md)
 - [Code Navigation MCP](./code-navigation-mcp.md)
-- [Test Runs](./test-runs.md) — read-only launcher visibility; notification targets are not delegation waits.
+- [Test Runs](./test-runs.md) — launcher visibility, the test-run card and run waits (`termal_resume_after_test_runs`), which mirror delegation waits with their own record type; notification targets are not waits.
 
 ## Completed Codex child thread lifecycle
 

@@ -15,6 +15,9 @@ const TEST_RUN_ACTIVE_RESCAN_INTERVAL: Duration = Duration::from_secs(2);
 const TEST_RUN_IDLE_RESCAN_INTERVAL: Duration = Duration::from_secs(10);
 /// Terminal runs kept in the index per project, newest first.
 const TEST_RUN_TERMINAL_RUNS_PER_PROJECT: usize = 50;
+/// Reads after a liveness check, per run per rescan. A run hands over from its
+/// creator to at most one worker, so two reads settle it; one more is slack.
+const TEST_RUN_READS_AFTER_CHECK_MAX: usize = 3;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -389,14 +392,39 @@ impl AppState {
                         None => continue,
                     },
                 };
-                parsed.insert(run_dir, disk.clone());
+                parsed.insert(run_dir.clone(), disk.clone());
                 // Run ids are random, so a repeat means a copied directory. The
                 // first in sorted order wins on every scan; nothing is logged,
                 // since the rescan would repeat the line every few seconds.
                 if !seen.insert(disk.run_id.clone()) {
                     continue;
                 }
-                let state = disk.state(writer_may_be_alive);
+                let mut disk = disk;
+                let mut state = disk.state(writer_may_be_alive);
+                // Unknown from results read before the check that found the
+                // process gone: the launcher may have written its terminal
+                // results and exited in between. Read them once more, now that
+                // the check is behind us, and judge from that read. A read that
+                // names another responsible process (a detached run's creator
+                // handing over to its worker) was itself made before that
+                // process's check, so it is judged the same way again.
+                for _ in 0..TEST_RUN_READS_AFTER_CHECK_MAX {
+                    if !disk.unknown_needs_read_after_check(state) {
+                        break;
+                    }
+                    let checked = disk.responsible_pid().map(|(pid, _)| pid);
+                    let Some(mut fresh) = TestRunDisk::read(&run_dir, Some(disk.as_ref()))
+                        .filter(|fresh| fresh.read_failures == 0)
+                    else {
+                        // The read after the check failed; the verdict stays
+                        // this rescan's, and the next rescan reads again.
+                        break;
+                    };
+                    fresh.confirmed_unknown = Some(checked);
+                    state = fresh.state(writer_may_be_alive);
+                    disk = Arc::new(fresh);
+                    parsed.insert(run_dir.clone(), disk.clone());
+                }
                 let project_id =
                     test_run_project_id(&test_run_path_key(&disk.worktree), &projects, common_key);
                 scanned.push(TestRunScanned {

@@ -1647,3 +1647,136 @@ fn a_write_time_too_late_for_the_margin_proves_nothing() {
         &created
     ));
 }
+
+#[test]
+fn a_launcher_that_finishes_between_the_read_and_the_liveness_check_reads_its_verdict() {
+    // The rescan reads results.json, then checks the recorded pid. A launcher
+    // that writes its terminal results and exits in between leaves a read
+    // that predates the verdict and a process that is gone. The run must read
+    // `passed`, never `unknown` for a rescan.
+    let fixture = RunFixture::new("finish-race");
+    let run_dir = write_run(
+        &fixture.runs_dir(),
+        "test-finishing",
+        full_request(&fixture.root, "2026-09-25T10:00:00.000Z"),
+        Some(running_results(Some(4242))),
+    );
+    let results_path = run_dir.join("results.json");
+    let finish_then_exit = move |_: u32, _: Option<std::time::SystemTime>| {
+        let mut results = passed_results();
+        results["runId"] = json!("test-finishing");
+        fs::write(&results_path, results.to_string()).expect("terminal results should write");
+        false
+    };
+
+    fixture
+        .state
+        .refresh_test_runs_with(&finish_then_exit, &|event| {
+            fixture.state.publish_delta(event)
+        });
+
+    assert_eq!(
+        fixture.summary("test-finishing").state,
+        TestRunState::Passed
+    );
+}
+
+#[test]
+fn a_detached_run_that_hands_over_and_finishes_between_checks_reads_its_verdict() {
+    // A detached run: its creator (pid 100) leaves pid-less results, its
+    // worker writes its own pid (200), then its terminal results, and exits.
+    // Each step lands between a read and the next liveness check, so the read
+    // that finds the worker was made before the worker's own check.
+    let fixture = RunFixture::new("handoff-race");
+    let mut request = full_request(&fixture.root, "2026-09-25T10:00:00.000Z");
+    request["creatorPid"] = json!(100);
+    let run_dir = write_run(
+        &fixture.runs_dir(),
+        "test-handoff",
+        request,
+        Some(running_results(None)),
+    );
+    let results_path = run_dir.join("results.json");
+    let hand_over_then_finish = move |pid: u32, _: Option<std::time::SystemTime>| {
+        let mut results = if pid == 100 {
+            running_results(Some(200))
+        } else {
+            passed_results()
+        };
+        results["runId"] = json!("test-handoff");
+        fs::write(&results_path, results.to_string()).expect("results should write");
+        false
+    };
+
+    fixture
+        .state
+        .refresh_test_runs_with(&hand_over_then_finish, &|event| {
+            fixture.state.publish_delta(event)
+        });
+
+    assert_eq!(fixture.summary("test-handoff").state, TestRunState::Passed);
+}
+
+#[test]
+fn a_failed_read_after_the_check_leaves_this_rescan_unknown_and_the_next_one_reads_again() {
+    let fixture = RunFixture::new("reread-fails");
+    let run_dir = write_run(
+        &fixture.runs_dir(),
+        "test-reread-fails",
+        full_request(&fixture.root, "2026-09-25T10:00:00.000Z"),
+        Some(running_results(Some(4242))),
+    );
+    let results_path = run_dir.join("results.json");
+    let corrupt_then_gone = move |_: u32, _: Option<std::time::SystemTime>| {
+        fs::write(&results_path, "{ not json").expect("results should write");
+        false
+    };
+    fixture
+        .state
+        .refresh_test_runs_with(&corrupt_then_gone, &|event| {
+            fixture.state.publish_delta(event)
+        });
+    assert_eq!(
+        fixture.summary("test-reread-fails").state,
+        TestRunState::Unknown
+    );
+
+    let mut results = passed_results();
+    results["runId"] = json!("test-reread-fails");
+    fs::write(run_dir.join("results.json"), results.to_string()).expect("results should write");
+    fixture.refresh(&[]);
+    assert_eq!(
+        fixture.summary("test-reread-fails").state,
+        TestRunState::Passed
+    );
+}
+
+#[test]
+fn an_abandoned_run_is_read_again_once_not_on_every_rescan() {
+    // The read after the liveness check is final for the process it found
+    // gone, so an abandoned run whose files do not change costs one liveness
+    // check per rescan, not another read.
+    let fixture = RunFixture::new("abandoned");
+    write_run(
+        &fixture.runs_dir(),
+        "test-abandoned",
+        full_request(&fixture.root, "2026-09-25T10:00:00.000Z"),
+        Some(running_results(Some(4242))),
+    );
+    let checks = std::rc::Rc::new(std::cell::Cell::new(0));
+    let counted = checks.clone();
+    let gone = move |_: u32, _: Option<std::time::SystemTime>| {
+        counted.set(counted.get() + 1);
+        false
+    };
+    let publish = |event: &DeltaEvent| fixture.state.publish_delta(event);
+
+    fixture.state.refresh_test_runs_with(&gone, &publish);
+    assert_eq!(fixture.summary("test-abandoned").state, TestRunState::Unknown);
+    assert_eq!(checks.get(), 2, "first rescan: a check, a read after it, a check");
+
+    checks.set(0);
+    fixture.state.refresh_test_runs_with(&gone, &publish);
+    assert_eq!(fixture.summary("test-abandoned").state, TestRunState::Unknown);
+    assert_eq!(checks.get(), 1, "unchanged files: one check and no further read");
+}

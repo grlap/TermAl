@@ -329,6 +329,11 @@ struct TestRunDisk {
     /// next rescan reads the files again whatever their stamps, so a failed
     /// read is never cached as if it were an answer.
     read_failures: u8,
+    /// Set when these results were read again after the liveness check found
+    /// their responsible process gone (`Some(pid)`), or found no pid at all
+    /// (`None`). Such a read is final for that process, so an unchanged run
+    /// is not read again on every rescan.
+    confirmed_unknown: Option<Option<u32>>,
 }
 
 impl TestRunDisk {
@@ -499,7 +504,20 @@ impl TestRunDisk {
             results,
             started_at,
             read_failures,
+            confirmed_unknown: None,
         })
+    }
+
+    /// Whether an `unknown` verdict may rest on results read before the
+    /// liveness check. A launcher writes its terminal results just before it
+    /// exits, so results read before the check that found its process gone
+    /// (or found no pid) can predate that write. Such a verdict needs one more
+    /// read after the check, unless this read already was one for the same
+    /// process.
+    fn unknown_needs_read_after_check(&self, state: TestRunState) -> bool {
+        state == TestRunState::Unknown
+            && self.results.is_some()
+            && self.confirmed_unknown != Some(self.responsible_pid().map(|(pid, _)| pid))
     }
 
     /// Whether `results.json` is terminal, exactly as the launcher's
