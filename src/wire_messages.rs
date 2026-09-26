@@ -367,6 +367,17 @@ enum Message {
         author: Author,
         agents: Vec<ParallelAgentProgress>,
     },
+    /// A test run as a specialized tool execution, created and updated in
+    /// place by the host from the test-run index (`test_run_cards.rs`).
+    #[serde(rename = "testRun")]
+    TestRun {
+        id: String,
+        timestamp: String,
+        author: Author,
+        #[serde(rename = "schemaVersion")]
+        schema_version: u32,
+        run: TestRunCardSnapshot,
+    },
     #[serde(rename = "fileChanges")]
     FileChanges {
         id: String,
@@ -481,6 +492,7 @@ impl Message {
             | Self::Markdown { id, .. }
             | Self::SubagentResult { id, .. }
             | Self::ParallelAgents { id, .. }
+            | Self::TestRun { id, .. }
             | Self::FileChanges { id, .. }
             | Self::EngramControl { id, .. }
             | Self::Approval { id, .. }
@@ -607,6 +619,7 @@ impl Message {
                 card.stage, card.decision
             ))),
             Self::ParallelAgents { agents, .. } => Some(parallel_agents_preview_text(agents)),
+            Self::TestRun { run, .. } => Some(test_run_card_preview_text(run)),
             Self::Command { .. } => None,
         }
     }

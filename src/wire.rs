@@ -1056,6 +1056,9 @@ enum SessionStatus {
 enum Author {
     You,
     Assistant,
+    /// Written by TermAl itself, not by the user or the agent: the test-run
+    /// card (`test_run_cards.rs`).
+    System,
 }
 
 /// Enumerates command states.
@@ -3067,6 +3070,19 @@ enum DeltaEvent {
             skip_serializing_if = "Option::is_none"
         )]
         session_mutation_stamp: Option<u64>,
+    },
+    /// A test-run card updated in place from the index. `run` replaces the
+    /// snapshot whole; the message's other fields never change.
+    TestRunCardUpdated {
+        revision: u64,
+        session_id: String,
+        message_id: String,
+        message_index: usize,
+        message_count: u32,
+        preview: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session_mutation_stamp: Option<u64>,
+        run: TestRunCardSnapshot,
     },
     ConversationMarkerCreated {
         revision: u64,

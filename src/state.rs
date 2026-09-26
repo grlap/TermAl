@@ -1436,6 +1436,13 @@ struct StateInner {
     /// The test launcher's runs, mirrored from their run directories by the
     /// rescan in `test_runs.rs`. Memory only: disk stays the record.
     test_runs: TestRunIndex,
+    /// When this host first ran with test-run cards; runs that started
+    /// earlier never get one (`test_run_cards.rs`). Persisted, never derived
+    /// from "now" again once stored.
+    test_run_cards_epoch: Option<String>,
+    /// Each run's card, by run id: the owner session and message. Persisted;
+    /// the transcript stays the render source.
+    test_run_cards: BTreeMap<String, TestRunCardRef>,
     /// Durable delegation rows isolated during startup validation. See
     /// `quarantined_persisted_session_ids` for the preservation contract.
     quarantined_persisted_delegation_ids: BTreeSet<String>,
@@ -1499,6 +1506,8 @@ impl StateInner {
             delegation_followup_admissions: HashMap::new(),
             acceptance_evaluation_submissions_in_flight: HashSet::new(),
             test_runs: TestRunIndex::default(),
+            test_run_cards_epoch: None,
+            test_run_cards: BTreeMap::new(),
             quarantined_persisted_delegation_ids: BTreeSet::new(),
             delegation_waits: Vec::new(),
             delegation_mutation_stamps: BTreeMap::new(),

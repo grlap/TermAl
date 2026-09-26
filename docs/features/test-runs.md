@@ -95,9 +95,11 @@ Remote projects are not indexed in slice 1.
 - A directory without a readable `request.json` is skipped.
 - The index keeps every non-terminal run, plus the newest 50 terminal runs per
   project. From slice 2 it also keeps any terminal run that a pending wait
-  names, or that a card which has not yet stored its terminal snapshot names.
-  So a long run that finishes behind 50 newer ones still settles its wait
-  with its verdict, not as `UNKNOWN (not indexed)`.
+  names, or that a card which has not yet stored its terminal snapshot names,
+  as long as that card is in its session's in-memory window (a card outside
+  it cannot be updated yet, see Card updates). So a long run that finishes
+  behind 50 newer ones still settles its wait with its verdict, not as
+  `UNKNOWN (not indexed)`.
 
 ### State
 
@@ -375,11 +377,12 @@ the execution.
 ### When a card is created
 
 - On its first boot with slice 2, TermAl stores `testRunCardsEpoch`, the
-  current time, in persisted state. That state is persisted before the first
-  rescan of the boot publishes any run. The epoch is never derived from "now"
-  again.
+  current time, in persisted state. No card is created until that state is
+  durable (see below). The epoch is never derived from "now" again.
 - A card is created when the index sees a run that meets all of these:
-  - its `ownerSessionId` resolves to a session that is not archived;
+  - its `ownerSessionId` resolves to a visible local session. TermAl sessions
+    have no archived state (a Codex thread's `archived` is thread state), so
+    this excludes internal sessions and, below, remote proxies;
   - its `request.json` `started` is at or after the epoch;
   - it is non-terminal at first sight, or it started at most 10 minutes
     before first sight. The second case catches a short focused run that
@@ -389,10 +392,36 @@ the execution.
   down still gets its card if it started within 10 minutes of that boot's
   first sight. A longer one does not; it stays in the tab.
 - A card is keyed by (owner session, runId). Persisted state holds a
-  `testRunCards` map, from runId to `{ sessionId, messageId }`, the way
-  delegation records point at their card message. The transcript stays the
-  render source. Boot rescans, index churn and ageing-out never create a
-  second card, and boot never scans transcripts to find cards.
+  `testRunCards` map, from runId to `{ sessionId, messageId, terminal,
+  failureDetailVersion? }`, the way delegation records point at their card
+  message. `terminal` says whether the stored snapshot is terminal, so
+  non-terminal cards are found without reading transcripts, and
+  `failureDetailVersion` is the `detailVersion` the stored failure excerpt came
+  from. The transcript stays the render source. Boot rescans, index churn and
+  ageing-out never create a second card, and boot never scans transcripts to
+  find cards.
+  - An entry is dropped when its session or message is gone, and when its
+    card is terminal and its run has left the index, unless the run started
+    within the 10-minute window, where a returning run would still qualify
+    for a card. So the map stays bounded by the index.
+  - The map is written with the metadata, but a card's transcript row can
+    reach disk one persist tick later. After a restart the transcript is the
+    authority: each entry's `terminal` and `failureDetailVersion` are reset
+    at load and re-derived by the first scan, which checks every entry and
+    reads every failed carded run's excerpt again.
+- The epoch must be durable before any card is created, so a restart can
+  never store a later epoch under a card already shown. An epoch loaded from
+  disk is durable. A new one is written through a persist fence that the
+  rescan thread checks on each tick without waiting: until it resolves,
+  rescans keep publishing runs and create no card, and a slow or failing
+  persist never holds up the index. A failed fence is retried with the same
+  epoch. On the scan after it becomes durable, every indexed run without a
+  card is evaluated once, so a short run that started after the epoch and
+  ended in that window still gets its card.
+- A remote proxy's transcript belongs to its remote, so a run owned by one
+  gets no local card.
+- The card's `author` is `system`, a new author value: TermAl wrote it, not
+  the user or the agent.
 - Runs from before the epoch never get a card; they stay in the Test Runs tab.
 - Only the owner gets a card. A `--notify` target alone gets none, because a
   notification is not a registered wait. A run started outside TermAl, with a
@@ -400,6 +429,24 @@ the execution.
 - The card is appended to the end of the owner's transcript when TermAl first
   sees the run, like a delegation card at spawn. It keeps its id and position
   and is updated in place.
+
+### Rollout: the UI first
+
+The served UI (`ui/dist`) is built and installed separately from the
+backend, and a UI that predates the card does not handle it:
+- its message height estimate has no case for `testRun` and no fallback, so a
+  session holding a card likely gets a broken transcript layout;
+- every `testRunCardUpdated` is an unknown delta to it, which forces a full
+  state resync.
+
+So a UI with the card renderer (tm-ncc6.13.3) must be built and installed
+before TermAl restarts onto a backend that creates cards. A card UI works
+with an older backend, which simply sends no cards.
+
+The card backend landed switched off: `TEST_RUN_CARDS_SHIPPED` in
+`src/test_runs.rs` keeps the rescan thread from starting the card epoch, so
+no card is created and the epoch is first stored when cards go live. The
+switch is turned on together with the card UI.
 
 ### Card rendering
 
@@ -527,6 +574,14 @@ means "not known", never `processGone` or `noPid`.
   and its `detailVersion` differs from the one the stored excerpt came from.
   The card keeps its last stored snapshot, so the run's evidence can later
   leave the index or be pruned without emptying it.
+  - The version recorded is the digest of the bytes the excerpt was read
+    from.
+  - A read that fails (a replacement race, or an oversized file) is never
+    recorded as "no failure": the card keeps its previous excerpt, and the
+    read is retried on the next rescan even if the run's summary has not
+    changed.
+  - A read at a new version is recorded even when the card itself does not
+    change, so it is not read again on every rescan.
 - **Delta.**
   - The card is created with the existing `messageCreated`.
   - Updates use `testRunCardUpdated { revision, sessionId, messageId,
@@ -544,6 +599,13 @@ means "not known", never `processGone` or `noPid`.
   - A run no longer in the index becomes `unknown` (`notIndexed`), so no card
     stays `running` after its directory is gone.
   - If the run is indexed again, its summary updates the card again.
+- **The in-memory window.** A session keeps only the tail of its transcript in
+  memory once idle (64 messages), and only that tail is written back. A card
+  whose message has left that window is not updated yet: its map entry stays,
+  and the card keeps its last snapshot. Updating such a card's stored row, and
+  mirroring a remote's `testRunCardUpdated` into a proxied transcript (today
+  the proxy consumes the revision without applying it), are the next
+  changeset.
 - **Limits of the pid evidence.** The PID-reuse rule (see State) proves only
   that the process that wrote a pid existed when its file was written. It
   does not exclude a process created within the 2 s margin, or after

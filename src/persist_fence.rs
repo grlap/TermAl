@@ -13,6 +13,9 @@ enum PersistFenceTarget {
     EngramAdmission { session_id: String, content: Value },
     Delegation(Box<DelegationRecord>),
     WaitRegistration(DelegationWaitRecord),
+    /// The test-run card epoch, which must be durable before any card is
+    /// created (`test_run_cards.rs`).
+    TestRunCardsEpoch(String),
 }
 
 impl PersistFenceTarget {
@@ -32,6 +35,9 @@ impl PersistFenceTarget {
                 .delegation_waits
                 .iter()
                 .any(|actual| actual == expected),
+            Self::TestRunCardsEpoch(expected) => {
+                delta.metadata.test_run_cards_epoch.as_deref() == Some(expected.as_str())
+            }
         }
     }
 
@@ -71,9 +77,10 @@ impl PersistFenceTarget {
                     .context("failed to serialize delegation fence target")?;
                 Ok(stored.as_deref() == Some(expected_json.as_str()))
             }
-            // Every delta writes the whole metadata document, including waits.
-            // Absence/mismatch there is already conclusive for this tick.
-            Self::WaitRegistration(_) => Ok(false),
+            // Every delta writes the whole metadata document, including waits
+            // and the card epoch. Absence/mismatch there is already
+            // conclusive for this tick.
+            Self::WaitRegistration(_) | Self::TestRunCardsEpoch(_) => Ok(false),
         }
     }
 }

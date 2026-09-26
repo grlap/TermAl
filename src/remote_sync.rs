@@ -43,7 +43,8 @@ fn delta_event_revision(event: &DeltaEvent) -> u64 {
         | DeltaEvent::DelegationFailed { revision, .. }
         | DeltaEvent::DelegationCanceled { revision, .. }
         | DeltaEvent::TestRunChanged { revision, .. }
-        | DeltaEvent::TestRunRemoved { revision, .. } => *revision,
+        | DeltaEvent::TestRunRemoved { revision, .. }
+        | DeltaEvent::TestRunCardUpdated { revision, .. } => *revision,
     }
 }
 

@@ -279,6 +279,9 @@ struct TestRunResultsExtract {
     ended: Option<String>,
     exit_code: Option<i64>,
     error: Option<String>,
+    /// Whether `error` is shorter than the results.json error, so a card can
+    /// say its error was cut (slice 2).
+    error_truncated: bool,
     pid: Option<u32>,
     started: Option<String>,
 }
@@ -324,6 +327,8 @@ impl TestRunResultsExtract {
             exit_code: results.get("exitCode").and_then(Value::as_i64),
             error: test_run_str(results, "error")
                 .map(|error| test_run_truncate(&error, TEST_RUN_ERROR_MAX_BYTES)),
+            error_truncated: test_run_str(results, "error")
+                .is_some_and(|error| error.len() > TEST_RUN_ERROR_MAX_BYTES),
             pid: test_run_pid(results, "pid"),
             started: text("started"),
         }

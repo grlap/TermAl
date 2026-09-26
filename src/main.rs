@@ -766,6 +766,7 @@ include!("work_memories.rs");
 include!("test_runs.rs");
 include!("test_runs_disk.rs");
 include!("test_runs_api.rs");
+include!("test_run_cards.rs");
 include!("session_runtime.rs");
 include!("session_interaction.rs");
 include!("engram_queued_admission.rs");

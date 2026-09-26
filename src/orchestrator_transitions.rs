@@ -822,13 +822,14 @@ fn transition_message_summary(message: &Message) -> Option<String> {
             }
         }
         Message::ParallelAgents { agents, .. } => Some(parallel_agents_preview_text(agents)),
+        Message::TestRun { run, .. } => Some(test_run_card_preview_text(run)),
         Message::FileChanges { .. } | Message::EngramControl { .. } => None,
         Message::Approval { .. }
         | Message::UserInputRequest { .. }
         | Message::McpElicitationRequest { .. }
         | Message::CodexAppRequest { .. }
         | Message::Text {
-            author: Author::You,
+            author: Author::You | Author::System,
             ..
         } => None,
     }
@@ -866,6 +867,7 @@ fn transition_message_text(message: &Message) -> Option<String> {
                 .to_owned(),
         ),
         Message::ParallelAgents { agents, .. } => Some(parallel_agents_preview_text(agents)),
+        Message::TestRun { run, .. } => Some(test_run_card_preview_text(run)),
         Message::FileChanges { title, files, .. } => {
             let paths = files
                 .iter()
@@ -909,7 +911,7 @@ fn transition_message_text(message: &Message) -> Option<String> {
         | Message::McpElicitationRequest { .. }
         | Message::CodexAppRequest { .. }
         | Message::Text {
-            author: Author::You,
+            author: Author::You | Author::System,
             ..
         } => None,
     }

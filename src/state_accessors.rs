@@ -140,7 +140,12 @@ fn conversation_overview_message_metadata(message: &Message) -> (ConversationOve
         {
             (author, ConversationOverviewKind::Error)
         }
-        Message::Command { author, .. } => (author, ConversationOverviewKind::Command),
+        Message::TestRun { author, run, .. } if run.state == TestRunState::Failed => {
+            (author, ConversationOverviewKind::Error)
+        }
+        Message::Command { author, .. } | Message::TestRun { author, .. } => {
+            (author, ConversationOverviewKind::Command)
+        }
         Message::Diff { author, .. } | Message::FileChanges { author, .. } => {
             (author, ConversationOverviewKind::Diff)
         }

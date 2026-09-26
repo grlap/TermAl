@@ -325,13 +325,14 @@ fn project_progress_summary_for_message(message: &Message) -> Option<String> {
             }
         }
         Message::ParallelAgents { agents, .. } => Some(parallel_agents_preview_text(agents)),
+        Message::TestRun { run, .. } => Some(test_run_card_preview_text(run)),
         Message::FileChanges { .. } | Message::EngramControl { .. } => None,
         Message::Approval { .. }
         | Message::UserInputRequest { .. }
         | Message::McpElicitationRequest { .. }
         | Message::CodexAppRequest { .. }
         | Message::Text {
-            author: Author::You,
+            author: Author::You | Author::System,
             ..
         } => None,
     }

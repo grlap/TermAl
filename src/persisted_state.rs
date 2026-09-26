@@ -45,6 +45,10 @@ struct PersistedState {
     delegations: Vec<DelegationRecord>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     delegation_waits: Vec<DelegationWaitRecord>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    test_run_cards_epoch: Option<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    test_run_cards: BTreeMap<String, TestRunCardRef>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     workspace_layouts: BTreeMap<String, WorkspaceLayoutDocument>,
     sessions: Vec<PersistedSessionRecord>,
@@ -89,6 +93,8 @@ impl PersistedState {
             orchestrator_instances: inner.orchestrator_instances.clone(),
             delegations: Vec::new(),
             delegation_waits: inner.delegation_waits.clone(),
+            test_run_cards_epoch: inner.test_run_cards_epoch.clone(),
+            test_run_cards: inner.test_run_cards.clone(),
             workspace_layouts: inner.workspace_layouts.clone(),
             sessions: Vec::new(),
             quarantined_persisted_session_ids: inner.quarantined_persisted_session_ids.clone(),
@@ -133,6 +139,8 @@ impl PersistedState {
             orchestrator_instances: self.orchestrator_instances.clone(),
             delegations: Vec::new(),
             delegation_waits: self.delegation_waits.clone(),
+            test_run_cards_epoch: self.test_run_cards_epoch.clone(),
+            test_run_cards: self.test_run_cards.clone(),
             workspace_layouts: self.workspace_layouts.clone(),
             sessions: Vec::new(),
             quarantined_persisted_session_ids: self.quarantined_persisted_session_ids.clone(),
@@ -182,7 +190,31 @@ impl PersistedState {
             delegations: self.delegations,
             delegation_followup_admissions: HashMap::new(),
             acceptance_evaluation_submissions_in_flight: HashSet::new(),
-            test_runs: TestRunIndex::default(),
+            // An epoch loaded from disk is already durable.
+            test_runs: TestRunIndex {
+                cards_enabled: self.test_run_cards_epoch.is_some(),
+                ..TestRunIndex::default()
+            },
+            test_run_cards_epoch: self.test_run_cards_epoch,
+            // The map is written with the metadata, but a card's transcript
+            // row can be deferred to a later persist tick, so after a restart
+            // the transcript is the authority: the flags are re-derived by the
+            // first scan (every entry is checked, and every failed carded run's
+            // excerpt is read again).
+            test_run_cards: self
+                .test_run_cards
+                .into_iter()
+                .map(|(run_id, card)| {
+                    (
+                        run_id,
+                        TestRunCardRef {
+                            terminal: false,
+                            failure_detail_version: None,
+                            ..card
+                        },
+                    )
+                })
+                .collect(),
             delegation_waits: self.delegation_waits,
             delegation_mutation_stamps: BTreeMap::new(),
             removed_delegation_ids: BTreeMap::new(),

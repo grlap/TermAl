@@ -14,6 +14,13 @@
 /// never start the thread.
 #[cfg(not(test))]
 const TEST_RUN_TICK: Duration = Duration::from_secs(2);
+/// Whether the host creates test-run cards. Off until the card UI ships
+/// (tm-ncc6.13.3): a UI without the card renderer breaks on a `testRun`
+/// message (docs/features/test-runs.md, "Rollout: the UI first"). While off,
+/// the rescan thread never starts the card epoch, so no card is created and
+/// the epoch is first stored when cards go live. Tests enable cards directly.
+#[cfg(not(test))]
+const TEST_RUN_CARDS_SHIPPED: bool = false;
 /// The idle backstop: a full rescan at least this often, for a change made in
 /// the same modification-time tick as a stat.
 const TEST_RUN_IDLE_RESCAN_INTERVAL: Duration = Duration::from_secs(10);
@@ -192,6 +199,15 @@ struct TestRunIndex {
     /// Held for a whole rescan, so rescans never interleave: a scan that
     /// started earlier can never commit over a newer one.
     rescan: Arc<Mutex<()>>,
+    /// When this host process first saw each indexed run, which decides
+    /// whether a run already terminal then still gets a card
+    /// (`test_run_cards.rs`).
+    first_sight: HashMap<String, TestRunFirstSight>,
+    /// Whether the card epoch is durable, so cards may be created.
+    cards_enabled: bool,
+    /// Set when cards become enabled in this process: the next scan
+    /// re-evaluates every indexed run without a card once.
+    cards_reevaluate: bool,
 }
 
 impl TestRunIndex {
@@ -427,7 +443,10 @@ impl AppState {
         // Project roots and the previous parses, taken under the lock; all
         // disk reads happen without it. The parse cache is moved out, not
         // copied: rescans are serialized, so only this one uses it.
-        let (roots, mut previous) = {
+        // The card map and the published detail versions are copied too: they
+        // decide the retention exemption and which failure excerpts to read
+        // before the lock.
+        let (roots, mut previous, card_refs, retained_by_cards, published_versions, reevaluate_cards) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let roots: Vec<(String, String)> = inner
                 .projects
@@ -435,7 +454,35 @@ impl AppState {
                 .filter(|project| project.remote_id == LOCAL_REMOTE_ID)
                 .map(|project| (project.id.clone(), project.root_path.clone()))
                 .collect();
-            (roots, std::mem::take(&mut inner.test_runs.parsed))
+            let published_versions: HashMap<String, Option<String>> = inner
+                .test_runs
+                .entries
+                .iter()
+                .map(|entry| {
+                    (
+                        entry.summary.run_id.clone(),
+                        entry.summary.detail_version.clone(),
+                    )
+                })
+                .collect();
+            // Only a card that can still take its terminal snapshot keeps its
+            // run indexed: one in its session's in-memory window. A card out
+            // of that window is not updated yet (tm-ncc6.13.4), so exempting
+            // its run would keep it past the retention cap for good.
+            let retained_by_cards: HashSet<String> = inner
+                .test_run_cards
+                .iter()
+                .filter(|(_, card)| !card.terminal && test_run_card_is_resident(&inner, card))
+                .map(|(run_id, _)| run_id.clone())
+                .collect();
+            (
+                roots,
+                std::mem::take(&mut inner.test_runs.parsed),
+                inner.test_run_cards.clone(),
+                retained_by_cards,
+                published_versions,
+                inner.test_runs.cards_enabled && inner.test_runs.cards_reevaluate,
+            )
         };
         let mut projects = Vec::new();
         let mut common_dirs: BTreeMap<String, PathBuf> = BTreeMap::new();
@@ -547,16 +594,45 @@ impl AppState {
         }
         scanned.sort_by(|left, right| test_run_list_order(&left.disk, &right.disk));
         // Every non-terminal run stays; terminal runs are kept newest first, a
-        // bounded number per project. Only the kept runs get summaries.
+        // bounded number per project. A run whose card has not yet stored its
+        // terminal snapshot stays too, so the card gets its verdict (only a
+        // card in its session's in-memory window, see above). Only the kept
+        // runs get summaries.
         let mut terminal_kept: HashMap<Option<String>, usize> = HashMap::new();
         scanned.retain(|run| {
-            if !run.disk.is_terminal() {
+            if !run.disk.is_terminal() || retained_by_cards.contains(&run.disk.run_id) {
                 return true;
             }
             let kept = terminal_kept.entry(run.project_id.clone()).or_default();
             *kept += 1;
             *kept <= TEST_RUN_TERMINAL_RUNS_PER_PROJECT
         });
+        // Failure excerpts, read without the lock: only for a failed run whose
+        // card was built from other results, or an uncarded one with an owner
+        // whose results this index has not published yet (or every uncarded
+        // one with an owner, on the scan that re-evaluates them).
+        let failures: HashMap<String, TestRunCardFailureRead> = scanned
+            .iter()
+            .filter_map(|run| {
+                let results = run.disk.results.as_ref()?;
+                if results.terminal_state != Some(TestRunState::Failed) {
+                    return None;
+                }
+                let digest = Some(results.digest.as_str());
+                let needed = match card_refs.get(&run.disk.run_id) {
+                    Some(card) => card.failure_detail_version.as_deref() != digest,
+                    None => {
+                        run.disk.owner.is_some()
+                            && (reevaluate_cards
+                                || published_versions
+                                    .get(&run.disk.run_id)
+                                    .map(Option::as_deref)
+                                    != Some(digest))
+                    }
+                };
+                needed.then(|| (run.disk.run_id.clone(), test_run_card_failure(&run.disk.run_dir)))
+            })
+            .collect();
         // Each delta is published under the lock that allocated its revision,
         // as every commit_delta_locked caller must: published after unlock,
         // another thread's later revision could reach clients first, which
@@ -600,6 +676,7 @@ impl AppState {
         let mut failed = false;
         let mut unsent_removed = Vec::new();
         let mut unsent_changed = HashSet::new();
+        let mut published_changed = HashSet::new();
         for run_id in removed {
             if failed {
                 unsent_removed.push(run_id);
@@ -620,7 +697,10 @@ impl AppState {
                 continue;
             }
             match self.commit_delta_locked(&mut inner) {
-                Ok(revision) => publish(&DeltaEvent::TestRunChanged { revision, run }),
+                Ok(revision) => {
+                    published_changed.insert(run.run_id.clone());
+                    publish(&DeltaEvent::TestRunChanged { revision, run });
+                }
                 Err(err) => {
                     eprintln!("test runs> failed to record a changed run: {err:#}");
                     failed = true;
@@ -628,11 +708,14 @@ impl AppState {
                 }
             }
         }
-        inner.test_runs.entries = if failed {
+        let entries = if failed {
             test_run_settle_entries(entries, &before, &unsent_changed, &unsent_removed)
         } else {
             entries
         };
+        // Cards follow the summaries clients were told about.
+        self.sync_test_run_cards_locked(&mut inner, &entries, &published_changed, &failures, publish);
+        inner.test_runs.entries = entries;
         inner.test_runs.any_running()
     }
 
@@ -691,7 +774,15 @@ impl AppState {
             .spawn(move || {
                 let mut active = false;
                 let mut last_rescan: Option<std::time::Instant> = None;
+                let mut cards_enabled = false;
+                let mut epoch_fence = None;
                 while !*shutdown.borrow() {
+                    // The card epoch is durable before any card is created;
+                    // until then rescans publish runs but create no card. The
+                    // step never waits, so the index is never held up by it.
+                    if TEST_RUN_CARDS_SHIPPED && !cards_enabled {
+                        cards_enabled = state.step_test_run_cards_epoch(&mut epoch_fence);
+                    }
                     if test_run_rescan_due(
                         active,
                         last_rescan.map(|at| at.elapsed()),
