@@ -1505,6 +1505,7 @@ impl AppState {
                 .collect(),
             delegation_waits: inner.delegation_waits.clone(),
             test_runs: inner.test_runs.summaries(),
+            test_run_waits: inner.test_run_waits.clone(),
             pending_engram_mcp_revocation_session_ids:
                 Self::pending_engram_mcp_revocation_session_ids(inner),
         }

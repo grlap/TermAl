@@ -434,6 +434,10 @@ fn app_router_with_acceptance_policy_limiter(
             post(create_delegation_wait),
         )
         .route(
+            "/api/sessions/{id}/test-run-waits",
+            post(create_test_run_wait),
+        )
+        .route(
             "/api/sessions/{id}/markers",
             get(list_session_markers).post(create_session_marker),
         )
@@ -767,6 +771,7 @@ include!("test_runs.rs");
 include!("test_runs_disk.rs");
 include!("test_runs_api.rs");
 include!("test_run_cards.rs");
+include!("test_run_waits.rs");
 include!("session_runtime.rs");
 include!("session_interaction.rs");
 include!("engram_queued_admission.rs");

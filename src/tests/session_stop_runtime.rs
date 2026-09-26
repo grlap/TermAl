@@ -1087,6 +1087,11 @@ fn stop_session_restores_parent_delegation_wait_when_persist_fails() {
             title: Some("Second stopped-parent wait".to_owned()),
         },
     ];
+    // Run waits follow the same rule (docs/features/test-runs.md).
+    let baseline_run_waits = vec![
+        test_run_wait_record("test-run-wait-stopped-session", &session_id),
+        test_run_wait_record("test-run-wait-other-session", "session-other-parent"),
+    ];
     {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
         let index = inner
@@ -1095,6 +1100,7 @@ fn stop_session_restores_parent_delegation_wait_when_persist_fails() {
         inner.sessions[index].runtime = SessionRuntime::Acp(runtime);
         inner.sessions[index].session.status = SessionStatus::Active;
         inner.delegation_waits = baseline_waits.clone();
+        inner.test_run_waits = baseline_run_waits.clone();
         state.commit_locked(&mut inner).unwrap();
     }
 
@@ -1117,6 +1123,10 @@ fn stop_session_restores_parent_delegation_wait_when_persist_fails() {
     assert_eq!(
         inner.delegation_waits, baseline_waits,
         "a failed Stop commit must restore every pending wait in its original order"
+    );
+    assert_eq!(
+        inner.test_run_waits, baseline_run_waits,
+        "and every pending run wait, in its original order"
     );
     let parent = inner
         .sessions

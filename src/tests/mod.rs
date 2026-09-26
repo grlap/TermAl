@@ -106,6 +106,7 @@ mod telegram_settings;
 mod telegram_support;
 mod terminal;
 mod test_run_cards;
+mod test_run_waits;
 mod test_runs;
 mod turns;
 mod work_visualizer;
@@ -1320,6 +1321,7 @@ fn sample_remote_orchestrator_state(
             delegations: Vec::new(),
             delegation_waits: Vec::new(),
             test_runs: Vec::new(),
+            test_run_waits: Vec::new(),
             pending_engram_mcp_revocation_session_ids: Vec::new(),
         },
     }
@@ -1709,6 +1711,27 @@ fn test_shared_codex_runtime_with_process(
         stdout_activity: Arc::new(Mutex::new(std::time::Instant::now())),
     };
     (runtime, input_rx, process)
+}
+
+/// A pending run wait of `session_id` on one run, for tests that seed state
+/// directly (docs/features/test-runs.md, run waits).
+fn test_run_wait_record(id: &str, session_id: &str) -> TestRunWaitRecord {
+    TestRunWaitRecord {
+        id: id.to_owned(),
+        session_id: session_id.to_owned(),
+        run_ids: vec!["test-seeded".to_owned()],
+        mode: DelegationWaitMode::All,
+        created_at: stamp_now(),
+        title: None,
+        runs: vec![TestRunWaitRunLabel {
+            run_id: "test-seeded".to_owned(),
+            run_dir: "/repo/.git/review-runs/test-seeded".to_owned(),
+            preset: TestRunPreset::Full,
+            worktree: "/repo".to_owned(),
+            owner_session_id: None,
+            started_at: None,
+        }],
+    }
 }
 
 async fn request_json<T: for<'de> Deserialize<'de>>(

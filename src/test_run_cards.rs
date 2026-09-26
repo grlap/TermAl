@@ -285,6 +285,12 @@ enum TestRunCardFailureRead {
 /// with the detail route's 1 MiB guard: the first failing stage, else the
 /// first failing preflight check. Its diagnostics text is cut to 4 KiB.
 fn test_run_card_failure(run_dir: &FsPath) -> TestRunCardFailureRead {
+    test_run_failure_read(run_dir, TEST_RUN_CARD_EXCERPT_MAX_BYTES)
+}
+
+/// `test_run_card_failure` with the diagnostics cut to `max_excerpt` bytes:
+/// a run wait's resume prompt allows more than a card (test_run_waits.rs).
+fn test_run_failure_read(run_dir: &FsPath, max_excerpt: usize) -> TestRunCardFailureRead {
     let TestRunJson::Parsed(results, digest, _) =
         test_run_read_json(&run_dir.join("results.json"))
     else {
@@ -309,7 +315,7 @@ fn test_run_card_failure(run_dir: &FsPath) -> TestRunCardFailureRead {
                 let diagnostics = test_run_diagnostics(item.get("diagnostics"));
                 let (excerpt, cut) = test_run_card_cut(
                     diagnostics.as_ref().map_or("", |diagnostics| &diagnostics.text),
-                    TEST_RUN_CARD_EXCERPT_MAX_BYTES,
+                    max_excerpt,
                 );
                 Some(TestRunCardFailure {
                     phase,

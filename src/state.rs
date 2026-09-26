@@ -512,6 +512,7 @@ mod state_broadcast_mailbox_tests {
             delegations: Vec::new(),
             delegation_waits: Vec::new(),
             test_runs: Vec::new(),
+            test_run_waits: Vec::new(),
             pending_engram_mcp_revocation_session_ids: Vec::new(),
         }
     }
@@ -1443,6 +1444,9 @@ struct StateInner {
     /// Each run's card, by run id: the owner session and message. Persisted;
     /// the transcript stays the render source.
     test_run_cards: BTreeMap<String, TestRunCardRef>,
+    /// Pending run waits (`test_run_waits.rs`). Persisted; a wait exists only
+    /// while pending.
+    test_run_waits: Vec<TestRunWaitRecord>,
     /// Durable delegation rows isolated during startup validation. See
     /// `quarantined_persisted_session_ids` for the preservation contract.
     quarantined_persisted_delegation_ids: BTreeSet<String>,
@@ -1508,6 +1512,7 @@ impl StateInner {
             test_runs: TestRunIndex::default(),
             test_run_cards_epoch: None,
             test_run_cards: BTreeMap::new(),
+            test_run_waits: Vec::new(),
             quarantined_persisted_delegation_ids: BTreeSet::new(),
             delegation_waits: Vec::new(),
             delegation_mutation_stamps: BTreeMap::new(),

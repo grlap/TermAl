@@ -49,6 +49,8 @@ struct PersistedState {
     test_run_cards_epoch: Option<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     test_run_cards: BTreeMap<String, TestRunCardRef>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    test_run_waits: Vec<TestRunWaitRecord>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     workspace_layouts: BTreeMap<String, WorkspaceLayoutDocument>,
     sessions: Vec<PersistedSessionRecord>,
@@ -95,6 +97,7 @@ impl PersistedState {
             delegation_waits: inner.delegation_waits.clone(),
             test_run_cards_epoch: inner.test_run_cards_epoch.clone(),
             test_run_cards: inner.test_run_cards.clone(),
+            test_run_waits: inner.test_run_waits.clone(),
             workspace_layouts: inner.workspace_layouts.clone(),
             sessions: Vec::new(),
             quarantined_persisted_session_ids: inner.quarantined_persisted_session_ids.clone(),
@@ -141,6 +144,7 @@ impl PersistedState {
             delegation_waits: self.delegation_waits.clone(),
             test_run_cards_epoch: self.test_run_cards_epoch.clone(),
             test_run_cards: self.test_run_cards.clone(),
+            test_run_waits: self.test_run_waits.clone(),
             workspace_layouts: self.workspace_layouts.clone(),
             sessions: Vec::new(),
             quarantined_persisted_session_ids: self.quarantined_persisted_session_ids.clone(),
@@ -215,6 +219,7 @@ impl PersistedState {
                     )
                 })
                 .collect(),
+            test_run_waits: self.test_run_waits,
             delegation_waits: self.delegation_waits,
             delegation_mutation_stamps: BTreeMap::new(),
             removed_delegation_ids: BTreeMap::new(),

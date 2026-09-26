@@ -1449,7 +1449,10 @@ impl AppState {
             | DeltaEvent::DelegationCanceled { .. }
             | DeltaEvent::TestRunChanged { .. }
             | DeltaEvent::TestRunRemoved { .. }
-            | DeltaEvent::TestRunCardUpdated { .. } => {
+            | DeltaEvent::TestRunCardUpdated { .. }
+            | DeltaEvent::TestRunWaitCreated { .. }
+            | DeltaEvent::TestRunWaitConsumed { .. }
+            | DeltaEvent::TestRunWaitResumeDispatchFailed { .. } => {
                 // Delegations are local parent/child session relationships.
                 // Cross-machine delegation is a non-goal for this phase, so
                 // consume the remote revision without mirroring the payload.

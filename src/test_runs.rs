@@ -208,6 +208,9 @@ struct TestRunIndex {
     /// Set when cards become enabled in this process: the next scan
     /// re-evaluates every indexed run without a card once.
     cards_reevaluate: bool,
+    /// Whether this process has completed a full scan. Until it has, an
+    /// empty index says nothing, so no run wait settles.
+    scanned_once: bool,
 }
 
 impl TestRunIndex {
@@ -446,7 +449,7 @@ impl AppState {
         // The card map and the published detail versions are copied too: they
         // decide the retention exemption and which failure excerpts to read
         // before the lock.
-        let (roots, mut previous, card_refs, retained_by_cards, published_versions, reevaluate_cards) = {
+        let (roots, mut previous, card_refs, retained_runs, published_versions, reevaluate_cards) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let roots: Vec<(String, String)> = inner
                 .projects
@@ -469,17 +472,25 @@ impl AppState {
             // run indexed: one in its session's in-memory window. A card out
             // of that window is not updated yet (tm-ncc6.13.4), so exempting
             // its run would keep it past the retention cap for good.
-            let retained_by_cards: HashSet<String> = inner
+            // A run a pending wait names stays too, so the wait settles with
+            // its verdict, not as not indexed.
+            let retained_runs: HashSet<String> = inner
                 .test_run_cards
                 .iter()
                 .filter(|(_, card)| !card.terminal && test_run_card_is_resident(&inner, card))
                 .map(|(run_id, _)| run_id.clone())
+                .chain(
+                    inner
+                        .test_run_waits
+                        .iter()
+                        .flat_map(|wait| wait.run_ids.iter().cloned()),
+                )
                 .collect();
             (
                 roots,
                 std::mem::take(&mut inner.test_runs.parsed),
                 inner.test_run_cards.clone(),
-                retained_by_cards,
+                retained_runs,
                 published_versions,
                 inner.test_runs.cards_enabled && inner.test_runs.cards_reevaluate,
             )
@@ -600,7 +611,7 @@ impl AppState {
         // runs get summaries.
         let mut terminal_kept: HashMap<Option<String>, usize> = HashMap::new();
         scanned.retain(|run| {
-            if !run.disk.is_terminal() || retained_by_cards.contains(&run.disk.run_id) {
+            if !run.disk.is_terminal() || retained_runs.contains(&run.disk.run_id) {
                 return true;
             }
             let kept = terminal_kept.entry(run.project_id.clone()).or_default();
@@ -716,6 +727,8 @@ impl AppState {
         // Cards follow the summaries clients were told about.
         self.sync_test_run_cards_locked(&mut inner, &entries, &published_changed, &failures, publish);
         inner.test_runs.entries = entries;
+        // Run waits may settle from here on (`refresh_test_run_waits`).
+        inner.test_runs.scanned_once = true;
         inner.test_runs.any_running()
     }
 
@@ -790,6 +803,9 @@ impl AppState {
                     ) {
                         active = state.refresh_test_runs();
                         last_rescan = Some(std::time::Instant::now());
+                        // After the rescan's own lock is released: resuming
+                        // a wait may dispatch a turn.
+                        state.refresh_test_run_waits();
                     }
                     std::thread::sleep(TEST_RUN_TICK);
                 }

@@ -6470,6 +6470,12 @@ fn engram_mcp_pending_revocation_completes_failed_stop_without_resuming_automati
             process: process.clone(),
         });
         record.session.status = SessionStatus::Active;
+        // A Stop that the revocation completes consumes the session's run
+        // waits, and only its own (docs/features/test-runs.md).
+        inner.test_run_waits = vec![
+            test_run_wait_record("test-run-wait-stopped-session", &session_id),
+            test_run_wait_record("test-run-wait-other-session", "session-other"),
+        ];
         state
             .commit_locked(&mut inner)
             .expect("active runtime should persist");
@@ -6532,6 +6538,8 @@ fn engram_mcp_pending_revocation_completes_failed_stop_without_resuming_automati
         record.queued_prompts.front().map(|queued| queued.source),
         Some(QueuedPromptSource::User)
     );
+    let waits: Vec<&str> = inner.test_run_waits.iter().map(|wait| wait.id.as_str()).collect();
+    assert_eq!(waits, vec!["test-run-wait-other-session"]);
 }
 
 #[test]

@@ -50,6 +50,7 @@ fn empty_state_events_response(server_instance_id: String) -> StateResponse {
         delegations: Vec::new(),
         delegation_waits: Vec::new(),
         test_runs: Vec::new(),
+        test_run_waits: Vec::new(),
         pending_engram_mcp_revocation_session_ids: Vec::new(),
     }
 }

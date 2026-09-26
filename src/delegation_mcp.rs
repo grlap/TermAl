@@ -900,6 +900,7 @@ impl TermalDelegationMcpBridge {
             "termal_board_set" => self.tool_board_set(arguments),
             "termal_wait_delegations" => self.tool_wait_delegations(arguments),
             "termal_resume_after_delegations" => self.tool_resume_after_delegations(arguments),
+            "termal_resume_after_test_runs" => self.tool_resume_after_test_runs(arguments),
             other => Err(anyhow!("unknown TermAl delegation MCP tool `{other}`")),
         }?;
         Ok(delegation_mcp_tool_result(&name, &result))
@@ -1590,6 +1591,26 @@ impl TermalDelegationMcpBridge {
         )
     }
 
+    /// A sibling of `termal_resume_after_delegations`, not an extension of it
+    /// (docs/features/test-runs.md, run waits): a wait never mixes
+    /// delegations and runs.
+    fn tool_resume_after_test_runs(&self, arguments: Value) -> Result<Value> {
+        let run_ids = required_path_identifier_array(arguments.get("runIds"), "runIds")?;
+        let mut body = serde_json::Map::new();
+        body.insert(
+            "runIds".to_owned(),
+            Value::Array(run_ids.into_iter().map(Value::String).collect()),
+        );
+        if let Some(mode) = optional_string(arguments.get("mode")) {
+            body.insert("mode".to_owned(), Value::String(mode));
+        }
+        insert_optional_string(&mut body, "title", arguments.get("title"));
+        self.post_json(
+            &format!("/api/sessions/{}/test-run-waits", self.serving_session_id),
+            &Value::Object(body),
+        )
+    }
+
     fn tool_wait_delegations(&self, arguments: Value) -> Result<Value> {
         let delegation_ids =
             required_path_identifier_array(arguments.get("delegationIds"), "delegationIds")?;
@@ -2268,7 +2289,8 @@ fn required_board_key_shaped(value: Option<&Value>, field: &str) -> Result<Strin
 
 /// Peer and board tools operate on arbitrary root-session coordination state,
 /// so they are restricted to root callers and hidden from / rejected for
-/// delegation children.
+/// delegation children. So is the run wait: the backend accepts it from root
+/// sessions only (test_run_waits.rs).
 fn tool_requires_root_session(name: &str) -> bool {
     matches!(
         name,
@@ -2281,6 +2303,7 @@ fn tool_requires_root_session(name: &str) -> bool {
             | "termal_board_list"
             | "termal_board_get"
             | "termal_board_set"
+            | "termal_resume_after_test_runs"
     )
 }
 
@@ -2644,6 +2667,11 @@ fn mcp_tools_list_result() -> Value {
         TERMAL_SUBMIT_REVIEW_RESULT_TOOL_NAME,
         acceptance_evaluation_submit_tool_definition(),
     );
+    insert_mcp_tool_after(
+        &mut result,
+        "termal_resume_after_delegations",
+        test_run_wait_tool_definition(),
+    );
     // Keep one bootstrap body in tools/list; the other mailbox entry points
     // point to the read tool while retaining their tool-specific contracts.
     for tool in result["tools"]
@@ -2673,6 +2701,23 @@ fn mcp_tools_list_result() -> Value {
         }
     }
     result
+}
+
+/// `termal_resume_after_test_runs` (docs/features/test-runs.md, run waits).
+fn test_run_wait_tool_definition() -> Value {
+    json!({
+        "name": "termal_resume_after_test_runs",
+        "description": "Schedule a durable TermAl backend resume wait for test-launcher runs in this session's project (1 to 16 run ids, from the RUN or STARTED receipt of scripts/test-launcher.mjs). End your turn after it returns; TermAl resumes this session with one bounded result per run when they settle. A run not yet indexed is found by one forced rescan; runs already settled resume at once.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["runIds"],
+            "properties": {
+                "runIds": { "type": "array", "items": { "type": "string" } },
+                "mode": { "type": "string", "enum": ["all", "any"] },
+                "title": { "type": "string" }
+            }
+        }
+    })
 }
 
 fn insert_mcp_tool_after(result: &mut Value, after_name: &str, tool: Value) {

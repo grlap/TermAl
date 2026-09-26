@@ -668,22 +668,37 @@ title?: string }` is a sibling of `termal_resume_after_delegations`, not an
 extension of it. The delegation tool's validation and resume prompt are part
 of the reviewed `/review-changes` contract.
 
-- **`runIds`.** One to 16 distinct ids, each indexed and in the caller's
-  project.
+- **Caller.** Root sessions only, as for mailboxes: the tool is hidden from
+  delegation children, and the backend rejects one (400). A child that ended
+  its turn to wait would read as finished to its parent, then start a new
+  turn when resumed. A child runs its gates in the foreground instead.
+- **`runIds`.** One to 16 distinct ids (a repeated id is kept once), each
+  indexed and in the caller's project. A caller without a project cannot
+  wait on runs.
   - The caller need not be the owner: a coordinator may wait on a run it did
     not start.
-  - If an id is not in the index, the tool first forces one synchronous
-    rescan of the caller's project roots, bounded to 1 s. Only then does an
-    unknown or foreign id reject the whole call. So an agent that registers
-    right after launching a detached run is never pushed into polling.
+  - If an id is not in the index, the tool first forces one rescan, waited on
+    for at most 1 s; a longer one finishes in the background and the call
+    proceeds with the index as it is. Only then does an unknown id (404) or a
+    foreign one (400) reject the whole call. So an agent that registers right
+    after launching a detached run is never pushed into polling.
   - Rescans are serialized. The tool's forced rescan and the background
     rescan take the same rescan lock, so a scan that started earlier never
     commits over a newer one.
+  - Each registration that names an unknown id starts one rescan thread, and
+    nothing coalesces them. A burst of such registrations behind a long
+    rescan queues that many threads on the rescan lock, and each then scans
+    in turn. The bound is the number of those registrations: agent tool
+    calls, a handful at a time.
   - The wait's mandatory prompt content, meaning every run's header and
     commands, must fit in 48 KiB. A registration that would exceed that is
     rejected, which leaves at least 16 KiB for excerpts.
 - **`mode`.** Defaults to `all`.
-- **Result.** `{ waitId, runIds, mode }`.
+- **Result.** `{ waitId, runIds, mode }`, plus the record (`wait`), the
+  revision, and whether a resume was queued (`resumePromptQueued`) and
+  dispatched (`resumeDispatchRequested`) at once.
+- **HTTP.** The tool posts to `POST /api/sessions/{id}/test-run-waits`, where
+  `{id}` is the waiting session; it answers `201`.
 - **Already settled.** A wait on runs that have already settled queues its
   resume at once and never blocks. This is also how a session re-fetches a
   verdict.
@@ -692,9 +707,23 @@ of the reviewed `/review-changes` contract.
 ### Settled
 
 A run is settled for a wait when it is `passed` or `failed`, or `unknown` with
-`unknownReason` of `processGone` or `noPid`. It is also settled when it leaves
-the index after the wait was registered, and it then resumes as `UNKNOWN (not
-indexed)`.
+`unknownReason` of `processGone` or `noPid`.
+
+A run that left the index after the wait was registered settles as `UNKNOWN
+(not indexed)` only when it cannot come back:
+
+- its `request.json` is gone (with its directory or alone) or cannot be read,
+  checked on disk without the state lock; or
+- the waiting session's project no longer exists. After `delete_project`
+  that is also the run's project, since a wait requires them to match. The
+  session stays, without a project, and the index stops scanning that
+  repository.
+
+A run that left the index while still readable on disk is not settled. A
+rescan that was already running when the wait was registered started without
+the wait's retention exemption, and may drop a terminal run past the
+per-project cap. The next scan indexes it again, and it settles with its real
+verdict.
 
 An `unknown` run with `resultsUnreadable`, or with no reason, is not settled:
 the run may still finish, and the index retries.
@@ -713,12 +742,37 @@ the run may still finish, and the index retries.
     the reason.
   - It reuses the delegation-wait machinery: refresh on index change, the
     same prompt queue and dispatch rules, and boot reconciliation.
+  - The refresh runs after every background rescan, once the rescan has
+    released its lock (resuming may dispatch a turn), and after each
+    registration. Failure excerpts are read from disk without the state
+    lock.
+  - A scan can land between picking the excerpts to read and queuing the
+    resumes. A wait whose run failed in that window has no read yet, so it
+    stays pending until the next refresh reads it; it never resumes without
+    diagnostics that are on disk. A read that was made is an answer and does
+    not defer the wait, even one that found nothing or could not read
+    results.json whole (a replacement race, or a file over the 1 MiB read
+    limit): the prompt then says the diagnostics are not available here.
 - **Stop or archive.** A Stop or an archive consumes the session's pending
   run waits. Runs and cards stay, and nothing reactivates on its own. An
   archived session gets no new card and no wait resume.
+  - A Stop consumes them as part of its durable commit (reason
+    `sessionStopped`) and restores them if that commit fails, as for
+    delegation waits.
+  - Stop acts on a turn. A session that ended its turn to wait is idle, and
+    Stop answers 409 there, so its waits stay until they resume. They are
+    consumed by a Stop that ends a later turn, for example while the user
+    talks to the session. Cancelling a wait from an idle session is
+    tm-70lr (run and delegation waits).
+  - A session that became an archived Codex thread (`sessionUnavailable`) or
+    was removed (`sessionRemoved`) has its waits consumed by the next
+    refresh, within one rescan. A thread archived and unarchived again
+    before that refresh keeps its waits, as delegation waits do. Consuming
+    them at the archive itself is tm-9tbr.
 - **Restart.** Pending waits are reloaded. After the first index scan, a wait
   whose runs have settled resumes once, and only for an idle session that is
-  not latched.
+  not latched. No wait settles before this process's first full scan, since
+  an empty index would read every run as not indexed.
 
 ```ts
 type TestRunWaitMode = "any" | "all";
@@ -774,14 +828,48 @@ cap is 64 KiB. For each run it contains:
 
 - a header: runId, preset, verdict (`PASS`, `FAIL` or `UNKNOWN (reason)`),
   `interrupted`, exit code, start and end times, and the run directory;
-- for `FAIL`, the first failing stage with its diagnostics excerpt; for
-  `UNKNOWN`, the stage that was running at the last observation;
+- for `FAIL`, the first failing stage or preflight check with its
+  diagnostics excerpt (`First failing: stage NAME` or `First failing:
+  preflight NAME`). Both come from reading results.json, which names a
+  preflight check or a stage past the summary's 64; the summary's stages are
+  the fallback when the read names none. For `UNKNOWN`, the stage that was
+  running at the last observation;
 - the commands to inspect it: `node scripts/test-launcher.mjs summary
   RUN_DIR`, plus `recover RUN_DIR` for `UNKNOWN`.
 
 Headers and commands are never cut; registration bounds them to 48 KiB. Each
 run's excerpt budget is min(8 KiB, (64 KiB minus all headers and commands) /
 number of runs), and never negative. `UNKNOWN` is never phrased as a pass.
+In an `any` wait, a run that has not settled yet is listed as `NOT SETTLED
+YET` with the stage at the last observation. A failed run whose diagnostics
+cannot be read at resume time says so and points to the summary command.
+
+An excerpt is marked `(cut)` when the prompt's budget cut it, and also when
+it was cut before: the launcher caps diagnostics and records that it did, and
+the read caps them at 8 KiB. Its code fence is longer than any run of
+backticks in the excerpt, so test output that contains a fence cannot close
+it.
+
+### Rollout: ships switched on
+
+Run waits add no `Message` variant, so unlike the card (see "Rollout: the UI
+first") they ship switched on, with any UI. What a UI without run-wait
+support does with them, traced in `ui/src` at 39977e5:
+
+- **`testRunWaits` in the state response.** Ignored: the UI reads the state
+  response by field name, with no validator.
+- **`testRunWaitCreated`.** It has no top-level `sessionId`, so the session
+  reducer's exhaustive default answers `needsResync`: one `/api/state`
+  resync.
+- **`testRunWaitConsumed` and `testRunWaitResumeDispatchFailed`.** They carry
+  a top-level `sessionId`, so the UI takes them for session deltas. The same
+  default answers `needsResync`, which triggers a `/api/state` resync and a
+  forced reload of that session's recent transcript
+  (`triggerRecoveryForDelta`), deduplicated by the hydration queue.
+
+That is one or two bounded reloads per wait created or consumed. The resume
+prompt reaches the transcript as an ordinary queued prompt. The waiting
+indicator, and the UI handling of these events, land with tm-ncc6.8.
 
 ### Waiting indicator
 

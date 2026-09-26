@@ -816,7 +816,10 @@ impl AppState {
             | DeltaEvent::DelegationCanceled { .. }
             | DeltaEvent::TestRunChanged { .. }
             | DeltaEvent::TestRunRemoved { .. }
-            | DeltaEvent::TestRunCardUpdated { .. } => return None,
+            | DeltaEvent::TestRunCardUpdated { .. }
+            | DeltaEvent::TestRunWaitCreated { .. }
+            | DeltaEvent::TestRunWaitConsumed { .. }
+            | DeltaEvent::TestRunWaitResumeDispatchFailed { .. } => return None,
         };
         Some(RemoteDeltaReplayKey {
             remote_id: remote_id.to_owned(),

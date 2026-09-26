@@ -1160,6 +1160,15 @@ impl AppState {
             } else {
                 DelegationWaitRefresh::default()
             };
+            // Run waits follow the same rule: consumed only as part of the
+            // durable Stop commit, restored if it fails.
+            let test_run_waits_before_stop =
+                suppress_automatic_resume.then(|| inner.test_run_waits.clone());
+            let stopped_test_run_waits = if suppress_automatic_resume {
+                consume_test_run_waits_for_stopped_session_locked(&mut inner, session_id)
+            } else {
+                Vec::new()
+            };
 
             let mut stopped_orchestrator_instance_index = None;
             let mut added_stopped_session_id = false;
@@ -1266,7 +1275,14 @@ impl AppState {
 
             match self.commit_locked(&mut inner) {
                 Ok(revision) => Ok((
-                    queued_turn_result,
+                    {
+                        self.publish_test_run_waits_consumed(
+                            revision,
+                            &stopped_test_run_waits,
+                            TestRunWaitConsumedReason::SessionStopped,
+                        );
+                        queued_turn_result
+                    },
                     pending_interaction_updates,
                     created_messages,
                     stopped_wait_refresh,
@@ -1276,6 +1292,9 @@ impl AppState {
                 Err(err) => {
                     if let Some(delegation_waits_before_stop) = delegation_waits_before_stop {
                         inner.delegation_waits = delegation_waits_before_stop;
+                    }
+                    if let Some(test_run_waits_before_stop) = test_run_waits_before_stop {
+                        inner.test_run_waits = test_run_waits_before_stop;
                     }
                     if added_stopped_session_id {
                         if let Some(instance_index) = stopped_orchestrator_instance_index {

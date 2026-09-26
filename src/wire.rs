@@ -2455,6 +2455,9 @@ struct StateResponse {
     /// The test launcher's runs, in list order (docs/features/test-runs.md).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     test_runs: Vec<TestRunSummary>,
+    /// Pending run waits only (docs/features/test-runs.md, run waits).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    test_run_waits: Vec<TestRunWaitRecord>,
     /// Sessions whose stale Engram MCP runtime will be revoked by the Stop
     /// operation that already owns their runtime fence. Normal snapshots and
     /// SSE state events preserve this durable-in-memory pending state so a
@@ -3166,4 +3169,22 @@ enum DeltaEvent {
     TestRunChanged { revision: u64, run: TestRunSummary },
     /// A test run left the index.
     TestRunRemoved { revision: u64, run_id: String },
+    /// A run wait was registered (`test_run_waits.rs`).
+    TestRunWaitCreated {
+        revision: u64,
+        wait: TestRunWaitRecord,
+    },
+    /// A run wait left the pending set.
+    TestRunWaitConsumed {
+        revision: u64,
+        wait_id: String,
+        session_id: String,
+        reason: TestRunWaitConsumedReason,
+    },
+    /// A resume queued by a run wait could not be dispatched.
+    TestRunWaitResumeDispatchFailed {
+        revision: u64,
+        session_id: String,
+        error: String,
+    },
 }

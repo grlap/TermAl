@@ -417,6 +417,7 @@ fn delegation_mcp_base_tools_list_includes_role_scoped_tools() {
             "termal_cancel_session",
             "termal_wait_delegations",
             "termal_resume_after_delegations",
+            "termal_resume_after_test_runs",
             "termal_followup_session",
             "termal_evaluate_acceptance",
             "termal_review_freeze_check",
@@ -4048,5 +4049,88 @@ fn delegation_followup_http_budget_covers_release_reconciliation_and_restore() {
     assert_eq!(
         bridge.request_timeout, TERMAL_DELEGATION_MCP_HTTP_TIMEOUT,
         "ordinary requests keep their existing timeout"
+    );
+}
+
+#[test]
+fn delegation_mcp_resume_after_test_runs_posts_backend_run_wait() {
+    let (base_url, requests, server) = spawn_test_mcp_http_server(1, move |request| {
+        assert_eq!(request.method, "POST");
+        assert_eq!(request.path, "/api/sessions/session-waiter/test-run-waits");
+        let body: Value =
+            serde_json::from_str(&request.body).expect("run wait body should be JSON");
+        assert_eq!(body["runIds"], json!(["test-full", "test-focused"]));
+        assert_eq!(body["mode"], "any");
+        assert_eq!(body["title"], "Gate fan-in");
+        assert!(body.get("delegationIds").is_none(), "a wait never mixes delegations and runs");
+        (
+            201,
+            json!({ "waitId": "test-run-wait-one", "runIds": ["test-full", "test-focused"], "mode": "any" }),
+        )
+    });
+    let bridge = TermalDelegationMcpBridge::new("session-waiter".to_owned(), base_url)
+        .expect("bridge should initialize");
+
+    let response = bridge
+        .tool_resume_after_test_runs(json!({
+            "runIds": ["test-full", "test-focused"],
+            "mode": "any",
+            "title": "Gate fan-in"
+        }))
+        .expect("run wait should post request");
+
+    assert_eq!(response["waitId"], "test-run-wait-one");
+    server.join().expect("test server should join");
+    assert_eq!(requests.lock().expect("request log mutex poisoned").len(), 1);
+    assert!(
+        bridge.tool_resume_after_test_runs(json!({ "runIds": [] })).is_err(),
+        "at least one run id"
+    );
+}
+
+#[test]
+fn delegation_mcp_run_wait_tool_is_hidden_from_and_rejected_for_children() {
+    let (base_url, requests, server) = spawn_test_mcp_http_server(1, move |request| {
+        assert_eq!(request.path, "/api/state");
+        (
+            200,
+            json!({
+                "sessions": [
+                    { "id": "session-child", "name": "Worker", "parentDelegationId": "delegation-x" }
+                ]
+            }),
+        )
+    });
+    let bridge = TermalDelegationMcpBridge::new("session-child".to_owned(), base_url)
+        .expect("bridge should initialize");
+    let names = bridge.tools_list_for_caller()["tools"]
+        .as_array()
+        .expect("tools array")
+        .iter()
+        .filter_map(|tool| tool["name"].as_str().map(str::to_owned))
+        .collect::<Vec<_>>();
+    assert!(
+        !names.iter().any(|name| name == "termal_resume_after_test_runs"),
+        "a child never sees the run wait: {names:?}"
+    );
+    assert!(
+        names.iter().any(|name| name == "termal_resume_after_delegations"),
+        "only the run wait is root-only among the waits: {names:?}"
+    );
+    let error = bridge
+        .handle_tool_call(json!({
+            "name": "termal_resume_after_test_runs",
+            "arguments": { "runIds": ["test-a"] }
+        }))
+        .expect_err("a child cannot wait on runs");
+    assert!(
+        error.to_string().contains("not available to delegation-child sessions"),
+        "{error}"
+    );
+    server.join().expect("test server should join");
+    assert_eq!(
+        requests.lock().expect("request log mutex poisoned").len(),
+        1,
+        "the classification only; nothing reaches the wait route"
     );
 }

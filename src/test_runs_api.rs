@@ -1,8 +1,23 @@
-// Read-only HTTP routes for the test-run index (docs/features/test-runs.md,
-// slice 1): the run list, one run's detail, and a bounded stage-log tail.
-// Owns request parsing and the index lookups. Does not own reading run
-// directories (`test_runs_disk.rs`) or the index itself (`test_runs.rs`), and
-// never starts, cancels or reruns a run.
+// HTTP routes for test runs (docs/features/test-runs.md): the read-only run
+// list, one run's detail and a bounded stage-log tail (slice 1), and
+// registering a run wait (slice 2). Owns request parsing and the index
+// lookups. Does not own reading run directories (`test_runs_disk.rs`), the
+// index itself (`test_runs.rs`) or run waits (`test_run_waits.rs`), and never
+// starts, cancels or reruns a run.
+
+/// Registers a wait for the session in the path on one or more test runs;
+/// the session is resumed with one bounded prompt when they settle.
+async fn create_test_run_wait(
+    AxumPath(session_id): AxumPath<String>,
+    State(state): State<AppState>,
+    request: Result<Json<CreateTestRunWaitRequest>, JsonRejection>,
+) -> Result<(StatusCode, Json<TestRunWaitResponse>), ApiError> {
+    let Json(request) =
+        request.map_err(|rejection| api_json_rejection("test run wait request", rejection))?;
+    let response =
+        run_blocking_api(move || state.create_test_run_wait(&session_id, request)).await?;
+    Ok((StatusCode::CREATED, Json(response)))
+}
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]

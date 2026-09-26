@@ -967,6 +967,12 @@ result envelope to that child's own coordinator. Only a root-session caller
 sees the general peer tools, so the note above that `termal_list_sessions` lists
 the caller is itself scoped to a root caller.
 
+`termal_resume_after_test_runs` is withheld from children the same way, and the
+backend accepts a run wait only from a root session. A child that ended its turn
+to wait would read as finished to its parent, then start a new turn when
+resumed; it runs its gates in the foreground instead. See
+[Test Runs](./test-runs.md).
+
 The bridge caches a successful caller classification for its lifetime. That is
 safe because root eligibility is conjunctive: the session must have no
 `parentDelegationId` **and** its id must be absent from the durable delegation
@@ -998,6 +1004,7 @@ termal_get_session_result
 termal_cancel_session
 termal_wait_delegations
 termal_resume_after_delegations
+termal_resume_after_test_runs
 termal_followup_session
 termal_evaluate_acceptance
 termal_submit_review_result
