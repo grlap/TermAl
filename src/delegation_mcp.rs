@@ -2337,7 +2337,7 @@ fn mcp_tools_list_result() -> Value {
         "tools": [
             {
                 "name": "termal_spawn_session",
-                "description": "Create a TermAl child delegation under the current parent session. Single-line prompts matching a known slash command are resolved before spawning. Mode defaults to reviewer when omitted, and reviewer mode supports only Claude or Codex. Cursor and Gemini callers should pass explorer instead. OpenCode and Kimi callers should pass explorer or worker together with isolatedWorktree because these agents do not support writePolicy readOnly.",
+                "description": "Create a TermAl child delegation under the current parent session. Single-line prompts matching a known slash command are resolved before spawning. Mode defaults to reviewer when omitted, and reviewer mode supports only Claude, Codex or Kimi. Cursor and Gemini callers should pass explorer instead. OpenCode callers should pass explorer or worker together with isolatedWorktree because OpenCode does not support writePolicy readOnly.",
                 "inputSchema": {
                     "type": "object",
                     "required": ["prompt"],
@@ -2354,13 +2354,13 @@ fn mcp_tools_list_result() -> Value {
                         "agent": {
                             "type": "string",
                             "enum": ["Codex", "Claude", "Cursor", "Gemini", "OpenCode", "Kimi"],
-                            "description": "Reviewer mode requires Claude or Codex. Use explorer for Cursor or Gemini; use explorer or worker with isolatedWorktree for OpenCode or Kimi."
+                            "description": "Reviewer mode requires Claude, Codex or Kimi. Use explorer for Cursor or Gemini; use explorer or worker with isolatedWorktree for OpenCode."
                         },
                         "model": { "type": "string" },
                         "mode": {
                             "type": "string",
                             "enum": ["reviewer", "explorer", "worker"],
-                            "description": "Defaults to reviewer when omitted. Reviewer mode requires a Claude or Codex agent; ACP agents should pass explorer instead."
+                            "description": "Defaults to reviewer when omitted. Reviewer mode requires a Claude, Codex or Kimi agent; other ACP agents should pass explorer instead."
                         },
                         "writePolicy": write_policy_input_schema
                     }

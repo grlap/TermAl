@@ -125,12 +125,16 @@ submission is an authenticated control-plane capability. A second narrow
 reviewer capability, [`termal_review_freeze_check`](features/review-freeze-verification.md),
 verifies Engram schema-1 frozen inputs using compiled host code and an observed
 subprocess, without permitting Node or execution of repository helpers.
-Reviewer mode is currently limited to Claude and Codex because their native
-permission protocols expose an identity that TermAl can authenticate. ACP v1
-permission requests do not expose a portable authenticated MCP tool origin, so
-Cursor, Gemini, OpenCode, and Kimi reviewer requests fail before child creation rather
-than relying on presentation-name heuristics; those agents remain available for
-explorer delegations where their write policy is supported.
+Reviewer mode is limited to Claude, Codex and Kimi. Claude and Codex have
+native permission protocols that expose an identity TermAl can authenticate.
+Kimi's read-only children run behind a host gate that decides every permission
+request from the server-qualified tool name and the complete streamed arguments
+(see [Kimi Code CLI Integration](features/kimi-cli-integration.md#read-only-delegation-children)).
+ACP v1 permission requests do not expose a portable authenticated MCP tool
+origin, so Cursor, Gemini and OpenCode reviewer requests fail before child
+creation rather than relying on presentation-name heuristics. Those agents
+remain available for explorer delegations where their write policy is
+supported.
 Malformed durable review artifacts are quarantined per submission attempt and
 reported as `reviewResultRecoveryError`; parent lifecycle endpoints continue
 through the normal fail-closed path rather than propagating recovery parse

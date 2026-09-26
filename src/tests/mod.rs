@@ -60,6 +60,7 @@ mod http_routes;
 mod instruction_search;
 mod json_rpc;
 mod kimi;
+mod kimi_read_only;
 mod mailboxes;
 mod opencode_approvals;
 mod opencode_config;

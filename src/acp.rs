@@ -576,6 +576,7 @@ fn handle_acp_prompt_command(
     // Kimi can retain an Auto/YOLO mode across continuation. Establish manual
     // approvals before every prompt, including already-running sessions.
     if agent == AcpAgent::Kimi {
+        set_kimi_mode_gate_armed(runtime_state, false);
         if let Err(err) =
             configure_kimi_manual_approvals(writer, pending_requests, &external_session_id)
                 .and_then(|config| {
@@ -592,6 +593,9 @@ fn handle_acp_prompt_command(
             set_acp_turn_active(turn_lifecycle, false);
             return Err(err);
         }
+        // Default mode is acknowledged for this prompt: from here until the
+        // prompt settles, a report of another mode is a violation.
+        set_kimi_mode_gate_armed(runtime_state, true);
     }
 
     // Direct test/runtime callers may not pass through `deliver_turn_dispatch`;
@@ -644,6 +648,7 @@ fn handle_acp_prompt_command(
     let wait_state = state.clone();
     let wait_session_id = session_id.to_owned();
     let wait_runtime_token = runtime_token.clone();
+    let wait_runtime_state = runtime_state.clone();
     std::thread::spawn(move || {
         let result = wait_for_acp_json_rpc_response(
             &pending_requests,
@@ -653,6 +658,9 @@ fn handle_acp_prompt_command(
             agent,
         );
         set_acp_turn_active(&wait_turn_lifecycle, false);
+        if agent == AcpAgent::Kimi {
+            set_kimi_mode_gate_armed(&wait_runtime_state, false);
+        }
 
         match result {
             Ok(_) => {
@@ -1310,6 +1318,21 @@ fn handle_acp_message(
                 return Ok(());
             }
         }
+        // A read-only Kimi delegation child: the host answers every request
+        // itself, fenced by the same lock as Stop (kimi_read_only.rs). Any
+        // other Kimi session keeps manual approval cards.
+        if agent == AcpAgent::Kimi
+            && method == "session/request_permission"
+            && state.answer_kimi_read_only_permission(
+                message,
+                session_id,
+                runtime_token,
+                input_tx,
+                &mut turn_state.kimi_read_only,
+            )?
+        {
+            return Ok(());
+        }
         return handle_acp_request(message, state, session_id, input_tx, recorder, agent);
     }
 
@@ -1491,6 +1514,38 @@ fn handle_acp_notification(
                 log_unhandled_acp_event(agent, "ACP session/update missing params.update", message);
                 return Ok(());
             };
+            if agent == AcpAgent::Kimi {
+                // The read-only gate's evidence: streamed arguments before a
+                // permission request, and the rawInput reported after it.
+                if let Some(mismatch) = turn_state.kimi_read_only.observe(update) {
+                    state.stop_kimi_read_only_violation(
+                        session_id,
+                        runtime_token,
+                        input_tx,
+                        &format!(
+                            "Kimi ran `{}` with arguments other than the ones TermAl approved for this read-only delegation, so TermAl stopped the turn",
+                            mismatch.title
+                        ),
+                    )?;
+                }
+                // Only inside the prompt window that began with TermAl's own
+                // Default-mode ACK: a mode Kimi reports during session setup is
+                // about to be replaced, and the ACK itself refuses the prompt
+                // if it is not.
+                if let Some(mode) = kimi_reported_mode(update)
+                    .filter(|mode| !kimi_mode_keeps_permission_gate(mode))
+                    .filter(|_| kimi_mode_gate_armed(runtime_state))
+                {
+                    state.stop_kimi_read_only_violation(
+                        session_id,
+                        runtime_token,
+                        input_tx,
+                        &format!(
+                            "Kimi switched to `{mode}` mode, in which it acts without asking, so TermAl stopped this read-only delegation's turn"
+                        ),
+                    )?;
+                }
+            }
             if agent == AcpAgent::Kimi
                 && update
                     .get("sessionUpdate")

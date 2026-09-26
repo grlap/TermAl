@@ -2286,7 +2286,7 @@ fn delegation_mcp_spawn_schema_documents_mode_and_agent_boundaries() {
         .expect("spawn description should be text");
     assert!(
         description.contains("defaults to reviewer")
-            && description.contains("reviewer mode supports only Claude or Codex")
+            && description.contains("reviewer mode supports only Claude, Codex or Kimi")
             && description.contains("Cursor and Gemini")
             && description.contains("pass explorer")
             && description.contains("OpenCode")
@@ -2309,7 +2309,7 @@ fn delegation_mcp_spawn_schema_documents_mode_and_agent_boundaries() {
         .and_then(Value::as_str)
         .expect("mode schema should explain its default and compatibility");
     assert!(
-        agent_description.contains("Reviewer mode requires Claude or Codex")
+        agent_description.contains("Reviewer mode requires Claude, Codex or Kimi")
             && agent_description.contains("explorer")
             && mode_description.contains("Defaults to reviewer")
             && mode_description.contains("ACP agents should pass explorer"),

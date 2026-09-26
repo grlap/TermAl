@@ -360,7 +360,7 @@ fn running_read_only_delegation_index_entry(
 }
 
 const OPENCODE_READ_ONLY_DELEGATION_ERROR: &str = "OpenCode delegations do not support writePolicy `readOnly`; use `isolatedWorktree` for bounded writable work";
-const ACP_REVIEWER_DELEGATION_ERROR: &str = "reviewer mode requires Claude or Codex because ACP permission requests do not provide an authenticated MCP tool identity; for Cursor, Gemini, OpenCode, or Kimi pass mode `explorer` with a supported write policy";
+const ACP_REVIEWER_DELEGATION_ERROR: &str = "reviewer mode requires Claude, Codex or Kimi because Cursor, Gemini and OpenCode permission requests do not provide an authenticated MCP tool identity; for those agents pass mode `explorer` with a supported write policy";
 const ACP_EVALUATOR_DELEGATION_ERROR: &str = "acceptance evaluators require Claude or Codex because ACP permission requests do not provide an authenticated MCP tool identity; pass agent `Claude` or `Codex`";
 const EVALUATOR_DELEGATION_HOST_ONLY_ERROR: &str = "evaluator delegations are created only by an acceptance evaluation request (`termal_evaluate_acceptance` or POST /api/sessions/{id}/acceptance-evaluations), never by a delegation create request";
 
@@ -538,22 +538,7 @@ impl AppState {
         }
 
         let agent = request.agent.unwrap_or(parent_agent);
-        if mode == DelegationMode::Reviewer && !agent.supports_structured_review_results() {
-            return Err(ApiError::bad_request(ACP_REVIEWER_DELEGATION_ERROR));
-        }
-        // Same reason as reviewer mode: the submission tool is admitted by
-        // authenticated MCP tool identity, which only these agents provide.
-        if mode == DelegationMode::Evaluator && !agent.supports_structured_review_results() {
-            return Err(ApiError::bad_request(ACP_EVALUATOR_DELEGATION_ERROR));
-        }
-        if agent == Agent::OpenCode && requested_write_policy == DelegationWritePolicy::ReadOnly {
-            return Err(ApiError::bad_request(OPENCODE_READ_ONLY_DELEGATION_ERROR));
-        }
-        if agent == Agent::Kimi && requested_write_policy == DelegationWritePolicy::ReadOnly {
-            return Err(ApiError::bad_request(
-                "Kimi delegations do not support writePolicy `readOnly`; use `isolatedWorktree` for bounded writable work",
-            ));
-        }
+        validate_delegation_agent_admission(agent, mode, &requested_write_policy)?;
         // OpenCode model ingress: the generic delegation length check above
         // runs before `agent` is known, so it cannot apply the agent-specific
         // contract. Normalize here — the only point where both the requested
@@ -2260,8 +2245,25 @@ Final answer requirements:\n\
             prompt.push_str("\n\nIf your task requires Engram schema-1 freeze verification, use `termal_review_freeze_check` before and after inspection with the manifest path and the parent's independently supplied SHA-256 literal. It runs a compiled host checker and returns a real separate-stream subprocess observation. Require `verified: true` and `observer.stdoutExact: true`; failure is unavailable verification, never a clean review. Do not run Node, repository helpers, or arbitrary interpreters as a workaround.");
         }
     }
+    if record.agent == Agent::Kimi && matches!(record.write_policy, DelegationWritePolicy::ReadOnly)
+    {
+        prompt.push_str(KIMI_READ_ONLY_CHILD_INSTRUCTIONS);
+        prompt.push_str(if record.mode == DelegationMode::Reviewer {
+            KIMI_READ_ONLY_REVIEWER_REFUSALS
+        } else {
+            KIMI_READ_ONLY_EXPLORER_REFUSALS
+        });
+    }
     prompt
 }
+
+/// Appended to a read-only Kimi child's prompt: what the host's permission
+/// gate allows (kimi_read_only.rs), so the child does not spend its turn on
+/// refusals. The refusal line depends on the mode: only a reviewer has the
+/// TermAl result tools.
+const KIMI_READ_ONLY_CHILD_INSTRUCTIONS: &str = "\n\nTermAl read-only gate for Kimi (TermAl answers your permission requests itself):\n- Read, Grep and Glob work as usual.\n- Bash runs only simple read-only commands (for example `git status`, `git diff`, `git log`, `ls`, `sed -n`), in the working directory, in the foreground. Do not pass `cwd`, `run_in_background` or `disable_timeout`; no redirection, `;`, backticks or `$(`.\n- Do not use Agent or AgentSwarm: a subagent's requests are always refused.\n- A refused tool is not a failure of your task; continue with what is allowed.";
+const KIMI_READ_ONLY_REVIEWER_REFUSALS: &str = "\n- Write, Edit, CronCreate and every other tool that asks permission are refused, except the TermAl result tools named above.";
+const KIMI_READ_ONLY_EXPLORER_REFUSALS: &str = "\n- Write, Edit, CronCreate and every other tool that asks permission are refused.";
 
 impl AppState {
     fn delegation_control_plane_capability_allowed(
@@ -2270,33 +2272,65 @@ impl AppState {
         capability: DelegationControlPlaneCapability,
     ) -> bool {
         let inner = self.inner.lock().expect("state mutex poisoned");
-        let Some(delegation_index) =
-            inner.find_delegation_index_by_child_session_id(child_session_id)
-        else {
-            return false;
-        };
-        let delegation = &inner.delegations[delegation_index];
-        match capability {
-            DelegationControlPlaneCapability::ReviewFreeze => {
-                review_freeze_authority_locked(&inner, child_session_id).is_ok()
-            }
-            DelegationControlPlaneCapability::SubmitAcceptanceEvaluation => {
-                acceptance_evaluation_submit_authority_locked(&inner, child_session_id).is_ok()
-            }
-            DelegationControlPlaneCapability::SubmitReviewResult => {
-                delegation.child_session_id == child_session_id
-                    && delegation.mode == DelegationMode::Reviewer
-                    && delegation.status == DelegationStatus::Running
-                    && inner
-                        .find_session_index(child_session_id)
-                        .and_then(|index| inner.sessions.get(index))
-                        .is_some_and(|child| {
-                            !child.hidden
-                                && child.is_local_session()
-                                && child.session.parent_delegation_id.as_deref()
-                                    == Some(delegation.id.as_str())
-                        })
-            }
+        delegation_control_plane_capability_allowed_locked(&inner, child_session_id, capability)
+    }
+}
+
+/// Whether `agent` may run a delegation in `mode` under `write_policy`.
+fn validate_delegation_agent_admission(
+    agent: Agent,
+    mode: DelegationMode,
+    write_policy: &DelegationWritePolicy,
+) -> Result<(), ApiError> {
+    if mode == DelegationMode::Reviewer && !agent.supports_structured_review_results() {
+        return Err(ApiError::bad_request(ACP_REVIEWER_DELEGATION_ERROR));
+    }
+    // Same reason as reviewer mode: the submission tool is admitted by
+    // authenticated MCP tool identity, and evaluators stay Claude or Codex.
+    if mode == DelegationMode::Evaluator && !agent.supports_acceptance_evaluations() {
+        return Err(ApiError::bad_request(ACP_EVALUATOR_DELEGATION_ERROR));
+    }
+    if agent == Agent::OpenCode && *write_policy == DelegationWritePolicy::ReadOnly {
+        return Err(ApiError::bad_request(OPENCODE_READ_ONLY_DELEGATION_ERROR));
+    }
+    // Kimi read-only children run in Kimi's Default (manual) mode and the host
+    // answers every permission request they make (kimi_read_only.rs), so
+    // `readOnly` is enforced for Kimi.
+    Ok(())
+}
+
+/// `delegation_control_plane_capability_allowed` for a caller that already
+/// holds the state lock.
+fn delegation_control_plane_capability_allowed_locked(
+    inner: &StateInner,
+    child_session_id: &str,
+    capability: DelegationControlPlaneCapability,
+) -> bool {
+    let Some(delegation_index) = inner.find_delegation_index_by_child_session_id(child_session_id)
+    else {
+        return false;
+    };
+    let delegation = &inner.delegations[delegation_index];
+    match capability {
+        DelegationControlPlaneCapability::ReviewFreeze => {
+            review_freeze_authority_locked(inner, child_session_id).is_ok()
+        }
+        DelegationControlPlaneCapability::SubmitAcceptanceEvaluation => {
+            acceptance_evaluation_submit_authority_locked(inner, child_session_id).is_ok()
+        }
+        DelegationControlPlaneCapability::SubmitReviewResult => {
+            delegation.child_session_id == child_session_id
+                && delegation.mode == DelegationMode::Reviewer
+                && delegation.status == DelegationStatus::Running
+                && inner
+                    .find_session_index(child_session_id)
+                    .and_then(|index| inner.sessions.get(index))
+                    .is_some_and(|child| {
+                        !child.hidden
+                            && child.is_local_session()
+                            && child.session.parent_delegation_id.as_deref()
+                                == Some(delegation.id.as_str())
+                    })
         }
     }
 }

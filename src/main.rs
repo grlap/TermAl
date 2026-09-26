@@ -827,6 +827,7 @@ include!("agent_readiness.rs");
 include!("gemini.rs");
 include!("opencode.rs");
 include!("kimi.rs");
+include!("kimi_read_only.rs");
 include!("turns.rs");
 include!("recorders.rs");
 include!("claude.rs");

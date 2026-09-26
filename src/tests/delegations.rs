@@ -1472,7 +1472,7 @@ async fn inherited_acp_agent_and_default_reviewer_mode_are_rejected_before_creat
     assert!(
         response
             .error
-            .contains("reviewer mode requires Claude or Codex")
+            .contains("reviewer mode requires Claude, Codex or Kimi")
             && response.error.contains("pass mode `explorer`"),
         "the rejection must name both the constraint and the supported fix: {}",
         response.error

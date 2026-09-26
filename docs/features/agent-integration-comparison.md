@@ -57,11 +57,16 @@ identity. Current runtimes also diverge in their extensions: Cursor has emitted
 a flat `toolName`, Gemini emits the standard nested tool call without a name,
 and OpenCode uses its permission category as the title. TermAl therefore does
 not infer control-plane authority from any of those presentation fields.
-`mode: reviewer` is accepted only for Claude and Codex; Cursor, Gemini, and
+`mode: reviewer` is accepted for Claude, Codex and Kimi. Cursor, Gemini, and
 OpenCode can still use `mode: explorer` where their write policy is supported.
-This is a fail-fast protocol boundary, not an agent-name workaround: ACP
-reviewers can be enabled together when ACP exposes an authenticated tool-origin
-contract.
+Kimi is the exception among the ACP agents, pinned to Kimi Code 2.0.2. It names
+MCP tools `mcp__<server>__<tool>` and streams each call's complete arguments
+before its permission request, so a host gate can judge every request of a
+read-only child and reject the rest (see
+[Kimi Code CLI Integration](./kimi-cli-integration.md#read-only-delegation-children)).
+For the others this is a fail-fast protocol boundary, not an agent-name
+workaround: they can be enabled together when ACP exposes an authenticated
+tool-origin contract.
 
 ## Advanced features
 

@@ -476,6 +476,11 @@ struct AcpRuntimeState {
     /// Writer-owned: set only after the first host-guided prompt is flushed.
     /// Process-local; external-session resume skips teaching independently.
     host_guidance_sent: bool,
+    /// Writer-owned: true from the moment Kimi acknowledged Default mode for
+    /// the current prompt until that prompt settles. The read-only gate's
+    /// mode guard acts only inside this window, so a mode Kimi reports during
+    /// session setup, before TermAl sets Default, never fails a child.
+    kimi_mode_gate_armed: bool,
     capabilities: Option<AcpCapabilities>,
     current_session_id: Option<String>,
     is_loading_history: bool,
@@ -522,6 +527,8 @@ impl AcpCapabilities {
 struct AcpTurnState {
     current_agent_message_id: Option<String>,
     thinking_buffer: String,
+    /// Kimi tool calls observed by the reader, for the read-only gate.
+    kimi_read_only: KimiReadOnlyObservations,
 }
 
 /// Holds turn configuration.

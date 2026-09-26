@@ -407,15 +407,32 @@ is no old-record or parser-version fallback for reviewer delegations; explorer
 and worker modes may still synthesize their ordinary compact result from final
 assistant prose because they do not claim the reviewer result contract.
 
-New reviewer delegations currently support Claude and Codex. Their native
-permission protocols let TermAl authenticate the injected MCP server/tool before
-granting the narrow result-submission exception. ACP v1
-`session/request_permission` does not expose a portable authenticated MCP tool
-identity, and Cursor, Gemini, and OpenCode emit incompatible presentation-only
-fields. TermAl rejects `mode: reviewer` for those ACP adapters before child
-creation instead of guessing from names or leaving a headless child blocked on
-approval. ACP agents remain available in `mode: explorer` where the requested
-write policy is supported.
+New reviewer delegations support Claude, Codex and Kimi. The native permission
+protocols of Claude and Codex let TermAl authenticate the injected MCP
+server/tool before granting the narrow result-submission exception.
+
+Kimi is an ACP agent, and its read-only children run behind a host gate. The
+gate answers every permission request from the tool call's server-qualified
+`mcp__<server>__<tool>` name and its complete streamed arguments, and rejects
+anything it cannot judge. See
+[Kimi Code CLI Integration](./kimi-cli-integration.md#read-only-delegation-children).
+
+A Kimi reviewer is weaker than a Claude or Codex reviewer, and a parent
+choosing a reviewer agent should weigh that:
+- Kimi's FetchURL and WebSearch run without asking and cannot be disabled, so
+  a Kimi reviewer can reach the network. A Claude reviewer is denied WebFetch.
+- Kimi's reads are not limited to the workspace.
+- The check of Kimi's reported arguments after an approval detects a mismatch;
+  it cannot undo the call.
+
+Workspace writes are refused in every case.
+
+ACP v1 `session/request_permission` itself does not expose a portable
+authenticated MCP tool identity, and Cursor, Gemini and OpenCode emit
+incompatible presentation-only fields. TermAl therefore rejects `mode:
+reviewer` for those three before child creation, instead of guessing from
+names or leaving a headless child blocked on approval. They remain available
+in `mode: explorer` where the requested write policy is supported.
 
 Claude read-only children keep user/project/local settings for command and
 instruction discovery, but receive a process-only permission overlay: explicit
@@ -1610,9 +1627,10 @@ be explicit about which guarantees are enforced and which are advisory.
   `termal_submit_review_result`. Agent adapters map their native protocol onto
   the same capability check, while the backend independently revalidates the
   live reviewer link, schema, routing, and idempotency before any mailbox append.
-  Claude and Codex currently provide the authenticated permission identity this
-  requires. ACP reviewer creation fails before child state exists until ACP has
-  an equivalent tool-origin contract.
+  Claude and Codex provide the authenticated permission identity this requires,
+  and Kimi's read-only gate provides the equivalent from its qualified tool
+  name and streamed arguments. Reviewer creation for the other ACP agents fails
+  before child state exists until ACP has an equivalent tool-origin contract.
 - While the read-only delegation is running, TermAl also blocks local
   TermAl-mediated writes from parent or sibling sessions that target the same
   project/workdir scope. This fail-closed project lock prevents bypassing a

@@ -939,7 +939,8 @@ fn kimi_identity_defaults_and_capability_boundaries() {
     );
     assert_eq!(Agent::Kimi.acp_runtime(), Some(AcpAgent::Kimi));
     assert_eq!(Agent::Kimi.default_model(), "auto");
-    assert!(!Agent::Kimi.supports_structured_review_results());
+    // Kimi reviews through the host's read-only gate (tests/kimi_read_only.rs).
+    assert!(Agent::Kimi.supports_structured_review_results());
     let mut preferences = AppPreferences::default();
     assert_eq!(preferences.default_model_for_agent(Agent::Kimi), "auto");
     preferences.default_kimi_model = "configured-kimi-model".to_owned();
@@ -1153,8 +1154,8 @@ fn kimi_manual_mode_requires_explicit_acknowledgment() {
     ));
 }
 
-#[tokio::test]
-async fn kimi_read_only_and_reviewer_delegations_refuse_before_child_creation() {
+#[test]
+fn kimi_read_only_explorers_and_reviewers_are_admitted_and_evaluators_are_not() {
     let tools = mcp_tools_list_result();
     let spawn = tools["tools"]
         .as_array()
@@ -1170,37 +1171,43 @@ async fn kimi_read_only_and_reviewer_delegations_refuse_before_child_creation() 
             .unwrap()
             .contains(&json!("Kimi"))
     );
-    for mode in ["explorer", "reviewer"] {
-        let state = test_app_state();
-        let parent = test_session_id(&state, Agent::Codex);
-        let before = state.inner.lock().unwrap().sessions.len();
-        let app = app_router(state.clone());
-        let (status, response): (StatusCode, ErrorResponse) = request_json(
-            &app,
-            Request::builder()
-                .method("POST")
-                .uri(format!("/api/sessions/{parent}/delegations"))
-                .header("content-type", "application/json")
-                .body(Body::from(
-                    serde_json::to_vec(&json!({
-                        "prompt":"Inspect task", "agent":"Kimi", "mode":mode,
-                        "writePolicy":{"kind":"readOnly"}
-                    }))
-                    .unwrap(),
-                ))
-                .unwrap(),
-        )
-        .await;
-        assert_eq!(status, StatusCode::BAD_REQUEST);
-        assert!(response.error.contains(if mode == "explorer" {
-            "Kimi delegations do not support"
-        } else {
-            "reviewer"
-        }));
-        let inner = state.inner.lock().unwrap();
-        assert_eq!(inner.sessions.len(), before);
-        assert!(inner.delegations.is_empty());
+    // Read-only Kimi children are gated by the host (tests/kimi_read_only.rs).
+    for mode in [DelegationMode::Explorer, DelegationMode::Reviewer] {
+        assert!(
+            validate_delegation_agent_admission(
+                Agent::Kimi,
+                mode,
+                &DelegationWritePolicy::ReadOnly
+            )
+            .is_ok(),
+            "{mode:?}"
+        );
     }
+    let evaluator = validate_delegation_agent_admission(
+        Agent::Kimi,
+        DelegationMode::Evaluator,
+        &DelegationWritePolicy::ReadOnly,
+    )
+    .err()
+    .expect("a Kimi evaluator is refused");
+    assert!(evaluator.message.contains("Claude or Codex"), "{}", evaluator.message);
+    for agent in [Agent::Cursor, Agent::Gemini, Agent::OpenCode] {
+        assert!(
+            validate_delegation_agent_admission(
+                agent,
+                DelegationMode::Reviewer,
+                &DelegationWritePolicy::ReadOnly
+            )
+            .is_err(),
+            "{agent:?}"
+        );
+    }
+    assert!(validate_delegation_agent_admission(
+        Agent::OpenCode,
+        DelegationMode::Explorer,
+        &DelegationWritePolicy::ReadOnly
+    )
+    .is_err());
 }
 
 #[test]

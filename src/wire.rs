@@ -312,8 +312,17 @@ impl Agent {
     }
 
     /// Returns whether the adapter can authenticate the MCP tool that submits
-    /// the authoritative result for a delegated reviewer.
+    /// the authoritative result for a delegated reviewer. Kimi can: its ACP
+    /// tool calls carry the server-qualified `mcp__<server>__<tool>` name and
+    /// the host answers every permission request of a read-only Kimi child
+    /// (docs/features/kimi-cli-integration.md, "Read-only delegation children").
     fn supports_structured_review_results(self) -> bool {
+        matches!(self, Self::Codex | Self::Claude | Self::Kimi)
+    }
+
+    /// Returns whether the adapter may run an acceptance evaluator. Evaluators
+    /// stay Claude or Codex; Kimi's read-only gate covers reviewers only.
+    fn supports_acceptance_evaluations(self) -> bool {
         matches!(self, Self::Codex | Self::Claude)
     }
 }
