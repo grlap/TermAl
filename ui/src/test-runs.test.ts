@@ -3,6 +3,16 @@ import { applyTestRunDelta, reconcileTestRunSnapshot, sortTestRuns, testRunSessi
 import { makeTestRun, makeTestRunDetail } from "./test-runs-fixtures";
 
 describe("test run presentation", () => {
+  it.each(["processGone", "resultsUnreadable", "noPid"] as const)("adopts unknown reason %s without inferring a missing reason", unknownReason => {
+    const run = makeTestRun({ state: "unknown" });
+    expect(run.unknownReason).toBeUndefined();
+    const incoming = { ...run, unknownReason };
+    const updated = reconcileTestRunSnapshot([run], [incoming]);
+    expect(updated[0]).toBe(incoming);
+    expect(reconcileTestRunSnapshot(updated, [{ ...incoming }])).toBe(updated);
+    expect(reconcileTestRunSnapshot(updated, [run])[0]?.unknownReason).toBeUndefined();
+    expect(applyTestRunDelta([run], { type: "testRunChanged", revision: 2, run: incoming })[0]).toBe(incoming);
+  });
   it("reuses equal versioned snapshot summaries independently of JSON field order", () => {
     const run = makeTestRun();
     const previous = [run];

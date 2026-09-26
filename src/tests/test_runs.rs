@@ -1,8 +1,9 @@
-//! Tests the test-run index (docs/features/test-runs.md, slice 1): which run
-//! directories are found and whose they are, the host verdict for
-//! non-terminal runs, session attribution, list order and retention, the
-//! deltas the rescan publishes, run detail, the stage-log tail and its
-//! containment, and the wire shape. Liveness is injected so no test depends on
+//! Tests the test-run index (docs/features/test-runs.md, slices 1 and 2):
+//! which run directories are found and whose they are, the host verdict for
+//! non-terminal runs and the reason for an unknown one, session attribution,
+//! list order and retention, the deltas the rescan publishes, rescan
+//! serialization and the directories the background thread stats, run
+//! detail, the stage-log tail and its containment, and the wire shape. Liveness is injected so no test depends on
 //! a real process's pid.
 //!
 //! Owns the index tests only. New module; the index is new in
@@ -1740,6 +1741,11 @@ fn a_failed_read_after_the_check_leaves_this_rescan_unknown_and_the_next_one_rea
         fixture.summary("test-reread-fails").state,
         TestRunState::Unknown
     );
+    assert_eq!(
+        fixture.summary("test-reread-fails").unknown_reason,
+        Some(TestRunUnknownReason::ResultsUnreadable),
+        "a failed read after the check is never classified as processGone"
+    );
 
     let mut results = passed_results();
     results["runId"] = json!("test-reread-fails");
@@ -1749,6 +1755,385 @@ fn a_failed_read_after_the_check_leaves_this_rescan_unknown_and_the_next_one_rea
         fixture.summary("test-reread-fails").state,
         TestRunState::Passed
     );
+    assert_eq!(fixture.summary("test-reread-fails").unknown_reason, None);
+}
+
+#[test]
+fn an_unknown_run_says_why_when_that_is_known() {
+    let fixture = RunFixture::new("unknown-reasons");
+    let runs = fixture.runs_dir();
+    let root = fixture.root.as_path();
+    write_run(
+        &runs,
+        "test-gone",
+        full_request(root, "2026-09-25T10:00:00.000Z"),
+        Some(running_results(Some(4242))),
+    );
+    write_run(
+        &runs,
+        "test-no-pid",
+        full_request(root, "2026-09-25T09:00:00.000Z"),
+        Some(running_results(None)),
+    );
+    let unreadable = write_run(
+        &runs,
+        "test-unreadable",
+        full_request(root, "2026-09-25T08:00:00.000Z"),
+        None,
+    );
+    fs::write(unreadable.join("results.json"), "{ not json").unwrap();
+    write_run(
+        &runs,
+        "test-running",
+        full_request(root, "2026-09-25T07:00:00.000Z"),
+        Some(running_results(Some(7))),
+    );
+    write_run(
+        &runs,
+        "test-passed",
+        full_request(root, "2026-09-25T06:00:00.000Z"),
+        Some(passed_results()),
+    );
+
+    fixture.refresh(&[7]);
+
+    for (run_id, reason) in [
+        ("test-gone", Some(TestRunUnknownReason::ProcessGone)),
+        ("test-no-pid", Some(TestRunUnknownReason::NoPid)),
+        ("test-unreadable", Some(TestRunUnknownReason::ResultsUnreadable)),
+        ("test-running", None),
+        ("test-passed", None),
+    ] {
+        assert_eq!(fixture.summary(run_id).unknown_reason, reason, "{run_id}");
+    }
+    // Additive on the wire: sent only when set.
+    let gone = serde_json::to_value(fixture.summary("test-gone")).unwrap();
+    assert_eq!(gone["unknownReason"], "processGone");
+    let running = serde_json::to_value(fixture.summary("test-running")).unwrap();
+    assert!(running.get("unknownReason").is_none(), "{running}");
+    // A reason stays with an unchanged run on later rescans.
+    fixture.refresh(&[7]);
+    assert_eq!(
+        fixture.summary("test-gone").unknown_reason,
+        Some(TestRunUnknownReason::ProcessGone)
+    );
+}
+
+#[test]
+fn a_run_still_handing_over_when_the_reads_run_out_has_no_reason() {
+    // Every check finds the responsible process gone and a newer one named in
+    // results written meanwhile, so each read was made before its own
+    // process's check. When the bounded reads run out, the verdict still rests
+    // on such a read: unknown, but not processGone.
+    let fixture = RunFixture::new("handover-exhausted");
+    let run_dir = write_run(
+        &fixture.runs_dir(),
+        "test-endless-handover",
+        full_request(&fixture.root, "2026-09-25T10:00:00.000Z"),
+        Some(running_results(Some(1000))),
+    );
+    let results_path = run_dir.join("results.json");
+    let hand_over = move |pid: u32, _: Option<std::time::SystemTime>| {
+        let mut results = running_results(Some(pid + 1));
+        results["runId"] = json!("test-endless-handover");
+        fs::write(&results_path, results.to_string()).expect("results should write");
+        false
+    };
+    fixture.state.refresh_test_runs_with(&hand_over, &|event| {
+        fixture.state.publish_delta(event)
+    });
+    let summary = fixture.summary("test-endless-handover");
+    assert_eq!(summary.state, TestRunState::Unknown);
+    assert_eq!(summary.unknown_reason, None);
+}
+
+#[test]
+fn a_run_directory_longer_than_the_path_bound_is_not_indexed() {
+    let base = if cfg!(windows) { "C:/r/" } else { "/r/" };
+    let fits = PathBuf::from(format!("{base}{}", "x".repeat(4096 - base.len())));
+    let too_long = PathBuf::from(format!("{base}{}", "x".repeat(4097 - base.len())));
+    assert!(test_run_dir_within_bounds(&fits));
+    assert!(!test_run_dir_within_bounds(&too_long));
+    // Unsupported before any read: a path the index cannot hold is never
+    // reported as pending, which would track it and rescan on every tick.
+    assert!(matches!(
+        TestRunDisk::read_classified(&too_long, None),
+        TestRunRead::Unsupported
+    ));
+}
+
+#[test]
+fn a_linked_worktree_added_after_a_rescan_is_noticed_at_once() {
+    let fixture = RunFixture::new("new-worktree");
+    fixture.refresh(&[]);
+    assert!(!fixture.state.test_run_tracked_dirs_changed());
+
+    // Git adds the worktree's metadata directory under `worktrees`.
+    let linked_git = fixture.root.join(".git").join("worktrees").join("wt1");
+    fs::create_dir_all(&linked_git).unwrap();
+    assert!(
+        fixture.state.test_run_tracked_dirs_changed(),
+        "the worktrees directory is tracked"
+    );
+    fixture.refresh(&[]);
+    assert!(!fixture.state.test_run_tracked_dirs_changed());
+
+    // Its first run creates its review-runs directory, tracked from the
+    // rescan that listed the new worktree.
+    write_run(
+        &linked_git.join("review-runs"),
+        "test-in-new-worktree",
+        full_request(&fixture.root, "2026-09-25T10:00:00.000Z"),
+        Some(passed_results()),
+    );
+    assert!(fixture.state.test_run_tracked_dirs_changed());
+    fixture.refresh(&[]);
+    assert_eq!(
+        fixture.summary("test-in-new-worktree").state,
+        TestRunState::Passed
+    );
+}
+
+#[test]
+fn a_run_indexed_before_its_results_is_tracked_until_they_read() {
+    // The launcher renames request.json into the run directory before
+    // results.json; a rescan in between indexes the run without results.
+    let fixture = RunFixture::new("request-first");
+    let run_dir = write_run(
+        &fixture.runs_dir(),
+        "test-request-first",
+        full_request(&fixture.root, "2026-09-25T10:00:00.000Z"),
+        None,
+    );
+    let tracks_run_dir = |fixture: &RunFixture| {
+        fixture
+            .state
+            .inner
+            .lock()
+            .unwrap()
+            .test_runs
+            .tracked_dirs
+            .iter()
+            .any(|(dir, _)| dir.ends_with("test-request-first"))
+    };
+    fixture.refresh(&[]);
+    let summary = fixture.summary("test-request-first");
+    assert_eq!(summary.state, TestRunState::Unknown);
+    assert_eq!(
+        summary.unknown_reason,
+        Some(TestRunUnknownReason::ResultsUnreadable),
+        "never settled"
+    );
+    assert!(tracks_run_dir(&fixture));
+    // Still tracked when the unchanged run is served from the parse cache.
+    fixture.refresh(&[]);
+    assert!(tracks_run_dir(&fixture));
+
+    let mut results = passed_results();
+    results["runId"] = json!("test-request-first");
+    fs::write(run_dir.join("results.json"), results.to_string()).unwrap();
+    fixture.refresh(&[]);
+    assert_eq!(
+        fixture.summary("test-request-first").state,
+        TestRunState::Passed
+    );
+    assert!(!tracks_run_dir(&fixture), "results read: no longer tracked");
+}
+
+#[test]
+fn a_run_that_cannot_be_indexed_is_not_tracked() {
+    let fixture = RunFixture::new("unsupported-untracked");
+    let runs = fixture.runs_dir();
+    let mut long_owner = full_request(&fixture.root, "2026-09-25T10:00:00.000Z");
+    long_owner["owner"] = json!("x".repeat(129));
+    write_run(&runs, "test-long-owner", long_owner, Some(passed_results()));
+    let oversized = runs.join("test-oversized-request");
+    fs::create_dir_all(&oversized).unwrap();
+    fs::write(
+        oversized.join("request.json"),
+        format!("{{\"pad\":\"{}\"}}", "x".repeat(1024 * 1024)),
+    )
+    .unwrap();
+    // A directory still waiting for its request is tracked, for contrast.
+    fs::create_dir_all(runs.join("test-no-request-yet")).unwrap();
+
+    fixture.refresh(&[]);
+
+    assert!(fixture.summaries().is_empty());
+    let tracked = fixture.state.inner.lock().unwrap().test_runs.tracked_dirs.clone();
+    let tracks = |name: &str| tracked.iter().any(|(dir, _)| dir.ends_with(name));
+    assert!(!tracks("test-long-owner"), "{tracked:?}");
+    assert!(!tracks("test-oversized-request"), "{tracked:?}");
+    assert!(tracks("test-no-request-yet"), "{tracked:?}");
+}
+
+#[test]
+fn oversized_results_read_as_results_unreadable() {
+    let fixture = RunFixture::new("oversized-results");
+    let run_dir = write_run(
+        &fixture.runs_dir(),
+        "test-oversized-results",
+        full_request(&fixture.root, "2026-09-25T10:00:00.000Z"),
+        None,
+    );
+    fs::write(
+        run_dir.join("results.json"),
+        format!("{{\"pad\":\"{}\"}}", "x".repeat(1024 * 1024)),
+    )
+    .unwrap();
+    fixture.refresh(&[]);
+    let summary = fixture.summary("test-oversized-results");
+    assert_eq!(summary.state, TestRunState::Unknown);
+    assert_eq!(
+        summary.unknown_reason,
+        Some(TestRunUnknownReason::ResultsUnreadable)
+    );
+}
+
+#[test]
+fn a_known_reason_survives_one_failed_read_of_changed_results() {
+    // processGone was confirmed on these results. One failed read of a
+    // replacement keeps them for a rescan under the grace, and with them
+    // their confirmation: nothing flickers and nothing is sent.
+    let fixture = RunFixture::new("reason-grace");
+    let run_dir = write_run(
+        &fixture.runs_dir(),
+        "test-reason-grace",
+        full_request(&fixture.root, "2026-09-25T10:00:00.000Z"),
+        Some(running_results(Some(4242))),
+    );
+    fixture.refresh(&[]);
+    let before = fixture.summary("test-reason-grace");
+    assert_eq!(
+        before.unknown_reason,
+        Some(TestRunUnknownReason::ProcessGone)
+    );
+
+    let mut receiver = fixture.state.subscribe_delta_events();
+    fs::write(run_dir.join("results.json"), "{ mid-replacement").unwrap();
+    fixture.refresh(&[]);
+    assert_eq!(fixture.summary("test-reason-grace"), before);
+    assert!(drain_test_run_deltas(&mut receiver).is_empty());
+}
+
+#[test]
+fn a_rescan_tracks_the_directories_where_a_new_run_appears() {
+    let fixture = RunFixture::new("tracked-dirs");
+    let runs = fixture.runs_dir();
+    let tracked = |fixture: &RunFixture| -> Vec<(PathBuf, Option<std::time::SystemTime>)> {
+        fixture.state.inner.lock().unwrap().test_runs.tracked_dirs.clone()
+    };
+    // The index spells paths as it found them from the project root, so they
+    // are matched by their trailing components.
+    let is_runs_dir = |dir: &PathBuf| {
+        dir.ends_with(
+            FsPath::new("test-runs-tracked-dirs")
+                .join(".git")
+                .join("review-runs"),
+        )
+    };
+    let is_pending = |dir: &PathBuf| dir.ends_with("test-pending");
+
+    // No run yet: the review-runs directory is tracked though it is missing,
+    // so its creation reads as a change.
+    fixture.refresh(&[]);
+    let first = tracked(&fixture);
+    assert!(
+        first
+            .iter()
+            .any(|(dir, stamp)| is_runs_dir(dir) && stamp.is_none()),
+        "{first:?}"
+    );
+    assert!(
+        first.iter().any(|(dir, stamp)| {
+            dir.ends_with(FsPath::new("test-runs-tracked-dirs").join(".git").join("worktrees"))
+                && stamp.is_none()
+        }),
+        "the worktrees directory is tracked though missing: {first:?}"
+    );
+    assert!(!fixture.state.test_run_tracked_dirs_changed());
+    fs::create_dir_all(&runs).unwrap();
+    assert!(fixture.state.test_run_tracked_dirs_changed());
+
+    // A run directory the launcher has created but not yet given a request:
+    // skipped, and tracked, so the request's arrival reads as a change.
+    let pending = runs.join("test-pending");
+    fs::create_dir_all(&pending).unwrap();
+    fixture.refresh(&[]);
+    let now_tracked = tracked(&fixture);
+    assert!(now_tracked.iter().any(|(dir, stamp)| is_runs_dir(dir) && stamp.is_some()));
+    assert!(now_tracked.iter().any(|(dir, _)| is_pending(dir)), "{now_tracked:?}");
+    assert!(!fixture.state.test_run_tracked_dirs_changed());
+    // A stamp older than the directory's reads as a change. (A real change
+    // can land in the same modification-time tick as the stat; the 10 s full
+    // rescan is the backstop for that.)
+    fixture
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .test_runs
+        .tracked_dirs
+        .iter_mut()
+        .find(|(dir, _)| is_pending(dir))
+        .unwrap()
+        .1 = Some(std::time::UNIX_EPOCH);
+    assert!(fixture.state.test_run_tracked_dirs_changed());
+
+    // Once the request is there, the run is indexed and its directory is no
+    // longer tracked.
+    write_run(
+        &runs,
+        "test-pending",
+        full_request(&fixture.root, "2026-09-25T10:00:00.000Z"),
+        Some(passed_results()),
+    );
+    fixture.refresh(&[]);
+    assert_eq!(fixture.summary("test-pending").state, TestRunState::Passed);
+    assert!(!tracked(&fixture).iter().any(|(dir, _)| is_pending(dir)));
+}
+
+#[test]
+fn the_background_rescan_is_due_when_running_changed_or_idle_long_enough() {
+    let changed = std::cell::Cell::new(false);
+    let ask = || {
+        changed.set(true);
+        false
+    };
+    assert!(test_run_rescan_due(false, None, || false), "no rescan yet");
+    assert!(test_run_rescan_due(true, Some(Duration::ZERO), || false), "a run is running");
+    assert!(test_run_rescan_due(false, Some(Duration::ZERO), || true), "a directory changed");
+    assert!(test_run_rescan_due(false, Some(TEST_RUN_IDLE_RESCAN_INTERVAL), || false), "backstop");
+    assert!(!test_run_rescan_due(false, Some(Duration::from_secs(9)), ask), "idle and unchanged");
+    assert!(changed.get(), "the directories are asked only when nothing else decides");
+    changed.set(false);
+    assert!(test_run_rescan_due(true, Some(Duration::ZERO), ask));
+    assert!(!changed.get(), "no stats while a run is running");
+}
+
+#[test]
+fn rescans_are_serialized() {
+    let fixture = RunFixture::new("serialized");
+    write_run(
+        &fixture.runs_dir(),
+        "test-serial",
+        full_request(&fixture.root, "2026-09-25T10:00:00.000Z"),
+        Some(running_results(Some(5))),
+    );
+    let state = fixture.state.clone();
+    let held = std::rc::Rc::new(std::cell::Cell::new(None));
+    let observed = held.clone();
+    let check = move |_: u32, _: Option<std::time::SystemTime>| {
+        let rescan = state.inner.lock().unwrap().test_runs.rescan.clone();
+        observed.set(Some(rescan.try_lock().is_err()));
+        true
+    };
+    fixture
+        .state
+        .refresh_test_runs_with(&check, &|event| fixture.state.publish_delta(event));
+    assert_eq!(held.get(), Some(true), "the rescan lock is held while it reads");
+    let rescan = fixture.state.inner.lock().unwrap().test_runs.rescan.clone();
+    assert!(rescan.try_lock().is_ok(), "and released after");
 }
 
 #[test]

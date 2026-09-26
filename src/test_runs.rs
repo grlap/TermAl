@@ -1,17 +1,21 @@
-// The test-run index (docs/features/test-runs.md, slice 1): which launcher
-// runs exist, their summaries in the state snapshot, and the live deltas that
-// keep clients current. Owns the wire types, the runtime-only index kept in
-// `StateInner`, the rescan that turns disk reads into summaries (project and
-// session attribution, retention, list order), change detection, and the
-// background rescan thread. Does not own reading a run directory
+// The test-run index (docs/features/test-runs.md, slices 1 and 2): which
+// launcher runs exist, their summaries in the state snapshot, and the live
+// deltas that keep clients current. Owns the wire types, the runtime-only
+// index kept in `StateInner`, the rescan that turns disk reads into summaries
+// (project and session attribution, the unknown reason, retention, list
+// order), change detection, rescan serialization, and the background rescan
+// thread with its directory stats. Does not own reading a run directory
 // (`test_runs_disk.rs`) or HTTP (`test_runs_api.rs`), and never starts,
 // cancels or settles a run.
 
-/// How often the rescan runs while some indexed run is `running`, and
-/// otherwise. Tests drive the rescan directly and never start the thread.
+/// The background thread's tick: it rescans on every tick while some indexed
+/// run is `running`, and otherwise stats the tracked directories on every
+/// tick and rescans when one changed. Tests drive the rescan directly and
+/// never start the thread.
 #[cfg(not(test))]
-const TEST_RUN_ACTIVE_RESCAN_INTERVAL: Duration = Duration::from_secs(2);
-#[cfg(not(test))]
+const TEST_RUN_TICK: Duration = Duration::from_secs(2);
+/// The idle backstop: a full rescan at least this often, for a change made in
+/// the same modification-time tick as a stat.
 const TEST_RUN_IDLE_RESCAN_INTERVAL: Duration = Duration::from_secs(10);
 /// Terminal runs kept in the index per project, newest first.
 const TEST_RUN_TERMINAL_RUNS_PER_PROJECT: usize = 50;
@@ -26,6 +30,18 @@ enum TestRunState {
     Passed,
     Failed,
     Unknown,
+}
+
+/// Why a run reads `unknown`, when that is known (slice 2). `processGone` and
+/// `noPid` come only from results read after the liveness check, so they are
+/// final for that process and settle a wait. `resultsUnreadable` may still
+/// resolve on a later read and never settles one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum TestRunUnknownReason {
+    ProcessGone,
+    ResultsUnreadable,
+    NoPid,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -68,6 +84,10 @@ struct TestRunSummary {
     command_truncated: bool,
     detached: Option<bool>,
     state: TestRunState,
+    /// Only with `state: unknown`, and only when the reason is known. Sent
+    /// only when set, an additive field: a missing reason means "not known".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    unknown_reason: Option<TestRunUnknownReason>,
     interrupted: bool,
     current_stage: Option<String>,
     stages: Vec<TestRunStageSummary>,
@@ -162,6 +182,16 @@ struct TestRunIndex {
     /// run whose files did not change is never parsed again. Aged-out runs
     /// outnumber listed ones as run directories accumulate.
     parsed: HashMap<PathBuf, Arc<TestRunDisk>>,
+    /// The directories whose change means a run appeared or became readable,
+    /// with the modification time each had when the last rescan listed or
+    /// read it: every `review-runs` directory, and every run directory the
+    /// rescan skipped for want of a readable request (the launcher creates the
+    /// directory, then renames `request.json` into it). The background thread
+    /// stats them between rescans (`test_run_tracked_dirs_changed`).
+    tracked_dirs: Vec<(PathBuf, Option<std::time::SystemTime>)>,
+    /// Held for a whole rescan, so rescans never interleave: a scan that
+    /// started earlier can never commit over a newer one.
+    rescan: Arc<Mutex<()>>,
 }
 
 impl TestRunIndex {
@@ -192,7 +222,49 @@ impl TestRunIndex {
 struct TestRunScanned {
     disk: Arc<TestRunDisk>,
     state: TestRunState,
+    unknown_reason: Option<TestRunUnknownReason>,
     project_id: Option<String>,
+}
+
+/// Why `state` is `unknown`. `processGone` and `noPid` are classified only
+/// from results read after the liveness check that found the responsible
+/// process gone, or no pid at all: a launcher writes its terminal results just
+/// before it exits, so an earlier read can predate them. When that read after
+/// the check failed, the reason is `resultsUnreadable`, never `processGone`.
+/// When the bounded reads after checks ran out on a run still handing over,
+/// the reason is not known.
+fn test_run_unknown_reason(
+    disk: &TestRunDisk,
+    state: TestRunState,
+    read_after_check_failed: bool,
+) -> Option<TestRunUnknownReason> {
+    if state != TestRunState::Unknown {
+        return None;
+    }
+    if disk.results.is_none() || read_after_check_failed {
+        return Some(TestRunUnknownReason::ResultsUnreadable);
+    }
+    if disk.unknown_needs_read_after_check(state) {
+        return None;
+    }
+    Some(match disk.responsible_pid() {
+        Some(_) => TestRunUnknownReason::ProcessGone,
+        None => TestRunUnknownReason::NoPid,
+    })
+}
+
+/// Whether the background thread rescans on this tick: on every tick while a
+/// run is `running`, at once when a tracked directory changed, and otherwise
+/// once the idle interval has passed since the last rescan (or there has been
+/// none). `dirs_changed` is only asked when nothing else decides.
+fn test_run_rescan_due(
+    active: bool,
+    since_last_rescan: Option<Duration>,
+    dirs_changed: impl FnOnce() -> bool,
+) -> bool {
+    active
+        || since_last_rescan.is_none_or(|since| since >= TEST_RUN_IDLE_RESCAN_INTERVAL)
+        || dirs_changed()
 }
 
 /// The session id `reference` names: an id of a visible session, or the name
@@ -258,6 +330,7 @@ fn test_run_summary(inner: &StateInner, scanned: &TestRunScanned) -> TestRunSumm
         command_truncated: disk.command_truncated,
         detached: disk.detached,
         state: scanned.state,
+        unknown_reason: scanned.unknown_reason,
         interrupted: results.is_some_and(|results| results.interrupted),
         current_stage,
         stages,
@@ -338,10 +411,22 @@ impl AppState {
         writer_may_be_alive: &TestRunLiveness,
         publish: &dyn Fn(&DeltaEvent),
     ) -> bool {
+        // One rescan at a time, from its first read to its last commit. A
+        // rescan that panicked leaves nothing half-done behind the lock, so a
+        // poisoned lock is still taken.
+        let rescan = self
+            .inner
+            .lock()
+            .expect("state mutex poisoned")
+            .test_runs
+            .rescan
+            .clone();
+        let _serialized = rescan
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         // Project roots and the previous parses, taken under the lock; all
         // disk reads happen without it. The parse cache is moved out, not
-        // copied: only this rescan uses it, and a concurrent rescan that
-        // finds it empty merely parses again.
+        // copied: rescans are serialized, so only this one uses it.
         let (roots, mut previous) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let roots: Vec<(String, String)> = inner
@@ -373,13 +458,23 @@ impl AppState {
         let mut scanned = Vec::new();
         let mut parsed = HashMap::new();
         let mut seen = HashSet::new();
+        let mut tracked_dirs = Vec::new();
         for (common_key, common_dir) in &common_dirs {
-            for run_dir in test_runs_directories(common_dir) {
+            for run_dir in test_runs_directories(common_dir, &mut tracked_dirs) {
+                let earlier = previous.remove(&run_dir);
+                // A run directory still waiting for a file is stamped before
+                // its files are read: the launcher creates the directory, then
+                // renames `request.json` and then `results.json` into it, so a
+                // file arriving after this rescan's read changes the stamp.
+                let dir_stamp = earlier
+                    .as_ref()
+                    .is_none_or(|disk| disk.results.is_none() || disk.read_failures > 0)
+                    .then(|| test_run_dir_stamp(&run_dir));
                 let request_stamp = test_run_file_stamp(&run_dir.join("request.json"));
                 let results_stamp = test_run_file_stamp(&run_dir.join("results.json"));
                 // An entry that kept an earlier read after a failed one is
                 // read again whatever its stamps say.
-                let disk = match previous.remove(&run_dir) {
+                let disk = match earlier {
                     Some(disk)
                         if disk.read_failures == 0
                             && disk.request_stamp == request_stamp
@@ -387,9 +482,15 @@ impl AppState {
                     {
                         disk
                     }
-                    earlier => match TestRunDisk::read(&run_dir, earlier.as_deref()) {
-                        Some(disk) => Arc::new(disk),
-                        None => continue,
+                    earlier => match TestRunDisk::read_classified(&run_dir, earlier.as_deref()) {
+                        TestRunRead::Run(disk) => Arc::new(disk),
+                        TestRunRead::Pending => {
+                            if let Some(stamp) = dir_stamp {
+                                tracked_dirs.push((run_dir.clone(), stamp));
+                            }
+                            continue;
+                        }
+                        TestRunRead::Unsupported => continue,
                     },
                 };
                 parsed.insert(run_dir.clone(), disk.clone());
@@ -401,6 +502,7 @@ impl AppState {
                 }
                 let mut disk = disk;
                 let mut state = disk.state(writer_may_be_alive);
+                let mut read_after_check_failed = false;
                 // Unknown from results read before the check that found the
                 // process gone: the launcher may have written its terminal
                 // results and exited in between. Read them once more, now that
@@ -418,6 +520,7 @@ impl AppState {
                     else {
                         // The read after the check failed; the verdict stays
                         // this rescan's, and the next rescan reads again.
+                        read_after_check_failed = true;
                         break;
                     };
                     fresh.confirmed_unknown = Some(checked);
@@ -425,9 +528,17 @@ impl AppState {
                     disk = Arc::new(fresh);
                     parsed.insert(run_dir.clone(), disk.clone());
                 }
+                // Indexed before its results were written: tracked until they
+                // read, so they are seen within a tick, not at the backstop.
+                if disk.results.is_none() {
+                    if let Some(stamp) = dir_stamp {
+                        tracked_dirs.push((run_dir.clone(), stamp));
+                    }
+                }
                 let project_id =
                     test_run_project_id(&test_run_path_key(&disk.worktree), &projects, common_key);
                 scanned.push(TestRunScanned {
+                    unknown_reason: test_run_unknown_reason(&disk, state, read_after_check_failed),
                     disk,
                     state,
                     project_id,
@@ -452,6 +563,7 @@ impl AppState {
         // they treat as a gap and answer with a full resync.
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         inner.test_runs.parsed = parsed;
+        inner.test_runs.tracked_dirs = tracked_dirs;
         let entries: Vec<TestRunEntry> = scanned
             .iter()
             .map(|run| TestRunEntry {
@@ -547,9 +659,29 @@ impl AppState {
             .collect()
     }
 
-    /// Starts the background rescan: every 2 s while a run is `running`,
-    /// every 10 s otherwise. Nothing else polls. It stops once shutdown is
-    /// signalled, so no delta is committed after persistence has shut down.
+    /// Whether a tracked directory's modification time differs from the one
+    /// the last rescan recorded: a run was created or removed in a
+    /// `review-runs` directory, or a skipped run directory got its request.
+    /// Stats only; the state lock is not held while they run.
+    fn test_run_tracked_dirs_changed(&self) -> bool {
+        let tracked = self
+            .inner
+            .lock()
+            .expect("state mutex poisoned")
+            .test_runs
+            .tracked_dirs
+            .clone();
+        tracked
+            .iter()
+            .any(|(dir, stamp)| test_run_dir_stamp(dir) != *stamp)
+    }
+
+    /// Starts the background rescan. It ticks every 2 s: while a run is
+    /// `running` it rescans on every tick; otherwise it stats the tracked
+    /// directories and rescans when one changed, so a new run is seen within
+    /// about 2 s, with a full rescan every 10 s as the backstop. Nothing else
+    /// polls. It stops once shutdown is signalled, so no delta is committed
+    /// after persistence has shut down.
     #[cfg(not(test))]
     fn spawn_test_run_index(&self) {
         let state = self.clone();
@@ -557,13 +689,18 @@ impl AppState {
         let spawned = std::thread::Builder::new()
             .name("termal-test-runs".to_owned())
             .spawn(move || {
+                let mut active = false;
+                let mut last_rescan: Option<std::time::Instant> = None;
                 while !*shutdown.borrow() {
-                    let active = state.refresh_test_runs();
-                    std::thread::sleep(if active {
-                        TEST_RUN_ACTIVE_RESCAN_INTERVAL
-                    } else {
-                        TEST_RUN_IDLE_RESCAN_INTERVAL
-                    });
+                    if test_run_rescan_due(
+                        active,
+                        last_rescan.map(|at| at.elapsed()),
+                        || state.test_run_tracked_dirs_changed(),
+                    ) {
+                        active = state.refresh_test_runs();
+                        last_rescan = Some(std::time::Instant::now());
+                    }
+                    std::thread::sleep(TEST_RUN_TICK);
                 }
             });
         if let Err(err) = spawned {

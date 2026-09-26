@@ -1,6 +1,6 @@
 // Reading the test launcher's run directories (docs/features/test-runs.md,
-// slice 1). Owns Git common-directory discovery from the filesystem, run
-// directory listing, bounded parsing of request.json and results.json, the
+// slices 1 and 2). Owns Git common-directory discovery from the filesystem,
+// run directory listing and directory stamps, bounded parsing of request.json and results.json, the
 // host verdict for non-terminal runs (process liveness), run detail and the
 // stage-log tail with canonical path containment. Never writes to a run
 // directory and never decides passed or failed itself: those come from the
@@ -22,9 +22,16 @@ const TEST_RUN_STAGES_MAX: usize = 64;
 /// whose run id or session reference is longer is not indexed, a stage with a
 /// longer or invalid name is left out, and a longer timestamp reads as null.
 const TEST_RUN_TEXT_MAX_BYTES: usize = 128;
-/// The longest worktree path the index accepts; a run with a longer one is
-/// not indexed.
+/// The longest worktree or run directory path the index accepts; a run with
+/// a longer one is not indexed.
 const TEST_RUN_PATH_MAX_BYTES: usize = 4096;
+
+/// Whether the index accepts a run directory's path: its displayed form fits
+/// `TEST_RUN_PATH_MAX_BYTES`, so a card's core, which is never cut, stays
+/// bounded.
+fn test_run_dir_within_bounds(run_dir: &FsPath) -> bool {
+    test_run_display_path(run_dir).len() <= TEST_RUN_PATH_MAX_BYTES
+}
 
 /// `text` when it is within `max` bytes; never a cut copy.
 fn test_run_within(text: String, max: usize) -> Option<String> {
@@ -76,12 +83,27 @@ fn test_runs_git_common_dir(root: &FsPath) -> Option<PathBuf> {
     None
 }
 
+/// A directory's modification time, which changes when an entry is created,
+/// removed or renamed in it. `None` when it cannot be read or does not exist,
+/// so a directory that appears later reads as changed.
+fn test_run_dir_stamp(dir: &FsPath) -> Option<std::time::SystemTime> {
+    fs::metadata(dir).ok()?.modified().ok()
+}
+
 /// Every run directory under a common directory: its own `review-runs` and
 /// each linked worktree's, sorted so a duplicate run id resolves the same way
-/// on every scan.
-fn test_runs_directories(common_dir: &FsPath) -> Vec<PathBuf> {
+/// on every scan. Each directory listed here is appended to `tracked` with its
+/// modification time, taken before it is listed, so an entry created after
+/// the listing changes the stamp: every `review-runs` directory, and the
+/// `worktrees` directory, whose stamp changes when a linked worktree is added.
+fn test_runs_directories(
+    common_dir: &FsPath,
+    tracked: &mut Vec<(PathBuf, Option<std::time::SystemTime>)>,
+) -> Vec<PathBuf> {
     let mut review_dirs = vec![common_dir.join("review-runs")];
-    if let Ok(entries) = fs::read_dir(common_dir.join("worktrees")) {
+    let worktrees = common_dir.join("worktrees");
+    tracked.push((worktrees.clone(), test_run_dir_stamp(&worktrees)));
+    if let Ok(entries) = fs::read_dir(&worktrees) {
         review_dirs.extend(
             entries
                 .flatten()
@@ -90,6 +112,7 @@ fn test_runs_directories(common_dir: &FsPath) -> Vec<PathBuf> {
     }
     let mut runs = Vec::new();
     for review_dir in review_dirs {
+        tracked.push((review_dir.clone(), test_run_dir_stamp(&review_dir)));
         let Ok(entries) = fs::read_dir(&review_dir) else {
             continue;
         };
@@ -307,6 +330,29 @@ impl TestRunResultsExtract {
     }
 }
 
+/// What a read of a run directory found.
+enum TestRunRead {
+    /// A run to index.
+    Run(TestRunDisk),
+    /// No readable request, and no earlier good read to keep: a directory the
+    /// launcher is still creating, or a request lost to a replacement race.
+    /// The next rescan reads again, and the directory is tracked meanwhile.
+    Pending,
+    /// A run that cannot be indexed as its files stand: an oversized request,
+    /// or an identifier or path over its bound. It is not tracked, since the
+    /// launcher's own writes to a live run would trigger a rescan every tick.
+    Unsupported,
+}
+
+impl TestRunRead {
+    fn into_run(self) -> Option<TestRunDisk> {
+        match self {
+            Self::Run(disk) => Some(disk),
+            Self::Pending | Self::Unsupported => None,
+        }
+    }
+}
+
 /// What one run directory says, parsed once per change of its files.
 #[derive(Clone, Debug)]
 struct TestRunDisk {
@@ -352,13 +398,32 @@ impl TestRunDisk {
     /// results, and every failed read is tried again on the next rescan.
     /// `None` when the run has no readable request to report.
     fn read(run_dir: &FsPath, previous: Option<&Self>) -> Option<Self> {
-        Self::read_pausing(run_dir, previous, &|| {})
+        Self::read_classified(run_dir, previous).into_run()
+    }
+
+    /// `read`, telling a run whose request is not readable yet from one that
+    /// can never be indexed as its files stand.
+    fn read_classified(run_dir: &FsPath, previous: Option<&Self>) -> TestRunRead {
+        Self::read_classified_pausing(run_dir, previous, &|| {})
     }
 
     /// `read`, calling `after_stamp` between the stamp taken before the reads
     /// and the reads themselves: the window in which the launcher can replace
     /// a file, which a test uses to replace one deterministically.
+    #[cfg(test)]
     fn read_pausing(run_dir: &FsPath, previous: Option<&Self>, after_stamp: &dyn Fn()) -> Option<Self> {
+        Self::read_classified_pausing(run_dir, previous, after_stamp).into_run()
+    }
+
+    fn read_classified_pausing(
+        run_dir: &FsPath,
+        previous: Option<&Self>,
+        after_stamp: &dyn Fn(),
+    ) -> TestRunRead {
+        // Unsupported, not failed: nothing to report, and nothing to read.
+        if !test_run_dir_within_bounds(run_dir) {
+            return TestRunRead::Unsupported;
+        }
         let request_path = run_dir.join("request.json");
         let results_path = run_dir.join("results.json");
         // Stamped before the read: it is kept only when there are no parsed
@@ -374,13 +439,16 @@ impl TestRunDisk {
             // the index at once), so a missing request is a failed read like
             // any other.
             TestRunJson::Missing | TestRunJson::Failed => {
-                return grace.map(|previous| Self {
-                    read_failures: 1,
-                    ..previous.clone()
-                });
+                return match grace {
+                    Some(previous) => TestRunRead::Run(Self {
+                        read_failures: 1,
+                        ..previous.clone()
+                    }),
+                    None => TestRunRead::Pending,
+                };
             }
             // Deterministic, not a race: no grace, and nothing to report.
-            TestRunJson::TooLarge => return None,
+            TestRunJson::TooLarge => return TestRunRead::Unsupported,
         };
         let run_id = test_run_str(&request, "runId").unwrap_or_else(|| {
             run_dir
@@ -390,7 +458,9 @@ impl TestRunDisk {
                 .into_owned()
         });
         // Identifiers the index cannot hold whole are unsupported, never cut.
-        let run_id = test_run_within(run_id, TEST_RUN_TEXT_MAX_BYTES)?;
+        let Some(run_id) = test_run_within(run_id, TEST_RUN_TEXT_MAX_BYTES) else {
+            return TestRunRead::Unsupported;
+        };
         let preset = if request.get("full").and_then(Value::as_bool) == Some(true) {
             TestRunPreset::Full
         } else if request
@@ -433,6 +503,9 @@ impl TestRunDisk {
             (None, false)
         };
         let mut read_failures = 0;
+        // A confirmation belongs to the results it was made on, so it is kept
+        // only with the grace's copy of those same results.
+        let mut confirmed_unknown = None;
         let (results, results_stamp) = match test_run_read_json(&results_path) {
             // The pid in these results is judged against when this version
             // was written, never against a stamp of a replaced version.
@@ -453,9 +526,12 @@ impl TestRunDisk {
             // not read again until the file changes.
             TestRunJson::TooLarge => (None, results_stamp),
             TestRunJson::Missing | TestRunJson::Failed => match grace {
-                // The grace: the last good results stand for one rescan.
+                // The grace: the last good results stand for one rescan, with
+                // what was confirmed about them, so a known reason does not
+                // flicker over one failed read.
                 Some(grace) => {
                     read_failures = 1;
+                    confirmed_unknown = grace.confirmed_unknown;
                     (grace.results.clone(), grace.results_stamp)
                 }
                 // No evidence to keep: unknown, read again next rescan.
@@ -475,20 +551,24 @@ impl TestRunDisk {
                     .ok_or(()),
             }
         };
-        let owner = reference("owner").ok()?;
-        let notify_to = reference("notifyTo").ok()?;
+        let (Ok(owner), Ok(notify_to)) = (reference("owner"), reference("notifyTo")) else {
+            return TestRunRead::Unsupported;
+        };
         let worktree = match test_run_str(&request, "root") {
             None => String::new(),
-            Some(root) => test_run_within(
+            Some(root) => match test_run_within(
                 test_run_display_path(FsPath::new(&root)),
                 TEST_RUN_PATH_MAX_BYTES,
-            )?,
+            ) {
+                Some(worktree) => worktree,
+                None => return TestRunRead::Unsupported,
+            },
         };
         // A timestamp is not an identifier: an over-long one reads as null.
         let started_at = test_run_str(&request, "started")
             .and_then(|text| test_run_within(text, TEST_RUN_TEXT_MAX_BYTES))
             .or_else(|| results.as_ref().and_then(|results| results.started.clone()));
-        Some(Self {
+        TestRunRead::Run(Self {
             run_id,
             run_dir: run_dir.to_path_buf(),
             request_stamp,
@@ -504,7 +584,7 @@ impl TestRunDisk {
             results,
             started_at,
             read_failures,
-            confirmed_unknown: None,
+            confirmed_unknown,
         })
     }
 

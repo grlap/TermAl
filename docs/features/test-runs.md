@@ -152,8 +152,11 @@ never writes to a run directory in slice 1.
 
 A host thread rescans the run directories: every 2 s while any indexed run is
 `running`, and every 10 s otherwise, so an abandoned `unknown` run does not
-hold the fast rescan until someone recovers it. TermAl's workspace file watcher
-deliberately ignores `.git/`, where the runs live.
+hold the fast rescan until someone recovers it. From slice 2, a changed
+directory also triggers a rescan at once (see Noticing runs quickly). Rescans
+are serialized: one runs at a time, from its first read to its last commit.
+TermAl's workspace file watcher deliberately ignores `.git/`, where the runs
+live.
 
 A rescan only stats `request.json` and `results.json`. It parses a run again
 only when their size or modification time changed, and it re-checks liveness
@@ -182,8 +185,8 @@ shorter than the plan, while `currentStage` names the running stage wherever
 it is), `interrupted`, `ended`,
 `exitCode`, the pid, and the error cut to 512 bytes. Nothing that names
 something is ever cut, since a cut identifier could alias another. A run whose
-run id, `owner` or `notifyTo` exceeds 128 bytes, or whose worktree exceeds 4096
-bytes, is not indexed. A stage whose name is not a launcher stage name
+run id, `owner` or `notifyTo` exceeds 128 bytes, or whose worktree or (from
+slice 2) run directory exceeds 4096 bytes, is not indexed. A stage whose name is not a launcher stage name
 (`^[A-Za-z0-9_-]+$`, at most 128 bytes) is left out of the summary. A timestamp
 over 128 bytes reads as null. So what the index keeps per run is bounded,
 listed or not; the total still grows with the number of run directories. A run
@@ -557,15 +560,34 @@ a wait with `UNKNOWN` for a run that passed, and write two card revisions.
 
 When the read after the check fails, the verdict is `unknown` with
 `resultsUnreadable`, not `processGone`. It is not settled, and the next rescan
-reads again.
+reads again. Results that cannot be read at all, are missing or exceed the
+read limit are `resultsUnreadable` too. The one-rescan grace for a failed read
+(see Refresh) keeps the last good results together with what was confirmed
+about them, so a known reason does not flicker over one failed read. When the bounded reads after checks
+run out on a run still handing over from process to process, the verdict
+rests on a read made before the last check, so it carries no reason.
 
 ### Noticing runs quickly
 
 The rescan stats each tracked `review-runs` directory every 2 s. A changed
 directory modification time triggers a full rescan at once, so a new run is
-seen within about 2 s. The per-run liveness cadence is unchanged. The 10 s
-full rescan stays as the backstop for a run directory created in the same
-modification-time tick as a stat.
+seen within about 2 s. The tracked directories are:
+
+- every `review-runs` directory, including one that does not exist yet, whose
+  creation counts as a change;
+- the Git `worktrees` directory, whose modification time changes when a
+  linked worktree is added, so that worktree's `review-runs` is tracked from
+  the next rescan;
+- a run directory whose files have not all arrived. The launcher creates the
+  directory, then renames `request.json` and then `results.json` into it. A
+  directory skipped for want of a readable request, or a run indexed before
+  its results, stays tracked until they read.
+
+A run that cannot be indexed as its files stand (an oversized request, or an
+identifier or path over its bound) is not tracked, since the launcher's own
+writes to it would trigger a rescan on every tick. The per-run liveness
+cadence is unchanged. The 10 s full rescan stays as the backstop for a change
+made in the same modification-time tick as a stat.
 
 ## Slice 2: run waits
 
