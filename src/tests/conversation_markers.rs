@@ -843,6 +843,8 @@ fn remote_marker_create_is_rejected_after_post_decode_a_to_b_to_a_cycle() {
         state_for_hook
             .update_app_settings(UpdateAppSettingsRequest {
                 default_opencode_approval_mode: None,
+                default_kimi_approval_mode: None,
+                default_kimi_effort: None,
                 default_codex_model: None,
                 default_claude_model: None,
                 default_cursor_model: None,
@@ -860,6 +862,8 @@ fn remote_marker_create_is_rejected_after_post_decode_a_to_b_to_a_cycle() {
         state_for_hook
             .update_app_settings(UpdateAppSettingsRequest {
                 default_opencode_approval_mode: None,
+                default_kimi_approval_mode: None,
+                default_kimi_effort: None,
                 default_codex_model: None,
                 default_claude_model: None,
                 default_cursor_model: None,

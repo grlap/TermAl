@@ -61,6 +61,8 @@ export type CreateConversationMarkerHandlerResult =
   | Promise<boolean | void>;
 
 export type SessionSettingsField =
+  | "kimiApprovalMode"
+  | "kimiMode"
   | "opencodeApprovalMode"
   | "model"
   | "sandboxMode"

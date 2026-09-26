@@ -588,6 +588,15 @@ struct Session {
     kimi_current_effort: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     kimi_effort_options: Vec<SessionModelOption>,
+    /// TermAl's Kimi permission policy; None reads as `ask`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    kimi_approval_mode: Option<KimiApprovalMode>,
+    /// Kimi's own mode for this session; None reads as `default`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    kimi_mode: Option<KimiMode>,
+    /// The mode Kimi last reported, for display only; never `kimi_mode`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    kimi_current_mode: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     opencode_approval_mode: Option<OpenCodeApprovalMode>,
     id: String,
@@ -711,6 +720,12 @@ struct StateSessionSummary {
     kimi_current_effort: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     kimi_effort_options: Vec<SessionModelOption>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    kimi_approval_mode: Option<KimiApprovalMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    kimi_mode: Option<KimiMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    kimi_current_mode: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     opencode_approval_mode: Option<OpenCodeApprovalMode>,
     id: String,
@@ -971,6 +986,36 @@ enum OpenCodeApprovalMode {
     AutoApprove,
 }
 
+/// TermAl-owned Kimi permission policy: the same `ask` / `auto-approve` wire
+/// values as OpenCode's, and the same meaning. Independent of `KimiMode`,
+/// which is Kimi's own setting (docs/features/kimi-cli-integration.md).
+type KimiApprovalMode = OpenCodeApprovalMode;
+
+/// Kimi's own mode, set before every prompt and acknowledged by Kimi.
+/// `default` asks before commands and edits; `plan` plans only; in `yolo`
+/// and `auto` Kimi decides for itself and rarely or never asks TermAl.
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum KimiMode {
+    #[default]
+    Default,
+    Plan,
+    Yolo,
+    Auto,
+}
+
+impl KimiMode {
+    /// The value Kimi's `mode` config option uses.
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::Plan => "plan",
+            Self::Yolo => "yolo",
+            Self::Auto => "auto",
+        }
+    }
+}
+
 /// Enumerates Gemini approval modes.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -1092,6 +1137,10 @@ struct CodexAppRequestSubmissionRequest {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CreateSessionRequest {
+    #[serde(default)]
+    kimi_approval_mode: Option<KimiApprovalMode>,
+    #[serde(default)]
+    kimi_mode: Option<KimiMode>,
     opencode_approval_mode: Option<OpenCodeApprovalMode>,
     agent: Option<Agent>,
     name: Option<String>,
@@ -1866,6 +1915,12 @@ impl UpdateProjectEngramSettingsRequest {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct UpdateAppSettingsRequest {
+    #[serde(default)]
+    default_kimi_approval_mode: Option<KimiApprovalMode>,
+    /// `auto` (the CLI's current value) or an effort value; copied onto new
+    /// Kimi sessions when they are created.
+    #[serde(default)]
+    default_kimi_effort: Option<String>,
     #[serde(rename = "defaultOpenCodeApprovalMode")]
     default_opencode_approval_mode: Option<OpenCodeApprovalMode>,
     default_codex_model: Option<String>,
@@ -2191,6 +2246,10 @@ struct FollowupDelegationRequest {
 #[serde(rename_all = "camelCase")]
 struct UpdateSessionSettingsRequest {
     kimi_effort: Option<String>,
+    #[serde(default)]
+    kimi_approval_mode: Option<KimiApprovalMode>,
+    #[serde(default)]
+    kimi_mode: Option<KimiMode>,
     opencode_approval_mode: Option<OpenCodeApprovalMode>,
     name: Option<String>,
     model: Option<String>,

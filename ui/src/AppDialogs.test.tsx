@@ -30,6 +30,25 @@ type NavigatorWithUserAgentData = Navigator & {
   userAgentData?: { platform?: string };
 };
 
+it("keeps Kimi creation drafts local and resets both mode and approval after cancel", async () => {
+  const props = createBaseProps({ isCreateSessionOpen: true, newSessionAgent: "Kimi", defaultKimiApprovalMode: "auto-approve" });
+  const view = render(<AppDialogs {...props} />);
+  expect(screen.getByRole("combobox", { name: "TermAl approvals" })).toHaveTextContent("Auto-approve");
+  fireEvent.click(screen.getByRole("combobox", { name: "TermAl approvals" }));
+  fireEvent.click(await screen.findByRole("option", { name: /^Ask$/ }));
+  fireEvent.click(screen.getByRole("combobox", { name: "Kimi mode" }));
+  fireEvent.click(await screen.findByRole("option", { name: /^Never ask/ }));
+  expect(screen.getByText(/rarely or never asks TermAl/)).toBeInTheDocument();
+  fireEvent.submit(screen.getByRole("combobox", { name: "Kimi mode" }).closest("form")!);
+  expect(props.handleCreateSessionDialogSubmit).toHaveBeenCalledWith("ask", "auto");
+  expect(props.handleDefaultKimiApprovalModeChange).not.toHaveBeenCalled();
+  expect(props.handleDefaultKimiEffortChange).not.toHaveBeenCalled();
+  view.rerender(<AppDialogs {...props} isCreateSessionOpen={false} />);
+  view.rerender(<AppDialogs {...props} />);
+  expect(screen.getByRole("combobox", { name: "TermAl approvals" })).toHaveTextContent("Auto-approve");
+  expect(screen.getByRole("combobox", { name: "Kimi mode" })).toHaveTextContent("Default");
+});
+
 it("keeps OpenCode creation approvals local to the dialog and resets them after cancel", async () => {
   const props = createBaseProps({ isCreateSessionOpen: true, newSessionAgent: "OpenCode" });
   const view = render(<AppDialogs {...props} />);
@@ -111,6 +130,10 @@ function createBaseProps(
     defaultGeminiModel: "default",
     handleDefaultGeminiModelChange: vi.fn(),
     defaultKimiModel: "default",
+    defaultKimiApprovalMode: "ask",
+    defaultKimiEffort: "auto",
+    handleDefaultKimiApprovalModeChange: vi.fn(),
+    handleDefaultKimiEffortChange: vi.fn(),
     handleDefaultKimiModelChange: vi.fn(),
     defaultGeminiApprovalMode: GEMINI_APPROVAL_OPTIONS[0].value,
     onChangeDefaultGeminiApprovalMode: vi.fn(),
@@ -568,10 +591,12 @@ describe("AppDialogs settings agent defaults", () => {
     expect(screen.queryByLabelText("Default Gemini approvals")).toBeNull();
   });
 
-  it("renders the Kimi settings tab with model-only defaults", () => {
+  it("renders the Kimi settings tab with startup defaults", () => {
     renderSettingsDialog("kimi");
     expect(screen.getByRole("heading", { name: "Kimi startup settings" })).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Kimi default model" })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Default TermAl approvals" })).toHaveTextContent("Ask");
+    expect(screen.getByRole("combobox", { name: "Default reasoning effort" })).toHaveTextContent("CLI current");
     expect(screen.getByText("kimi login")).toBeInTheDocument();
   });
 

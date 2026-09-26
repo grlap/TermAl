@@ -21,7 +21,8 @@ import {
   remoteConnectionLabel,
   remoteDisplayName,
 } from "./remotes";
-import type { OpenCodeApprovalMode } from "./types";
+import type { KimiApprovalMode, KimiMode, OpenCodeApprovalMode } from "./types";
+import { KIMI_APPROVAL_OPTIONS, KIMI_MODE_OPTIONS, isKimiApprovalMode, isKimiMode, kimiModeHint } from "./kimi-settings-options";
 import { KimiPreferencesPanel } from "./preferences/kimi-preferences-panel";
 import {
   ThemePreferencesPanel,
@@ -105,7 +106,7 @@ type AppDialogsProps = {
   isCreateSessionOpen: boolean;
   isCreating: boolean;
   closeCreateSessionDialog: () => void;
-  handleCreateSessionDialogSubmit: (approvalMode?: OpenCodeApprovalMode) => Promise<void>;
+  handleCreateSessionDialogSubmit: (approvalMode?: OpenCodeApprovalMode | KimiApprovalMode, kimiMode?: KimiMode) => Promise<void>;
   newSessionAgent: AgentType;
   onChangeNewSessionAgent: (nextValue: AgentType) => void;
   defaultCodexModel: string;
@@ -122,6 +123,10 @@ type AppDialogsProps = {
   onChangeDefaultCursorMode: (nextValue: CursorMode) => void;
   defaultGeminiModel: string;
   defaultKimiModel: string;
+  defaultKimiApprovalMode: KimiApprovalMode;
+  defaultKimiEffort: string;
+  handleDefaultKimiApprovalModeChange: (value: KimiApprovalMode) => void;
+  handleDefaultKimiEffortChange: (value: string) => void;
   handleDefaultGeminiModelChange: (nextValue: string) => void;
   handleDefaultKimiModelChange: (nextValue: string) => void;
   defaultGeminiApprovalMode: GeminiApprovalMode;
@@ -410,6 +415,10 @@ export function AppDialogs({
   onChangeDefaultCursorMode,
   defaultGeminiModel,
   defaultKimiModel,
+  defaultKimiApprovalMode,
+  defaultKimiEffort,
+  handleDefaultKimiApprovalModeChange,
+  handleDefaultKimiEffortChange,
   handleDefaultGeminiModelChange,
   handleDefaultKimiModelChange,
   defaultGeminiApprovalMode,
@@ -487,8 +496,14 @@ export function AppDialogs({
 }: AppDialogsProps): JSX.Element {
   const [createOpenCodeApprovalMode, setCreateOpenCodeApprovalMode] =
     useState<OpenCodeApprovalMode | null>(null);
+  const [createKimiApprovalMode, setCreateKimiApprovalMode] = useState<KimiApprovalMode | null>(null);
+  const [createKimiMode, setCreateKimiMode] = useState<KimiMode>("default");
   useLayoutEffect(() => {
-    if (!isCreateSessionOpen) setCreateOpenCodeApprovalMode(null);
+    if (!isCreateSessionOpen) {
+      setCreateOpenCodeApprovalMode(null);
+      setCreateKimiApprovalMode(null);
+      setCreateKimiMode("default");
+    }
   }, [isCreateSessionOpen]);
   useDialogEscapeDismiss({
     isOpen: isCreateSessionOpen,
@@ -721,11 +736,18 @@ export function AppDialogs({
               className="create-session-dialog-body"
               onSubmit={(event) => {
                 event.preventDefault();
-                void handleCreateSessionDialogSubmit(
-                  newSessionAgent === "OpenCode"
-                    ? createOpenCodeApprovalMode ?? defaultOpenCodeApprovalMode
-                    : undefined,
-                );
+                if (newSessionAgent === "Kimi") {
+                  void handleCreateSessionDialogSubmit(
+                    createKimiApprovalMode ?? defaultKimiApprovalMode,
+                    createKimiMode,
+                  );
+                } else {
+                  void handleCreateSessionDialogSubmit(
+                    newSessionAgent === "OpenCode"
+                      ? createOpenCodeApprovalMode ?? defaultOpenCodeApprovalMode
+                      : undefined,
+                  );
+                }
               }}
             >
               {requestError ? (
@@ -775,6 +797,22 @@ export function AppDialogs({
                   <p className="create-session-field-hint">Applies only to this new session; your Settings default is unchanged. Auto-approve permits tool operations without approval cards. Human questions remain interactive.</p>
                 </div>
               ) : null}
+
+              {newSessionAgent === "Kimi" ? (<>
+                <div className="create-session-field">
+                  <label className="session-control-label" htmlFor="create-kimi-approval">TermAl approvals</label>
+                  <ThemedCombobox id="create-kimi-approval" value={createKimiApprovalMode ?? defaultKimiApprovalMode}
+                    options={KIMI_APPROVAL_OPTIONS} disabled={isCreating}
+                    onChange={value => { if (isKimiApprovalMode(value)) setCreateKimiApprovalMode(value); }} />
+                  <p className="create-session-field-hint">Applies only to this new session; your Settings default is unchanged. Auto-approve permits tool requests from Kimi without approval cards; questions and plans remain interactive.</p>
+                </div>
+                <div className="create-session-field">
+                  <label className="session-control-label" htmlFor="create-kimi-mode">Kimi mode</label>
+                  <ThemedCombobox id="create-kimi-mode" value={createKimiMode} options={KIMI_MODE_OPTIONS}
+                    disabled={isCreating} onChange={value => { if (isKimiMode(value)) setCreateKimiMode(value); }} />
+                  <p className="create-session-field-hint">{kimiModeHint(createKimiMode)}</p>
+                </div>
+              </>) : null}
 
               {newSessionAgent === "Codex" ? (
                 <div className="create-session-field">
@@ -1223,6 +1261,10 @@ export function AppDialogs({
               ) : settingsTab === "kimi" ? (
                 <KimiPreferencesPanel
                   model={defaultKimiModel}
+                  approvalMode={defaultKimiApprovalMode}
+                  onSelectApprovalMode={handleDefaultKimiApprovalModeChange}
+                  effort={defaultKimiEffort}
+                  onSelectEffort={handleDefaultKimiEffortChange}
                   onSelectModel={handleDefaultKimiModelChange}
                   sessions={sessions}
                 />

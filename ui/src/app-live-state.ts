@@ -269,6 +269,8 @@ export function useAppLiveState(
     setDefaultCursorModel,
     setDefaultGeminiModel,
     setDefaultKimiModel,
+    setDefaultKimiApprovalMode,
+    setDefaultKimiEffort,
     setDefaultOpenCodeModel,
     setDefaultOpenCodeApprovalMode,
     setDefaultCodexReasoningEffort,
@@ -1484,6 +1486,8 @@ export function useAppLiveState(
     setDefaultCursorModel(preferences.defaultCursorModel);
     setDefaultGeminiModel(preferences.defaultGeminiModel);
     setDefaultKimiModel(preferences.defaultKimiModel);
+    setDefaultKimiApprovalMode(preferences.defaultKimiApprovalMode);
+    setDefaultKimiEffort(preferences.defaultKimiEffort);
     setDefaultOpenCodeModel(preferences.defaultOpenCodeModel);
     setDefaultOpenCodeApprovalMode(preferences.defaultOpenCodeApprovalMode);
     setDefaultCodexReasoningEffort(preferences.defaultCodexReasoningEffort);

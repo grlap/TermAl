@@ -663,6 +663,8 @@ fn syncs_cursor_model_options_from_acp_config() {
     let created = state
         .create_session(CreateSessionRequest {
             opencode_approval_mode: None,
+            kimi_approval_mode: None,
+            kimi_mode: None,
             agent: Some(Agent::Cursor),
             name: Some("Cursor ACP".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -711,6 +713,8 @@ fn cursor_agent_mode_auto_approves_acp_permission_requests() {
     let created = state
         .create_session(CreateSessionRequest {
             opencode_approval_mode: None,
+            kimi_approval_mode: None,
+            kimi_mode: None,
             agent: Some(Agent::Cursor),
             name: Some("Cursor Agent".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -772,6 +776,8 @@ fn cursor_ask_mode_queues_acp_permission_requests() {
     let created = state
         .create_session(CreateSessionRequest {
             opencode_approval_mode: None,
+            kimi_approval_mode: None,
+            kimi_mode: None,
             agent: Some(Agent::Cursor),
             name: Some("Cursor Ask".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -907,6 +913,8 @@ fn acp_structured_permission_requests_queue_and_resolve_in_arrival_order() {
     let created = state
         .create_session(CreateSessionRequest {
             opencode_approval_mode: None,
+            kimi_approval_mode: None,
+            kimi_mode: None,
             agent: Some(Agent::OpenCode),
             name: Some("Structured ACP permissions".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -1127,6 +1135,8 @@ fn cursor_permissions_remain_resolvable_out_of_arrival_order() {
     let created = state
         .create_session(CreateSessionRequest {
             opencode_approval_mode: None,
+            kimi_approval_mode: None,
+            kimi_mode: None,
             agent: Some(Agent::Cursor),
             name: Some("Cursor independent permissions".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -1260,6 +1270,8 @@ fn cursor_plan_mode_rejects_acp_permission_requests() {
     let created = state
         .create_session(CreateSessionRequest {
             opencode_approval_mode: None,
+            kimi_approval_mode: None,
+            kimi_mode: None,
             agent: Some(Agent::Cursor),
             name: Some("Cursor Plan".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -1321,6 +1333,8 @@ fn syncs_cursor_mode_from_acp_config_updates() {
     let created = state
         .create_session(CreateSessionRequest {
             opencode_approval_mode: None,
+            kimi_approval_mode: None,
+            kimi_mode: None,
             agent: Some(Agent::Cursor),
             name: Some("Cursor Config Sync".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -1387,6 +1401,8 @@ fn syncs_cursor_mode_from_mode_updates() {
     let created = state
         .create_session(CreateSessionRequest {
             opencode_approval_mode: None,
+            kimi_approval_mode: None,
+            kimi_mode: None,
             agent: Some(Agent::Cursor),
             name: Some("Cursor Mode Sync".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -1519,6 +1535,8 @@ fn updates_live_cursor_mode_on_active_acp_sessions() {
     let created = state
         .create_session(CreateSessionRequest {
             opencode_approval_mode: None,
+            kimi_approval_mode: None,
+            kimi_mode: None,
             agent: Some(Agent::Cursor),
             name: Some("Cursor Live Mode".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -1550,6 +1568,8 @@ fn updates_live_cursor_mode_on_active_acp_sessions() {
             UpdateSessionSettingsRequest {
                 kimi_effort: None,
                 opencode_approval_mode: None,
+                kimi_approval_mode: None,
+                kimi_mode: None,
                 name: None,
                 model: None,
                 sandbox_mode: None,

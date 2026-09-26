@@ -1596,6 +1596,8 @@ fn blocked_session_manual_recovery_preserves_user_prompt_fifo_after_plain_stop_p
     let created = state
         .create_session(CreateSessionRequest {
             opencode_approval_mode: None,
+            kimi_approval_mode: None,
+            kimi_mode: None,
             agent: Some(Agent::Claude),
             name: Some("Blocked FIFO".to_owned()),
             workdir: Some(state.default_workdir.clone()),
@@ -1766,6 +1768,8 @@ fn blocked_session_manual_recovery_drops_stale_orchestrator_and_preserves_user_f
     let created = state
         .create_session(CreateSessionRequest {
             opencode_approval_mode: None,
+            kimi_approval_mode: None,
+            kimi_mode: None,
             agent: Some(Agent::Claude),
             name: Some("Blocked Mixed Queue".to_owned()),
             workdir: Some(state.default_workdir.clone()),

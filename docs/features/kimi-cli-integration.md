@@ -113,14 +113,19 @@ point the operator to `kimi login`.
     Observed CLI effort is not promoted into requested actor identity. This is
     host-side attribution coverage, not live Engram acceptance certification.
 - Shared ACP streaming text, thinking, tool cards, permission cards and
-  cancellation are reused. Before every prompt, TermAl sets mode to `default`
-  and requires its acknowledgment, including resumed sessions. Tool permission
-  requests remain manual; saved Auto/YOLO modes are not inherited for prompts.
-  The one exception is a read-only delegation child, whose requests the host
-  answers itself (see Read-only delegation children).
-  The singular `config_option_update`, `current_mode_update` (ignored except by
-  the read-only gate), and partial-catalog preservation are Kimi-specific;
-  Cursor, Gemini and OpenCode retain their existing notification contracts.
+  cancellation are reused.
+- **Mode before every prompt.** TermAl sets Kimi's mode and requires its
+  acknowledgment, including for resumed sessions. The mode is the session's
+  `kimiMode`, or `default` for a read-only delegation child. A mode Kimi kept
+  from an earlier session is never inherited.
+- **Who answers permission requests.** This depends on the session's TermAl
+  policy, `kimiApprovalMode`, and on the delegation. See Approvals and mode,
+  and Read-only delegation children.
+- **Kimi-specific notifications.** The singular `config_option_update`,
+  `current_mode_update` and partial-catalog preservation are Kimi-specific.
+  `current_mode_update` is recorded for display as `kimiCurrentMode`, and the
+  read-only gate also acts on it. Cursor, Gemini and OpenCode keep their
+  existing notification contracts.
   User Stop sends ACP cancellation, waits within the shared graceful-stop bound,
   then terminates the local process while preserving the external conversation ID.
 - Existing conversation IDs use advertised resume/load support. A failed
@@ -128,13 +133,101 @@ point the operator to `kimi login`.
 - Kimi is a structured reviewer adapter: `mode: reviewer`, and `mode:
   explorer` with `writePolicy: readOnly`, are admitted and run behind the host's
   read-only gate. Kimi is not an acceptance evaluator; evaluators stay Claude or
-  Codex. Composer delegations still default to explorer with an isolated
-  worktree, which is not an OS security sandbox.
+  Codex. A Kimi parent's composer delegations default to `mode: reviewer`
+  with `writePolicy: readOnly`, like Claude and Codex: the child runs in the
+  shared workspace behind the host gate, with the network limit described
+  under Known limits.
 
-This slice does not expose Kimi approval-mode controls, image attachments,
-or native form elicitation. ACP permission-based question fallback remains
-available; client filesystem/terminal/elicitation capabilities are not advertised.
-It does not certify Engram live-control or provider acceptance for Kimi.
+This slice does not expose image attachments or native form elicitation. The
+ACP permission-based question fallback remains available: AskUserQuestion
+arrives as a permission request. Client filesystem, terminal and elicitation
+capabilities are not advertised. It does not certify Engram live-control or
+provider acceptance for Kimi.
+
+## Approvals and mode
+
+This replaces the earlier "tool approvals remain manual, no override"
+contract for ordinary Kimi sessions. Read-only delegation children keep the
+host gate below, which always takes precedence. There are two separate
+settings, plus an app default for effort.
+
+### TermAl's policy: `kimiApprovalMode`
+
+- **Values.** `ask` or `auto-approve`, the same values and meaning as
+  OpenCode's policy. A session without it reads as `ask`.
+- **App default.** `defaultKimiApprovalMode` in Settings → Kimi.
+- **Where it can be set.**
+  - the session's Prompt settings;
+  - `/approvals`;
+  - the session-creation dialog, which edits a draft of the app default for
+    that one session.
+- **Orchestrator templates.** `autoApprove` maps to `auto-approve`.
+- **Rules for changing it.**
+  - A settings request that changes it must not also change `model`,
+    `kimiEffort` or `kimiMode`; that is a 400, before any mutation.
+  - Changing it while the session is busy is a 409. Resending the unchanged
+    value is accepted.
+- **What `auto-approve` answers.** TermAl answers a permission request itself
+  only if all of these hold:
+  - the session is Active, so a pending manual card suspends auto-approve;
+  - no Stop is in progress;
+  - the session is not a read-only delegation child;
+  - the tool is on the Kimi Code 2.0.2 allowlist: Bash, Write, Edit,
+    CronCreate, or an MCP tool named `mcp__<server>__<tool>`;
+  - the request offers exactly one `allow_once` option. That option is
+    selected; `allow_always` never is.
+- **What always stays a manual card.**
+  - AskUserQuestion: its answers arrive as `allow_once` options, so picking
+    one would answer the user's question.
+  - ExitPlanMode, a plan approval.
+  - Any request offering more than one `allow_once` option.
+  - Any other tool.
+- **A stale or stopping runtime** of an auto-approve session is answered
+  `cancelled`, never approved.
+
+### Kimi's own mode: `kimiMode`
+
+- **Values.** A session without it reads as `default`. Labels quote Kimi's
+  help (`kimi --help`):
+
+  | Value | Meaning |
+  | --- | --- |
+  | `default` | asks before commands and edits |
+  | `plan` | "Start in plan mode." |
+  | `yolo` | "Ask When Needed mode: routine edits and commands run automatically; risky actions, questions, and plans still ask." |
+  | `auto` | "Never Ask mode: never interrupts you; everything runs and is decided automatically." |
+
+  In captures of both `yolo` and `auto`, `echo`, writing a file, deleting it
+  and `git init` all ran without a permission request. So TermAl's policy
+  rarely or never applies in those modes, and the UI says so.
+- **Where it can be set:** the Prompt settings and `/mode`. There is no app
+  default.
+- **Applying it.** It is applied before every prompt and must be
+  acknowledged exactly, or the prompt is refused. The thinking setter's
+  acknowledgment must retain the same mode.
+- **While the session is busy,** any request carrying it is a 409, even one
+  with the unchanged value, as for `model` and `kimiEffort`.
+- **Observed mode.** `kimiCurrentMode` shows the mode Kimi last acknowledged
+  or reported. Each prompt's mode ACK refreshes it, and a model change clears
+  it until the fresh runtime's next prompt. It is display only.
+- **Orchestrators** never set it.
+
+### Default effort: `defaultKimiEffort`
+
+- **Values.** `auto`, which leaves the CLI's choice, or one effort token.
+- **Applied at creation.** It is copied onto new Kimi sessions as
+  `kimiEffort` when they are created. A later Settings change never alters
+  an existing session.
+- **Checked when prompting,** as today: a value the model does not advertise
+  shows the "unavailable" state.
+- **Validated before any change.** An invalid value rejects the whole
+  Settings request (400), and no other field of that request is applied.
+
+### Delegation children
+
+A Kimi delegation child never inherits a policy or mode. It gets `ask` and
+`default`, whatever the app default or its parent says. A read-only child is
+answered by the gate in `default` mode.
 
 ## Read-only delegation children
 

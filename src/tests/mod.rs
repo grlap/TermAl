@@ -60,6 +60,7 @@ mod http_routes;
 mod instruction_search;
 mod json_rpc;
 mod kimi;
+mod kimi_approvals;
 mod kimi_read_only;
 mod mailboxes;
 mod opencode_approvals;
@@ -1179,6 +1180,9 @@ fn sample_remote_orchestrator_state(
             let agent = template_session.agent;
             let mut session = Session {
                 opencode_approval_mode: None,
+                kimi_approval_mode: None,
+                kimi_mode: None,
+                kimi_current_mode: None,
                 id: remote_session_ids_by_template_session_id[&template_session.id].clone(),
                 name: template_session.name.clone(),
                 emoji: agent.avatar().to_owned(),
@@ -1347,6 +1351,9 @@ fn test_state_session_summary_from_session(session: &Session) -> StateSessionSum
         kimi_effort: session.kimi_effort.clone(),
         kimi_current_effort: session.kimi_current_effort.clone(),
         kimi_effort_options: session.kimi_effort_options.clone(),
+        kimi_approval_mode: session.kimi_approval_mode,
+        kimi_mode: session.kimi_mode,
+        kimi_current_mode: session.kimi_current_mode.clone(),
         opencode_mode: session.opencode_mode.clone(),
         opencode_current_mode: session.opencode_current_mode.clone(),
         opencode_mode_options: session.opencode_mode_options.clone(),
@@ -2398,6 +2405,8 @@ fn canonicalizes_session_model_updates_from_live_model_labels() {
     let created = state
         .create_session(CreateSessionRequest {
             opencode_approval_mode: None,
+            kimi_approval_mode: None,
+            kimi_mode: None,
             agent: Some(Agent::Codex),
             name: Some("Codex Canonical".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -2427,6 +2436,8 @@ fn canonicalizes_session_model_updates_from_live_model_labels() {
             UpdateSessionSettingsRequest {
                 kimi_effort: None,
                 opencode_approval_mode: None,
+                kimi_approval_mode: None,
+                kimi_mode: None,
                 name: None,
                 model: Some("GPT-5.4".to_owned()),
                 sandbox_mode: None,
@@ -2459,6 +2470,8 @@ fn revisions_increase_for_visible_state_changes() {
     let created = state
         .create_session(CreateSessionRequest {
             opencode_approval_mode: None,
+            kimi_approval_mode: None,
+            kimi_mode: None,
             agent: Some(Agent::Codex),
             name: Some("Revision Test".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -2481,6 +2494,8 @@ fn revisions_increase_for_visible_state_changes() {
             UpdateSessionSettingsRequest {
                 kimi_effort: None,
                 opencode_approval_mode: None,
+                kimi_approval_mode: None,
+                kimi_mode: None,
                 name: None,
                 model: None,
                 sandbox_mode: Some(CodexSandboxMode::ReadOnly),
@@ -2504,6 +2519,8 @@ fn revisions_increase_for_visible_state_changes() {
             UpdateSessionSettingsRequest {
                 kimi_effort: None,
                 opencode_approval_mode: None,
+                kimi_approval_mode: None,
+                kimi_mode: None,
                 name: Some("Revision Test Renamed".to_owned()),
                 model: None,
                 sandbox_mode: None,
@@ -2530,6 +2547,8 @@ fn renames_sessions_via_settings_updates() {
     let created = state
         .create_session(CreateSessionRequest {
             opencode_approval_mode: None,
+            kimi_approval_mode: None,
+            kimi_mode: None,
             agent: Some(Agent::Codex),
             name: Some("Old Name".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -2551,6 +2570,8 @@ fn renames_sessions_via_settings_updates() {
             UpdateSessionSettingsRequest {
                 kimi_effort: None,
                 opencode_approval_mode: None,
+                kimi_approval_mode: None,
+                kimi_mode: None,
                 name: Some("New Name".to_owned()),
                 model: None,
                 sandbox_mode: None,

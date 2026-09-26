@@ -657,6 +657,39 @@ fn a_mode_that_stops_asking_stops_a_read_only_turn_only_inside_the_prompt() {
     assert_eq!(kimi.status(), SessionStatus::Error);
 }
 
+// The mode guard acts before the display of the reported mode is persisted,
+// so a failing commit can never skip the Cancel.
+#[test]
+fn a_mode_violation_is_cancelled_even_when_persisting_the_display_fails() {
+    let mut kimi = KimiHarness::read_only_child();
+    set_kimi_mode_gate_armed(&kimi.runtime_state, true);
+    // Every commit from here fails: the persist worker is gone and the
+    // persistence path is a directory.
+    let failing_path = test_temp_dir().join(format!(
+        "termal-kimi-mode-persist-failure-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&failing_path).expect("a directory at the persistence path");
+    kimi.state.shutdown_persist_blocking();
+    kimi.state.persistence_path = Arc::new(failing_path.clone());
+
+    let _ = handle_acp_message(
+        &update(json!({ "sessionUpdate": "current_mode_update", "currentModeId": "yolo" })),
+        &kimi.state,
+        &kimi.id,
+        &RuntimeToken::Acp("kimi-read-only-runtime".to_owned()),
+        &Arc::new(Mutex::new(HashMap::new())),
+        &kimi.runtime_state,
+        &kimi.runtime.input_tx,
+        &mut kimi.turn_state,
+        &mut SessionRecorder::new(kimi.state.clone(), kimi.id.clone()),
+        AcpAgent::Kimi,
+    );
+
+    assert!(kimi.cancelled(), "the prompt is cancelled whatever persistence does");
+    let _ = fs::remove_dir_all(&failing_path);
+}
+
 #[test]
 fn a_kimi_session_that_is_not_read_only_keeps_manual_approvals() {
     let state = test_app_state();

@@ -3665,6 +3665,13 @@ impl AppState {
                 "opencodeApprovalMode is only supported by OpenCode",
             ));
         }
+        if (request.kimi_approval_mode.is_some() || request.kimi_mode.is_some())
+            && agent != Agent::Kimi
+        {
+            return Err(ApiError::bad_request(
+                "kimiApprovalMode and kimiMode are only supported by Kimi",
+            ));
+        }
         if agent == Agent::Kimi
             && (request.sandbox_mode.is_some()
                 || request.approval_policy.is_some()
@@ -3675,7 +3682,7 @@ impl AppState {
                 || request.gemini_approval_mode.is_some())
         {
             return Err(ApiError::bad_request(
-                "Kimi sessions only support model settings; tool approvals remain manual",
+                "Kimi sessions support model, kimiApprovalMode and kimiMode settings only",
             ));
         }
         let has_explicit_project = request.project_id.is_some();
@@ -3851,6 +3858,16 @@ impl AppState {
                 record.session.opencode_approval_mode = Some(mode);
             }
         }
+        if agent == Agent::Kimi {
+            // The creation dialog edits a draft of the app default for this
+            // one session; `create_session` already applied the default.
+            if let Some(mode) = request.kimi_approval_mode {
+                record.session.kimi_approval_mode = Some(mode);
+            }
+            if let Some(mode) = request.kimi_mode {
+                record.session.kimi_mode = Some(mode);
+            }
+        }
         if record.session.agent.supports_codex_prompt_settings() {
             if let Some(sandbox_mode) = request.sandbox_mode {
                 record.codex_sandbox_mode = sandbox_mode;
@@ -3941,6 +3958,13 @@ impl AppState {
     ) -> Result<StateResponse, ApiError> {
         // Normalize remotes outside the lock — pure validation on request data.
         let normalized_remotes = request.remotes.map(normalize_remote_configs).transpose()?;
+        // Also before any preference changes, so a rejected effort cannot
+        // leave an earlier field of the same request applied.
+        let default_kimi_effort = request
+            .default_kimi_effort
+            .as_deref()
+            .map(normalize_default_kimi_effort)
+            .transpose()?;
 
         // Refresh the agent readiness cache before the critical section so that
         // commit_locked's SSE publish and the API response snapshot both carry
@@ -4009,6 +4033,20 @@ impl AppState {
         if let Some(mode) = request.default_opencode_approval_mode {
             if inner.preferences.default_opencode_approval_mode != mode {
                 inner.preferences.default_opencode_approval_mode = mode;
+                changed = true;
+            }
+        }
+
+        if let Some(mode) = request.default_kimi_approval_mode {
+            if inner.preferences.default_kimi_approval_mode != mode {
+                inner.preferences.default_kimi_approval_mode = mode;
+                changed = true;
+            }
+        }
+
+        if let Some(effort) = default_kimi_effort {
+            if inner.preferences.default_kimi_effort != effort {
+                inner.preferences.default_kimi_effort = effort;
                 changed = true;
             }
         }

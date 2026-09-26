@@ -425,6 +425,8 @@ async fn get_session_route_returns_bounded_session_detail() {
     let created = state
         .create_session(CreateSessionRequest {
             opencode_approval_mode: None,
+            kimi_approval_mode: None,
+            kimi_mode: None,
             name: Some("Route Session Detail".to_owned()),
             agent: None,
             workdir: Some("/tmp".to_owned()),
@@ -476,6 +478,8 @@ async fn get_session_route_can_return_tail_only() {
     let created = state
         .create_session(CreateSessionRequest {
             opencode_approval_mode: None,
+            kimi_approval_mode: None,
+            kimi_mode: None,
             name: Some("Route Session Tail".to_owned()),
             agent: None,
             workdir: Some("/tmp".to_owned()),
@@ -556,6 +560,8 @@ async fn get_session_history_route_pages_large_transcript_by_message_id() {
     let created = state
         .create_session(CreateSessionRequest {
             opencode_approval_mode: None,
+            kimi_approval_mode: None,
+            kimi_mode: None,
             name: Some("Route Session History".to_owned()),
             agent: None,
             workdir: Some("/tmp".to_owned()),
@@ -1164,6 +1170,8 @@ async fn get_session_route_tail_limit_covering_transcript_preserves_loaded_flag(
     let created = state
         .create_session(CreateSessionRequest {
             opencode_approval_mode: None,
+            kimi_approval_mode: None,
+            kimi_mode: None,
             name: Some("Route Session Full Tail".to_owned()),
             agent: None,
             workdir: Some("/tmp".to_owned()),
@@ -1226,6 +1234,8 @@ async fn get_session_route_tail_returns_not_found_for_missing_or_hidden_sessions
     let created = state
         .create_session(CreateSessionRequest {
             opencode_approval_mode: None,
+            kimi_approval_mode: None,
+            kimi_mode: None,
             name: Some("Route Session Hidden Tail".to_owned()),
             agent: None,
             workdir: Some("/tmp".to_owned()),
@@ -1280,6 +1290,8 @@ async fn get_session_route_rejects_zero_tail_limit() {
     let created = state
         .create_session(CreateSessionRequest {
             opencode_approval_mode: None,
+            kimi_approval_mode: None,
+            kimi_mode: None,
             name: Some("Route Session Zero Tail".to_owned()),
             agent: None,
             workdir: Some("/tmp".to_owned()),
@@ -1322,6 +1334,8 @@ async fn get_session_route_rejects_tail_limit_above_cap() {
     let created = state
         .create_session(CreateSessionRequest {
             opencode_approval_mode: None,
+            kimi_approval_mode: None,
+            kimi_mode: None,
             name: Some("Route Session Oversized Tail".to_owned()),
             agent: None,
             workdir: Some("/tmp".to_owned()),
@@ -1371,6 +1385,8 @@ async fn get_session_route_query_rejection_uses_api_error_envelope() {
     let created = state
         .create_session(CreateSessionRequest {
             opencode_approval_mode: None,
+            kimi_approval_mode: None,
+            kimi_mode: None,
             name: Some("Route Session Bad Tail".to_owned()),
             agent: None,
             workdir: Some("/tmp".to_owned()),
@@ -1415,6 +1431,8 @@ async fn snapshot_bearing_routes_include_message_count() {
     let created = state
         .create_session(CreateSessionRequest {
             opencode_approval_mode: None,
+            kimi_approval_mode: None,
+            kimi_mode: None,
             name: Some("Counted Session".to_owned()),
             agent: None,
             workdir: Some("/tmp".to_owned()),
@@ -1503,6 +1521,8 @@ async fn targeted_session_tail_includes_pending_prompts_redacted_from_global_sta
     let created = state
         .create_session(CreateSessionRequest {
             opencode_approval_mode: None,
+            kimi_approval_mode: None,
+            kimi_mode: None,
             name: Some("Queued Prompt Projection".to_owned()),
             agent: None,
             workdir: Some("/tmp".to_owned()),
@@ -3331,6 +3351,8 @@ async fn codex_thread_fork_route_returns_created_response() {
     let created = state
         .create_session(CreateSessionRequest {
             opencode_approval_mode: None,
+            kimi_approval_mode: None,
+            kimi_mode: None,
             agent: Some(Agent::Codex),
             name: Some("Codex Route Review".to_owned()),
             workdir: Some("/tmp".to_owned()),

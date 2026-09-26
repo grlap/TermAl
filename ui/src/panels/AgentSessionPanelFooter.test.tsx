@@ -735,7 +735,7 @@ describe("AgentSessionPanelFooter", () => {
       );
       expect(
         screen.getByRole("menuitemradio", {
-          name: "Delegate · Reviewer — requires Claude or Codex",
+          name: "Delegate · Reviewer — requires Claude, Codex or Kimi",
         }),
       ).toBeDisabled();
       fireEvent.click(

@@ -464,6 +464,43 @@ describe("useAppSessionActions", () => {
     });
   });
 
+  it.each([undefined, "ask", "auto-approve"] as const)("creates Kimi with approval draft %s and backend effort default", async approval => {
+    const create = vi.spyOn(api, "createSession").mockResolvedValue({
+      revision: 6, serverInstanceId: "server-a", session: makeSession("new", { agent: "Kimi" }), sessionId: "new",
+    });
+    vi.spyOn(api, "refreshSessionModelOptions").mockResolvedValue(makeStateResponse(7));
+    const params = makeSessionActionsParams();
+    params.defaults.defaultKimiApprovalMode = "auto-approve";
+    const actions = useAppSessionActions(params);
+    await expect(actions.handleNewSession({ agent: "Kimi", kimiApprovalMode: approval, kimiMode: "plan" })).resolves.toBe(true);
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({
+      kimiApprovalMode: approval ?? "auto-approve", kimiMode: "plan",
+    }));
+    expect(create.mock.calls[0]?.[0]).not.toHaveProperty("kimiEffort");
+  });
+
+  it.each([undefined, "max"])("preserves source Kimi approval, mode and effort %s on clone", async effort => {
+    const source = makeSession("kimi-source", { agent: "Kimi", kimiEffort: effort, kimiApprovalMode: "ask", kimiMode: "yolo" });
+    const clone = makeSession("kimi-clone", { agent: "Kimi", kimiEffort: "high" });
+    const create = vi.spyOn(api, "createSession").mockResolvedValue({
+      revision: 6, serverInstanceId: "server-a", session: clone, sessionId: clone.id,
+    });
+    vi.spyOn(api, "refreshSessionModelOptions").mockResolvedValue({
+      ...makeStateResponse(7), sessions: [{ ...clone, kimiEffortOptions: [{ value: "max", label: "Max" }] }],
+    });
+    const patch = vi.spyOn(api, "updateSessionSettings").mockResolvedValue({
+      ...makeStateResponse(8), sessions: [{ ...clone, kimiEffort: effort }],
+    });
+    const params = makeSessionActionsParams({ adoptState: vi.fn(() => true) });
+    params.defaults.defaultKimiApprovalMode = "auto-approve";
+    params.lookups.sessionLookup = new Map([[source.id, source]]);
+    params.refs.sessionsRef.current = [source];
+    await expect(useAppSessionActions(params).handleCloneSessionFromExisting(source.id)).resolves.toBe(true);
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ kimiApprovalMode: "ask", kimiMode: "yolo" }));
+    expect(patch).toHaveBeenCalledWith(clone.id, { kimiEffort: effort ?? "auto" });
+    expect(params.refs.configuringClonedSessionIdsRef.current[clone.id]).toBeUndefined();
+  });
+
   it.each([true, false])("discovers and preserves explicit Kimi effort on clone (accepted=%s)", async (accepted) => {
     const source = makeSession("kimi-source", { agent: "Kimi", kimiEffort: "max" });
     const clone = makeSession("kimi-clone", { agent: "Kimi" });

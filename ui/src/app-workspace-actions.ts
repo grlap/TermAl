@@ -68,7 +68,7 @@ import type {
   OrchestratorRuntimeAction,
   StandaloneControlSurfaceViewState,
 } from "./app-shell-internals";
-import type { AgentType, DiffMessage, OpenCodeApprovalMode, Project, Session } from "./types";
+import type { AgentType, DiffMessage, KimiApprovalMode, KimiMode, OpenCodeApprovalMode, Project, Session } from "./types";
 
 type PendingScrollToBottomRequest = {
   reattach?: boolean;
@@ -127,6 +127,8 @@ type UseAppWorkspaceActionsParams = {
   handleNewSession: (options: {
     agent: AgentType;
     opencodeApprovalMode?: OpenCodeApprovalMode;
+    kimiApprovalMode?: KimiApprovalMode;
+    kimiMode?: KimiMode;
     preferredPaneId: string | null;
     projectSelectionId: string;
   }) => Promise<boolean>;
@@ -137,7 +139,7 @@ type UseAppWorkspaceActionsParams = {
 };
 
 type UseAppWorkspaceActionsReturn = {
-  handleCreateSessionDialogSubmit: (approvalMode?: OpenCodeApprovalMode) => Promise<void>;
+  handleCreateSessionDialogSubmit: (approvalMode?: OpenCodeApprovalMode | KimiApprovalMode, kimiMode?: KimiMode) => Promise<void>;
   handleSidebarSessionClick: (
     sessionId: string,
     preferredPaneId?: string | null,
@@ -377,10 +379,11 @@ export function useAppWorkspaceActions({
     });
   }
 
-  async function handleCreateSessionDialogSubmit(approvalMode?: OpenCodeApprovalMode) {
+  async function handleCreateSessionDialogSubmit(approvalMode?: OpenCodeApprovalMode | KimiApprovalMode, kimiMode?: KimiMode) {
     const created = await handleNewSession({
       agent: newSessionAgent,
       ...(newSessionAgent === "OpenCode" ? { opencodeApprovalMode: approvalMode } : {}),
+      ...(newSessionAgent === "Kimi" ? { kimiApprovalMode: approvalMode, kimiMode } : {}),
       preferredPaneId: createSessionPaneId,
       projectSelectionId: createSessionProjectId,
     });

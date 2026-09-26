@@ -527,7 +527,7 @@ fn kimi_effort_can_be_cleared_after_model_catalog_removal() {
     };
     assert!(
         state
-            .admit_kimi_thinking(&mut writer, &pending, &id, "external", &config, None)
+            .admit_kimi_thinking(&mut writer, &pending, &id, "external", KimiMode::Default, &config, None)
             .is_err()
     );
     state
@@ -537,7 +537,7 @@ fn kimi_effort_can_be_cleared_after_model_catalog_removal() {
         )
         .unwrap();
     state
-        .admit_kimi_thinking(&mut writer, &pending, &id, "external", &config, None)
+        .admit_kimi_thinking(&mut writer, &pending, &id, "external", KimiMode::Default, &config, None)
         .unwrap();
     assert!(
         writer.frames.is_empty(),
@@ -1140,13 +1140,28 @@ fn kimi_manual_mode_requires_explicit_acknowledgment() {
     };
     for value in [json!(null), json!("auto"), json!("yolo"), json!("plan")] {
         writer.reply = json!({"configOptions":[{"id":"mode", "currentValue":value}]});
-        assert!(configure_kimi_manual_approvals(&mut writer, &pending, "saved-session").is_err());
+        assert!(
+            configure_kimi_mode(&mut writer, &pending, "saved-session", KimiMode::Default)
+                .is_err()
+        );
     }
     writer.reply = json!({"configOptions":[{"id":"mode", "currentValue":"default"}]});
-    configure_kimi_manual_approvals(&mut writer, &pending, "saved-session").unwrap();
+    configure_kimi_mode(&mut writer, &pending, "saved-session", KimiMode::Default).unwrap();
     assert_eq!(
         writer.frames.last().unwrap()["params"],
         json!({"sessionId":"saved-session", "configId":"mode", "value":"default"})
+    );
+    // A session's own mode is set and must be acknowledged exactly.
+    writer.reply = json!({"configOptions":[{"id":"mode", "currentValue":"yolo"}]});
+    configure_kimi_mode(&mut writer, &pending, "saved-session", KimiMode::Yolo).unwrap();
+    assert_eq!(
+        writer.frames.last().unwrap()["params"],
+        json!({"sessionId":"saved-session", "configId":"mode", "value":"yolo"})
+    );
+    writer.reply = json!({"configOptions":[{"id":"mode", "currentValue":"default"}]});
+    assert!(
+        configure_kimi_mode(&mut writer, &pending, "saved-session", KimiMode::Yolo).is_err(),
+        "an ACK of another mode refuses the prompt"
     );
     assert!(is_acp_config_update_kind(
         "config_option_update",
@@ -1320,7 +1335,7 @@ async fn kimi_creation_rejects_unsupported_constraints_without_allocating_sessio
             response.error.contains(if field == "opencodeApprovalMode" {
                 "only supported by OpenCode"
             } else {
-                "Kimi sessions only support model"
+                "Kimi sessions support model, kimiApprovalMode and kimiMode settings only"
             }),
             "{field}: {}",
             response.error
@@ -1511,7 +1526,10 @@ fn kimi_prompt_rechecks_manual_mode_and_deactivates_on_refusal() {
             },
         )
         .unwrap_err();
-        assert!(err.to_string().contains("manual"));
+        assert!(
+            err.to_string().contains("did not acknowledge mode `default`"),
+            "{err}"
+        );
         assert!(!*lifecycle.0.lock().unwrap());
     }
     assert_eq!(writer.frames.len(), 2);
@@ -1558,6 +1576,71 @@ fn kimi_prompt_rechecks_manual_mode_and_deactivates_on_refusal() {
             .unwrap();
         assert!(!*active, "scripted prompt must settle");
     }
+}
+
+// The mode ACK refreshes the observed mode, so a mode Kimi reported during
+// session setup cannot stay displayed after TermAl set another.
+#[test]
+fn kimi_mode_ack_is_shown_as_the_observed_mode() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Kimi);
+    let (handle, _input_rx) = test_acp_runtime_handle(AcpAgent::Kimi, "kimi-mode-test");
+    {
+        let mut inner = state.inner.lock().unwrap();
+        let index = inner.find_session_index(&session_id).unwrap();
+        inner.sessions[index].runtime = SessionRuntime::Acp(handle);
+        inner.sessions[index].session.kimi_mode = Some(KimiMode::Yolo);
+        inner.sessions[index].session.kimi_current_mode = Some("default".to_owned());
+    }
+    let runtime = Arc::new(Mutex::new(AcpRuntimeState {
+        current_session_id: Some("saved-kimi".to_owned()),
+        ..Default::default()
+    }));
+    let pending = Arc::new(Mutex::new(HashMap::new()));
+    let lifecycle: AcpTurnLifecycle = Arc::new((Mutex::new(true), Condvar::new()));
+    let mut writer = KimiReplyWriter {
+        pending: pending.clone(),
+        buffer: vec![],
+        frames: vec![],
+        error: None,
+        reply: json!({"configOptions":[{"id":"mode","currentValue":"yolo"}],
+            "stopReason":"end_turn"}),
+    };
+    handle_acp_prompt_command(
+        &mut writer,
+        &pending,
+        &state,
+        &session_id,
+        &runtime,
+        &lifecycle,
+        &RuntimeToken::Acp("kimi-mode-test".to_owned()),
+        None,
+        AcpAgent::Kimi,
+        AcpPromptCommand {
+            cwd: state.default_workdir.clone(),
+            cursor_mode: None,
+            model: "auto".to_owned(),
+            opencode_effort: None,
+            opencode_mode: None,
+            prompt: "Scripted prompt".to_owned(),
+            resume_session_id: Some("saved-kimi".to_owned()),
+        },
+    )
+    .unwrap();
+    let (active, _) = lifecycle
+        .1
+        .wait_timeout_while(
+            lifecycle.0.lock().unwrap(),
+            phase_sync::DEADLOCK_GUARD,
+            |active| *active,
+        )
+        .unwrap();
+    assert!(!*active, "scripted prompt must settle");
+    drop(active);
+    let inner = state.inner.lock().unwrap();
+    let session = &inner.sessions[inner.find_session_index(&session_id).unwrap()].session;
+    assert_eq!(session.kimi_current_mode.as_deref(), Some("yolo"));
+    assert_eq!(session.kimi_mode, Some(KimiMode::Yolo));
 }
 
 #[test]
@@ -1647,7 +1730,10 @@ fn kimi_auth_failure_has_login_remedy_and_model_failure_cannot_cache_ready_sessi
 }
 
 #[test]
-fn kimi_orchestrator_auto_approval_is_rejected_explicitly() {
+fn kimi_orchestrator_auto_approval_is_accepted_and_maps_to_the_termal_policy_only() {
+    // Deliberately inverted from the manual-only contract: an orchestrator's
+    // autoApprove now maps to TermAl's Kimi auto-approve, and never to Kimi's
+    // own mode (docs/features/kimi-cli-integration.md, "Approvals and mode").
     let template = OrchestratorSessionTemplate {
         id: "kimi".to_owned(),
         name: "Kimi".to_owned(),
@@ -1658,17 +1744,29 @@ fn kimi_orchestrator_auto_approval_is_rejected_explicitly() {
         input_mode: OrchestratorSessionInputMode::Queue,
         position: OrchestratorNodePosition { x: 0.0, y: 0.0 },
     };
-    let error = normalize_orchestrator_session_template(template.clone()).unwrap_err();
-    assert_eq!(error.status, StatusCode::BAD_REQUEST);
-    assert!(error.message.contains("manual tool approvals"));
-    assert!(validate_orchestrator_manual_approval_policy(&template).is_err());
-    assert!(
-        normalize_orchestrator_session_template(OrchestratorSessionTemplate {
-            auto_approve: false,
-            ..template
-        })
-        .is_ok()
-    );
+    let normalized = normalize_orchestrator_session_template(template.clone())
+        .expect("Kimi autoApprove is accepted");
+    assert!(normalized.auto_approve);
+
+    let state = test_app_state();
+    let mut record = {
+        let mut inner = state.inner.lock().unwrap();
+        inner.create_session(Agent::Kimi, None, "/tmp".to_owned(), None, None)
+    };
+    for (auto_approve, expected) in [
+        (true, KimiApprovalMode::AutoApprove),
+        (false, KimiApprovalMode::Ask),
+    ] {
+        apply_orchestrator_template_session_settings(
+            &mut record,
+            &OrchestratorSessionTemplate {
+                auto_approve,
+                ..template.clone()
+            },
+        );
+        assert_eq!(record.session.kimi_approval_mode, Some(expected));
+        assert_eq!(record.session.kimi_mode, Some(KimiMode::Default));
+    }
 }
 
 fn kimi_model_catalog(current: &str) -> Value {

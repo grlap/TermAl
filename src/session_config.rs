@@ -107,15 +107,45 @@ impl AppState {
                 "kimiEffort is only supported by Kimi",
             ));
         }
+        if (request.kimi_approval_mode.is_some() || request.kimi_mode.is_some())
+            && record.session.agent != Agent::Kimi
+        {
+            return Err(ApiError::bad_request(
+                "kimiApprovalMode and kimiMode are only supported by Kimi",
+            ));
+        }
+        // A payload contract, as for OpenCode: TermAl's policy never shares a
+        // request with provider configuration, even when a value is unchanged.
+        if request.kimi_approval_mode.is_some()
+            && (request.model.is_some()
+                || request.kimi_effort.is_some()
+                || request.kimi_mode.is_some())
+        {
+            return Err(ApiError::bad_request(
+                "Change kimiApprovalMode separately from model, kimiEffort, and kimiMode",
+            ));
+        }
+        let session_busy = matches!(
+            record.session.status,
+            SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
+        );
         if record.session.agent == Agent::Kimi
-            && (request.model.is_some() || request.kimi_effort.is_some())
-            && matches!(
-                record.session.status,
-                SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
-            )
+            && (request.model.is_some()
+                || request.kimi_effort.is_some()
+                || request.kimi_mode.is_some())
+            && session_busy
         {
             return Err(ApiError::conflict(
-                "Stop the Kimi turn before changing its model or reasoning effort",
+                "Stop the Kimi turn before changing its model, reasoning effort or mode",
+            ));
+        }
+        if request
+            .kimi_approval_mode
+            .is_some_and(|mode| mode != record.session.kimi_approval_mode.unwrap_or_default())
+            && session_busy
+        {
+            return Err(ApiError::conflict(
+                "Stop the Kimi turn before changing its approval mode",
             ));
         }
         if let Some(effort) = request.kimi_effort.as_deref() {
@@ -282,7 +312,7 @@ impl AppState {
                     || request.opencode_mode.is_some()
                 {
                     return Err(ApiError::bad_request(
-                        "Kimi sessions only support model and reasoning effort settings",
+                        "Kimi sessions only support model, reasoning effort, kimiMode and kimiApprovalMode settings",
                     ));
                 }
             }
@@ -670,6 +700,9 @@ impl AppState {
                         // explicit intent, but never validate against the old catalog.
                         record.session.kimi_effort_options.clear();
                         record.session.kimi_current_effort = None;
+                        // The fresh runtime has not reported or acknowledged a
+                        // mode yet; the next prompt's mode ACK shows it again.
+                        record.session.kimi_current_mode = None;
                         // Resume the same conversation in a fresh runtime, then
                         // require the model setter ACK before the next prompt.
                         record.runtime_reset_required = true;
@@ -680,6 +713,15 @@ impl AppState {
                     // changes this needs no restart unless an installed Engram
                     // descriptor's immutable actor context changes below.
                     record.session.kimi_effort = (effort != "auto").then_some(effort);
+                }
+                if let Some(mode) = request.kimi_mode {
+                    // Applied and acknowledged before every prompt, like effort.
+                    record.session.kimi_mode = Some(mode);
+                }
+                if let Some(mode) = request.kimi_approval_mode {
+                    // TermAl's own policy: read under the state lock on every
+                    // permission request, so it needs no runtime message.
+                    record.session.kimi_approval_mode = Some(mode);
                 }
             }
             _ => {}

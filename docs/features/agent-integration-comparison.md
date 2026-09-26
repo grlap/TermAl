@@ -216,6 +216,7 @@ on 2026-09-20; live provider acceptance is separate.
 | Default model | CLI-configured model (Auto) |
 | Authentication | Operator runs `kimi login`; ACP checks existing login |
 | Platforms | Native Windows, macOS and Linux CLI |
-| Boundaries | Manual approvals; no structured reviewers or read-only delegations |
+| Approvals | TermAl Ask / Auto-approve (allowlisted tools, one allow-once option; questions and plans stay manual) plus Kimi's own mode (default / plan / yolo / auto) |
+| Delegations | Structured reviewer and read-only explorer behind a host permission gate; not an acceptance evaluator |
 
 See [`kimi-cli-integration.md`](./kimi-cli-integration.md) for setup and scope.

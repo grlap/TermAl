@@ -245,6 +245,9 @@ function sameSessionSummary(previous: Session, next: Session) {
     previous.opencodeApprovalMode === next.opencodeApprovalMode &&
     previous.opencodeEffort === next.opencodeEffort &&
     previous.kimiEffort === next.kimiEffort &&
+    previous.kimiApprovalMode === next.kimiApprovalMode &&
+    previous.kimiMode === next.kimiMode &&
+    previous.kimiCurrentMode === next.kimiCurrentMode &&
     previous.kimiCurrentEffort === next.kimiCurrentEffort &&
     sameModelOptions(previous.kimiEffortOptions, next.kimiEffortOptions) &&
     previous.opencodeCurrentEffort === next.opencodeCurrentEffort &&

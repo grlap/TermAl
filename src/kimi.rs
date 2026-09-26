@@ -128,24 +128,29 @@ fn kimi_agent_readiness_with(resolve: impl FnOnce() -> Option<PathBuf>) -> Agent
         command_path: path,
     }
 }
-/// A missing or contradictory ACK refuses the turn; inheriting Auto/YOLO is
-/// not compatible with this adapter's manual-permission contract.
-fn configure_kimi_manual_approvals(
+/// Sets Kimi's own mode before a prompt. `mode` is the effective mode: always
+/// `default` for a read-only delegation child, the session's `kimiMode`
+/// otherwise (`AppState::kimi_effective_mode`). A missing or contradictory
+/// ACK refuses the turn, so Kimi never runs a prompt in a mode TermAl did not
+/// choose; a mode Kimi kept from an earlier session is never inherited.
+fn configure_kimi_mode(
     writer: &mut impl Write,
     pending_requests: &AcpPendingRequestMap,
     session_id: &str,
+    mode: KimiMode,
 ) -> Result<Value> {
     let result = send_acp_json_rpc_request(
         writer,
         pending_requests,
         "session/set_config_option",
-        json!({"sessionId": session_id, "configId": "mode", "value": "default"}),
+        json!({"sessionId": session_id, "configId": "mode", "value": mode.as_str()}),
         Duration::from_secs(15),
         AcpAgent::Kimi,
     )?;
-    if current_acp_config_option_value(&result, "mode").as_deref() != Some("default") {
+    if current_acp_config_option_value(&result, "mode").as_deref() != Some(mode.as_str()) {
         bail!(
-            "Kimi did not acknowledge Default mode; refusing to prompt without manual approvals. Use a CLI compatible with the verified Kimi Code 2.0.2 ACP contract, then restart the session. No approval override is available"
+            "Kimi did not acknowledge mode `{}`; refusing to prompt in a mode TermAl did not set. Use a CLI compatible with the verified Kimi Code 2.0.2 ACP contract, then restart the session",
+            mode.as_str()
         );
     }
     Ok(result)
@@ -159,6 +164,7 @@ fn configure_kimi_thinking(
     pending_requests: &AcpPendingRequestMap,
     external_session_id: &str,
     requested: Option<&str>,
+    mode: KimiMode,
     config: &Value,
 ) -> Result<Value> {
     let Some(requested) = requested else {
@@ -186,10 +192,11 @@ fn configure_kimi_thinking(
             "Kimi did not acknowledge requested reasoning effort `{requested}`; refusing to prompt with a different effort"
         );
     }
-    // The full 2.0.2 setter ACK must also retain manual approval mode.
-    if current_acp_config_option_value(&result, "mode").as_deref() != Some("default") {
+    // The full 2.0.2 setter ACK must also retain the mode TermAl just set.
+    if current_acp_config_option_value(&result, "mode").as_deref() != Some(mode.as_str()) {
         bail!(
-            "Kimi thinking acknowledgment did not retain Default mode; refusing to prompt without manual approvals"
+            "Kimi thinking acknowledgment did not retain mode `{}`; refusing to prompt in a mode TermAl did not set",
+            mode.as_str()
         );
     }
     Ok(result)
@@ -286,12 +293,27 @@ impl AppState {
         Ok(())
     }
 
+    /// The mode Kimi must run a prompt in: `default` for a read-only
+    /// delegation child whatever its session says (the host gate needs Kimi to
+    /// ask), and the session's `kimiMode` otherwise, `default` when unset.
+    fn kimi_effective_mode(&self, session_id: &str) -> Result<KimiMode> {
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(session_id)
+            .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
+        if read_only_session_delegation_block_locked(&inner, Some(session_id)).is_some() {
+            return Ok(KimiMode::Default);
+        }
+        Ok(inner.sessions[index].session.kimi_mode.unwrap_or_default())
+    }
+
     fn admit_kimi_thinking(
         &self,
         writer: &mut impl Write,
         pending: &AcpPendingRequestMap,
         session_id: &str,
         external_session_id: &str,
+        mode: KimiMode,
         config: &Value,
         source_runtime: Option<&RuntimeToken>,
     ) -> Result<()> {
@@ -310,6 +332,7 @@ impl AppState {
             pending,
             external_session_id,
             requested.as_deref(),
+            mode,
             config,
         )?;
         if result != *config {

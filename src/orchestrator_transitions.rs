@@ -49,8 +49,13 @@ fn apply_orchestrator_template_session_settings(
 
     match record.session.agent {
         Agent::Kimi => {
-            // Template admission rejects Auto for Kimi. Every ACP prompt also
-            // requires the manual-mode ACK; no host auto-approval field exists.
+            // Auto-approve maps to TermAl's Kimi policy only. An orchestrator
+            // never sets Kimi's own mode, so the session keeps `default`.
+            record.session.kimi_approval_mode = Some(if template_session.auto_approve {
+                KimiApprovalMode::AutoApprove
+            } else {
+                KimiApprovalMode::Ask
+            });
         }
         Agent::OpenCode => {
             record.session.opencode_approval_mode = Some(if template_session.auto_approve {

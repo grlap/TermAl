@@ -1,4 +1,4 @@
-import type { OpenCodeApprovalMode } from "./types";
+import type { KimiApprovalMode, KimiMode, OpenCodeApprovalMode } from "./types";
 // Owns client-side construction of session-settings API payloads.
 // Does not own optimistic UI projection, rollback, or action-state adoption;
 // see app-session-settings-optimism.ts for the sibling local projection path.
@@ -34,6 +34,8 @@ export type SessionSettingsPayload = {
   geminiApprovalMode?: GeminiApprovalMode;
   opencodeEffort?: string;
   kimiEffort?: string;
+  kimiApprovalMode?: KimiApprovalMode;
+  kimiMode?: KimiMode;
   opencodeMode?: string;
   opencodeApprovalMode?: OpenCodeApprovalMode;
 };
@@ -109,6 +111,8 @@ export function buildSessionSettingsPayload(
       }
       return null;
     case "Kimi":
+      if (field === "kimiApprovalMode") return { kimiApprovalMode: value as KimiApprovalMode };
+      if (field === "kimiMode") return { kimiMode: value as KimiMode };
       if (field === "kimiEffort") return { kimiEffort: value as string };
       return field === "model" ? { model: normalizedModelValue ?? (value as string) } : null;
     case "OpenCode":

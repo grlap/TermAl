@@ -63,6 +63,9 @@ export type ComposerSessionSnapshot = Readonly<{
   opencodeEffort?: string | null;
   opencodeCurrentEffort?: string | null;
   opencodeEffortOptions?: readonly SessionModelOption[];
+  kimiApprovalMode?: Session["kimiApprovalMode"];
+  kimiMode?: Session["kimiMode"];
+  kimiCurrentMode?: Session["kimiCurrentMode"];
   kimiEffort?: string | null;
   kimiCurrentEffort?: string | null;
   kimiEffortOptions?: readonly SessionModelOption[];
@@ -96,6 +99,9 @@ export type SessionSummarySnapshot = Readonly<{
   opencodeEffort?: string | null;
   opencodeCurrentEffort?: string | null;
   opencodeEffortOptions?: readonly SessionModelOption[];
+  kimiApprovalMode?: Session["kimiApprovalMode"];
+  kimiMode?: Session["kimiMode"];
+  kimiCurrentMode?: Session["kimiCurrentMode"];
   kimiEffort?: string | null;
   kimiCurrentEffort?: string | null;
   kimiEffortOptions?: readonly SessionModelOption[];
@@ -513,6 +519,9 @@ function buildComposerSessionSnapshot(
     previous.opencodeModel === session.opencodeModel &&
     previous.opencodeApprovalMode === session.opencodeApprovalMode &&
     previous.opencodeEffort === session.opencodeEffort &&
+    previous.kimiApprovalMode === session.kimiApprovalMode &&
+    previous.kimiMode === session.kimiMode &&
+    previous.kimiCurrentMode === session.kimiCurrentMode &&
     previous.kimiEffort === session.kimiEffort &&
     previous.kimiCurrentEffort === session.kimiCurrentEffort &&
     previous.kimiEffortOptions === nextKimiEffortOptions &&
@@ -545,6 +554,9 @@ function buildComposerSessionSnapshot(
     opencodeModel: session.opencodeModel,
     opencodeApprovalMode: session.opencodeApprovalMode,
     opencodeEffort: session.opencodeEffort,
+    kimiApprovalMode: session.kimiApprovalMode,
+    kimiMode: session.kimiMode,
+    kimiCurrentMode: session.kimiCurrentMode,
     kimiEffort: session.kimiEffort,
     kimiCurrentEffort: session.kimiCurrentEffort,
     kimiEffortOptions: nextKimiEffortOptions,
@@ -701,6 +713,9 @@ function buildSessionSummarySnapshot(
     previous.opencodeModel === session.opencodeModel &&
     previous.opencodeApprovalMode === session.opencodeApprovalMode &&
     previous.opencodeEffort === session.opencodeEffort &&
+    previous.kimiApprovalMode === session.kimiApprovalMode &&
+    previous.kimiMode === session.kimiMode &&
+    previous.kimiCurrentMode === session.kimiCurrentMode &&
     previous.kimiEffort === session.kimiEffort &&
     previous.kimiCurrentEffort === session.kimiCurrentEffort &&
     previous.kimiEffortOptions === nextKimiEffortOptions &&
@@ -732,6 +747,9 @@ function buildSessionSummarySnapshot(
     opencodeModel: session.opencodeModel,
     opencodeApprovalMode: session.opencodeApprovalMode,
     opencodeEffort: session.opencodeEffort,
+    kimiApprovalMode: session.kimiApprovalMode,
+    kimiMode: session.kimiMode,
+    kimiCurrentMode: session.kimiCurrentMode,
     kimiEffort: session.kimiEffort,
     kimiCurrentEffort: session.kimiCurrentEffort,
     kimiEffortOptions: nextKimiEffortOptions,

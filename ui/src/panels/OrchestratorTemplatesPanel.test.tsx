@@ -182,16 +182,18 @@ describe("OrchestratorTemplatesPanel", () => {
     expect(control).toBeChecked();
   });
 
-  it("clears and disables Auto when an orchestrator node switches to Kimi", async () => {
+  it("preserves and allows host Auto-approve when an orchestrator node switches to Kimi", async () => {
     fetchTemplatesMock.mockResolvedValue({ templates: [makeTemplate({ sessions: [
       makeSession({ agent: "OpenCode", autoApprove: true }),
     ] })] });
     render(<OrchestratorTemplatesPanel />);
     expect(await screen.findByRole("checkbox", { name: /Auto-approve this session's tool calls$/ })).toBeChecked();
     await selectComboboxOption("Agent", "Kimi");
-    const control = screen.getByRole("checkbox", { name: /Kimi requires manual tool approvals/ });
+    const control = screen.getByRole("checkbox", { name: /Auto-approve this session's tool calls$/ });
+    expect(control).toBeChecked();
+    expect(control).toBeEnabled();
+    fireEvent.click(control);
     expect(control).not.toBeChecked();
-    expect(control).toBeDisabled();
   });
 
   it("creates a new template from the editor draft", async () => {

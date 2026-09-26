@@ -415,6 +415,11 @@ struct AppPreferences {
     default_opencode_model: String,
     #[serde(default, rename = "defaultOpenCodeApprovalMode")]
     default_opencode_approval_mode: OpenCodeApprovalMode,
+    #[serde(default)]
+    default_kimi_approval_mode: KimiApprovalMode,
+    /// `auto` leaves new Kimi sessions on the CLI's current effort.
+    #[serde(default = "default_kimi_effort_preference")]
+    default_kimi_effort: String,
     #[serde(default = "default_codex_reasoning_effort")]
     default_codex_reasoning_effort: CodexReasoningEffort,
     #[serde(default = "default_claude_approval_mode")]
@@ -496,6 +501,8 @@ impl Default for AppPreferences {
             default_kimi_model: default_model_preference(),
             default_opencode_model: default_model_preference(),
             default_opencode_approval_mode: OpenCodeApprovalMode::Ask,
+            default_kimi_approval_mode: KimiApprovalMode::Ask,
+            default_kimi_effort: default_kimi_effort_preference(),
             default_codex_reasoning_effort: default_codex_reasoning_effort(),
             default_claude_approval_mode: default_claude_approval_mode(),
             default_claude_effort: default_claude_effort(),
@@ -541,6 +548,11 @@ impl AppPreferences {
 /// Returns the default model preference marker.
 fn default_model_preference() -> String {
     "default".to_owned()
+}
+
+/// The Kimi effort preference that leaves new sessions on the CLI's choice.
+fn default_kimi_effort_preference() -> String {
+    "auto".to_owned()
 }
 
 /// Returns the default cursor mode.

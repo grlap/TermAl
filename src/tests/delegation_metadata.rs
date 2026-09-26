@@ -76,6 +76,8 @@ fn delegation_default_model_uses_update_app_settings_normalized_value() {
     let updated = state
         .update_app_settings(UpdateAppSettingsRequest {
             default_opencode_approval_mode: None,
+            default_kimi_approval_mode: None,
+            default_kimi_effort: None,
             default_codex_model: Some("  gpt-5.5  ".to_owned()),
             default_claude_model: None,
             default_cursor_model: None,

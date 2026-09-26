@@ -73,7 +73,7 @@ const DELEGATION_COMPOSER_TITLE_ELLIPSIS = "...";
 export type ComposerDelegationMode = "reviewer" | "explorer";
 
 export const COMPOSER_REVIEWER_UNAVAILABLE_MESSAGE =
-  "Reviewer requires Claude or Codex. Select Explorer instead.";
+  "Reviewer requires Claude, Codex or Kimi. Select Explorer instead.";
 
 export type CreateComposerDelegationOptions = {
   title?: string;
@@ -288,10 +288,8 @@ export function createComposerDelegationRequest(
   prompt: string,
   options: CreateComposerDelegationOptions = {},
 ): CreateDelegationRequest {
-  // Claude and Codex default to reviewer mode. ACP parents visibly default to
-  // explorer because reviewer result submission requires an authenticated MCP
-  // identity those adapters do not expose. OpenCode explorers also require an
-  // isolated worktree rather than the shared read-only workspace.
+  // Claude, Codex and Kimi support authenticated read-only reviews. Other ACP
+  // parents default to explorer; OpenCode also requires an isolated worktree.
   // Other delegation entry points should add their own builder instead of
   // treating this composer default as a generic request factory.
   return {
@@ -307,7 +305,7 @@ export function createComposerDelegationRequest(
 }
 
 export function supportsComposerReviewer(agent: Session["agent"]): boolean {
-  return agent === "Claude" || agent === "Codex";
+  return agent === "Claude" || agent === "Codex" || agent === "Kimi";
 }
 
 export function defaultComposerDelegationMode(
@@ -319,7 +317,7 @@ export function defaultComposerDelegationMode(
 export function defaultComposerDelegationWritePolicy(
   agent: Session["agent"],
 ): NonNullable<CreateDelegationRequest["writePolicy"]> {
-  return agent === "OpenCode" || agent === "Kimi"
+  return agent === "OpenCode"
     ? { kind: "isolatedWorktree", ownedPaths: [] }
     : { kind: "readOnly" };
 }

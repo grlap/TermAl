@@ -417,6 +417,8 @@ pub(super) fn create_telegram_settings_project_and_session(state: &AppState) -> 
     let session = state
         .create_session(CreateSessionRequest {
             opencode_approval_mode: None,
+            kimi_approval_mode: None,
+            kimi_mode: None,
             agent: Some(Agent::Codex),
             name: Some("Telegram Session".to_owned()),
             workdir: None,

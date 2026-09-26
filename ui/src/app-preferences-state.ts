@@ -1,4 +1,4 @@
-import type { OpenCodeApprovalMode } from "./types";
+import type { KimiApprovalMode, OpenCodeApprovalMode } from "./types";
 // app-preferences-state.ts
 //
 // Owns: the React state + apply/persist side-effect orchestration
@@ -118,6 +118,8 @@ export function useAppPreferencesState(
   const [defaultCursorModel, setDefaultCursorModel] = useState("default");
   const [defaultGeminiModel, setDefaultGeminiModel] = useState("default");
   const [defaultKimiModel, setDefaultKimiModel] = useState("default");
+  const [defaultKimiApprovalMode, setDefaultKimiApprovalMode] = useState<KimiApprovalMode>("ask");
+  const [defaultKimiEffort, setDefaultKimiEffort] = useState("auto");
   const [defaultOpenCodeModel, setDefaultOpenCodeModel] = useState("default");
   const [defaultOpenCodeApprovalMode, setDefaultOpenCodeApprovalMode] =
     useState<OpenCodeApprovalMode>("ask");
@@ -218,6 +220,10 @@ export function useAppPreferencesState(
     defaultKimiModel,
     setDefaultGeminiModel,
     setDefaultKimiModel,
+    defaultKimiApprovalMode,
+    setDefaultKimiApprovalMode,
+    defaultKimiEffort,
+    setDefaultKimiEffort,
     defaultOpenCodeModel,
     defaultOpenCodeApprovalMode,
     setDefaultOpenCodeApprovalMode,

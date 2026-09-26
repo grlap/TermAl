@@ -117,6 +117,8 @@ fn opencode_session_new_reapplies_explicit_model_effort_then_mode_before_ready()
     let created = state
         .create_session(CreateSessionRequest {
             opencode_approval_mode: None,
+            kimi_approval_mode: None,
+            kimi_mode: None,
             agent: Some(Agent::OpenCode),
             name: Some("OpenCode Explicit Config".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -323,6 +325,8 @@ fn opencode_resume_survives_explicit_config_rejection() {
     let created = state
         .create_session(CreateSessionRequest {
             opencode_approval_mode: None,
+            kimi_approval_mode: None,
+            kimi_mode: None,
             agent: Some(Agent::OpenCode),
             name: Some("OpenCode Resume Config Rejection".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -442,6 +446,8 @@ fn opencode_missing_explicit_config_resets_to_auto_with_visible_notice() {
     let created = state
         .create_session(CreateSessionRequest {
             opencode_approval_mode: None,
+            kimi_approval_mode: None,
+            kimi_mode: None,
             agent: Some(Agent::OpenCode),
             name: Some("OpenCode Stale Config".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -562,6 +568,8 @@ fn opencode_generic_resume_error_preserves_continuity_without_fallback() {
     let created = state
         .create_session(CreateSessionRequest {
             opencode_approval_mode: None,
+            kimi_approval_mode: None,
+            kimi_mode: None,
             agent: Some(Agent::OpenCode),
             name: Some("OpenCode Missing Resume".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -669,6 +677,8 @@ fn opencode_structured_missing_session_error_preserves_continuity_after_failure(
     let created = state
         .create_session(CreateSessionRequest {
             opencode_approval_mode: None,
+            kimi_approval_mode: None,
+            kimi_mode: None,
             agent: Some(Agent::OpenCode),
             name: Some("OpenCode Structured Missing Resume".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -793,6 +803,8 @@ fn opencode_prompt_dispatch_does_not_inject_repository_instruction_files() {
     let created = state
         .create_session(CreateSessionRequest {
             opencode_approval_mode: None,
+            kimi_approval_mode: None,
+            kimi_mode: None,
             agent: Some(Agent::OpenCode),
             name: Some("OpenCode Prompt Boundary".to_owned()),
             workdir: Some(root.to_string_lossy().into_owned()),
@@ -873,6 +885,8 @@ fn opencode_config_update_queues_explicit_selection_reconciliation() {
     let created = state
         .create_session(CreateSessionRequest {
             opencode_approval_mode: None,
+            kimi_approval_mode: None,
+            kimi_mode: None,
             agent: Some(Agent::OpenCode),
             name: Some("OpenCode Config Drift".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -893,6 +907,8 @@ fn opencode_config_update_queues_explicit_selection_reconciliation() {
             UpdateSessionSettingsRequest {
                 kimi_effort: None,
                 opencode_approval_mode: None,
+                kimi_approval_mode: None,
+                kimi_mode: None,
                 name: None,
                 model: None,
                 approval_policy: None,
@@ -963,6 +979,8 @@ fn opencode_model_only_config_payload_preserves_absent_effort_and_mode_state() {
     let created = state
         .create_session(CreateSessionRequest {
             opencode_approval_mode: None,
+            kimi_approval_mode: None,
+            kimi_mode: None,
             agent: Some(Agent::OpenCode),
             name: Some("OpenCode Partial Config".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -1072,6 +1090,8 @@ fn opencode_invalid_agent_current_values_are_not_persisted() {
     let created = state
         .create_session(CreateSessionRequest {
             opencode_approval_mode: None,
+            kimi_approval_mode: None,
+            kimi_mode: None,
             agent: Some(Agent::OpenCode),
             name: Some("OpenCode Invalid Current Config".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -1163,6 +1183,8 @@ fn opencode_config_update_reconciliation_failure_is_visible_and_nonfatal() {
     let created = state
         .create_session(CreateSessionRequest {
             opencode_approval_mode: None,
+            kimi_approval_mode: None,
+            kimi_mode: None,
             agent: Some(Agent::OpenCode),
             name: Some("OpenCode Config Update Failure".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -1282,6 +1304,8 @@ fn opencode_config_rejection_reverts_to_current_without_failing_reconcile() {
     let created = state
         .create_session(CreateSessionRequest {
             opencode_approval_mode: None,
+            kimi_approval_mode: None,
+            kimi_mode: None,
             agent: Some(Agent::OpenCode),
             name: Some("OpenCode Config Rejection".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -1392,6 +1416,8 @@ fn opencode_duplicate_config_update_is_reconciled_once() {
     let created = state
         .create_session(CreateSessionRequest {
             opencode_approval_mode: None,
+            kimi_approval_mode: None,
+            kimi_mode: None,
             agent: Some(Agent::OpenCode),
             name: Some("OpenCode Config Dedupe".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -1531,6 +1557,8 @@ fn opencode_config_transport_failure_remains_runtime_fatal() {
     let created = state
         .create_session(CreateSessionRequest {
             opencode_approval_mode: None,
+            kimi_approval_mode: None,
+            kimi_mode: None,
             agent: Some(Agent::OpenCode),
             name: Some("OpenCode Config Transport Failure".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -1593,6 +1621,8 @@ fn opencode_live_config_commits_only_after_protocol_acknowledgement() {
     let created = state
         .create_session(CreateSessionRequest {
             opencode_approval_mode: None,
+            kimi_approval_mode: None,
+            kimi_mode: None,
             agent: Some(Agent::OpenCode),
             name: Some("OpenCode acknowledged config".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -1724,6 +1754,8 @@ fn opencode_combined_model_and_effort_update_waits_for_model_specific_options() 
     let created = state
         .create_session(CreateSessionRequest {
             opencode_approval_mode: None,
+            kimi_approval_mode: None,
+            kimi_mode: None,
             agent: Some(Agent::OpenCode),
             name: Some("OpenCode model-specific effort".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -1883,6 +1915,8 @@ fn opencode_dependent_rejection_after_model_change_resets_only_that_selection() 
     let created = state
         .create_session(CreateSessionRequest {
             opencode_approval_mode: None,
+            kimi_approval_mode: None,
+            kimi_mode: None,
             agent: Some(Agent::OpenCode),
             name: Some("OpenCode rejected post-model effort".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -2053,6 +2087,8 @@ fn opencode_model_change_resets_missing_carried_effort_to_auto() {
     let created = state
         .create_session(CreateSessionRequest {
             opencode_approval_mode: None,
+            kimi_approval_mode: None,
+            kimi_mode: None,
             agent: Some(Agent::OpenCode),
             name: Some("OpenCode missing carried effort".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -2201,6 +2237,8 @@ fn opencode_post_model_options_timeout_resets_dependents_without_failing_writer(
     let created = state
         .create_session(CreateSessionRequest {
             opencode_approval_mode: None,
+            kimi_approval_mode: None,
+            kimi_mode: None,
             agent: Some(Agent::OpenCode),
             name: Some("OpenCode post-model timeout".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -2323,6 +2361,8 @@ fn opencode_post_model_timeout_preserves_and_applies_reported_dependent() {
     let created = state
         .create_session(CreateSessionRequest {
             opencode_approval_mode: None,
+            kimi_approval_mode: None,
+            kimi_mode: None,
             agent: Some(Agent::OpenCode),
             name: Some("OpenCode partial post-model timeout".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -2626,6 +2666,8 @@ fn opencode_live_config_rejection_preserves_authority_and_runtime() {
     let created = state
         .create_session(CreateSessionRequest {
             opencode_approval_mode: None,
+            kimi_approval_mode: None,
+            kimi_mode: None,
             agent: Some(Agent::OpenCode),
             name: Some("OpenCode rejected config".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -2734,6 +2776,8 @@ fn opencode_config_command_skips_apply_after_scheduling_waiter_expires() {
     let created = state
         .create_session(CreateSessionRequest {
             opencode_approval_mode: None,
+            kimi_approval_mode: None,
+            kimi_mode: None,
             agent: Some(Agent::OpenCode),
             name: Some("Expired OpenCode config".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -2804,6 +2848,8 @@ fn opencode_config_command_rejects_expired_execution_after_start_authorization()
     let created = state
         .create_session(CreateSessionRequest {
             opencode_approval_mode: None,
+            kimi_approval_mode: None,
+            kimi_mode: None,
             agent: Some(Agent::OpenCode),
             name: Some("Expired authorized OpenCode config".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -2884,6 +2930,8 @@ fn opencode_config_command_requires_post_start_authorization() {
     let created = state
         .create_session(CreateSessionRequest {
             opencode_approval_mode: None,
+            kimi_approval_mode: None,
+            kimi_mode: None,
             agent: Some(Agent::OpenCode),
             name: Some("Canceled OpenCode config start".to_owned()),
             workdir: Some("/tmp".to_owned()),

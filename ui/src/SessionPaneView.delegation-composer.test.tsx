@@ -393,9 +393,9 @@ describe("SessionPaneView composer delegation click-through", () => {
     animationFrameSpies = [];
   });
 
-  it("spawns from the active parent session and clears the draft on success", async () => {
+  it.each(["Codex", "Kimi"] as const)("spawns a read-only %s reviewer and clears the draft on success", async agent => {
     const draft = "  Review\nthis change  ";
-    const session = makeSession({ id: "session-parent" });
+    const session = makeSession({ id: "session-parent", agent });
     spawnDelegationCommandMock.mockResolvedValue(completedSpawnResult());
 
     const { onComposerError, onDraftCommit, textarea } = renderSessionPaneView({
@@ -412,7 +412,7 @@ describe("SessionPaneView composer delegation click-through", () => {
         {
           title: "Review this change",
           prompt: "Review\nthis change",
-          agent: "Codex",
+          agent,
           model: "gpt-5",
           mode: "reviewer",
           writePolicy: { kind: "readOnly" },
@@ -443,7 +443,7 @@ describe("SessionPaneView composer delegation click-through", () => {
     );
     expect(
       screen.getByRole("menuitemradio", {
-        name: "Delegate · Reviewer — requires Claude or Codex",
+        name: "Delegate · Reviewer — requires Claude, Codex or Kimi",
       }),
     ).toBeDisabled();
     await clickAndSettle(

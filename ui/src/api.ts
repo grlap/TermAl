@@ -1,4 +1,4 @@
-import type { OpenCodeApprovalMode } from "./types";
+import type { KimiApprovalMode, KimiMode, OpenCodeApprovalMode } from "./types";
 import type {
   ApprovalDecision,
   AgentType,
@@ -489,6 +489,8 @@ type CreateSessionRequest = {
   claudeApprovalMode?: ClaudeApprovalMode;
   geminiApprovalMode?: GeminiApprovalMode;
   opencodeApprovalMode?: OpenCodeApprovalMode;
+  kimiApprovalMode?: KimiApprovalMode;
+  kimiMode?: KimiMode;
 };
 
 export type CreateDelegationRequest = {
@@ -820,6 +822,8 @@ export function updateAppSettings(payload: {
   defaultCursorModel?: string;
   defaultGeminiModel?: string;
   defaultKimiModel?: string;
+  defaultKimiApprovalMode?: KimiApprovalMode;
+  defaultKimiEffort?: string;
   defaultOpenCodeModel?: string;
   defaultOpenCodeApprovalMode?: OpenCodeApprovalMode;
   defaultCodexReasoningEffort?: CodexReasoningEffort;
@@ -1327,6 +1331,8 @@ export function updateSessionSettings(
     opencodeApprovalMode?: OpenCodeApprovalMode;
     opencodeEffort?: string;
     kimiEffort?: string;
+    kimiApprovalMode?: KimiApprovalMode;
+    kimiMode?: KimiMode;
     opencodeMode?: string;
   },
 ) {

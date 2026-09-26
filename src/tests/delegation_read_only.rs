@@ -53,6 +53,8 @@ async fn read_only_delegation_blocks_write_capable_surfaces() {
         UpdateSessionSettingsRequest {
             kimi_effort: None,
             opencode_approval_mode: None,
+            kimi_approval_mode: None,
+            kimi_mode: None,
             name: Some("try rename".to_owned()),
             model: None,
             approval_policy: None,
@@ -728,6 +730,8 @@ async fn read_only_delegation_blocks_project_and_workdir_writes_with_parent_sess
                 UpdateSessionSettingsRequest {
                     kimi_effort: None,
                     opencode_approval_mode: None,
+                    kimi_approval_mode: None,
+                    kimi_mode: None,
                     name: Some(name.to_owned()),
                     model: None,
                     approval_policy: None,
@@ -749,6 +753,8 @@ async fn read_only_delegation_blocks_project_and_workdir_writes_with_parent_sess
         UpdateSessionSettingsRequest {
             kimi_effort: None,
             opencode_approval_mode: None,
+            kimi_approval_mode: None,
+            kimi_mode: None,
             name: Some("child rename stays blocked".to_owned()),
             model: None,
             approval_policy: None,

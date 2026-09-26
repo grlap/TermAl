@@ -573,28 +573,35 @@ fn handle_acp_prompt_command(
         }
     };
 
-    // Kimi can retain an Auto/YOLO mode across continuation. Establish manual
-    // approvals before every prompt, including already-running sessions.
+    // Kimi can retain any mode across continuation. Set the effective mode
+    // before every prompt, including already-running sessions: `default` for
+    // a read-only delegation child, the session's own `kimiMode` otherwise.
     if agent == AcpAgent::Kimi {
         set_kimi_mode_gate_armed(runtime_state, false);
-        if let Err(err) =
-            configure_kimi_manual_approvals(writer, pending_requests, &external_session_id)
-                .and_then(|config| {
+        if let Err(err) = state.kimi_effective_mode(session_id).and_then(|mode| {
+            configure_kimi_mode(writer, pending_requests, &external_session_id, mode).and_then(
+                |config| {
                     state.admit_kimi_thinking(
                         writer,
                         pending_requests,
                         session_id,
                         &external_session_id,
+                        mode,
                         &config,
                         Some(runtime_token),
-                    )
-                })
-        {
+                    )?;
+                    // The ACK is the most direct evidence of Kimi's mode, so
+                    // the displayed mode never lags behind what TermAl set.
+                    state.record_kimi_current_mode(session_id, runtime_token, mode.as_str())
+                },
+            )
+        }) {
             set_acp_turn_active(turn_lifecycle, false);
             return Err(err);
         }
-        // Default mode is acknowledged for this prompt: from here until the
-        // prompt settles, a report of another mode is a violation.
+        // The effective mode is acknowledged for this prompt: from here until
+        // the prompt settles, a read-only child (always in `default`) reporting
+        // a mode that does not ask is a violation.
         set_kimi_mode_gate_armed(runtime_state, true);
     }
 
@@ -1318,20 +1325,25 @@ fn handle_acp_message(
                 return Ok(());
             }
         }
-        // A read-only Kimi delegation child: the host answers every request
-        // itself, fenced by the same lock as Stop (kimi_read_only.rs). Any
-        // other Kimi session keeps manual approval cards.
-        if agent == AcpAgent::Kimi
-            && method == "session/request_permission"
-            && state.answer_kimi_read_only_permission(
+        // Kimi, in this order, each fenced by the same lock as Stop: a
+        // read-only delegation child is answered by its gate
+        // (kimi_read_only.rs), which always wins; then a session whose TermAl
+        // policy is auto-approve may be answered for an allowlisted tool with
+        // exactly one allow-once option (kimi_approvals.rs). Everything else
+        // stays a manual approval card.
+        if agent == AcpAgent::Kimi && method == "session/request_permission" {
+            if state.answer_kimi_read_only_permission(
                 message,
                 session_id,
                 runtime_token,
                 input_tx,
                 &mut turn_state.kimi_read_only,
-            )?
-        {
-            return Ok(());
+            )? {
+                return Ok(());
+            }
+            if state.answer_kimi_auto_approval(message, session_id, runtime_token, input_tx)? {
+                return Ok(());
+            }
         }
         return handle_acp_request(message, state, session_id, input_tx, recorder, agent);
     }
@@ -1528,11 +1540,16 @@ fn handle_acp_notification(
                         ),
                     )?;
                 }
+                let reported_mode = kimi_reported_mode(update);
+                // Enforcement comes before the display record below, so a
+                // failure to persist the display can never skip the Cancel.
                 // Only inside the prompt window that began with TermAl's own
-                // Default-mode ACK: a mode Kimi reports during session setup is
-                // about to be replaced, and the ACK itself refuses the prompt
-                // if it is not.
-                if let Some(mode) = kimi_reported_mode(update)
+                // effective-mode ACK: a mode Kimi reports during session setup
+                // is about to be replaced, and the ACK itself refuses the
+                // prompt if it is not. Only a read-only child, whose effective
+                // mode is always `default`, is stopped.
+                if let Some(mode) = reported_mode
+                    .as_deref()
                     .filter(|mode| !kimi_mode_keeps_permission_gate(mode))
                     .filter(|_| kimi_mode_gate_armed(runtime_state))
                 {
@@ -1544,6 +1561,11 @@ fn handle_acp_notification(
                             "Kimi switched to `{mode}` mode, in which it acts without asking, so TermAl stopped this read-only delegation's turn"
                         ),
                     )?;
+                }
+                // The reported mode is shown to the user; it never decides an
+                // approval or changes the session's chosen mode.
+                if let Some(mode) = reported_mode.as_deref() {
+                    state.record_kimi_current_mode(session_id, runtime_token, mode)?;
                 }
             }
             if agent == AcpAgent::Kimi

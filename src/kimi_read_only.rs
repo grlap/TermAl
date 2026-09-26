@@ -8,7 +8,8 @@
 // Does not own: runtime fencing and sending the answer (acp.rs,
 // `handle_acp_message`), the read-only bash grammar (claude.rs,
 // `claude_bash_command_is_read_only`, reused unchanged), control-plane
-// authority (delegations.rs), or Kimi's Default-mode ACK (kimi.rs).
+// authority (delegations.rs), or Kimi's effective-mode ACK (kimi.rs), which
+// is always `default` for a read-only child.
 //
 // New module, not split from another file. Contract and evidence:
 // docs/features/kimi-cli-integration.md, "Read-only delegation children".
@@ -466,7 +467,8 @@ fn kimi_mode_keeps_permission_gate(mode: &str) -> bool {
 }
 
 /// Opens or closes the window in which the read-only mode guard acts: from
-/// Kimi's Default-mode ACK for a prompt until that prompt settles.
+/// Kimi's effective-mode ACK for a prompt until that prompt settles. Only a
+/// read-only child, whose effective mode is always `default`, is stopped.
 fn set_kimi_mode_gate_armed(runtime_state: &Arc<Mutex<AcpRuntimeState>>, armed: bool) {
     runtime_state
         .lock()

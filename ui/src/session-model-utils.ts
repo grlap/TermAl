@@ -85,7 +85,7 @@ export function isDefaultModelPreference(model: string): boolean {
 export function createSessionModelHint(agent: AgentType): string {
   switch (agent) {
     case "Kimi":
-      return "Kimi uses its configured model by default. Live model choices arrive over ACP after connecting; sign in with `kimi login` in a terminal first. Tool approvals remain manual.";
+      return "Kimi uses its configured model by default. Live model choices arrive over ACP after connecting; sign in with `kimi login` in a terminal first. TermAl approvals and Kimi mode are separate session settings.";
     case "Claude":
       return "Claude model selection lives on the session itself. TermAl asks Claude for its live model list after the session opens, and you can always enter a full Claude model id manually. New Claude sessions use the configured app default model; set it to default to let Claude choose.";
     case "Codex":
@@ -163,6 +163,8 @@ export function resolveAppPreferences(preferences?: AppPreferences | null) {
     defaultCursorModel: preferences?.defaultCursorModel ?? DEFAULT_MODEL_PREFERENCE,
     defaultGeminiModel: preferences?.defaultGeminiModel ?? DEFAULT_MODEL_PREFERENCE,
     defaultKimiModel: preferences?.defaultKimiModel ?? DEFAULT_MODEL_PREFERENCE,
+    defaultKimiApprovalMode: preferences?.defaultKimiApprovalMode ?? "ask",
+    defaultKimiEffort: preferences?.defaultKimiEffort ?? "auto",
     defaultOpenCodeModel: preferences?.defaultOpenCodeModel ?? DEFAULT_MODEL_PREFERENCE,
     defaultOpenCodeApprovalMode: preferences?.defaultOpenCodeApprovalMode ?? "ask",
     defaultCodexReasoningEffort:

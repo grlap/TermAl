@@ -58,6 +58,22 @@ function createDraftAttachment(
 }
 
 describe("session-store composer snapshots", () => {
+  it.each([
+    { kimiApprovalMode: "auto-approve" }, { kimiMode: "auto" }, { kimiCurrentMode: "plan" },
+  ] as const)("publishes Kimi policy/mode changes to both snapshots: %j", change => {
+    const initial = createSession({ agent: "Kimi" });
+    const sync = (session: Session) => syncComposerSessionsStore({
+      sessions: [session], draftsBySessionId: {}, draftAttachmentsBySessionId: {},
+    });
+    sync(initial);
+    const composer = getComposerSessionSnapshotForTesting(initial.id);
+    const summary = getSessionSummarySnapshotForTesting(initial.id);
+    sync({ ...initial, ...change });
+    expect(getComposerSessionSnapshotForTesting(initial.id)).not.toBe(composer);
+    expect(getSessionSummarySnapshotForTesting(initial.id)).not.toBe(summary);
+    expect(getComposerSessionSnapshotForTesting(initial.id)).toMatchObject(change);
+    expect(getSessionSummarySnapshotForTesting(initial.id)).toMatchObject(change);
+  });
   it("reuses the Kimi catalog when unrelated snapshot fields change", () => {
     const initial = createSession({
       agent: "Kimi",

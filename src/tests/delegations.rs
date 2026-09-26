@@ -6099,6 +6099,8 @@ fn terminal_read_only_delegations_do_not_keep_child_session_write_blocked() {
                 UpdateSessionSettingsRequest {
                     kimi_effort: None,
                     opencode_approval_mode: None,
+                    kimi_approval_mode: None,
+                    kimi_mode: None,
                     name: Some(name.to_owned()),
                     model: None,
                     approval_policy: None,

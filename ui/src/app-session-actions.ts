@@ -188,6 +188,7 @@ export function useAppSessionActions(
       defaultGeminiApprovalMode,
       defaultGeminiModel,
       defaultKimiModel,
+      defaultKimiApprovalMode = "ask",
       defaultOpenCodeModel,
       defaultOpenCodeApprovalMode,
     },
@@ -732,6 +733,8 @@ export function useAppSessionActions(
   async function handleNewSession({
     agent,
     opencodeApprovalMode,
+    kimiApprovalMode,
+    kimiMode,
     preferredPaneId = null,
     projectSelectionId = CREATE_SESSION_WORKSPACE_ID,
   }: HandleNewSessionArgs) {
@@ -787,6 +790,8 @@ export function useAppSessionActions(
       const created = await createSession({
         agent,
         model: requestedModel,
+        kimiApprovalMode: agent === "Kimi" ? kimiApprovalMode ?? defaultKimiApprovalMode : undefined,
+        kimiMode: agent === "Kimi" ? kimiMode ?? "default" : undefined,
         opencodeApprovalMode: agent === "OpenCode"
           ? opencodeApprovalMode ?? defaultOpenCodeApprovalMode
           : undefined,
@@ -841,6 +846,8 @@ export function useAppSessionActions(
         workspace.activePaneId;
       const created = await createSession({
         agent: session.agent,
+        kimiApprovalMode: session.agent === "Kimi" ? session.kimiApprovalMode ?? "ask" : undefined,
+        kimiMode: session.agent === "Kimi" ? session.kimiMode ?? "default" : undefined,
         opencodeApprovalMode: session.agent === "OpenCode" ? (session.opencodeApprovalMode ?? "ask") : undefined,
         model:
           session.agent === "OpenCode"
@@ -884,7 +891,7 @@ export function useAppSessionActions(
         return false;
       }
 
-      const preserveKimiEffort = session.agent === "Kimi" && !!session.kimiEffort;
+      const preserveKimiEffort = session.agent === "Kimi";
       if (preserveKimiEffort) {
         // Set the synchronous action fence before adoption can expose a composer.
         configuringCloneId = created.sessionId;
@@ -894,17 +901,18 @@ export function useAppSessionActions(
         setUpdatingSessionIds(current => setSessionFlag(current, created.sessionId, true));
       }
       const refreshOutcome = await openCreatedSession(created, targetPaneId, session.agent, preserveKimiEffort);
-      if (session.agent === "Kimi" && session.kimiEffort) {
+      if (preserveKimiEffort) {
         // A clone is a new provider session: discover its catalog instead of
         // trusting the source's cached options. Surface any failure, never
         // claim a successful clone that silently lost the explicit request.
         try {
           if (!isMountedRef.current) return false;
-          if (refreshOutcome !== "refreshed") {
+          if (session.kimiEffort && refreshOutcome !== "refreshed") {
             throw new Error("Model discovery did not complete; refresh the clone's models while idle and retry its effort setting.");
           }
           const configured = await updateSessionSettings(created.sessionId, {
-            kimiEffort: session.kimiEffort,
+            // Explicit auto prevents inheriting a newer app default on clones.
+            kimiEffort: session.kimiEffort ?? "auto",
           });
           if (!isMountedRef.current) return false;
           adoptSessionActionState(created.sessionId, configured);

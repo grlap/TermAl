@@ -214,6 +214,8 @@ export type AppPreferences = {
   defaultCursorModel: string;
   defaultGeminiModel: string;
   defaultKimiModel?: string;
+  defaultKimiApprovalMode?: KimiApprovalMode;
+  defaultKimiEffort?: string;
   defaultOpenCodeModel?: string;
   defaultOpenCodeApprovalMode?: OpenCodeApprovalMode;
   defaultCodexReasoningEffort: CodexReasoningEffort;
@@ -390,6 +392,9 @@ export type Session = {
   opencodeApprovalMode?: OpenCodeApprovalMode | null;
   opencodeEffort?: string | null;
   kimiEffort?: string | null;
+  kimiApprovalMode?: KimiApprovalMode | null;
+  kimiMode?: KimiMode | null;
+  kimiCurrentMode?: string | null;
   kimiCurrentEffort?: string | null;
   kimiEffortOptions?: SessionModelOption[];
   opencodeCurrentEffort?: string | null;
@@ -1258,8 +1263,12 @@ export type DeltaEvent =
   | DelegationCanceledEvent;
 
 export type OpenCodeApprovalMode = "ask" | "auto-approve";
+export type KimiApprovalMode = "ask" | "auto-approve";
+export type KimiMode = "default" | "plan" | "yolo" | "auto";
 
 export type SessionSettingsField =
+  | "kimiApprovalMode"
+  | "kimiMode"
   | "opencodeApprovalMode"
   | "model"
   | "sandboxMode"

@@ -355,7 +355,7 @@ export const SessionComposer = memo(function SessionComposer({
       mode: "reviewer",
       label: composerReviewerAvailable
         ? "Delegate · Reviewer"
-        : "Delegate · Reviewer — requires Claude or Codex",
+        : "Delegate · Reviewer — requires Claude, Codex or Kimi",
       disabled: !composerReviewerAvailable,
     },
     { mode: "explorer", label: "Delegate · Explorer" },

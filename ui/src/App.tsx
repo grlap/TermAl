@@ -14,7 +14,7 @@ import { isDialogBackdropDismissMouseDown } from "./dialog-backdrop-dismiss";
 import { TestRunsProvider } from "./test-runs-context";
 import { openTestRunsInWorkspaceState } from "./workspace";
 import { DialogCloseIcon } from "./message-card-icons";
-import type { OpenCodeApprovalMode } from "./types";
+import type { KimiApprovalMode, OpenCodeApprovalMode } from "./types";
 import {
   deleteProject,
   fetchGitDiff,
@@ -420,6 +420,10 @@ export default function App() {
     defaultKimiModel,
     setDefaultGeminiModel,
     setDefaultKimiModel,
+    defaultKimiApprovalMode,
+    setDefaultKimiApprovalMode,
+    defaultKimiEffort,
+    setDefaultKimiEffort,
     defaultOpenCodeModel,
     defaultOpenCodeApprovalMode,
     setDefaultOpenCodeApprovalMode,
@@ -953,6 +957,8 @@ export default function App() {
       setDefaultCursorModel,
       setDefaultGeminiModel,
       setDefaultKimiModel,
+      setDefaultKimiApprovalMode,
+      setDefaultKimiEffort,
       setDefaultOpenCodeModel,
       setDefaultOpenCodeApprovalMode,
       setDefaultCodexReasoningEffort,
@@ -1025,6 +1031,7 @@ export default function App() {
       defaultGeminiApprovalMode,
       defaultGeminiModel,
       defaultKimiModel,
+      defaultKimiApprovalMode,
       defaultOpenCodeModel,
       defaultOpenCodeApprovalMode,
     },
@@ -1331,6 +1338,8 @@ export default function App() {
     defaultCursorModel?: string;
     defaultGeminiModel?: string;
     defaultKimiModel?: string;
+    defaultKimiApprovalMode?: KimiApprovalMode;
+    defaultKimiEffort?: string;
     defaultOpenCodeModel?: string;
     defaultOpenCodeApprovalMode?: OpenCodeApprovalMode;
     defaultCodexReasoningEffort?: CodexReasoningEffort;
@@ -1450,6 +1459,16 @@ export default function App() {
     if (nextValue === defaultKimiModel) return;
     setDefaultKimiModel(nextValue);
     void persistAppPreferences({ defaultKimiModel: nextValue });
+  }
+
+  function handleDefaultKimiApprovalModeChange(nextValue: KimiApprovalMode) {
+    setDefaultKimiApprovalMode(nextValue);
+    void persistAppPreferences({ defaultKimiApprovalMode: nextValue });
+  }
+
+  function handleDefaultKimiEffortChange(nextValue: string) {
+    setDefaultKimiEffort(nextValue);
+    void persistAppPreferences({ defaultKimiEffort: nextValue });
   }
 
   function handleDefaultOpenCodeApprovalModeChange(nextValue: OpenCodeApprovalMode) {
@@ -2299,6 +2318,10 @@ export default function App() {
         onChangeDefaultCursorMode={setDefaultCursorMode}
         defaultGeminiModel={defaultGeminiModel}
         defaultKimiModel={defaultKimiModel}
+        defaultKimiApprovalMode={defaultKimiApprovalMode}
+        handleDefaultKimiApprovalModeChange={handleDefaultKimiApprovalModeChange}
+        defaultKimiEffort={defaultKimiEffort}
+        handleDefaultKimiEffortChange={handleDefaultKimiEffortChange}
         handleDefaultGeminiModelChange={handleDefaultGeminiModelChange}
         handleDefaultKimiModelChange={handleDefaultKimiModelChange}
         defaultGeminiApprovalMode={defaultGeminiApprovalMode}

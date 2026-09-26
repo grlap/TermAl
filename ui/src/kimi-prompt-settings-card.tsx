@@ -1,5 +1,5 @@
-// Model and reasoning-effort controls for Kimi. Approval/mode policy belongs to the
-// host ACP admission path, not to this card or the app-default preferences.
+// Owns Kimi session settings controls, not host permission enforcement or app defaults.
+import { KIMI_APPROVAL_OPTIONS, KIMI_MODE_OPTIONS, isKimiApprovalMode, isKimiMode, kimiModeHint } from "./kimi-settings-options";
 import { ThemedCombobox } from "./preferences/themed-combobox";
 import {
   SessionModelRefreshAction,
@@ -60,6 +60,25 @@ export function KimiPromptSettingsCard({
       <h3>Kimi session</h3>
       <div className="prompt-settings-grid">
         <div className="session-control-group">
+          <label className="session-control-label" htmlFor={`kimi-approval-${paneId}`}>TermAl approvals</label>
+          <ThemedCombobox id={`kimi-approval-${paneId}`} className="prompt-settings-select"
+            value={session.kimiApprovalMode ?? "ask"} options={KIMI_APPROVAL_OPTIONS}
+            disabled={disabled} onChange={value => {
+              if (isKimiApprovalMode(value)) onSessionSettingsChange(session.id, "kimiApprovalMode", value);
+            }} />
+          <p className="session-control-hint">Applies to tool requests Kimi sends to TermAl. Questions and plans remain interactive. Read-only delegation restrictions always take precedence.</p>
+        </div>
+        <div className="session-control-group">
+          <label className="session-control-label" htmlFor={`kimi-mode-${paneId}`}>Kimi mode</label>
+          <ThemedCombobox id={`kimi-mode-${paneId}`} className="prompt-settings-select"
+            value={session.kimiMode ?? "default"} options={KIMI_MODE_OPTIONS}
+            disabled={disabled} onChange={value => {
+              if (isKimiMode(value)) onSessionSettingsChange(session.id, "kimiMode", value);
+            }} />
+          <p className="session-control-hint">{kimiModeHint(session.kimiMode ?? "default")}</p>
+          {session.kimiCurrentMode ? <p className="session-control-hint">Observed CLI mode: {session.kimiCurrentMode}</p> : null}
+        </div>
+        <div className="session-control-group">
           <label className="session-control-label" htmlFor={`kimi-model-${paneId}`}>
             Kimi model
           </label>
@@ -119,7 +138,7 @@ export function KimiPromptSettingsCard({
         <p className="session-control-hint">
           Choose an advertised model while the session is idle. Model changes restart
           the runtime on the next prompt and preserve the conversation. Refresh models
-          reconnects the idle session. Tool approvals always remain manual.
+          reconnects the idle session. Stop the current turn before changing settings.
         </p>
       </div>
     </article>

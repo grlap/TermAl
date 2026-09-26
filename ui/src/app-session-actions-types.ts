@@ -1,4 +1,4 @@
-import type { OpenCodeApprovalMode } from "./types";
+import type { KimiApprovalMode, KimiMode, OpenCodeApprovalMode } from "./types";
 // Owns: public and internal type surface for useAppSessionActions.
 // Does not own: action implementation, API calls, or optimistic state mutation helpers.
 // Split from: ui/src/app-session-actions.ts.
@@ -51,6 +51,7 @@ export type UseAppSessionActionsDefaults = {
   defaultGeminiApprovalMode: GeminiApprovalMode;
   defaultGeminiModel: string;
   defaultKimiModel: string;
+  defaultKimiApprovalMode?: KimiApprovalMode;
   defaultOpenCodeModel: string;
   defaultOpenCodeApprovalMode: OpenCodeApprovalMode;
 };
@@ -158,6 +159,8 @@ export type UseAppSessionActionsParams = {
 export type HandleNewSessionArgs = {
   agent: AgentType;
   opencodeApprovalMode?: OpenCodeApprovalMode;
+  kimiApprovalMode?: KimiApprovalMode;
+  kimiMode?: KimiMode;
   preferredPaneId?: string | null;
   projectSelectionId?: string;
 };

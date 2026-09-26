@@ -573,6 +573,17 @@ fn validate_persisted_session_fields(
         ));
     }
 
+    // Legacy Kimi records have no policy or mode and read as ask/default.
+    if session.agent != Agent::Kimi
+        && (session.kimi_approval_mode.is_some()
+            || session.kimi_mode.is_some()
+            || session.kimi_current_mode.is_some())
+    {
+        return Err(anyhow!(
+            "kimiApprovalMode, kimiMode and kimiCurrentMode are only valid for Kimi sessions"
+        ));
+    }
+
     if session.agent.supports_codex_prompt_settings() {
         if session.approval_policy.is_none() {
             return Err(anyhow!(

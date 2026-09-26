@@ -363,6 +363,8 @@ function makeLiveStateParams(
       setDefaultCursorModel: noopSetter,
       setDefaultGeminiModel: noopSetter,
       setDefaultKimiModel: noopSetter,
+      setDefaultKimiApprovalMode: noopSetter,
+      setDefaultKimiEffort: noopSetter,
       setDefaultOpenCodeModel: noopSetter,
       setDefaultOpenCodeApprovalMode: noopSetter,
       setDefaultCodexReasoningEffort: noopSetter,

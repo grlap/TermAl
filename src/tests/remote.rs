@@ -39,6 +39,8 @@ fn persists_remote_settings() {
     let updated = state
         .update_app_settings(UpdateAppSettingsRequest {
             default_opencode_approval_mode: None,
+            default_kimi_approval_mode: None,
+            default_kimi_effort: None,
             default_codex_model: None,
             default_claude_model: None,
             default_cursor_model: None,
@@ -129,6 +131,8 @@ fn rejects_remote_settings_with_unsafe_remote_id() {
 
     let error = match state.update_app_settings(UpdateAppSettingsRequest {
         default_opencode_approval_mode: None,
+        default_kimi_approval_mode: None,
+        default_kimi_effort: None,
         default_codex_model: None,
         default_claude_model: None,
         default_cursor_model: None,
@@ -174,6 +178,8 @@ fn rejects_remote_settings_with_invalid_ssh_host() {
 
     let error = match state.update_app_settings(UpdateAppSettingsRequest {
         default_opencode_approval_mode: None,
+        default_kimi_approval_mode: None,
+        default_kimi_effort: None,
         default_codex_model: None,
         default_claude_model: None,
         default_cursor_model: None,
@@ -216,6 +222,8 @@ fn rejects_remote_settings_with_invalid_ssh_user() {
 
     let error = match state.update_app_settings(UpdateAppSettingsRequest {
         default_opencode_approval_mode: None,
+        default_kimi_approval_mode: None,
+        default_kimi_effort: None,
         default_codex_model: None,
         default_claude_model: None,
         default_cursor_model: None,
@@ -645,6 +653,8 @@ fn remote_action_lookup_rejects_unusable_remotes_before_ssh() {
     state
         .update_app_settings(UpdateAppSettingsRequest {
             default_opencode_approval_mode: None,
+            default_kimi_approval_mode: None,
+            default_kimi_effort: None,
             default_codex_model: None,
             default_claude_model: None,
             default_cursor_model: None,

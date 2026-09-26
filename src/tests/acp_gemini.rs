@@ -182,6 +182,8 @@ fn acp_session_resume_loads_when_explicitly_advertised() {
     let created = state
         .create_session(CreateSessionRequest {
             opencode_approval_mode: None,
+            kimi_approval_mode: None,
+            kimi_mode: None,
             agent: Some(Agent::Cursor),
             name: Some("Cursor Resume".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -367,6 +369,8 @@ fn acp_session_resume_prefers_resume_when_explicitly_supported() {
     let created = state
         .create_session(CreateSessionRequest {
             opencode_approval_mode: None,
+            kimi_approval_mode: None,
+            kimi_mode: None,
             agent: Some(Agent::Cursor),
             name: Some("Cursor Resume".to_owned()),
             workdir: Some("/tmp".to_owned()),
@@ -576,6 +580,8 @@ fn established_cursor_config_refresh_preserves_legacy_noop_contract() {
     let created = state
         .create_session(CreateSessionRequest {
             opencode_approval_mode: None,
+            kimi_approval_mode: None,
+            kimi_mode: None,
             agent: Some(Agent::Cursor),
             name: Some("Cursor Refresh".to_owned()),
             workdir: Some("/tmp".to_owned()),

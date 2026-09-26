@@ -203,9 +203,17 @@ impl StateInner {
                     .then(|| OPENCODE_CONFIG_AUTO.to_owned()),
                 opencode_current_effort: None,
                 opencode_effort_options: Vec::new(),
-                kimi_effort: None,
+                // A new Kimi session starts from the app defaults: the TermAl
+                // approval policy, and the reasoning effort unless it is `auto`.
+                kimi_effort: (agent == Agent::Kimi)
+                    .then(|| self.preferences.default_kimi_effort.trim().to_owned())
+                    .filter(|effort| !effort.is_empty() && effort != "auto"),
                 kimi_current_effort: None,
                 kimi_effort_options: Vec::new(),
+                kimi_approval_mode: (agent == Agent::Kimi)
+                    .then_some(self.preferences.default_kimi_approval_mode),
+                kimi_mode: (agent == Agent::Kimi).then_some(KimiMode::Default),
+                kimi_current_mode: None,
                 opencode_mode: agent
                     .supports_opencode_settings()
                     .then(|| OPENCODE_CONFIG_AUTO.to_owned()),

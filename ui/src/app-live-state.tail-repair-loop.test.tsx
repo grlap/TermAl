@@ -126,6 +126,8 @@ function makeParams(): UseAppLiveStateParams {
       setDefaultCodexApprovalPolicy: set, setDefaultClaudeModel: set,
       setDefaultCursorModel: set, setDefaultGeminiModel: set, setDefaultOpenCodeModel: set,
       setDefaultKimiModel: set,
+      setDefaultKimiApprovalMode: set,
+      setDefaultKimiEffort: set,
       setDefaultOpenCodeApprovalMode: set,
       setDefaultCodexReasoningEffort: set,
       setDefaultClaudeApprovalMode: set, setDefaultClaudeEffort: set,

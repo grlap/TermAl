@@ -1,4 +1,4 @@
-import type { OpenCodeApprovalMode } from "./types";
+import type { KimiApprovalMode, KimiMode, OpenCodeApprovalMode } from "./types";
 // Owns optimistic session-settings projection and rollback helpers.
 // Does not own API calls, action adoption, or React state setters.
 // Split from ui/src/app-session-actions.ts.
@@ -136,6 +136,12 @@ export function buildOptimisticSessionSettingsUpdate(
       };
     }
     case "Kimi": {
+      if (field === "kimiApprovalMode") {
+        return { ...session, kimiApprovalMode: value as KimiApprovalMode };
+      }
+      if (field === "kimiMode") {
+        return { ...session, kimiMode: value as KimiMode };
+      }
       const model = normalizedModelValue ?? session.model;
       const kimiEffort = field === "kimiEffort"
         ? (value === "auto" ? null : value as string)
@@ -185,6 +191,16 @@ export function rollbackOptimisticSessionSettingsUpdate(
 ) {
   let changed = false;
   const nextSession = { ...currentSession };
+  if (currentSession.kimiApprovalMode === optimisticSession.kimiApprovalMode &&
+      currentSession.kimiApprovalMode !== previousSession.kimiApprovalMode) {
+    nextSession.kimiApprovalMode = previousSession.kimiApprovalMode;
+    changed = true;
+  }
+  if (currentSession.kimiMode === optimisticSession.kimiMode &&
+      currentSession.kimiMode !== previousSession.kimiMode) {
+    nextSession.kimiMode = previousSession.kimiMode;
+    changed = true;
+  }
   if (optimisticSession.agent === "Kimi" &&
       currentSession.model === optimisticSession.model &&
       previousSession.model !== optimisticSession.model) {

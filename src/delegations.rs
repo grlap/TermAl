@@ -2354,6 +2354,12 @@ fn configure_delegation_child_prompt_settings(
         child_record.session.cursor_mode = Some(CursorMode::Plan);
     } else if child_record.session.agent.supports_gemini_approval_mode() {
         child_record.session.gemini_approval_mode = Some(GeminiApprovalMode::Plan);
+    } else if child_record.session.agent == Agent::Kimi {
+        // A Kimi child never inherits the app default or its parent's
+        // auto-approve or yolo/auto mode. A read-only child is answered by the
+        // host gate in `default` mode whatever these say; any other child asks.
+        child_record.session.kimi_approval_mode = Some(KimiApprovalMode::Ask);
+        child_record.session.kimi_mode = Some(KimiMode::Default);
     }
 }
 

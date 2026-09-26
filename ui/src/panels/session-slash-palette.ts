@@ -46,6 +46,7 @@ import {
   matchingSessionModelOption,
 } from "../session-model-options";
 import type { SessionSummarySnapshot } from "../session-store";
+import { KIMI_APPROVAL_OPTIONS, KIMI_MODE_OPTIONS, kimiModeHint } from "../kimi-settings-options";
 import type {
   AgentCommand,
   ApprovalPolicy,
@@ -73,6 +74,9 @@ export type SlashPaletteSession = Pick<
   | "opencodeEffort"
   | "opencodeEffortOptions"
   | "kimiEffort"
+  | "kimiApprovalMode"
+  | "kimiMode"
+  | "kimiCurrentMode"
   | "kimiCurrentEffort"
   | "kimiEffortOptions"
   | "opencodeMode"
@@ -170,7 +174,7 @@ export const SLASH_COMMANDS: ReadonlyArray<{
     detail: "Change the session mode for this agent",
     id: "mode",
     label: "/mode",
-    supports: ["Claude", "Cursor", "Gemini", "OpenCode"],
+    supports: ["Claude", "Cursor", "Gemini", "OpenCode", "Kimi"],
   },
   {
     command: "/sandbox",
@@ -184,7 +188,7 @@ export const SLASH_COMMANDS: ReadonlyArray<{
     detail: "Change the session tool approval policy",
     id: "approvals",
     label: "/approvals",
-    supports: ["Codex", "OpenCode"],
+    supports: ["Codex", "OpenCode", "Kimi"],
   },
   {
     command: "/effort",
@@ -695,8 +699,16 @@ export function sessionModeSlashState(session: SlashPaletteSession, query: strin
         title: "OpenCode modes",
       };
     }
+    case "Kimi": {
+      const busy = ["active", "approval", "stopping"].includes(session.status);
+      return {
+        emptyMessage: busy ? "Stop the Kimi turn before changing its mode." : `No Kimi modes match "${query}".`,
+        hint: kimiModeHint(session.kimiMode ?? "default"),
+        items: busy ? [] : makeSlashChoices(KIMI_MODE_OPTIONS, "kimiMode", session.kimiMode ?? "default", query),
+        title: "Kimi modes",
+      };
+    }
     case "Codex":
-    case "Kimi": // Kimi mode/thinking controls are not exposed by this slice.
       return null;
   }
 }
@@ -716,6 +728,16 @@ export function codexApprovalSlashState(query: string, currentValue: ApprovalPol
     hint: "Enter to set the next Codex prompt approval policy.",
     items: makeSlashChoices(APPROVAL_POLICY_SLASH_OPTIONS, "approvalPolicy", currentValue, query),
     title: "Codex approvals",
+  };
+}
+
+export function kimiApprovalSlashState(session: SlashPaletteSession, query: string): SlashChoiceState {
+  const busy = ["active", "approval", "stopping"].includes(session.status);
+  return {
+    emptyMessage: busy ? "Stop the Kimi turn before changing approvals." : `No Kimi approval policies match "${query}".`,
+    hint: `TermAl approvals apply only to requests from Kimi; questions and plans remain interactive. ${kimiModeHint(session.kimiMode ?? "default")}`,
+    items: busy ? [] : makeSlashChoices(KIMI_APPROVAL_OPTIONS, "kimiApprovalMode", session.kimiApprovalMode ?? "ask", query),
+    title: "Kimi approvals",
   };
 }
 
@@ -940,7 +962,7 @@ export function kimiEffortSlashState(session: SlashPaletteSession, query: string
       : `No Kimi reasoning efforts match "${query}". Refresh models in Prompt settings for new choices.`,
     hint: unavailable
       ? `Saved effort "${session.kimiEffort}" is unavailable. Choose a supported effort or CLI current before prompting.`
-      : "Choose an advertised thinking effort for the next prompt. Tool approvals stay manual.",
+      : "Choose an advertised thinking effort for the next prompt.",
     items: busy ? [] : makeSlashChoices(
       [{ value: "auto", label: currentLabel, detail: "Clear the explicit request; keep the CLI's current effort" },
       ...(session.kimiEffortOptions ?? []).filter(option => option.value !== "auto").map(option => ({
@@ -1152,7 +1174,7 @@ export function buildSlashPaletteState(
               ? codexApprovalSlashState(rawOptionQuery, session.approvalPolicy ?? "never")
               : session.agent === "OpenCode"
                 ? opencodeApprovalSlashState(session, rawOptionQuery)
-                : null
+                : session.agent === "Kimi" ? kimiApprovalSlashState(session, rawOptionQuery) : null
             : activeCommand.id === "effort"
               ? session.agent === "Codex"
                 ? codexReasoningEffortSlashState(session, rawOptionQuery)
