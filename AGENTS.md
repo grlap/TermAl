@@ -23,6 +23,30 @@ bd close <id>         # Complete work
 bd dolt push          # Push beads data to remote
 ```
 
+## Work only in the repository folder
+
+Greg's rule (2026-09-26), after an agent's cleanup script deleted most of his
+user profile (cause recorded in bead `tm-t1gh`; host enforcement is Engram
+item `w-bf5b12465446`):
+
+- Create, change, move and delete files only inside this repository's folder
+  and its worktrees, including worktrees TermAl creates for delegated
+  sessions. This covers every shell command and script an agent writes.
+  Scratch files, throwaway stores, test homes and logs go under `.tmp/`
+  (ignored by Git), never in the system temp folder, `C:\tmp`, the user
+  profile or another project, even when a harness names a scratchpad there.
+- Outside the repository only tools write, as part of their own work: TermAl
+  through its tools and test runs, Engram to its store home, Cargo and npm to
+  their caches. Anything else there, such as installing, repairing or updating
+  software, toolchains or TermAl itself, or changing user or global
+  configuration, needs Greg's explicit word first.
+- Reading outside the repository is allowed.
+- Before a recursive delete, resolve the target to an absolute path and check
+  that it lies inside the repository. Never delete through a variable whose
+  value you have not checked. In PowerShell never assign `$home` or any other
+  automatic variable: variable names ignore case, `$HOME` is read-only, and a
+  failed assignment keeps the old value while the script runs on.
+
 ## Non-Interactive Shell Commands
 
 **ALWAYS use non-interactive flags** with file operations to avoid hanging on confirmation prompts.
