@@ -1216,9 +1216,10 @@ gap detection and `/api/state` repair keep working:
 ```typescript
 type DelegationDeltaEvent =
   | { type: "delegationCreated"; revision: number; delegation: DelegationSummary }
-  | { type: "delegationWaitCreated"; revision: number; wait: DelegationWaitRecord }
+  | { type: "delegationWaitCreated"; revision: number; serverInstanceId: string; wait: DelegationWaitRecord }
   | {
       type: "delegationWaitConsumed";
+      serverInstanceId: string;
       revision: number;
       waitId: string;
       parentSessionId: string;
@@ -1252,6 +1253,11 @@ type DelegationDeltaEvent =
       reason?: string;
     };
 ```
+
+Delegation wait creation and consumption follow the same server-identity and
+snapshot-ordering rules as [test-run waits](test-runs.md#rollout-ships-switched-on):
+retired-server deltas are discarded, unproven identity requests a snapshot,
+and each wait list has a per-server revision watermark.
 
 `/api/state` carries each delegation's `id`, `childSessionId`, `mode`, and
 `reviewResultRequired`. The durable link restores delegated-child ownership

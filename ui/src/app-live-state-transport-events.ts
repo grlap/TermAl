@@ -21,6 +21,7 @@ import {
   type DeltaApplyResult,
 } from "./live-updates";
 import {
+  classifyDeltaServerIdentity,
   decideDeltaRevisionAction,
   shouldAdoptSnapshotRevision,
 } from "./state-revision";
@@ -398,6 +399,46 @@ export function createAppLiveStateTransportEventHandlers(
     try {
       const delta = JSON.parse(event.data) as DeltaEvent;
       const currentRevision = latestStateRevisionRef.current;
+      if (delta.type === "testRunWaitCreated" || delta.type === "testRunWaitConsumed" ||
+          delta.type === "delegationWaitCreated" || delta.type === "delegationWaitConsumed") {
+        const identity = classifyDeltaServerIdentity(
+          delta.serverInstanceId, lastSeenServerInstanceIdRef.current, seenServerInstanceIdsRef.current,
+        );
+        if (identity !== "current") {
+          // A retired server cannot mutate a replacement's waits or request
+          // repair at its old revision. Unknown/missing identity needs a
+          // snapshot; never compare that delta's revision to the current one.
+          if (identity === "unproven") {
+            requestStateResync({
+              allowSameServerEqualRevision: true,
+              // A tagged replacement hint survives retries only while the
+              // observed origin is still current, and only for that target.
+              waitRepair: {
+                observedServerInstanceId: lastSeenServerInstanceIdRef.current,
+                replacementServerInstanceId: delta.serverInstanceId || undefined,
+              },
+            });
+          }
+          return;
+        }
+        if ((delta.type === "testRunWaitCreated" || delta.type === "delegationWaitCreated") &&
+            currentRevision !== null && delta.revision < currentRevision) {
+          // A session-only response may have advanced the revision without
+          // refreshing waits. Do not apply the stale create; repair the list.
+          requestStateResync({
+            allowSameServerEqualRevision: true,
+            waitRepair: { observedServerInstanceId: lastSeenServerInstanceIdRef.current },
+          });
+          // This current-server frame still proves live delivery, independently
+          // of the wait-list repair. A stale frame cannot repair a bad event.
+          if (!transportState.pendingBadLiveEventRecovery) {
+            void confirmReconnectRecoveryFromDeltaEvent();
+          }
+          setBackendConnectionIssueDetail(null);
+          clearRecoveredBackendRequestError();
+          return;
+        }
+      }
       // A dispatch outcome is emitted after the consumed snapshot/delta and may
       // have that same (or an older) revision. It is not a state mutation: never
       // advance the global revision or put it in the transient connection slot.

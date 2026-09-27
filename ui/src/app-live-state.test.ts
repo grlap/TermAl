@@ -1712,7 +1712,7 @@ describe("deferred session-store sync", () => {
 
     act(() => {
       eventSource!.dispatchNamedEvent("delta", {
-        type: "delegationWaitCreated",
+        type: "delegationWaitCreated", serverInstanceId: "server-a",
         revision: 2,
         wait: {
           id: "wait-1",
@@ -1738,7 +1738,7 @@ describe("deferred session-store sync", () => {
 
     act(() => {
       eventSource!.dispatchNamedEvent("delta", {
-        type: "delegationWaitConsumed",
+        type: "delegationWaitConsumed", serverInstanceId: "server-a",
         revision: 3,
         waitId: "wait-1",
         parentSessionId: session.id,

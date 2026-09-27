@@ -8,9 +8,25 @@ import {
 } from "./app-live-state-resync-options";
 
 describe("state resync option coalescing", () => {
+  it("retains replacement evidence within one origin and supersedes it after a new origin", () => {
+    const first = coalescePendingStateResyncOptions(null, {
+      waitRepair: { observedServerInstanceId: "a", replacementServerInstanceId: "b" },
+    });
+    const second = coalescePendingStateResyncOptions(first, {
+      waitRepair: { observedServerInstanceId: "a" },
+    });
+    expect(second.waitRepair).toEqual(first.waitRepair);
+    const third = coalescePendingStateResyncOptions(second, {
+      waitRepair: { observedServerInstanceId: "c" },
+    });
+    expect(third.waitRepair).toEqual({ observedServerInstanceId: "c" });
+  });
+
   it("creates an empty option bag from a null start and undefined options", () => {
     expect(coalescePendingStateResyncOptions(null, undefined)).toEqual({
       allowAuthoritativeRollback: false,
+      allowSameServerEqualRevision: false,
+      waitRepair: null,
       allowUnknownServerInstance: false,
       preserveReconnectFallback: false,
       preserveWatchdogCooldown: false,
@@ -27,6 +43,7 @@ describe("state resync option coalescing", () => {
   it("retains monotonic boolean flags across later narrower requests", () => {
     const first = coalescePendingStateResyncOptions(null, {
       allowAuthoritativeRollback: true,
+      allowSameServerEqualRevision: true,
       preserveReconnectFallback: true,
       preserveWatchdogCooldown: true,
       rearmOnSuccess: true,
@@ -43,6 +60,8 @@ describe("state resync option coalescing", () => {
 
     expect(second).toEqual({
       allowAuthoritativeRollback: true,
+      allowSameServerEqualRevision: true,
+      waitRepair: null,
       allowUnknownServerInstance: true,
       preserveReconnectFallback: true,
       preserveWatchdogCooldown: true,
@@ -152,6 +171,8 @@ describe("state resync option coalescing", () => {
     expect(ref.current).toBeNull();
     expect(consumePendingStateResyncOptions(ref)).toEqual({
       allowAuthoritativeRollback: false,
+      allowSameServerEqualRevision: false,
+      waitRepair: null,
       allowUnknownServerInstance: false,
       preserveReconnectFallback: false,
       preserveWatchdogCooldown: false,

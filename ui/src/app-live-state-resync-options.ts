@@ -8,8 +8,17 @@
 
 import type { MutableRefObject } from "react";
 
+// Durable wait-repair evidence, independent of one-shot reconnect permissions.
+export type WaitSnapshotRepairIntent = {
+  observedServerInstanceId: string | null;
+  replacementServerInstanceId?: string;
+};
+
 export type RequestStateResyncOptions = {
   allowAuthoritativeRollback?: boolean;
+  /** Repair a partial projection at the current revision, without trusting a new server. */
+  allowSameServerEqualRevision?: boolean;
+  waitRepair?: WaitSnapshotRepairIntent;
   allowUnknownServerInstance?: boolean;
   preserveReconnectFallback?: boolean;
   preserveWatchdogCooldown?: boolean;
@@ -26,6 +35,8 @@ export type RequestStateResyncOptions = {
 
 export type PendingStateResyncOptions = {
   allowAuthoritativeRollback: boolean;
+  allowSameServerEqualRevision: boolean;
+  waitRepair: WaitSnapshotRepairIntent | null;
   allowUnknownServerInstance: boolean;
   preserveReconnectFallback: boolean;
   preserveWatchdogCooldown: boolean;
@@ -43,6 +54,8 @@ export type PendingStateResyncOptions = {
 function createEmptyPendingStateResyncOptions(): PendingStateResyncOptions {
   return {
     allowAuthoritativeRollback: false,
+    allowSameServerEqualRevision: false,
+    waitRepair: null,
     allowUnknownServerInstance: false,
     preserveReconnectFallback: false,
     preserveWatchdogCooldown: false,
@@ -66,6 +79,18 @@ export function coalescePendingStateResyncOptions(
   next.allowAuthoritativeRollback =
     next.allowAuthoritativeRollback ||
     options?.allowAuthoritativeRollback === true;
+  next.allowSameServerEqualRevision =
+    next.allowSameServerEqualRevision ||
+    options?.allowSameServerEqualRevision === true;
+  if (options?.waitRepair) {
+    const previous = next.waitRepair;
+    const incoming = options.waitRepair;
+    // A later adopted origin supersedes older evidence. Within one origin,
+    // a current/untagged wait must not erase a pending replacement hint.
+    next.waitRepair = previous?.observedServerInstanceId === incoming.observedServerInstanceId
+      ? { ...incoming, replacementServerInstanceId: incoming.replacementServerInstanceId ?? previous.replacementServerInstanceId }
+      : { ...incoming };
+  }
   next.allowUnknownServerInstance =
     next.allowUnknownServerInstance ||
     options?.allowUnknownServerInstance === true;

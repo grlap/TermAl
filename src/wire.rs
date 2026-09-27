@@ -3127,10 +3127,14 @@ enum DeltaEvent {
     },
     DelegationWaitCreated {
         revision: u64,
+        #[serde(default)]
+        server_instance_id: String,
         wait: DelegationWaitRecord,
     },
     DelegationWaitConsumed {
         revision: u64,
+        #[serde(default)]
+        server_instance_id: String,
         wait_id: String,
         parent_session_id: String,
         reason: DelegationWaitConsumedReason,
@@ -3172,11 +3176,15 @@ enum DeltaEvent {
     /// A run wait was registered (`test_run_waits.rs`).
     TestRunWaitCreated {
         revision: u64,
+        #[serde(default)]
+        server_instance_id: String,
         wait: TestRunWaitRecord,
     },
     /// A run wait left the pending set.
     TestRunWaitConsumed {
         revision: u64,
+        #[serde(default)]
+        server_instance_id: String,
         wait_id: String,
         session_id: String,
         reason: TestRunWaitConsumedReason,

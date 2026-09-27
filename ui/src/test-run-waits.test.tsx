@@ -14,9 +14,9 @@ afterEach(() => { cleanup(); vi.useRealTimers(); });
 it("uses wait identity, not run identity, and removes only the consumed wait", () => {
   const first = makeTestRunWait();
   const second = makeTestRunWait({ id: "wait-two" });
-  const both = applyTestRunWaitDelta([first], { type: "testRunWaitCreated", revision: 2, wait: second });
+  const both = applyTestRunWaitDelta([first], { type: "testRunWaitCreated", serverInstanceId: "test-server", revision: 2, wait: second });
   expect(both).toHaveLength(2);
-  const consumed = { type: "testRunWaitConsumed" as const, revision: 3, sessionId: first.sessionId, waitId: first.id, reason: "sessionStopped" as const };
+  const consumed = { type: "testRunWaitConsumed" as const, serverInstanceId: "test-server", revision: 3, sessionId: first.sessionId, waitId: first.id, reason: "sessionStopped" as const };
   expect(applyTestRunWaitDelta(both, consumed)).toEqual([second]);
   expect(isSessionDeltaEvent(consumed)).toBe(false);
   expect(isSessionDeltaEvent({ type: "testRunWaitResumeDispatchFailed", revision: 4, sessionId: first.sessionId, error: "failed" })).toBe(false);

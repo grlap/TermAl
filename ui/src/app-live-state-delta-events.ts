@@ -65,8 +65,9 @@ export type DeltaScopeMatchesSessionDeltaEvent = AssertTrue<
 >;
 
 export function isSessionDeltaEvent(delta: DeltaEvent): delta is SessionDeltaEvent {
-  const scope = (DELTA_EVENT_SCOPE as Readonly<Record<string, "session" | "global" | undefined>>)[delta.type];
-  if (scope !== undefined) return scope === "session";
+  if (Object.prototype.hasOwnProperty.call(DELTA_EVENT_SCOPE, delta.type)) {
+    return DELTA_EVENT_SCOPE[delta.type] === "session";
+  }
   // A type this UI does not know yet (from a newer backend) keeps the
   // structural rule, so a sessionId still leads to the safe session resync.
   return "sessionId" in delta && typeof (delta as { sessionId?: unknown }).sessionId === "string";

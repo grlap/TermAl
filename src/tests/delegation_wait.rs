@@ -292,6 +292,7 @@ fn removing_delegation_parent_consumes_pending_wait_with_parent_removed_reason()
             },
         )
         .expect("delegation should be created");
+    let mut delta_events = state.subscribe_delta_events();
     let wait = state
         .create_delegation_wait(
             &parent_session_id,
@@ -322,8 +323,6 @@ fn removing_delegation_parent_consumes_pending_wait_with_parent_removed_reason()
     );
     let wait_ids = BTreeSet::from([wait.wait.id.clone(), second_wait.wait.id.clone()]);
 
-    let mut delta_events = state.subscribe_delta_events();
-    while delta_events.try_recv().is_ok() {}
     state
         .kill_session(&parent_session_id)
         .expect("parent removal should succeed");
@@ -352,23 +351,38 @@ fn removing_delegation_parent_consumes_pending_wait_with_parent_removed_reason()
     drop(inner);
 
     let mut consumed_wait_ids = BTreeSet::new();
-    while let Ok(payload) = delta_events.try_recv() {
+    let mut created_wait_ids = BTreeSet::new();
+    loop {
+        let payload = match delta_events.try_recv() {
+            Ok(payload) => payload,
+            Err(tokio::sync::broadcast::error::TryRecvError::Lagged(count)) => {
+                panic!("wait identity test lost {count} published deltas");
+            }
+            Err(_) => break,
+        };
         let event: DeltaEvent =
             serde_json::from_str(&payload).expect("delta event should deserialize");
-        if let DeltaEvent::DelegationWaitConsumed {
-            wait_id,
-            parent_session_id: consumed_parent_session_id,
-            reason,
-            ..
-        } = event
-        {
-            if wait_ids.contains(&wait_id) {
+        match event {
+            DeltaEvent::DelegationWaitCreated { server_instance_id, wait, .. } => {
+                assert_eq!(server_instance_id, state.server_instance_id);
+                created_wait_ids.insert(wait.id);
+            }
+            DeltaEvent::DelegationWaitConsumed {
+                server_instance_id,
+                wait_id,
+                parent_session_id: consumed_parent_session_id,
+                reason,
+                ..
+            } if wait_ids.contains(&wait_id) => {
+                assert_eq!(server_instance_id, state.server_instance_id);
                 assert_eq!(consumed_parent_session_id, parent_session_id);
                 assert_eq!(reason, DelegationWaitConsumedReason::ParentSessionRemoved);
                 consumed_wait_ids.insert(wait_id);
             }
+            _ => {}
         }
     }
+    assert_eq!(created_wait_ids, wait_ids);
     assert_eq!(
         consumed_wait_ids, wait_ids,
         "parent removal should publish reasoned wait-consumed deltas"
@@ -572,6 +586,7 @@ fn delegation_wait_consumed_delta_requires_reason() {
     let error = match serde_json::from_value::<DeltaEvent>(json!({
         "type": "delegationWaitConsumed",
         "revision": 42,
+        "serverInstanceId": "instance-1",
         "waitId": "delegation-wait-current",
         "parentSessionId": "session-current"
     })) {
@@ -597,6 +612,7 @@ fn delegation_wait_consumed_delta_serializes_reason() {
     ] {
         let event = DeltaEvent::DelegationWaitConsumed {
             revision: 42,
+            server_instance_id: "instance-1".to_owned(),
             wait_id: "delegation-wait-serialized".to_owned(),
             parent_session_id: "session-parent".to_owned(),
             reason,
@@ -605,6 +621,7 @@ fn delegation_wait_consumed_delta_serializes_reason() {
         let value = serde_json::to_value(&event).expect("wait-consumed delta should serialize");
 
         assert_eq!(value["type"], "delegationWaitConsumed");
+        assert_eq!(value["serverInstanceId"], "instance-1");
         assert_eq!(value["revision"], 42);
         assert_eq!(value["waitId"], "delegation-wait-serialized");
         assert_eq!(value["parentSessionId"], "session-parent");
@@ -615,17 +632,42 @@ fn delegation_wait_consumed_delta_serializes_reason() {
         match decoded {
             DeltaEvent::DelegationWaitConsumed {
                 revision,
+                server_instance_id,
                 wait_id,
                 parent_session_id,
                 reason: decoded_reason,
             } => {
                 assert_eq!(revision, 42);
+                assert_eq!(server_instance_id, "instance-1");
                 assert_eq!(wait_id, "delegation-wait-serialized");
                 assert_eq!(parent_session_id, "session-parent");
                 assert_eq!(decoded_reason, reason);
             }
             _ => panic!("expected wait-consumed delta"),
         }
+    }
+}
+
+#[test]
+fn delegation_wait_deltas_keep_server_identity_and_decode_legacy_payloads() {
+    for mut value in [
+        json!({
+            "type": "delegationWaitCreated", "revision": 1, "serverInstanceId": "instance-1",
+            "wait": {
+                "id": "wait-1", "parentSessionId": "parent", "delegationIds": ["child"],
+                "mode": "all", "createdAt": "now"
+            }
+        }),
+        json!({
+            "type": "delegationWaitConsumed", "revision": 1, "serverInstanceId": "instance-1",
+            "waitId": "wait-1", "parentSessionId": "parent", "reason": "completed"
+        }),
+    ] {
+        let event: DeltaEvent = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(serde_json::to_value(event).unwrap()["serverInstanceId"], "instance-1");
+        value.as_object_mut().unwrap().remove("serverInstanceId");
+        let untagged: DeltaEvent = serde_json::from_value(value).unwrap();
+        assert_eq!(serde_json::to_value(untagged).unwrap()["serverInstanceId"], "");
     }
 }
 

@@ -459,6 +459,7 @@ impl AppState {
         for wait in waits {
             self.publish_delta(&DeltaEvent::TestRunWaitConsumed {
                 revision,
+                server_instance_id: self.server_instance_id.clone(),
                 wait_id: wait.id.clone(),
                 session_id: wait.session_id.clone(),
                 reason,
@@ -611,6 +612,7 @@ impl AppState {
             })?;
             self.publish_delta(&DeltaEvent::TestRunWaitCreated {
                 revision,
+                server_instance_id: self.server_instance_id.clone(),
                 wait: wait.clone(),
             });
             (revision, wait)

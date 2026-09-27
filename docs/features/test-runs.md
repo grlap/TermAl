@@ -819,11 +819,12 @@ type TestRunWaitConsumedReason =
   | "sessionRemoved";
 
 type TestRunWaitCreatedEvent = {
-  type: "testRunWaitCreated"; revision: number; wait: TestRunWaitRecord;
+  type: "testRunWaitCreated"; revision: number; serverInstanceId: string;
+  wait: TestRunWaitRecord;
 };
 type TestRunWaitConsumedEvent = {
   type: "testRunWaitConsumed"; revision: number; waitId: string;
-  sessionId: string; reason: TestRunWaitConsumedReason;
+  serverInstanceId: string; sessionId: string; reason: TestRunWaitConsumedReason;
 };
 type TestRunWaitResumeDispatchFailedEvent = {
   type: "testRunWaitResumeDispatchFailed"; revision: number;
@@ -899,14 +900,39 @@ them:
   authoritative `/api/state` repair of that revision. The repair fetches are
   coalesced (one in flight). A created wait older than the adopted state, or
   than the newest wait delta applied, is ignored, so a late create cannot
-  bring back a consumed wait; a consume removes by id at any revision.
+  bring back a consumed wait; a consume removes by id at any revision of the
+  adopted server. Both wait families carry `serverInstanceId`: retired-server
+  deltas are discarded before local updates or repair bookkeeping. Missing or
+  unseen identity requests a snapshot without applying the delta or comparing
+  its revision to the current server. An unseen nonempty identity enables the
+  authoritative replacement recovery for that identity, allowing that snapshot
+  to prove the new server even at a lower revision; missing identity grants no such
+  permission. Missing identity can still trigger an equal-revision repair from
+  the same known server: a session-only response may have advanced the global
+  revision without refreshing waits. It cannot permit a revision downgrade.
+  Fetch-failure retries retain those restrictions; a failed request alone is
+  not evidence of a replacement server. A separate timer retries the projection
+  repair until an acceptable snapshot is adopted, with one fetch in flight and
+  capped backoff. This includes tagged probes rejected after in-flight progress,
+  and stale current-server creates after a session-only response. Unrelated SSE
+  traffic cannot cancel it. Retries retain only wait-specific evidence: a tagged
+  replacement hint remains valid only while its observed origin is still current.
+  One-shot live-connection proof, navigation and generic replacement permissions
+  from coalesced requests are not replayed. Reconnect polling remains independent.
+  Missing identity handling accommodates a version-skewed development UI; current
+  local producers always tag wait events and remote wait events are not forwarded.
+  Each list retains its newest delta's
+  revision and skips replacement by older snapshots; a snapshot of the same
+  revision covers sibling changes. These watermarks are scoped to the server
+  and reset when an accepted snapshot changes that identity to a nonempty one.
 - **`testRunWaitResumeDispatchFailed`** is routed before that gate and never
   advances the revision. It reports an outcome after the wait was consumed,
   not a state change, and can carry the same revision as the consume or an
   older one. The UI keeps the latest error per session: a repeat of the same
   revision and error, or an older revision, from the same server instance does
   not replace it. Revisions are not compared across instances, because a
-  restart can roll the revision back; another instance's failure is always new.
+  restart can roll the revision back. Failures from previously adopted,
+  retired servers are rejected; an unseen server's early failure is accepted.
 - **The error notice** shows in the session pane's toolbar and on the board,
   apart from connection errors. It stays through unrelated deltas, snapshots
   and tab changes, until the user dismisses it, the session is removed, or

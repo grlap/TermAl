@@ -1,4 +1,5 @@
 import {
+  classifyDeltaServerIdentity,
   decideDeltaRevisionAction,
   isServerInstanceMismatch,
   isStaleSameInstanceSnapshot,
@@ -7,6 +8,18 @@ import {
 } from "./state-revision";
 
 describe("state revision helpers", () => {
+  it.each([
+    { id: undefined, current: null, expected: "unproven" },
+    { id: null, current: "b", expected: "unproven" },
+    { id: "", current: "", expected: "unproven" },
+    { id: "a", current: "b", expected: "retired" },
+    { id: "b", current: "b", expected: "current" },
+    { id: "c", current: "b", expected: "unproven" },
+    { id: "c", current: null, expected: "unproven" },
+  ])("classifies delta identity $id with current server $current", ({ id, current, expected }) => {
+    expect(classifyDeltaServerIdentity(id, current, new Set(["", "a", "b"]))).toBe(expected);
+  });
+
   it("adopts the first snapshot and newer snapshots only", () => {
     expect(shouldAdoptStateRevision(null, 0)).toBe(true);
     expect(shouldAdoptStateRevision(4, 4)).toBe(false);

@@ -20,3 +20,8 @@ it("keeps the structural rule for delta types this UI does not know yet", () => 
   expect(isSessionDeltaEvent({ type: "futureSessionEvent", revision: 3, sessionId: "s" } as unknown as DeltaEvent)).toBe(true);
   expect(isSessionDeltaEvent({ type: "futureGlobalEvent", revision: 3 } as unknown as DeltaEvent)).toBe(false);
 });
+
+it.each(["toString", "constructor", "__proto__"])("treats inherited object member %s as an unknown wire type", type => {
+  expect(isSessionDeltaEvent({ type, revision: 3, sessionId: "s" } as unknown as DeltaEvent)).toBe(true);
+  expect(isSessionDeltaEvent({ type, revision: 3 } as unknown as DeltaEvent)).toBe(false);
+});

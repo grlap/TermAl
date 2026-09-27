@@ -1,3 +1,15 @@
+// Shared classification for wait records and dispatch outcomes. Callers own
+// admission/recovery policy; an empty identity never proves a current server.
+export function classifyDeltaServerIdentity(
+  serverInstanceId: string | null | undefined,
+  currentServerInstanceId: string | null,
+  seenServerInstanceIds: ReadonlySet<string>,
+): "current" | "retired" | "unproven" {
+  if (!serverInstanceId) return "unproven";
+  if (serverInstanceId === currentServerInstanceId) return "current";
+  return seenServerInstanceIds.has(serverInstanceId) ? "retired" : "unproven";
+}
+
 export function shouldAdoptStateRevision(
   currentRevision: number | null,
   nextRevision: number,

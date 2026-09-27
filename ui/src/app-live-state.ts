@@ -87,6 +87,7 @@ import { applyTestRunDelta, reconcileTestRunSnapshot, type TestRunSummary } from
 import { applyTestRunWaitDelta, type TestRunWaitRecord } from "./test-run-waits";
 import { ALL_PROJECTS_FILTER_ID } from "./project-filters";
 import {
+  classifyDeltaServerIdentity,
   isServerInstanceMismatch,
   shouldAdoptSnapshotRevision,
 } from "./state-revision";
@@ -188,6 +189,7 @@ import {
 import { useAppLiveStateRenderSchedulers } from "./app-live-state-render-schedulers";
 import { useAppLiveStateTransport } from "./app-live-state-transport";
 import { reconcileAdoptedSessionsWorkspace } from "./app-live-state-workspace-reconciliation";
+import { WaitDeltaWatermark } from "./wait-delta-watermark";
 
 function rememberServerInstanceId(
   seenServerInstanceIdsRef: MutableRefObject<Set<string>>,
@@ -288,8 +290,8 @@ export function useAppLiveState(
   const [testRunWaits, setTestRunWaits] = useState<readonly TestRunWaitRecord[]>([]);
   const [testRunWaitFailures, setTestRunWaitFailures] = useState<import("./test-run-waits").TestRunWaitFailures>({});
   const seenTestRunWaitFailuresRef = useRef(new Map<string, import("./test-run-waits").TestRunWaitFailure>());
-  // Newest test-run wait delta applied; see applyTestRunDeltaLocally.
-  const latestTestRunWaitDeltaRevisionRef = useRef<number | null>(null);
+  const testRunWaitWatermarkRef = useRef(new WaitDeltaWatermark());
+  const delegationWaitWatermarkRef = useRef(new WaitDeltaWatermark());
   const dismissTestRunWaitFailure = useCallback((sessionId: string) => {
     setTestRunWaitFailures(current => {
       const next = { ...current };
@@ -590,27 +592,15 @@ export function useAppLiveState(
   }
 
   function applyDelegationWaitDeltaLocally(delta: DeltaEvent) {
-    let nextWaits: DelegationWaitRecord[] | null = null;
-    if (delta.type === "delegationWaitCreated") {
-      const currentRevision = latestStateRevisionRef.current;
-      if (currentRevision !== null && delta.revision < currentRevision) {
-        return;
-      }
-      nextWaits = applyDelegationWaitCreated(
-        delegationWaitsRef.current,
-        delta.wait,
-      );
-    } else if (delta.type === "delegationWaitConsumed") {
-      nextWaits = applyDelegationWaitConsumed(
-        delegationWaitsRef.current,
-        delta.waitId,
-      );
-    }
-
-    if (
-      nextWaits === null ||
-      areDelegationWaitRecordsEqual(delegationWaitsRef.current, nextWaits)
-    ) {
+    if (delta.type !== "delegationWaitCreated" && delta.type !== "delegationWaitConsumed") return;
+    if (!delegationWaitWatermarkRef.current.acceptDelta(
+      delta.revision, delta.serverInstanceId, latestStateRevisionRef.current,
+      delta.type === "delegationWaitCreated",
+    )) return;
+    const nextWaits = delta.type === "delegationWaitCreated"
+      ? applyDelegationWaitCreated(delegationWaitsRef.current, delta.wait)
+      : applyDelegationWaitConsumed(delegationWaitsRef.current, delta.waitId);
+    if (areDelegationWaitRecordsEqual(delegationWaitsRef.current, nextWaits)) {
       return;
     }
 
@@ -1560,9 +1550,6 @@ export function useAppLiveState(
 
     latestStateRevisionRef.current = nextState.revision;
     if (fullStateServerInstanceChanged) {
-      // A restart can roll revisions back; the old server's wait deltas say
-      // nothing about the new one's.
-      latestTestRunWaitDeltaRevisionRef.current = null;
       // Keep a failure this server sent before its snapshot was adopted; drop
       // failures from an older server and untagged ones from older backends.
       const fromThisServer = (failure: import("./test-run-waits").TestRunWaitFailure) =>
@@ -1576,7 +1563,11 @@ export function useAppLiveState(
       });
     }
     setTestRuns(current => reconcileTestRunSnapshot(current, nextState.testRuns ?? []));
-    setTestRunWaits(current => JSON.stringify(current) === JSON.stringify(nextState.testRunWaits ?? []) ? current : nextState.testRunWaits ?? []);
+    // A partial wait delta can be ahead of this otherwise adoptable snapshot.
+    // Keep its projection until a snapshot covering that delta arrives.
+    if (testRunWaitWatermarkRef.current.snapshotCovers(nextState.revision, nextState.serverInstanceId)) {
+      setTestRunWaits(current => JSON.stringify(current) === JSON.stringify(nextState.testRunWaits ?? []) ? current : nextState.testRunWaits ?? []);
+    }
     setHasAdoptedStateSnapshot(true);
     if (nextState.serverInstanceId) {
       rememberServerInstanceId(
@@ -1660,7 +1651,10 @@ export function useAppLiveState(
       setOrchestrators(adoptedStateSlices.orchestrators);
     }
     const nextDelegationWaits = nextState.delegationWaits ?? [];
+    // Wait deltas can be ahead of this snapshot's delegation membership.
+    // Keep their projection until the requested covering snapshot arrives.
     if (
+      delegationWaitWatermarkRef.current.snapshotCovers(nextState.revision, nextState.serverInstanceId) &&
       !areDelegationWaitRecordsEqual(
         delegationWaitsRef.current,
         nextDelegationWaits,
@@ -1754,23 +1748,24 @@ export function useAppLiveState(
       if (delta.type === "testRunChanged" || delta.type === "testRunRemoved") {
         setTestRuns(current => applyTestRunDelta(current, delta));
       } else if (delta.type === "testRunWaitResumeDispatchFailed") {
+        if (
+          classifyDeltaServerIdentity(
+            delta.serverInstanceId, lastSeenServerInstanceIdRef.current, seenServerInstanceIdsRef.current,
+          ) === "retired"
+        ) return;
         const seen = seenTestRunWaitFailuresRef.current.get(delta.sessionId);
         // Revisions are comparable only within one server instance: a restart
-        // can roll the revision back, so another server's failure is always new.
+        // can roll the revision back. An unseen server may report a failure
+        // before its first snapshot; a retired server was rejected above.
         const sameServer = seen?.serverInstanceId === delta.serverInstanceId;
         if (seen && sameServer && (seen.revision > delta.revision || (seen.revision === delta.revision && seen.error === delta.error))) return;
         seenTestRunWaitFailuresRef.current.set(delta.sessionId, delta);
         setTestRunWaitFailures(current => ({ ...current, [delta.sessionId]: delta }));
       } else if (delta.type === "testRunWaitCreated" || delta.type === "testRunWaitConsumed") {
-        // Wait deltas do not move the global revision (the transport repairs
-        // from the authoritative snapshot instead), so a created wait is stale
-        // when older than the adopted state or the newest wait delta applied.
-        // Otherwise a late created would bring back a consumed wait. Consumed
-        // removes by id, so it is safe at any revision.
-        const latestWaitDeltaRevision = latestTestRunWaitDeltaRevisionRef.current;
-        const floor = Math.max(latestStateRevisionRef.current ?? -Infinity, latestWaitDeltaRevision ?? -Infinity);
-        if (delta.type === "testRunWaitCreated" && delta.revision < floor) return;
-        latestTestRunWaitDeltaRevisionRef.current = Math.max(latestWaitDeltaRevision ?? delta.revision, delta.revision);
+        if (!testRunWaitWatermarkRef.current.acceptDelta(
+          delta.revision, delta.serverInstanceId, latestStateRevisionRef.current,
+          delta.type === "testRunWaitCreated",
+        )) return;
         setTestRunWaits(current => applyTestRunWaitDelta(current, delta));
       }
     },

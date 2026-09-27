@@ -71,6 +71,7 @@ import {
 import type { AdoptStateOptions } from "./app-live-state-types";
 import { createAppLiveStateTransportEventHandlers } from "./app-live-state-transport-events";
 import { ReconnectStateMachine } from "./app-live-state-reconnect-state";
+import { createWaitSnapshotRepairRetry } from "./app-live-state-wait-repair";
 import type { SessionHydrationOptions } from "./app-live-state-hydration";
 import type { HydrationDeltaObservation } from "./session-hydration-adoption";
 
@@ -230,6 +231,7 @@ export function useAppLiveStateTransport(
     >();
     let lastWatchdogResyncAttemptAt: number | null = null;
     const eventSource = createLiveEventSource(sseEpoch > 0);
+    const waitRepairRetry = createWaitSnapshotRepairRetry(requestStateResync, readNavigatorOnline);
 
     function clearInitialStateResyncRetryTimeout() {
       if (initialStateResyncRetryTimeoutId === null) {
@@ -553,8 +555,11 @@ export function useAppLiveStateTransport(
         try {
           while (!cancelled && stateResyncPendingRef.current) {
             stateResyncPendingRef.current = false;
+            const resyncOptions = consumePendingStateResyncOptions(pendingStateResyncOptionsRef);
             const {
               allowAuthoritativeRollback,
+              allowSameServerEqualRevision,
+              waitRepair,
               allowUnknownServerInstance,
               preserveReconnectFallback,
               preserveWatchdogCooldown,
@@ -567,7 +572,7 @@ export function useAppLiveStateTransport(
               rearmOnFailure,
               openSessionId,
               paneId,
-            } = consumePendingStateResyncOptions(pendingStateResyncOptionsRef);
+            } = resyncOptions;
             const requestedRevision = latestStateRevisionRef.current;
             const requestedServerInstanceId =
               lastSeenServerInstanceIdRef.current;
@@ -685,19 +690,39 @@ export function useAppLiveStateTransport(
               const shouldAllowUnknownServerInstance =
                 allowUnknownServerInstance ||
                 shouldTrustAuthoritativeReplacementInstance;
+              const shouldTrustWaitReplacement =
+                !!waitRepair?.replacementServerInstanceId &&
+                waitRepair.observedServerInstanceId === requestedServerInstanceId &&
+                lastSeenServerInstanceIdRef.current === requestedServerInstanceId &&
+                latestStateRevisionRef.current === requestedRevision &&
+                state.serverInstanceId === waitRepair.replacementServerInstanceId;
+              // A partial response can advance the global revision without
+              // updating waits. Repair that projection at the current revision
+              // only when the request and response still name the same server.
+              // This grants neither revision rollback nor replacement adoption.
+              const shouldForceSameServerEqualRevision =
+                allowSameServerEqualRevision &&
+                !!requestedServerInstanceId &&
+                state.serverInstanceId === requestedServerInstanceId &&
+                lastSeenServerInstanceIdRef.current === requestedServerInstanceId &&
+                state.revision === latestStateRevisionRef.current;
 
               const adopted = adoptState(state, {
                 // A reconnect fallback snapshot is authoritative if no newer
                 // SSE state landed while it was in flight. Same-instance
                 // downgrades stay limited to automatic reconnect/fallback and
                 // watchdog probes; manual retry still waits for catch-up.
-                force: shouldForceAuthoritativeSnapshot,
-                allowRevisionDowngrade: shouldForceAuthoritativeSnapshot,
-                allowUnknownServerInstance: shouldAllowUnknownServerInstance,
+                force: shouldForceAuthoritativeSnapshot || shouldForceSameServerEqualRevision || shouldTrustWaitReplacement,
+                allowRevisionDowngrade: shouldForceAuthoritativeSnapshot || shouldTrustWaitReplacement,
+                allowUnknownServerInstance: shouldAllowUnknownServerInstance || shouldTrustWaitReplacement,
                 sseReconnectRequestId,
                 openSessionId,
                 paneId,
               });
+              if (waitRepair) {
+                if (adopted) waitRepairRetry.complete();
+                else waitRepairRetry.schedule(resyncOptions);
+              }
               const shouldRetryStaleSameInstanceSnapshot =
                 !adopted &&
                 allowAuthoritativeRollback &&
@@ -846,6 +871,11 @@ export function useAppLiveStateTransport(
                 );
                 const errorRequiresRestart =
                   isBackendUnavailableError(error) && error.restartRequired;
+                if (!errorRequiresRestart && waitRepair) {
+                  // Retain only wait-specific evidence, never one-shot proof
+                  // or permissions borrowed from a coalesced recovery request.
+                  waitRepairRetry.schedule(resyncOptions);
+                }
                 if (errorRequiresRestart) {
                   // Incompatible backend serving HTML — retrying will produce
                   // the same result until the user restarts.
@@ -906,6 +936,15 @@ export function useAppLiveStateTransport(
     function requestStateResync(options?: RequestStateResyncOptions) {
       if (cancelled) {
         return;
+      }
+      if (options?.waitRepair) {
+        // A fresh wait repair also carries an outstanding wait-specific hint.
+        const retryOptions = waitRepairRetry.take();
+        if (retryOptions) {
+          pendingStateResyncOptionsRef.current = coalescePendingStateResyncOptions(
+            pendingStateResyncOptionsRef.current, retryOptions,
+          );
+        }
       }
 
       if (
@@ -1372,6 +1411,7 @@ export function useAppLiveStateTransport(
 
     return () => {
       cancelled = true;
+      waitRepairRetry.dispose();
       requestBackendReconnectRef.current = () => {};
       requestActionRecoveryResyncRef.current = () => {};
       syncAdoptedLiveSessionResumeWatchdogBaselinesRef.current = () => {};

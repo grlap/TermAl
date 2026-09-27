@@ -12,8 +12,8 @@ export interface TestRunWaitRecord {
   runs: { runId: string; runDir: string; preset: "full" | "focused" | "live"; worktree: string; ownerSessionId: string | null; startedAt: string | null }[];
 }
 export type TestRunWaitDelta =
-  | { type: "testRunWaitCreated"; revision: number; wait: TestRunWaitRecord }
-  | { type: "testRunWaitConsumed"; revision: number; waitId: string; sessionId: string;
+  | { type: "testRunWaitCreated"; revision: number; serverInstanceId: string; wait: TestRunWaitRecord }
+  | { type: "testRunWaitConsumed"; revision: number; serverInstanceId: string; waitId: string; sessionId: string;
       reason: "completed" | "sessionStopped" | "sessionUnavailable" | "sessionRemoved" }
   // serverInstanceId is absent from backends before the field was added.
   | { type: "testRunWaitResumeDispatchFailed"; revision: number; sessionId: string; error: string; serverInstanceId?: string };

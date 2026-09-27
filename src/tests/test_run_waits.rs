@@ -477,20 +477,35 @@ fn stop_consumes_the_sessions_run_waits_and_nothing_resumes_later() {
     let run_dir = fixture.write("test-stopped", Some(running(7)));
     fixture.scan(&[7]);
     fixture.busy();
-    fixture.register(&["test-stopped"], "all").unwrap();
     let mut deltas = fixture.state.subscribe_delta_events();
+    let registered = fixture.register(&["test-stopped"], "all").unwrap();
 
     fixture.state.stop_session(&fixture.session).expect("stop should succeed");
 
     assert!(fixture.pending_waits().is_empty());
     let mut consumed = Vec::new();
-    while let Ok(payload) = deltas.try_recv() {
-        if let Ok(DeltaEvent::TestRunWaitConsumed { reason, session_id, .. }) =
-            serde_json::from_str::<DeltaEvent>(&payload)
-        {
-            consumed.push((reason, session_id));
+    let mut created_ids = Vec::new();
+    loop {
+        let payload = match deltas.try_recv() {
+            Ok(payload) => payload,
+            Err(tokio::sync::broadcast::error::TryRecvError::Lagged(count)) => {
+                panic!("wait identity test lost {count} published deltas");
+            }
+            Err(_) => break,
+        };
+        match serde_json::from_str::<DeltaEvent>(&payload).expect("published delta should decode") {
+            DeltaEvent::TestRunWaitCreated { server_instance_id, wait, .. } => {
+                assert_eq!(server_instance_id, fixture.state.server_instance_id);
+                created_ids.push(wait.id);
+            }
+            DeltaEvent::TestRunWaitConsumed { server_instance_id, reason, session_id, .. } => {
+                assert_eq!(server_instance_id, fixture.state.server_instance_id);
+                consumed.push((reason, session_id));
+            }
+            _ => {}
         }
     }
+    assert_eq!(created_ids, vec![registered.wait.id]);
     assert_eq!(
         consumed,
         vec![(TestRunWaitConsumedReason::SessionStopped, fixture.session.clone())]
@@ -834,16 +849,34 @@ fn the_wait_and_its_events_have_the_contract_wire_shape() {
     }
     let consumed = serde_json::to_value(DeltaEvent::TestRunWaitConsumed {
         revision: 3,
+        server_instance_id: "instance-1".to_owned(),
         wait_id: "test-run-wait-1".to_owned(),
         session_id: "session-1".to_owned(),
         reason: TestRunWaitConsumedReason::SessionUnavailable,
     })
     .unwrap();
     assert_eq!(consumed["type"], "testRunWaitConsumed");
+    assert_eq!(consumed["serverInstanceId"], "instance-1");
     assert_eq!(consumed["reason"], "sessionUnavailable");
     assert_eq!(consumed["sessionId"], "session-1");
-    let created = serde_json::to_value(DeltaEvent::TestRunWaitCreated { revision: 2, wait }).unwrap();
+    let created = serde_json::to_value(DeltaEvent::TestRunWaitCreated {
+        revision: 2,
+        server_instance_id: "instance-1".to_owned(),
+        wait,
+    }).unwrap();
     assert_eq!(created["type"], "testRunWaitCreated");
+    assert_eq!(created["serverInstanceId"], "instance-1");
+    // Older remotes omit identity; decoding must still succeed.
+    for mut value in [created, consumed] {
+        value.as_object_mut().unwrap().remove("serverInstanceId");
+        let decoded: DeltaEvent = serde_json::from_value(value).unwrap();
+        let id = match decoded {
+            DeltaEvent::TestRunWaitCreated { server_instance_id, .. }
+            | DeltaEvent::TestRunWaitConsumed { server_instance_id, .. } => server_instance_id,
+            _ => panic!("expected a wait-record delta"),
+        };
+        assert!(id.is_empty());
+    }
     let failed = serde_json::to_value(DeltaEvent::TestRunWaitResumeDispatchFailed {
         revision: 4,
         session_id: "session-1".to_owned(),

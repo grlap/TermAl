@@ -1185,12 +1185,14 @@ export type DelegationCreatedEvent = {
 export type DelegationWaitCreatedEvent = {
   type: "delegationWaitCreated";
   revision: number;
+  serverInstanceId: string;
   wait: DelegationWaitRecord;
 };
 
 export type DelegationWaitConsumedEvent = {
   type: "delegationWaitConsumed";
   revision: number;
+  serverInstanceId: string;
   waitId: string;
   parentSessionId: string;
   reason: DelegationWaitConsumedReason;

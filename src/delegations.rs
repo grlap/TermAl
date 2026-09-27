@@ -1956,7 +1956,11 @@ impl AppState {
     }
 
     fn publish_delegation_wait_created(&self, revision: u64, wait: DelegationWaitRecord) {
-        self.publish_delta(&DeltaEvent::DelegationWaitCreated { revision, wait });
+        self.publish_delta(&DeltaEvent::DelegationWaitCreated {
+            revision,
+            server_instance_id: self.server_instance_id.clone(),
+            wait,
+        });
     }
 
     fn publish_delegation_wait_consumed_deltas(
@@ -1967,6 +1971,7 @@ impl AppState {
         for consumed in waits {
             self.publish_delta(&DeltaEvent::DelegationWaitConsumed {
                 revision,
+                server_instance_id: self.server_instance_id.clone(),
                 wait_id: consumed.wait.id.clone(),
                 parent_session_id: consumed.wait.parent_session_id.clone(),
                 reason: consumed.reason,
