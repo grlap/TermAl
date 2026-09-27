@@ -3731,6 +3731,15 @@ fn real_fixture_engram_settings(root: &FsPath) -> EngramProjectSettings {
     }
 }
 
+/// What a fence-gated settings update reports if it returns without reaching
+/// the gate: its error, or that it finished without one.
+fn fence_gate_detail(result: &Result<StateResponse, ApiError>) -> String {
+    match result {
+        Ok(_) => "settings update returned without visiting the fence gate".to_owned(),
+        Err(error) => format!("{} {}", error.status, error.message),
+    }
+}
+
 fn install_fixture_engram_host_settings(state: &AppState, home: &FsPath) {
     let mut inner = state.inner.lock().expect("state mutex poisoned");
     inner.preferences.engram = EngramHostSettings {
@@ -5320,7 +5329,10 @@ fn engram_mcp_rechecks_retired_grants_under_the_commit_lock_across_projects() {
     racing_settings.home = Some(second_next_home.to_string_lossy().into_owned());
     racing_settings.work_authority_grant = Some("grant-race".to_owned());
     let racing = std::thread::spawn(move || {
-        racing_state.update_project_engram_settings(&racing_second_id, racing_settings)
+        let result =
+            racing_state.update_project_engram_settings(&racing_second_id, racing_settings);
+        abort_engram_project_reset_fence_gate(&racing_second_id, &fence_gate_detail(&result));
+        result
     });
     gate.wait_until_entered();
 
@@ -5391,7 +5403,10 @@ fn engram_mcp_rechecks_active_grant_ownership_under_the_commit_lock() {
     racing_settings.home = Some(second_next_home.to_string_lossy().into_owned());
     racing_settings.work_authority_grant = Some("grant-active-race".to_owned());
     let racing = std::thread::spawn(move || {
-        racing_state.update_project_engram_settings(&racing_second_id, racing_settings)
+        let result =
+            racing_state.update_project_engram_settings(&racing_second_id, racing_settings);
+        abort_engram_project_reset_fence_gate(&racing_second_id, &fence_gate_detail(&result));
+        result
     });
     gate.wait_until_entered();
 
@@ -8577,7 +8592,9 @@ fn immediate_revocation_rejects_overlapping_project_engram_mutations() {
     let mut cleared = enabled.clone();
     cleared.work_authority_grant = None;
     let clearing = std::thread::spawn(move || {
-        clearing_state.update_project_engram_settings(&clearing_project_id, cleared)
+        let result = clearing_state.update_project_engram_settings(&clearing_project_id, cleared);
+        abort_engram_project_reset_fence_gate(&clearing_project_id, &fence_gate_detail(&result));
+        result
     });
     gate.wait_until_entered();
 
@@ -8624,7 +8641,9 @@ fn grant_rotation_fence_rejects_an_overlapping_rotation() {
     let mut grant_b = real_fixture_engram_settings(&root);
     grant_b.work_authority_grant = Some("grant-b".to_owned());
     let rotating = std::thread::spawn(move || {
-        rotating_state.update_project_engram_settings(&rotating_project_id, grant_b)
+        let result = rotating_state.update_project_engram_settings(&rotating_project_id, grant_b);
+        abort_engram_project_reset_fence_gate(&rotating_project_id, &fence_gate_detail(&result));
+        result
     });
     gate.wait_until_entered();
 
@@ -8651,6 +8670,51 @@ fn grant_rotation_fence_rejects_an_overlapping_rotation() {
         .and_then(|project| project.engram.as_ref())
         .expect("settings should remain");
     assert_eq!(settings.work_authority_grant.as_deref(), Some("grant-b"));
+}
+
+#[test]
+fn a_fence_gated_update_that_returns_early_reports_its_own_error() {
+    // The gate is only useful when this path works. An update that never reaches
+    // the fence must name its own outcome, not leave the test waiting out the gate
+    // for a bare timeout (tm-gcs8).
+    let state = test_app_state();
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .expect("test root should exist")
+        .path()
+        .join("engram-fence-early-return");
+    fs::create_dir_all(&root).expect("project root should exist");
+    let project_id = create_test_project(&state, &root, "Engram fence early return");
+    let gate = gate_next_engram_project_reset_fence(&project_id);
+    let worker_state = state.clone();
+    let worker_project_id = project_id.clone();
+    let worker = std::thread::spawn(move || {
+        // Without a `.engram-project` marker, enablement is refused before any fence.
+        let result = worker_state.update_project_engram_settings(
+            &worker_project_id,
+            real_fixture_engram_settings(&root),
+        );
+        abort_engram_project_reset_fence_gate(&worker_project_id, &fence_gate_detail(&result));
+        result
+    });
+
+    let panic =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| gate.wait_until_entered()))
+            .expect_err("an update that never reached the fence must fail the wait");
+    let message = panic.downcast_ref::<String>().cloned().unwrap_or_default();
+    assert!(
+        message.contains("returned before the test fence gate")
+            && message.contains("is missing or unreadable"),
+        "{message}"
+    );
+    assert!(
+        worker
+            .join()
+            .expect("the update thread should not panic")
+            .is_err(),
+        "enablement without a marker is refused"
+    );
 }
 
 #[test]

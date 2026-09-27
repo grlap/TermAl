@@ -1121,9 +1121,12 @@ static TEST_ENGRAM_PROJECT_RESET_FENCE_OBSERVERS: LazyLock<
     Mutex<HashMap<String, mpsc::SyncSender<()>>>,
 > = LazyLock::new(|| Mutex::new(HashMap::new()));
 
+// The entered channel carries an error when the gated update returns without
+// reaching the fence, so a test reports that update's own failure instead of
+// waiting out the gate timeout (tm-gcs8). Same shape as the release gate below.
 #[cfg(test)]
 static TEST_ENGRAM_PROJECT_RESET_FENCE_GATES: LazyLock<
-    Mutex<HashMap<String, (mpsc::SyncSender<()>, mpsc::Receiver<()>)>>,
+    Mutex<HashMap<String, (mpsc::SyncSender<Result<(), String>>, mpsc::Receiver<()>)>>,
 > = LazyLock::new(|| Mutex::new(HashMap::new()));
 
 #[cfg(test)]
@@ -1178,7 +1181,7 @@ const TEST_ENGRAM_PROJECT_RESET_GATE_TIMEOUT: Duration = Duration::from_secs(30)
 #[cfg(test)]
 struct TestEngramProjectResetFenceGate {
     project_id: String,
-    entered_rx: mpsc::Receiver<()>,
+    entered_rx: mpsc::Receiver<Result<(), String>>,
     release_tx: mpsc::SyncSender<()>,
 }
 
@@ -1194,7 +1197,8 @@ impl TestEngramProjectResetFenceGate {
     fn wait_until_entered(&self) {
         self.entered_rx
             .recv_timeout(TEST_ENGRAM_PROJECT_RESET_GATE_TIMEOUT)
-            .expect("Engram project reset should enter the test fence gate");
+            .expect("Engram project reset should enter the test fence gate")
+            .unwrap_or_else(|error| panic!("{error}"));
     }
 
     fn release(self) {
@@ -1266,6 +1270,22 @@ fn gate_next_engram_project_reset_release(project_id: &str) -> TestEngramProject
     }
 }
 
+/// Called by a gated update's thread after the update returns. A gate the
+/// update already passed is gone and this does nothing; a gate it never reached
+/// receives `detail`, the update's own outcome, in place of a silent timeout.
+#[cfg(test)]
+fn abort_engram_project_reset_fence_gate(project_id: &str, detail: &str) {
+    let gate = TEST_ENGRAM_PROJECT_RESET_FENCE_GATES
+        .lock()
+        .expect("Engram reset fence gate mutex poisoned")
+        .remove(project_id);
+    if let Some((entered_tx, _release_rx)) = gate {
+        let _ = entered_tx.send(Err(format!(
+            "Engram project reset returned before the test fence gate: {detail}"
+        )));
+    }
+}
+
 #[cfg(test)]
 fn abort_engram_project_reset_release_gate(project_id: &str, detail: &str) {
     let gate = TEST_ENGRAM_PROJECT_RESET_RELEASE_GATES
@@ -1334,8 +1354,17 @@ fn wait_at_engram_project_reset_fence_gate(project_id: &str) {
         .expect("Engram reset fence gate mutex poisoned")
         .remove(project_id);
     if let Some((entered_tx, release_rx)) = gate {
-        let _ = entered_tx.send(());
-        let _ = release_rx.recv_timeout(Duration::from_secs(5));
+        let _ = entered_tx.send(Ok(()));
+        // Hold until the test releases the gate or drops it. The update must
+        // not continue on its own while the test is still working behind the
+        // gate: a silent resume would break the order the test sets up and
+        // surface as an unrelated assertion.
+        match release_rx.recv_timeout(TEST_ENGRAM_PROJECT_RESET_GATE_TIMEOUT) {
+            Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => {}
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                panic!("Engram project reset test fence gate was never released")
+            }
+        }
     }
 }
 

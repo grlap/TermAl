@@ -443,6 +443,16 @@ impl EngramDescendantProbe {
     }
 }
 
+/// Budget for every call in the two stateful fixture tests below. They check
+/// idempotency and stale-grant semantics, not latency, and a call's budget also
+/// covers starting the PowerShell fixture when no process is running yet. A
+/// two-second budget made their outcome depend on how fast the machine starts a
+/// process: under load both failed at once with "admission budget exhausted
+/// during process startup" (tm-menr). So this is a guard against a hang, as in
+/// the lifecycle test above; that test covers a deliberate deadline, and applies
+/// it only after the startup handshake has been acquired.
+const STATEFUL_FIXTURE_CALL_BUDGET: Duration = DEADLOCK_GUARD;
+
 fn process_fixture_bind(
     transport: &ProcessEngramControlTransport,
     connection: &EngramConnectionConfig,
@@ -460,7 +470,7 @@ fn process_fixture_bind(
                 work_binding: None,
                 idempotency_key: idempotency_key.to_owned(),
             },
-            Duration::from_secs(2),
+            STATEFUL_FIXTURE_CALL_BUDGET,
         )
         .expect("stateful process fixture bind should succeed");
     (
@@ -493,7 +503,7 @@ fn process_fixture_evaluate(
                 requested_effects: vec![EngramEffect::Observe],
                 resource_intents: Vec::new(),
             },
-            Duration::from_secs(2),
+            STATEFUL_FIXTURE_CALL_BUDGET,
         )
         .expect("stateful process fixture evaluation should succeed")["grant"]["grant_id"]
         .as_str()
@@ -535,7 +545,7 @@ fn real_process_fixture_persists_idempotency_and_unknown_grant_semantics() {
                 work_binding: None,
                 idempotency_key: "durable-bind".to_owned(),
             },
-            Duration::from_secs(2),
+            STATEFUL_FIXTURE_CALL_BUDGET,
         )
         .expect_err("a changed same-key bind intent should conflict");
     assert_eq!(
@@ -558,7 +568,7 @@ fn real_process_fixture_persists_idempotency_and_unknown_grant_semantics() {
         resource_intents: Vec::new(),
     };
     let refusal = transport
-        .request(&connection, &refusal_request, Duration::from_secs(2))
+        .request(&connection, &refusal_request, STATEFUL_FIXTURE_CALL_BUDGET)
         .expect("open turn should refuse");
     assert_eq!(refusal["directive"]["code"], "turn_already_open");
     let (fresh_token, _) = process_fixture_bind(&transport, &connection, "expire-open-grant");
@@ -581,7 +591,11 @@ fn real_process_fixture_persists_idempotency_and_unknown_grant_semantics() {
         _ => unreachable!(),
     };
     let refusal_replay = transport
-        .request(&connection, &refusal_replay_request, Duration::from_secs(2))
+        .request(
+            &connection,
+            &refusal_replay_request,
+            STATEFUL_FIXTURE_CALL_BUDGET,
+        )
         .expect("persisted refusal should replay");
     assert_eq!(refusal_replay, refusal);
 
@@ -592,13 +606,13 @@ fn real_process_fixture_persists_idempotency_and_unknown_grant_semantics() {
         idempotency_key: "superseded-known-begin".to_owned(),
     };
     let scope_refusal = transport
-        .request(&connection, &superseded_begin, Duration::from_secs(2))
+        .request(&connection, &superseded_begin, STATEFUL_FIXTURE_CALL_BUDGET)
         .expect("a known superseded fixture grant should return a refusal decision");
     assert_eq!(scope_refusal["decision"], "refuse");
     assert_eq!(scope_refusal["code"], "grant_scope_mismatch");
     assert_eq!(
         transport
-            .request(&connection, &superseded_begin, Duration::from_secs(2))
+            .request(&connection, &superseded_begin, STATEFUL_FIXTURE_CALL_BUDGET)
             .expect("fixture scope refusal should replay"),
         scope_refusal
     );
@@ -610,13 +624,21 @@ fn real_process_fixture_persists_idempotency_and_unknown_grant_semantics() {
         idempotency_key: "superseded-known-checkpoint".to_owned(),
     };
     let checkpoint_scope_refusal = transport
-        .request(&connection, &superseded_checkpoint, Duration::from_secs(2))
+        .request(
+            &connection,
+            &superseded_checkpoint,
+            STATEFUL_FIXTURE_CALL_BUDGET,
+        )
         .expect("a known superseded fixture grant should return a checkpoint refusal decision");
     assert_eq!(checkpoint_scope_refusal["decision"], "refuse");
     assert_eq!(checkpoint_scope_refusal["code"], "grant_scope_mismatch");
     assert_eq!(
         transport
-            .request(&connection, &superseded_checkpoint, Duration::from_secs(2),)
+            .request(
+                &connection,
+                &superseded_checkpoint,
+                STATEFUL_FIXTURE_CALL_BUDGET,
+            )
             .expect("fixture checkpoint scope refusal should replay"),
         checkpoint_scope_refusal
     );
@@ -637,7 +659,7 @@ fn real_process_fixture_persists_idempotency_and_unknown_grant_semantics() {
         },
     ] {
         let error = transport
-            .request(&connection, &request, Duration::from_secs(2))
+            .request(&connection, &request, STATEFUL_FIXTURE_CALL_BUDGET)
             .expect_err("unknown grant should fail");
         assert_eq!(error.code.as_deref(), Some("turn_grant_not_found"));
     }
@@ -658,7 +680,7 @@ fn real_process_fixture_persists_idempotency_and_unknown_grant_semantics() {
                 delivery_tokens: vec!["delivery-a".to_owned()],
                 idempotency_key: "delivery-scoped-begin".to_owned(),
             },
-            Duration::from_secs(2),
+            STATEFUL_FIXTURE_CALL_BUDGET,
         )
         .expect("replacement grant should begin");
     let conflict = transport
@@ -670,7 +692,7 @@ fn real_process_fixture_persists_idempotency_and_unknown_grant_semantics() {
                 delivery_tokens: vec!["delivery-b".to_owned()],
                 idempotency_key: "delivery-scoped-begin".to_owned(),
             },
-            Duration::from_secs(2),
+            STATEFUL_FIXTURE_CALL_BUDGET,
         )
         .expect_err("delivery-token change must conflict");
     assert_eq!(
@@ -685,11 +707,11 @@ fn real_process_fixture_persists_idempotency_and_unknown_grant_semantics() {
         idempotency_key: "durable-checkpoint".to_owned(),
     };
     let first = transport
-        .request(&connection, &checkpoint, Duration::from_secs(2))
+        .request(&connection, &checkpoint, STATEFUL_FIXTURE_CALL_BUDGET)
         .expect("checkpoint should succeed");
     assert_eq!(
         transport
-            .request(&connection, &checkpoint, Duration::from_secs(2))
+            .request(&connection, &checkpoint, STATEFUL_FIXTURE_CALL_BUDGET)
             .expect("checkpoint replay should succeed"),
         first
     );
@@ -734,7 +756,7 @@ fn real_process_fixture_enforces_stale_begin_and_unbegun_grant_recovery() {
                 delivery_tokens: Vec::new(),
                 idempotency_key: stale_begin_key.clone(),
             },
-            Duration::from_secs(2),
+            STATEFUL_FIXTURE_CALL_BUDGET,
         )
         .expect("the fixture should return the configured stale-begin refusal");
     assert_eq!(stale_begin["decision"], "refuse");
@@ -756,7 +778,7 @@ fn real_process_fixture_enforces_stale_begin_and_unbegun_grant_recovery() {
                 delivery_tokens: Vec::new(),
                 idempotency_key: format!("fixture-begin:{fresh_grant}"),
             },
-            Duration::from_secs(2),
+            STATEFUL_FIXTURE_CALL_BUDGET,
         )
         .expect("the replacement grant should begin with its own key");
     transport
@@ -769,7 +791,7 @@ fn real_process_fixture_enforces_stale_begin_and_unbegun_grant_recovery() {
                 report: EngramTurnReport::default(),
                 idempotency_key: "stale-fixture-cleanup".to_owned(),
             },
-            Duration::from_secs(2),
+            STATEFUL_FIXTURE_CALL_BUDGET,
         )
         .expect("the replacement grant should checkpoint");
     let reused_key_error = transport
@@ -781,7 +803,7 @@ fn real_process_fixture_enforces_stale_begin_and_unbegun_grant_recovery() {
                 delivery_tokens: Vec::new(),
                 idempotency_key: stale_begin_key,
             },
-            Duration::from_secs(2),
+            STATEFUL_FIXTURE_CALL_BUDGET,
         )
         .expect_err("a stale grant's begin key must not be reused");
     assert_eq!(reused_key_error.kind, EngramTransportErrorKind::Remote);
@@ -813,7 +835,7 @@ fn real_process_fixture_enforces_stale_begin_and_unbegun_grant_recovery() {
             &EngramControlRequest::SessionStatus {
                 routing_token: orphan_token.clone(),
             },
-            Duration::from_secs(2),
+            STATEFUL_FIXTURE_CALL_BUDGET,
         )
         .expect("status should expose the issued grant");
     assert_eq!(status["open_grant_id"], orphan_grant);
@@ -827,7 +849,7 @@ fn real_process_fixture_enforces_stale_begin_and_unbegun_grant_recovery() {
                 report: EngramTurnReport::default(),
                 idempotency_key: "orphan-checkpoint".to_owned(),
             },
-            Duration::from_secs(2),
+            STATEFUL_FIXTURE_CALL_BUDGET,
         )
         .expect("an issued but unbegun grant should return a refusal decision");
     assert_eq!(unbegun_checkpoint["decision"], "refuse");
@@ -838,7 +860,7 @@ fn real_process_fixture_enforces_stale_begin_and_unbegun_grant_recovery() {
             &EngramControlRequest::SessionStatus {
                 routing_token: orphan_token.clone(),
             },
-            Duration::from_secs(2),
+            STATEFUL_FIXTURE_CALL_BUDGET,
         )
         .expect("a checkpoint refusal decision must keep the control connection alive");
     assert_eq!(
@@ -866,7 +888,7 @@ fn real_process_fixture_enforces_stale_begin_and_unbegun_grant_recovery() {
                 delivery_tokens: Vec::new(),
                 idempotency_key: format!("fixture-begin:{recovered_grant}"),
             },
-            Duration::from_secs(2),
+            STATEFUL_FIXTURE_CALL_BUDGET,
         )
         .expect("evaluation should resume after the fresh bind");
     transport.shutdown_session(&orphan_connection.session_id);
@@ -896,7 +918,7 @@ fn real_process_fixture_enforces_stale_begin_and_unbegun_grant_recovery() {
                 delivery_tokens: Vec::new(),
                 idempotency_key: format!("fixture-begin:{refused_grant}"),
             },
-            Duration::from_secs(2),
+            STATEFUL_FIXTURE_CALL_BUDGET,
         )
         .expect("delivery_invalid should be a normal begin refusal");
     assert_eq!(begin_refusal["decision"], "refuse");
@@ -913,7 +935,7 @@ fn real_process_fixture_enforces_stale_begin_and_unbegun_grant_recovery() {
                 requested_effects: vec![EngramEffect::Observe],
                 resource_intents: Vec::new(),
             },
-            Duration::from_secs(2),
+            STATEFUL_FIXTURE_CALL_BUDGET,
         )
         .expect("turn_already_open should be a refusal decision, not an error envelope");
     assert_eq!(open_turn_refusal["decision"], "refuse");
@@ -924,7 +946,7 @@ fn real_process_fixture_enforces_stale_begin_and_unbegun_grant_recovery() {
             &EngramControlRequest::SessionStatus {
                 routing_token: refusal_token.clone(),
             },
-            Duration::from_secs(2),
+            STATEFUL_FIXTURE_CALL_BUDGET,
         )
         .expect("status should preserve the non-expiring issued grant");
     assert_eq!(refusal_status["phase"], "turn_open");
@@ -939,7 +961,7 @@ fn real_process_fixture_enforces_stale_begin_and_unbegun_grant_recovery() {
                 report: EngramTurnReport::default(),
                 idempotency_key: "non-expiring-refusal-checkpoint".to_owned(),
             },
-            Duration::from_secs(2),
+            STATEFUL_FIXTURE_CALL_BUDGET,
         )
         .expect("an issued grant should return a checkpoint refusal decision");
     assert_eq!(refused_checkpoint["decision"], "refuse");
@@ -965,7 +987,7 @@ fn real_process_fixture_enforces_stale_begin_and_unbegun_grant_recovery() {
                 delivery_tokens: Vec::new(),
                 idempotency_key: format!("fixture-begin:{replacement_grant}"),
             },
-            Duration::from_secs(2),
+            STATEFUL_FIXTURE_CALL_BUDGET,
         )
         .expect("the replacement grant should begin");
     let begun_bind_error = transport
@@ -980,7 +1002,7 @@ fn real_process_fixture_enforces_stale_begin_and_unbegun_grant_recovery() {
                 work_binding: None,
                 idempotency_key: "bind-over-begun".to_owned(),
             },
-            Duration::from_secs(2),
+            STATEFUL_FIXTURE_CALL_BUDGET,
         )
         .expect_err("bind over a begun grant must be rejected");
     assert_eq!(
@@ -997,7 +1019,7 @@ fn real_process_fixture_enforces_stale_begin_and_unbegun_grant_recovery() {
                 report: EngramTurnReport::default(),
                 idempotency_key: "replacement-checkpoint".to_owned(),
             },
-            Duration::from_secs(2),
+            STATEFUL_FIXTURE_CALL_BUDGET,
         )
         .expect("the begun replacement grant should checkpoint");
     transport.shutdown_session(&refusal_connection.session_id);
