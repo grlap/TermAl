@@ -2974,8 +2974,13 @@ fn review_changes_pins_two_child_resume_wait_flow() {
     );
     assert_command_contains(
         review_changes,
-        "Reviewers neither inspect nor mutate\nBeads.",
+        "do not reconcile findings with tracker tasks or mutate\nBeads.",
         "/review-changes must keep tracker ownership in the writable parent",
+    );
+    assert_command_contains(
+        review_changes,
+        "Reviewers may perform required read-only startup recovery",
+        "/review-changes must allow the project's required read-only startup recovery",
     );
 }
 
@@ -3033,8 +3038,8 @@ fn review_code_pins_delegated_child_inline_reviewer_mode() {
     );
     assert_command_contains(
         review_code,
-        "Do not inspect the existing tracker or run any `bd` command",
-        "/review-code must leave tracker inspection and mutation to /review-changes",
+        "all tracker reconciliation and mutations belong to the parent",
+        "/review-code must leave tracker reconciliation and mutation to /review-changes",
     );
     assert_command_contains(
         review_code,

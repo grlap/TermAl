@@ -16,6 +16,93 @@ fn test_app_state() -> AppState {
     test_app_state_with_drained_delegation_codex_runtime("delegation-wait-runtime")
 }
 
+#[test]
+fn delegation_wait_fan_in_keeps_findings_and_freeze_notes_without_evidence_lists() {
+    let mut record: DelegationRecord = serde_json::from_value(json!({
+        "id": "delegation-compact", "parentSessionId": "parent", "childSessionId": "child",
+        "mode": "reviewer", "status": "completed", "title": "Review", "prompt": "Review this",
+        "cwd": "/repo", "agent": "Codex", "writePolicy": {"kind": "readOnly"}, "createdAt": "now"
+    }))
+    .unwrap();
+    let envelope: DelegationReviewMailboxResult = serde_json::from_value(json!({
+        "schemaVersion": 1, "kind": "review-result",
+        "delegationId": record.id, "childSessionId": record.child_session_id,
+        "submissionAttempt": 1, "status": "completed", "summary": "Review finished",
+        "findings": [{"severity": "Medium", "file": "src/bug.rs", "line": 12,
+            "message": "The actual finding"}],
+        "commandsRun": [{"command": "long command body".repeat(1_000), "status": "error"}],
+        "filesInspected": ["src/large-list-entry.rs"],
+        "notes": ["Freeze verification: verified=true; fingerprint abc",
+            "Inspected only Rust sources; frontend behavior was not verified",
+            "Inspected the freeze manifest; verification unavailable because the fingerprint was missing"],
+        "suggestedTrackerUpdates": ["investigate finding"]
+    })).unwrap();
+    record.result = Some(delegation_result_from_review_envelope(&envelope));
+    let result_json = serde_json::to_value(record.result.as_ref().unwrap()).unwrap();
+    assert_eq!(
+        result_json["filesInspected"],
+        json!(["src/large-list-entry.rs"])
+    );
+    assert_eq!(result_json["notes"][1], envelope.notes[1]);
+    assert_eq!(result_json["notes"][2], envelope.notes[2]);
+    let original = record.result.clone();
+    let prompt = delegation_wait_result_section(&record);
+    assert!(prompt.contains("Status: completed"));
+    assert!(prompt.contains("Medium `src/bug.rs:12` - The actual finding"));
+    assert!(prompt.contains("Freeze verification: verified=true; fingerprint abc"));
+    assert!(prompt.contains("Suggested tracker update: investigate finding"));
+    assert!(prompt.contains("commands: 1; errors: 1; unfinished/unknown: 0; inspected files: 1"));
+    assert!(prompt.contains(&envelope.notes[1]));
+    assert!(prompt.contains(&envelope.notes[2]));
+    assert!(prompt.contains("termal_get_session_result"));
+    assert!(!prompt.contains("long command body"));
+    assert!(!prompt.contains("src/large-list-entry.rs"));
+    assert_eq!(
+        record.result, original,
+        "the result endpoint must retain all evidence"
+    );
+    let mut legacy = result_json;
+    legacy.as_object_mut().unwrap().remove("filesInspected");
+    legacy["notes"] = json!(["Inspected src/legacy.rs"]);
+    record.result = Some(serde_json::from_value(legacy).unwrap());
+    let legacy_prompt = delegation_wait_result_section(&record);
+    assert!(legacy_prompt.contains("Inspected src/legacy.rs"));
+    assert!(legacy_prompt.contains("inspected files: 0"));
+    record.status = DelegationStatus::Failed;
+    record.result = None;
+    let missing = delegation_wait_result_section(&record);
+    assert!(missing.contains("Status: failed"));
+    assert!(missing.contains("No result summary was recorded."));
+    assert!(missing.contains("Evidence: unavailable (no result was recorded)"));
+    assert!(!missing.contains("errors: 0"));
+}
+
+#[test]
+fn delegation_wait_fan_in_reports_unfinished_and_unknown_command_statuses() {
+    let record: DelegationRecord = serde_json::from_value(json!({
+        "id": "delegation-statuses", "parentSessionId": "parent", "childSessionId": "child",
+        "mode": "explorer", "status": "completed", "title": "Explore", "prompt": "Inspect",
+        "cwd": "/repo", "agent": "Codex", "writePolicy": {"kind": "readOnly"}, "createdAt": "now",
+        "result": {"delegationId": "delegation-statuses", "childSessionId": "child",
+            "status": "completed", "summary": "Exploration ended.",
+            "commandsRun": [
+                {"command": "successful command", "status": "success"},
+                {"command": "failed command", "status": "error"},
+                {"command": "unfinished command", "status": "running"},
+                {"command": "unclassified command", "status": "unknown"}
+            ]}
+    })).unwrap();
+    let prompt = delegation_wait_result_section(&record);
+    assert!(prompt.contains(
+        "recorded commands: 4; errors: 1; unfinished/unknown: 2; inspected files: 0"
+    ));
+    assert!(prompt.contains("termal_get_session_result"));
+    assert!(!prompt.contains("successful command"));
+    assert!(!prompt.contains("failed command"));
+    assert!(!prompt.contains("unfinished command"));
+    assert!(!prompt.contains("unclassified command"));
+}
+
 fn assert_delegation_wait_response_serializes_queue_flags(
     response: &DelegationWaitResponse,
     resume_prompt_queued: bool,
@@ -435,6 +522,7 @@ fn removing_delegation_parent_consumes_already_satisfied_wait_with_parent_remove
             summary: "Completed before parent removal.".to_owned(),
             findings: Vec::new(),
             changed_files: Vec::new(),
+            files_inspected: Vec::new(),
             commands_run: Vec::new(),
             notes: Vec::new(),
         });

@@ -13,13 +13,14 @@ function formatPrompt(
     Partial<
       Pick<
         DelegationPromptResult,
-        "findings" | "changedFiles" | "commandsRun" | "notes"
+        "findings" | "changedFiles" | "filesInspected" | "commandsRun" | "notes"
       >
     >,
 ) {
   return formatDelegationResultPrompt({
     findings: [],
     changedFiles: [],
+    filesInspected: [],
     commandsRun: [],
     notes: [],
     ...result,
@@ -107,6 +108,19 @@ describe("formatDelegationResultPrompt", () => {
         "- src/main.rs",
       ]),
     );
+  });
+
+  it("keeps inspected files separate from similarly worded scope notes", () => {
+    expect(formatPrompt({
+      childSessionId: "child-1",
+      status: "completed",
+      summary: "Reviewed changes.",
+      filesInspected: ["src/example.rs"],
+      notes: ["Inspected only Rust sources; frontend behavior was not verified"],
+    })).toBe(expectedPrompt("completed", "child-1", [
+      "Summary:", "Reviewed changes.", "", "Files inspected:", "- src/example.rs",
+      "", "Notes:", "- Inspected only Rust sources; frontend behavior was not verified",
+    ]));
   });
 
   it("formats command results independently", () => {

@@ -15,7 +15,7 @@ Review current staged and unstaged changes by delegating `/review-code` to both 
 
 **IMPORTANT: This command must use TermAl MCP delegation tools to attempt exactly two reviewer session spawns. Do NOT use raw `claude -p`, Codex platform subagents, Claude Task agents, shell polling, raw HTTP, nested TermAl delegations, or any non-TermAl MCP review path to spawn or wait for reviewers. The delegated child sessions execute `/review-code` in read-only TermAl reviewer mode, where nested reviewer spawning is explicitly disabled. If the required TermAl MCP tools are unavailable, stop and report that `/review-changes` requires the TermAl delegation MCP bridge.**
 
-Delegated child reviewers run with `writePolicy: readOnly`. They may use read-only git/file inspection commands freely, but must not edit files, run mutating git commands, launch nested reviewer agents, run quality gates, inspect the existing Beads tracker, or call `bd`. Their `Suggested beads updates` sections are proposals only. The parent session exclusively owns all compilation, build, test, type-check, lint, and formatting gates; it first consolidates and deduplicates both reviews in Step 5, then reconciles the consolidated result with Beads in Step 6.
+Delegated child reviewers run with `writePolicy: readOnly`. They may use read-only git/file inspection commands freely, but must not edit files, run mutating git commands, launch nested reviewer agents, run quality gates, mutate the tracker, or query tracker tasks to reconcile findings. Read-only startup recovery required by project instructions is allowed. Their `Suggested beads updates` sections are proposals only. The parent session exclusively owns all compilation, build, test, type-check, lint, and formatting gates; it first consolidates and deduplicates both reviews in Step 5, then reconciles the consolidated result with Beads in Step 6.
 
 Delegated `/review-code` children submit their authoritative result through the
 versioned `termal_submit_review_result` mailbox contract. The backend validates
@@ -146,19 +146,24 @@ After both reviewers finish, fetch each delegation result packet and present a c
 - Status: ...
 - Findings: ...
 - Changed files: ...
-- Commands run: ...
+- Evidence: recorded command/error/unfinished/file counts; unavailable if no result.
 
 ## Claude /review-code
 - Status: ...
 - Findings: ...
 - Changed files: ...
-- Commands run: ...
+- Evidence: recorded command/error/unfinished/file counts; unavailable if no result.
 
 ## Consolidated Action
 - Critical/High: ...
 - Medium/Low: ...
 - Notes: ...
 ```
+
+The fan-in contains evidence counts. Fetch each result packet as required above
+to inspect the full command and file lists, including which commands failed.
+Summarize relevant failures in the report; zero recorded errors alone does not
+establish a passing check.
 
 Deduplicate findings. If both reviewers report the same issue, merge it and note that both caught it.
 Also merge their proposed tracker follow-ups into the consolidated action list.
@@ -173,7 +178,7 @@ Paged full output may be shown for diagnosis, but it is not a result protocol.
 
 ## Step 6: Reconcile consolidated findings with Beads (bd)
 
-The writable parent owns this entire step. Reviewers neither inspect nor mutate
+The writable parent owns this entire step. Reviewers may perform required read-only startup recovery, but do not reconcile findings with tracker tasks or mutate
 Beads. Use only the deduplicated findings and follow-ups produced in Step 5:
 
 1. Search and inspect the existing tracker for each consolidated actionable

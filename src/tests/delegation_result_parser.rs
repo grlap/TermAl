@@ -341,11 +341,11 @@ fn delegation_result_packet_parses_findings_notes_and_inspected_files() {
     );
     assert_eq!(
         parsed.notes,
-        vec![
-            "Checked backend wait dispatch.".to_owned(),
-            "Inspected src/delegations.rs".to_owned(),
-            "Inspected ui/src/delegation-commands.ts".to_owned(),
-        ]
+        vec!["Checked backend wait dispatch.".to_owned()]
+    );
+    assert_eq!(
+        parsed.files_inspected,
+        vec!["src/delegations.rs", "ui/src/delegation-commands.ts"]
     );
 }
 
@@ -444,7 +444,8 @@ Files Inspected:\n\
             },
         ]
     );
-    assert_eq!(parsed.notes, vec!["Inspected src/state.rs".to_owned()]);
+    assert!(parsed.notes.is_empty());
+    assert_eq!(parsed.files_inspected, vec!["src/state.rs".to_owned()]);
 }
 
 #[test]

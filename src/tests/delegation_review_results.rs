@@ -119,6 +119,9 @@ fn reviewer_delegation_prompt_injects_termal_owned_result_protocol() {
         acceptance_evaluation: None,
     };
     let prompt = build_delegation_prompt(&record);
+    assert!(prompt.contains("Read-only startup recovery required by project instructions"));
+    assert!(prompt.contains("Do not mutate the tracker or query it to reconcile review findings"));
+    assert!(prompt.contains("the parent owns that work"));
 
     assert!(
         prompt.contains(DELEGATED_CHILD_SESSION_MARKER),
@@ -290,6 +293,114 @@ fn codex_reviewer_auto_accepts_only_authorized_review_result_control_plane_reque
 }
 
 #[test]
+fn delegation_review_retry_accepts_the_persisted_legacy_projection() {
+    let (state, _root_sender_id, parent_session_id) = mailbox_test_state();
+    let (delegation_id, child_session_id) =
+        install_required_review_delegation(&state, &parent_session_id);
+    let mut request = structured_review_request();
+    request.notes = vec!["Inspected only Rust sources; frontend was not verified".to_owned()];
+    let first = state
+        .submit_delegation_review_result(&child_session_id, request.clone())
+        .unwrap();
+    let legacy_notes = vec![
+        request.notes[0].clone(),
+        "Inspected src/example.rs".to_owned(),
+    ];
+    {
+        let mut inner = state.inner.lock().unwrap();
+        let record = inner
+            .delegations
+            .iter_mut()
+            .find(|record| record.id == delegation_id)
+            .unwrap();
+        let result = record.submitted_review_result.as_mut().unwrap();
+        result.files_inspected.clear();
+        result.notes = legacy_notes.clone();
+        result.notes.extend(
+            request
+                .suggested_tracker_updates
+                .iter()
+                .map(|note| format!("Suggested tracker update: {note}")),
+        );
+    }
+    let retry = state
+        .submit_delegation_review_result(&child_session_id, request)
+        .unwrap();
+    assert!(retry.duplicate);
+    assert_eq!(retry.message_id, first.message_id);
+    let inner = state.inner.lock().unwrap();
+    let record = inner
+        .delegations
+        .iter()
+        .find(|record| record.id == delegation_id)
+        .unwrap();
+    let result = record.submitted_review_result.as_ref().unwrap();
+    assert!(
+        result.files_inspected.is_empty(),
+        "legacy prose must not be reclassified"
+    );
+    assert_eq!(&result.notes[..2], &legacy_notes);
+}
+
+#[test]
+fn delegation_review_retry_rejects_results_different_from_both_projections() {
+    for legacy in [false, true] {
+        for changed_field in ["note", "file"] {
+            let (state, _root_sender_id, parent_session_id) = mailbox_test_state();
+            let (delegation_id, child_session_id) =
+                install_required_review_delegation(&state, &parent_session_id);
+            let mut request = structured_review_request();
+            request.notes = vec!["Scope note".to_owned()];
+            request.files_inspected = vec!["src/example.rs".to_owned()];
+            request.suggested_tracker_updates.clear();
+            state
+                .submit_delegation_review_result(&child_session_id, request.clone())
+                .unwrap();
+            let corrupted = {
+                let mut inner = state.inner.lock().unwrap();
+                let record = inner
+                    .delegations
+                    .iter_mut()
+                    .find(|record| record.id == delegation_id)
+                    .unwrap();
+                let result = record.submitted_review_result.as_mut().unwrap();
+                if legacy {
+                    result.files_inspected.clear();
+                    result.notes.push("Inspected src/example.rs".to_owned());
+                }
+                if changed_field == "note" {
+                    result.notes[0] = "Different scope note".to_owned();
+                } else if legacy {
+                    result.notes[1] = "Inspected src/different.rs".to_owned();
+                } else {
+                    result.files_inspected[0] = "src/different.rs".to_owned();
+                }
+                result.clone()
+            };
+            let error = state
+                .submit_delegation_review_result(&child_session_id, request)
+                .unwrap_err();
+            assert_eq!(
+                error.status,
+                StatusCode::CONFLICT,
+                "legacy={legacy}; changed={changed_field}"
+            );
+            assert_eq!(
+                error.message,
+                "delegation already submitted a different structured review result"
+            );
+            let inner = state.inner.lock().unwrap();
+            let record = inner
+                .delegations
+                .iter()
+                .find(|record| record.id == delegation_id)
+                .unwrap();
+            assert_eq!(record.submitted_review_result.as_ref(), Some(&corrupted));
+        }
+    }
+}
+
+#[test]
 fn structured_review_result_uses_durable_mailbox_and_bypasses_prose_parser() {
     let (state, _root_sender_id, parent_session_id) = mailbox_test_state();
     let (delegation_id, child_session_id) =
@@ -365,12 +476,7 @@ fn structured_review_result_uses_durable_mailbox_and_bypasses_prose_parser() {
     assert_eq!(result.summary, "One medium issue found.");
     assert_eq!(result.findings.len(), 1);
     assert_eq!(result.findings[0].severity, "Medium");
-    assert!(
-        result
-            .notes
-            .iter()
-            .any(|note| note == "Inspected src/example.rs")
-    );
+    assert_eq!(result.files_inspected, vec!["src/example.rs".to_owned()]);
     let inner = state.inner.lock().expect("state mutex poisoned");
     let record = inner
         .delegations
@@ -1247,11 +1353,11 @@ fn structured_failed_review_preserves_typed_blocker() {
         result.summary,
         "Required repository inspection was unavailable."
     );
+    assert_eq!(result.files_inspected, vec!["src/example.rs".to_owned()]);
     assert_eq!(
         result.notes,
         vec![
             "The local file tool could not be started.".to_owned(),
-            "Inspected src/example.rs".to_owned(),
             "Suggested tracker update: Proposal only: bug, priority 2 — preserve the exact finding."
                 .to_owned(),
         ]

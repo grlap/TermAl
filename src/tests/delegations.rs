@@ -1877,10 +1877,12 @@ async fn delegation_result_route_uses_camel_case_json_shape() {
     );
     assert_eq!(
         result["notes"],
-        json!(["Result packet metadata inspected.", "Inspected src/main.rs"])
+        json!(["Result packet metadata inspected."])
     );
     assert!(result.get("delegation_id").is_none());
     assert!(result.get("child_session_id").is_none());
+    assert_eq!(result["filesInspected"], json!(["src/main.rs"]));
+    assert!(result.get("files_inspected").is_none());
     assert!(result.get("changed_files").is_none());
     assert!(result.get("commands_run").is_none());
 

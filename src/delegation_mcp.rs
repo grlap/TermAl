@@ -907,6 +907,11 @@ impl TermalDelegationMcpBridge {
     }
 
     fn tool_spawn_session(&self, arguments: Value) -> Result<Value> {
+        let include_session = match arguments.get("includeSession") {
+            None => false,
+            Some(Value::Bool(value)) => *value,
+            Some(_) => bail!("includeSession must be a boolean"),
+        };
         let prompt = required_string(arguments.get("prompt"), "prompt")?;
         let cwd = optional_string(arguments.get("cwd"));
         let resolved_prompt =
@@ -942,6 +947,13 @@ impl TermalDelegationMcpBridge {
             &format!("/api/sessions/{}/delegations", self.serving_session_id),
             &Value::Object(body),
         )
+        .map(|response| {
+            if include_session {
+                response
+            } else {
+                compact_mcp_spawn_result(response)
+            }
+        })
     }
 
     fn tool_list_delegations(&self, _arguments: Value) -> Result<Value> {
@@ -1404,7 +1416,7 @@ impl TermalDelegationMcpBridge {
             serde_json::from_value(response).context("mailbox read response shape was invalid")?;
         Ok(json!({
             "mailboxId": mailbox_id,
-            "messages": range.messages,
+            "messages": mcp_mailbox_messages(&range.messages, &self.serving_session_id)?,
             "afterSequence": range.after_sequence,
             "processedThrough": range.processed_through,
             "receipt": range.receipt,
@@ -2360,7 +2372,7 @@ fn mcp_tools_list_result() -> Value {
         "tools": [
             {
                 "name": "termal_spawn_session",
-                "description": "Create a TermAl child delegation under the current parent session. Single-line prompts matching a known slash command are resolved before spawning. Mode defaults to reviewer when omitted, and reviewer mode supports only Claude, Codex or Kimi. Cursor and Gemini callers should pass explorer instead. OpenCode callers should pass explorer or worker together with isolatedWorktree because OpenCode does not support writePolicy readOnly.",
+                "description": "Create a TermAl child delegation under the current parent session. Returns compact metadata, delegationId and childSessionId by default; includeSession:true opts into the full response. Single-line prompts matching a known slash command are resolved before spawning. Mode defaults to reviewer when omitted, and reviewer mode supports only Claude, Codex or Kimi. Cursor and Gemini callers should pass explorer instead. OpenCode callers should pass explorer or worker together with isolatedWorktree because OpenCode does not support writePolicy readOnly.",
                 "inputSchema": {
                     "type": "object",
                     "required": ["prompt"],
@@ -2385,7 +2397,12 @@ fn mcp_tools_list_result() -> Value {
                             "enum": ["reviewer", "explorer", "worker"],
                             "description": "Defaults to reviewer when omitted. Reviewer mode requires a Claude, Codex or Kimi agent; other ACP agents should pass explorer instead."
                         },
-                        "writePolicy": write_policy_input_schema
+                        "writePolicy": write_policy_input_schema,
+                        "includeSession": {
+                            "type": "boolean",
+                            "default": false,
+                            "description": "Return the full session and delegation response, including prompt copies. By default only compact metadata, ids and a short preview are returned."
+                        }
                     }
                 }
             },
@@ -2577,7 +2594,7 @@ fn mcp_tools_list_result() -> Value {
             },
             {
                 "name": "termal_read_mailbox",
-                "description": "Read a FIFO page without acknowledging it. Omit afterSequence to start at the durable cursor. Returns messages (including own sends), receipt, hasMore, nextAfterSequence and cursor metadata. Save receipt and acknowledge it unchanged only after processing the entire page, even if you send a reply meanwhile. Empty pages have no receipt. Process/ack pages in order; explicit afterSequence may replay history but cannot authorize skipping earlier visible messages. The server records issuance, not proof of reading or understanding. Legacy numeric clients remain supported with issuance validation; pre-upgrade reads may need repeating. A reply appended after reading is outside that receipt: acknowledge the original page, then read/process/acknowledge the next page including your reply. Numeric ACK through that unissued reply returns 409. The bridge sets issueReceipt itself; UI previews and old bridge binaries without that flag do not issue pages. Upgrade/restart an old bridge or use the current CLI; repeating its preview cannot repair missing issuance.",
+                "description": "Read a FIFO page without acknowledging it. Omit afterSequence to start at the durable cursor. Returns messages (including own sends): incoming bodies in full, own sends as headers with bodyOmitted:true; fetch an omitted body by id using termal_read_mailbox_message. Own headers still belong to the receipt page and must be processed before acknowledgement. Returns receipt, hasMore, nextAfterSequence and cursor metadata. Save receipt and acknowledge it unchanged only after processing the entire page, even if you send a reply meanwhile. Empty pages have no receipt. Process/ack pages in order; explicit afterSequence may replay history but cannot authorize skipping earlier visible messages. The server records issuance, not proof of reading or understanding. Legacy numeric clients remain supported with issuance validation; pre-upgrade reads may need repeating. A reply appended after reading is outside that receipt: acknowledge the original page, then read/process/acknowledge the next page including your reply. Numeric ACK through that unissued reply returns 409. The bridge sets issueReceipt itself; UI previews and old bridge binaries without that flag do not issue pages. Upgrade/restart an old bridge or use the current CLI; repeating its preview cannot repair missing issuance.",
                 "inputSchema": {
                     "type": "object",
                     "required": ["mailboxId"],
@@ -2980,3 +2997,5 @@ fn is_terminal_delegation_status(status: &str) -> bool {
 #[cfg(test)]
 #[path = "delegation_mcp_tests.rs"]
 mod delegation_mcp_tests;
+
+include!("delegation_mcp_projection.rs");

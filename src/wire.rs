@@ -1258,6 +1258,8 @@ struct DelegationResult {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     changed_files: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    files_inspected: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     commands_run: Vec<DelegationCommandResult>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     notes: Vec<String>,

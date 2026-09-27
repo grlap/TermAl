@@ -26,6 +26,7 @@ fn parse_delegation_result_packet(text: &str) -> Option<ParsedDelegationResult> 
     let mut summary_lines = Vec::new();
     let mut finding_lines = Vec::new();
     let mut note_lines: Vec<String> = Vec::new();
+    let mut files_inspected = Vec::new();
     let mut section: Option<DelegationResultSection> = None;
     let mut saw_summary_section = false;
     for line in lines {
@@ -99,7 +100,7 @@ fn parse_delegation_result_packet(text: &str) -> Option<ParsedDelegationResult> 
             Some(DelegationResultSection::Notes) => note_lines.push(line.to_owned()),
             Some(DelegationResultSection::FilesInspected) => {
                 if let Some(note) = parse_delegation_note_line(line) {
-                    note_lines.push(format!("Inspected {note}"));
+                    files_inspected.push(note);
                 }
             }
             Some(DelegationResultSection::Ignored) | None => {}
@@ -160,6 +161,7 @@ fn parse_delegation_result_packet(text: &str) -> Option<ParsedDelegationResult> 
         status,
         summary: compact_delegation_result_summary(&summary),
         findings: dedupe_delegation_findings(findings),
+        files_inspected,
         notes: note_lines
             .iter()
             .filter_map(|line| parse_delegation_note_line(line))
@@ -413,6 +415,7 @@ fn synthesize_delegation_result_from_assistant_output(
     Some(ParsedDelegationResult {
         status: DelegationStatus::Completed,
         findings: parse_delegation_review_findings(&summary),
+        files_inspected: Vec::new(),
         summary: compact_delegation_result_summary(&summary),
         notes: Vec::new(),
     })

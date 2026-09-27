@@ -2116,6 +2116,193 @@ fn delegation_mcp_spawn_session_posts_parent_scoped_request() {
 }
 
 #[test]
+fn delegation_mcp_spawn_session_rejects_invalid_projection_option_before_post() {
+    let (base_url, requests, server) = spawn_test_mcp_http_server(1, |_| {
+        (
+            200,
+            json!({
+                "delegation": {"id": "delegation-one"},
+                "childSession": {"id": "session-child"}
+            }),
+        )
+    });
+    let bridge = TermalDelegationMcpBridge::new("session-parent".into(), base_url).unwrap();
+    for invalid in [json!("yes"), json!(null), json!(1), json!({})] {
+        let error = bridge
+            .tool_spawn_session(json!({
+                "prompt": "Review", "includeSession": invalid
+            }))
+            .unwrap_err();
+        assert_eq!(error.to_string(), "includeSession must be a boolean");
+    }
+    assert!(requests.lock().unwrap().is_empty());
+    // The sole POST is this valid call; it also covers a prompt-less response
+    // and the childSession.id fallback when delegation.childSessionId is absent.
+    let response = bridge
+        .tool_spawn_session(json!({"prompt": "Review"}))
+        .unwrap();
+    assert_eq!(response["childSessionId"], "session-child");
+    assert!(response.get("preview").is_none());
+    server.join().unwrap();
+    assert_eq!(requests.lock().unwrap().len(), 1);
+}
+
+#[test]
+fn delegation_mcp_spawn_session_compacts_prompt_copies_unless_requested() {
+    for include_session in [false, true] {
+        let prompt = "子 prompt ".repeat(2_000);
+        let wire = json!({
+            "revision": 42, "serverInstanceId": "server-a",
+            "delegation": { "id": "delegation-one", "childSessionId": "session-child",
+                "agent": "Codex", "model": "model-one", "status": "running", "mode": "reviewer",
+                "writePolicy": {"kind": "readOnly"}, "prompt": prompt },
+            "childSession": { "id": "session-child", "agent": "Codex", "model": "model-one",
+                "workdir": "/repo", "liveActivity": {"prompt": prompt},
+                "messages": [{"text": prompt}], "promptHistory": [prompt] }
+        });
+        let expected = wire.clone();
+        let (base_url, _, server) = spawn_test_mcp_http_server(1, move |request| {
+            let body: Value = serde_json::from_str(&request.body).unwrap();
+            assert!(
+                body.get("includeSession").is_none(),
+                "projection is bridge-owned"
+            );
+            (200, wire.clone())
+        });
+        let bridge = TermalDelegationMcpBridge::new("session-parent".into(), base_url).unwrap();
+        let mut args = json!({"prompt": "Review", "writePolicy": {"kind": "readOnly"}});
+        if include_session {
+            args["includeSession"] = json!(true);
+        }
+        let response = bridge.tool_spawn_session(args).unwrap();
+        server.join().unwrap();
+        if include_session {
+            assert_eq!(response, expected);
+        } else {
+            assert_eq!(response["delegationId"], "delegation-one");
+            assert_eq!(response["childSessionId"], "session-child");
+            assert_eq!(response["childSession"]["id"], "session-child");
+            assert_eq!(
+                response["delegation"]["writePolicy"],
+                json!({"kind": "readOnly"})
+            );
+            assert_eq!(response["delegation"]["model"], "model-one");
+            assert_eq!(response["revision"], 42);
+            assert_eq!(response["serverInstanceId"], "server-a");
+            assert_eq!(response["preview"].as_str().unwrap().chars().count(), 160);
+            assert!(response["delegation"].get("prompt").is_none());
+            assert!(response["childSession"].get("messages").is_none());
+            assert!(
+                response.to_string().len() < 1_200,
+                "full prompts must not reach the caller"
+            );
+        }
+    }
+}
+
+#[test]
+fn delegation_mcp_failed_spawn_keeps_a_bounded_reason() {
+    for summary in ["child session failed to start".to_owned(), "子".repeat(600)] {
+        let expected_summary = summary.clone();
+        let (base_url, _, server) = spawn_test_mcp_http_server(1, move |request| {
+            assert_eq!(request.method, "POST");
+            assert_eq!(request.path, "/api/sessions/session-parent/delegations");
+            (
+                200,
+                json!({
+                    "delegation": {"id": "delegation-failed", "status": "failed",
+                        "childSessionId": "session-child", "result": {
+                            "status": "failed", "summary": summary,
+                            "commandsRun": [{"command": "large command".repeat(1_000), "status": "error"}],
+                            "notes": ["large note".repeat(1_000)]
+                        }},
+                    "childSession": {"id": "session-child", "status": "error", "messages": []}
+                }),
+            )
+        });
+        let bridge = TermalDelegationMcpBridge::new("session-parent".into(), base_url).unwrap();
+        let response = bridge
+            .tool_spawn_session(json!({"prompt": "Review"}))
+            .unwrap();
+        server.join().unwrap();
+        assert_eq!(response["delegation"]["status"], "failed");
+        let result = &response["delegation"]["result"];
+        assert_eq!(result["status"], "failed");
+        let actual_summary = result["summary"].as_str().unwrap();
+        if expected_summary.chars().count() <= 500 {
+            assert_eq!(actual_summary, expected_summary);
+        } else {
+            assert_eq!(actual_summary, format!("{}...", "子".repeat(500)));
+        }
+        assert!(result.get("notes").is_none());
+        assert!(result.get("commandsRun").is_none());
+        assert!(response["childSession"].get("messages").is_none());
+    }
+}
+
+#[test]
+fn delegation_mcp_own_mailbox_body_is_retrievable_without_changing_receipts() {
+    let own = json!({
+        "id": "message-own", "mailboxId": "mailbox-one", "sequence": 8,
+        "senderSessionId": "session-parent", "senderName": "Parent",
+        "targetSessionId": "session-peer", "targetName": "Peer", "topic": "Already sent",
+        "createdAt": "2026-09-27T00:00:00Z", "class": "routine",
+        "body": "own long body ".repeat(1_000), "notificationState": "durableButNotWoken"
+    });
+    let original = own.clone();
+    let mut incoming = own.clone();
+    incoming["id"] = json!("message-incoming");
+    incoming["sequence"] = json!(7);
+    incoming["senderSessionId"] = json!("session-peer");
+    incoming["targetSessionId"] = json!("session-parent");
+    incoming["body"] = json!("new inbound instructions");
+    let (base_url, _, server) = spawn_test_mcp_http_server(3, move |request| {
+        if request.path.ends_with("/read") {
+            return (
+                200,
+                json!({"messages": [incoming, own], "afterSequence": 6,
+                "processedThrough": 6, "receipt": "opaque-page", "hasMore": true, "nextAfterSequence": 8}),
+            );
+        }
+        if request.path.ends_with("/message-own") {
+            return (200, own.clone());
+        }
+        assert!(request.path.ends_with("/acknowledge"));
+        assert_eq!(
+            serde_json::from_str::<Value>(&request.body).unwrap(),
+            json!({"receipt": "opaque-page"})
+        );
+        (
+            200,
+            json!({"id": "mailbox-one", "participants": [], "latestSequence": 8, "unreadCount": 0}),
+        )
+    });
+    let bridge = TermalDelegationMcpBridge::new("session-parent".into(), base_url).unwrap();
+    let page = bridge
+        .tool_read_mailbox(json!({"mailboxId": "mailbox-one"}))
+        .unwrap();
+    assert_eq!(page["messages"][0]["body"], "new inbound instructions");
+    assert!(page["messages"][0].get("bodyOmitted").is_none());
+    assert!(page["messages"][1].get("body").is_none());
+    assert_eq!(page["messages"][1]["bodyOmitted"], true);
+    assert_eq!(page["messages"][1]["id"], "message-own");
+    assert_eq!(page["messages"][1]["sequence"], 8);
+    assert_eq!(page["messages"][1]["topic"], "Already sent");
+    assert_eq!(page["receipt"], "opaque-page");
+    assert_eq!(page["processedThrough"], 6);
+    assert_eq!(page["nextAfterSequence"], 8);
+    assert_eq!(page["hasMore"], true);
+    let exact = bridge
+        .tool_read_mailbox_message(json!({"messageId": "message-own"}))
+        .unwrap();
+    assert_eq!(exact, original);
+    bridge
+        .tool_acknowledge_mailbox(json!({"mailboxId": "mailbox-one", "receipt": page["receipt"]}))
+        .unwrap();
+    server.join().unwrap();
+}
+
+#[test]
 fn mailbox_cursor_mcp_send_preserves_both_receipt_snapshots() {
     for (cursor, advanced) in [(9, true), (7, false)] {
         let (base_url, _, server) = spawn_test_mcp_http_server(1, move |request| {

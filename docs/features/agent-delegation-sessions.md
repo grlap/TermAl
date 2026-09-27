@@ -214,6 +214,54 @@ target already exists instead of being spawned, the identical machinery becomes 
 peer conversation between two top-level sessions. See
 [Peer Session Connections](#peer-session-connections) below.
 
+### Agent response size
+
+`termal_spawn_session` returns compact delegation/session metadata, top-level
+`delegationId` and `childSessionId`, and a preview containing the first 160
+characters (or fewer) of the resolved prompt. Slash commands preview their
+expanded text; the preview is not the full prompt.
+The child prompt and transcript remain durable; pass `includeSession: true`
+only when the full creation response is needed. The HTTP/UI creation response
+is unchanged. The default MCP response keeps these fields when present:
+
+- Top level: `revision`, `serverInstanceId`, `delegationId`, `childSessionId`,
+  `preview`, `delegation`, and `childSession`.
+- `delegation`: `id`, `parentSessionId`, `childSessionId`, `mode`, `status`,
+  `title`, `agent`, `model`, `writePolicy`, `createdAt`, `startedAt`, `completedAt`,
+  `reviewResultRequired`, `postSubmissionTransportError`, and `reviewResultRecoveryError`.
+- `childSession`: `id`, `name`, `agent`, `model`, `status`, and `workdir`.
+- For a terminal delegation with a recorded result, `delegation.result` retains
+  `status` and `summary` (at most 500 characters plus `...` when shortened).
+  This includes failures during startup. Retrieve the complete result with
+  `termal_get_session_result`.
+
+Other creation metadata, including submission-attempt details, requires
+`includeSession: true`. Evaluators are created through the separate
+`termal_evaluate_acceptance` tool; its response is unaffected.
+
+`termal_read_mailbox` returns incoming bodies in full. The reader's own messages
+retain their headers and IDs, with `bodyOmitted: true` instead of a repeated body.
+Use `termal_read_mailbox_message` with that ID to retrieve the complete message.
+Own headers remain part of the issued page: process them in order and acknowledge
+the original receipt. This changes neither pagination nor receipt boundaries.
+
+Delegation fan-in prompts retain status, summary, findings, changed files and
+substantive notes, including reported freeze verification and its limitations.
+Command and inspected-file lists become counts, including separate error and
+unfinished/unknown command counts; `termal_get_session_result`
+retains the complete lists. Inspected files have their own `filesInspected`
+field in result packets; free-form `notes` are preserved even if they start
+with "Inspected ". Existing stored results without that field keep all their
+notes; prose is never reclassified as a file list. Omission of a list does not
+establish a passing check. Counts describe only recorded evidence; a missing
+result is explicitly marked unavailable. The UI's manual "insert result" action
+keeps the complete evidence lists; automatic fan-in uses counts to limit repeated
+context.
+
+Reviewer leaves may perform read-only startup recovery required by their project
+instructions. They must not mutate the tracker or reconcile findings against its
+tasks; that work belongs to the parent after the reviews are consolidated.
+
 ## Value To Parent Agents
 
 Delegation is useful to a parent agent even when that agent already has an
@@ -1366,6 +1414,7 @@ type DelegationResult = {
   summary: string;
   findings?: DelegationFinding[];
   changedFiles?: string[];
+  filesInspected?: string[];
   commandsRun?: DelegationCommandResult[];
   notes?: string[];
 };
@@ -1561,6 +1610,7 @@ type DelegationResultPacket = {
   summary: string;
   findings: DelegationFinding[];
   changedFiles: string[];
+  filesInspected: string[];
   commandsRun: DelegationCommandResult[];
   notes: string[];
   revision: number;

@@ -1785,6 +1785,20 @@ describe("delegation command surface", () => {
     expectRedactedDelegationSummary(statusResult.delegation);
   });
 
+  it("retains inspected-file provenance and free-form scope notes", async () => {
+    stubFetchResponses({
+      revision: 4,
+      serverInstanceId: "server-a",
+      result: makeResult({
+        filesInspected: ["src/example.rs"],
+        notes: ["Inspected only Rust sources; frontend behavior was not verified"],
+      }),
+    });
+    const result = await getDelegationResultCommand("parent-1", "delegation-1");
+    expect(result.filesInspected).toEqual(["src/example.rs"]);
+    expect(result.notes).toEqual(["Inspected only Rust sources; frontend behavior was not verified"]);
+  });
+
   it("normalizes compact result packets without deriving failed checks", async () => {
     stubFetchResponses({
       revision: 4,
@@ -1792,6 +1806,7 @@ describe("delegation command surface", () => {
       result: makeResult({
         findings: undefined,
         changedFiles: undefined,
+        filesInspected: undefined,
         commandsRun: [
           { command: "cargo check", status: "success" },
           { command: "npx vitest run", status: "error" },
@@ -1805,6 +1820,7 @@ describe("delegation command surface", () => {
     expect(result).toMatchObject({
       findings: [],
       changedFiles: [],
+      filesInspected: [],
       commandsRun: [
         { command: "cargo check", status: "success" },
         { command: "npx vitest run", status: "error" },

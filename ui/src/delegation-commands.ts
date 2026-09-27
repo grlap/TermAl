@@ -1037,6 +1037,7 @@ function delegationResultPacket(
     summary: result.summary,
     findings: result.findings ?? [],
     changedFiles: result.changedFiles ?? [],
+    filesInspected: result.filesInspected ?? [],
     commandsRun: result.commandsRun ?? [],
     notes: result.notes ?? [],
     revision: metadata.revision,

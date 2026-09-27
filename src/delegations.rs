@@ -58,7 +58,7 @@ TermAl reviewer result protocol (TERMAL_STRUCTURED_REVIEW_RESULT_V1):
 - Finding severity must be exactly `Critical`, `High`, `Medium`, `Low`, or `Note`. Omit `file` and `line` only when no meaningful source location exists.
 - Command status must be exactly `success` or `error`.
 - If there are no changes or no findings, still submit a completed result with an explanatory summary and an empty findings array.
-- Do not include tracker identifiers and do not inspect or mutate the tracker.
+- Read-only startup recovery required by project instructions is allowed. Do not mutate the tracker or query it to reconcile review findings; the parent owns that work. Do not include tracker identifiers in review findings.
 - If submission validation fails, correct the payload and retry. Do not replace the tool call with prose or a JSON code block.
 
 Required tool payload:
@@ -2679,15 +2679,24 @@ fn delegation_wait_result_section(delegation: &DelegationRecord) -> String {
         .map(|result| result.summary.trim())
         .filter(|summary| !summary.is_empty())
         .unwrap_or("No result summary was recorded.");
-    let commands = result
-        .map(|result| {
-            result
+    let evidence = result.map_or_else(
+        || "unavailable (no result was recorded)".to_owned(),
+        |result| {
+            let command_count = result.commands_run.len();
+            let command_errors = result
                 .commands_run
                 .iter()
-                .map(|command| format!("- `{}`: {}", command.command, command.status))
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
+                .filter(|command| command.status == "error")
+                .count();
+            let command_unfinished = result
+                .commands_run
+                .iter()
+                .filter(|command| !matches!(command.status.as_str(), "success" | "error"))
+                .count();
+            let inspected_count = result.files_inspected.len();
+            format!("recorded commands: {command_count}; errors: {command_errors}; unfinished/unknown: {command_unfinished}; inspected files: {inspected_count}")
+        },
+    );
     let changed_files = result
         .map(|result| {
             result
@@ -2716,11 +2725,6 @@ fn delegation_wait_result_section(delegation: &DelegationRecord) -> String {
         })
         .unwrap_or_default();
 
-    let commands = if commands.is_empty() {
-        "- None".to_owned()
-    } else {
-        commands.join("\n")
-    };
     let findings = if findings.is_empty() {
         "- None".to_owned()
     } else {
@@ -2738,7 +2742,7 @@ fn delegation_wait_result_section(delegation: &DelegationRecord) -> String {
     };
 
     let mut section = format!(
-        "### {} (`{}`)\n\nStatus: {}\nChild session: `{}`\nFull output: call `termal_get_session_result` with `{{\"delegationId\":\"{}\",\"outputOffset\":0,\"outputLimit\":4096}}`; use each `nextOffsetBytes` value as the next `outputOffset` until `complete` is true.\n\nSummary:\n{}\n\nFindings:\n{}\n\nChanged files:\n{}\n\nCommands run:\n{}\n\nNotes:\n{}",
+        "### {} (`{}`)\n\nStatus: {}\nChild session: `{}`\nEvidence: {evidence}. Retrieve lists with `termal_get_session_result` using `{{\"delegationId\":\"{}\"}}`. For full output add `\"outputOffset\":0` and `\"outputLimit\":4096`, then page with `nextOffsetBytes` until `complete`.\n\nSummary:\n{}\n\nFindings:\n{}\n\nChanged files:\n{}\n\nNotes:\n{}",
         delegation.title,
         delegation.id,
         delegation_status_label(delegation.status),
@@ -2747,7 +2751,6 @@ fn delegation_wait_result_section(delegation: &DelegationRecord) -> String {
         summary,
         findings,
         changed_files,
-        commands,
         notes
     );
     // The child's prose is not the record: say what the tracker accepted.
@@ -3001,6 +3004,7 @@ fn refresh_delegation_from_child_locked(
             summary,
             findings,
             changed_files,
+            files_inspected,
             commands_run,
             notes,
         } => {
@@ -3028,6 +3032,7 @@ fn refresh_delegation_from_child_locked(
                         message: "Structured review result was not submitted; findings are unavailable, not empty.".to_owned(),
                     }],
                     changed_files: Vec::new(),
+                    files_inspected: Vec::new(),
                     commands_run: Vec::new(),
                     notes: unavailable_notes,
                 };
@@ -3068,6 +3073,7 @@ fn refresh_delegation_from_child_locked(
                 summary,
                 findings,
                 changed_files,
+                files_inspected,
                 commands_run,
                 notes,
             };
@@ -3431,6 +3437,7 @@ fn mark_delegation_failed_locked(
         summary: summary.to_owned(),
         findings: Vec::new(),
         changed_files: Vec::new(),
+        files_inspected: Vec::new(),
         commands_run: Vec::new(),
         notes: recovery_notes,
     };
@@ -3483,6 +3490,7 @@ fn mark_delegation_canceled_locked(
         summary: raw_summary.to_owned(),
         findings: Vec::new(),
         changed_files: Vec::new(),
+        files_inspected: Vec::new(),
         commands_run: Vec::new(),
         notes: Vec::new(),
     };
@@ -4091,6 +4099,7 @@ enum DelegationChildOutcome {
         summary: String,
         findings: Vec<DelegationFinding>,
         changed_files: Vec<String>,
+        files_inspected: Vec<String>,
         commands_run: Vec<DelegationCommandResult>,
         notes: Vec<String>,
     },
@@ -4105,6 +4114,7 @@ struct ParsedDelegationResult {
     status: DelegationStatus,
     summary: String,
     findings: Vec<DelegationFinding>,
+    files_inspected: Vec<String>,
     notes: Vec<String>,
 }
 
@@ -4177,6 +4187,7 @@ fn delegation_child_outcome_from_result(
         summary: result.summary,
         findings: result.findings,
         changed_files: child_changed_files(&child.session),
+        files_inspected: result.files_inspected,
         commands_run: child_commands_run(&child.session),
         notes: result.notes,
     }

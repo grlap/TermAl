@@ -596,6 +596,7 @@ export type DelegationResult = {
   summary: string;
   findings?: DelegationFinding[];
   changedFiles?: string[];
+  filesInspected?: string[];
   commandsRun?: DelegationCommandResult[];
   notes?: string[];
 };

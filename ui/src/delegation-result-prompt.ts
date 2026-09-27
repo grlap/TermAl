@@ -17,6 +17,7 @@ export type DelegationPromptResult = Pick<
   | "summary"
   | "findings"
   | "changedFiles"
+  | "filesInspected"
   | "commandsRun"
   | "notes"
 >;
@@ -93,6 +94,14 @@ export function formatDelegationResultPrompt(result: DelegationPromptResult) {
       "",
       "Changed files:",
       ...changedFiles.map((path) => formatListItem(path, "unknown path")),
+    );
+  }
+  const filesInspected = result.filesInspected ?? [];
+  if (filesInspected.length > 0) {
+    bodySections.push(
+      "",
+      "Files inspected:",
+      ...filesInspected.map((path) => formatListItem(path, "unknown path")),
     );
   }
   const commandsRun = result.commandsRun ?? [];

@@ -496,6 +496,22 @@ impl AppState {
                 if existing == &result {
                     return Ok(());
                 }
+                // A running review may have persisted the earlier projection
+                // before restart. Compare it with a projection of the proven
+                // envelope; never infer inspected-file provenance from prose.
+                let mut legacy = result.clone();
+                legacy.files_inspected.clear();
+                legacy.notes.splice(
+                    submission.envelope.notes.len()..submission.envelope.notes.len(),
+                    submission
+                        .envelope
+                        .files_inspected
+                        .iter()
+                        .map(|path| format!("Inspected {path}")),
+                );
+                if existing == &legacy {
+                    return Ok(());
+                }
                 return Err(ApiError::conflict(
                     "delegation already submitted a different structured review result",
                 ));
@@ -563,12 +579,6 @@ fn delegation_result_from_review_envelope(
     let mut notes = envelope.notes.clone();
     notes.extend(
         envelope
-            .files_inspected
-            .iter()
-            .map(|path| format!("Inspected {path}")),
-    );
-    notes.extend(
-        envelope
             .suggested_tracker_updates
             .iter()
             .map(|update| format!("Suggested tracker update: {update}")),
@@ -580,6 +590,7 @@ fn delegation_result_from_review_envelope(
         summary: envelope.summary.clone(),
         findings: envelope.findings.clone(),
         changed_files: Vec::new(),
+        files_inspected: envelope.files_inspected.clone(),
         commands_run: envelope.commands_run.clone(),
         notes,
     }

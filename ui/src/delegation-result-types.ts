@@ -17,6 +17,7 @@ export type DelegationResultPacket = {
   summary: string;
   findings: DelegationFinding[];
   changedFiles: string[];
+  filesInspected: string[];
   commandsRun: DelegationCommandResult[];
   notes: string[];
   // Evaluator delegations only: what was judged and what the tracker holds.
