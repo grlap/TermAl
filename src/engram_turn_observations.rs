@@ -136,13 +136,16 @@ fn engram_evaluate_requested_effects<'a>(
 
 /// The execution observation a mediated turn reports on the checkpoint that
 /// closes its grant, built under the checkpoint's lock before the terminal
-/// transition clears the turn's file-change tracking. `source_changed` is
-/// authoritative when both the begin-time and the end-time basis exist and
-/// their revisions differ; the turn's file-change tracking, a debounced hint
-/// that can arrive late or skip ignored paths, is only a lower bound, and
-/// decides alone when the closing basis is missing. A turn whose begin-time
-/// basis is missing but whose closing basis exists cannot be cleared by the
-/// comparison and counts as changed under a mutation grant. A changed source is
+/// transition clears the turn's file-change tracking. When both the
+/// begin-time and the end-time basis exist, `source_changed` is their
+/// comparison alone: the begin-time basis is taken before the prompt reaches
+/// the runtime, so no edit of the turn precedes it, and the file-change
+/// tracking is not consulted, because the watcher credits the turn with any
+/// write under the session's workdir, by any writer and in a nested worktree
+/// too (tm-97wp). The tracking, a debounced hint, decides alone only when the
+/// closing basis is missing. A turn whose begin-time basis is missing but
+/// whose closing basis exists cannot be cleared by the comparison and counts
+/// as changed under a mutation grant. A changed source is
 /// reported with the `mutate_local` effect Engram requires for it, which
 /// must be one of the grant's requested effects; a turn that changed source
 /// under a grant that mediates no local mutation is withheld rather than
@@ -169,20 +172,16 @@ fn engram_turn_execution_observation(
     let source_changed = match (reported_revision, &end_basis) {
         (Some(reported), Some(end)) => end.source_revision != reported,
         (Some(_), None) => tracked_change,
-        (None, _) => {
-            let content_changed = match (&record.engram.active_turn_start_basis, &end_basis) {
-                (Some(start), Some(end)) => start.source_revision != end.source_revision,
-                // Without a begin-time basis the comparison cannot clear the
-                // turn. Under a grant that mediates local mutation the
-                // conservative answer is a change, which opens an obligation
-                // a later check can satisfy; under an observe-only grant a
-                // change could only withhold the report, so the tracking
-                // decides.
-                (None, Some(_)) => mutation_granted,
-                _ => false,
-            };
-            tracked_change || content_changed
-        }
+        (None, Some(end)) => match &record.engram.active_turn_start_basis {
+            Some(start) => start.source_revision != end.source_revision,
+            // Without a begin-time basis the comparison cannot clear the
+            // turn. Under a grant that mediates local mutation the
+            // conservative answer is a change, which opens an obligation a
+            // later check can satisfy; under an observe-only grant a change
+            // could only withhold the report, so the tracking decides.
+            None => mutation_granted || tracked_change,
+        },
+        (None, None) => tracked_change,
     };
     if source_changed && !mutation_granted {
         eprintln!(

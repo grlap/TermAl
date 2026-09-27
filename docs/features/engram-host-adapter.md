@@ -382,12 +382,14 @@ as the source basis, together with the observation time (see
 [Content revision](#content-revision)).
 `source_changed` is decided by content: the same
 fingerprint is taken before the prompt reaches the runtime and again at the
-close, and a difference is a source change; the turn's file-change tracking,
-a debounced hint that can arrive late or skip ignored paths, only adds to
-that and decides alone when the closing basis is missing; a turn whose
-begin-time basis is missing but whose closing basis exists cannot be cleared
-by the comparison and is reported as a change under a grant that mediates
-local mutation, the conservative answer. Each capture
+close, and a difference is a source change. When both exist, the turn's
+file-change tracking is not consulted: the watcher credits the turn with any
+write under the session's workdir, by any writer and inside a nested
+worktree too, so it reported changes the content never showed (tm-97wp).
+The tracking, a debounced hint, decides alone only when the closing basis is
+missing; a turn whose begin-time basis is missing but whose closing basis
+exists cannot be cleared by the comparison and is reported as a change under
+a grant that mediates local mutation, the conservative answer. Each capture
 runs under the reviewer's shared twenty-second freeze budget, because a turn
 closes at the host's busiest moment and a tighter bound would drop the basis
 when Git is merely slow; at the close the capture is taken before the
@@ -401,9 +403,9 @@ long as it runs, on top of the control call that already ran there. On the
 teardown paths (Stop, termination, reset, revocation) the capture is taken
 while the runtime may still be running and before it is shut down, so a
 write the runtime makes between the capture and its shutdown is not
-attributed to the turn. The comparison is also workspace-scoped, like the
-file-change tracking it extends: an edit another session makes in the same
-workspace during the turn counts as this turn's change, which withholds a
+attributed to the turn. The comparison is also worktree-scoped: an edit
+another session makes in the same worktree during the turn counts as this
+turn's change, which withholds a
 read-only child's observation and, where mutation is granted, attributes the
 edit to the turn; over-reporting is the conservative direction, but children
 sharing a busy workspace will often report nothing. That fingerprint is what a

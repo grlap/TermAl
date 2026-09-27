@@ -297,9 +297,23 @@ fn start_mediated_turn_with_script(
 }
 
 impl RunningMediatedTurn {
-    /// Records a source change the workspace watcher would have observed
-    /// during the running turn.
+    /// Changes source during the running turn: writes `path` in the child's
+    /// workdir, so its content revision moves, and records the event the
+    /// workspace watcher would have raised for it.
     fn change_source(&self, path: &str) {
+        let file = self.child_workdir.join(path);
+        fs::create_dir_all(file.parent().expect("a source path has a parent"))
+            .expect("source directory should exist");
+        fs::write(&file, format!("changed during turn {}\n", self.grant_id))
+            .expect("source edit should write");
+        self.record_watcher_event(path);
+    }
+
+    /// Records only a watcher event for `path`, as the watcher raises one for
+    /// any write under the session's workdir, whoever made it and wherever
+    /// it lands (a nested worktree, an ignored path), with no content change
+    /// in the files the turn's revision covers.
+    fn record_watcher_event(&self, path: &str) {
         let mut inner = self.state.inner.lock().expect("state mutex poisoned");
         let index = inner
             .find_session_index(&self.child_id)
@@ -717,6 +731,70 @@ fn a_completed_turn_that_changed_nothing_in_a_worktree_reports_its_unchanged_bas
         observation.get("observed_at").is_some(),
         "a basis comes with its time"
     );
+}
+
+#[test]
+fn a_watcher_event_without_a_content_change_is_no_source_change() {
+    // tm-97wp: the watcher credits a turn with any write under its session's
+    // workdir, such as another session's edit in a nested worktree. When
+    // both bases exist and are equal, the content decides: no change, and no
+    // obligation opened for a turn that changed nothing.
+    let turn = start_mediated_turn(
+        "watcher-only",
+        ChildWorkspace::IsolatedWorktree,
+        ControlBinding::Claimed,
+    );
+    turn.record_watcher_event(".worktrees/peer/scripts/test-launcher.test.mjs");
+
+    turn.state
+        .finish_turn_ok_if_runtime_matches(&turn.child_id, &turn.runtime_token)
+        .expect("turn should complete");
+
+    let (_, observation) = turn.observation();
+    assert_eq!(
+        observation["source_changed"], false,
+        "equal fingerprints are no change, whatever the watcher saw"
+    );
+    assert_eq!(observation["effect"], "observe");
+    assert_eq!(
+        observation["source_basis"]["source_revision"]
+            .as_str()
+            .expect("source revision"),
+        content_revision_of(&turn.child_workdir),
+        "the basis is the unchanged content's fingerprint"
+    );
+}
+
+#[test]
+fn a_turn_without_a_closing_basis_is_judged_by_its_watcher_event() {
+    // With no closing basis there is nothing to compare, so the watcher's
+    // hint decides. An untracked nested repository makes the closing
+    // capture fail closed while the begin-time basis stands.
+    let turn = start_mediated_turn(
+        "no-closing-basis",
+        ChildWorkspace::IsolatedWorktree,
+        ControlBinding::Claimed,
+    );
+    assert!(turn.start_basis().is_some(), "the turn began with a basis");
+    let nested = turn.child_workdir.join("nested");
+    fs::create_dir_all(&nested).expect("nested directory should exist");
+    init_git_repository(&nested);
+    turn.record_watcher_event("nested/README.md");
+
+    turn.state
+        .finish_turn_ok_if_runtime_matches(&turn.child_id, &turn.runtime_token)
+        .expect("turn should complete");
+
+    let (_, observation) = turn.observation();
+    assert!(
+        observation.get("source_basis").is_none(),
+        "the closing capture refuses the nested repository"
+    );
+    assert_eq!(
+        observation["source_changed"], true,
+        "without a closing basis the watcher's hint decides"
+    );
+    assert_eq!(observation["effect"], "mutate_local");
 }
 
 #[test]
