@@ -1,0 +1,6 @@
+/* Test-run command-family content stays bounded in a narrow transcript. */
+.test-run-card pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.test-run-card p, .test-run-card li { overflow-wrap: anywhere; }
+.test-run-card .test-run-failure { max-height: 16rem; overflow: auto; }
+.test-run-card .chip-status-neutral { color: var(--ink); background: transparent; border: 1px solid var(--line); }
+.test-run-card .command-card-details-toggle { width: auto; padding: 0 .5rem; }

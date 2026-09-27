@@ -14,13 +14,6 @@
 /// never start the thread.
 #[cfg(not(test))]
 const TEST_RUN_TICK: Duration = Duration::from_secs(2);
-/// Whether the host creates test-run cards. Off until the card UI ships
-/// (tm-ncc6.13.3): a UI without the card renderer breaks on a `testRun`
-/// message (docs/features/test-runs.md, "Rollout: the UI first"). While off,
-/// the rescan thread never starts the card epoch, so no card is created and
-/// the epoch is first stored when cards go live. Tests enable cards directly.
-#[cfg(not(test))]
-const TEST_RUN_CARDS_SHIPPED: bool = false;
 /// The idle backstop: a full rescan at least this often, for a change made in
 /// the same modification-time tick as a stat.
 const TEST_RUN_IDLE_RESCAN_INTERVAL: Duration = Duration::from_secs(10);
@@ -793,7 +786,8 @@ impl AppState {
                     // The card epoch is durable before any card is created;
                     // until then rescans publish runs but create no card. The
                     // step never waits, so the index is never held up by it.
-                    if TEST_RUN_CARDS_SHIPPED && !cards_enabled {
+                    // Tests enable cards directly and never start this thread.
+                    if !cards_enabled {
                         cards_enabled = state.step_test_run_cards_epoch(&mut epoch_fence);
                     }
                     if test_run_rescan_due(

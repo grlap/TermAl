@@ -76,14 +76,14 @@ export function MessageMeta({
     typeof sourceName === "string" ? sourceName.trim() : "";
   // A peer message keeps the user bubble styling but is labelled with the
   // sender's session name; an empty/absent name falls back to "You".
-  const displayName = isUser ? trimmedSourceName || "You" : "Agent";
+  const displayName = isUser ? trimmedSourceName || "You" : author === "system" ? "System" : "Agent";
   const enableMarkerMenuTrigger = useIsMessageMetaMarkerMenuTriggerEnabled();
   const responseBoardDragStart = useMessageMetaResponseBoardDragStart();
   const isMarkerMenuTrigger = enableMarkerMenuTrigger;
   const markerMenuLabel = `${displayName}, open marker actions`;
   const markerMenuTitle = isUser
     ? `Open marker actions for ${trimmedSourceName ? `${displayName}'s` : "your"} message`
-    : "Open marker actions for assistant message";
+    : `Open marker actions for ${author === "system" ? "system" : "assistant"} message`;
 
   return (
     <div

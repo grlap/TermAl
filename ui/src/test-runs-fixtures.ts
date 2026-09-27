@@ -1,5 +1,18 @@
 // Shared test-run wire fixtures. No launcher or backend processes are started.
 import type { TestRunDetail, TestRunSummary } from "./test-runs";
+import type { TestRunCardSnapshot } from "./test-run-card";
+import type { TestRunWaitRecord } from "./test-run-waits";
+
+export function makeTestRunCard(overrides: Partial<TestRunCardSnapshot> = {}): TestRunCardSnapshot {
+  return { ...makeTestRun(), stagesOmitted: 0, errorTruncated: false, failure: null, ...overrides };
+}
+
+export function makeTestRunWait(overrides: Partial<TestRunWaitRecord> = {}): TestRunWaitRecord {
+  const run = makeTestRun();
+  return { id: "wait-one", sessionId: "session-coordinator", runIds: [run.runId], mode: "all",
+    createdAt: run.startedAt!, runs: [{ runId: run.runId, runDir: run.runDir, preset: run.preset,
+      worktree: run.worktree, ownerSessionId: run.ownerSessionId, startedAt: run.startedAt }], ...overrides };
+}
 
 export function makeTestRun(overrides: Partial<TestRunSummary> = {}): TestRunSummary {
   return {

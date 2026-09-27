@@ -3,21 +3,42 @@
 import { createContext, useContext, useMemo, type ReactNode } from "react";
 import { useStableEvent } from "./panels/use-stable-event";
 import { testRunSessionMarker, type TestRunSummary } from "./test-runs";
+import type { TestRunCardTarget } from "./test-run-card";
+import type { TestRunWaitRecord, TestRunWaitFailures } from "./test-run-waits";
+import { EMPTY_TEST_RUN_WAITS, TestRunWaitsContext, TestRunWaitFailuresContext } from "./test-run-waits-context";
 
-export const TestRunsOpenContext = createContext<((sessionId?: string | null) => void) | null>(null);
+export type OpenTestRuns = (sessionId?: string | null, target?: TestRunCardTarget) => void;
+
+export const TestRunsOpenContext = createContext<OpenTestRuns | null>(null);
 
 export const TestRunsContext = createContext<{
   runs: readonly TestRunSummary[];
-  open: ((sessionId?: string | null) => void) | null;
-}>({ runs: [], open: null });
+  open: OpenTestRuns | null;
+  snapshotReady: boolean;
+}>({ runs: [], open: null, snapshotReady: false });
 
-export function TestRunsProvider({ runs, open, children }: {
-  runs: readonly TestRunSummary[]; open: (sessionId?: string | null) => void; children: ReactNode;
+const NO_WAITS: readonly TestRunWaitRecord[] = [];
+const NO_FAILURES: TestRunWaitFailures = {};
+const NO_DISMISS = () => {};
+
+// snapshotReady is required: a default of true would let a new call site claim
+// the index is ready and show "Run not currently indexed" before the first
+// snapshot. The context itself defaults to false (not ready).
+export function TestRunsProvider({ runs, waits = NO_WAITS, failures = NO_FAILURES, dismissFailure = NO_DISMISS, snapshotReady, open, children }: {
+  runs: readonly TestRunSummary[]; waits?: readonly TestRunWaitRecord[]; open: OpenTestRuns; children: ReactNode;
+  failures?: TestRunWaitFailures; dismissFailure?: (sessionId: string) => void; snapshotReady: boolean;
 }) {
   const stableOpen = useStableEvent(open);
-  const value = useMemo(() => ({ runs, open: stableOpen }), [runs, stableOpen]);
+  const value = useMemo(() => ({ runs, open: stableOpen, snapshotReady }), [runs, stableOpen, snapshotReady]);
+  const waitValue = useMemo(() => waits.length ? { waits, runs } : EMPTY_TEST_RUN_WAITS, [waits, runs]);
+  const stableDismiss = useStableEvent(dismissFailure);
+  const failureValue = useMemo(() => ({ failures, dismiss: stableDismiss }), [failures, stableDismiss]);
   return <TestRunsOpenContext.Provider value={stableOpen}>
-    <TestRunsContext.Provider value={value}>{children}</TestRunsContext.Provider>
+    <TestRunWaitFailuresContext.Provider value={failureValue}>
+    <TestRunWaitsContext.Provider value={waitValue}>
+      <TestRunsContext.Provider value={value}>{children}</TestRunsContext.Provider>
+    </TestRunWaitsContext.Provider>
+    </TestRunWaitFailuresContext.Provider>
   </TestRunsOpenContext.Provider>;
 }
 

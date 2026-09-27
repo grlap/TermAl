@@ -14,8 +14,8 @@ it("keeps action-only consumers independent of run updates", () => {
     return <button onClick={() => action?.()}>Open</button>;
   }
   const child = <ActionOnly />;
-  const rendered = render(<TestRunsProvider runs={[]} open={open}>{child}</TestRunsProvider>);
-  rendered.rerender(<TestRunsProvider runs={[makeTestRun()]} open={open}>{child}</TestRunsProvider>);
+  const rendered = render(<TestRunsProvider snapshotReady runs={[]} open={open}>{child}</TestRunsProvider>);
+  rendered.rerender(<TestRunsProvider snapshotReady runs={[makeTestRun()]} open={open}>{child}</TestRunsProvider>);
   expect(renders).toBe(1);
   fireEvent.click(screen.getByRole("button", { name: "Open" }));
   expect(open).toHaveBeenCalledTimes(1);
@@ -34,7 +34,7 @@ it("truncates the marker in existing toolbar space without a reserved row or ove
 });
 it("offers the Test Runs dock action separately from section navigation", () => {
   const open = vi.fn();
-  render(<TestRunsProvider runs={[]} open={open}><ControlPanelSurface
+  render(<TestRunsProvider snapshotReady runs={[]} open={open}><ControlPanelSurface
     gitStatusCount={0} isPreferencesOpen={false} onOpenPreferences={vi.fn()}
     projectCount={0} sessionCount={0} renderSection={() => null} /></TestRunsProvider>);
   fireEvent.click(screen.getByRole("button", { name: "Open Test Runs" }));
@@ -44,7 +44,7 @@ it("offers the Test Runs dock action separately from section navigation", () => 
 it("opens the owning session filter and disappears on terminal transition", () => {
   const open = vi.fn();
   const run = makeTestRun();
-  const view = (state: "running" | "passed") => <TestRunsProvider runs={[{ ...run, state }]} open={open}>
+  const view = (state: "running" | "passed") => <TestRunsProvider snapshotReady runs={[{ ...run, state }]} open={open}>
     <TestRunSessionMarker sessionId="session-owner" />
   </TestRunsProvider>;
   const rendered = render(view("running"));

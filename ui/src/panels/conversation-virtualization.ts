@@ -383,6 +383,8 @@ export function estimateConversationMessageHeight(
       return 176 + (message.directives?.length ?? 0) * 32;
     case "command":
       return ESTIMATED_COLLAPSED_COMMAND_HEIGHT_PX;
+    case "testRun":
+      return Math.min(900, 180 + message.run.stages.length * 28 + (message.run.failure ? 160 : 0));
     case "diff": {
       const diffLineCount = message.diff.length === 0 ? 1 : message.diff.split("\n").length;
       return Math.min(1500, Math.max(180, 156 + Math.min(diffLineCount, 20) * 20));
@@ -425,6 +427,12 @@ export function estimateConversationMessageHeight(
     case "codexAppRequest": {
       const detailLineCount = message.detail.length === 0 ? 1 : message.detail.split("\n").length;
       return Math.min(900, Math.max(220, 188 + detailLineCount * 20));
+    }
+    default: {
+      // Compile-time exhaustiveness, but tolerate future wire variants at runtime.
+      const unknownMessage: never = message;
+      void unknownMessage;
+      return ESTIMATED_COLLAPSED_COMMAND_HEIGHT_PX;
     }
   }
 }

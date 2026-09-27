@@ -25,6 +25,7 @@ import {
   shouldAdoptSnapshotRevision,
 } from "./state-revision";
 import {
+  isAuthoritativeRepairDeltaEvent,
   isDelegationDeltaEvent,
   isSameRevisionReplayableSessionDelta,
   isSessionDeltaEvent,
@@ -397,11 +398,27 @@ export function createAppLiveStateTransportEventHandlers(
     try {
       const delta = JSON.parse(event.data) as DeltaEvent;
       const currentRevision = latestStateRevisionRef.current;
-      if (isDelegationDeltaEvent(delta)) {
+      // A dispatch outcome is emitted after the consumed snapshot/delta and may
+      // have that same (or an older) revision. It is not a state mutation: never
+      // advance the global revision or put it in the transient connection slot.
+      // The hook deduplicates outcomes independently of snapshot adoption.
+      if (delta.type === "testRunWaitResumeDispatchFailed") {
+        applyTestRunDeltaLocally?.(delta);
+        return;
+      }
+      // Delegation and test-run wait deltas carry only part of their commit
+      // (a consumed wait also queued a resume prompt; sibling waits share the
+      // revision). Apply the wait locally by id, never move the global
+      // revision from it, and repair from the authoritative snapshot.
+      if (isAuthoritativeRepairDeltaEvent(delta)) {
         if (currentRevision === null || delta.revision > currentRevision) {
           observeDelta(delta, "resync");
         }
-        applyDelegationWaitDeltaLocally(delta);
+        if (isDelegationDeltaEvent(delta)) {
+          applyDelegationWaitDeltaLocally(delta);
+        } else {
+          applyTestRunDeltaLocally?.(delta);
+        }
         if (currentRevision === null || delta.revision >= currentRevision) {
           if (transportState.delegationRepairAdoptedSinceLastReconnectError) {
             void confirmReconnectRecoveryFromDeltaEvent();
@@ -409,9 +426,9 @@ export function createAppLiveStateTransportEventHandlers(
           setLastDelegationRepairRequestedRevision(delta.revision);
           requestStateResync({
             allowAuthoritativeRollback: currentRevision !== null,
-            // A delegation delta can require an authoritative `/api/state`
-            // repair for broad delegation/project state, but adopting that
-            // snapshot is not proof the reopened SSE stream is healthy.
+            // A delegation or wait delta can require an authoritative
+            // `/api/state` repair for state its commit changed, but adopting
+            // that snapshot is not proof the reopened SSE stream is healthy.
             // Keep reconnect polling armed until a later data-bearing SSE
             // event confirms live delivery after the repair.
             forceAdoptEqualOrNewerRevision: delta.revision,
@@ -607,12 +624,18 @@ export function createAppLiveStateTransportEventHandlers(
         return;
       }
 
+      // Each test-run index delta has a commit of its own, so it may move the
+      // revision. Wait deltas take the authoritative-repair branch above.
       if (delta.type === "testRunChanged" || delta.type === "testRunRemoved") {
+        if (!applyTestRunDeltaLocally) {
+          requestStateResync({ rearmOnFailure: true });
+          return;
+        }
         void confirmReconnectRecoveryFromDeltaEvent();
         latestStateRevisionRef.current = delta.revision;
-        applyTestRunDeltaLocally?.(delta);
         setBackendConnectionIssueDetail(null);
         clearRecoveredBackendRequestError();
+        applyTestRunDeltaLocally(delta);
         return;
       }
 

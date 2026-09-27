@@ -3,6 +3,7 @@
 // Does not own cards, stream tracking, announcements, or scroll writes.
 import { resolveSessionActivity, type SessionActivityOptions } from "./panels/AgentSessionPanel.waiting-indicator";
 import { isSessionAtLiveTail } from "./session-live-tail";
+import { useTestRunWaitAnnouncement } from "./test-run-waits-context";
 import type { Session } from "./types";
 import "./transcript-activity-slot.css";
 
@@ -24,7 +25,10 @@ export function transcriptActivityLabel(session: Session | null, inputs: Activit
 }
 
 export function TranscriptActivitySlot({ session, ...inputs }: { session: Session | null } & ActivityInputs) {
-  const label = transcriptActivityLabel(session, inputs);
+  // Registered test-run waits come from context, as in SessionActivityStrip, so
+  // both surfaces agree. The slot shows no elapsed time, so no ticking prompt.
+  const testRunWaitPrompt = useTestRunWaitAnnouncement(session?.id, session?.status);
+  const label = transcriptActivityLabel(session, { ...inputs, testRunWaitPrompt });
   return (
     <div
       className="transcript-activity-slot"

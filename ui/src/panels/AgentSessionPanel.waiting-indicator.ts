@@ -7,7 +7,7 @@ import type { Session } from "../types";
 export type SessionActivitySource = Pick<
   Session,
   "agent" | "status" | "liveActivity" | "pendingPrompts" | "queuePaused"
->;
+> & { id?: string };
 
 type SessionActivityState =
   | "idle"
@@ -25,6 +25,7 @@ export type SessionActivityOptions = {
   isSending?: boolean;
   isStopping?: boolean;
   delegationWaitPrompt?: string | null;
+  testRunWaitPrompt?: string | null;
 };
 
 export function resolveSessionActivity({
@@ -32,6 +33,7 @@ export function resolveSessionActivity({
   isSending = false,
   isStopping = false,
   delegationWaitPrompt = null,
+  testRunWaitPrompt = null,
 }: SessionActivityOptions) {
   const prompt = session.liveActivity?.prompt.trim() || null;
   const pendingPrompt = session.pendingPrompts?.[0]?.text.trim() || null;
@@ -62,8 +64,9 @@ export function resolveSessionActivity({
     return describe("paused", "has a paused queue", pendingPrompt);
   }
   if (delegationWaitPrompt) {
-    return describe("waiting", "is waiting for delegated sessions", delegationWaitPrompt);
+    return describe("waiting", testRunWaitPrompt ? "is waiting for delegated sessions and test runs" : "is waiting for delegated sessions", [delegationWaitPrompt, testRunWaitPrompt].filter(Boolean).join("; "));
   }
+  if (testRunWaitPrompt) return describe("waiting", "is waiting for test runs", testRunWaitPrompt);
   if ((session.pendingPrompts?.length ?? 0) > 0) {
     return describe("queued", "is starting the next turn", pendingPrompt, true);
   }

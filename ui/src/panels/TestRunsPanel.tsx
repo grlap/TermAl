@@ -6,16 +6,18 @@ import { TestRunsContext } from "../test-runs-context";
 import { sortTestRuns, testRunMatchesSession, type TestRunState } from "../test-runs";
 import { TestRunDetails, TestRunDuration } from "./TestRunDetails";
 import "./test-runs-panel.css";
+import type { TestRunCardTarget } from "../test-run-card";
 
-export function TestRunsPanel({ projects, sessions, initialProjectId = null, initialSessionId = null }: {
+export function TestRunsPanel({ projects, sessions, initialProjectId = null, initialSessionId = null, initialRun = null }: {
   projects: readonly Project[]; sessions: readonly Session[];
   initialProjectId?: string | null; initialSessionId?: string | null;
+  initialRun?: TestRunCardTarget | null;
 }) {
-  const { runs } = useContext(TestRunsContext);
+  const { runs, snapshotReady } = useContext(TestRunsContext);
   const [projectId, setProjectId] = useState(initialSessionId ? "" : initialProjectId ?? "");
   const [sessionId, setSessionId] = useState(initialSessionId ?? "");
   const [state, setState] = useState<TestRunState | "">("");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(initialRun?.runId ?? null);
   const names = useMemo(() => new Map(sessions.map(session => [session.id, session.name])), [sessions]);
   const sessionIds = [...new Set([...sessions.map(session => session.id), ...runs.flatMap(run =>
     [run.ownerSessionId, run.notifySessionId].filter((id): id is string => id !== null)), ...(sessionId ? [sessionId] : [])])];
@@ -41,7 +43,7 @@ export function TestRunsPanel({ projects, sessions, initialProjectId = null, ini
     </div>
     <div className="test-runs-layout">
       <div className="test-runs-list" aria-label="Discovered runs">
-        {!visible.length ? <p>No test runs match these filters.</p> : visible.map(run => <button
+        {!visible.length ? <p>{snapshotReady ? "No test runs match these filters." : "Waiting for the test-run index…"}</p> : visible.map(run => <button
           key={run.runId} type="button" className="test-run-row" aria-pressed={selectedId === run.runId}
           onClick={() => setSelectedId(run.runId)}>
           <span className={`test-run-state is-${run.state}`}>{run.state}{run.interrupted ? " · interrupted" : ""}</span>
@@ -53,7 +55,14 @@ export function TestRunsPanel({ projects, sessions, initialProjectId = null, ini
           {run.state === "running" ? <span>Stage: {run.currentStage ?? "none"}</span> : null}
         </button>)}
       </div>
-      {selected ? <TestRunDetails key={selected.runId} run={selected} /> : <p>Select a run to inspect stages and logs.</p>}
+      {selected ? <TestRunDetails key={selected.runId} run={selected} /> : initialRun && selectedId === initialRun.runId && !runs.some(run => run.runId === initialRun.runId) ?
+        <section aria-label="Recorded run evidence"><h3>{snapshotReady ? "Run not currently indexed" : "Waiting for the test-run index…"}</h3>
+          <p>{initialRun.runId}</p><p>Run directory (literal path): <code>{initialRun.runDir}</code></p>
+          <pre>node scripts/test-launcher.mjs summary RUN_DIRECTORY</pre>
+          <p>RUN_DIRECTORY is a placeholder. Pass the literal path above as one argument using your shell’s quoting rules.</p>
+          <p>{snapshotReady ? "Discovery may still be in progress; absence from this snapshot does not prove the run was removed." : "The first state snapshot has not arrived yet."}</p>
+          <p>The transcript card retains its recorded evidence. No new run has been started.</p>
+        </section> : <p>Select a run to inspect stages and logs.</p>}
     </div>
   </section>;
 }

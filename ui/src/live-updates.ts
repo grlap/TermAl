@@ -121,6 +121,9 @@ export type SessionDeltaEvent = Exclude<
   | { type: "codexUpdated" }
   | { type: "testRunChanged" }
   | { type: "testRunRemoved" }
+  | { type: "testRunWaitCreated" }
+  | { type: "testRunWaitConsumed" }
+  | { type: "testRunWaitResumeDispatchFailed" }
   | { type: "orchestratorsUpdated" }
   | { type: "delegationCreated" }
   | { type: "delegationWaitCreated" }
@@ -147,6 +150,7 @@ type TranscriptDelta = Extract<
   | { type: "textReplace" }
   | { type: "commandUpdate" }
   | { type: "parallelAgentsUpdate" }
+  | { type: "testRunCardUpdated" }
 >;
 type RetainedMessageTargetDelta = Exclude<
   TranscriptDelta,
@@ -403,6 +407,7 @@ function applyMetadataOnlySessionDelta(
       };
     case "commandUpdate":
     case "parallelAgentsUpdate":
+    case "testRunCardUpdated":
       return {
         ...base,
         preview: delta.preview,
@@ -1086,6 +1091,23 @@ export function applyDeltaToSessions(
       };
     }
 
+    case "testRunCardUpdated": {
+      if (sessionIndex === -1) return { kind: "needsResync" };
+      const session = sessions[sessionIndex];
+      const target = resolveRetainedMessageTargetOrFallback(sessions, sessionIndex, session, delta);
+      if (target.kind !== "messageFound") return target;
+      const message = session.messages[target.messageIndex];
+      if (!message || message.id !== delta.messageId || message.type !== "testRun") return { kind: "needsResync" };
+      if (serializedValuesMatch(message.run, delta.run) && sessionMetadataUpdateIsNoOp(
+        session, delta.messageCount, delta.preview, delta.sessionMutationStamp,
+      )) return { kind: "appliedNoOp", sessions };
+      const messages = session.messages.slice();
+      messages[target.messageIndex] = { ...message, run: delta.run };
+      return { kind: "applied", sessions: replaceSession(sessions, sessionIndex, {
+        ...session, messages, messageCount: delta.messageCount, preview: delta.preview,
+        sessionMutationStamp: resolveSessionMutationStamp(session, delta.sessionMutationStamp),
+      }) };
+    }
     case "parallelAgentsUpdate": {
       if (sessionIndex === -1) {
         return { kind: "needsResync" };

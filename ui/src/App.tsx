@@ -888,6 +888,9 @@ export default function App() {
   const {
     adoptState,
     testRuns,
+    testRunWaits,
+    testRunWaitFailures,
+    dismissTestRunWaitFailure,
     adoptCreatedSessionResponse,
     syncPreferencesFromState,
     clearHydrationMismatchSessionIds,
@@ -2109,10 +2112,11 @@ export default function App() {
   }
 
   return (
-    <TestRunsProvider runs={testRuns} open={(sessionId = null) => {
+    <TestRunsProvider runs={testRuns} waits={testRunWaits} failures={testRunWaitFailures}
+      dismissFailure={dismissTestRunWaitFailure} snapshotReady={hasAdoptedStateSnapshot} open={(sessionId = null, target) => {
       setWorkspace(current => applyControlPanelLayout(openTestRunsInWorkspaceState(
         current, current.activePaneId, sessionId ?? activeSession?.id ?? null,
-        sessionId ? null : activeSession?.projectId ?? null, sessionId,
+        sessionId || target ? null : activeSession?.projectId ?? null, sessionId, target,
       )));
     }}>
     <div className="shell">

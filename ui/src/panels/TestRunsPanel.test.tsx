@@ -17,7 +17,7 @@ beforeEach(() => {
   vi.mocked(api.readTestRunLog).mockResolvedValue({ text: "tail output", truncated: true, size: 90000 });
 });
 function view(runs: TestRunSummary[], initialSessionId: string | null = null) {
-  return <TestRunsContext.Provider value={{ runs, open: vi.fn() }}>
+  return <TestRunsContext.Provider value={{ runs, open: vi.fn(), snapshotReady: true }}>
     <TestRunsPanel projects={[]} sessions={[]} initialSessionId={initialSessionId} />
   </TestRunsContext.Provider>;
 }

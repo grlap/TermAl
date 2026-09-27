@@ -22,6 +22,12 @@
 .test-run-details table { border-collapse: collapse; width: 100%; }
 .test-run-details th, .test-run-details td { text-align: left; padding: .4rem; border-bottom: 1px solid var(--line); }
 .test-run-session-marker { max-width: 100%; font-size: .8em; overflow-wrap: anywhere; }
-/* The existing horizontal toolbar owns overflow; no new transcript-height row. */
+.test-run-wait-indicator { display: block; min-width: 0; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.test-run-wait-failure { min-width: 0; max-width: 24rem; font-size: .8em; }
+.test-run-wait-failure summary { cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.test-run-wait-failure p { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 12rem; overflow: auto; }
+/* Closed, the notice is one toolbar item. Opened in the pane toolbar, its
+   error text (at most 12rem tall) grows the toolbar and moves the transcript
+   down by that height; this is accepted. */
 .pane-view-strip .test-run-session-marker { flex: 0 0 auto; max-width: 16rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 @container (max-width: 650px) { .test-runs-layout { grid-template-columns: minmax(0, 1fr); } }

@@ -4083,7 +4083,8 @@ describe("applyDeltaToSessions", () => {
         status: "idle",
         sessionMutationStamp: 41,
       };
-      return { sessions, delta };
+      // Preserve the fixture's text discriminant when callers vary its author.
+      return { sessions, delta: { ...delta, message: { ...message } } };
     }
 
     it("returns appliedNoOp for an identical replay at the same index", () => {

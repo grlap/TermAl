@@ -1,3 +1,4 @@
+import { testRunSearchText } from "./test-run-card";
 import {
   buildConnectionRetryDisplayStateByMessageId,
   connectionRetryPresentationFor,
@@ -226,6 +227,8 @@ function collectMessageSearchText(
       return collectThinkingSearchText(message);
     case "command":
       return collectCommandSearchText(message);
+    case "testRun":
+      return testRunSearchText(message.run);
     case "diff":
       return collectDiffSearchText(message);
     case "markdown":

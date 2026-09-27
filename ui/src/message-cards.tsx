@@ -67,6 +67,7 @@ import {
 } from "./connection-retry";
 import { ConnectionRetryCard } from "./connection-retry-card";
 import { ParallelAgentsCard } from "./parallel-agents-card";
+import { TestRunCard } from "./test-run-card-view";
 import { renderPlainTextWithSoftBreaks } from "./plain-text-wrapping";
 import type { MonacoAppearance } from "./monaco";
 import { MessageNavigationButtons } from "./panels/conversation-navigation";
@@ -351,6 +352,8 @@ export const MessageCard = memo(
             searchHighlightTone={searchHighlightTone}
           />
         );
+      case "testRun":
+        return <TestRunCard message={message} searchQuery={searchQuery} searchHighlightTone={searchHighlightTone} />;
       case "diff":
         return (
           <DiffCard

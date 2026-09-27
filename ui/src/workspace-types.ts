@@ -100,6 +100,7 @@ export type WorkspaceResponseBoardView = {
 export type WorkspaceTestRunsTab = Omit<WorkspaceWorkTab, "kind"> & {
   kind: "testRuns";
   filterSessionId: string | null;
+  selectedRun?: { runId: string; runDir: string } | null;
 };
 
 /**

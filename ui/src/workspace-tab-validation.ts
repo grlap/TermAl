@@ -89,7 +89,10 @@ export function isWorkspaceTab(value: unknown): value is WorkspaceTab {
     case "work":
     case "testRuns":
       return (
-        (value.kind !== "testRuns" || isNullableString(value.filterSessionId)) &&
+        (value.kind !== "testRuns" || (isNullableString(value.filterSessionId) &&
+          (value.selectedRun == null || (typeof value.selectedRun === "object" &&
+            "runId" in value.selectedRun && isString(value.selectedRun.runId) &&
+            "runDir" in value.selectedRun && isString(value.selectedRun.runDir))))) &&
         isNullableString(value.originSessionId) &&
         isString(value.refreshToken) &&
         isOptionalNullableString(value.originProjectId)

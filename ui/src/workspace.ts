@@ -951,8 +951,12 @@ export function openTestRunsInWorkspaceState(
   originSessionId: string | null,
   originProjectId: string | null = null,
   filterSessionId: string | null = null,
+  selectedRun?: { runId: string; runDir: string },
 ): WorkspaceState {
-  return openSingletonWorkTab(workspace, preferredPaneId, originSessionId, originProjectId, "testRuns", filterSessionId);
+  const next = openSingletonWorkTab(workspace, preferredPaneId, originSessionId, originProjectId, "testRuns", filterSessionId);
+  return { ...next, panes: next.panes.map(pane => pane.id !== next.activePaneId ? pane : {
+    ...pane, tabs: pane.tabs.map(tab => tab.kind === "testRuns" ? { ...tab, selectedRun: selectedRun ?? null } : tab),
+  }) };
 }
 
 function openSingletonWorkTab(

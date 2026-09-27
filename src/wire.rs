@@ -3186,5 +3186,11 @@ enum DeltaEvent {
         revision: u64,
         session_id: String,
         error: String,
+        /// The server instance that failed to dispatch. The UI can then keep
+        /// a failure a restarted server sends before its first snapshot.
+        /// Defaults to empty when decoding a remote on an older build that
+        /// omits it, so remote delta decoding does not fail.
+        #[serde(default)]
+        server_instance_id: String,
     },
 }

@@ -17,6 +17,16 @@ function workspace(): WorkspaceState {
   };
 }
 describe("Test Runs workspace tab", () => {
+  it("retains a card's evidence target on navigation, then clears it on ordinary reopening", () => {
+    const selectedRun = { runId: "test-historical", runDir: "C:/repo/.git/review-runs/test-historical" };
+    const opened = openTestRunsInWorkspaceState(workspace(), "a", "a", null, null, selectedRun);
+    const tab = opened.panes[0].tabs.find(tab => tab.kind === "testRuns")!;
+    expect(tab).toMatchObject({ selectedRun });
+    expect(isWorkspaceTab(JSON.parse(JSON.stringify(tab)))).toBe(true);
+    expect(isWorkspaceTab({ ...tab, selectedRun: { runId: 4, runDir: "x" } })).toBe(false);
+    const reopened = openTestRunsInWorkspaceState(opened, "a", "a");
+    expect(reopened.panes[0].tabs.find(tab => tab.kind === "testRuns")).toMatchObject({ selectedRun: null });
+  });
   it("validates a persisted tab and its filters", () => {
     const tab = createTestRunsTab("s", "p", "s");
     expect(isWorkspaceTab(JSON.parse(JSON.stringify(tab)))).toBe(true);

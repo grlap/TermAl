@@ -1,9 +1,12 @@
 // Owns whole-turn labels, live-tail boundaries, accessibility and stable slot
 // reservation tests. JSDOM checks CSS contracts, not browser scroll geometry.
 import { cleanup, render } from "@testing-library/react";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { TranscriptActivitySlot, transcriptActivityLabel } from "./transcript-activity-slot";
 import { isSessionAtLiveTail } from "./session-live-tail";
+import { TestRunsProvider } from "./test-runs-context";
+import { makeTestRunWait } from "./test-runs-fixtures";
+import type { TestRunWaitRecord } from "./test-run-waits";
 import type { CommandMessage, Message, Session } from "./types";
 
 const prompt: Message = { id: "prompt", author: "you", type: "text", timestamp: "10:00", text: "Work" };
@@ -28,6 +31,25 @@ it("matches the strip during send, stop and delegation-wait handoffs", () => {
   expect(slot).toHaveTextContent("Agent is working");
   view.rerender(<TranscriptActivitySlot session={idle} />);
   expect(view.container.firstElementChild).toBe(slot);
+  expect(slot).toBeEmptyDOMElement();
+});
+
+it("shows a registered test-run wait as the strip does, only for its own idle session", () => {
+  const wait = makeTestRunWait();
+  const view = (waits: TestRunWaitRecord[], status: Session["status"] = "idle") => (
+    <TestRunsProvider snapshotReady runs={[]} waits={waits} open={vi.fn()}>
+      <TranscriptActivitySlot session={session([], { id: wait.sessionId, status })} />
+    </TestRunsProvider>
+  );
+  const rendered = render(view([wait]));
+  const slot = rendered.container.firstElementChild;
+  expect(slot).toHaveTextContent("Agent is working");
+  rendered.rerender(view([makeTestRunWait({ sessionId: "other" })]));
+  expect(slot).toBeEmptyDOMElement();
+  rendered.rerender(view([wait], "approval"));
+  expect(slot).toBeEmptyDOMElement();
+  rendered.rerender(view([]));
+  expect(rendered.container.firstElementChild).toBe(slot);
   expect(slot).toBeEmptyDOMElement();
 });
 

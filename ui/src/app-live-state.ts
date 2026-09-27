@@ -52,6 +52,7 @@
 
 import {
   startTransition,
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -83,6 +84,7 @@ import {
 } from "./session-model-utils";
 import { resolveAdoptedStateSlices } from "./state-adoption";
 import { applyTestRunDelta, reconcileTestRunSnapshot, type TestRunSummary } from "./test-runs";
+import { applyTestRunWaitDelta, type TestRunWaitRecord } from "./test-run-waits";
 import { ALL_PROJECTS_FILTER_ID } from "./project-filters";
 import {
   isServerInstanceMismatch,
@@ -283,6 +285,18 @@ export function useAppLiveState(
 
   const hydratingSessionIdsRef = useRef<Set<string>>(new Set());
   const [testRuns, setTestRuns] = useState<TestRunSummary[]>([]);
+  const [testRunWaits, setTestRunWaits] = useState<readonly TestRunWaitRecord[]>([]);
+  const [testRunWaitFailures, setTestRunWaitFailures] = useState<import("./test-run-waits").TestRunWaitFailures>({});
+  const seenTestRunWaitFailuresRef = useRef(new Map<string, import("./test-run-waits").TestRunWaitFailure>());
+  // Newest test-run wait delta applied; see applyTestRunDeltaLocally.
+  const latestTestRunWaitDeltaRevisionRef = useRef<number | null>(null);
+  const dismissTestRunWaitFailure = useCallback((sessionId: string) => {
+    setTestRunWaitFailures(current => {
+      const next = { ...current };
+      delete next[sessionId];
+      return next;
+    });
+  }, []);
   const partialTailAppendProofsRef = useRef(
     new Map<string, PartialTailAppendProof>(),
   );
@@ -734,6 +748,12 @@ export function useAppLiveState(
         });
       }
       if (hasRemovedSessions) {
+        for (const id of removedSessionIds) seenTestRunWaitFailuresRef.current.delete(id);
+        setTestRunWaitFailures(current => {
+          const next = { ...current };
+          for (const id of removedSessionIds) delete next[id];
+          return next;
+        });
         setDraftsBySessionId((current) =>
           pruneSessionValues(current, availableSessionIds),
         );
@@ -1539,7 +1559,24 @@ export function useAppLiveState(
     }
 
     latestStateRevisionRef.current = nextState.revision;
+    if (fullStateServerInstanceChanged) {
+      // A restart can roll revisions back; the old server's wait deltas say
+      // nothing about the new one's.
+      latestTestRunWaitDeltaRevisionRef.current = null;
+      // Keep a failure this server sent before its snapshot was adopted; drop
+      // failures from an older server and untagged ones from older backends.
+      const fromThisServer = (failure: import("./test-run-waits").TestRunWaitFailure) =>
+        failure.serverInstanceId === nextState.serverInstanceId;
+      for (const [sessionId, failure] of seenTestRunWaitFailuresRef.current) {
+        if (!fromThisServer(failure)) seenTestRunWaitFailuresRef.current.delete(sessionId);
+      }
+      setTestRunWaitFailures(current => {
+        const kept = Object.fromEntries(Object.entries(current).filter(([, failure]) => fromThisServer(failure)));
+        return Object.keys(kept).length === Object.keys(current).length ? current : kept;
+      });
+    }
     setTestRuns(current => reconcileTestRunSnapshot(current, nextState.testRuns ?? []));
+    setTestRunWaits(current => JSON.stringify(current) === JSON.stringify(nextState.testRunWaits ?? []) ? current : nextState.testRunWaits ?? []);
     setHasAdoptedStateSnapshot(true);
     if (nextState.serverInstanceId) {
       rememberServerInstanceId(
@@ -1716,6 +1753,25 @@ export function useAppLiveState(
     applyTestRunDeltaLocally: delta => {
       if (delta.type === "testRunChanged" || delta.type === "testRunRemoved") {
         setTestRuns(current => applyTestRunDelta(current, delta));
+      } else if (delta.type === "testRunWaitResumeDispatchFailed") {
+        const seen = seenTestRunWaitFailuresRef.current.get(delta.sessionId);
+        // Revisions are comparable only within one server instance: a restart
+        // can roll the revision back, so another server's failure is always new.
+        const sameServer = seen?.serverInstanceId === delta.serverInstanceId;
+        if (seen && sameServer && (seen.revision > delta.revision || (seen.revision === delta.revision && seen.error === delta.error))) return;
+        seenTestRunWaitFailuresRef.current.set(delta.sessionId, delta);
+        setTestRunWaitFailures(current => ({ ...current, [delta.sessionId]: delta }));
+      } else if (delta.type === "testRunWaitCreated" || delta.type === "testRunWaitConsumed") {
+        // Wait deltas do not move the global revision (the transport repairs
+        // from the authoritative snapshot instead), so a created wait is stale
+        // when older than the adopted state or the newest wait delta applied.
+        // Otherwise a late created would bring back a consumed wait. Consumed
+        // removes by id, so it is safe at any revision.
+        const latestWaitDeltaRevision = latestTestRunWaitDeltaRevisionRef.current;
+        const floor = Math.max(latestStateRevisionRef.current ?? -Infinity, latestWaitDeltaRevision ?? -Infinity);
+        if (delta.type === "testRunWaitCreated" && delta.revision < floor) return;
+        latestTestRunWaitDeltaRevisionRef.current = Math.max(latestWaitDeltaRevision ?? delta.revision, delta.revision);
+        setTestRunWaits(current => applyTestRunWaitDelta(current, delta));
       }
     },
     observeHydrationDelta,
@@ -1792,6 +1848,9 @@ export function useAppLiveState(
   return {
     adoptState,
     testRuns,
+    testRunWaits,
+    testRunWaitFailures,
+    dismissTestRunWaitFailure,
     adoptCreatedSessionResponse,
     syncPreferencesFromState,
     clearHydrationMismatchSessionIds,

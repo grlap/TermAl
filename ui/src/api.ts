@@ -51,6 +51,7 @@ import {
 } from "./api-request";
 
 export type StateResponse = {
+  testRunWaits?: import("./test-run-waits").TestRunWaitRecord[];
   testRuns?: import("./test-runs").TestRunSummary[];
   revision: number;
   /**

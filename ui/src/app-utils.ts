@@ -260,6 +260,8 @@ export function messageChangeMarker(message: Message) {
       return `${message.type}:${message.lines.length}:${message.title.length}`;
     case "command":
       return `${message.type}:${message.status}:${message.output.length}`;
+    case "testRun":
+      return `${message.type}:${jsonContentChangeMarker(message.run)}`;
     case "diff":
       return `${message.type}:${message.filePath}:${message.diff.length}`;
     case "markdown":

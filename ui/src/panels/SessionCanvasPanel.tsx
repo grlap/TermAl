@@ -10,6 +10,7 @@
 } from "react";
 import { AgentIcon } from "../agent-icon";
 import { TestRunSessionMarker } from "../test-runs-context";
+import { TestRunWaitIndicator, TestRunWaitFailureNotice } from "../test-run-waits-context";
 import {
   dataTransferHasSessionDragType,
   readSessionDragData,
@@ -492,6 +493,8 @@ export function SessionCanvasPanel({
 
                 <div className="session-canvas-card-body">
                   <TestRunSessionMarker sessionId={session.id} />
+                  <TestRunWaitIndicator sessionId={session.id} status={session.status} />
+                  <TestRunWaitFailureNotice sessionId={session.id} announce={false} />
                   <div className="session-canvas-card-meta">
                     <span>{session.agent}</span>
                     <span>{session.model}</span>

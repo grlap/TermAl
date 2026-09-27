@@ -891,6 +891,8 @@ function reconcileMessage(previous: Message, next: Message): Message {
       return reconcileThinkingMessage(previous as ThinkingMessage, next);
     case "command":
       return reconcileCommandMessage(previous as CommandMessage, next);
+    case "testRun":
+      return JSON.stringify(previous) === JSON.stringify(next) ? previous : next;
     case "diff":
       return reconcileDiffMessage(previous as DiffMessage, next);
     case "markdown":

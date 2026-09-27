@@ -321,7 +321,7 @@ function renderSessionPaneView({
   };
 
   const openTestRuns = vi.fn();
-  const view = (runs: TestRunSummary[]) => <TestRunsProvider runs={runs} open={openTestRuns}><SessionPaneView {...props} /></TestRunsProvider>;
+  const view = (runs: TestRunSummary[]) => <TestRunsProvider snapshotReady runs={runs} open={openTestRuns}><SessionPaneView {...props} /></TestRunsProvider>;
   const rendered = render(view(testRuns));
 
   return {

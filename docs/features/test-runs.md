@@ -443,10 +443,16 @@ So a UI with the card renderer (tm-ncc6.13.3) must be built and installed
 before TermAl restarts onto a backend that creates cards. A card UI works
 with an older backend, which simply sends no cards.
 
-The card backend landed switched off: `TEST_RUN_CARDS_SHIPPED` in
-`src/test_runs.rs` keeps the rescan thread from starting the card epoch, so
-no card is created and the epoch is first stored when cards go live. The
-switch is turned on together with the card UI.
+The card backend landed switched off, and is switched on in source together
+with the card UI (tm-ncc6.13.3), in one changeset. The switch is gone: the
+rescan thread starts the card epoch on its first tick, the epoch is stored
+before any card is created, and only runs started after it get cards.
+
+Enabled in source is not deployed. Until the card UI is built and installed
+into `ui/dist`, and then the host restarts onto this backend, the running
+host keeps serving the old UI and creates no cards. The order stays the
+same: install the UI first, then restart. A restart before the UI install
+puts cards in front of a UI that cannot lay them out.
 
 ### Card rendering
 
@@ -460,13 +466,21 @@ switch is turned on together with the card UI.
   never joins the live index, so there is one verdict source and historical
   cards do not rerender.
 - The "details" action is always enabled and opens the run in the Test Runs
-  tab. When the runId is not in the index, the tab shows an explicit "run no
-  longer indexed" view with the runId, run directory and the `summary`
-  command.
+  tab. When the runId is not in the index, the tab shows an explicit view
+  with the runId, the literal run directory, and the `summary` command with a
+  `RUN_DIRECTORY` placeholder, since the path is not quoted into it.
+  - Before the first state snapshot, the view says it is waiting for the
+    index.
+  - After it, the view says "Run not currently indexed". It does not claim the
+    run was removed: discovery may still be in progress, and the wire has no
+    flag for the first scan finishing.
 - A card never shows `passed` without a terminal `results.json`. A dead worker
   shows `unknown` with its reason and names `recover` as the way to settle
   it.
 - There is no cancel control before slice 3.
+- The card shows in the transcript only. The pane's Commands view lists
+  `command` messages and leaves test-run cards out; the Test Runs tab is the
+  list of runs.
 - A possible later refinement: fold the launching command card into the
   test-run card when its output carries the run's `RUN` or `STARTED` receipt.
 
@@ -814,7 +828,10 @@ type TestRunWaitConsumedEvent = {
 type TestRunWaitResumeDispatchFailedEvent = {
   type: "testRunWaitResumeDispatchFailed"; revision: number;
   sessionId: string; error: string;
+  serverInstanceId: string; // absent from backends before tm-ncc6.8.4
 };
+// The backend decodes a remote's event without serverInstanceId as an empty
+// string, so a remote on an older build does not break remote delta decoding.
 ```
 
 `StateResponse.testRunWaits?: TestRunWaitRecord[]` lists pending waits only,
@@ -868,17 +885,63 @@ support does with them, traced in `ui/src` at 39977e5:
   (`triggerRecoveryForDelta`), deduplicated by the hydration queue.
 
 That is one or two bounded reloads per wait created or consumed. The resume
-prompt reaches the transcript as an ordinary queued prompt. The waiting
-indicator, and the UI handling of these events, land with tm-ncc6.8.
+prompt reaches the transcript as an ordinary queued prompt.
+
+The UI that ships with the card UI (tm-ncc6.8) handles all three events and
+never takes them for session deltas, so it never reloads a transcript for
+them:
+
+- **`testRunWaitCreated` and `testRunWaitConsumed`** are handled like
+  delegation wait deltas. Each carries only part of its commit: a consume also
+  queued a resume prompt, and one commit can consume several waits at the
+  same revision. So the UI updates the list of pending waits by wait id,
+  never advances the global revision from these deltas, and asks for an
+  authoritative `/api/state` repair of that revision. The repair fetches are
+  coalesced (one in flight). A created wait older than the adopted state, or
+  than the newest wait delta applied, is ignored, so a late create cannot
+  bring back a consumed wait; a consume removes by id at any revision.
+- **`testRunWaitResumeDispatchFailed`** is routed before that gate and never
+  advances the revision. It reports an outcome after the wait was consumed,
+  not a state change, and can carry the same revision as the consume or an
+  older one. The UI keeps the latest error per session: a repeat of the same
+  revision and error, or an older revision, from the same server instance does
+  not replace it. Revisions are not compared across instances, because a
+  restart can roll the revision back; another instance's failure is always new.
+- **The error notice** shows in the session pane's toolbar and on the board,
+  apart from connection errors. It stays through unrelated deltas, snapshots
+  and tab changes, until the user dismisses it, the session is removed, or
+  the UI adopts a snapshot from a different server and the failure did not
+  come from that server (see "Server identity"). A dismissed error does not
+  come back when the same event repeats. The notice lives in the browser
+  session only, so a reload drops it; the backend's `test run wait warning>`
+  line on stderr is the lasting record. Opened in the pane toolbar, its error
+  text (at most 12rem tall) grows the toolbar and moves the transcript down by
+  that height; this is accepted. Only the pane's notice carries a live region;
+  the board's copy is a plain label, so two mounted notices do not both
+  announce. The region mounts with its text already in place, which screen
+  readers do not always announce.
+- **Server identity.** The event carries the `serverInstanceId` of the server
+  that failed to dispatch. When the UI adopts a snapshot from a different
+  server, it keeps the failures tagged with that new server and drops the
+  rest, including untagged ones from older backends. A failure that a
+  restarted server sends before the UI has adopted its first snapshot
+  therefore survives the switch, instead of the session looking plainly idle.
 
 ### Waiting indicator
 
 The indicator sits in the session pane's waiting indicator, next to delegation
-waits, and on the board. It is not a transcript message. For example: "waiting
-for test run RUN (full, stage rust-tests, 3m12s)".
+waits, and on the board. It is not a transcript message, but the transcript's
+reserved activity line shows "Agent is working" for it, as it does for a
+delegation wait. For example: "Waiting for all test runs: RUN (full, running,
+stage rust-tests, 3m12s) — TITLE". A wait in `any` mode says "any test run",
+and a run that has left the index shows "not indexed" and no elapsed time.
 
-- It shows only while a wait is registered. It is never inferred from a
-  running card, and it hides while the session is actively responding.
+- It shows only while a wait is registered and the session is idle. It is
+  never inferred from a running card, and it hides while the session is
+  actively responding.
+- The live-region announcement leaves out the elapsed time, so screen readers
+  are not re-told every second. The visible text and its tooltip keep it
+  current.
 - While the run is in `testRuns`, the indicator joins that run's live summary
   for its state, current stage and elapsed time. After the run leaves the
   index, it falls back to the wait's `runs` label. So a waiter that does not

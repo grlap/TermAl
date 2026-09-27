@@ -848,7 +848,23 @@ fn the_wait_and_its_events_have_the_contract_wire_shape() {
         revision: 4,
         session_id: "session-1".to_owned(),
         error: "x".to_owned(),
+        server_instance_id: "instance-1".to_owned(),
     })
     .unwrap();
     assert_eq!(failed["type"], "testRunWaitResumeDispatchFailed");
+    assert_eq!(failed["serverInstanceId"], "instance-1");
+    // A remote on an older build omits the field; decoding must still work.
+    let legacy: DeltaEvent = serde_json::from_value(serde_json::json!({
+        "type": "testRunWaitResumeDispatchFailed",
+        "revision": 4,
+        "sessionId": "session-1",
+        "error": "x",
+    }))
+    .expect("a dispatch failure without serverInstanceId should decode");
+    match legacy {
+        DeltaEvent::TestRunWaitResumeDispatchFailed { server_instance_id, .. } => {
+            assert_eq!(server_instance_id, "");
+        }
+        _ => panic!("expected a TestRunWaitResumeDispatchFailed delta"),
+    }
 }

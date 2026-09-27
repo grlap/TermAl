@@ -211,6 +211,9 @@ export type UseAppLiveStateParams = {
 };
 
 export type UseAppLiveStateReturn = {
+  testRunWaits: readonly import("./test-run-waits").TestRunWaitRecord[];
+  testRunWaitFailures: import("./test-run-waits").TestRunWaitFailures;
+  dismissTestRunWaitFailure: (sessionId: string) => void;
   testRuns: import("./test-runs").TestRunSummary[];
   adoptState: (
     nextState: StateResponse,

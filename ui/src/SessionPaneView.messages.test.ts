@@ -11,10 +11,10 @@ import {
   visibleMessageContentSignatureForPaneViewMode,
   visibleMessagesForPaneViewMode,
 } from "./SessionPaneView.messages";
-import type { CommandMessage, DiffMessage, Message, Session } from "./types";
+import type { CommandMessage, DiffMessage, Message, Session, TextMessage } from "./types";
 import type { PaneViewMode } from "./workspace-types";
 
-function textMessage(id: string, author: Message["author"]): Message {
+function textMessage(id: string, author: TextMessage["author"]): TextMessage {
   return {
     id,
     type: "text",

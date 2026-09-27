@@ -828,6 +828,7 @@ impl AppState {
                     revision,
                     session_id: session_id.clone(),
                     error,
+                    server_instance_id: self.server_instance_id.clone(),
                 });
             }
         }

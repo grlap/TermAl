@@ -1,3 +1,5 @@
+import type { TestRunCardSnapshot } from "./test-run-card";
+
 export type AgentType = "Claude" | "Codex" | "Cursor" | "Gemini" | "OpenCode" | "Kimi";
 export type ExhaustiveValueCoverage<
   Union extends string,
@@ -649,6 +651,7 @@ export type Message =
   | TextMessage
   | ThinkingMessage
   | CommandMessage
+  | TestRunCardMessage
   | DiffMessage
   | MarkdownMessage
   | ParallelAgentsMessage
@@ -1111,6 +1114,25 @@ export type CommandUpdateEvent = {
   sessionMutationStamp?: number | null;
 };
 
+export type TestRunCardMessage = Omit<BaseMessage, "author"> & {
+  type: "testRun";
+  author: "system";
+  schemaVersion: 1;
+  run: TestRunCardSnapshot;
+};
+
+export type TestRunCardUpdatedEvent = {
+  type: "testRunCardUpdated";
+  revision: number;
+  sessionId: string;
+  messageId: string;
+  messageIndex: number;
+  messageCount: number;
+  preview: string;
+  sessionMutationStamp?: number | null;
+  run: TestRunCardSnapshot;
+};
+
 export type ParallelAgentsUpdateEvent = {
   type: "parallelAgentsUpdate";
   revision: number;
@@ -1248,6 +1270,8 @@ export type DeltaEvent =
   | TextReplaceEvent
   | CommandUpdateEvent
   | ParallelAgentsUpdateEvent
+  | TestRunCardUpdatedEvent
+  | import("./test-run-waits").TestRunWaitDelta
   | ConversationMarkerCreatedEvent
   | ConversationMarkerUpdatedEvent
   | ConversationMarkerDeletedEvent

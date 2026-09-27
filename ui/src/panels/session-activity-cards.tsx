@@ -4,6 +4,7 @@
 // Transient agent activity must never add or remove transcript height.
 
 import { memo, useId } from "react";
+import { useTestRunWaitPrompt } from "../test-run-waits-context";
 import {
   DELEGATION_FAN_IN_AUTHOR_LABEL,
   isDelegationFanInText,
@@ -32,7 +33,9 @@ import {
 } from "./session-message-leaves";
 
 export function SessionActivityStrip(options: SessionActivityOptions) {
-  const activity = resolveSessionActivity(options);
+  const wait = useTestRunWaitPrompt(options.session.id, options.session.status);
+  const activity = resolveSessionActivity({ ...options, testRunWaitPrompt: wait.prompt });
+  const announcement = resolveSessionActivity({ ...options, testRunWaitPrompt: wait.announcement });
   const tooltipId = useId();
   return (
     <div
@@ -51,8 +54,8 @@ export function SessionActivityStrip(options: SessionActivityOptions) {
         aria-live="polite"
         aria-atomic="true"
       >
-        {activity.label}
-        {activity.prompt ? `: ${activity.prompt}` : ""}
+        {announcement.label}
+        {announcement.prompt ? `: ${announcement.prompt}` : ""}
       </span>
       <div className="activity-tooltip" role="tooltip" id={tooltipId}>
         <div className="activity-tooltip-label">{activity.label}</div>
