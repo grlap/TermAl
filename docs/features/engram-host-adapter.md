@@ -377,8 +377,9 @@ rejected delivery); `source_changed`, reported with the `mutate_local` effect
 Engram requires for it, else `observe`; the intent fingerprint the grant was
 issued for as the action fingerprint; and, when the session's workdir lies in
 a worktree, the canonical root of that worktree (a session in a subdirectory
-shares its worktree's) with the schema-1 review-freeze fingerprint of its full
-working content as the source basis, together with the observation time.
+shares its worktree's) with the content revision of the files present in it
+as the source basis, together with the observation time (see
+[Content revision](#content-revision)).
 `source_changed` is decided by content: the same
 fingerprint is taken before the prompt reaches the runtime and again at the
 close, and a difference is a source change; the turn's file-change tracking,
@@ -387,8 +388,7 @@ that and decides alone when the closing basis is missing; a turn whose
 begin-time basis is missing but whose closing basis exists cannot be cleared
 by the comparison and is reported as a change under a grant that mediates
 local mutation, the conservative answer. Each capture
-runs under the reviewer's shared twenty-second freeze budget, the bound the
-same fingerprint of the same workspace already runs under, because a turn
+runs under the reviewer's shared twenty-second freeze budget, because a turn
 closes at the host's busiest moment and a tighter bound would drop the basis
 when Git is merely slow; at the close the capture is taken before the
 checkpoint is claimed, so session teardown's settle wait for a checkpoint
@@ -433,6 +433,102 @@ rather than an observe-only claim, and logs the omission. Restart recovery, the
 compensating checkpoint of a superseded begin and the project-reset exit
 checkpoint close grants whose turn this process never saw end and report no
 observation.
+
+### Content revision
+
+Every source basis TermAl reports, at a turn's begin and close, at each
+check's start and end, and as an evaluator's declared fingerprint, is taken by
+one function (`src/content_revision.rs`) and reads `content-v1:<sha256>`.
+Engram treats the value as an opaque string. It checks only the value's
+shape, then compares it for equality.
+
+- **What it covers.** Every path Git lists as tracked, or as untracked and
+  not ignored, as it is in the worktree now. A present file counts with its
+  content and its mode: the executable bit on Unix, `100644` on Windows,
+  which has none. A symlink counts with its link text and mode `120000`. A
+  path that is not there has no entry, as if its deletion were committed; so
+  has a tracked file now replaced by a directory, whose own files are listed
+  as untracked.
+- **What does not move it.** HEAD takes no part, and the index none in
+  content or mode. Committing already reported content, staging it,
+  fast-forwarding to the same content, or `update-index --chmod` leaves the
+  revision where it was. The index decides only which ignored paths are
+  listed: a force-added ignored file counts, and `git rm --cached` of it
+  removes it. A gate that ran
+  before the commit still speaks for the committed tree (tm-21yl), and an
+  evaluation of the same content stays fresh (tm-5gi4). Two worktrees that
+  hold the same content have the same revision.
+- **Line endings.** A file with a line-ending contract counts byte for
+  byte, so rewriting its line endings is a change: one whose
+  `.gitattributes` set `eol=` (as TermAl's `*.sh text eol=lf`) or unset
+  `text` (`-text`, which `binary` sets), and on Unix an executable one,
+  whose interpreter line a CR would break. Every other file counts with each
+  CRLF read as LF exactly when Git's `core.autocrlf` would convert it on the
+  way in. Git takes a file for binary, and leaves it alone, when it holds a
+  lone CR or a NUL anywhere, or when its printable bytes divided by 128 are
+  fewer than its non-printable ones; the tests compare the rule with Git's
+  own conversion. So Git rewriting such a file with the other line ending
+  (checkout, reset, stash), or a checkout made with another
+  `core.autocrlf`, does not move it. The pinned runner cannot leave this to
+  Git: it drops the system and global configuration where `core.autocrlf`
+  lives. Git also leaves a file alone when the index's copy holds a CR; the
+  revision does not consult the index for that. The revision is not byte
+  identity: the known limit is a file with no contract rewritten from LF to
+  CRLF, which keeps its revision.
+- **What else moves it.** Any tracked file does, the tracker's own included.
+  In TermAl, a `bd` write changes files under `.beads`, which are tracked, so
+  it moves the revision like any other edit.
+- **Platform semantics.** On Unix the filesystem's executable bit counts even
+  where the repository sets `core.fileMode=false`, so a chmod alone moves the
+  revision. On a filesystem that ignores case, renaming a file in case only,
+  outside Git, does not move it. On Windows, a tracked file another process
+  holds open without read sharing cannot be read, which fails the capture.
+- **When there is none.** The capture uses the review freeze's pinned Git
+  runner and budget. A repository with a submodule gets none: what is inside
+  a submodule is not read, so a checkout, an edit or a deinit there would
+  leave the revision equal, a false "unchanged"; the capture fails closed,
+  as the freeze does (a repository such as PhoenixCodeNav, whose index holds
+  gitlinks, has no basis, as before). A repository that configures Git
+  filters gets none: nothing here runs a filter, and the refusal is kept
+  only for uniformity with the freeze. Nor does an untracked nested
+  repository, one path that is not UTF-8 or not safe (empty, absolute, with
+  `..` or `.` or an empty component, with a newline, or, on Windows only,
+  with `:` or `\`), a file that changes while it is read or cannot be read
+  for any reason but absence, or an exceeded bound (200,000 paths, tracked
+  and untracked together, 128 MiB for one file, 512 MiB read in all, the
+  twenty-second budget; a revision finished after the budget is not
+  returned). On a filesystem that ignores case, a tracked directory renamed
+  in case only fails the path check the same way, because the index still
+  spells it the old way. So does a tracked `.gitattributes` deleted from the
+  worktree but not yet in the index: Git would then take its attributes from
+  the index, and staging the deletion alone would change which files count
+  byte for byte. One such path costs the whole tree its basis. The
+  report then goes without one, the conservative path described above, and
+  an obligation opened without a basis can only be waived. A path that is
+  simply not there, its directory gone or turned into a file, has no entry
+  and fails nothing.
+- **Cost.** Every capture reads every listed file, with no cache: at turn
+  begin and close, at each check's start and end, and for an evaluation at
+  request and at submission. The cost grows with the bytes listed. A capture
+  that takes two seconds or more is logged with its entry count and bytes
+  read, so the cost is measured where it runs. Past the bounds above a tree
+  has no basis at all. A per-file cache keyed by size and time would cut the
+  cost, at the price of its own staleness risk; there is none yet (tm-heis).
+- **Stalled reads.** A file read cannot be interrupted, so every capture a
+  turn or an evaluation waits for runs on its own thread and is waited for
+  at most the budget. At a turn's begin and close, a capture that overruns
+  counts as not taken, the conservative path described above, and the close
+  keeps one budget for its basis and its checks together. The thread is left
+  to finish its read; at most 32 such threads take turn bases in the host at
+  once, and past that a turn's basis is not taken.
+- **Not the review-freeze fingerprint.** Review freezes keep their schema-1
+  fingerprint, which hashes HEAD, both diffs and the untracked files. The two
+  values differ by construction, even for an uncommitted tree.
+- **Switching from the earlier revision.** Before this, the source revision
+  was the schema-1 fingerprint. On a run open across the upgrade, the first
+  basis after it differs from every earlier one although nothing changed.
+  Such a run needs one more passing test and, where it was evaluated, one
+  more evaluation. Upgrade while no evaluation is pending.
 
 ### Test evidence
 
@@ -616,9 +712,9 @@ reports.
   What TermAl cannot see: a process an agent left running in the background
   after its own turn, a terminal command already running when a check
   starts that ends after the check settles, and writes from outside TermAl.
-- **Freshness.** The review-freeze fingerprint is taken when the check starts
+- **Freshness.** The content revision is taken when the check starts
   and again when it ends, each on its own thread. A check whose two
-  fingerprints differ, or either is missing, is not reported: the source
+  revisions differ, or either is missing, is not reported: the source
   moved while it ran. Equal fingerprints bound the window between the two
   snapshots, not an edit that landed between the command's start and the
   first snapshot, which is why overlapping activity makes the outcome
@@ -934,19 +1030,57 @@ for want of evaluator authority.
 `independent_session` spawns an evaluator delegation and returns the ordinary
 creation response plus `mode` and `workRef`; the parent waits with
 `termal_resume_after_delegations`. `same_session` spawns nothing and returns
-`{ mode, workRef, acceptanceBasis, evidenceBasis, brief }`, where the brief
-tells the caller to record the evaluation with its own tracker tool.
+`{ mode, workRef, acceptanceBasis, evidenceBasis, sourceFingerprint?, brief }`,
+where the brief tells the caller to record the evaluation with its own tracker
+tool, including the `source_fingerprint` when there is one.
 `sub_agent` returns `501`.
+
+**Declared source fingerprint.** After the reads, and only for the two modes
+that use it (never for `sub_agent`), the host takes the
+[content revision](#content-revision) of the parent's worktree, the same
+worktree the evaluator reads (it runs in the parent's workdir). The value
+comes from the same function as every basis the turns report. The capture
+runs on its own thread and is abandoned at the freeze budget, so a slow file
+read cannot hold the request past the allowance the bridge gives it; an
+abandoned capture counts as not taken. Its thread lives on until its read
+returns. At most four such capture threads are alive in the host at once,
+healthy and abandoned alike and across all projects; past that a request
+starts none and declares nothing. So a worktree whose reads stall costs at
+most four threads however often it is asked, and, while they stall,
+evaluations in every project declare no fingerprint. An evaluator
+delegation keeps it on its target and declares it as `--source-fingerprint`,
+with no workspace. A `same_session` caller gets it in the response and in its
+brief. Engram voids an evaluation when the run reports a source change after
+it, unless the change is to the declared revision. So a change the parent
+reports for the content that was judged, at its turn's close, a commit of
+that content, or a peer worktree holding it leaves the evaluation fresh
+(tm-5gi4). A change to other content still voids it, and so does a report
+of any other revision. When the revision cannot be taken, nothing is
+declared, as before, and the response's `notice` says so. An evaluator's
+first submission takes the revision again. When the worktree no longer
+holds the requested revision, the submission is refused with `409`, naming
+both values, before anything runs or is written. The refusal is final for
+that evaluator, and both the refusal and the submit tool's description tell
+it not to submit again but to finish and report, since only the parent can
+request a new evaluation. The parent's fan-in does not yet name this reason.
+When it cannot be taken again within
+the budget, the submission declares nothing. A replay after an unknown
+outcome resends its stored arguments unchanged. In `same_session` the host
+measures the value and the agent passes it on; the host cannot see what the
+agent passes. Under the policy `require_source_freshness`, Engram's
+`done` must also present the evaluated fingerprint; TermAl does not supply
+it at completion yet.
 
 **Read budget.** Every tracker call runs through the one-retry lock policy, so
 it can cost two command timeouts plus the retry delay. One function computes
 the worst case of a request (the two task reads, up to seven continuation
-pages and the policy read) and both sides use it: the MCP bridge adds it to
-its HTTP allowance, and the request path takes it as its own deadline. Before
-each continuation page the host checks that the deadline still funds that page
-and the two reads that decide the request; when it does not, paging stops and
-the brief lists the evidence read so far. The bridge therefore never gives up
-on a request the backend is still serving.
+pages, the policy read and the source capture, bounded by the freeze budget)
+and both sides use it: the MCP bridge adds it to its HTTP allowance, and the
+request path takes it as its own deadline. Before each continuation page the
+host checks that the deadline still funds that page, the two reads that decide
+the request and the capture; when it does not, paging stops and the brief
+lists the evidence read so far. The bridge therefore never gives up on a
+request the backend is still serving.
 
 **Store identity.** The bases and the work ref mean something only in the store
 they were read from. The host keeps that store (the project id and database
@@ -1015,6 +1149,7 @@ every pass. TermAl then runs, as the evaluator:
 engram work --actor-id <child seat> --session-id <child session> [--actor-context …]
   evaluate REF --mode … --acceptance-basis N --evidence-basis M
   --verdict P=VERDICT:BASIS --rationale P=TEXT [--evidence P=LOCATOR]…
+  [--source-fingerprint content-v1:<sha256>]
   [--model anthropic/<model> | openai/<model>] --attempt <delegation id> --json
 ```
 

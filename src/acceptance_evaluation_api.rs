@@ -12,7 +12,7 @@ const TERMAL_EVALUATE_ACCEPTANCE_TOOL_DESCRIPTION: &str = "Ask TermAl to produce
 const TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_TOOL_NAME: &str = "termal_submit_acceptance_evaluation";
 const TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_QUALIFIED_TOOL_NAME: &str =
     "mcp__termal-delegation__termal_submit_acceptance_evaluation";
-const TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_TOOL_DESCRIPTION: &str = "Record this evaluator's acceptance verdicts in the tracker. TermAl derives the task, evaluation mode, bases, identity, model and attempt key; supply exactly one verdict per acceptance criterion, by its number. A pass must cite at least one evidence locator from your brief. The tool is TermAl control plane, not a workspace mutation: `writePolicy: readOnly` does not prohibit it. A refusal names what to correct; correct it and submit again. When the answer says the write outcome is unknown, submit exactly the same verdicts again: the tracker replays them, and changed verdicts are refused because only a receipt resolves it. If the answer says nothing was sent, submit again. If it says a submission is already in progress, let that one answer, then submit the same verdicts again. If a refusal adds that an earlier send's outcome is unknown, do not change the verdicts: finish and report that, and the parent reads the task. Once an evaluation is recorded, further submissions are refused.";
+const TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_TOOL_DESCRIPTION: &str = "Record this evaluator's acceptance verdicts in the tracker. TermAl derives the task, evaluation mode, bases, identity, model and attempt key; supply exactly one verdict per acceptance criterion, by its number. A pass must cite at least one evidence locator from your brief. The tool is TermAl control plane, not a workspace mutation: `writePolicy: readOnly` does not prohibit it. A refusal names what to correct; correct it and submit again. When the answer says the write outcome is unknown, submit exactly the same verdicts again: the tracker replays them, and changed verdicts are refused because only a receipt resolves it. If the answer says nothing was sent, submit again. If it says a submission is already in progress, let that one answer, then submit the same verdicts again. If a refusal adds that an earlier send's outcome is unknown, do not change the verdicts: finish and report that, and the parent reads the task. If a refusal says the worktree changed while it was evaluated, do not submit again: finish and report it, because only the parent can request a new evaluation. Once an evaluation is recorded, further submissions are refused.";
 
 const ACCEPTANCE_EVALUATION_READER_LABEL: &str = "acceptance-evaluation reader";
 const ACCEPTANCE_EVALUATION_SUBMIT_LABEL: &str = "acceptance-evaluation submission";
@@ -31,22 +31,68 @@ fn acceptance_evaluation_call_worst_case(timeout: Duration) -> Duration {
     timeout * 2 + ENGRAM_WORK_BINDING_LOCK_RETRY_DELAY
 }
 
-/// Worst-case tracker time of one request: the windowed and the complete task
-/// read, every evidence continuation page, and the policy read. The request
+/// Worst-case time of one request: the windowed and the complete task read,
+/// every evidence continuation page, the policy read, and the capture of the
+/// declared source fingerprint, bounded by the freeze budget. The request
 /// path's own deadline and the bridge's HTTP allowance are both this, so the
 /// bridge never gives up on a request the backend is still serving.
 fn acceptance_evaluation_request_tracker_budget() -> Duration {
     let task_reads = 2 + (MAX_ACCEPTANCE_EVIDENCE_PAGES as u32 - 1);
     acceptance_evaluation_call_worst_case(ENGRAM_WORK_BINDING_COMMAND_TIMEOUT) * task_reads
         + acceptance_evaluation_call_worst_case(ACCEPTANCE_EVALUATION_POLICY_READ_TIMEOUT)
+        + REVIEW_FREEZE_TIMEOUT
+}
+
+/// Said when a request could not take the content revision of the worktree
+/// the evaluation reads, so that the requester learns it before a void does.
+const ACCEPTANCE_EVALUATION_UNMEASURED_SOURCE_NOTICE: &str = "The host could not take the \
+     content revision of the worktree this evaluation reads, so the evaluation declares no source \
+     fingerprint: any source change reported on the run after it voids it.";
+
+/// At most this many threads of one host take acceptance evaluations' source
+/// revisions at once, abandoned ones included. Past it a request declares
+/// nothing rather than start another thread, so a worktree whose reads stall
+/// cannot pile up threads one request at a time.
+const ACCEPTANCE_SOURCE_CAPTURE_LIMIT: usize = 4;
+
+impl AppState {
+    /// The content revision of the worktree `workdir` lies in, taken by the
+    /// one function every basis comes from, or `None` when it cannot be taken
+    /// within the freeze budget ([`bounded_content_revision_capture`]).
+    fn acceptance_evaluation_source_revision(&self, workdir: &str) -> Option<String> {
+        let live = self
+            .inner
+            .lock()
+            .expect("state mutex poisoned")
+            .acceptance_source_captures_live
+            .clone();
+        let workdir = workdir.to_owned();
+        bounded_content_revision_capture(
+            &live,
+            ACCEPTANCE_SOURCE_CAPTURE_LIMIT,
+            REVIEW_FREEZE_TIMEOUT,
+            move || {
+                engram_execution_source_basis(FsPath::new(&workdir))
+                    .map(|basis| basis.source_revision)
+            },
+        )
+    }
+}
+
+/// The notices of one request answer as one text, or none.
+fn acceptance_evaluation_notices<const N: usize>(notices: [Option<String>; N]) -> Option<String> {
+    let joined = notices.into_iter().flatten().collect::<Vec<_>>().join(" ");
+    (!joined.is_empty()).then_some(joined)
 }
 
 /// What must still fit after a continuation page: that page, the complete
-/// task read and the policy read. Paging stops once the deadline cannot fund
-/// it; the reads that decide the request are never the ones cut.
+/// task read, the policy read and the source capture. Paging stops once the
+/// deadline cannot fund it; the steps that decide the request are never the
+/// ones cut.
 fn acceptance_evaluation_paging_reserve() -> Duration {
     acceptance_evaluation_call_worst_case(ENGRAM_WORK_BINDING_COMMAND_TIMEOUT) * 2
         + acceptance_evaluation_call_worst_case(ACCEPTANCE_EVALUATION_POLICY_READ_TIMEOUT)
+        + REVIEW_FREEZE_TIMEOUT
 }
 
 /// How long a submission waits for the writer to acknowledge one state.
@@ -64,10 +110,13 @@ const ACCEPTANCE_EVALUATION_PERSIST_ACK_ATTEMPTS: usize = 3;
 
 /// Worst-case time of one submission beyond the ordinary request: the
 /// evaluate call and, when its outcome is unknown, the one identical resend,
-/// plus the two acknowledged states (`pending` before, the outcome after).
+/// the two acknowledged states (`pending` before, the outcome after), and the
+/// second capture of the declared source fingerprint, bounded by the freeze
+/// budget.
 fn acceptance_evaluation_submit_budget() -> Duration {
     acceptance_evaluation_call_worst_case(ENGRAM_WORK_BINDING_COMMAND_TIMEOUT) * 2
         + ACCEPTANCE_EVALUATION_PERSIST_ACK_TIMEOUT * 2
+        + REVIEW_FREEZE_TIMEOUT
 }
 
 fn acceptance_evaluation_request_tool_definition() -> Value {
@@ -192,6 +241,10 @@ enum AcceptanceEvaluationRequestResponse {
         work_ref: String,
         acceptance_basis: i64,
         evidence_basis: i64,
+        /// The content revision to declare as `source_fingerprint`; absent
+        /// when it could not be taken.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        source_fingerprint: Option<String>,
         brief: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         notice: Option<String>,
@@ -667,6 +720,14 @@ impl AppState {
             admitted.as_deref(),
         )
         .map_err(ApiError::conflict)?;
+        // The declared fingerprint is taken only by the modes that use it,
+        // after the reads, on the worktree the evaluator reads: the parent's
+        // workdir, which is also the evaluator child's (cwd None).
+        let unmeasured = |fingerprint: &Option<String>| {
+            fingerprint
+                .is_none()
+                .then(|| ACCEPTANCE_EVALUATION_UNMEASURED_SOURCE_NOTICE.to_owned())
+        };
 
         match mode {
             AcceptanceEvaluationMode::IndependentSession => {
@@ -689,6 +750,9 @@ impl AppState {
                     &parent_workdir,
                     MAX_ACCEPTANCE_BRIEF_BYTES,
                 )?;
+                let source_fingerprint =
+                    self.acceptance_evaluation_source_revision(&parent_workdir);
+                let unmeasured = unmeasured(&source_fingerprint);
                 let delegation = self.create_delegation_with_evaluation_target(
                     parent_session_id,
                     CreateDelegationRequest {
@@ -702,13 +766,16 @@ impl AppState {
                     },
                     // Creation re-resolves the store and refuses a second
                     // active evaluator of this task, under its own lock.
-                    Some(task.target_seed(mode, target.store.clone())),
+                    Some(task.target_seed(mode, target.store.clone(), source_fingerprint)),
                 )?;
-                let notice = self.acceptance_evaluation_open_write_notice(
-                    &target.store,
-                    &task.work_ref,
-                    Some(&delegation.delegation.id),
-                );
+                let notice = acceptance_evaluation_notices([
+                    self.acceptance_evaluation_open_write_notice(
+                        &target.store,
+                        &task.work_ref,
+                        Some(&delegation.delegation.id),
+                    ),
+                    unmeasured,
+                ]);
                 Ok(AcceptanceEvaluationRequestResponse::Spawned {
                     delegation,
                     mode,
@@ -717,16 +784,27 @@ impl AppState {
                 })
             }
             AcceptanceEvaluationMode::SameSession => {
+                let source_fingerprint =
+                    self.acceptance_evaluation_source_revision(&parent_workdir);
+                let unmeasured = unmeasured(&source_fingerprint);
                 Ok(AcceptanceEvaluationRequestResponse::SameSession {
                     mode,
-                    brief: build_same_session_acceptance_brief(&task, MAX_ACCEPTANCE_BRIEF_BYTES)?,
+                    brief: build_same_session_acceptance_brief(
+                        &task,
+                        source_fingerprint.as_deref(),
+                        MAX_ACCEPTANCE_BRIEF_BYTES,
+                    )?,
                     acceptance_basis: task.acceptance_basis,
                     evidence_basis: task.evidence_basis,
-                    notice: self.acceptance_evaluation_open_write_notice(
-                        &target.store,
-                        &task.work_ref,
-                        None,
-                    ),
+                    source_fingerprint,
+                    notice: acceptance_evaluation_notices([
+                        self.acceptance_evaluation_open_write_notice(
+                            &target.store,
+                            &task.work_ref,
+                            None,
+                        ),
+                        unmeasured,
+                    ]),
                     work_ref: task.work_ref,
                 })
             }
@@ -817,6 +895,56 @@ impl AppState {
         Ok((authority, target, model, in_flight))
     }
 
+    /// The target a first send declares. The evaluator read its worktree for
+    /// a while, so the revision taken at the request is declared only if the
+    /// worktree still holds it, as a check requires of its two snapshots: a
+    /// worktree that moved on is refused, naming both revisions, and one whose
+    /// revision cannot be taken again declares none, which leaves Engram to
+    /// void on any later change. An open write is replayed from its stored
+    /// argument list, so nothing here applies to it.
+    fn acceptance_evaluation_declared_target(
+        &self,
+        child: &str,
+        target: &DelegationAcceptanceEvaluation,
+    ) -> Result<DelegationAcceptanceEvaluation, ApiError> {
+        let mut declared = target.clone();
+        let Some(requested) = target.source_fingerprint.as_deref() else {
+            return Ok(declared);
+        };
+        if !matches!(target.submission, AcceptanceEvaluationSubmission::None) {
+            return Ok(declared);
+        }
+        let workdir = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            inner
+                .find_session_index(child)
+                .map(|index| inner.sessions[index].session.workdir.clone())
+        };
+        // Off the lock and within the budget: the capture reads the whole
+        // worktree.
+        let current =
+            workdir.and_then(|workdir| self.acceptance_evaluation_source_revision(&workdir));
+        match current {
+            Some(current) if current == requested => {}
+            Some(current) => {
+                return Err(ApiError::conflict(format!(
+                    "the worktree changed while it was evaluated: the evaluation was requested \
+                     at {requested} and the worktree now holds {current}, so these verdicts may \
+                     not describe it. This is final for this evaluator: do not submit again. \
+                     Finish and report this; the parent must request a new evaluation"
+                )));
+            }
+            None => {
+                eprintln!(
+                    "acceptance evaluation> the revision of {child}'s worktree could not be taken \
+                     again; the submission declares no source fingerprint"
+                );
+                declared.source_fingerprint = None;
+            }
+        }
+        Ok(declared)
+    }
+
     fn submit_acceptance_evaluation(
         &self,
         child: &str,
@@ -852,9 +980,10 @@ impl AppState {
             self.acceptance_evaluation_submit_context(child, &request)?;
         // Rationales are model text: never hand them to a shell shim.
         validate_work_read_target(&target)?;
+        let declared = self.acceptance_evaluation_declared_target(child, &authority.target)?;
         let args = acceptance_evaluation_cli_args(
             &target.connection,
-            &authority.target,
+            &declared,
             &request,
             model.as_deref(),
         )?;

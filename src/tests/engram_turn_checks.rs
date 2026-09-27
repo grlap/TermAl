@@ -912,8 +912,8 @@ impl CheckedTurn {
     }
 
     fn revision(&self) -> String {
-        review_freeze_fingerprint(&self.root)
-            .expect("the worktree should freeze")
+        content_revision(&self.root)
+            .expect("the content revision should be taken")
             .1
     }
 

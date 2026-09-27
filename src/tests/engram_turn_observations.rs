@@ -1,7 +1,7 @@
 //! Execution observations on the end-of-turn checkpoint (Engram
 //! w-108a13d58018, tm-winf): a mediated turn reports one observation on the
 //! checkpoint that closes its grant, with `source_changed` decided by content
-//! (the workspace's review-freeze fingerprint before the prompt reached the
+//! (the workspace's content revision before the prompt reached the
 //! runtime against the one at the close, the turn's file-change tracking
 //! being only a lower bound), the outcome of the transition that closed it,
 //! the intent fingerprint the grant was issued for, and the closing
@@ -88,10 +88,10 @@ impl CheckpointScript {
     }
 }
 
-/// The review-freeze fingerprint of `root`, as the observation reports it.
-fn freeze_fingerprint(root: &FsPath) -> String {
-    review_freeze_fingerprint(root)
-        .expect("the worktree should freeze")
+/// The content revision of `root`, as the observation reports it.
+fn content_revision_of(root: &FsPath) -> String {
+    content_revision(root)
+        .expect("the content revision should be taken")
         .1
 }
 
@@ -437,14 +437,14 @@ fn a_completed_turn_that_changed_source_reports_a_mutating_observation_with_its_
         .to_owned();
     assert_eq!(
         reported_revision,
-        freeze_fingerprint(&turn.child_workdir),
-        "the revision is the review-freeze fingerprint of the full working content"
+        content_revision_of(&turn.child_workdir),
+        "the revision is the content revision of the files present"
     );
     fs::write(turn.child_workdir.join("notes.txt"), "an untracked edit\n")
         .expect("untracked file should write");
     assert_ne!(
         reported_revision,
-        freeze_fingerprint(&turn.child_workdir),
+        content_revision_of(&turn.child_workdir),
         "an uncommitted, untracked edit changes the revision"
     );
     let observed_at = observation["observed_at"]
@@ -637,7 +637,7 @@ fn a_root_session_on_claimed_work_reports_the_source_change_its_turn_made() {
         observation["source_basis"]["source_revision"]
             .as_str()
             .expect("source revision"),
-        freeze_fingerprint(root),
+        content_revision_of(root),
         "the basis is the root workspace's changed content"
     );
 }
@@ -683,7 +683,7 @@ fn a_completed_turn_that_changed_nothing_in_a_worktree_reports_its_unchanged_bas
         turn.start_basis()
             .expect("the turn began with a basis")
             .source_revision,
-        freeze_fingerprint(&turn.child_workdir),
+        content_revision_of(&turn.child_workdir),
         "the begin-time basis is the worktree's fingerprint, so the comparison is real"
     );
 
@@ -710,7 +710,7 @@ fn a_completed_turn_that_changed_nothing_in_a_worktree_reports_its_unchanged_bas
         observation["source_basis"]["source_revision"]
             .as_str()
             .expect("source revision"),
-        freeze_fingerprint(&turn.child_workdir),
+        content_revision_of(&turn.child_workdir),
         "the basis is the unchanged content's fingerprint"
     );
     assert!(
@@ -747,7 +747,7 @@ fn a_turn_without_a_begin_basis_under_a_mutation_grant_reports_a_change() {
         observation["source_basis"]["source_revision"]
             .as_str()
             .expect("source revision"),
-        freeze_fingerprint(&turn.child_workdir),
+        content_revision_of(&turn.child_workdir),
         "the closing basis is still reported for a later check to match"
     );
 }
@@ -1228,7 +1228,7 @@ fn a_turn_whose_content_changed_without_a_watcher_event_still_reports_the_change
     assert_eq!(observation["effect"], "mutate_local");
     assert_eq!(
         observation["source_basis"]["source_revision"],
-        freeze_fingerprint(&turn.child_workdir).as_str()
+        content_revision_of(&turn.child_workdir).as_str()
     );
 }
 

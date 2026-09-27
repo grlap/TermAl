@@ -3712,7 +3712,10 @@ impl AppState {
         let (end_basis, mut resolved_checks) = match capture {
             Some((workdir, checks)) => {
                 let deadline = std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT;
-                let end_basis = engram_execution_source_basis(FsPath::new(&workdir));
+                let end_basis = self.engram_execution_source_basis_within(
+                    &workdir,
+                    deadline.saturating_duration_since(std::time::Instant::now()),
+                );
                 let resolved_checks =
                     engram_resolve_turn_checks(session_id, &planned_grant_id, checks, deadline);
                 (end_basis, resolved_checks)

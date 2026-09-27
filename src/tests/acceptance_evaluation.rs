@@ -7,6 +7,9 @@ use super::work_visualizer::{fixture, install_store};
 use super::*;
 use std::sync::atomic::AtomicUsize;
 
+#[path = "acceptance_evaluation_source.rs"]
+mod source;
+
 type RecordedEngramCalls = Arc<Mutex<Vec<(EngramConnectionConfig, Vec<String>)>>>;
 
 fn modes(words: &[&str]) -> Vec<String> {
@@ -22,6 +25,7 @@ fn evaluation_target(delegation_id: &str, criteria_count: usize) -> DelegationAc
         criteria_count,
         attempt_key: delegation_id.to_owned(),
         store: None,
+        source_fingerprint: None,
         submission: AcceptanceEvaluationSubmission::None,
     }
 }
@@ -622,7 +626,7 @@ fn acceptance_evaluator_brief_carries_a_requirement_placed_late_in_a_criterion()
     );
     assert!(prompt.contains(requirement));
     assert!(
-        build_same_session_acceptance_brief(&task, MAX_ACCEPTANCE_BRIEF_BYTES)
+        build_same_session_acceptance_brief(&task, None, MAX_ACCEPTANCE_BRIEF_BYTES)
             .unwrap()
             .contains(requirement)
     );
@@ -804,7 +808,8 @@ fn acceptance_request_tool_result_keeps_the_ids_and_drops_the_transcript() {
 #[test]
 fn acceptance_same_session_brief_carries_the_bases_and_every_criterion() {
     let task = parse_acceptance_evaluation_task(show_receipt(None), full_receipt()).unwrap();
-    let brief = build_same_session_acceptance_brief(&task, MAX_ACCEPTANCE_BRIEF_BYTES).unwrap();
+    let brief =
+        build_same_session_acceptance_brief(&task, None, MAX_ACCEPTANCE_BRIEF_BYTES).unwrap();
     assert!(brief.contains("mode same_session"));
     assert!(
         brief.contains("acceptance_basis 7, evidence_basis 42"),
@@ -1717,7 +1722,12 @@ fn acceptance_request_reads_as_the_host_and_spawns_an_evaluator_with_the_target(
         wire["delegation"]["acceptanceEvaluation"]["store"],
         json!({"databasePath": store.database_path, "projectId": store.project_id})
     );
-    assert!(wire.get("notice").is_none());
+    // The fixture's workdir is no Git worktree: the only notice says that
+    // nothing is declared.
+    assert_eq!(
+        wire["notice"],
+        ACCEPTANCE_EVALUATION_UNMEASURED_SOURCE_NOTICE
+    );
     assert!(
         record
             .prompt
@@ -1758,6 +1768,14 @@ fn acceptance_request_returns_a_same_session_brief_without_spawning() {
     );
     assert!(wire.get("delegation").is_none());
     assert!(state.inner.lock().unwrap().delegations.is_empty());
+    // The fixture's workdir is no Git worktree: no revision, nothing declared.
+    assert!(wire.get("sourceFingerprint").is_none());
+    assert!(
+        !wire["brief"]
+            .as_str()
+            .unwrap()
+            .contains("source_fingerprint")
+    );
 }
 
 #[test]
@@ -4127,12 +4145,12 @@ fn acceptance_evaluator_brief_fits_exactly_with_its_complete_outcome_and_no_evid
 #[test]
 fn acceptance_same_session_brief_holds_complete_criteria_within_the_bound_or_refuses() {
     let task = parse_acceptance_evaluation_task(show_receipt(None), full_receipt()).unwrap();
-    let brief = render_same_session_acceptance_brief(&task);
+    let brief = render_same_session_acceptance_brief(&task, None);
     assert_eq!(
-        build_same_session_acceptance_brief(&task, brief.len()).unwrap(),
+        build_same_session_acceptance_brief(&task, None, brief.len()).unwrap(),
         brief
     );
-    let refused = build_same_session_acceptance_brief(&task, brief.len() - 1).unwrap_err();
+    let refused = build_same_session_acceptance_brief(&task, None, brief.len() - 1).unwrap_err();
     assert_eq!(refused.status, StatusCode::CONFLICT);
     assert!(
         refused
@@ -4149,7 +4167,7 @@ fn acceptance_same_session_brief_holds_complete_criteria_within_the_bound_or_ref
     let task = parse_acceptance_evaluation_task(show_receipt(None), oversized.clone()).unwrap();
     let criteria_bytes = acceptance_brief_criteria(&task).len();
     for refused in [
-        build_same_session_acceptance_brief(&task, MAX_ACCEPTANCE_BRIEF_BYTES).unwrap_err(),
+        build_same_session_acceptance_brief(&task, None, MAX_ACCEPTANCE_BRIEF_BYTES).unwrap_err(),
         build_acceptance_evaluator_prompt(&task, "/work/repo", MAX_ACCEPTANCE_BRIEF_BYTES)
             .unwrap_err(),
     ] {
@@ -4166,7 +4184,8 @@ fn acceptance_same_session_brief_holds_complete_criteria_within_the_bound_or_ref
     let mut fitting = full_receipt();
     fitting["work"]["acceptance"] = json!(["基".repeat(21_000), "second"]);
     let task = parse_acceptance_evaluation_task(show_receipt(None), fitting).unwrap();
-    let brief = build_same_session_acceptance_brief(&task, MAX_ACCEPTANCE_BRIEF_BYTES).unwrap();
+    let brief =
+        build_same_session_acceptance_brief(&task, None, MAX_ACCEPTANCE_BRIEF_BYTES).unwrap();
     assert!(brief.contains(&"基".repeat(21_000)) && brief.len() <= MAX_ACCEPTANCE_BRIEF_BYTES);
 
     // Through the request: a same-session answer is refused, not oversized.
@@ -4550,16 +4569,21 @@ fn acceptance_request_budget_covers_every_read_with_its_retry() {
     let policy =
         ACCEPTANCE_EVALUATION_POLICY_READ_TIMEOUT * 2 + ENGRAM_WORK_BINDING_LOCK_RETRY_DELAY;
     assert_eq!(MAX_ACCEPTANCE_EVIDENCE_PAGES, 8);
-    // Two task reads, seven continuation pages, one policy read.
+    // Two task reads, seven continuation pages, one policy read, and the
+    // source capture under the freeze budget.
     assert_eq!(
         acceptance_evaluation_request_tracker_budget(),
-        call * 9 + policy
+        call * 9 + policy + REVIEW_FREEZE_TIMEOUT
     );
-    assert_eq!(acceptance_evaluation_paging_reserve(), call * 2 + policy);
-    // Two sends and two acknowledged states: `pending` before, the outcome after.
+    assert_eq!(
+        acceptance_evaluation_paging_reserve(),
+        call * 2 + policy + REVIEW_FREEZE_TIMEOUT
+    );
+    // Two sends, two acknowledged states (`pending` before, the outcome
+    // after) and the second source capture.
     assert_eq!(
         acceptance_evaluation_submit_budget(),
-        call * 2 + ACCEPTANCE_EVALUATION_PERSIST_ACK_TIMEOUT * 2
+        call * 2 + ACCEPTANCE_EVALUATION_PERSIST_ACK_TIMEOUT * 2 + REVIEW_FREEZE_TIMEOUT
     );
 
     // The arithmetic names exactly the reads a maximal request performs.
@@ -4688,6 +4712,11 @@ fn acceptance_request_refuses_a_second_active_evaluator_and_names_the_first() {
     let notice = wire["notice"].as_str().expect("the open write is named");
     assert!(
         notice.contains(&format!("`{first}`")) && notice.contains("outcome unknown"),
+        "{notice}"
+    );
+    // The fixture's workdir is no Git worktree, so both notices are joined.
+    assert!(
+        notice.contains(ACCEPTANCE_EVALUATION_UNMEASURED_SOURCE_NOTICE),
         "{notice}"
     );
     assert_eq!(

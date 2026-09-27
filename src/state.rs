@@ -1434,6 +1434,13 @@ struct StateInner {
     /// restart has no request in flight, and the persisted `pending` already
     /// carries what such a request left open.
     acceptance_evaluation_submissions_in_flight: HashSet<String>,
+    /// Threads taking an acceptance evaluation's source revision that are
+    /// still alive, abandoned ones included (`bounded_content_revision_capture`).
+    /// Memory only, one count for the host.
+    acceptance_source_captures_live: Arc<std::sync::atomic::AtomicUsize>,
+    /// Threads taking a turn's begin or closing source basis that are still
+    /// alive, abandoned ones included. Memory only, one count for the host.
+    engram_turn_basis_captures_live: Arc<std::sync::atomic::AtomicUsize>,
     /// The test launcher's runs, mirrored from their run directories by the
     /// rescan in `test_runs.rs`. Memory only: disk stays the record.
     test_runs: TestRunIndex,
@@ -1509,6 +1516,8 @@ impl StateInner {
             delegations: Vec::new(),
             delegation_followup_admissions: HashMap::new(),
             acceptance_evaluation_submissions_in_flight: HashSet::new(),
+            acceptance_source_captures_live: Arc::default(),
+            engram_turn_basis_captures_live: Arc::default(),
             test_runs: TestRunIndex::default(),
             test_run_cards_epoch: None,
             test_run_cards: BTreeMap::new(),

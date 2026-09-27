@@ -1398,6 +1398,16 @@ struct DelegationAcceptanceEvaluation {
     /// which can no longer submit.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     store: Option<EngramAuthorityStoreKey>,
+    /// The content revision of the worktree the evaluator reads, taken when
+    /// the evaluation was requested. The first submission takes it again and
+    /// declares it to the tracker as `--source-fingerprint` only when the two
+    /// agree (a later source change to this same revision then leaves the
+    /// evaluation fresh); when the second cannot be taken it declares none,
+    /// so this field is not proof of what was declared. Absent when it could
+    /// not be taken at the request, and on a record persisted before it was
+    /// kept; such an evaluation declares none, as before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source_fingerprint: Option<String>,
     #[serde(
         default,
         skip_serializing_if = "AcceptanceEvaluationSubmission::is_none"
@@ -1526,6 +1536,8 @@ struct PersistedDelegationAcceptanceEvaluation {
     #[serde(default)]
     store: Option<EngramAuthorityStoreKey>,
     #[serde(default)]
+    source_fingerprint: Option<String>,
+    #[serde(default)]
     submission: AcceptanceEvaluationSubmission,
     #[serde(default)]
     outcome: Option<PersistedRawAcceptanceEvaluationOutcome>,
@@ -1557,6 +1569,7 @@ impl From<PersistedDelegationAcceptanceEvaluation> for DelegationAcceptanceEvalu
             criteria_count: persisted.criteria_count,
             attempt_key: persisted.attempt_key,
             store: persisted.store,
+            source_fingerprint: persisted.source_fingerprint,
             submission,
         }
     }

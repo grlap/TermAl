@@ -497,7 +497,11 @@ selected and what is recorded, is described in the
 - **Target and submission.** The record carries `acceptanceEvaluation`:
   `workRef`, `mode`, `acceptanceBasis`, `evidenceBasis`, `criteriaCount`,
   `attemptKey` (the delegation id), `store` (the tracker store the brief was
-  read from) and `submission`, the state of the evaluator's one tracker write:
+  read from), `sourceFingerprint` (the content revision of the evaluated
+  worktree taken at the request; declared as `--source-fingerprint` only if
+  the first submission finds the worktree still at it, see
+  [Content revision](engram-host-adapter.md#content-revision)) and
+  `submission`, the state of the evaluator's one tracker write:
   absent (nothing is recorded or open), `pending` (acknowledged durable before
   the tracker runs), `recorded` (a bounded extract of the receipt and
   `recordedAt`, acknowledged durable before success is answered) or
@@ -1030,7 +1034,7 @@ termal_wait_delegations({ delegationIds, pollIntervalMs?, timeoutMs? }) -> WaitD
 termal_resume_after_delegations({ delegationIds, mode?, title? }) -> DelegationWaitResponse
 termal_followup_session({ delegationId, message }) -> DelegationStatusResponse
 termal_submit_review_result({ schemaVersion, status, summary, findings, commandsRun, filesInspected, notes, suggestedTrackerUpdates }) -> MailboxAppendReceipt
-termal_evaluate_acceptance({ workRef, agent?, model? }) -> DelegationResponse & { mode, workRef, notice? } | { mode: "same_session", workRef, acceptanceBasis, evidenceBasis, brief, notice? }
+termal_evaluate_acceptance({ workRef, agent?, model? }) -> DelegationResponse & { mode, workRef, notice? } | { mode: "same_session", workRef, acceptanceBasis, evidenceBasis, sourceFingerprint?, brief, notice? }
 termal_submit_acceptance_evaluation({ schemaVersion, verdicts: [{ criterion, verdict, basis?, rationale, evidence? }] }) -> { schemaVersion, delegationId, workRef, mode, attemptKey, recordedAt, receipt, receiptTruncated? }
 termal_send_to_session({ sessionId, message, idempotencyKey, topic?, stateStamp?, class? }) -> { sessionId, resolvedFrom, mailboxId, messageId, sequence, unreadDepth, notificationDisposition, duplicate }
 termal_list_sessions() -> { sessions: [{ sessionId, name, agent, status, workdir, preview }] }
@@ -1330,6 +1334,8 @@ type DelegationRecord = {
     attemptKey: string;
     // The tracker store the brief was read from.
     store?: { projectId: string; databasePath: string } | null;
+    // The content revision taken at the request ("content-v1:<sha256>").
+    sourceFingerprint?: string | null;
     // Absent: nothing was sent. `pending`/`unconfirmed`: the outcome is unknown.
     submission?:
       // The host also keeps an open write's original argument list; that is

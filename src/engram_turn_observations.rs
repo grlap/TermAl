@@ -219,25 +219,26 @@ fn engram_turn_execution_observation(
 
 /// The source identity of a workspace at one moment: the canonical worktree
 /// root the fingerprint was taken on, so two captures of the same root
-/// compare equal however the path was spelled, and the schema-1 review-freeze
-/// fingerprint of its full working content, tracked and untracked, which is
-/// what Engram compares a later check's revision with. Bounded by the
-/// reviewer's shared freeze budget ([`REVIEW_FREEZE_TIMEOUT`]), the bound the
-/// same fingerprint of the same workspace already runs under: the capture
-/// spawns eight Git processes in sequence, and the moment a turn closes is
-/// often the host's busiest, so a tighter bound would drop the basis exactly
-/// when Git is slow rather than stuck. The bound is paid only in that case;
-/// the closing capture precedes the checkpoint claim, so teardown's settle
-/// wait never spans it. Taken on the worktree the workdir lies in, so a
-/// session in a subdirectory has its worktree's basis. Absent, and logged,
-/// outside a worktree or when the fingerprint cannot be taken in time; the
-/// contract
-/// keeps the basis optional, at the price of an obligation that can only be
-/// waived.
+/// compare equal however the path was spelled, and the content revision
+/// ([`content_revision`]) of the files present in it, tracked and untracked,
+/// which is what Engram compares a later check's revision with. HEAD and the
+/// index take no part, so a commit of already reported content is not a
+/// change. Every producer takes its basis here: the turn's begin and close,
+/// each check, and an evaluator's declared fingerprint. Bounded by the
+/// reviewer's shared freeze budget ([`REVIEW_FREEZE_TIMEOUT`]): the capture
+/// spawns four Git processes in sequence and reads every listed file, and the
+/// moment a turn closes is often the host's busiest, so a tighter bound would
+/// drop the basis exactly when Git is slow rather than stuck. The bound is
+/// paid only in that case; the closing capture precedes the checkpoint claim,
+/// so teardown's settle wait never spans it. Taken on the worktree the workdir
+/// lies in, so a session in a subdirectory has its worktree's basis. Absent,
+/// and logged, outside a worktree or when the revision cannot be taken in
+/// time; the contract keeps the basis optional, at the price of an obligation
+/// that can only be waived.
 fn engram_execution_source_basis(workdir: &FsPath) -> Option<EngramExecutionSourceBasis> {
     // A session may work in a subdirectory: its source identity is its
     // worktree's, which the fingerprint takes from the worktree root.
-    match review_freeze_fingerprint(&engram_worktree_root_path(workdir)) {
+    match content_revision(&engram_worktree_root_path(workdir)) {
         Ok((root, source_revision)) => engram_bounded_source_basis(workdir, &root, source_revision),
         Err(error) => {
             eprintln!(
@@ -272,7 +273,37 @@ fn engram_bounded_source_basis(
     })
 }
 
+/// At most this many threads of one host take turn source bases at once,
+/// healthy and abandoned alike. A capture past it counts as not taken.
+const ENGRAM_TURN_BASIS_CAPTURE_LIMIT: usize = 32;
+
 impl AppState {
+    /// [`engram_execution_source_basis`] on its own thread, waited for at
+    /// most `budget`. The capture reads every listed file and a read cannot
+    /// be interrupted, so a read that stalls must not hold the turn that
+    /// waits for it: past the budget the basis counts as not taken, the
+    /// conservative path, and the thread is left to finish
+    /// ([`bounded_content_revision_capture`]).
+    fn engram_execution_source_basis_within(
+        &self,
+        workdir: &str,
+        budget: Duration,
+    ) -> Option<EngramExecutionSourceBasis> {
+        let live = self
+            .inner
+            .lock()
+            .expect("state mutex poisoned")
+            .engram_turn_basis_captures_live
+            .clone();
+        let workdir = workdir.to_owned();
+        bounded_content_revision_capture(
+            &live,
+            ENGRAM_TURN_BASIS_CAPTURE_LIMIT,
+            budget,
+            move || engram_execution_source_basis(FsPath::new(&workdir)),
+        )
+    }
+
     /// Takes the begin-time source basis of the turn `grant_id` begins, off
     /// the lock and bounded, and keeps it on the record while that grant is
     /// mirrored, so the closing checkpoint can tell whether the turn changed
@@ -292,7 +323,7 @@ impl AppState {
             }
             record.session.workdir.clone()
         };
-        let basis = engram_execution_source_basis(FsPath::new(&workdir));
+        let basis = self.engram_execution_source_basis_within(&workdir, REVIEW_FREEZE_TIMEOUT);
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         if let Some(index) = inner.find_session_index(session_id)
             && inner.sessions[index].engram.active_grant_id.as_deref() == Some(grant_id)

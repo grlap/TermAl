@@ -752,6 +752,7 @@ include!("engram_session_reconciliation.rs");
 include!("coordination_instructions.rs");
 include!("delegation_mcp.rs");
 include!("review_freeze.rs");
+include!("content_revision.rs");
 include!("bounded_read_process.rs");
 include!("review_freeze_process.rs");
 include!("review_freeze_api.rs");

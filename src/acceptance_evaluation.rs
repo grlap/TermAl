@@ -138,6 +138,9 @@ struct AcceptanceEvaluationTargetSeed {
     criteria_count: usize,
     /// The store the reads above ran against.
     store: EngramAuthorityStoreKey,
+    /// The content revision of the evaluator's worktree, taken after the
+    /// reads above; `None` when it could not be taken.
+    source_fingerprint: Option<String>,
 }
 
 impl AcceptanceEvaluationTargetSeed {
@@ -150,6 +153,7 @@ impl AcceptanceEvaluationTargetSeed {
             criteria_count: self.criteria_count,
             attempt_key,
             store: Some(self.store),
+            source_fingerprint: self.source_fingerprint,
             submission: AcceptanceEvaluationSubmission::None,
         }
     }
@@ -343,6 +347,7 @@ impl AcceptanceEvaluationTask {
         &self,
         mode: AcceptanceEvaluationMode,
         store: EngramAuthorityStoreKey,
+        source_fingerprint: Option<String>,
     ) -> AcceptanceEvaluationTargetSeed {
         AcceptanceEvaluationTargetSeed {
             work_ref: self.work_ref.clone(),
@@ -351,6 +356,7 @@ impl AcceptanceEvaluationTask {
             evidence_basis: self.evidence_basis,
             criteria_count: self.criteria.len(),
             store,
+            source_fingerprint,
         }
     }
 }
@@ -560,18 +566,30 @@ fn acceptance_contract_too_large(
 /// it through its own tracker tool, against the bases read here. It carries no
 /// context to shrink, so it holds the complete criteria within the same byte
 /// bound as the evaluator's brief or is refused the same way.
+/// `source_fingerprint` is the host's content revision of this session's
+/// worktree, taken when the evaluation was requested; the brief asks the
+/// session to declare it, so its own turn's report of that same revision does
+/// not void the evaluation.
 fn build_same_session_acceptance_brief(
     task: &AcceptanceEvaluationTask,
+    source_fingerprint: Option<&str>,
     max_bytes: usize,
 ) -> std::result::Result<String, ApiError> {
-    let brief = render_same_session_acceptance_brief(task);
+    let brief = render_same_session_acceptance_brief(task, source_fingerprint);
     if brief.len() > max_bytes {
         return Err(acceptance_contract_too_large(task, brief.len(), max_bytes));
     }
     Ok(brief)
 }
 
-fn render_same_session_acceptance_brief(task: &AcceptanceEvaluationTask) -> String {
+fn render_same_session_acceptance_brief(
+    task: &AcceptanceEvaluationTask,
+    source_fingerprint: Option<&str>,
+) -> String {
+    // The value is host-measured ("content-v1:" and hex), never tracker text.
+    let source = source_fingerprint
+        .map(|fingerprint| format!(", source_fingerprint {fingerprint}"))
+        .unwrap_or_default();
     format!(
         "Acceptance evaluation of {work_ref} runs in this session (mode same_session); no \
 evaluator was spawned.\n\
@@ -580,7 +598,7 @@ Judge your own work against every acceptance criterion, by number:\n\
 {criteria}\n\
 \n\
 Record it with your own Engram `evaluate` tool: mode same_session, acceptance_basis \
-{acceptance_basis}, evidence_basis {evidence_basis}, and exactly one verdict per criterion \
+{acceptance_basis}, evidence_basis {evidence_basis}{source}, and exactly one verdict per criterion \
 (pass, fail, insufficient_evidence or needs_human) with a rationale saying what you checked and \
 what you found. A pass must cite at least one evidence locator from `show {work_ref} --notes \
 --gates`. Missing proof is insufficient_evidence, never pass.",
@@ -788,6 +806,14 @@ fn acceptance_evaluation_cli_args(
         target.evidence_basis.to_string(),
     ]);
     args.extend(acceptance_evaluation_verdict_args(request));
+    // Host-measured, never the evaluator's: a later source change to this
+    // revision leaves the evaluation fresh. No workspace is declared, so a
+    // peer worktree holding the same content matches too. The flag came into
+    // Engram's `evaluate` with `--evidence-basis` (Engram 45b0f9e), which this
+    // list always passes, so no binary that takes the rest refuses it.
+    if let Some(fingerprint) = target.source_fingerprint.as_ref() {
+        args.extend(["--source-fingerprint".to_owned(), fingerprint.clone()]);
+    }
     if let Some(model) = model {
         args.extend(["--model".to_owned(), model.to_owned()]);
     }

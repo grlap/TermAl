@@ -553,6 +553,12 @@ export type DelegationAcceptanceEvaluation = {
   attemptKey: string;
   /** The tracker store the brief was read from. */
   store?: { projectId: string; databasePath: string } | null;
+  /**
+   * The content revision of the evaluated worktree taken at the request. It
+   * is declared as `--source-fingerprint` only if the first submission finds
+   * the worktree still at it.
+   */
+  sourceFingerprint?: string | null;
   submission?: AcceptanceEvaluationSubmission | null;
 };
 export type DelegationStatus =

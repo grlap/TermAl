@@ -167,7 +167,7 @@ struct EngramCapture<T> {
     ready: std::sync::Condvar,
 }
 
-/// A review-freeze source basis, or `None` when it could not be taken.
+/// A content-revision source basis, or `None` when it could not be taken.
 type EngramBasisCapture = EngramCapture<Option<EngramExecutionSourceBasis>>;
 
 /// A toolchain label (`engram_toolchain_label`), or `None` when TermAl

@@ -194,6 +194,8 @@ impl PersistedState {
             delegations: self.delegations,
             delegation_followup_admissions: HashMap::new(),
             acceptance_evaluation_submissions_in_flight: HashSet::new(),
+            acceptance_source_captures_live: Arc::default(),
+            engram_turn_basis_captures_live: Arc::default(),
             // An epoch loaded from disk is already durable.
             test_runs: TestRunIndex {
                 cards_enabled: self.test_run_cards_epoch.is_some(),

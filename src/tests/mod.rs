@@ -33,6 +33,7 @@ mod codex_home;
 mod codex_protocol;
 mod codex_thread_recovery;
 mod codex_threads;
+mod content_revision;
 mod conversation_markers;
 mod coordination_board_routes;
 mod coordination_instructions;
