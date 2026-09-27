@@ -559,6 +559,27 @@ export type DelegationAcceptanceEvaluation = {
    * the worktree still at it.
    */
   sourceFingerprint?: string | null;
+  /**
+   * The work's named source root the evaluation was requested on, when its
+   * claim had one; the evaluator ran there. This and `sourceClaim` are host
+   * bookkeeping for the first submission's check, serialized with the rest
+   * of the evaluation as `attemptKey` and `store` are; the UI reads neither.
+   */
+  sourceRoot?: {
+    root: string;
+    commonDirKey: string;
+    workId: string;
+    claimId: string;
+    generation: number;
+  } | null;
+  /**
+   * With no root named at the request, the claim the requesting session was
+   * bound to; a root named for it since refuses the first submission.
+   */
+  sourceClaim?: {
+    workId: string;
+    claimId: string;
+  } | null;
   submission?: AcceptanceEvaluationSubmission | null;
 };
 export type DelegationStatus =
@@ -861,6 +882,12 @@ export type EngramControlMessage = BaseMessage & {
   failMode: EngramControlFailMode;
   repairArmed?: boolean;
   nextIntent?: "continue" | "wait" | "exit" | null;
+  /**
+   * On the checkpoint of a turn bound to claimed work: where its source
+   * basis was taken. `root` names the work's source root; absent, the turn
+   * was measured in the session's workdir because no worktree is named.
+   */
+  sourceRoot?: { root?: string | null; workRef?: string | null } | null;
 };
 
 export type SubagentResultMessage = BaseMessage & {

@@ -56,25 +56,23 @@ const ACCEPTANCE_EVALUATION_UNMEASURED_SOURCE_NOTICE: &str = "The host could not
 const ACCEPTANCE_SOURCE_CAPTURE_LIMIT: usize = 4;
 
 impl AppState {
-    /// The content revision of the worktree `workdir` lies in, taken by the
-    /// one function every basis comes from, or `None` when it cannot be taken
-    /// within the freeze budget ([`bounded_content_revision_capture`]).
-    fn acceptance_evaluation_source_revision(&self, workdir: &str) -> Option<String> {
+    /// The content revision at `place` (the worktree a workdir lies in, or
+    /// exactly a work's named source root), taken by the one function every
+    /// basis comes from, or `None` when it cannot be taken within the freeze
+    /// budget ([`bounded_content_revision_capture`]).
+    fn acceptance_evaluation_source_revision(&self, place: &EngramBasisPlace) -> Option<String> {
         let live = self
             .inner
             .lock()
             .expect("state mutex poisoned")
             .acceptance_source_captures_live
             .clone();
-        let workdir = workdir.to_owned();
+        let place = place.clone();
         bounded_content_revision_capture(
             &live,
             ACCEPTANCE_SOURCE_CAPTURE_LIMIT,
             REVIEW_FREEZE_TIMEOUT,
-            move || {
-                engram_execution_source_basis(FsPath::new(&workdir))
-                    .map(|basis| basis.source_revision)
-            },
+            move || engram_place_source_basis(&place).map(|basis| basis.source_revision),
         )
     }
 }
@@ -393,6 +391,38 @@ fn acceptance_evaluation_spawn_admission_locked(
     if current.store != seed.store {
         return Err(ApiError::conflict(
             ACCEPTANCE_EVALUATION_STORE_CHANGED_ERROR,
+        ));
+    }
+    // The root was looked up before the fingerprint was taken off the lock;
+    // a rename, a clear or a first name since then would leave the evaluator
+    // judging a tree the work is no longer (or not yet) measured in.
+    let binding = inner
+        .find_session_index(parent_session_id)
+        .and_then(|index| inner.sessions[index].engram.work_binding.as_ref());
+    let root_now = engram_evaluation_source_root(
+        &inner.engram_work_source_roots,
+        &seed.store,
+        binding,
+        &seed.work_ref,
+        seed.work_id.as_deref(),
+    );
+    // With no root at the request, a first name for the claim it was made
+    // under counts even if the parent has bound another claim, or none,
+    // since: the first submission would be refused on that claim.
+    let named_since = seed.source_root.is_none()
+        && seed.source_claim.as_ref().is_some_and(|claim| {
+            acceptance_evaluation_claim_named_since(
+                &inner.engram_work_source_roots,
+                &seed.store,
+                claim,
+                &seed.work_ref,
+            )
+        });
+    if root_now != seed.source_root || named_since {
+        return Err(ApiError::conflict(
+            "the work's source root changed while this evaluation was being requested, so its \
+             fingerprint may not describe the tree the work is measured in; request the \
+             evaluation again",
         ));
     }
     refuse_second_active_acceptance_evaluator_locked(inner, &seed.store, &seed.work_ref, None)
@@ -721,8 +751,46 @@ impl AppState {
         )
         .map_err(ApiError::conflict)?;
         // The declared fingerprint is taken only by the modes that use it,
-        // after the reads, on the worktree the evaluator reads: the parent's
-        // workdir, which is also the evaluator child's (cwd None).
+        // after the reads, on the worktree the evaluator reads: the work's
+        // named source root when the requesting session is bound to its claim
+        // (`engram_source_roots.rs`), where the evaluator child then runs;
+        // otherwise the parent's workdir, which is also the child's (cwd None).
+        // With no root named, the claim the session is bound to is kept, so
+        // a root named for it later refuses the submission whatever the
+        // session is bound to by then.
+        let (source_root, source_claim) = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            let binding = inner
+                .find_session_index(parent_session_id)
+                .and_then(|index| inner.sessions[index].engram.work_binding.clone());
+            let source_root = engram_evaluation_source_root(
+                &inner.engram_work_source_roots,
+                &target.store,
+                binding.as_ref(),
+                &task.work_ref,
+                task.work_id.as_deref(),
+            );
+            let source_claim = binding
+                .as_ref()
+                .filter(|_| source_root.is_none())
+                .map(AcceptanceEvaluationSourceClaim::from_binding);
+            (source_root, source_claim)
+        };
+        let place = source_root.as_ref().map_or_else(
+            || EngramBasisPlace::Workdir(parent_workdir.clone()),
+            AcceptanceEvaluationSourceRoot::place,
+        );
+        let evaluator_dir = source_root.as_ref().map_or_else(
+            || parent_workdir.clone(),
+            |root| engram_source_root_display(&root.root),
+        );
+        let root_notice = source_root.as_ref().map(|_| {
+            format!(
+                "The evaluation reads `{}`'s named source root {evaluator_dir}, where its \
+                 fingerprint is taken.",
+                task.work_ref
+            )
+        });
         let unmeasured = |fingerprint: &Option<String>| {
             fingerprint
                 .is_none()
@@ -747,18 +815,17 @@ impl AppState {
                 });
                 let prompt = build_acceptance_evaluator_prompt(
                     &task,
-                    &parent_workdir,
+                    &evaluator_dir,
                     MAX_ACCEPTANCE_BRIEF_BYTES,
                 )?;
-                let source_fingerprint =
-                    self.acceptance_evaluation_source_revision(&parent_workdir);
+                let source_fingerprint = self.acceptance_evaluation_source_revision(&place);
                 let unmeasured = unmeasured(&source_fingerprint);
                 let delegation = self.create_delegation_with_evaluation_target(
                     parent_session_id,
                     CreateDelegationRequest {
                         prompt,
                         title: Some(format!("Acceptance evaluation: {}", task.work_ref)),
-                        cwd: None,
+                        cwd: source_root.as_ref().map(|_| evaluator_dir.clone()),
                         agent: Some(agent),
                         model,
                         mode: Some(DelegationMode::Evaluator),
@@ -766,7 +833,13 @@ impl AppState {
                     },
                     // Creation re-resolves the store and refuses a second
                     // active evaluator of this task, under its own lock.
-                    Some(task.target_seed(mode, target.store.clone(), source_fingerprint)),
+                    Some(task.target_seed(
+                        mode,
+                        target.store.clone(),
+                        source_fingerprint,
+                        source_root.clone(),
+                        source_claim,
+                    )),
                 )?;
                 let notice = acceptance_evaluation_notices([
                     self.acceptance_evaluation_open_write_notice(
@@ -774,6 +847,7 @@ impl AppState {
                         &task.work_ref,
                         Some(&delegation.delegation.id),
                     ),
+                    root_notice,
                     unmeasured,
                 ]);
                 Ok(AcceptanceEvaluationRequestResponse::Spawned {
@@ -784,8 +858,7 @@ impl AppState {
                 })
             }
             AcceptanceEvaluationMode::SameSession => {
-                let source_fingerprint =
-                    self.acceptance_evaluation_source_revision(&parent_workdir);
+                let source_fingerprint = self.acceptance_evaluation_source_revision(&place);
                 let unmeasured = unmeasured(&source_fingerprint);
                 Ok(AcceptanceEvaluationRequestResponse::SameSession {
                     mode,
@@ -803,6 +876,7 @@ impl AppState {
                             &task.work_ref,
                             None,
                         ),
+                        root_notice,
                         unmeasured,
                     ]),
                     work_ref: task.work_ref,
@@ -908,22 +982,35 @@ impl AppState {
         target: &DelegationAcceptanceEvaluation,
     ) -> Result<DelegationAcceptanceEvaluation, ApiError> {
         let mut declared = target.clone();
-        let Some(requested) = target.source_fingerprint.as_deref() else {
-            return Ok(declared);
-        };
         if !matches!(target.submission, AcceptanceEvaluationSubmission::None) {
             return Ok(declared);
         }
-        let workdir = {
+        // An evaluation requested on a work's named source root is taken
+        // again on exactly that root, never through the workdir's ancestor
+        // walk, so a root removed meanwhile cannot measure the main checkout;
+        // and it is refused if the work's root has changed since, a first
+        // name included, whether or not a revision was taken at the request.
+        let place = {
             let inner = self.inner.lock().expect("state mutex poisoned");
-            inner
-                .find_session_index(child)
-                .map(|index| inner.sessions[index].session.workdir.clone())
+            if acceptance_evaluation_root_changed_locked(&inner, target) {
+                return Err(acceptance_evaluation_source_root_changed_error(
+                    target.source_root.as_ref(),
+                ));
+            }
+            match &target.source_root {
+                Some(source_root) => Some(source_root.place()),
+                None => inner
+                    .find_session_index(child)
+                    .map(|index| EngramBasisPlace::Workdir(inner.sessions[index].session.workdir.clone())),
+            }
+        };
+        // Without a revision taken at the request there is nothing to compare.
+        let Some(requested) = target.source_fingerprint.as_deref() else {
+            return Ok(declared);
         };
         // Off the lock and within the budget: the capture reads the whole
         // worktree.
-        let current =
-            workdir.and_then(|workdir| self.acceptance_evaluation_source_revision(&workdir));
+        let current = place.and_then(|place| self.acceptance_evaluation_source_revision(&place));
         match current {
             Some(current) if current == requested => {}
             Some(current) => {
@@ -1171,6 +1258,21 @@ impl AppState {
                         "this evaluator's delegation no longer carries its evaluation target",
                     )
                 })?;
+            // The root check again, under the lock that admits the first
+            // write: the submit-time capture ran off the lock, and a rename or
+            // a clear may have landed meanwhile. Naming commits under this
+            // lock too, so whichever comes first holds: a write admitted here
+            // was for the root as it was named then. An open write replays.
+            if let Some(target) = inner.delegations[index]
+                .acceptance_evaluation
+                .as_ref()
+                .filter(|target| matches!(target.submission, AcceptanceEvaluationSubmission::None))
+                .filter(|target| acceptance_evaluation_root_changed_locked(&inner, target))
+            {
+                return Err(acceptance_evaluation_source_root_changed_error(
+                    target.source_root.as_ref(),
+                ));
+            }
             let Some(target) = inner.delegations[index].acceptance_evaluation.as_mut() else {
                 return Err(ApiError::conflict(
                     "this evaluator delegation has no evaluation target",

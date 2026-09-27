@@ -927,6 +927,20 @@ trait EngramControlTransport: Send + Sync {
         self.read_work_binding(connection, preference, timeout)
     }
 
+    /// Every claim the session holds (`read_engram_held_claims_from_cli`),
+    /// which a work's source root is named against and ended by
+    /// (`engram_source_roots.rs`). A transport that cannot list them fails,
+    /// so no root is named and none ends on its account.
+    fn read_held_claims(
+        &self,
+        _connection: &EngramConnectionConfig,
+        _timeout: Duration,
+    ) -> std::result::Result<EngramHeldClaims, EngramTransportError> {
+        Err(EngramTransportError::protocol(
+            "this Engram transport does not list held claims",
+        ))
+    }
+
     fn shutdown_session(&self, session_id: &str);
 }
 
@@ -960,6 +974,9 @@ struct ScriptedEngramControlTransport {
     /// The bindings each work-binding read was told Engram refused
     /// (`EngramBindingPreference::refused`), in read order.
     refused_at_reads: Mutex<Vec<Vec<EngramControlWorkBinding>>>,
+    /// What each held-claims read returns, in order; the last one repeats,
+    /// and none scripted fails the read.
+    held_claims: Mutex<VecDeque<std::result::Result<EngramHeldClaims, EngramTransportError>>>,
     shutdowns: Mutex<Vec<String>>,
 }
 
@@ -971,6 +988,7 @@ impl ScriptedEngramControlTransport {
             responses: Mutex::new(responses.into_iter().collect()),
             work_bindings: Mutex::new(VecDeque::new()),
             refused_at_reads: Mutex::new(Vec::new()),
+            held_claims: Mutex::new(VecDeque::new()),
             shutdowns: Mutex::new(Vec::new()),
         })
     }
@@ -986,8 +1004,34 @@ impl ScriptedEngramControlTransport {
             responses: Mutex::new(responses.into_iter().collect()),
             work_bindings: Mutex::new(work_bindings.into_iter().collect()),
             refused_at_reads: Mutex::new(Vec::new()),
+            held_claims: Mutex::new(VecDeque::new()),
             shutdowns: Mutex::new(Vec::new()),
         })
+    }
+
+    /// Scripts what the next held-claims reads return (the last repeats).
+    fn script_held_claims(
+        &self,
+        reads: impl IntoIterator<Item = std::result::Result<EngramHeldClaims, EngramTransportError>>,
+    ) {
+        self.held_claims
+            .lock()
+            .expect("scripted Engram held claims mutex poisoned")
+            .extend(reads);
+    }
+
+    /// As `script_held_claims`, dropping what earlier scripts left (the last
+    /// read of a script repeats until more are scripted).
+    fn replace_held_claims(
+        &self,
+        reads: impl IntoIterator<Item = std::result::Result<EngramHeldClaims, EngramTransportError>>,
+    ) {
+        let mut held_claims = self
+            .held_claims
+            .lock()
+            .expect("scripted Engram held claims mutex poisoned");
+        held_claims.clear();
+        held_claims.extend(reads);
     }
 
     fn requests(&self) -> Vec<RecordedEngramControlRequest> {
@@ -1066,6 +1110,24 @@ impl EngramControlTransport for ScriptedEngramControlTransport {
             .expect("scripted Engram work bindings mutex poisoned")
             .pop_front()
             .unwrap_or(Ok(None))
+    }
+
+    fn read_held_claims(
+        &self,
+        _connection: &EngramConnectionConfig,
+        _timeout: Duration,
+    ) -> std::result::Result<EngramHeldClaims, EngramTransportError> {
+        let mut reads = self
+            .held_claims
+            .lock()
+            .expect("scripted Engram held claims mutex poisoned");
+        match reads.len() {
+            0 => Err(EngramTransportError::protocol(
+                "no held claims scripted for this test transport",
+            )),
+            1 => reads.front().cloned().expect("one scripted read"),
+            _ => reads.pop_front().expect("a scripted read"),
+        }
     }
 
     fn shutdown_session(&self, session_id: &str) {
@@ -2074,6 +2136,14 @@ impl EngramHostAdapter {
             .read_work_binding_for_boot(connection, preference, timeout)
     }
 
+    fn read_held_claims(
+        &self,
+        connection: &EngramConnectionConfig,
+        timeout: Duration,
+    ) -> std::result::Result<EngramHeldClaims, EngramTransportError> {
+        self.transport.read_held_claims(connection, timeout)
+    }
+
     fn shutdown_session(&self, session_id: &str) {
         self.transport.shutdown_session(session_id);
     }
@@ -2188,6 +2258,25 @@ struct EngramSessionState {
     /// delivered. Compared with the end-time basis, it decides whether the
     /// turn changed the workspace's content. In memory only.
     active_turn_start_basis: Option<EngramExecutionSourceBasis>,
+    /// The work's source root the turn `active_grant_id` began with, when its
+    /// claim has one (`engram_source_roots.rs`): every basis and check credit
+    /// of that turn is taken there instead of in the workdir. `None` measures
+    /// the workdir. Set at admission, so a root named during the turn takes
+    /// effect at the next one. In memory only.
+    active_turn_source_root: Option<EngramTurnSourceRoot>,
+    /// Host lines put before the agent's prompt about where its turns on
+    /// claimed work are measured (`engram_source_root_line`), one per line,
+    /// until the runtime accepts a prompt that carried them: a dispatch
+    /// refused before that keeps them, and a line set after the prompt was
+    /// built waits for the next one. Set only through
+    /// `set_pending_source_root_line`. In memory only.
+    pending_source_root_line: Option<String>,
+    /// The lines the prompt of the given turn generation carried, set as the
+    /// prompt is built (`turn_dispatch.rs`), less any given again since
+    /// (`set_pending_source_root_line`); when the runtime accepts it,
+    /// exactly those lines leave the pending ones
+    /// (`acknowledge_engram_source_root_line_delivery`).
+    source_root_line_delivery: Option<(String, u64)>,
     /// What the first closing checkpoint of the named grant reported for its
     /// turn, reused verbatim by every retry of that checkpoint so the
     /// idempotency key repeats: the turn's observations and the evidence of
@@ -2279,6 +2368,9 @@ impl Default for EngramSessionState {
             active_grant_id: None,
             active_turn_intent_fingerprint: None,
             active_turn_start_basis: None,
+            active_turn_source_root: None,
+            pending_source_root_line: None,
+            source_root_line_delivery: None,
             active_turn_report: None,
             active_turn_report_fallback: None,
             active_turn_grant_mutates: None,
@@ -2664,6 +2756,10 @@ struct EngramControlCard {
     repair_armed: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     next_intent: Option<EngramNextIntent>,
+    /// On the checkpoint of a turn bound to claimed work: where its source
+    /// basis was taken (`engram_source_roots.rs`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source_root: Option<EngramControlSourceRootCard>,
 }
 
 fn parse_engram_result<T: for<'de> Deserialize<'de>>(
@@ -3582,6 +3678,7 @@ impl AppState {
                 fail_mode,
                 repair_armed: false,
                 next_intent: Some(EngramNextIntent::Wait),
+                source_root: None,
             };
             let record = inner
                 .session_mut_by_index(index)
@@ -3678,7 +3775,7 @@ impl AppState {
         // whether its report needs a fresh basis. Nothing is claimed yet, so
         // the bounded basis capture that follows runs outside the
         // checkpoint_in_progress window that session teardown waits for.
-        let (planned_grant_id, capture) = {
+        let (planned_grant_id, capture, card_source_root) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let Some((index, grant_id, _)) = Self::engram_checkpoint_grant_locked(
                 &inner,
@@ -3696,13 +3793,24 @@ impl AppState {
             }
             let capture =
                 match engram_turn_report_plan(&inner.sessions[index], &grant_id, turn_outcome) {
-                    EngramTurnReportPlan::Fresh { workdir, .. } => Some((
-                        workdir,
+                    EngramTurnReportPlan::Fresh { place, sealed, .. } => Some((
+                        place,
+                        sealed,
                         inner.sessions[index].engram.active_turn_checks.clone(),
                     )),
                     EngramTurnReportPlan::Nothing | EngramTurnReportPlan::Cached(_) => None,
                 };
-            (grant_id, capture)
+            // Where a bound turn was measured, for the card the operator sees.
+            let card_source_root = inner.sessions[index]
+                .engram
+                .work_binding
+                .is_some()
+                .then(|| {
+                    EngramControlSourceRootCard::for_turn(
+                        inner.sessions[index].engram.active_turn_source_root.as_ref(),
+                    )
+                });
+            (grant_id, capture, card_source_root)
         };
         // The closing basis, and the checks the turn ran with their own
         // snapshots and toolchain labels, all off the lock. One budget bounds
@@ -3710,10 +3818,11 @@ impl AppState {
         // at most the freeze bound once: what is not ready by then is
         // withheld or goes unlabelled.
         let (end_basis, mut resolved_checks) = match capture {
-            Some((workdir, checks)) => {
+            Some((place, sealed, checks)) => {
                 let deadline = std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT;
-                let end_basis = self.engram_execution_source_basis_within(
-                    &workdir,
+                let end_basis = self.engram_turn_end_basis_within(
+                    &place,
+                    sealed.as_ref(),
                     deadline.saturating_duration_since(std::time::Instant::now()),
                 );
                 let resolved_checks =
@@ -3888,6 +3997,7 @@ impl AppState {
             fail_mode,
             repair_armed: false,
             next_intent: Some(next_intent),
+            source_root: card_source_root,
         };
         self.finish_engram_checkpoint_record(
             session_id,
@@ -4595,6 +4705,7 @@ impl AppState {
             fail_mode,
             repair_armed,
             next_intent: None,
+            source_root: None,
         };
         if issued_unbegun_grant_id.is_some() {
             // Arm orphan-grant repair while the exact queue owner still
@@ -4974,6 +5085,7 @@ impl AppState {
                 // checkpoint under the intent it was issued for.
                 record.engram.active_turn_intent_fingerprint = released_intent;
                 record.engram.active_turn_start_basis = None;
+                record.engram.active_turn_source_root = None;
                 record.engram.active_turn_report = None;
                 record.engram.active_turn_report_fallback = None;
                 // A begin recorded as uncertain while it was in flight has
@@ -5955,6 +6067,25 @@ impl AppState {
                     ));
                 }
             }
+            // A newly bound claim tells the agent, once, where its turns on
+            // it are measured (`engram_source_roots.rs`).
+            let source_root_line = match &bound_request {
+                EngramControlRequest::SessionBind {
+                    work_binding: Some(binding),
+                    ..
+                } => engram_bind_source_root_line(
+                    Self::engram_session_has_child_binding_shape_locked(
+                        &inner,
+                        &inner.sessions[index].session.id,
+                    ),
+                    &inner.engram_work_source_roots,
+                    target.settings.authority_store_key.as_ref(),
+                    inner.sessions[index].engram.work_binding.as_ref(),
+                    binding,
+                    &inner.sessions[index].session.workdir,
+                ),
+                _ => None,
+            };
             let record = inner
                 .session_mut_by_index(index)
                 .expect("session index should be valid");
@@ -5967,6 +6098,9 @@ impl AppState {
                 EngramControlRequest::SessionBind { work_binding, .. } => work_binding.clone(),
                 _ => None,
             };
+            if let Some(line) = source_root_line {
+                record.engram.set_pending_source_root_line(line);
+            }
             record.engram.turn_begun_since_binding_read = false;
             // Engram refuses a bind while a grant is begun, so an accepted
             // bind settles any uncertain begin on the old binding, including
@@ -6561,6 +6695,7 @@ impl AppState {
                 );
                 record.engram.next_bind_retry_at = None;
                 record.engram.rebind_required = true;
+                record.engram.drop_pending_source_root_lines();
                 return;
             }
             if error.counts_for_circuit_breaker() {
@@ -6618,6 +6753,7 @@ impl AppState {
             );
             record.engram.next_bind_retry_at = None;
             record.engram.rebind_required = true;
+            record.engram.drop_pending_source_root_lines();
             return;
         }
         if error.counts_for_circuit_breaker() {

@@ -476,6 +476,11 @@ impl StateInner {
     /// SQLite after the move to delta persistence.
     fn record_removed_session(&mut self, session_id: String) {
         if !session_id.is_empty() {
+            // A work's source root this session named has nobody left who
+            // named it; it ends with the session (`engram_source_roots.rs`).
+            engram_end_orphaned_work_source_roots(&mut self.engram_work_source_roots, |named_by| {
+                named_by != session_id
+            });
             self.removed_session_ids.push(session_id);
         }
     }

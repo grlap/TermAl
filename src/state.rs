@@ -1385,6 +1385,16 @@ struct StateInner {
     /// TermAl retired. Unlike project settings, this survives project deletion
     /// so recreating the same Engram store cannot reuse a retired credential.
     engram_retired_work_authority_grants: Vec<EngramRetiredWorkAuthorityGrant>,
+    /// The source roots agents named for claimed Engram work
+    /// (`engram_source_roots.rs`), persisted so a restart keeps them.
+    engram_work_source_roots: Vec<EngramWorkSourceRoot>,
+    /// The generation the last new source-root name got; the next is one
+    /// more, so no generation is given twice, even after a clear. Persisted
+    /// (`PersistedState`), and on restore raised to the highest generation
+    /// stored, the orphans' included. An evaluation's root check
+    /// (`AcceptanceEvaluationSourceRoot::still_named`) compares the root as
+    /// well as the generation.
+    engram_source_root_generation: u64,
     /// Durable outbox of project scopes whose coordination-board data must be
     /// fenced and removed after the project deletion reaches termal.sqlite.
     /// The dedicated cleanup worker removes an item in memory only after the
@@ -1441,6 +1451,10 @@ struct StateInner {
     /// Threads taking a turn's begin or closing source basis that are still
     /// alive, abandoned ones included. Memory only, one count for the host.
     engram_turn_basis_captures_live: Arc<std::sync::atomic::AtomicUsize>,
+    /// Threads checking a path named as a work's source root that are still
+    /// alive, abandoned ones included (`engram_run_source_root_validation_within`).
+    /// Memory only, one count for the host.
+    engram_source_root_validations_live: Arc<std::sync::atomic::AtomicUsize>,
     /// The test launcher's runs, mirrored from their run directories by the
     /// rescan in `test_runs.rs`. Memory only: disk stays the record.
     test_runs: TestRunIndex,
@@ -1504,6 +1518,8 @@ impl StateInner {
             next_message_number: 1,
             projects: Vec::new(),
             engram_retired_work_authority_grants: Vec::new(),
+            engram_work_source_roots: Vec::new(),
+            engram_source_root_generation: 0,
             pending_coordination_scope_deletions: BTreeSet::new(),
             pending_response_board_project_detachments: BTreeMap::new(),
             ignored_discovered_codex_thread_ids: BTreeSet::new(),
@@ -1518,6 +1534,7 @@ impl StateInner {
             acceptance_evaluation_submissions_in_flight: HashSet::new(),
             acceptance_source_captures_live: Arc::default(),
             engram_turn_basis_captures_live: Arc::default(),
+            engram_source_root_validations_live: Arc::default(),
             test_runs: TestRunIndex::default(),
             test_run_cards_epoch: None,
             test_run_cards: BTreeMap::new(),

@@ -2,8 +2,9 @@
 //! w-108a13d58018, tm-winf): a mediated turn reports one observation on the
 //! checkpoint that closes its grant, with `source_changed` decided by content
 //! (the workspace's content revision before the prompt reached the
-//! runtime against the one at the close, the turn's file-change tracking
-//! being only a lower bound), the outcome of the transition that closed it,
+//! runtime against the one at the close; the turn's file-change tracking
+//! decides only when the closing revision is missing), in the source root
+//! named for its claim when there is one, the outcome of the transition that closed it,
 //! the intent fingerprint the grant was issued for, and the closing
 //! fingerprint with its canonical worktree root as the source basis. A turn
 //! that changed source under a grant that mediates no local mutation reports
@@ -743,6 +744,10 @@ fn a_watcher_event_without_a_content_change_is_no_source_change() {
         "watcher-only",
         ChildWorkspace::IsolatedWorktree,
         ControlBinding::Claimed,
+    );
+    assert!(
+        turn.start_basis().is_some(),
+        "the turn began with a basis, so a failed begin capture is not mistaken for the rule"
     );
     turn.record_watcher_event(".worktrees/peer/scripts/test-launcher.test.mjs");
 
@@ -1503,3 +1508,312 @@ fn a_confirmed_failure_through_the_atomic_path_reports_a_failed_observation() {
     let (_, observation) = turn.observation();
     assert_eq!(observation["outcome"], "failed");
 }
+
+/// A linked worktree of the claimed root's repository under `.worktrees/wt`,
+/// which the main checkout ignores (its untracked nested repository would
+/// otherwise leave main without a content revision).
+fn add_claimed_root_worktree(root: &FsPath) -> PathBuf {
+    fs::write(root.join(".gitignore"), ".worktrees/\n").expect("ignore file should write");
+    run_git_test_command(root, &["add", ".gitignore"]);
+    run_git_test_command(root, &["commit", "--quiet", "-m", "ignore worktrees"]);
+    let worktree = root.join(".worktrees").join("wt");
+    run_git_test_command(
+        root,
+        &[
+            "worktree",
+            "add",
+            "--quiet",
+            "-b",
+            "wt",
+            worktree.to_str().expect("a UTF-8 test path"),
+        ],
+    );
+    worktree
+}
+
+/// Names `worktree` as the source root of the claimed root's work through the
+/// tool's handler, with the store identity and the held claim a real Engram
+/// gives: the claim the session is bound to by `ClaimedRoot::new`.
+fn name_claimed_root_source_root(
+    claimed: &ClaimedRoot,
+    label: &str,
+    worktree: &FsPath,
+) -> EngramSourceRootResponse {
+    let binding = test_control_work_binding(&format!("turn-observation-{label}"), 1);
+    {
+        let mut inner = claimed.state.inner.lock().expect("state mutex poisoned");
+        for project in &mut inner.projects {
+            if let Some(engram) = project.engram.as_mut() {
+                engram.authority_store_key = Some(EngramAuthorityStoreKey {
+                    database_path: claimed.root.join("engram.db"),
+                    project_id: "github.com/example/source-root".to_owned(),
+                });
+            }
+        }
+    }
+    claimed.transport.script_held_claims([Ok(EngramHeldClaims {
+        items: vec![EngramHeldClaim {
+            work_id: binding.work_id.clone(),
+            short_ref: format!("w-{label}"),
+            claim_id: binding.claim_id.clone(),
+            claim_fence: binding.claim_fence,
+            focused: true,
+            control_binding: Some(binding),
+        }],
+        omitted: 0,
+    })]);
+    claimed
+        .state
+        .name_engram_source_root(
+            &claimed.session_id,
+            EngramSourceRootRequest {
+                work: format!("w-{label}"),
+                path: Some(Some(worktree.to_string_lossy().into_owned())),
+            },
+        )
+        .expect("the claim's holder names a registered worktree of its repository")
+}
+
+/// The prompt text the root's runtime received.
+fn received_prompt(claimed: &ClaimedRoot) -> String {
+    match receive(&claimed.runtime_rx, "runtime should receive the root prompt") {
+        CodexRuntimeCommand::Prompt { command, .. } => command.prompt,
+        _ => panic!("expected the root's runtime to receive a prompt"),
+    }
+}
+
+#[test]
+fn a_turn_on_a_claim_with_a_named_source_root_is_measured_in_that_worktree() {
+    // tm-5gi4 phase 2: a session rooted in the main checkout that works in a
+    // worktree names it once; its turns on that claim are measured there.
+    let label = "named-root";
+    let grant_id = "turn-observation-named-root-grant";
+    let claimed = ClaimedRoot::new(
+        label,
+        vec![
+            bind_reply("turn-observation-named-root-token"),
+            grant_reply(grant_id),
+            begin_reply(grant_id),
+            checkpoint_reply(grant_id),
+        ],
+    );
+    let worktree = add_claimed_root_worktree(&claimed.root);
+    let named = name_claimed_root_source_root(&claimed, label, &worktree);
+    let canonical = fs::canonicalize(&worktree).expect("the worktree should canonicalize");
+    assert_eq!(named.root.as_deref().map(PathBuf::from), Some(canonical.clone()));
+    assert_eq!(named.generation, 1);
+    assert_eq!(named.source_revision, Some(content_revision_of(&worktree)));
+
+    deliver_turn_dispatch(&claimed.state, claimed.dispatch())
+        .expect("the begun root turn should reach the runtime");
+    let prompt = received_prompt(&claimed);
+    assert!(
+        prompt.contains(&format!("Engram source basis for w-{label}: its named source root")),
+        "the agent is told where its turns are measured: {prompt}"
+    );
+    let runtime_token = claimed.runtime_token();
+    fs::write(worktree.join("README.md"), "changed in the named worktree\n")
+        .expect("worktree edit should write");
+
+    claimed
+        .state
+        .finish_turn_ok_if_runtime_matches(&claimed.session_id, &runtime_token)
+        .expect("root turn should complete");
+
+    let checkpoint = claimed
+        .transport
+        .requests()
+        .into_iter()
+        .find(|request| request.request["operation"] == "turn_checkpoint")
+        .expect("the root turn is checkpointed")
+        .request;
+    let observation = &checkpoint["observations"][0];
+    assert_eq!(observation["source_changed"], true, "{checkpoint:#}");
+    assert_eq!(
+        PathBuf::from(
+            observation["source_basis"]["workspace_id"]
+                .as_str()
+                .expect("workspace id")
+        ),
+        canonical,
+        "the basis is the named worktree's, not the main checkout's"
+    );
+    assert_eq!(
+        observation["source_basis"]["source_revision"].as_str(),
+        Some(content_revision_of(&worktree).as_str())
+    );
+}
+
+/// A claimed root in a turn with a linked worktree; `name_first` names it as
+/// the work's source root before the turn is dispatched, else during it.
+fn named_root_turn(label: &str, name_first: bool) -> (ClaimedRoot, PathBuf, RuntimeToken) {
+    let grant_id = format!("turn-observation-{label}-grant");
+    let claimed = ClaimedRoot::new(
+        label,
+        vec![
+            bind_reply(&format!("turn-observation-{label}-token")),
+            grant_reply(&grant_id),
+            begin_reply(&grant_id),
+            checkpoint_reply(&grant_id),
+        ],
+    );
+    let worktree = add_claimed_root_worktree(&claimed.root);
+    if name_first {
+        name_claimed_root_source_root(&claimed, label, &worktree);
+    }
+    deliver_turn_dispatch(&claimed.state, claimed.dispatch())
+        .expect("the begun root turn should reach the runtime");
+    let _ = received_prompt(&claimed);
+    if !name_first {
+        name_claimed_root_source_root(&claimed, label, &worktree);
+    }
+    let runtime_token = claimed.runtime_token();
+    (claimed, worktree, runtime_token)
+}
+
+/// Completes the claimed root's turn and returns its one observation.
+fn finish_claimed_turn(claimed: &ClaimedRoot, runtime_token: &RuntimeToken) -> Value {
+    claimed
+        .state
+        .finish_turn_ok_if_runtime_matches(&claimed.session_id, runtime_token)
+        .expect("root turn should complete");
+    let checkpoint = claimed
+        .transport
+        .requests()
+        .into_iter()
+        .find(|request| request.request["operation"] == "turn_checkpoint")
+        .expect("the root turn is checkpointed")
+        .request;
+    checkpoint["observations"][0].clone()
+}
+
+#[test]
+fn a_root_named_during_a_turn_takes_effect_at_the_next_one() {
+    // The turn running when the name is given keeps the root it began with:
+    // its basis is not moved, and the agent is told for the next turn.
+    let (claimed, worktree, runtime_token) = named_root_turn("named-mid-turn", false);
+    fs::write(worktree.join("README.md"), "changed in the worktree\n").expect("worktree edit");
+    assert!(
+        claimed
+            .record(|record| record.engram.pending_source_root_line.clone())
+            .is_some_and(|line| line.contains("its named source root")),
+        "the next prompt carries the new root"
+    );
+
+    let observation = finish_claimed_turn(&claimed, &runtime_token);
+
+    assert_eq!(
+        PathBuf::from(observation["source_basis"]["workspace_id"].as_str().expect("workspace id")),
+        fs::canonicalize(&claimed.root).expect("the root should canonicalize"),
+        "this turn is still measured in the workdir it began with"
+    );
+    assert_eq!(
+        observation["source_changed"], false,
+        "the worktree's edit is not this turn's change of its workdir"
+    );
+}
+
+#[test]
+fn without_a_closing_basis_a_watcher_event_outside_the_named_root_is_no_change() {
+    let (claimed, worktree, runtime_token) = named_root_turn("named-no-closing-outside", true);
+    // The closing capture of the root fails: an untracked nested repository.
+    let nested = worktree.join("nested");
+    fs::create_dir_all(&nested).expect("nested directory");
+    init_git_repository(&nested);
+    // The watcher saw only a write in the main checkout.
+    claimed.record(|record| {
+        record.active_turn_file_changes.insert(
+            claimed.root.join("README.md").to_string_lossy().into_owned(),
+            WorkspaceFileChangeKind::Modified,
+        );
+    });
+
+    let observation = finish_claimed_turn(&claimed, &runtime_token);
+
+    assert!(observation.get("source_basis").is_none(), "{observation:#}");
+    assert_eq!(
+        observation["source_changed"], false,
+        "the hint counts only paths inside the turn's root"
+    );
+}
+
+#[test]
+fn without_a_closing_basis_a_watcher_event_inside_the_named_root_is_a_change() {
+    let (claimed, worktree, runtime_token) = named_root_turn("named-no-closing-inside", true);
+    let nested = worktree.join("nested");
+    fs::create_dir_all(&nested).expect("nested directory");
+    init_git_repository(&nested);
+    claimed.record(|record| {
+        record.active_turn_file_changes.insert(
+            worktree.join("README.md").to_string_lossy().into_owned(),
+            WorkspaceFileChangeKind::Modified,
+        );
+    });
+
+    let observation = finish_claimed_turn(&claimed, &runtime_token);
+
+    assert!(observation.get("source_basis").is_none(), "{observation:#}");
+    assert_eq!(
+        observation["source_changed"], true,
+        "without a closing basis the hint inside the root decides"
+    );
+}
+
+#[test]
+fn an_edit_in_the_main_checkout_is_no_change_of_a_turn_measured_in_a_named_root() {
+    let label = "named-root-main-edit";
+    let grant_id = "turn-observation-named-root-main-edit-grant";
+    let claimed = ClaimedRoot::new(
+        label,
+        vec![
+            bind_reply("turn-observation-named-root-main-edit-token"),
+            grant_reply(grant_id),
+            begin_reply(grant_id),
+            checkpoint_reply(grant_id),
+        ],
+    );
+    let worktree = add_claimed_root_worktree(&claimed.root);
+    name_claimed_root_source_root(&claimed, label, &worktree);
+    deliver_turn_dispatch(&claimed.state, claimed.dispatch())
+        .expect("the begun root turn should reach the runtime");
+    let _ = received_prompt(&claimed);
+    let runtime_token = claimed.runtime_token();
+    // Another session's edit in the shared main checkout, which the watcher
+    // attributes to every session rooted there.
+    fs::write(claimed.root.join("README.md"), "changed in main\n").expect("main edit");
+    claimed.record(|record| {
+        record.active_turn_file_changes.insert(
+            claimed.root.join("README.md").to_string_lossy().into_owned(),
+            WorkspaceFileChangeKind::Modified,
+        );
+    });
+
+    claimed
+        .state
+        .finish_turn_ok_if_runtime_matches(&claimed.session_id, &runtime_token)
+        .expect("root turn should complete");
+
+    let checkpoint = claimed
+        .transport
+        .requests()
+        .into_iter()
+        .find(|request| request.request["operation"] == "turn_checkpoint")
+        .expect("the root turn is checkpointed")
+        .request;
+    let observation = &checkpoint["observations"][0];
+    assert_eq!(
+        observation["source_changed"], false,
+        "the named worktree did not move: {checkpoint:#}"
+    );
+    assert_eq!(
+        PathBuf::from(
+            observation["source_basis"]["workspace_id"]
+                .as_str()
+                .expect("workspace id")
+        ),
+        fs::canonicalize(&worktree).expect("the worktree should canonicalize")
+    );
+}
+
+#[path = "engram_source_root_naming.rs"]
+mod source_root_naming;

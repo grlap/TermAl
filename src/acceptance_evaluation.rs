@@ -141,6 +141,13 @@ struct AcceptanceEvaluationTargetSeed {
     /// The content revision of the evaluator's worktree, taken after the
     /// reads above; `None` when it could not be taken.
     source_fingerprint: Option<String>,
+    /// The work's named source root it was taken on, if any.
+    source_root: Option<AcceptanceEvaluationSourceRoot>,
+    /// With no root named, the claim the requesting session was bound to.
+    source_claim: Option<AcceptanceEvaluationSourceClaim>,
+    /// The work's id when the tracker's receipt carried it, with which the
+    /// root is looked up again as the evaluator is created.
+    work_id: Option<String>,
 }
 
 impl AcceptanceEvaluationTargetSeed {
@@ -154,6 +161,8 @@ impl AcceptanceEvaluationTargetSeed {
             attempt_key,
             store: Some(self.store),
             source_fingerprint: self.source_fingerprint,
+            source_root: self.source_root,
+            source_claim: self.source_claim,
             submission: AcceptanceEvaluationSubmission::None,
         }
     }
@@ -197,6 +206,10 @@ struct EngramShowStatusForEvaluation {
 #[derive(Debug, Deserialize)]
 struct EngramShowWorkForEvaluation {
     short_ref: String,
+    /// The work's id, which a named source root is keyed by. Optional: the
+    /// match falls back to `short_ref` when a receipt does not carry it.
+    #[serde(default)]
+    work_id: Option<String>,
     lifecycle: String,
     /// Present only when the task pins a mode.
     #[serde(default)]
@@ -258,6 +271,8 @@ struct AcceptanceEvaluationEvidence {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct AcceptanceEvaluationTask {
     work_ref: String,
+    /// The work's id, when the tracker's receipt carried it.
+    work_id: Option<String>,
     title: String,
     outcome: String,
     criteria: Vec<String>,
@@ -315,6 +330,7 @@ fn parse_acceptance_evaluation_task(
     }
     Ok(AcceptanceEvaluationTask {
         work_ref: work.short_ref,
+        work_id: work.work_id.filter(|work_id| !work_id.is_empty()),
         title: contract.work.title,
         outcome: contract.work.outcome,
         criteria: contract.work.acceptance,
@@ -348,6 +364,8 @@ impl AcceptanceEvaluationTask {
         mode: AcceptanceEvaluationMode,
         store: EngramAuthorityStoreKey,
         source_fingerprint: Option<String>,
+        source_root: Option<AcceptanceEvaluationSourceRoot>,
+        source_claim: Option<AcceptanceEvaluationSourceClaim>,
     ) -> AcceptanceEvaluationTargetSeed {
         AcceptanceEvaluationTargetSeed {
             work_ref: self.work_ref.clone(),
@@ -357,6 +375,9 @@ impl AcceptanceEvaluationTask {
             criteria_count: self.criteria.len(),
             store,
             source_fingerprint,
+            source_root,
+            source_claim,
+            work_id: self.work_id.clone(),
         }
     }
 }

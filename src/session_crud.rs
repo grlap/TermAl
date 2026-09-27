@@ -3206,6 +3206,7 @@ impl AppState {
                 fail_mode: EngramControlFailMode::Degraded,
                 next_intent: Some(EngramNextIntent::Exit),
                 repair_armed: true,
+                source_root: None,
             },
             target.project_reset_owner_generation,
         );

@@ -555,31 +555,60 @@ impl AppState {
                 continue;
             }
             diagnostic.eligible_sessions += 1;
+            // A turn measured in its claim's named source root
+            // (`engram_source_roots.rs`) counts events there too, since the
+            // root may lie beside the workdir rather than inside it; only
+            // while its grant is held, as the record keeps the root until the
+            // next grant begins. Watch roots are canonical, so event paths
+            // carry the root's canonical prefix and compare by key, with no
+            // file-system access under the lock; the key folds case, so it
+            // can add a sibling's path but never drops one of the root's.
+            let turn_root_key = record
+                .engram
+                .active_turn_source_root
+                .as_ref()
+                .filter(|_| record.engram.active_grant_id.is_some())
+                .map(|turn_root| engram_path_key(FsPath::new(&turn_root.root)));
 
             for change in changes {
                 let path = change.path.trim();
-                if change.session_id.is_none() && session_scoped_change_paths.contains(path) {
-                    continue;
-                }
-                if change
-                    .session_id
-                    .as_deref()
-                    .is_some_and(|session_id| session_id != record.session.id)
-                {
-                    continue;
-                }
-
                 if path.is_empty() {
                     continue;
                 }
-                let path_check_started = std::time::Instant::now();
-                let matches = path_contains(&record.session.workdir, FsPath::new(path));
-                let path_check_elapsed = path_check_started.elapsed();
-                diagnostic.path_checks += 1;
-                diagnostic.path_checks_subset += path_check_elapsed;
-                diagnostic.path_check_max = diagnostic.path_check_max.max(path_check_elapsed);
-                if !matches {
-                    continue;
+                // An event in the turn's root counts whichever scope it was
+                // routed to: the root may lie under another session's
+                // workdir, whose scoped copy is the only one carrying it.
+                // Copies of one path merge into one entry. This set is also
+                // the turn's "files changed" summary, so another session's
+                // edit in a shared root is listed there as well as in that
+                // session's own: the watcher cannot tell writers apart, and
+                // missing the turn's own edits is the worse error
+                // (docs/features/engram-host-adapter.md, named source roots).
+                let in_root = turn_root_key.as_deref().is_some_and(|root| {
+                    engram_path_within(&engram_path_key(FsPath::new(path)), root)
+                });
+                if !in_root {
+                    if change.session_id.is_none() && session_scoped_change_paths.contains(path)
+                    {
+                        continue;
+                    }
+                    if change
+                        .session_id
+                        .as_deref()
+                        .is_some_and(|session_id| session_id != record.session.id)
+                    {
+                        continue;
+                    }
+                    let path_check_started = std::time::Instant::now();
+                    let matches = path_contains(&record.session.workdir, FsPath::new(path));
+                    let path_check_elapsed = path_check_started.elapsed();
+                    diagnostic.path_checks += 1;
+                    diagnostic.path_checks_subset += path_check_elapsed;
+                    diagnostic.path_check_max =
+                        diagnostic.path_check_max.max(path_check_elapsed);
+                    if !matches {
+                        continue;
+                    }
                 }
                 diagnostic.path_matches += 1;
 

@@ -703,6 +703,7 @@ fn failed_legacy_unknown_park_is_published_and_never_falls_through() {
                     fail_mode: EngramControlFailMode::Enforced,
                     repair_armed: false,
                     next_intent: None,
+                    source_root: None,
                 },
             },
         );
@@ -879,6 +880,7 @@ fn failed_defer_card_commit_keeps_the_durable_evaluation_recovery_anchor() {
                 fail_mode: EngramControlFailMode::Enforced,
                 repair_armed: false,
                 next_intent: None,
+                source_root: None,
             },
         ),
         EngramDispatchRecordFinish::PersistenceUnknown

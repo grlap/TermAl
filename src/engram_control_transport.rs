@@ -241,6 +241,14 @@ impl EngramControlTransport for ProcessEngramControlTransport {
         read_engram_work_binding_from_cli(connection, preference, timeout, true)
     }
 
+    fn read_held_claims(
+        &self,
+        connection: &EngramConnectionConfig,
+        timeout: Duration,
+    ) -> std::result::Result<EngramHeldClaims, EngramTransportError> {
+        read_engram_held_claims_from_cli(connection, timeout, false)
+    }
+
     fn shutdown_session(&self, session_id: &str) {
         let process = self
             .processes

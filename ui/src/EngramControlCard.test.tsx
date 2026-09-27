@@ -86,4 +86,66 @@ describe("EngramControlCard", () => {
       "Repair: armed",
     );
   });
+
+  it("names the source root a bound turn was measured in", () => {
+    renderEngramCard({
+      id: "engram-checkpoint-named",
+      type: "engramControl",
+      author: "assistant",
+      timestamp: "10:03",
+      schemaVersion: 1,
+      stage: "checkpoint",
+      assurance: "turn_gated",
+      decision: "grant",
+      dispatch: "sent_on_grant",
+      grantId: "grant-1",
+      latencyMs: { checkpoint: 3, total: 3 },
+      failMode: "enforced",
+      nextIntent: "wait",
+      sourceRoot: { root: "C:\\repo\\.worktrees\\wt", workRef: "w-abc" },
+    });
+
+    expect(screen.getByText(/Grant: grant-1/)).toHaveTextContent(
+      "Source basis: C:\\repo\\.worktrees\\wt (named for w-abc)",
+    );
+  });
+
+  it("says when a bound turn was measured in the workdir because no worktree is named", () => {
+    renderEngramCard({
+      id: "engram-checkpoint-workdir",
+      type: "engramControl",
+      author: "assistant",
+      timestamp: "10:04",
+      schemaVersion: 1,
+      stage: "checkpoint",
+      assurance: "turn_gated",
+      decision: "grant",
+      dispatch: "sent_on_grant",
+      latencyMs: { checkpoint: 3, total: 3 },
+      failMode: "enforced",
+      sourceRoot: {},
+    });
+
+    expect(screen.getByText(/Dispatch: sent on grant/)).toHaveTextContent(
+      "Source basis: session workdir (no worktree named)",
+    );
+  });
+
+  it("says nothing about a source basis on a card that carries none", () => {
+    renderEngramCard({
+      id: "engram-dispatch-plain",
+      type: "engramControl",
+      author: "assistant",
+      timestamp: "10:05",
+      schemaVersion: 1,
+      stage: "dispatch",
+      assurance: "turn_gated",
+      decision: "grant",
+      dispatch: "sent_on_grant",
+      latencyMs: { total: 1 },
+      failMode: "enforced",
+    });
+
+    expect(screen.queryByText(/Source basis/)).not.toBeInTheDocument();
+  });
 });

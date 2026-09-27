@@ -1301,6 +1301,7 @@ fn a_begin_whose_outcome_arrives_after_it_was_recorded_uncertain_settles_the_rec
             fail_mode: EngramControlFailMode::Enforced,
             repair_armed: false,
             next_intent: None,
+            source_root: None,
         },
     );
     assert_eq!(finish, EngramDispatchRecordFinish::Ready);

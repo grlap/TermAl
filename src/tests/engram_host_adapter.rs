@@ -130,6 +130,14 @@ impl EngramControlTransport for ControlOnlyEngramTransport {
         self.control
             .read_work_binding_for_boot(connection, preference, timeout)
     }
+
+    fn read_held_claims(
+        &self,
+        connection: &EngramConnectionConfig,
+        timeout: Duration,
+    ) -> std::result::Result<EngramHeldClaims, EngramTransportError> {
+        self.control.read_held_claims(connection, timeout)
+    }
 }
 
 fn install_control_only_transport(state: &AppState, control: Arc<dyn EngramControlTransport>) {
@@ -11060,6 +11068,7 @@ fn api_rejection_guard_ignores_a_dispatch_marker_replaced_after_finish() {
             fail_mode: EngramControlFailMode::Enforced,
             repair_armed: false,
             next_intent: None,
+            source_root: None,
         },
     );
     assert_eq!(finish, EngramDispatchRecordFinish::Rejected);
@@ -15404,6 +15413,7 @@ fn circuit_breaker_and_fatal_protocol_errors_update_only_the_effective_child() {
             fail_mode: EngramControlFailMode::Degraded,
             repair_armed: false,
             next_intent: None,
+            source_root: None,
         },
     );
     assert_eq!(accepted, EngramDispatchRecordFinish::Ready);
@@ -15560,6 +15570,7 @@ fn dispatch_card_persist_failure_withholds_granted_delivery() {
             fail_mode: EngramControlFailMode::Enforced,
             repair_armed: false,
             next_intent: None,
+            source_root: None,
         },
     );
     assert_eq!(preparation, EngramDispatchRecordFinish::PersistenceUnknown);

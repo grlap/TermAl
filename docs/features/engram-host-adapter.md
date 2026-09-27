@@ -531,6 +531,191 @@ shape, then compares it for equality.
   basis after it differs from every earlier one although nothing changed.
   Such a run needs one more passing test and, where it was evaluated, one
   more evaluation. Upgrade while no evaluation is pending.
+- **Ignored files are not source.** A write only to a path the revision does
+  not cover (an ignored file, a nested worktree under an ignored folder)
+  leaves the revision where it was, so a turn whose begin and closing bases
+  both exist reports no source change for it, whatever the file watcher saw.
+
+### Source root
+
+A root session usually starts in the project folder and does a claimed
+item's work in a linked worktree. By default every basis above is taken on
+the session's workdir, which would measure the main checkout while the work
+happens elsewhere. The agent therefore names the item's worktree once with
+`termal_name_source_root { work, path }` (tm-5gi4 phase 2, Greg's option B;
+`src/engram_source_roots.rs`), and TermAl measures that tree instead.
+
+- **Who names it, and what.** Only a root session that holds a live claim on
+  `work` (its id or short reference), as `engram work core held` lists it
+  under that session's own Engram session id, with Engram control on for it
+  and its project (a name counts only for mediated turns). A project, folder
+  or Engram store that changes while the name is being checked makes the
+  call a conflict, and nothing is named. The path must be (a) the root
+  of a worktree TermAl can measure, (b) of the same repository as the
+  session's workdir (the common Git directory, read from the file system
+  and compared exactly, since on a case-sensitive volume two repositories
+  may differ only in case), (c) registered with it (the main worktree, or a
+  linked one whose own directory names `<root>/.git` back; a copied or
+  pruned `.git` is refused), and (d) inside the project folder on its
+  canonical path, because the acceptance evaluator runs there and a
+  delegated session's folder must lie inside its project. A root on a
+  network share, or on a drive mapped to one, is refused, whatever the
+  spelling (a verbatim alias of the network redirector, such as
+  `\\?\GLOBALROOT\Device\Mup\…`, included, before anything resolves it):
+  TermAl never resolves such a path while measuring, and the
+  evaluator cannot start there. A path is at most 4096 characters, and a
+  Windows drive-relative spelling (`C:wt`) is refused, since it would
+  resolve against the host process's folder on that drive; Git Bash's
+  `/c/…` spelling, as its `pwd` prints it, is read as `C:/…`. Omitting `path`
+  clears the name; a blank or null `path` is refused rather than read as a
+  clear, and the MCP tool sends a present `path` as written and refuses one
+  that is not a string. A delegated session names nothing: it holds its own
+  claim, and nobody may name a root for a claim they do not hold, so its
+  claim has no named root and its turns are measured in its workdir, its
+  own worktree (the tool is withheld from it; see
+  [Agent delegation sessions](./agent-delegation-sessions.md)).
+- **What is kept.** One entry per work and store, persisted with the host's
+  metadata: the claim it was named for, the canonical root, the repository
+  key, who named it and when, and a generation unique to the name host-wide:
+  naming the same root again under the same claim keeps it, while another
+  root, another claim or a name after a clear gets a new one, from a
+  persisted counter, so no generation is given twice. It applies only to
+  that claim, so a new claim on the same work does not inherit an old tree;
+  the claim's fence is recorded but not matched, so a renewal keeps the
+  root. At most 64 entries are kept, and a full list refuses a new name,
+  naming the entries, rather than evict one.
+- **When it takes effect.** At the session's next admission: the turn
+  running when the name is given keeps the root it began with, and its tests
+  and basis are not moved.
+- **What moves to the root.** A turn on that claim takes its begin and
+  closing basis there; a recognised test is credited only when it ran in
+  the root (the command is still read from the session's workdir, where its
+  runtime runs it), and its snapshots are taken there; the file watcher's
+  hint, where it still decides (no closing basis), counts only paths inside
+  the root, which may lie beside the workdir rather than inside it, and
+  counts them whichever session's scope the watcher routed them to. The
+  same set is the turn's "files changed" summary, so an edit in the root by
+  another session working in the same tree is listed in this turn's
+  summary as well as in that session's own: the watcher knows where a
+  change landed, not who made it, as for any write under the workdir. The
+  hint must never miss the turn's own edits in its root, and the summary
+  errs the same way; the
+  root is added to the session's writer worktrees for overlap while the
+  turn's grant is held, and another session's check still open in it is
+  marked when the turn is admitted with it, as one in the workdir is at the
+  turn's start; and an acceptance evaluation requested by the claim's
+  session runs its evaluator child in the root, takes its fingerprint
+  there, and names the root in its notice. What stays on the workdir: how
+  commands are read, the shell's `cd` tracking and the workdir's worktree
+  key.
+- **Exactly that path.** A named root is measured on its stored path and
+  never through the workdir's walk to the nearest `.git`: a root that was
+  removed, or lost its `.git`, has no basis, never the main checkout's. At
+  landing, request the evaluation while the worktree exists and remove it
+  after the verdict is recorded. Naming the main checkout is possible, and
+  takes the shared tree on the item: another session's edit there becomes
+  the item's change.
+- **Renaming or clearing during a turn** seals the old root's revision for
+  the session's turn running then in that root under the same claim, and
+  the response reports the seal only when that turn took it. A turn of
+  another claim measured in the same worktree (two works may name one) is
+  not sealed: its work still names the tree, so its later edits there
+  count. Only a turn already running with that root when the naming call
+  began is sealed, and only while it still runs: a turn admitted during the
+  call, whose start the capture may predate, and a turn already finished
+  are not, and with no such turn no capture is taken. The sealed turn's
+  close uses a live capture of the old root when
+  it still exists, and the sealed revision only when the root is gone (its
+  path missing, or no longer a worktree root), as a lookup that says so
+  shows; a denied or failed lookup, like a root that exists but could not
+  be measured, leaves no basis. The capture and that lookup run together
+  within the close's bound. A sealed revision does not know of edits made
+  after the seal.
+- **Invalidation.** An evaluation by an evaluator child records the root,
+  claim and generation it was requested on, or, with no root named, the
+  claim the requesting session was bound to. Its first submission is
+  refused, finally, when the work no longer names that root under that
+  claim and generation, or when a root has since been named for the
+  recorded claim on the evaluated work, whatever the requesting session is
+  bound to by then, and whether or not a revision was taken at the request;
+  its submit-time capture uses the stored path. The root is checked again under the lock that admits the
+  first write, after that capture: naming commits under the same lock, so a
+  write admitted there was for the root as it was then named. The request
+  itself looks the root up again under the lock that creates the evaluator,
+  after its own capture, and is refused when a rename, a clear or a first
+  name landed in between.
+- **When an entry ends.** On a clear by a session holding the work's claim;
+  when the session that named it no longer exists (at its removal and at
+  restore); and, once its claim has ended, at that session's next naming
+  call, when a complete held-claims read of it no longer lists the claim.
+  The admission refresh reads only the selected binding, so it ends none:
+  until one of these happens an entry of an ended claim stays, though it no
+  longer applies. A new name on a list that is still full once the caller's
+  own such entries are gone first ends such entries for every other naming
+  session that still exists, one held-claims read under each
+  one's connection (up to eight at once), and only then refuses; a refusal
+  keeps what the reclaim ended. A read that left claims out, listed a claim
+  without its id, failed, or did not start within the naming budget ends
+  nothing, and a read ends only entries that existed before it began, never
+  one named meanwhile. Likewise a name is compared with the work's entry as
+  it stood before the call's first read: a name that landed since, for a
+  newer claim say, makes the call a conflict rather than be overwritten.
+  An entry named in a store its session's project no longer uses, or of a
+  project with Engram turned off, can be neither read nor cleared, so it
+  stays until that session is removed; the full-list refusal names each
+  entry's store.
+- **How long naming takes.** One budget of 40 seconds on the server covers
+  the held-claims reads, the path's validation (on its own thread), the
+  reclaim and the captures (each capture counted with the turns' capture
+  threads); what has not started when it runs out is skipped
+  conservatively: no reclaim, no sealed revision, the new root reported
+  unmeasured. The captures stop two seconds short of its end, leaving that
+  for the commit, so a slow tree leaves the new root unmeasured rather than
+  costing the name. A validation that outlasts it, or a name that would be kept
+  after it, is refused with 503 and nothing is named. At most four path
+  checks run at once on the host, an abandoned one keeping its place until
+  its thread ends, so a stalled volume cannot pile up threads; a call past
+  that gets 503 too. The MCP bridge waits
+  that budget on top of its normal request timeout, so a tool call that
+  reports a failure never leaves a name the server kept. The budget starts
+  when the handler runs: the time the request waits for a blocking worker,
+  and the final write of the state, fall within that normal timeout.
+- **What the agent and the operator see.** The checkpoint card of a bound
+  turn names where it was measured: the root and the item, or "session
+  workdir (no worktree named)". The card is built from the root the turn
+  was admitted with, so a bound turn whose begin-time capture never ran
+  shows the workdir even if an entry exists. The agent gets a host line at
+  a newly bound claim, after it names or clears a root, and once a
+  recognised test of a mediated turn starts in another worktree than the
+  one the turn is measured in, and so gets no credit whether or not it
+  finishes, with the remedy. A
+  delegated session, which names no root, gets no bind line, and its
+  withheld-test line tells it to run the tests in its workdir. Lines
+  not yet delivered accumulate, at most four, so a later one does not hide
+  an earlier one; a line given again moves to the end instead of
+  repeating, so the last line tells the latest state (name, clear, name
+  again ends on the name). They come after the Engram
+  context fence, when one is delivered, and before the prompt. A line
+  leaves once the runtime accepts a prompt that carried it, turn grant or
+  not, so a dispatch refused before that keeps it for the next; a line set
+  after the prompt was built (a rebind while the begin is recovered) was
+  not in it and reaches the next prompt, and so does a line the prompt
+  carried that was given again after it was built, so the next prompt
+  still ends on the latest state.
+- **Limits.** The show receipt of the installed Engram carries no work id,
+  so an evaluation is matched to its root by short reference. An evaluation
+  is measured in a named root only when the requesting session is bound to
+  the claim that named it; a session holding two claims that asks for the
+  evaluation of the one it is not bound to is measured in its workdir. A
+  same-session evaluation takes its fingerprint in the root but records
+  none, having no evaluator child: a rename or a clear after it does not
+  refuse its submission, and the tracker's own freshness check is what
+  stands. A
+  change made between two mediated turns (the naming turn's edits, a
+  runtime-started turn) is not reported by either; option A', a separate
+  Engram record, is planned for it. The main checkout of a
+  `--separate-git-dir` repository cannot be named, since its `.git` file
+  names no linked worktree; a linked worktree of it can.
 
 ### Test evidence
 
@@ -556,8 +741,10 @@ reports.
   its description, names no test, and a script of several lines is not one
   test. A PowerShell or cmd script given as several words is taken as
   written, its quoting kept, so each argument is the one the runner saw.
-- **Which worktree.** A check is credited to the session's worktree only
-  when TermAl can tell it tested that worktree: the command runs there (in
+- **Which worktree.** A check is credited to the turn's worktree, the
+  claim's named [source root](#source-root) when there is one and else the
+  session's worktree, only when TermAl can tell it tested that worktree:
+  the command runs there (in
   the directory the runtime reports, Codex's item `cwd` or ACP's
   `rawInput.cwd`, else the session's workdir, a subdirectory included), and
   no argument names a place outside it. Every argument, what follows each
@@ -1039,8 +1226,10 @@ tool, including the `source_fingerprint` when there is one.
 
 **Declared source fingerprint.** After the reads, and only for the two modes
 that use it (never for `sub_agent`), the host takes the
-[content revision](#content-revision) of the parent's worktree, the same
-worktree the evaluator reads (it runs in the parent's workdir). The value
+[content revision](#content-revision) of the worktree the evaluator reads:
+the work's named [source root](#source-root) when the requesting session is
+bound to the claim that named it (the evaluator child then runs there), else
+the parent's worktree (it runs in the parent's workdir). The value
 comes from the same function as every basis the turns report. The capture
 runs on its own thread and is abandoned at the freeze budget, so a slow file
 read cannot hold the request past the allowance the bridge gives it; an

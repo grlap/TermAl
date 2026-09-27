@@ -287,3 +287,367 @@ fn acceptance_submit_replays_an_open_write_unchanged_after_the_worktree_moved() 
         "the stored arguments, unchanged"
     );
 }
+
+#[test]
+fn acceptance_request_on_a_named_source_root_runs_and_measures_the_evaluator_there() {
+    // tm-5gi4 phase 2: the parent is bound to the claim that named a worktree
+    // as the work's source root, so the evaluator runs there, its prompt names
+    // it, its fingerprint is taken there and the target records the root.
+    let (state, project, parent, root) = fixture();
+    install_store(&state, &project, &root);
+    make_workdir_a_worktree(&root);
+    fs::write(
+        root.join(".gitignore"),
+        ".engram-project\nprojects/\nwork-read-args.txt\n.worktrees/\n",
+    )
+    .unwrap();
+    run_git_test_command(&root, &["add", ".gitignore"]);
+    run_git_test_command(&root, &["commit", "--quiet", "-m", "ignore worktrees"]);
+    let worktree = root.join(".worktrees").join("wt");
+    run_git_test_command(
+        &root,
+        &["worktree", "add", "--quiet", "-b", "wt", worktree.to_str().unwrap()],
+    );
+    fs::write(worktree.join("judged.txt"), "the work's own tree\n").unwrap();
+    let store = established_store(&state, &project).expect("the store is established");
+    let (named_root, common_dir_key) = validate_engram_source_root(
+        &worktree.to_string_lossy(),
+        &root.to_string_lossy(),
+        &root.to_string_lossy(),
+    )
+    .expect("the worktree may be named");
+    {
+        let mut inner = state.inner.lock().unwrap();
+        inner.engram_work_source_roots = vec![EngramWorkSourceRoot {
+            store,
+            work_id: "work-task".to_owned(),
+            short_ref: "w-task".to_owned(),
+            claim_id: "claim-task".to_owned(),
+            claim_fence: 1,
+            root: named_root.clone(),
+            common_dir_key,
+            named_by_session: parent.clone(),
+            named_at: "2026-09-27T00:00:00.000Z".to_owned(),
+            generation: 1,
+        }];
+        let index = inner.find_session_index(&parent).unwrap();
+        inner.sessions[index].engram.work_binding = Some(EngramControlWorkBinding {
+            root_execution_id: "root".to_owned(),
+            work_id: "work-task".to_owned(),
+            run_id: "run".to_owned(),
+            work_revision: 1,
+            claim_id: "claim-task".to_owned(),
+            claim_fence: 1,
+        });
+    }
+    super::delegation_support::install_delegation_codex_runtime(
+        &state,
+        "acceptance-evaluation-runtime",
+    );
+    let response = state
+        .request_acceptance_evaluation_with_runner(
+            &parent,
+            evaluation_request(Some(Agent::Codex)),
+            fixture_reader(
+                Arc::default(),
+                show_receipt(None),
+                Ok(policy_receipt(Some(&["independent_session"]))),
+            ),
+        )
+        .unwrap();
+    let AcceptanceEvaluationRequestResponse::Spawned {
+        delegation, notice, ..
+    } = response
+    else {
+        panic!("an independent evaluation spawns an evaluator");
+    };
+    let display_root = engram_source_root_display(&named_root);
+    assert!(
+        notice
+            .as_deref()
+            .is_some_and(|notice| notice.contains("named source root")),
+        "{notice:?}"
+    );
+    let record = delegation.delegation;
+    assert_eq!(record.cwd, display_root, "the evaluator runs in the named root");
+    assert!(
+        record.prompt.contains(&display_root),
+        "the evaluator's brief names the root it reads"
+    );
+    let target = record
+        .acceptance_evaluation
+        .expect("an evaluator carries its target");
+    assert_eq!(
+        target.source_fingerprint,
+        Some(content_revision(&worktree).unwrap().1),
+        "the fingerprint is the named root's, not the parent's workdir's"
+    );
+    assert_ne!(
+        target.source_fingerprint,
+        Some(content_revision(&root).unwrap().1)
+    );
+    let source_root = target.source_root.expect("the target records the root");
+    assert_eq!(source_root.root, named_root);
+    assert_eq!(source_root.generation, 1);
+}
+
+#[test]
+fn acceptance_first_write_is_refused_when_the_root_is_renamed_during_the_submit_capture() {
+    // The submit-time capture runs off the lock; a rename landing there must
+    // still stop the first write, which is admitted under the lock.
+    let (state, project, parent, root) = fixture();
+    install_store(&state, &project, &root);
+    let workdir = root.to_string_lossy().into_owned();
+    let (delegation, child) =
+        install_evaluator_delegation(&state, &parent, Some(&project), &workdir, 2);
+    let store = established_store(&state, &project).expect("the fixture's store");
+    let named = EngramWorkSourceRoot {
+        store: store.clone(),
+        work_id: "work-raced".to_owned(),
+        short_ref: "w-raced".to_owned(),
+        claim_id: "claim-raced".to_owned(),
+        claim_fence: 1,
+        root: root.join("wt").to_string_lossy().into_owned(),
+        common_dir_key: "unused".to_owned(),
+        named_by_session: parent.clone(),
+        named_at: "2026-09-27T00:00:00.000Z".to_owned(),
+        generation: 1,
+    };
+    state.inner.lock().unwrap().engram_work_source_roots = vec![named.clone()];
+    update_evaluation_target(&state, &delegation, |target| {
+        target.source_root = Some(AcceptanceEvaluationSourceRoot::from_entry(&named));
+    });
+    let request = two_verdicts();
+    let (authority, _target, _model, _in_flight) = state
+        .acceptance_evaluation_submit_context(&child, &request)
+        .expect("the evaluator may submit");
+    state
+        .acceptance_evaluation_declared_target(&child, &authority.target)
+        .expect("the root is still named when the capture starts");
+
+    // Renamed while the capture ran.
+    state.inner.lock().unwrap().engram_work_source_roots[0].generation = 2;
+    let error = match state.begin_acceptance_evaluation_submission(
+        &authority,
+        AcceptanceEvaluationOpenWrite {
+            verdicts_digest: acceptance_evaluation_payload_digest(
+                &acceptance_evaluation_verdict_args(&request),
+            ),
+            args: vec!["work".to_owned(), "evaluate".to_owned()],
+        },
+    ) {
+        Ok(_) => panic!("a write for a root the work no longer names is admitted"),
+        Err(error) => error,
+    };
+
+    assert_eq!(error.status, StatusCode::CONFLICT);
+    assert!(error.message.contains("source root changed"), "{}", error.message);
+    let inner = state.inner.lock().unwrap();
+    let index = inner.find_delegation_index(&delegation).unwrap();
+    assert!(
+        matches!(
+            inner.delegations[index]
+                .acceptance_evaluation
+                .as_ref()
+                .unwrap()
+                .submission,
+            AcceptanceEvaluationSubmission::None
+        ),
+        "nothing was written"
+    );
+}
+
+#[test]
+fn acceptance_evaluator_creation_refuses_a_root_that_changed_during_the_request_capture() {
+    // The request looks the root up, takes the fingerprint off the lock, then
+    // creates the evaluator under its own lock: a rename, a clear or a first
+    // name in between refuses the request there, in either direction.
+    let (state, project, parent, root) = fixture();
+    install_store(&state, &project, &root);
+    let store = established_store(&state, &project).expect("the store is established");
+    let named = |generation| EngramWorkSourceRoot {
+        store: store.clone(),
+        work_id: "work-requested".to_owned(),
+        short_ref: "w-requested".to_owned(),
+        claim_id: "claim-requested".to_owned(),
+        claim_fence: 1,
+        root: root.join("wt").to_string_lossy().into_owned(),
+        common_dir_key: "unused".to_owned(),
+        named_by_session: parent.clone(),
+        named_at: "2026-09-27T00:00:00.000Z".to_owned(),
+        generation,
+    };
+    let seed = |source_root: Option<AcceptanceEvaluationSourceRoot>| AcceptanceEvaluationTargetSeed {
+        work_ref: "w-requested".to_owned(),
+        mode: AcceptanceEvaluationMode::IndependentSession,
+        acceptance_basis: 1,
+        evidence_basis: 1,
+        criteria_count: 2,
+        store: store.clone(),
+        source_fingerprint: None,
+        source_root,
+        source_claim: None,
+        work_id: Some("work-requested".to_owned()),
+    };
+    let mut inner = state.inner.lock().unwrap();
+    let index = inner.find_session_index(&parent).unwrap();
+    inner.sessions[index].engram.work_binding = Some(EngramControlWorkBinding {
+        root_execution_id: "root".to_owned(),
+        work_id: "work-requested".to_owned(),
+        run_id: "run".to_owned(),
+        work_revision: 1,
+        claim_id: "claim-requested".to_owned(),
+        claim_fence: 1,
+    });
+    let read_on_first = Some(AcceptanceEvaluationSourceRoot::from_entry(&named(1)));
+
+    for (now, seeded, case) in [
+        (vec![named(2)], read_on_first.clone(), "renamed"),
+        (Vec::new(), read_on_first.clone(), "cleared"),
+        (vec![named(1)], None, "named after the lookup"),
+    ] {
+        inner.engram_work_source_roots = now;
+        let error = acceptance_evaluation_spawn_admission_locked(&inner, &parent, &seed(seeded))
+            .expect_err(case);
+        assert_eq!(error.status, StatusCode::CONFLICT, "{case}");
+        assert!(
+            error.message.contains("changed while this evaluation was being requested"),
+            "{case}: {}",
+            error.message
+        );
+    }
+    inner.engram_work_source_roots = vec![named(1)];
+    acceptance_evaluation_spawn_admission_locked(&inner, &parent, &seed(read_on_first))
+        .expect("an unchanged root is admitted");
+    inner.engram_work_source_roots = Vec::new();
+    acceptance_evaluation_spawn_admission_locked(&inner, &parent, &seed(None))
+        .expect("a workdir evaluation with no root named is admitted");
+
+    // Requested with no root under the parent's claim; that claim gets its
+    // first root while the parent binds another claim, or none: the claim
+    // recorded at the request decides, as it does at the first submission.
+    let on_claim = AcceptanceEvaluationTargetSeed {
+        source_claim: Some(AcceptanceEvaluationSourceClaim {
+            work_id: "work-requested".to_owned(),
+            claim_id: "claim-requested".to_owned(),
+        }),
+        ..seed(None)
+    };
+    acceptance_evaluation_spawn_admission_locked(&inner, &parent, &on_claim)
+        .expect("no root named for the recorded claim yet");
+    inner.engram_work_source_roots = vec![named(1)];
+    for (binding, case) in [(Some("claim-other"), "rebound"), (None, "unbound")] {
+        inner.sessions[index].engram.work_binding = binding.map(|claim_id| EngramControlWorkBinding {
+            root_execution_id: "root".to_owned(),
+            work_id: "work-requested".to_owned(),
+            run_id: "run".to_owned(),
+            work_revision: 1,
+            claim_id: claim_id.to_owned(),
+            claim_fence: 1,
+        });
+        let error = acceptance_evaluation_spawn_admission_locked(&inner, &parent, &on_claim)
+            .expect_err(case);
+        assert!(
+            error.message.contains("changed while this evaluation was being requested"),
+            "{case}: {}",
+            error.message
+        );
+    }
+}
+
+#[test]
+fn acceptance_submission_is_refused_when_the_work_gets_its_first_root_while_evaluated() {
+    // Requested with no root named, so evaluated in the workdir; the parent's
+    // claim is then given a root, which moves the work's measurements away
+    // from the tree the evaluator judged. Both submit checks refuse it.
+    let (state, project, parent, root) = fixture();
+    install_store(&state, &project, &root);
+    let workdir = root.to_string_lossy().into_owned();
+    let (delegation, child) =
+        install_evaluator_delegation(&state, &parent, Some(&project), &workdir, 2);
+    let store = established_store(&state, &project).expect("the fixture's store");
+    {
+        let mut inner = state.inner.lock().unwrap();
+        let index = inner.find_session_index(&parent).unwrap();
+        inner.sessions[index].engram.work_binding = Some(EngramControlWorkBinding {
+            root_execution_id: "root".to_owned(),
+            work_id: "work-task".to_owned(),
+            run_id: "run".to_owned(),
+            work_revision: 1,
+            claim_id: "claim-task".to_owned(),
+            claim_fence: 1,
+        });
+    }
+    // As the request records it: no root, the claim the parent was bound to.
+    update_evaluation_target(&state, &delegation, |target| {
+        target.source_claim = Some(AcceptanceEvaluationSourceClaim {
+            work_id: "work-task".to_owned(),
+            claim_id: "claim-task".to_owned(),
+        });
+    });
+    let request = two_verdicts();
+    let (authority, _target, _model, _in_flight) = state
+        .acceptance_evaluation_submit_context(&child, &request)
+        .expect("the evaluator may submit");
+    assert_eq!(authority.target.source_root, None, "requested with no root named");
+    state
+        .acceptance_evaluation_declared_target(&child, &authority.target)
+        .expect("with no root named yet the workdir still measures the work");
+
+    // The first name lands while the evaluator's verdicts are on their way.
+    state.inner.lock().unwrap().engram_work_source_roots = vec![EngramWorkSourceRoot {
+        store,
+        work_id: "work-task".to_owned(),
+        short_ref: "w-task".to_owned(),
+        claim_id: "claim-task".to_owned(),
+        claim_fence: 1,
+        root: root.join("wt").to_string_lossy().into_owned(),
+        common_dir_key: "unused".to_owned(),
+        named_by_session: parent.clone(),
+        named_at: "2026-09-27T00:00:00.000Z".to_owned(),
+        generation: 1,
+    }];
+    // And the parent moves on to another claim: the claim the evaluation was
+    // requested under still decides, not the parent's binding now.
+    {
+        let mut inner = state.inner.lock().unwrap();
+        let index = inner.find_session_index(&parent).unwrap();
+        inner.sessions[index]
+            .engram
+            .work_binding
+            .as_mut()
+            .expect("bound")
+            .claim_id = "claim-other".to_owned();
+    }
+    let before_capture = state
+        .acceptance_evaluation_declared_target(&child, &authority.target)
+        .expect_err("the check before the capture refuses a first name");
+    assert!(
+        before_capture.message.contains("has since been given a named source root"),
+        "{}",
+        before_capture.message
+    );
+    let at_first_write = match state.begin_acceptance_evaluation_submission(
+        &authority,
+        AcceptanceEvaluationOpenWrite {
+            verdicts_digest: acceptance_evaluation_payload_digest(
+                &acceptance_evaluation_verdict_args(&request),
+            ),
+            args: vec!["work".to_owned(), "evaluate".to_owned()],
+        },
+    ) {
+        Ok(_) => panic!("a first write for a work now measured elsewhere is admitted"),
+        Err(error) => error,
+    };
+    assert_eq!(at_first_write.status, StatusCode::CONFLICT);
+    let inner = state.inner.lock().unwrap();
+    let index = inner.find_delegation_index(&delegation).unwrap();
+    assert!(matches!(
+        inner.delegations[index]
+            .acceptance_evaluation
+            .as_ref()
+            .unwrap()
+            .submission,
+        AcceptanceEvaluationSubmission::None
+    ));
+}

@@ -1,8 +1,10 @@
 // The one-shot CLI read of the work binding a session passes to
 // `session_bind`, through `engram work core held`, and the choice among the
 // claims it lists (Engram w-108a13d58018 criterion 3, tm-winf step 3). Owns
-// the reader, the shape of the held-claims output TermAl reads, and the
-// selection of one binding from it. Does not own when the binding is read
+// the reader, the shape of the held-claims output TermAl reads (the claim's
+// id and fence from each row included), the selection of one binding from
+// it, and the full read a work's source root is named against
+// (`read_engram_held_claims_from_cli`, `engram_source_roots.rs`). Does not own when the binding is read
 // (the bind in `engram_host_adapter.rs`, the queued bind preparation in
 // `engram_queued_admission.rs`, the admission refresh in
 // `engram_work_binding_refresh.rs`) or the CLI process plumbing it calls
@@ -21,7 +23,7 @@ const ENGRAM_WORK_CORE_HELD_MISSING_DIAGNOSTIC: &str = "unrecognized subcommand 
 /// The part of `engram work core held --json` TermAl reads: every item this
 /// session holds a live claim on, newest claim first. Fields TermAl does not
 /// read are ignored.
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 struct EngramHeldClaims {
     items: Vec<EngramHeldClaim>,
     /// Held claims left out of `items` by Engram's row limit (the oldest).
@@ -29,10 +31,20 @@ struct EngramHeldClaims {
     omitted: u64,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 struct EngramHeldClaim {
     #[serde(default)]
     work_id: String,
+    /// The item's short reference, which agents name it by.
+    #[serde(default)]
+    short_ref: String,
+    /// The claim itself, read from the row: `control_binding` is null while a
+    /// handoff offer is pending, yet the row is still the live claim. Empty
+    /// from an Engram build that does not list it.
+    #[serde(default)]
+    claim_id: String,
+    #[serde(default)]
+    claim_fence: i64,
     #[serde(default)]
     focused: bool,
     /// The binding `session_bind` would accept for this claim, or null when
@@ -72,6 +84,25 @@ fn read_engram_work_binding_from_cli(
     timeout: Duration,
     trace_boot_recovery: bool,
 ) -> std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError> {
+    let held = read_engram_held_claims_from_cli(connection, timeout, trace_boot_recovery)?;
+    Ok(select_engram_held_binding(
+        held.items,
+        held.omitted,
+        preference,
+    ))
+}
+
+/// Every claim the session holds, as `engram work core held --json` lists
+/// them under the agent's own Engram session id: the rows and how many the
+/// row limit left out. One read-only snapshot that selects no focus, stages
+/// no delivery and appends nothing. The work-binding read selects one binding
+/// from it; a work's source root (`engram_source_roots.rs`) reads the claims
+/// themselves.
+fn read_engram_held_claims_from_cli(
+    connection: &EngramConnectionConfig,
+    timeout: Duration,
+    trace_boot_recovery: bool,
+) -> std::result::Result<EngramHeldClaims, EngramTransportError> {
     let started_at = std::time::Instant::now();
     let mut args = vec![
         "work",
@@ -113,14 +144,9 @@ fn read_engram_work_binding_from_cli(
         }
         error
     })?;
-    let held: EngramHeldClaims = serde_json::from_value(held).map_err(|error| {
+    serde_json::from_value(held).map_err(|error| {
         EngramTransportError::protocol(format!("invalid Engram work core held output: {error}"))
-    })?;
-    Ok(select_engram_held_binding(
-        held.items,
-        held.omitted,
-        preference,
-    ))
+    })
 }
 
 /// The binding to bind from the claims a session holds. Only a claim with a

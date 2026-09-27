@@ -31,6 +31,10 @@ struct PersistedState {
     projects: Vec<Project>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     engram_retired_work_authority_grants: Vec<EngramRetiredWorkAuthorityGrant>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    engram_work_source_roots: Vec<EngramWorkSourceRoot>,
+    #[serde(default, skip_serializing_if = "engram_source_root_generation_is_unset")]
+    engram_source_root_generation: u64,
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pending_coordination_scope_deletions: BTreeSet<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -85,6 +89,8 @@ impl PersistedState {
             engram_retired_work_authority_grants: inner
                 .engram_retired_work_authority_grants
                 .clone(),
+            engram_work_source_roots: inner.engram_work_source_roots.clone(),
+            engram_source_root_generation: inner.engram_source_root_generation,
             pending_coordination_scope_deletions: inner
                 .pending_coordination_scope_deletions
                 .clone(),
@@ -134,6 +140,8 @@ impl PersistedState {
             next_message_number: self.next_message_number,
             projects: self.projects.clone(),
             engram_retired_work_authority_grants: self.engram_retired_work_authority_grants.clone(),
+            engram_work_source_roots: self.engram_work_source_roots.clone(),
+            engram_source_root_generation: self.engram_source_root_generation,
             pending_coordination_scope_deletions: self.pending_coordination_scope_deletions.clone(),
             pending_response_board_project_detachments: self
                 .pending_response_board_project_detachments
@@ -183,6 +191,8 @@ impl PersistedState {
             next_message_number: self.next_message_number,
             projects: self.projects,
             engram_retired_work_authority_grants: self.engram_retired_work_authority_grants,
+            engram_work_source_roots: self.engram_work_source_roots,
+            engram_source_root_generation: self.engram_source_root_generation,
             pending_coordination_scope_deletions: self.pending_coordination_scope_deletions,
             pending_response_board_project_detachments: self
                 .pending_response_board_project_detachments,
@@ -196,6 +206,7 @@ impl PersistedState {
             acceptance_evaluation_submissions_in_flight: HashSet::new(),
             acceptance_source_captures_live: Arc::default(),
             engram_turn_basis_captures_live: Arc::default(),
+            engram_source_root_validations_live: Arc::default(),
             // An epoch loaded from disk is already durable.
             test_runs: TestRunIndex {
                 cards_enabled: self.test_run_cards_epoch.is_some(),
@@ -262,8 +273,33 @@ impl PersistedState {
         inner.normalize_orchestrator_instances_with_persisted_non_running(
             &persisted_non_running_session_ids,
         );
+        // A new source-root name is numbered above every stored one, the
+        // orphans' too (an evaluation may still record one), whatever a state
+        // written before the counter was kept says.
+        inner.engram_source_root_generation = inner
+            .engram_work_source_roots
+            .iter()
+            .map(|entry| entry.generation)
+            .fold(inner.engram_source_root_generation, u64::max);
+        // A work's source root whose naming session did not survive has
+        // nobody left who named it (`engram_source_roots.rs`). A session
+        // whose row was quarantined still exists: its row is kept, and it may
+        // load again once repaired.
+        let session_ids = inner
+            .sessions
+            .iter()
+            .map(|record| record.session.id.clone())
+            .chain(inner.quarantined_persisted_session_ids.iter().cloned())
+            .collect::<HashSet<_>>();
+        engram_end_orphaned_work_source_roots(&mut inner.engram_work_source_roots, |named_by| {
+            session_ids.contains(named_by)
+        });
         Ok(inner)
     }
+}
+
+fn engram_source_root_generation_is_unset(value: &u64) -> bool {
+    *value == 0
 }
 
 fn session_flag_is_false(value: &bool) -> bool {

@@ -1025,6 +1025,12 @@ to wait would read as finished to its parent, then start a new turn when
 resumed; it runs its gates in the foreground instead. See
 [Test Runs](./test-runs.md).
 
+`termal_name_source_root` is withheld from children too: a work's source root
+is named by the root session holding its claim. A child names nothing: it
+holds its own claim, and nobody may name a root for a claim they do not hold,
+so its turns are measured in its workdir, its own worktree. See
+[Source root](./engram-host-adapter.md#source-root).
+
 The bridge caches a successful caller classification for its lifetime. That is
 safe because root eligibility is conjunctive: the session must have no
 `parentDelegationId` **and** its id must be absent from the durable delegation
@@ -1057,6 +1063,7 @@ termal_cancel_session
 termal_wait_delegations
 termal_resume_after_delegations
 termal_resume_after_test_runs
+termal_name_source_root
 termal_followup_session
 termal_evaluate_acceptance
 termal_submit_review_result

@@ -501,6 +501,24 @@ export const MessageCard = memo(
   },
 );
 
+/**
+ * Where a bound turn's source basis was taken: the work's named source root,
+ * or the session's workdir when no worktree is named (tm-5gi4 phase 2).
+ */
+function engramSourceRootDetail(
+  sourceRoot: EngramControlMessage["sourceRoot"],
+): string | null {
+  if (!sourceRoot) {
+    return null;
+  }
+  if (!sourceRoot.root) {
+    return "Source basis: session workdir (no worktree named)";
+  }
+  return sourceRoot.workRef
+    ? `Source basis: ${sourceRoot.root} (named for ${sourceRoot.workRef})`
+    : `Source basis: ${sourceRoot.root}`;
+}
+
 function EngramControlCard({ message }: { message: EngramControlMessage }) {
   const title =
     message.dispatch === "queued"
@@ -529,6 +547,7 @@ function EngramControlCard({ message }: { message: EngramControlMessage }) {
     `Dispatch: ${dispatchLabel}`,
     message.repairArmed ? "Repair: armed" : null,
     message.nextIntent ? `Next intent: ${message.nextIntent}` : null,
+    engramSourceRootDetail(message.sourceRoot),
     `Latency: ${message.latencyMs.total} ms`,
   ].filter((value): value is string => Boolean(value));
 

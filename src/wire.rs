@@ -1410,6 +1410,21 @@ struct DelegationAcceptanceEvaluation {
     /// kept; such an evaluation declares none, as before.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     source_fingerprint: Option<String>,
+    /// The work's named source root the evaluation was requested on, when
+    /// its claim had one (`engram_source_roots.rs`): the evaluator runs there
+    /// and its fingerprint is taken there. The first submission is refused
+    /// when the work's root has changed since. Absent when the evaluation
+    /// measured the requesting session's workdir. Like `source_claim`, it is
+    /// host bookkeeping that the stored record needs; the same serialization
+    /// carries it to the UI, which does not read it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source_root: Option<AcceptanceEvaluationSourceRoot>,
+    /// The claim the requesting session was bound to when no root was named
+    /// (`engram_source_roots.rs`): the first submission is refused if a root
+    /// is named for it on this work since, whatever that session is bound to
+    /// by then. Absent with a root, or with no binding at the request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source_claim: Option<AcceptanceEvaluationSourceClaim>,
     #[serde(
         default,
         skip_serializing_if = "AcceptanceEvaluationSubmission::is_none"
@@ -1540,6 +1555,10 @@ struct PersistedDelegationAcceptanceEvaluation {
     #[serde(default)]
     source_fingerprint: Option<String>,
     #[serde(default)]
+    source_root: Option<AcceptanceEvaluationSourceRoot>,
+    #[serde(default)]
+    source_claim: Option<AcceptanceEvaluationSourceClaim>,
+    #[serde(default)]
     submission: AcceptanceEvaluationSubmission,
     #[serde(default)]
     outcome: Option<PersistedRawAcceptanceEvaluationOutcome>,
@@ -1572,6 +1591,8 @@ impl From<PersistedDelegationAcceptanceEvaluation> for DelegationAcceptanceEvalu
             attempt_key: persisted.attempt_key,
             store: persisted.store,
             source_fingerprint: persisted.source_fingerprint,
+            source_root: persisted.source_root,
+            source_claim: persisted.source_claim,
             submission,
         }
     }

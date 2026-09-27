@@ -26,6 +26,8 @@ fn evaluation_target(delegation_id: &str, criteria_count: usize) -> DelegationAc
         attempt_key: delegation_id.to_owned(),
         store: None,
         source_fingerprint: None,
+        source_root: None,
+        source_claim: None,
         submission: AcceptanceEvaluationSubmission::None,
     }
 }

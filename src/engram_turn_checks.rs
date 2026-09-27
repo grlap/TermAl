@@ -183,15 +183,14 @@ type EngramToolchainCapture = EngramCapture<Option<String>>;
 /// bound.
 const ENGRAM_CAPTURE_WORKER_LIMIT: usize = 2 * ENGRAM_TURN_CHECK_LIMIT;
 
-/// The source basis of the worktree `workdir` lies in, taken on its own
-/// thread counted in `workers`.
+/// The source basis at `place` (a check's target: its worktree, or exactly
+/// the turn's named source root), taken on its own thread counted in
+/// `workers`.
 fn engram_spawn_basis_capture(
-    workdir: String,
+    place: EngramBasisPlace,
     workers: &Arc<std::sync::atomic::AtomicUsize>,
 ) -> Arc<EngramBasisCapture> {
-    EngramCapture::spawn(workers, move || {
-        engram_execution_source_basis(FsPath::new(&workdir))
-    })
+    EngramCapture::spawn(workers, move || engram_place_source_basis(&place))
 }
 
 #[cfg(test)]
@@ -589,6 +588,19 @@ fn engram_note_session_worktree(record: &mut SessionRecord, workdir: &str, key: 
 fn engram_writer_worktrees(inner: &StateInner, index: usize) -> Vec<Option<String>> {
     let record = &inner.sessions[index];
     std::iter::once(engram_session_worktree(record))
+        // A session whose turn works in its claim's named source root writes
+        // there too; the root is added to, not put in place of, its workdir's.
+        // The record keeps the root after the turn ends, until the next grant
+        // begins, so it counts only while a grant is held: a later turn that
+        // begins none does not work there.
+        .chain(
+            record
+                .engram
+                .active_turn_source_root
+                .as_ref()
+                .filter(|_| record.engram.active_grant_id.is_some())
+                .map(|turn_root| Some(engram_path_key(FsPath::new(&turn_root.root)))),
+        )
         .chain(
             record
                 .engram
@@ -728,7 +740,7 @@ impl AppState {
         // What this key's earlier starts said and where the command may run,
         // read under a brief lock, so the test's target can be resolved on
         // the file system off it.
-        let (workdir, runtime, reported, places, position, started) = {
+        let (workdir, credit_root, runtime, reported, places, position, started, child) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_session_index(session_id) else {
                 return;
@@ -738,6 +750,13 @@ impl AppState {
             let mediated = engram.work_binding.is_some() && engram.active_grant_id.is_some();
             (
                 record.session.workdir.clone(),
+                // A turn whose claim names a source root credits tests there.
+                engram.active_turn_source_root.as_ref().map(|turn_root| {
+                    (
+                        PathBuf::from(&turn_root.root),
+                        turn_root.common_dir_key.clone(),
+                    )
+                }),
                 record.runtime.runtime_token(),
                 cwd.map(str::to_owned)
                     .or_else(|| engram.running_command_keys.get(key).cloned().flatten()),
@@ -750,22 +769,60 @@ impl AppState {
                         .find(|check| check.key == key && check.end.is_none())
                         .map(|check| check.command.clone())
                 }),
+                Self::engram_session_has_child_binding_shape_locked(&inner, session_id),
             )
         };
         // The session's worktree and those the command may write in, resolved
         // here off the lock, for overlap marking under it.
         let workdir_worktree = engram_worktree_root(FsPath::new(&workdir));
         let worktrees = engram_command_worktrees(&workdir, places.as_deref(), ran);
+        let mediated = started.is_some();
         let target = started.and_then(|started| {
             let command = match ran {
                 Some(_) => recognised.clone()?,
                 None => started?,
             };
             // Where the shell cannot be followed, no check can say where it ran.
-            let target =
-                engram_check_worktree_from(&command, FsPath::new(&workdir), places.as_ref()?)?;
+            let target = engram_check_worktree_from(
+                &command,
+                FsPath::new(&workdir),
+                places.as_ref()?,
+                credit_root
+                    .as_ref()
+                    .map(|(root, common_dir_key)| (root.as_path(), common_dir_key.as_str())),
+            )?;
             Some((workdir.clone(), command, target))
         });
+        // A recognised test of a mediated turn that starts in another
+        // worktree than the one the turn is measured in gets no credit,
+        // finished or not; the agent is told once, before its next prompt,
+        // with the remedy. A network path
+        // is never resolved here, on the runtime's event reader: resolving it
+        // can block for a network timeout (`engram_network_path`).
+        let withheld_line = (mediated && recognised.is_some() && target.is_none())
+            .then(|| places.as_ref()?.last().cloned())
+            .flatten()
+            .and_then(|last| {
+                let ran_in_directory =
+                    last.map_or_else(|| PathBuf::from(&workdir), |dir| FsPath::new(&workdir).join(dir));
+                if engram_network_path(&workdir)
+                    || engram_network_path(&ran_in_directory.to_string_lossy())
+                {
+                    return None;
+                }
+                let ran_in = engram_worktree_root_path(&ran_in_directory);
+                let measured_in = credit_root
+                    .as_ref()
+                    .map_or_else(|| engram_worktree_root_path(FsPath::new(&workdir)), |(root, _)| root.clone());
+                (engram_exact_path_key(&ran_in) != engram_exact_path_key(&measured_in)).then(|| {
+                    engram_source_root_withheld_line(
+                        &ran_in,
+                        &measured_in.to_string_lossy(),
+                        credit_root.is_some(),
+                        child,
+                    )
+                })
+            });
         // Where the command's `cd` leads, from where its shell is presumed to
         // be; it moves the shell only once the command has run.
         let moving_to = match &shell_move {
@@ -784,6 +841,9 @@ impl AppState {
         engram_note_session_worktree(record, &workdir, workdir_worktree);
         engram_note_command_worktrees(record, key, worktrees);
         engram_note_shell_move(record, key, &runtime, shell_move, moving_to);
+        if let Some(line) = withheld_line {
+            record.engram.set_pending_source_root_line(line);
+        }
         engram_mark_checks_overlapped_by(&mut inner, index);
         let engram = &inner.sessions[index].engram;
         if engram.work_binding.is_none() {
@@ -879,7 +939,7 @@ impl AppState {
             record.engram.active_turn_checks.remove(oldest);
         }
         let start_basis =
-            engram_spawn_basis_capture(target.root.to_string_lossy().into_owned(), &workers);
+            engram_spawn_basis_capture(target.basis_place(), &workers);
         // The toolchain is named as the check starts, from the overrides it
         // ran under, not from whatever they say when the turn closes.
         let toolchain = if engram_cargo_toolchain_selector(&command).is_some() {
@@ -967,6 +1027,12 @@ impl AppState {
                                     check.target.clone(),
                                     record.session.workdir.clone(),
                                     engram_command_directories(record, key, cwd),
+                                    engram.active_turn_source_root.as_ref().map(|turn_root| {
+                                        (
+                                            PathBuf::from(&turn_root.root),
+                                            turn_root.common_dir_key.clone(),
+                                        )
+                                    }),
                                 )
                             })
                     })
@@ -983,7 +1049,7 @@ impl AppState {
         });
         let stands = started
             .as_ref()
-            .map(|(_, command, target, workdir, directories)| {
+            .map(|(_, command, target, workdir, directories, credit_root)| {
                 let named = match ran {
                     Some(ran) => engram_check_command(ran),
                     None => Some(command.clone()),
@@ -991,8 +1057,15 @@ impl AppState {
                 named.is_some_and(|named| {
                     named == *command
                         && directories.as_ref().is_some_and(|directories| {
-                            engram_check_worktree_from(&named, FsPath::new(workdir), directories)
-                                .is_some_and(|now| now == *target)
+                            engram_check_worktree_from(
+                                &named,
+                                FsPath::new(workdir),
+                                directories,
+                                credit_root.as_ref().map(|(root, common_dir_key)| {
+                                    (root.as_path(), common_dir_key.as_str())
+                                }),
+                            )
+                            .is_some_and(|now| now == *target)
                         })
                 })
             });
@@ -1009,7 +1082,7 @@ impl AppState {
         {
             *remembered = Some(cwd.to_owned());
         }
-        if let (Some((sequence, _, _, workdir, _)), Some(stands)) = (started, stands)
+        if let (Some((sequence, _, _, workdir, _, _)), Some(stands)) = (started, stands)
             && !(stands && workdir == record.session.workdir)
         {
             // It names another test or another place now: the check no
@@ -1149,7 +1222,7 @@ impl AppState {
             EngramBasisCapture::settled(None)
         } else {
             // The worktree the check ran in, as its opening snapshot was.
-            engram_spawn_basis_capture(check.target.root.to_string_lossy().into_owned(), &workers)
+            engram_spawn_basis_capture(check.target.basis_place(), &workers)
         };
         check.end = Some(EngramTurnCheckEnd {
             completed_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),

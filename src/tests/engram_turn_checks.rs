@@ -467,6 +467,7 @@ fn a_test_run_passes_only_on_evidence_that_tests_passed() {
         target: EngramCheckTarget {
             root: PathBuf::from("C:/w"),
             directory: PathBuf::from("C:/w"),
+            common_dir_key: None,
         },
         toolchain: EngramToolchainCapture::settled(None),
         started_at: "2026-09-24T00:00:00.000Z".to_owned(),
@@ -668,6 +669,13 @@ fn a_toolchain_program_is_taken_from_the_path_only_outside_the_workspace() {
         "\\\\server\\share",
         "//server/share",
         "\\\\?\\UNC\\server\\share",
+        // Verbatim aliases of the network redirector reach a share too.
+        "\\\\?\\GLOBALROOT\\Device\\Mup\\server\\share",
+        "\\\\?\\Mup\\server\\share",
+        "\\\\.\\UNC\\server\\share",
+        // So, conservatively, does a local volume mounted without a letter:
+        // only a verbatim path to a drive letter counts as local.
+        "\\\\?\\Volume{00000000-0000-0000-0000-000000000000}\\repo",
     ] {
         assert!(engram_network_path(network), "{network}");
     }
@@ -929,6 +937,7 @@ impl CheckedTurn {
             target: EngramCheckTarget {
                 root: root.clone(),
                 directory: root,
+                common_dir_key: None,
             },
             ..finished_check(sequence, end_basis)
         }
@@ -1170,6 +1179,7 @@ fn a_check_stays_open_to_writes_until_both_snapshots_are_taken() {
         target: EngramCheckTarget {
             root: PathBuf::from("C:/w"),
             directory: PathBuf::from("C:/w"),
+            common_dir_key: None,
         },
         toolchain: EngramToolchainCapture::settled(None),
         started_at: "2026-09-24T00:00:00.000Z".to_owned(),
@@ -1208,7 +1218,8 @@ fn a_check_stays_open_to_writes_until_both_snapshots_are_taken() {
 
 /// A finished check of `CHECK_GRANT` at `sequence` whose closing snapshot is
 /// `end_basis`.
-fn finished_check(sequence: usize, end_basis: Arc<EngramBasisCapture>) -> EngramTurnCheck {
+/// Also used by the source-root naming tests, a sibling module.
+pub(super) fn finished_check(sequence: usize, end_basis: Arc<EngramBasisCapture>) -> EngramTurnCheck {
     EngramTurnCheck {
         grant_id: CHECK_GRANT.to_owned(),
         key: format!("check-{sequence}"),
@@ -1217,6 +1228,7 @@ fn finished_check(sequence: usize, end_basis: Arc<EngramBasisCapture>) -> Engram
         target: EngramCheckTarget {
             root: PathBuf::from("C:/w"),
             directory: PathBuf::from("C:/w"),
+            common_dir_key: None,
         },
         toolchain: EngramToolchainCapture::settled(None),
         started_at: "2026-09-24T00:00:00.000Z".to_owned(),
@@ -3681,5 +3693,130 @@ fn a_lost_checkpoint_naming_an_environment_code_keeps_the_evidence() {
             .expect("an idempotency key")
             .contains(":evidence:"),
         "{retry:#}"
+    );
+}
+
+/// A linked worktree of the turn's repository at `.worktrees/wt`, made the
+/// turn's named source root as a turn admitted with it would carry it.
+fn name_turn_source_root(turn: &CheckedTurn) -> PathBuf {
+    let worktree = turn.root.join(".worktrees").join("wt");
+    run_git_test_command(
+        &turn.root,
+        &[
+            "worktree",
+            "add",
+            "--quiet",
+            "-b",
+            "wt",
+            worktree.to_str().expect("a UTF-8 worktree path"),
+        ],
+    );
+    let (root, common_dir_key) = validate_engram_source_root(
+        &worktree.to_string_lossy(),
+        &turn.root.to_string_lossy(),
+        &turn.root.to_string_lossy(),
+    )
+    .expect("the linked worktree can be named");
+    turn.record_mut(|record| {
+        record.engram.active_turn_source_root = Some(EngramTurnSourceRoot {
+            root,
+            common_dir_key,
+            short_ref: "w-turn-check".to_owned(),
+            claim_id: "claim-turn-check".to_owned(),
+            sealed_revision: None,
+        });
+    });
+    worktree
+}
+
+#[test]
+fn a_test_outside_the_named_root_is_withheld_and_the_agent_is_told() {
+    let turn = CheckedTurn::start("withheld-outside-root", true);
+    let worktree = name_turn_source_root(&turn);
+    let mut recorder = turn.recorder();
+
+    recorder
+        .command_started_in("main", "cargo test", Some("cargo test"), None)
+        .expect("the start should record");
+    turn.wait_for_snapshots();
+
+    let line = turn
+        .record(|record| record.engram.pending_source_root_line.clone())
+        .expect("the agent is told why the test gets no credit");
+    assert!(line.contains("started in"), "{line}");
+    assert!(line.contains("gets no credit"), "{line}");
+    assert!(line.contains("run the tests in that root"), "{line}");
+    assert!(
+        turn.record(|record| record.engram.active_turn_checks.is_empty()),
+        "a test in the main checkout is no check of the named root"
+    );
+
+    turn.record_mut(|record| record.engram.pending_source_root_line = None);
+    let worktree_directory = worktree.to_string_lossy().into_owned();
+    recorder
+        .command_started_in(
+            "root",
+            "cargo test",
+            Some("cargo test"),
+            Some(&worktree_directory),
+        )
+        .expect("the start should record");
+    turn.wait_for_snapshots();
+
+    assert_eq!(
+        turn.record(|record| record.engram.pending_source_root_line.clone()),
+        None,
+        "a test in the named root is credited silently"
+    );
+    let targets = turn.record(|record| {
+        record
+            .engram
+            .active_turn_checks
+            .iter()
+            .map(|check| (check.key.clone(), check.target.clone()))
+            .collect::<Vec<_>>()
+    });
+    assert_eq!(targets.len(), 1, "{targets:?}");
+    assert_eq!(targets[0].0, "root");
+    assert_eq!(
+        engram_exact_path_key(&targets[0].1.root),
+        engram_exact_path_key(&fs::canonicalize(&worktree).expect("the worktree canonicalizes")),
+        "the check is credited to the named root"
+    );
+}
+
+#[test]
+fn a_session_in_a_turn_on_a_named_root_is_a_writer_there_too() {
+    let turn = CheckedTurn::start("writer-in-named-root", true);
+    let worktree = name_turn_source_root(&turn);
+    let root_key = engram_path_key(&fs::canonicalize(&worktree).expect("the worktree canonicalizes"));
+
+    let worktrees = {
+        let inner = turn.state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&turn.session_id)
+            .expect("root should exist");
+        engram_writer_worktrees(&inner, index)
+    };
+
+    assert!(
+        worktrees.contains(&Some(root_key.clone())),
+        "{worktrees:?} holds {root_key}"
+    );
+    assert!(engram_worktrees_may_hold(&worktrees, &root_key));
+
+    // The record keeps the root until the next grant begins; without a grant
+    // held it is no place the session works in.
+    turn.record_mut(|record| record.engram.active_grant_id = None);
+    let worktrees = {
+        let inner = turn.state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&turn.session_id)
+            .expect("root should exist");
+        engram_writer_worktrees(&inner, index)
+    };
+    assert!(
+        !worktrees.contains(&Some(root_key.clone())),
+        "{worktrees:?} leaves out {root_key}"
     );
 }

@@ -55,6 +55,10 @@ mod engram_authority_fixture;
 mod engram_compaction;
 mod engram_host_adapter;
 mod engram_readiness;
+// The source-root naming tests (engram_source_root_naming.rs) are mounted
+// under engram_host_adapter's turn_observations module, whose ClaimedRoot
+// fixture they share.
+mod engram_source_roots;
 mod file_changes;
 mod git;
 mod http_routes;

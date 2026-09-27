@@ -11,8 +11,10 @@
 /// Windows verbatim prefix, no trailing separator, and case-folded where the
 /// platform's usual file system ignores case (Windows and macOS), which errs
 /// towards two paths being the same. That suits overlap, where treating two
-/// places as one only makes a check unknown; what a check is credited to is
-/// judged on `engram_exact_path_key` instead.
+/// places as one only makes a check unknown, and the change hint of a turn
+/// measured in a named root, where it can only count a change, never miss
+/// one; what a check is credited to is judged on `engram_exact_path_key`
+/// instead.
 fn engram_path_key(path: &FsPath) -> String {
     let text = engram_exact_path_key(path);
     if cfg!(any(windows, target_os = "macos")) {
@@ -335,17 +337,22 @@ fn engram_literal_directory(directory: &str) -> bool {
 }
 
 /// Whether `path` names a network location (`\\server\share`,
-/// `//server/share`, `\\?\UNC\server\share`). Resolving one can block for a
-/// network timeout, and TermAl resolves paths on the runtime's event reader,
-/// so such a path is taken to lead out of any worktree without being
-/// resolved. A Windows verbatim path to a drive (`\\?\C:\…`, the form a
-/// resolved path takes) is local.
+/// `//server/share`, `\\?\UNC\server\share`) or may lead to one. Resolving
+/// one can block for a network timeout, and TermAl resolves paths on the
+/// runtime's event reader, so such a path is taken to lead out of any
+/// worktree without being resolved. A Windows verbatim path is local only
+/// when it names a drive (`\\?\C:\…`, the form a resolved path takes); any
+/// other (`\\?\UNC\…`, `\\?\GLOBALROOT\Device\Mup\…`, `\\?\Mup\…`) may reach
+/// a share, as a device path (`\\.\…`) may. A local volume mounted without a
+/// letter (`\\?\Volume{…}\`) counts too, conservatively: a shell there is
+/// taken as lost and a test there gets no credit, and nothing is resolved.
 fn engram_network_path(path: &str) -> bool {
     let path = path.replace('\\', "/");
     match path.strip_prefix("//?/") {
-        Some(verbatim) => verbatim
-            .get(..4)
-            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("UNC/")),
+        Some(verbatim) => {
+            let bytes = verbatim.as_bytes();
+            !(bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':')
+        }
         None => path.starts_with("//"),
     }
 }
@@ -540,18 +547,25 @@ fn engram_settle_shell_move(
     };
 }
 
-/// `engram_check_worktree` from every directory the command may run in
+/// `engram_check_worktree_in` from every directory the command may run in
 /// (`engram_command_directories`): the target from the last, the presumed
-/// place of its runtime's shell, when every one names the session's
-/// worktree and none names a place outside it.
+/// place of its runtime's shell, when every one names the worktree the check
+/// is credited to (`credit_root`, else the session's) and none names a place
+/// outside it.
 fn engram_check_worktree_from(
     check: &EngramCheckCommand,
     workdir: &FsPath,
     directories: &[Option<String>],
+    credit_root: Option<(&FsPath, &str)>,
 ) -> Option<EngramCheckTarget> {
     let mut target = None;
     for directory in directories {
-        target = Some(engram_check_worktree(check, workdir, directory.as_deref())?);
+        target = Some(engram_check_worktree_in(
+            check,
+            workdir,
+            directory.as_deref(),
+            credit_root,
+        )?);
     }
     target
 }
@@ -579,11 +593,28 @@ fn engram_has_unquoted_expression(line: &str) -> bool {
 }
 
 /// Where a recognised check ran and what it is credited to: the worktree
-/// root, and the directory the command ran in.
+/// root, and the directory the command ran in. `common_dir_key` is set when
+/// the root is the turn's named source root (`engram_source_roots.rs`), whose
+/// snapshots are taken on exactly that path and never on an ancestor's.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct EngramCheckTarget {
     root: PathBuf,
     directory: PathBuf,
+    common_dir_key: Option<String>,
+}
+
+impl EngramCheckTarget {
+    /// Where the check's snapshots are taken.
+    fn basis_place(&self) -> EngramBasisPlace {
+        let root = self.root.to_string_lossy().into_owned();
+        match &self.common_dir_key {
+            Some(common_dir_key) => EngramBasisPlace::Named {
+                root,
+                common_dir_key: common_dir_key.clone(),
+            },
+            None => EngramBasisPlace::Workdir(root),
+        }
+    }
 }
 
 /// Where a recognised check ran, when TermAl can tell it tested the
@@ -609,10 +640,25 @@ struct EngramCheckTarget {
 /// test launcher's `--engram-binary` names the pinned binary a live run
 /// uses, not what it tests, so its value may lie anywhere. This touches the
 /// file system, so it runs off the state lock.
+#[cfg(test)]
 fn engram_check_worktree(
     check: &EngramCheckCommand,
     workdir: &FsPath,
     cwd: Option<&str>,
+) -> Option<EngramCheckTarget> {
+    engram_check_worktree_in(check, workdir, cwd, None)
+}
+
+/// [`engram_check_worktree`], credited to `credit_root` (the root and its
+/// repository's common-directory key) when the turn's claim names a source
+/// root (`engram_source_roots.rs`): the command is still read from the
+/// session's `workdir`, where its runtime runs it, but it counts only when it
+/// ran in that root. `None` credits the session's own worktree.
+fn engram_check_worktree_in(
+    check: &EngramCheckCommand,
+    workdir: &FsPath,
+    cwd: Option<&str>,
+    credit_root: Option<(&FsPath, &str)>,
 ) -> Option<EngramCheckTarget> {
     // A network place is never resolved (`engram_network_path`), whether the
     // runtime reported it or the session works there: the command runs in
@@ -625,7 +671,10 @@ fn engram_check_worktree(
     }
     // What a check is credited to is compared exactly: a case-sensitive
     // volume may hold two worktrees whose paths differ only in case.
-    let root = engram_worktree_root_path(workdir);
+    let root = credit_root.map_or_else(
+        || engram_worktree_root_path(workdir),
+        |(root, _)| root.to_path_buf(),
+    );
     let root_key = engram_exact_path_key(&root);
     if engram_exact_path_key(&engram_worktree_root_path(&directory)) != root_key {
         return None;
@@ -681,7 +730,11 @@ fn engram_check_worktree(
             !pinned_binary && engram_argument_values(word).into_iter().any(escapes)
         })
     });
-    (!named_elsewhere).then_some(EngramCheckTarget { root, directory })
+    (!named_elsewhere).then_some(EngramCheckTarget {
+        root,
+        directory,
+        common_dir_key: credit_root.map(|(_, common_dir_key)| common_dir_key.to_owned()),
+    })
 }
 
 /// Every value `word` may hand a runner: the word itself, the value attached

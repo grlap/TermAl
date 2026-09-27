@@ -514,6 +514,7 @@ fn handoff_prepared_turn_dispatch(
     }
     drop(inner);
     state.acknowledge_engram_context_nudge_delivery(&session_id, active_turn_generation);
+    state.acknowledge_engram_source_root_line_delivery(&session_id, active_turn_generation);
     if let Some(notification) = mailbox_notification.as_ref() {
         state.mark_mailbox_notification_delivered(notification);
     }

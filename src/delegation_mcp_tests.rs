@@ -418,6 +418,7 @@ fn delegation_mcp_base_tools_list_includes_role_scoped_tools() {
             "termal_wait_delegations",
             "termal_resume_after_delegations",
             "termal_resume_after_test_runs",
+            "termal_name_source_root",
             "termal_followup_session",
             "termal_evaluate_acceptance",
             "termal_review_freeze_check",
@@ -4301,6 +4302,10 @@ fn delegation_mcp_run_wait_tool_is_hidden_from_and_rejected_for_children() {
         "a child never sees the run wait: {names:?}"
     );
     assert!(
+        !names.iter().any(|name| name == "termal_name_source_root"),
+        "a child names no source root; its turns are measured in its workdir: {names:?}"
+    );
+    assert!(
         names.iter().any(|name| name == "termal_resume_after_delegations"),
         "only the run wait is root-only among the waits: {names:?}"
     );
@@ -4320,4 +4325,61 @@ fn delegation_mcp_run_wait_tool_is_hidden_from_and_rejected_for_children() {
         1,
         "the classification only; nothing reaches the wait route"
     );
+}
+
+#[test]
+fn delegation_mcp_name_source_root_posts_its_request_and_waits_the_naming_budget() {
+    // The stub answers the first request after the bridge's normal timeout:
+    // only the naming budget the bridge adds for this call lets the answer
+    // through. The rest answer at once.
+    let answered = std::sync::atomic::AtomicUsize::new(0);
+    let (base_url, requests, server) = spawn_test_mcp_http_server(3, move |_request| {
+        if answered.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+            thread::sleep(Duration::from_millis(600));
+        }
+        (
+            200,
+            json!({ "workRef": "w-a", "workId": "work-a", "generation": 1, "notice": "named" }),
+        )
+    });
+    let bridge = TermalDelegationMcpBridge::new_with_timeout(
+        "session-parent".to_owned(),
+        base_url,
+        Duration::from_millis(200),
+    )
+    .expect("bridge should initialize");
+
+    let named = bridge
+        .tool_name_source_root(json!({ "work": "w-a", "path": ".worktrees/wt" }))
+        .expect("the bridge waits the naming budget beyond its normal timeout");
+    assert_eq!(named["workRef"], "w-a");
+    bridge
+        .tool_name_source_root(json!({ "work": "w-a" }))
+        .expect("a clear is posted too");
+    // A blank path is sent as written, for the server to refuse, never read
+    // as a clear; a path that is no string is refused before anything is sent.
+    bridge
+        .tool_name_source_root(json!({ "work": "w-a", "path": "   " }))
+        .expect("the stub answers whatever it is sent");
+    for invalid in [json!(null), json!(3)] {
+        let error = bridge
+            .tool_name_source_root(json!({ "work": "w-a", "path": invalid }))
+            .expect_err("a path that is no string is refused");
+        assert!(error.to_string().contains("omit it to clear"), "{error}");
+    }
+
+    server.join().expect("test server should join");
+    let requests = requests.lock().expect("request log mutex poisoned");
+    for request in requests.iter() {
+        assert_eq!(request.method, "POST");
+        assert_eq!(request.path, "/api/sessions/session-parent/engram-source-root");
+    }
+    let bodies = requests
+        .iter()
+        .map(|request| serde_json::from_str::<Value>(&request.body).expect("a JSON body"))
+        .collect::<Vec<_>>();
+    assert_eq!(bodies[0], json!({ "work": "w-a", "path": ".worktrees/wt" }));
+    assert_eq!(bodies[1], json!({ "work": "w-a" }), "omitted, not blank");
+    assert_eq!(bodies[2], json!({ "work": "w-a", "path": "   " }), "blank, kept");
+    assert_eq!(bodies.len(), 3, "nothing is sent for a path that is no string");
 }

@@ -901,6 +901,7 @@ impl TermalDelegationMcpBridge {
             "termal_wait_delegations" => self.tool_wait_delegations(arguments),
             "termal_resume_after_delegations" => self.tool_resume_after_delegations(arguments),
             "termal_resume_after_test_runs" => self.tool_resume_after_test_runs(arguments),
+            "termal_name_source_root" => self.tool_name_source_root(arguments),
             other => Err(anyhow!("unknown TermAl delegation MCP tool `{other}`")),
         }?;
         Ok(delegation_mcp_tool_result(&name, &result))
@@ -2316,6 +2317,7 @@ fn tool_requires_root_session(name: &str) -> bool {
             | "termal_board_get"
             | "termal_board_set"
             | "termal_resume_after_test_runs"
+            | "termal_name_source_root"
     )
 }
 
@@ -2688,6 +2690,11 @@ fn mcp_tools_list_result() -> Value {
         &mut result,
         "termal_resume_after_delegations",
         test_run_wait_tool_definition(),
+    );
+    insert_mcp_tool_after(
+        &mut result,
+        "termal_resume_after_test_runs",
+        source_root_tool_definition(),
     );
     // Keep one bootstrap body in tools/list; the other mailbox entry points
     // point to the read tool while retaining their tool-specific contracts.

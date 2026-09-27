@@ -438,6 +438,10 @@ fn app_router_with_acceptance_policy_limiter(
             post(create_test_run_wait),
         )
         .route(
+            "/api/sessions/{id}/engram-source-root",
+            post(name_engram_source_root),
+        )
+        .route(
             "/api/sessions/{id}/markers",
             get(list_session_markers).post(create_session_marker),
         )
@@ -751,8 +755,10 @@ include!("engram_readiness.rs");
 include!("engram_session_reconciliation.rs");
 include!("coordination_instructions.rs");
 include!("delegation_mcp.rs");
+include!("delegation_mcp_source_root.rs");
 include!("review_freeze.rs");
 include!("content_revision.rs");
+include!("engram_source_roots.rs");
 include!("bounded_read_process.rs");
 include!("review_freeze_process.rs");
 include!("review_freeze_api.rs");

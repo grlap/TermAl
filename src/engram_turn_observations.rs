@@ -24,9 +24,13 @@ enum EngramTurnReportPlan {
     /// verbatim so the idempotency key repeats.
     Cached(EngramTurnReport),
     /// A report is built for this attempt once the end basis has been read
-    /// from `workdir` off-lock.
+    /// at `place` off-lock: the turn's source root when it began with one,
+    /// else the session's workdir. `sealed` is that root with the revision a
+    /// rename or a clear sealed during the turn, which stands in only when
+    /// the root is gone (`engram_turn_end_basis`).
     Fresh {
-        workdir: String,
+        place: EngramBasisPlace,
+        sealed: Option<(String, String)>,
         outcome: EngramExecutionOutcome,
     },
 }
@@ -51,11 +55,46 @@ fn engram_turn_report_plan(
         Some((cached_grant_id, report)) if cached_grant_id == grant_id => {
             EngramTurnReportPlan::Cached(report.clone())
         }
-        _ => EngramTurnReportPlan::Fresh {
-            workdir: record.session.workdir.clone(),
-            outcome,
-        },
+        _ => {
+            let turn_root = record.engram.active_turn_source_root.as_ref();
+            EngramTurnReportPlan::Fresh {
+                place: turn_root.map_or_else(
+                    || EngramBasisPlace::Workdir(record.session.workdir.clone()),
+                    EngramTurnSourceRoot::place,
+                ),
+                sealed: turn_root.and_then(|turn_root| {
+                    turn_root
+                        .sealed_revision
+                        .clone()
+                        .map(|revision| (turn_root.root.clone(), revision))
+                }),
+                outcome,
+            }
+        }
     }
+}
+
+/// The closing basis of a turn from what `place` gave (`captured`). A named
+/// root that is gone (`engram_named_root_absent`) is measured by the revision
+/// a rename or a clear sealed during the turn, if any; a root that exists but
+/// could not be measured (the budget, the capture limit) has no basis, so a
+/// slow capture never passes an older revision off as the closing one.
+fn engram_turn_end_basis(
+    place: &EngramBasisPlace,
+    sealed: Option<&(String, String)>,
+    captured: Option<EngramExecutionSourceBasis>,
+) -> Option<EngramExecutionSourceBasis> {
+    if captured.is_some() {
+        return captured;
+    }
+    let EngramBasisPlace::Named { root, .. } = place else {
+        return None;
+    };
+    let (sealed_root, revision) = sealed.filter(|(sealed_root, _)| sealed_root == root)?;
+    engram_named_root_absent(root).then(|| EngramExecutionSourceBasis {
+        workspace_id: sealed_root.clone(),
+        source_revision: revision.clone(),
+    })
 }
 
 /// Whether `grant_id`, the grant closing now, mediates local mutation, which
@@ -168,7 +207,32 @@ fn engram_turn_execution_observation(
     end_basis: Option<EngramExecutionSourceBasis>,
     reported_revision: Option<String>,
 ) -> Option<EngramExecutionObservationInput> {
-    let tracked_change = !record.active_turn_file_changes.is_empty();
+    // A turn measured in its claim's named source root counts only the
+    // watcher's changes inside that root: the watcher attributes every write
+    // under the session's workdir, whoever made it and wherever it landed.
+    // Compared by key: watch roots are canonical, so event paths carry the
+    // root's canonical prefix even when the project is reached by an alias.
+    // The key folds case, which can count an edit in a sibling worktree
+    // differing only in case but never misses one in the root: a missed
+    // change is the unsafe answer here, unlike a check's credit.
+    let tracked_change = match &record.engram.active_turn_source_root {
+        Some(turn_root) => {
+            let root = engram_path_key(FsPath::new(&turn_root.root));
+            let workdir = FsPath::new(&record.session.workdir);
+            record.active_turn_file_changes.keys().any(|path| {
+                // The watcher reports absolute paths; a relative one is read
+                // from the workdir rather than taken as outside the root.
+                let path = FsPath::new(path);
+                let path = if path.is_absolute() {
+                    path.to_path_buf()
+                } else {
+                    workdir.join(path)
+                };
+                engram_path_within(&engram_path_key(&path), &root)
+            })
+        }
+        None => !record.active_turn_file_changes.is_empty(),
+    };
     let source_changed = match (reported_revision, &end_basis) {
         (Some(reported), Some(end)) => end.source_revision != reported,
         (Some(_), None) => tracked_change,
@@ -277,15 +341,15 @@ fn engram_bounded_source_basis(
 const ENGRAM_TURN_BASIS_CAPTURE_LIMIT: usize = 32;
 
 impl AppState {
-    /// [`engram_execution_source_basis`] on its own thread, waited for at
-    /// most `budget`. The capture reads every listed file and a read cannot
-    /// be interrupted, so a read that stalls must not hold the turn that
-    /// waits for it: past the budget the basis counts as not taken, the
-    /// conservative path, and the thread is left to finish
+    /// The source basis at `place` ([`engram_place_source_basis`]) on its own
+    /// thread, waited for at most `budget`. The capture reads every listed
+    /// file and a read cannot be interrupted, so a read that stalls must not
+    /// hold the turn that waits for it: past the budget the basis counts as
+    /// not taken, the conservative path, and the thread is left to finish
     /// ([`bounded_content_revision_capture`]).
-    fn engram_execution_source_basis_within(
+    fn engram_source_basis_within(
         &self,
-        workdir: &str,
+        place: &EngramBasisPlace,
         budget: Duration,
     ) -> Option<EngramExecutionSourceBasis> {
         let live = self
@@ -294,12 +358,39 @@ impl AppState {
             .expect("state mutex poisoned")
             .engram_turn_basis_captures_live
             .clone();
-        let workdir = workdir.to_owned();
+        let place = place.clone();
         bounded_content_revision_capture(
             &live,
             ENGRAM_TURN_BASIS_CAPTURE_LIMIT,
             budget,
-            move || engram_execution_source_basis(FsPath::new(&workdir)),
+            move || engram_place_source_basis(&place),
+        )
+    }
+
+    /// The closing basis of a turn at `place` (`engram_turn_end_basis`), on
+    /// its own thread and waited for at most `budget`: the capture and, when
+    /// it fails, the check that a sealed root is gone both touch the file
+    /// system, so both stay inside the bound. Past the budget, or at the
+    /// capture limit, there is no basis.
+    fn engram_turn_end_basis_within(
+        &self,
+        place: &EngramBasisPlace,
+        sealed: Option<&(String, String)>,
+        budget: Duration,
+    ) -> Option<EngramExecutionSourceBasis> {
+        let live = self
+            .inner
+            .lock()
+            .expect("state mutex poisoned")
+            .engram_turn_basis_captures_live
+            .clone();
+        let place = place.clone();
+        let sealed = sealed.cloned();
+        bounded_content_revision_capture(
+            &live,
+            ENGRAM_TURN_BASIS_CAPTURE_LIMIT,
+            budget,
+            move || engram_turn_end_basis(&place, sealed.as_ref(), engram_place_source_basis(&place)),
         )
     }
 
@@ -307,22 +398,59 @@ impl AppState {
     /// the lock and bounded, and keeps it on the record while that grant is
     /// mirrored, so the closing checkpoint can tell whether the turn changed
     /// the workspace's content. Only a session bound to claimed work reports
-    /// observations, so an unbound session skips the capture.
+    /// observations, so an unbound session skips the capture. The turn is
+    /// measured in the source root named for its claim, when there is one
+    /// (`engram_source_roots.rs`); the record keeps that root for the turn's
+    /// checks and its close, so a root named during the turn takes effect at
+    /// the next one. The root is kept on the record before the capture
+    /// starts, so a rename or a clear during the capture seals it
+    /// (`name_engram_source_root`); the capture then sets only the basis.
     fn record_engram_turn_start_basis_off_lock(&self, session_id: &str, grant_id: &str) {
-        let workdir = {
-            let inner = self.inner.lock().expect("state mutex poisoned");
+        let place = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_session_index(session_id) else {
                 return;
             };
             let record = &inner.sessions[index];
-            if record.engram.work_binding.is_none()
-                || record.engram.active_grant_id.as_deref() != Some(grant_id)
-            {
+            let Some(binding) = record
+                .engram
+                .work_binding
+                .as_ref()
+                .filter(|_| record.engram.active_grant_id.as_deref() == Some(grant_id))
+            else {
                 return;
+            };
+            let turn_root = engram_project_for_session_locked(&inner, session_id)
+                .and_then(|project| project.engram.as_ref())
+                .and_then(|settings| settings.authority_store_key.as_ref())
+                .and_then(|store| {
+                    engram_work_source_root_for_claim(
+                        &inner.engram_work_source_roots,
+                        store,
+                        &binding.work_id,
+                        &binding.claim_id,
+                    )
+                })
+                .map(EngramTurnSourceRoot::from_entry);
+            let place = turn_root.as_ref().map_or_else(
+                || EngramBasisPlace::Workdir(record.session.workdir.clone()),
+                EngramTurnSourceRoot::place,
+            );
+            let named = turn_root.is_some();
+            inner.sessions[index].engram.active_turn_source_root = turn_root;
+            // The turn-start sweep (`engram_note_turn_started`) ran before the
+            // root was known: an open check in it is marked now, as one in
+            // the workdir was then.
+            if named {
+                engram_mark_checks_overlapped_by(&mut inner, index);
             }
-            record.session.workdir.clone()
+            place
         };
-        let basis = self.engram_execution_source_basis_within(&workdir, REVIEW_FREEZE_TIMEOUT);
+        #[cfg(test)]
+        if let Some(during) = TEST_ENGRAM_DURING_TURN_START_CAPTURE.with(|hook| hook.borrow_mut().take()) {
+            during();
+        }
+        let basis = self.engram_source_basis_within(&place, REVIEW_FREEZE_TIMEOUT);
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         if let Some(index) = inner.find_session_index(session_id)
             && inner.sessions[index].engram.active_grant_id.as_deref() == Some(grant_id)
@@ -421,6 +549,16 @@ fn engram_recovery_checkpoint_refusal(
         }
         _ => None,
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Run once on this test thread after a turn's root is kept on its record
+    /// and before its opening capture starts
+    /// (`record_engram_turn_start_basis_off_lock`), so a test can land a
+    /// rename or a clear inside that window.
+    static TEST_ENGRAM_DURING_TURN_START_CAPTURE: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+        const { std::cell::RefCell::new(None) };
 }
 
 // Test-only gate between a checkpoint's off-lock basis capture and its

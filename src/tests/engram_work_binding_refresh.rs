@@ -1124,6 +1124,7 @@ impl EngramControlTransport for HeldClaimsTransport {
                 work_id: binding.work_id.clone(),
                 focused: *focused,
                 control_binding: Some(binding.clone()),
+                ..Default::default()
             })
             .collect();
         Ok(select_engram_held_binding(held, 0, preference))

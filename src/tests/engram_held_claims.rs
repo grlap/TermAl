@@ -81,6 +81,29 @@ fn real_process_work_binding_reader_reads_the_held_claims() {
         "one read of the held claims, never a focus read"
     );
 
+    // The full read a work's source root is named against decodes each row's
+    // own claim fields, which naming depends on: with them missing, every
+    // name would be refused.
+    let held = read_engram_held_claims_from_cli(&connection, DEADLOCK_GUARD, false)
+        .expect("the held claims should be read");
+    assert_eq!(held.omitted, 0);
+    assert_eq!(
+        held.items
+            .iter()
+            .map(|claim| (
+                claim.work_id.as_str(),
+                claim.short_ref.as_str(),
+                claim.claim_id.as_str(),
+                claim.claim_fence,
+                claim.focused,
+            ))
+            .collect::<Vec<_>>(),
+        [
+            ("work-newer", "w-newer", "claim-newer", 3, false),
+            ("work-fixture", "w-fixture", "claim-fixture", 23, true),
+        ]
+    );
+
     // A held claim bind would refuse is printed with a null binding, or by an
     // older build without the key; either way it binds no work, as does
     // holding nothing. Only a present binding that does not decode, or output
@@ -161,6 +184,7 @@ fn a_binding_engram_refused_gives_way_to_another_held_claim() {
         work_id: binding.work_id.clone(),
         focused,
         control_binding: Some(binding.clone()),
+        ..Default::default()
     };
 
     assert_eq!(
@@ -276,11 +300,13 @@ fn a_held_binding_is_chosen_by_focus_then_the_current_claim_then_the_newest() {
         work_id: binding.work_id.clone(),
         focused,
         control_binding: Some(binding.clone()),
+        ..Default::default()
     };
     let unbindable = |work_id: &str, focused: bool| EngramHeldClaim {
         work_id: work_id.to_owned(),
         focused,
         control_binding: None,
+        ..Default::default()
     };
 
     assert_eq!(

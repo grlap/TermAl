@@ -459,6 +459,25 @@ impl AppState {
                 .map(|source| peer_message_runtime_prompt(&runtime_prompt, source))
                 .unwrap_or(runtime_prompt)
         };
+        // A one-time host line about where the agent's turns on claimed work
+        // are measured (`engram_source_roots.rs`): after the context fence
+        // when one is delivered, before the prompt. It is cleared only once the
+        // runtime accepts this prompt, and only if it is still the line this
+        // prompt carried (`acknowledge_engram_source_root_line_delivery`), so a
+        // dispatch refused or deferred after this point keeps it for the next,
+        // and a line set meanwhile is not lost.
+        let runtime_prompt = match record.engram.pending_source_root_line.as_deref() {
+            Some(line) => {
+                let runtime_prompt = format!("{line}\n\n{runtime_prompt}");
+                record.engram.source_root_line_delivery =
+                    Some((line.to_owned(), active_turn_generation));
+                runtime_prompt
+            }
+            None => {
+                record.engram.source_root_line_delivery = None;
+                runtime_prompt
+            }
+        };
         let runtime_prompt = match record.engram.pending_context_nudge.as_deref() {
             Some(context) => {
                 record.engram.context_nudge_delivery_generation =
