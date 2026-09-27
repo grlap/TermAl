@@ -2894,6 +2894,11 @@ fn review_changes_pins_two_child_resume_wait_flow() {
     );
     assert_command_contains(
         review_changes,
+        "While the reviewers run, keep the reviewed files unchanged",
+        "/review-changes must keep the reviewed input frozen while reviewers read the live tree",
+    );
+    assert_command_contains(
+        review_changes,
         "Never use `termal_wait_delegations`, PowerShell, shell, raw HTTP polling, or session-log polling",
         "/review-changes must not reintroduce active polling hangs",
     );

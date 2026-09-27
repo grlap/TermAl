@@ -131,6 +131,8 @@ Use TermAl MCP wait/fan-in tools to wait for both delegated reviewers to complet
 
 Call `termal_resume_after_delegations` with both delegation ids and `mode: "all"`, report the wait id and reviewer child session ids, then stop this turn immediately. Do not continue to Step 5 until TermAl resumes the parent with the fan-in prompt.
 
+While the reviewers run, keep the reviewed files unchanged: reviewers read the live working tree, so an edit during the review makes it cover a moving target. Make independent edits in another worktree. A deliberate edit to the reviewed files needs a new gate and a new review; do not read the earlier result as covering it.
+
 Never use `termal_wait_delegations`, PowerShell, shell, raw HTTP polling, or session-log polling for `/review-changes` review fan-in. `termal_wait_delegations` is reserved for short smoke tests and diagnostics outside this command. A backend resume wait queues its result as the next parent prompt; keeping the parent turn active prevents that queued fan-in prompt from running and can make the review appear stuck.
 
 ## Step 5: Consolidate results

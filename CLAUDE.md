@@ -34,8 +34,8 @@ anything implied by my default behaviour or by the Claude-Code skills
 ## Work only in the repository folder
 
 Greg's rule (2026-09-26), after an agent's cleanup script deleted most of his
-user profile (cause recorded in bead `tm-t1gh`; host enforcement is Engram
-item `w-bf5b12465446`):
+user profile (cause recorded in bead `tm-t1gh`). TermAl does not block these
+operations, so the rule holds only as long as every agent follows it:
 
 - Create, change, move and delete files only inside this repository's folder
   and its worktrees, including worktrees TermAl creates for delegated
