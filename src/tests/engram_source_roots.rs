@@ -1,10 +1,9 @@
-// Owns the tests of a work's source root (src/engram_source_roots.rs,
-// tm-5gi4 phase 2): what may be named, the basis taken on exactly the named
-// path, the list's cap, the rules that end an entry, the closing basis of a
-// turn whose root was sealed, and the root an evaluation is taken on. Does
-// not own the tests of turns measured in a named root
-// (src/tests/engram_turn_observations.rs) or of check credit
-// (src/tests/engram_turn_checks.rs). New module.
+// Owns the tests of a work's source root (src/engram_source_roots.rs): what may
+// be named, the basis taken on exactly the named path, the list's cap, the
+// rules that end an entry, the closing basis of a turn whose root was sealed,
+// and the root an evaluation is taken on. Does not own the tests of turns
+// measured in a named root (src/tests/engram_turn_observations.rs) or of check
+// credit (src/tests/engram_turn_checks.rs). New module.
 use super::*;
 
 /// Removes the directories it owns when dropped, on success and on an

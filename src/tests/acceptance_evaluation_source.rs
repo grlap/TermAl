@@ -1,12 +1,11 @@
-// Tests of the declared source fingerprint of an acceptance evaluation
-// (tm-5gi4): the request takes the content revision of the evaluator's
-// worktree, a same-session caller is handed it, the record keeps it across a
-// reload, and the first submission declares it only while the worktree still
-// holds it. Does not own the rest of the acceptance-evaluation tests, the
-// fixtures and helpers of which it uses from its parent module. New tests,
-// written for tm-5gi4 and placed in this child module of
-// src/tests/acceptance_evaluation.rs so that file stays within the size the
-// architecture lens allows for a test file.
+// Tests of the declared source fingerprint of an acceptance evaluation: the
+// request takes the content revision of the evaluator's worktree, a
+// same-session caller is handed it, the record keeps it across a reload, and
+// the first submission declares it only while the worktree still holds it. Does
+// not own the rest of the acceptance-evaluation tests, the fixtures and helpers
+// of which it uses from its parent module. New tests, placed in this child
+// module of src/tests/acceptance_evaluation.rs so that file stays within the
+// size the architecture lens allows for a test file.
 use super::*;
 
 /// The parent's workdir as a committed Git worktree, so a content revision
@@ -290,9 +289,9 @@ fn acceptance_submit_replays_an_open_write_unchanged_after_the_worktree_moved() 
 
 #[test]
 fn acceptance_request_on_a_named_source_root_runs_and_measures_the_evaluator_there() {
-    // tm-5gi4 phase 2: the parent is bound to the claim that named a worktree
-    // as the work's source root, so the evaluator runs there, its prompt names
-    // it, its fingerprint is taken there and the target records the root.
+    // The parent is bound to the claim that named a worktree as the work's
+    // source root, so the evaluator runs there, its prompt names it, its
+    // fingerprint is taken there and the target records the root.
     let (state, project, parent, root) = fixture();
     install_store(&state, &project, &root);
     make_workdir_a_worktree(&root);

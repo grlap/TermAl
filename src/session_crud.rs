@@ -1123,7 +1123,7 @@ static TEST_ENGRAM_PROJECT_RESET_FENCE_OBSERVERS: LazyLock<
 
 // The entered channel carries an error when the gated update returns without
 // reaching the fence, so a test reports that update's own failure instead of
-// waiting out the gate timeout (tm-gcs8). Same shape as the release gate below.
+// waiting out the gate timeout. Same shape as the release gate below.
 #[cfg(test)]
 static TEST_ENGRAM_PROJECT_RESET_FENCE_GATES: LazyLock<
     Mutex<HashMap<String, (mpsc::SyncSender<Result<(), String>>, mpsc::Receiver<()>)>>,

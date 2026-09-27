@@ -503,7 +503,7 @@ export const MessageCard = memo(
 
 /**
  * Where a bound turn's source basis was taken: the work's named source root,
- * or the session's workdir when no worktree is named (tm-5gi4 phase 2).
+ * or the session's workdir when no worktree is named.
  */
 function engramSourceRootDetail(
   sourceRoot: EngramControlMessage["sourceRoot"],

@@ -1,12 +1,12 @@
 // Owns the tests of the naming request behind `termal_name_source_root`
-// (`AppState::name_engram_source_root`, tm-5gi4 phase 2) and of the host line
-// it and a bind leave for the agent's next prompt: the refusals, the
-// generation a name gets, the seal a clear leaves on the running turn, the
-// full list's reclaim within its budget, and when the line counts as
-// delivered. Does not own the validation, the end rules or the basis taken
-// on a named root (src/tests/engram_source_roots.rs), or turns measured in a
-// named root (src/tests/engram_turn_observations.rs, whose `ClaimedRoot`
-// fixture this child module uses). New module.
+// (`AppState::name_engram_source_root`) and of the host line it and a bind
+// leave for the agent's next prompt: the refusals, the generation a name gets,
+// the seal a clear leaves on the running turn, the full list's reclaim within
+// its budget, and when the line counts as delivered. Does not own the
+// validation, the end rules or the basis taken on a named root
+// (src/tests/engram_source_roots.rs), or turns measured in a named root
+// (src/tests/engram_turn_observations.rs, whose `ClaimedRoot` fixture this
+// child module uses). New module.
 use super::*;
 
 /// The claimed root's project given the store identity a real Engram

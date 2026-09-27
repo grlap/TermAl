@@ -1,12 +1,12 @@
-// The bridge side of `termal_name_source_root` (tm-5gi4 phase 2): the MCP tool
-// definition an agent sees and the handler that forwards a call to
+// The bridge side of `termal_name_source_root`: the MCP tool definition an
+// agent sees and the handler that forwards a call to
 // `POST /api/sessions/{id}/engram-source-root`. Owns only the tool's text,
 // argument shaping and the request's timeout. Does not own naming itself, its
 // validation or its budget (`engram_source_roots.rs`), or the bridge's
 // dispatch, caller classification and tool list (`delegation_mcp.rs`, which
 // calls both functions here). Split out of `delegation_mcp.rs`, which is
-// already past its size limit (tm-dy69), so the phase adds only its dispatch
-// and tool-list entries there.
+// already past its size limit, so this tool adds only its dispatch and
+// tool-list entries there.
 
 impl TermalDelegationMcpBridge {
     /// `termal_name_source_root` (engram_source_roots.rs): names, or with no
@@ -44,7 +44,7 @@ impl TermalDelegationMcpBridge {
     }
 }
 
-/// `termal_name_source_root` (engram_source_roots.rs, tm-5gi4 phase 2).
+/// `termal_name_source_root` (engram_source_roots.rs).
 fn source_root_tool_definition() -> Value {
     json!({
         "name": "termal_name_source_root",

@@ -8676,7 +8676,7 @@ fn grant_rotation_fence_rejects_an_overlapping_rotation() {
 fn a_fence_gated_update_that_returns_early_reports_its_own_error() {
     // The gate is only useful when this path works. An update that never reaches
     // the fence must name its own outcome, not leave the test waiting out the gate
-    // for a bare timeout (tm-gcs8).
+    // for a bare timeout.
     let state = test_app_state();
     let root = state
         .test_temp_root

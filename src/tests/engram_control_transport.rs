@@ -448,9 +448,9 @@ impl EngramDescendantProbe {
 /// covers starting the PowerShell fixture when no process is running yet. A
 /// two-second budget made their outcome depend on how fast the machine starts a
 /// process: under load both failed at once with "admission budget exhausted
-/// during process startup" (tm-menr). So this is a guard against a hang, as in
-/// the lifecycle test above; that test covers a deliberate deadline, and applies
-/// it only after the startup handshake has been acquired.
+/// during process startup". So this is a guard against a hang, as in the
+/// lifecycle test above; that test covers a deliberate deadline, and applies it
+/// only after the startup handshake has been acquired.
 const STATEFUL_FIXTURE_CALL_BUDGET: Duration = DEADLOCK_GUARD;
 
 fn process_fixture_bind(

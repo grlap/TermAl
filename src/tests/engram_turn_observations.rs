@@ -1584,8 +1584,8 @@ fn received_prompt(claimed: &ClaimedRoot) -> String {
 
 #[test]
 fn a_turn_on_a_claim_with_a_named_source_root_is_measured_in_that_worktree() {
-    // tm-5gi4 phase 2: a session rooted in the main checkout that works in a
-    // worktree names it once; its turns on that claim are measured there.
+    // A session rooted in the main checkout that works in a worktree names it
+    // once; its turns on that claim are measured there.
     let label = "named-root";
     let grant_id = "turn-observation-named-root-grant";
     let claimed = ClaimedRoot::new(

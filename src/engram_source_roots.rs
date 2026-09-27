@@ -1,12 +1,11 @@
-// The work's source root (tm-5gi4 phase 2, Greg's option B): the worktree an
-// agent names once for a claimed Engram item, which TermAl then measures
-// instead of the session's workdir for every source basis of a turn on that
-// claim, for the credit of its tests, and as the acceptance evaluator's cwd
-// and declared fingerprint. Owns the persisted entries
-// (`EngramWorkSourceRoot`), their validation (a registered worktree of the
-// caller's repository inside its project folder), the basis taken on exactly
-// the stored path and never on an ancestor's, the lookup by claim, the rules
-// that end an entry, and the naming request behind the
+// The work's source root: the worktree an agent names once for a claimed Engram
+// item, which TermAl then measures instead of the session's workdir for every
+// source basis of a turn on that claim, for the credit of its tests, and as the
+// acceptance evaluator's cwd and declared fingerprint. Owns the persisted
+// entries (`EngramWorkSourceRoot`), their validation (a registered worktree of
+// the caller's repository inside its project folder), the basis taken on
+// exactly the stored path and never on an ancestor's, the lookup by claim, the
+// rules that end an entry, and the naming request behind the
 // `termal_name_source_root` tool. Does not own when a basis is taken
 // (`engram_turn_observations.rs`, `engram_turn_checks.rs`,
 // `acceptance_evaluation_api.rs`), the held-claims read

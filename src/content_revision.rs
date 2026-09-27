@@ -2,7 +2,7 @@
 // ("content-v1"): a fingerprint of the files present in a worktree and
 // nothing else, so a commit, a `git add` or a fast-forward to the same
 // content leaves it where it was, and a peer worktree holding the same content
-// has the same revision (tm-5gi4, tm-21yl).
+// has the same revision.
 // Does not own the review-freeze fingerprint (review_freeze.rs), which still
 // hashes HEAD, the index and both diffs for review freezes, nor when a basis
 // is taken (engram_turn_observations.rs, engram_turn_checks.rs,
