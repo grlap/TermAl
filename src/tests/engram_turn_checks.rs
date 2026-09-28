@@ -3820,3 +3820,8 @@ fn a_session_in_a_turn_on_a_named_root_is_a_writer_there_too() {
         "{worktrees:?} leaves out {root_key}"
     );
 }
+
+// The one-call form's tests, a child module so this file does not grow
+// further; it uses the `CheckedTurn` fixture above.
+#[path = "engram_one_call_checks.rs"]
+mod one_call_checks;

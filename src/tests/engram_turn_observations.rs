@@ -1693,11 +1693,26 @@ fn a_root_named_during_a_turn_takes_effect_at_the_next_one() {
     // its basis is not moved, and the agent is told for the next turn.
     let (claimed, worktree, runtime_token) = named_root_turn("named-mid-turn", false);
     fs::write(worktree.join("README.md"), "changed in the worktree\n").expect("worktree edit");
+    let line = claimed
+        .record(|record| record.engram.pending_source_root_line.clone())
+        .expect("the next prompt carries the new root");
+    assert!(line.contains("its named source root"), "{line}");
+    let root = engram_source_root_display(
+        &fs::canonicalize(&worktree)
+            .expect("the worktree canonicalizes")
+            .to_string_lossy(),
+    );
+    // A Codex session reports its directory and wraps its lines, so it is
+    // not told the one-call form, whatever the root's path.
     assert!(
-        claimed
-            .record(|record| record.engram.pending_source_root_line.clone())
-            .is_some_and(|line| line.contains("its named source root")),
-        "the next prompt carries the new root"
+        !line.contains("pushd"),
+        "no form the agent could not use: {line}"
+    );
+    assert!(
+        line.contains(&format!(
+            "its named source root {root}. Tests count for it only when they run there."
+        )),
+        "{line}"
     );
 
     let observation = finish_claimed_turn(&claimed, &runtime_token);

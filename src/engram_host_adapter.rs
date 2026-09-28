@@ -6083,6 +6083,7 @@ impl AppState {
                     inner.sessions[index].engram.work_binding.as_ref(),
                     binding,
                     &inner.sessions[index].session.workdir,
+                    engram_one_call_offered_up_front(inner.sessions[index].session.agent),
                 ),
                 _ => None,
             };

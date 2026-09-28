@@ -1177,17 +1177,22 @@ fn a_turn_admitted_with_a_named_root_marks_a_check_open_in_that_root() {
 fn a_delegated_session_is_not_told_to_name_a_root_it_cannot_name() {
     let child_bound = test_control_work_binding("naming-child-line", 1);
     assert_eq!(
-        engram_bind_source_root_line(true, &[], None, None, &child_bound, "C:/child"),
+        engram_bind_source_root_line(true, &[], None, None, &child_bound, "C:/child", false),
         None,
         "a delegated session gets no bind line"
     );
     assert!(
-        engram_bind_source_root_line(false, &[], None, None, &child_bound, "C:/root")
+        engram_bind_source_root_line(false, &[], None, None, &child_bound, "C:/root", false)
             .is_some_and(|line| line.contains("termal_name_source_root")),
         "a root session is told how to name one"
     );
-    let child_line =
-        engram_source_root_withheld_line(FsPath::new("C:/elsewhere"), "C:/child", false, true);
+    let child_line = engram_source_root_withheld_line(
+        FsPath::new("C:/elsewhere"),
+        "C:/child",
+        false,
+        true,
+        None,
+    );
     assert!(!child_line.contains("termal_name_source_root"), "{child_line}");
     assert!(child_line.contains("run the tests in your workdir"), "{child_line}");
 }

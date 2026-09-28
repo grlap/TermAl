@@ -346,6 +346,9 @@ fn engram_literal_directory(directory: &str) -> bool {
 /// a share, as a device path (`\\.\…`) may. A local volume mounted without a
 /// letter (`\\?\Volume{…}\`) counts too, conservatively: a shell there is
 /// taken as lost and a test there gets no credit, and nothing is resolved.
+/// Not caught: a drive letter mapped to a share (`Z:\`) looks local here and
+/// is resolved, which can block as a network path would, since TermAl does
+/// not ask the system which drives are remote.
 fn engram_network_path(path: &str) -> bool {
     let path = path.replace('\\', "/");
     match path.strip_prefix("//?/") {
@@ -548,18 +551,24 @@ fn engram_settle_shell_move(
 }
 
 /// `engram_check_worktree_in` from every directory the command may run in
-/// (`engram_command_directories`): the target from the last, the presumed
-/// place of its runtime's shell, when every one names the worktree the check
-/// is credited to (`credit_root`, else the session's) and none names a place
-/// outside it.
+/// (`engram_command_directories`, `None` when TermAl lost its shell): the
+/// target from the last, the presumed place of its runtime's shell, when
+/// every one names the worktree the check is credited to (`credit_root`, else
+/// the session's) and none names a place outside it. A one-call line
+/// (`pushd "DIR" && TEST`, `EngramCheckCommand::directory`) runs its test in
+/// DIR wherever its shell was, so that directory alone is judged.
 fn engram_check_worktree_from(
     check: &EngramCheckCommand,
     workdir: &FsPath,
-    directories: &[Option<String>],
+    directories: Option<&[Option<String>]>,
     credit_root: Option<(&FsPath, &str)>,
 ) -> Option<EngramCheckTarget> {
+    if let Some(directory) = check.directory.as_deref() {
+        let directory = engram_resolve_shell_move(None, directory)?;
+        return engram_check_worktree_in(check, workdir, Some(&directory), credit_root);
+    }
     let mut target = None;
-    for directory in directories {
+    for directory in directories? {
         target = Some(engram_check_worktree_in(
             check,
             workdir,

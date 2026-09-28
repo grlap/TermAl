@@ -78,6 +78,12 @@ thread_local! {
 /// next prompt; older ones give way.
 const ENGRAM_SOURCE_ROOT_PENDING_LINES: usize = 4;
 
+/// How every host line about a recognised test that got no check begins
+/// (`engram_source_root_withheld_line`, `engram_source_root_unconfirmed_line`):
+/// a new one replaces an earlier one still pending
+/// (`EngramSessionState::set_pending_source_root_line`).
+const ENGRAM_UNCREDITED_TEST_LINE_PREFIX: &str = "[TermAl] A recognised test";
+
 impl EngramSessionState {
     /// Adds a host line for the agent's next prompt about where its turns on
     /// claimed work are measured. Lines not yet delivered are kept, so a
@@ -90,6 +96,8 @@ impl EngramSessionState {
     /// acceptance does not take it, or an older line would end the next
     /// prompt's lines. The lines are kept one per text line, so a line break
     /// inside one (a path may hold one on Linux and macOS) becomes a space.
+    /// A line about a test that got no check replaces an earlier one still
+    /// pending, so a run of such tests never evicts a bind or name line.
     fn set_pending_source_root_line(&mut self, line: String) {
         let line = line.replace(['\r', '\n'], " ");
         let mut lines = self
@@ -97,7 +105,11 @@ impl EngramSessionState {
             .as_deref()
             .map(|pending| pending.lines().map(str::to_owned).collect::<Vec<_>>())
             .unwrap_or_default();
-        lines.retain(|pending| *pending != line);
+        let uncredited = line.starts_with(ENGRAM_UNCREDITED_TEST_LINE_PREFIX);
+        lines.retain(|pending| {
+            *pending != line
+                && !(uncredited && pending.starts_with(ENGRAM_UNCREDITED_TEST_LINE_PREFIX))
+        });
         if let Some((delivered, _)) = self.source_root_line_delivery.as_mut() {
             *delivered = delivered
                 .lines()
@@ -321,19 +333,39 @@ fn engram_evaluation_source_root(
 /// turns on claimed work are measured: at a newly bound claim, after it names
 /// or clears a root, and once a recognised test started outside the turn's root
 /// (`engram_source_root_withheld_line`). `work` names the work when no entry
-/// does.
+/// does; `one_call` says whether the session is told the one-call form up
+/// front (`engram_one_call_offered_up_front`).
 fn engram_source_root_line(
     entry: Option<&EngramWorkSourceRoot>,
     work: &str,
     workdir: &str,
+    one_call: bool,
 ) -> String {
     match entry {
-        Some(entry) => format!(
-            "[TermAl] Engram source basis for {}: its named source root {}. Tests count for \
-             it only when they run there.",
-            entry.short_ref,
-            engram_source_root_display(&entry.root)
-        ),
+        Some(entry) => {
+            let root = engram_source_root_display(&entry.root);
+            // The one-call form is named only to a session whose runtime
+            // reports no directory and runs the bare line (`one_call`,
+            // `engram_one_call_offered_up_front`): one that reports a
+            // directory is credited where it says it runs, and one that
+            // wraps its lines could not run the form. And only for a root
+            // the form reads (`engram_one_call_reads`: one holding `$`, `(`
+            // or a network prefix would not count).
+            let one_call = (one_call && engram_one_call_reads(&root))
+                .then(|| {
+                    ": start each in one call as `pushd \"DIR\" && <test>`, with DIR the \
+                     absolute directory in it where the test runs and nothing piped, redirected \
+                     or chained after the test, because a directory changed in an earlier call \
+                     may not hold"
+                        .to_owned()
+                })
+                .unwrap_or_default();
+            format!(
+                "[TermAl] Engram source basis for {}: its named source root {root}. Tests count \
+                 for it only when they run there{one_call}.",
+                entry.short_ref
+            )
+        }
         None => format!(
             "[TermAl] Engram source basis for {work}: this session's workdir {workdir} (no \
              worktree named). If you do this item's work in another worktree, name it once with \
@@ -347,7 +379,8 @@ fn engram_source_root_line(
 /// claim in `store` when there is one; `None` for a bind that keeps the
 /// claim, or for a delegated session (`child`), which names no root and is
 /// measured in its workdir. The binding carries no short reference, so
-/// without an entry the line names the work by its id.
+/// without an entry the line names the work by its id. `one_call` is
+/// `engram_source_root_line`'s.
 fn engram_bind_source_root_line(
     child: bool,
     entries: &[EngramWorkSourceRoot],
@@ -355,6 +388,7 @@ fn engram_bind_source_root_line(
     current: Option<&EngramControlWorkBinding>,
     bound: &EngramControlWorkBinding,
     workdir: &str,
+    one_call: bool,
 ) -> Option<String> {
     if child || current.is_some_and(|current| current.claim_id == bound.claim_id) {
         return None;
@@ -366,6 +400,7 @@ fn engram_bind_source_root_line(
         entry,
         &format!("work {}", bound.work_id),
         workdir,
+        one_call,
     ))
 }
 
@@ -391,29 +426,172 @@ impl EngramControlSourceRootCard {
     }
 }
 
+/// The one-call form of `test` as a remedy clause, with the directory left to
+/// the agent (`engram_one_call_template` in src/engram_one_call.rs). The test
+/// stands alone: one with anything after it is no one-call line, and its exit
+/// status could not say it passed.
+fn engram_one_call_clause(test: &str, measured_in: &str) -> String {
+    format!(
+        "in one call as `pushd \"DIR\" && {test}`, with DIR the absolute directory in \
+         {measured_in} where it runs and nothing piped, redirected or chained after the test"
+    )
+}
+
 /// The host line once a recognised test of a turn started in `ran_in`,
 /// outside the worktree the turn is measured in (`measured_in`), and so gets
 /// no credit whether or not it finishes: that is when a missing name costs
-/// something.
+/// something. `template` is the test to name in the one-call form, when the
+/// form could carry it (`engram_one_call_template`). Left for a test that gets
+/// no check by `engram_uncredited_test_line` in src/engram_one_call.rs.
 fn engram_source_root_withheld_line(
     ran_in: &FsPath,
     measured_in: &str,
     named: bool,
     child: bool,
+    template: Option<&str>,
 ) -> String {
+    let measured_in = engram_source_root_display(measured_in);
     // A delegated session names no root, so it is told where to run them.
     let remedy = if child {
-        "run the tests in your workdir, where your turns are measured"
+        "run the tests in your workdir, where your turns are measured".to_owned()
     } else if named {
-        "run the tests in that root, or name the worktree you work in with termal_name_source_root"
+        match template.map(|test| engram_one_call_clause(test, &measured_in)) {
+            Some(clause) => format!(
+                "run the tests in that root, {clause}, or name the worktree you work in with \
+                 termal_name_source_root"
+            ),
+            None => "run the tests in that root, or name the worktree you work in with \
+                     termal_name_source_root"
+                .to_owned(),
+        }
     } else {
-        "name that worktree once with termal_name_source_root so its tests count"
+        "name that worktree once with termal_name_source_root so its tests count".to_owned()
     };
     format!(
         "[TermAl] A recognised test started in {}, outside the worktree this turn is measured in \
-         ({}), and gets no credit: {remedy}.",
+         ({measured_in}), and gets no credit: {remedy}.",
         engram_source_root_display(&ran_in.to_string_lossy()),
-        engram_source_root_display(measured_in)
+    )
+}
+
+/// Why TermAl cannot confirm that a recognised test ran in the worktree its
+/// turn is measured in (`engram_source_root_unconfirmed_line`).
+enum EngramUnconfirmedReason<'place> {
+    /// The runtime reports no directory, and its shell may be back in this
+    /// place (the session's workdir) between calls.
+    ShellMayReturn(&'place FsPath),
+    /// TermAl cannot place the shell: a directory change it cannot follow,
+    /// or another command still changing it.
+    ShellUnknown,
+    /// The test ran after another command on its line (`A && TEST`), which
+    /// TermAl does not read as a shell would (`engram_embedded_test`).
+    InsideLine,
+    /// The line starts as the one-call form, but with more than one test
+    /// alone after its `pushd`: something before or after the test, or a
+    /// shell of its own around it.
+    OneCallTestNotAlone,
+}
+
+/// What TermAl knows of a session and its test that decides which remedy
+/// can make the test count (`engram_source_root_unconfirmed_line`); the
+/// fourth fact, whether TermAl follows a `cd` into the worktree, it reads
+/// from the worktree's path.
+#[derive(Clone, Copy, Debug)]
+struct EngramRemedyFacts<'test> {
+    /// The test, when the one-call form can carry it
+    /// (`engram_one_call_template`).
+    template: Option<&'test str>,
+    /// The runtime reported the directory this command runs in: it starts
+    /// each command where it says, so a `cd` in a call of its own does not
+    /// carry over.
+    reports_directory: bool,
+    /// The session's workdir lies in the worktree the turn is measured in, so
+    /// a shell that reports no directory counts there once TermAl places it
+    /// there too.
+    workdir_inside: bool,
+}
+
+/// The host line once a recognised test of a turn gets no credit because
+/// TermAl cannot confirm it ran in the worktree the turn is measured in
+/// (`measured_in`), though its shell was presumed there (`reason`). The
+/// remedy follows from four facts (`facts`), so that each is one the session
+/// can carry out:
+/// - the one-call form, when it can carry the test: it counts wherever the
+///   shell is;
+/// - else, for a runtime that reports its directory, the test as a line of
+///   its own with its working directory where it should run;
+/// - else, for a session whose workdir is in the worktree, a `cd` to the
+///   directory where the test runs in a call of its own, which TermAl
+///   follows, then the test as a line of its own; or a new session, where
+///   TermAl follows no `cd` into the worktree's path;
+/// - else a session whose workdir is in the worktree.
+///
+/// A test run after another command on its line may have been meant for
+/// another project, so its remedy is offered only for the case it was meant
+/// here. Which line a test that gets no check leaves, and with which
+/// `reason`, is decided by `engram_uncredited_test_line` in
+/// src/engram_one_call.rs.
+fn engram_source_root_unconfirmed_line(
+    measured_in: &str,
+    reason: EngramUnconfirmedReason<'_>,
+    facts: EngramRemedyFacts<'_>,
+) -> String {
+    let measured_in = engram_source_root_display(measured_in);
+    let lead = if matches!(
+        reason,
+        EngramUnconfirmedReason::InsideLine | EngramUnconfirmedReason::OneCallTestNotAlone
+    ) {
+        "If it was meant to count here, run"
+    } else {
+        "Run"
+    };
+    let reason = match reason {
+        EngramUnconfirmedReason::ShellMayReturn(place) => format!(
+            "this runtime reports no directory and its shell may return to {} between calls",
+            engram_source_root_display(&place.to_string_lossy())
+        ),
+        EngramUnconfirmedReason::ShellUnknown => "TermAl cannot tell where its shell is: a \
+             directory change it cannot follow, or another command still changing it"
+            .to_owned(),
+        EngramUnconfirmedReason::InsideLine => {
+            "it ran after another command on its line, which TermAl cannot place".to_owned()
+        }
+        EngramUnconfirmedReason::OneCallTestNotAlone => "its line starts as the one-call form, \
+             but the form takes only one test after its `pushd`, alone, with nothing before or \
+             after it and no shell of its own"
+            .to_owned(),
+    };
+    let remedy = if let Some(test) = facts.template {
+        format!("{lead} it {}", engram_one_call_clause(test, &measured_in))
+    } else if facts.reports_directory {
+        format!(
+            "{lead} it as a line of its own, with its working directory set to the directory in \
+             {measured_in} where it runs"
+        )
+    } else if facts.workdir_inside {
+        // The shell counts once TermAl places it where the test runs, which
+        // a `cd` to an absolute directory it follows does
+        // (`engram_shell_move`), whether TermAl lost the shell or not.
+        if matches!(
+            engram_shell_move(&format!("cd \"{measured_in}\"")),
+            EngramShellMove::To(_)
+        ) {
+            format!(
+                "{lead} `cd \"DIR\"` in a call of its own, with DIR the absolute directory in \
+                 {measured_in} where it runs, then run it as a line of its own"
+            )
+        } else {
+            format!(
+                "{lead} it from a new session whose workdir is in {measured_in}, since TermAl \
+                 cannot follow a directory change into that path"
+            )
+        }
+    } else {
+        format!("{lead} it from a session whose workdir is in {measured_in}")
+    };
+    format!(
+        "[TermAl] A recognised test gets no credit: TermAl cannot confirm it ran in \
+         {measured_in}, where this turn is measured, because {reason}. {remedy}."
     )
 }
 
@@ -1395,7 +1573,12 @@ impl AppState {
                 ),
                 generation,
             });
-        let line = engram_source_root_line(entry.as_ref(), &claim.short_ref, &workdir);
+        let line = engram_source_root_line(
+            entry.as_ref(),
+            &claim.short_ref,
+            &workdir,
+            engram_one_call_offered_up_front(inner.sessions[index].session.agent),
+        );
         if let Err(error) = engram_set_work_source_root(
             &mut inner.engram_work_source_roots,
             &store,

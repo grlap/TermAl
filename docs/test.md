@@ -233,6 +233,24 @@ Backend tests should avoid starting real agents. Use test HTTP listeners,
 temporary directories, injected remote configs, and helper state builders
 instead.
 
+Some tests expect different text depending on the test directory's path,
+and each branch asserts its exact text: the Engram one-call tests
+(`src/tests/engram_one_call_checks.rs`) offer the form `pushd "DIR" && TEST`
+only for a path the form can name, and advise a `cd` only into a path TermAl
+follows one into. Each such test runs once per kind of path, set by a suffix
+of its fixture's label, which becomes part of the project's path: plain,
+` (x)` (the form names nothing there) and ` $x` (TermAl follows no `cd`
+there). So a default run takes every branch on any host, and
+`the_path_kinds_reach_each_branch_on_any_host` checks that it does. The
+product test temp may also be pointed at such a path, given as a native
+absolute path inside the repository, for example:
+
+```bash
+mkdir -p ".tmp/unreadable (x)"
+TERMAL_TEST_USER_TEMP="$(node -p "require('path').resolve('.tmp/unreadable (x)')")" \
+  node scripts/test-launcher.mjs focused -- cargo test --bin termal one_call
+```
+
 ## Frontend Testing Guidelines
 
 Prefer pure TypeScript tests for reducers and helpers:

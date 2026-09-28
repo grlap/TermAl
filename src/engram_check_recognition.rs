@@ -23,6 +23,12 @@ struct EngramCheckCommand {
     /// The shell the wrapper named, which decides how the line's arguments
     /// reach the runner.
     dialect: EngramShellDialect,
+    /// The absolute directory a one-call line changes to before its test
+    /// (`pushd "DIR" && TEST`, `engram_one_call_prefix`): the test runs
+    /// there, wherever the shell was, so no presumption about a shell that
+    /// keeps a `cd` between calls is needed. `normalized` holds only the
+    /// test, so the check fingerprint is the one an author binds for it.
+    directory: Option<String>,
 }
 
 /// The shell a recognised line runs under, as its wrapper names it: bash
@@ -38,11 +44,33 @@ enum EngramShellDialect {
 
 /// Recognises a test run the way an author can predict: one shell wrapper
 /// (`bash -lc 'X'`, `pwsh -Command X`, `cmd /c X`) is removed, and the
-/// program with its first words must name a test runner. A test inside a
-/// longer line (`cd x && cargo test`) is not recognised; a recognised one
-/// with a pipe or a list is recorded, but only as unknown.
+/// program with its first words must name a test runner. A line may instead
+/// be the one-call form `pushd "DIR" && TEST` (`engram_one_call_prefix`),
+/// whose test is what follows the `&&`. Any other test inside a longer line
+/// (`cd x && cargo test`) is not recognised; a recognised one with a pipe or
+/// a list is recorded, but only as unknown.
 fn engram_check_command(command: &str) -> Option<EngramCheckCommand> {
-    let (line, dialect) = engram_unwrap_shell_command(command.trim());
+    let command = command.trim();
+    if let Some((directory, test)) = engram_one_call_prefix(command) {
+        // The test after the change is one simple command of its own: a
+        // wrapper would start another shell, and a pipe or a list could mask
+        // its exit status or run something elsewhere. It is read as a plain
+        // line, never as another one-call line, so nesting cannot recurse.
+        return engram_plain_check_command(test)
+            .filter(|check| check.simple && check.dialect == EngramShellDialect::Unknown)
+            .map(|check| EngramCheckCommand {
+                directory: Some(directory),
+                ..check
+            });
+    }
+    engram_plain_check_command(command)
+}
+
+/// `engram_check_command` for a line read as it stands, without the
+/// one-call form: the test it runs, with one shell wrapper removed.
+fn engram_plain_check_command(command: &str) -> Option<EngramCheckCommand> {
+    let command = command.trim();
+    let (line, dialect) = engram_unwrap_shell_command(command);
     // A script of several lines is several commands; read as one, the
     // lines after the first would pass for the test's arguments.
     if engram_has_unquoted_line_break(&line) {
@@ -60,6 +88,7 @@ fn engram_check_command(command: &str) -> Option<EngramCheckCommand> {
         simple,
         program,
         dialect,
+        directory: None,
     })
 }
 
@@ -691,14 +720,24 @@ fn engram_check_showed_passing_tests(check: &EngramCheckCommand, result_lines: &
 /// result lines in output order, within Engram's bound. A size inventory is
 /// all or nothing: when its lines do not all fit, every one is left out and
 /// a note says how many, since a partial list would misstate which paths the
-/// check covered.
+/// check covered. A one-call line (`pushd "DIR" && TEST`) is named whole,
+/// and its non-zero exit is said not to be the test's alone: its `pushd`, or
+/// the shell's reading of the line, may have failed first
+/// (`engram_check_command_outcome`).
 fn engram_check_summary(
     check: &EngramCheckCommand,
     exit: EngramCommandExit,
     result_lines: &[String],
 ) -> String {
-    let command = engram_truncate_utf8(&check.normalized, ENGRAM_CHECK_REF_MAX_BYTES);
+    let line = match &check.directory {
+        Some(directory) => format!("pushd \"{directory}\" && {}", check.normalized),
+        None => check.normalized.clone(),
+    };
+    let command = engram_truncate_utf8(&line, ENGRAM_CHECK_REF_MAX_BYTES);
     let mut summary = match exit {
+        EngramCommandExit::Code(code) if code != 0 && check.directory.is_some() => format!(
+            "`{command}` exited {code}, which does not say whether its `pushd` or its test failed"
+        ),
         EngramCommandExit::Code(code) => format!("`{command}` exited {code}"),
         EngramCommandExit::ReportedSuccess => {
             format!("`{command}` succeeded (the runtime reports no exit status)")
@@ -745,14 +784,17 @@ fn engram_check_summary(
 
 /// The verification references: the normalised command, unless it exceeds
 /// Engram's bound (the check fingerprint names it anyway), and, when known,
-/// its exit status.
+/// its exit status. A one-call line's non-zero exit is not known to be its
+/// test's (`engram_check_summary`), so it is left out.
 fn engram_check_refs(check: &EngramCheckCommand, exit: EngramCommandExit) -> Vec<String> {
     let mut refs = Vec::new();
     let command = format!("command:{}", check.normalized);
     if command.len() <= ENGRAM_CHECK_REF_MAX_BYTES {
         refs.push(command);
     }
-    if let EngramCommandExit::Code(code) = exit {
+    if let EngramCommandExit::Code(code) = exit
+        && (code == 0 || check.directory.is_none())
+    {
         refs.push(format!("exit:{code}"));
     }
     refs

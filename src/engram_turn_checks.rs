@@ -380,7 +380,7 @@ fn engram_resolve_turn_checks(
         let Some(end) = check.end.clone() else {
             continue;
         };
-        let Some(outcome) = engram_check_outcome(end.exit, check.command.simple) else {
+        let Some(outcome) = engram_check_command_outcome(&check.command, end.exit) else {
             continue;
         };
         let start = check.start_basis.wait_until(deadline);
@@ -782,47 +782,58 @@ impl AppState {
                 Some(_) => recognised.clone()?,
                 None => started?,
             };
-            // Where the shell cannot be followed, no check can say where it ran.
+            // Where the shell cannot be followed, no check can say where it
+            // ran, unless the line names its own directory.
             let target = engram_check_worktree_from(
                 &command,
                 FsPath::new(&workdir),
-                places.as_ref()?,
+                places.as_deref(),
                 credit_root
                     .as_ref()
                     .map(|(root, common_dir_key)| (root.as_path(), common_dir_key.as_str())),
             )?;
             Some((workdir.clone(), command, target))
         });
-        // A recognised test of a mediated turn that starts in another
-        // worktree than the one the turn is measured in gets no credit,
-        // finished or not; the agent is told once, before its next prompt,
-        // with the remedy. A network path
-        // is never resolved here, on the runtime's event reader: resolving it
-        // can block for a network timeout (`engram_network_path`).
-        let withheld_line = (mediated && recognised.is_some() && target.is_none())
-            .then(|| places.as_ref()?.last().cloned())
-            .flatten()
-            .and_then(|last| {
-                let ran_in_directory =
-                    last.map_or_else(|| PathBuf::from(&workdir), |dir| FsPath::new(&workdir).join(dir));
-                if engram_network_path(&workdir)
-                    || engram_network_path(&ran_in_directory.to_string_lossy())
-                {
-                    return None;
-                }
-                let ran_in = engram_worktree_root_path(&ran_in_directory);
-                let measured_in = credit_root
-                    .as_ref()
-                    .map_or_else(|| engram_worktree_root_path(FsPath::new(&workdir)), |(root, _)| root.clone());
-                (engram_exact_path_key(&ran_in) != engram_exact_path_key(&measured_in)).then(|| {
-                    engram_source_root_withheld_line(
-                        &ran_in,
-                        &measured_in.to_string_lossy(),
-                        credit_root.is_some(),
+        // A recognised test of a mediated turn that gets no check is told
+        // why, once, before the agent's next prompt
+        // (`engram_uncredited_test_line`); so is a test run after another
+        // command on its line, or after the one-call form's `pushd` with
+        // something the form does not take (`engram_embedded_test`,
+        // `EngramNearMiss`), never a check at all.
+        let credit = credit_root
+            .as_ref()
+            .map(|(root, common_dir_key)| (root.as_path(), common_dir_key.as_str()));
+        let withheld_line = if !mediated {
+            None
+        } else if let Some(check) = recognised.as_ref() {
+            target
+                .is_none()
+                .then(|| {
+                    engram_uncredited_test_line(
+                        check,
+                        None,
+                        &workdir,
+                        places.as_deref(),
+                        credit,
                         child,
+                        reported.is_some(),
                     )
                 })
-            });
+                .flatten()
+        } else {
+            ran.and_then(|ran| Some((engram_embedded_test(ran)?, EngramNearMiss::of(ran))))
+                .and_then(|(check, near_miss)| {
+                    engram_uncredited_test_line(
+                        &check,
+                        Some(near_miss),
+                        &workdir,
+                        places.as_deref(),
+                        credit,
+                        child,
+                        reported.is_some(),
+                    )
+                })
+        };
         // Where the command's `cd` leads, from where its shell is presumed to
         // be; it moves the shell only once the command has run.
         let moving_to = match &shell_move {
@@ -1056,17 +1067,15 @@ impl AppState {
                 };
                 named.is_some_and(|named| {
                     named == *command
-                        && directories.as_ref().is_some_and(|directories| {
-                            engram_check_worktree_from(
-                                &named,
-                                FsPath::new(workdir),
-                                directories,
-                                credit_root.as_ref().map(|(root, common_dir_key)| {
-                                    (root.as_path(), common_dir_key.as_str())
-                                }),
-                            )
-                            .is_some_and(|now| now == *target)
-                        })
+                        && engram_check_worktree_from(
+                            &named,
+                            FsPath::new(workdir),
+                            directories.as_deref(),
+                            credit_root.as_ref().map(|(root, common_dir_key)| {
+                                (root.as_path(), common_dir_key.as_str())
+                            }),
+                        )
+                        .is_some_and(|now| now == *target)
                 })
             });
         let mut inner = self.inner.lock().expect("state mutex poisoned");
