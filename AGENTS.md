@@ -66,6 +66,119 @@ command that writes.
 - Problems with Engram itself go to the Engram project's agents by mailbox;
   problems with TermAl's recording go to the TermAl coordinator.
 
+## Commit and push
+
+- `git add`, `git diff`, `git status`, `git log`, `git show`, and
+  `git stash` in the owned-path form below — all fine to run freely,
+  within the session's write policy.
+  The stash list is shared by all worktrees of this repository, including
+  dedicated worktrees. In every worktree, stash only owned paths with
+  `git stash push -u -m <unique-tag> -- <owned-paths>`. Resolve the saved
+  object id by its unique tag in `git stash list --format='%H %gs'`, never
+  assume `stash@{0}` is yours. Restore with `git stash apply <object-id>`
+  after checking those paths. After verifying the restore, drop the entry
+  only with coordinated exclusive access to the shared stash list granted
+  by the task coordinator (as of 2026-09-27: Termal::Fable2) by mailbox for
+  a named entry: match its tag and object id to its current stash reference
+  before dropping it.
+  Otherwise retain it for coordinated cleanup. Never use bare `git stash`
+  or `git stash pop`, or capture, restore or drop another session's work.
+
+Greg's standing rule for both Engram and TermAl (2026-09-27, 19:15Z,
+in Engram::Advisor's session, recorded verbatim):
+
+> regula jest taka sama dla Engram i Termal
+>
+> jezeli review nie ma uwag i testy sa green,
+>
+> taski maja evidence ze mozna je zamknac
+>
+> to robimy commit
+
+- A changeset may be committed without a further permission round trip only
+  when all three hold for the exact tree committed:
+  1. The review pair (`/review-changes`: one Codex and one Claude
+     `/review-code` child, `writePolicy: readOnly`) has no outstanding
+     in-scope findings on the reviewed input, Low and Note included.
+     Pre-existing defects outside the change's scope, filed as their own
+     items with provenance, do not block.
+  2. The full gate is green on exactly that input, compiled from it, before
+     every commit whether or not a commit prompt is shown.
+  3. The tasks carry the evidence needed to close them.
+- Greg's earlier wording of the same rule (2026-09-12, to Termal::Fable):
+  "jak review jest czyste mozna commit push sync"; and on 2026-09-25, to
+  Termal::Opus: "git commit means also push and dolt push". A commit under
+  this rule is a landing: `git push origin master` follows it, subject to
+  the integration and migration restrictions below.
+- A commit in a feature branch or detached worktree is not yet on `master`.
+  Hand its hash and exact-input gate, review and task evidence to the
+  integration owner; do not run `git push origin master` from that worktree.
+- Only the integration owner performs pushes under this rule. Every other
+  committing session, including one committing directly on master, sends
+  the commit hash and exact-input gate, review and task evidence to that
+  owner by TermAl mailbox.
+- Before every push under this rule, including for a commit made directly
+  on master, the integration owner must verify that master's tip is the
+  reviewed and gated commit, that `origin/master` still matches the reviewed
+  integration base, and that the push is a fast-forward. If any check fails,
+  do not push: coordinate integration and validate and review the resulting
+  input before publishing. Push from the master checkout, then verify that
+  the remote contains that commit. Never rebase or force-push to bypass
+  these checks.
+- The integration owner is the session assigned to integrate the change
+  onto master (as of 2026-09-27: Termal::Opus2); send the handoff by TermAl
+  mailbox. If no owner has been assigned, request the assignment from the
+  task coordinator (as of 2026-09-27: Termal::Fable2) before integration.
+- Beads retired 2026-09-28 after the verified import; the tracker is
+  Engram; agents run no bd command; the final bd dolt push before deletion
+  is Greg's own.
+- Changes to this section, or to any repository instruction or command
+  file that grants or limits commit, push, tracker or approval authority,
+  land under the standing rule only after (a) both projects' coordinators
+  (as of 2026-09-28: Engram::Fable and Termal::Fable2) have recorded their
+  concurrence on the exact wording in the item's notes, and (b) Greg has
+  been sent the exact wording and its consequence before the landing; an
+  objection from Greg, by any route, stops it. An edit that widens agent
+  authority — a new act granted, or a condition of this rule loosened —
+  also needs Greg's recorded word on that widening, verbatim with its
+  source, by any route; recording his words, narrowing, or clarifying needs
+  only (a) and (b). No other approval is asked.
+- Outside the three conditions above, a commit or push needs Greg's own
+  word in the acting session. Outside this standing rule, a word relayed
+  by another session never carries a commit or push. This rule grants no
+  restart, deploy or global-configuration authority; those actions need
+  Greg's explicit word. A landing under it also installs the binary built
+  from the exact gated tree (Greg, 2026-09-23, recorded in Engram's
+  instructions and extended to TermAl on 2026-09-27: his word "commit"
+  for a presented changeset also authorizes pushing it and installing its
+  build; and 2026-09-28, on the install/restart split: 'Fable ma racje to
+  dobra regula. W sumie mamy system kontroli. Agenci moga podejnowac takie
+  decyzje.'): the integration owner, outside any gate window, puts it at
+  target/release/termal.exe in the master checkout, where the host runs it
+  from, renaming the running binary aside as a backup, and records its
+  hash. Installing is not deploying: the running host keeps its build
+  until Greg restarts it on the restart signal (build hash and reason).
+  Nothing is installed outside the repository.
+- Use explicit paths only: never `git add -A` or `git add -u`, and never
+  include `.beads/interactions.jsonl` in a commit.
+- Do not amend, rebase or force-push. Commit message bodies (below the
+  subject line) must not contain tracker ids (Beads or Engram); subject
+  lines may contain them. Review-only sessions never commit.
+- This standing rule is Greg's explicit authorization for commit and push
+  when its three conditions hold. This entire section takes precedence over
+  all conflicting repository instructions, including approval, review
+  thresholds, stash ownership and explicit staging paths, and tracker
+  writes. This includes other sections of AGENTS.md and CLAUDE.md,
+  `.claude/commands/review-changes.md` and
+  `.claude/commands/fix-bug.md`. Generic ask-first wording does not require
+  another approval when these conditions hold; older `bd create` or
+  `bd close` steps do not override Beads' retirement; an Engram item
+  completes only by `done` after the acceptance evaluation its project
+  policy requires (Engram work tracker section).
+  Task-specific restrictions given in the session still apply. Review-only
+  sessions remain read-only. The Work only in the repository folder rule
+  is not overridden.
+
 ## Work only in the repository folder
 
 Greg's rule (2026-09-26), after an agent's cleanup script deleted most of his
