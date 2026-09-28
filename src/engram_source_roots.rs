@@ -353,11 +353,13 @@ fn engram_source_root_line(
             // or a network prefix would not count).
             let one_call = (one_call && engram_one_call_reads(&root))
                 .then(|| {
-                    ": start each in one call as `pushd \"DIR\" && <test>`, with DIR the \
-                     absolute directory in it where the test runs and nothing piped, redirected \
-                     or chained after the test, because a directory changed in an earlier call \
-                     may not hold"
-                        .to_owned()
+                    format!(
+                        ": start each in one call as `pushd \"DIR\" && <test>`, with DIR the \
+                         absolute directory in it where the test \
+                         runs{ENGRAM_ONE_CALL_DIR_SPELLING} and nothing piped, redirected or \
+                         chained after the test, because a directory changed in an earlier call \
+                         may not hold"
+                    )
                 })
                 .unwrap_or_default();
             format!(
@@ -429,13 +431,25 @@ impl EngramControlSourceRootCard {
 /// The one-call form of `test` as a remedy clause, with the directory left to
 /// the agent (`engram_one_call_template` in src/engram_one_call.rs). The test
 /// stands alone: one with anything after it is no one-call line, and its exit
-/// status could not say it passed.
+/// status could not say it passed. On Windows DIR is written as Windows names
+/// it (`ENGRAM_ONE_CALL_DIR_SPELLING`).
 fn engram_one_call_clause(test: &str, measured_in: &str) -> String {
     format!(
         "in one call as `pushd \"DIR\" && {test}`, with DIR the absolute directory in \
-         {measured_in} where it runs and nothing piped, redirected or chained after the test"
+         {measured_in} where it runs{ENGRAM_ONE_CALL_DIR_SPELLING} and nothing piped, redirected \
+         or chained after the test"
     )
 }
+
+/// How DIR is to be written in the one-call form, said wherever the form is
+/// named: on Windows as Windows names it, since Git Bash's spelling of a drive
+/// (`/c/…`), which Claude's Bash tool favours, is one the form does not take
+/// (`engram_one_call_git_bash_dir`); nothing on other systems.
+const ENGRAM_ONE_CALL_DIR_SPELLING: &str = if cfg!(windows) {
+    ", written as a Windows path (C:\\… or C:/…, not Git Bash's /c/…),"
+} else {
+    ""
+};
 
 /// The host line once a recognised test of a turn started in `ran_in`,
 /// outside the worktree the turn is measured in (`measured_in`), and so gets
@@ -490,6 +504,11 @@ enum EngramUnconfirmedReason<'place> {
     /// alone after its `pushd`: something before or after the test, or a
     /// shell of its own around it.
     OneCallTestNotAlone,
+    /// The line starts as the one-call form on Windows but writes its DIR in
+    /// Git Bash's spelling of a drive (`/c/…`), which the form does not take
+    /// (`engram_one_call_git_bash_dir`); `test_alone`: whether that is all,
+    /// or the line also holds more than its one test alone after its `pushd`.
+    OneCallGitBashDir { test_alone: bool },
 }
 
 /// What TermAl knows of a session and its test that decides which remedy
@@ -539,7 +558,9 @@ fn engram_source_root_unconfirmed_line(
     let measured_in = engram_source_root_display(measured_in);
     let lead = if matches!(
         reason,
-        EngramUnconfirmedReason::InsideLine | EngramUnconfirmedReason::OneCallTestNotAlone
+        EngramUnconfirmedReason::InsideLine
+            | EngramUnconfirmedReason::OneCallTestNotAlone
+            | EngramUnconfirmedReason::OneCallGitBashDir { .. }
     ) {
         "If it was meant to count here, run"
     } else {
@@ -559,6 +580,17 @@ fn engram_source_root_unconfirmed_line(
         EngramUnconfirmedReason::OneCallTestNotAlone => "its line starts as the one-call form, \
              but the form takes only one test after its `pushd`, alone, with nothing before or \
              after it and no shell of its own"
+            .to_owned(),
+        EngramUnconfirmedReason::OneCallGitBashDir { test_alone: true } => "its line is the \
+             one-call form but for its DIR, written in Git Bash's spelling of a drive (/c/…), \
+             which the form does not take, since not every shell reads it as that drive \
+             (PowerShell reads it as \\c\\… on the current drive)"
+            .to_owned(),
+        EngramUnconfirmedReason::OneCallGitBashDir { test_alone: false } => "its line starts \
+             as the one-call form, but with its DIR in Git Bash's spelling of a drive (/c/…), \
+             which not every shell reads as that drive (PowerShell reads it as \\c\\… on the \
+             current drive), and with more than its one test alone after its `pushd`: the form \
+             takes neither"
             .to_owned(),
     };
     let remedy = if let Some(test) = facts.template {

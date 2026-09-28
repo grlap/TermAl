@@ -380,7 +380,9 @@ fn engram_resolve_turn_checks(
         let Some(end) = check.end.clone() else {
             continue;
         };
-        let Some(outcome) = engram_check_command_outcome(&check.command, end.exit) else {
+        let Some(outcome) =
+            engram_check_command_outcome(&check.command, end.exit, &end.result_lines)
+        else {
             continue;
         };
         let start = check.start_basis.wait_until(deadline);
@@ -1488,7 +1490,7 @@ fn engram_turn_report(
                     end.exit,
                     &end.result_lines,
                 )),
-                refs: engram_check_refs(&check.command, end.exit),
+                refs: engram_check_refs(&check.command, end.exit, &end.result_lines),
             });
     }
     let own_observation = |reported_revision: Option<String>| {

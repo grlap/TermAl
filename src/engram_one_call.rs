@@ -3,14 +3,19 @@
 // the shell is, since a runtime that reports no directory (Claude) may
 // return its shell to the project between calls. Owns the form's grammar
 // (`engram_one_call_prefix`, `engram_one_call_reads`), which sessions are
-// told it up front (`engram_one_call_offered_up_front`), the outcome its end
-// may claim (`engram_check_command_outcome`), the near misses of a test run
-// after another command on its line or after the form's `pushd` with
-// something the form does not take (`engram_embedded_test`,
-// `EngramNearMiss`), and which host line a recognised test that gets no
-// check leaves for the agent, with which remedy
+// told it up front (`engram_one_call_offered_up_front`), whether its end's
+// exit is its test's own (`engram_check_exit_is_the_tests`), which decides
+// the outcome its end may claim (`engram_check_command_outcome`) and what
+// its evidence says of that exit (`engram_check_summary` and
+// `engram_check_refs` in `engram_check_recognition.rs` ask it), the near
+// misses of a test run after another command on its line, after the form's
+// `pushd` with something the form does not take, or in the form but for its
+// DIR, written in Git Bash's spelling of a drive (`engram_embedded_test`,
+// `EngramNearMiss`, `engram_one_call_git_bash_dir`), and which host line a
+// recognised test that gets no check leaves for the agent, with which remedy
 // (`engram_uncredited_test_line`). Does not own the recognition of a plain
-// test line (`engram_check_recognition.rs`), where a check is credited
+// test line or the wording of a check's evidence
+// (`engram_check_recognition.rs`), where a check is credited
 // (`engram_check_worktree_from` in `engram_check_paths.rs`), the wording of
 // the host lines (`engram_source_roots.rs`), or the check lifecycle
 // (`engram_turn_checks.rs`). New module: the choice of host line for a test
@@ -87,24 +92,52 @@ fn engram_one_call_reads(root: &str) -> bool {
 /// own, which the form cannot be; an ACP runtime may report one or not, call
 /// by call. Those are offered the form only once a test of theirs went
 /// without credit in a shape the form carries (`engram_one_call_template`).
+/// TermAl records a Claude command only from its `Bash` tool (claude.rs),
+/// which runs the line in bash (Git Bash on Windows), so the form offered up
+/// front never meets Windows PowerShell 5.1, which cannot read `&&`; were it
+/// to, each such test would end unknown, never failed
+/// (`engram_check_command_outcome`). That holds only because of what TermAl
+/// records: a test Claude runs through its `PowerShell` tool is not recorded
+/// at all, so it gets no check and no host line, in whatever shape.
 fn engram_one_call_offered_up_front(agent: Agent) -> bool {
     agent == Agent::Claude
 }
 
-/// `engram_check_outcome` for `check`. A one-call line exits non-zero also
-/// when its `pushd`, or the shell's reading of the line, failed and the test
-/// never ran (Windows PowerShell cannot parse `&&`; a shell may lack
-/// `pushd`), so its failure is unknown. Its success still needs both to have
-/// run.
+/// Whether `exit`, how `check`'s line ended, is its test's own. Always for a
+/// plain line. A one-call line exits non-zero also when its `pushd`, or the
+/// shell's reading of the line, failed and the test never ran (Windows
+/// PowerShell cannot parse `&&`; a shell may lack `pushd`), so its non-zero
+/// exit is the test's only when the test's runner stated its result in the
+/// check's output (`result_lines`, `engram_is_result_line` for the check's
+/// own program): it ran, so its `pushd` succeeded, and `pushd && TEST` exits
+/// as its last command did. A size inventory is the test's output, not the
+/// runner's result line, and does not count. Its success needs both to have
+/// run, so it is the test's own.
+fn engram_check_exit_is_the_tests(
+    check: &EngramCheckCommand,
+    exit: EngramCommandExit,
+    result_lines: &[String],
+) -> bool {
+    match exit {
+        EngramCommandExit::Code(code) if code != 0 && check.directory.is_some() => result_lines
+            .iter()
+            .any(|line| engram_is_result_line(&check.program, line.trim())),
+        _ => true,
+    }
+}
+
+/// `engram_check_outcome` for `check`, which ended `exit` with its runner's
+/// `result_lines`: an exit that is not its test's own
+/// (`engram_check_exit_is_the_tests`) is unknown.
 fn engram_check_command_outcome(
     check: &EngramCheckCommand,
     exit: EngramCommandExit,
+    result_lines: &[String],
 ) -> Option<EngramExecutionOutcome> {
-    let exit = match exit {
-        EngramCommandExit::Code(code) if code != 0 && check.directory.is_some() => {
-            EngramCommandExit::Unknown
-        }
-        exit => exit,
+    let exit = if engram_check_exit_is_the_tests(check, exit, result_lines) {
+        exit
+    } else {
+        EngramCommandExit::Unknown
     };
     engram_check_outcome(exit, check.simple)
 }
@@ -169,17 +202,47 @@ enum EngramNearMiss {
     /// form does not take: a pipe, redirection or list after the test, or a
     /// shell of its own around it (`pushd "DIR" && cargo test 2>&1 | tail`).
     AfterPushd,
+    /// After what would be the one-call form's `pushd "DIR" &&` on Windows,
+    /// but with DIR in Git Bash's spelling of a drive (`/c/…`), which the form
+    /// does not take: PowerShell would read it as `\c\…` on the current drive.
+    /// The spelling Claude's Bash tool (Git Bash) favours. `test_alone`:
+    /// whether the line, its DIR written as Windows names it, would be the
+    /// form itself, or would still hold more than its one test alone.
+    GitBashDir { test_alone: bool },
 }
 
 impl EngramNearMiss {
     /// How the test of `command`, a line that is no check itself, sits on it.
     fn of(command: &str) -> Self {
-        if engram_one_call_prefix(command.trim()).is_some() {
+        let command = command.trim();
+        if engram_one_call_prefix(command).is_some() {
             Self::AfterPushd
+        } else if let Some(test_alone) = engram_one_call_git_bash_dir(command) {
+            Self::GitBashDir { test_alone }
         } else {
             Self::AfterCommand
         }
     }
+}
+
+/// For `line`, which would start as the one-call form on Windows were its
+/// DIR, written in Git Bash's spelling of a drive (`/c/…`,
+/// `engram_is_msys_drive_path`), written as Windows names it (`C:/…`,
+/// `engram_msys_drive_path`): whether the line so written would be the form
+/// itself, its test alone. `None` for any other line, and always on another
+/// system, where `/c/…` is a path of its own.
+fn engram_one_call_git_bash_dir(line: &str) -> Option<bool> {
+    let rest = line.strip_prefix("pushd ")?.trim_start_matches(' ');
+    let rest = rest.strip_prefix('"')?;
+    let end = rest.find('"')?;
+    let (directory, after) = (&rest[..end], &rest[end + 1..]);
+    if !engram_is_msys_drive_path(directory) {
+        return None;
+    }
+    let windows = engram_msys_drive_path(directory);
+    let rewritten = format!("pushd \"{windows}\"{after}");
+    engram_one_call_prefix(&rewritten)?;
+    Some(engram_check_command(&rewritten).is_some())
 }
 
 /// The test to name in the one-call form's remedy for `check`, whose turn is
@@ -240,11 +303,15 @@ fn engram_uncredited_test_line(
     let measured_key = engram_exact_path_key(&measured_in);
     let measured_text = measured_in.to_string_lossy();
     let named = credit_root.is_some();
-    // The form's own line but for its test is told the form with the test
-    // left to the agent, alone: TermAl cannot rebuild a bare test from a
-    // piped or wrapped one.
+    // The form's own line but for its test, or for its DIR's spelling, is
+    // told the form, with the test left to the agent where it is not alone:
+    // TermAl cannot rebuild a bare test from a piped or wrapped one.
+    let form_but_for_one_part = matches!(
+        near_miss,
+        Some(EngramNearMiss::AfterPushd | EngramNearMiss::GitBashDir { .. })
+    );
     let template = engram_one_call_template(check, &measured_in).or_else(|| {
-        (near_miss == Some(EngramNearMiss::AfterPushd)
+        (form_but_for_one_part
             && engram_one_call_reads(&engram_source_root_display(&measured_text)))
         .then(|| "<test>".to_owned())
     });
@@ -261,6 +328,9 @@ fn engram_uncredited_test_line(
         let reason = match near_miss {
             EngramNearMiss::AfterCommand => EngramUnconfirmedReason::InsideLine,
             EngramNearMiss::AfterPushd => EngramUnconfirmedReason::OneCallTestNotAlone,
+            EngramNearMiss::GitBashDir { test_alone } => {
+                EngramUnconfirmedReason::OneCallGitBashDir { test_alone }
+            }
         };
         return Some(engram_source_root_unconfirmed_line(
             &measured_text,

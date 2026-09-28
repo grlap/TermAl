@@ -28,19 +28,30 @@ fn grammar_dir() -> &'static str {
 /// Runs `command` to the end `exit`, as a shell that reports no directory
 /// (Claude) runs it, waiting for the check's snapshots at its start and end.
 fn run_without_directory(turn: &CheckedTurn, key: &str, command: &str, exit: EngramCommandExit) {
+    run_with_output(
+        turn,
+        key,
+        command,
+        "running 1 test\ntest result: ok. 1 passed",
+        exit,
+    );
+}
+
+/// `run_without_directory` with the command's `output`.
+fn run_with_output(
+    turn: &CheckedTurn,
+    key: &str,
+    command: &str,
+    output: &str,
+    exit: EngramCommandExit,
+) {
     let mut recorder = turn.recorder();
     recorder
         .command_started(key, command)
         .expect("the start should record");
     turn.wait_for_snapshots();
     recorder
-        .command_completed_with_exit(
-            key,
-            command,
-            "running 1 test\ntest result: ok. 1 passed",
-            CommandStatus::Success,
-            exit,
-        )
+        .command_completed_with_exit(key, command, output, CommandStatus::Success, exit)
         .expect("the end should record");
     turn.wait_for_snapshots();
 }
@@ -91,10 +102,14 @@ fn take_pending_line(turn: &CheckedTurn) -> Option<String> {
 /// a fixture's label, which becomes part of its project's path: one the form
 /// can name; one it cannot (`(x)`) but a `cd` into it TermAl follows; and one
 /// TermAl follows no `cd` into (`$x`, which a shell would expand). Every test
-/// whose lines depend on the path runs once per kind, so the default gate
-/// takes each branch on any host; where the host's own temp path already
-/// falls in a later kind, a kind takes that kind's branch, and each branch
-/// asserts the exact text it expects, with no skip and no silent pass.
+/// whose lines depend on the path runs once per kind, and each branch asserts
+/// the exact text it expects, with no skip and no silent pass. The `(x)` and
+/// `$x` branches run on any host. The plain kind can only add to the host's
+/// temp path, so it takes the branch the form can name only where that path
+/// allows it: on a host whose temp path the form cannot name, that branch
+/// (a one-call line credited end to end) runs once `TERMAL_TEST_USER_TEMP`
+/// points at a plain path (docs/test.md), and a test on it is not required,
+/// since a precondition on the host would make the suite a lottery.
 const PATH_KINDS: [&str; 3] = ["", " (x)", " $x"];
 
 /// How the host lines name `worktree` (canonical, without the verbatim
@@ -120,11 +135,12 @@ fn cd_followed(root: &str) -> bool {
 }
 
 #[test]
-fn the_path_kinds_reach_each_branch_on_any_host() {
+fn the_unreadable_path_kinds_reach_their_branches_on_any_host() {
     // Whatever the host's temp path, `(x)` puts a project where the form
     // names nothing, and `$x` where TermAl follows no `cd`: the default gate
-    // takes those branches everywhere, and the plain one wherever the host's
-    // path allows it.
+    // takes those branches everywhere. The plain kind takes the branch the
+    // form can name only where the host's path allows it, so it asserts
+    // nothing here (`PATH_KINDS`).
     for kind in PATH_KINDS {
         let turn = CheckedTurn::start(&format!("path-kind{kind}"), false);
         let (root, readable) = root_as_named(&turn.root);
@@ -336,36 +352,56 @@ fn deeply_nested_one_call_prefixes_are_refused_without_recursing() {
 #[test]
 fn a_one_call_line_ends_as_its_test_does_unless_a_non_zero_exit_hides_which_failed() {
     // `A && B` exits non-zero also when A, or the shell's reading of the
-    // line, failed and B never ran; success needs both to have run.
+    // line, failed and B never ran, unless B's runner stated its result;
+    // success needs both to have run.
     let one_call = engram_check_command(&format!("pushd \"{}\" && cargo test", grammar_dir()))
         .expect("the one-call form");
     let plain = engram_check_command("cargo test").expect("a test");
-    for (check, exit, outcome) in [
+    let stated = ["test result: FAILED. 2 passed; 1 failed".to_owned()];
+    // A size inventory is the test's output, not its runner's result line.
+    let inventory = ["src/main.rs: 120 physical lines (limit 400)".to_owned()];
+    for (check, exit, lines, outcome) in [
         (
             &one_call,
             EngramCommandExit::Code(1),
+            &[][..],
             EngramExecutionOutcome::Unknown,
         ),
         (
             &one_call,
+            EngramCommandExit::Code(1),
+            &inventory[..],
+            EngramExecutionOutcome::Unknown,
+        ),
+        (
+            &one_call,
+            EngramCommandExit::Code(1),
+            &stated[..],
+            EngramExecutionOutcome::Failed,
+        ),
+        (
+            &one_call,
             EngramCommandExit::Code(0),
+            &[][..],
             EngramExecutionOutcome::Succeeded,
         ),
         (
             &one_call,
             EngramCommandExit::ReportedSuccess,
+            &[][..],
             EngramExecutionOutcome::Succeeded,
         ),
         (
             &plain,
             EngramCommandExit::Code(1),
+            &[][..],
             EngramExecutionOutcome::Failed,
         ),
     ] {
         assert_eq!(
-            engram_check_command_outcome(check, exit),
+            engram_check_command_outcome(check, exit, lines),
             Some(outcome),
-            "{} {exit:?}",
+            "{} {exit:?} {lines:?}",
             check.normalized
         );
     }
@@ -426,6 +462,38 @@ fn a_test_run_after_another_command_on_its_line_is_a_near_miss() {
         assert!(engram_embedded_test(&command).is_some(), "{command}");
         assert_eq!(EngramNearMiss::of(&command), near_miss, "{command}");
     }
+    // On Windows, Git Bash's spelling of a drive in DIR is its own near miss,
+    // whatever follows the test, unless the path would not be the form's
+    // even in Windows spelling; elsewhere `/c/…` is a path of its own, and
+    // the line is the form itself.
+    let git_bash = "pushd \"/c/one call/root\" && cargo test";
+    if cfg!(windows) {
+        for (command, near_miss) in [
+            (
+                git_bash.to_owned(),
+                EngramNearMiss::GitBashDir { test_alone: true },
+            ),
+            // Its test not alone either: both are told.
+            (
+                "pushd \"/c/one call/root\" && cargo test | tail -3".to_owned(),
+                EngramNearMiss::GitBashDir { test_alone: false },
+            ),
+            (
+                "pushd \"/c/one call/r$x\" && cargo test".to_owned(),
+                EngramNearMiss::AfterCommand,
+            ),
+        ] {
+            assert_eq!(engram_check_command(&command), None, "{command}");
+            assert!(engram_embedded_test(&command).is_some(), "{command}");
+            assert_eq!(EngramNearMiss::of(&command), near_miss, "{command}");
+        }
+    } else {
+        assert_eq!(engram_one_call_git_bash_dir(git_bash), None);
+        assert_eq!(
+            engram_check_command(git_bash).and_then(|check| check.directory),
+            Some("/c/one call/root".to_owned())
+        );
+    }
     // No test after another command. A check line, the one-call form
     // included, is never asked: its caller recognised it (a credited one-call
     // line leaves no word, as the crediting tests below check).
@@ -481,6 +549,8 @@ fn every_uncredited_test_line() -> Vec<String> {
                 EngramUnconfirmedReason::ShellUnknown,
                 EngramUnconfirmedReason::InsideLine,
                 EngramUnconfirmedReason::OneCallTestNotAlone,
+                EngramUnconfirmedReason::OneCallGitBashDir { test_alone: true },
+                EngramUnconfirmedReason::OneCallGitBashDir { test_alone: false },
             ] {
                 lines.push(engram_source_root_unconfirmed_line(dir, reason, facts));
             }
@@ -529,8 +599,8 @@ fn the_form_is_the_remedy_wherever_it_can_carry_the_test() {
             let line = engram_source_root_unconfirmed_line(dir, reason, facts);
             assert!(
                 line.ends_with(&format!(
-                    "{lead} it in one call as {} and nothing piped, redirected or chained after \
-                     the test.",
+                    "{lead} it in one call as {}{ENGRAM_ONE_CALL_DIR_SPELLING} and nothing piped, \
+                     redirected or chained after the test.",
                     form_in(dir, "cargo test")
                 )),
                 "{facts:?}: {line}"
@@ -1334,8 +1404,9 @@ fn a_one_call_check_is_credited_to_its_own_directory_on_any_path() {
 }
 
 #[test]
-fn a_one_call_test_that_fails_is_reported_as_unknown() {
-    // Its exit does not say whether the `pushd` or the test failed.
+fn a_one_call_test_whose_runner_stated_no_result_is_reported_as_unknown() {
+    // Its exit does not say whether the `pushd` or the test failed: nothing
+    // in its output shows its runner ran.
     for kind in PATH_KINDS {
         let turn = CheckedTurn::start(&format!("one-call-fails{kind}"), true);
         let (root, readable) = root_as_named(&turn.root);
@@ -1345,21 +1416,119 @@ fn a_one_call_test_that_fails_is_reported_as_unknown() {
             assert_eq!(engram_check_command(&command), None);
             continue;
         }
-        turn.run("check-1", &command, EngramCommandExit::Code(101), || {});
+        run_with_output(
+            &turn,
+            "check-1",
+            &command,
+            "The system cannot find the path specified.",
+            EngramCommandExit::Code(1),
+        );
         let checkpoint = turn.finish();
 
         let observations = observations(&checkpoint);
         assert_eq!(observations[0]["outcome"], "unknown", "{checkpoint:#}");
         // Nor do its summary and refs pin the exit on the test.
         let evidence = &checkpoint["verification_evidence"][0];
-        let summary = evidence["summary"].as_str().expect("a summary");
-        assert!(
-            summary.starts_with(&format!(
-                "`{command}` exited 101, which does not say whether its `pushd` or its test failed"
-            )),
-            "{summary}"
+        assert_eq!(
+            evidence["summary"],
+            format!(
+                "`{command}` exited 1, which does not say whether its `pushd` or its test failed"
+            ),
+            "{checkpoint:#}"
         );
         assert_eq!(evidence["refs"], serde_json::json!(["command:cargo test"]));
+    }
+}
+
+#[test]
+fn a_one_call_test_whose_runner_stated_its_result_fails_as_its_own() {
+    // Its runner ran, so its `pushd` succeeded and the line's exit is the
+    // test's: a failure is recorded as one, with its exit.
+    for kind in PATH_KINDS {
+        let turn = CheckedTurn::start(&format!("one-call-runner-failed{kind}"), true);
+        let (root, readable) = root_as_named(&turn.root);
+        let command = format!("pushd \"{root}\" && cargo test");
+        if !readable {
+            // No form can name this test directory: no check at all.
+            assert_eq!(engram_check_command(&command), None);
+            continue;
+        }
+        run_with_output(
+            &turn,
+            "check-1",
+            &command,
+            "running 3 tests\ntest result: FAILED. 2 passed; 1 failed",
+            EngramCommandExit::Code(101),
+        );
+        let checkpoint = turn.finish();
+
+        let observations = observations(&checkpoint);
+        assert_eq!(observations[0]["outcome"], "failed", "{checkpoint:#}");
+        let evidence = &checkpoint["verification_evidence"][0];
+        assert_eq!(
+            evidence["summary"],
+            format!("`{command}` exited 101\ntest result: FAILED. 2 passed; 1 failed"),
+            "{checkpoint:#}"
+        );
+        assert_eq!(
+            evidence["refs"],
+            serde_json::json!(["command:cargo test", "exit:101"])
+        );
+    }
+}
+
+#[test]
+fn a_one_call_lines_result_lines_reach_its_outcome_and_evidence_on_any_host() {
+    // The two tests above reach a one-call line's end only where the host's
+    // temp path is one the form can name. A finished check's record needs no
+    // path, so here the runner's result lines are carried from the check's
+    // end to its outcome, summary and refs on every host.
+    let turn = CheckedTurn::start("one-call-result-lines", true);
+    let line = format!("pushd \"{}\" && cargo test", grammar_dir());
+    for (stated, outcome, summary, refs) in [
+        (
+            vec!["test result: FAILED. 2 passed; 1 failed".to_owned()],
+            EngramExecutionOutcome::Failed,
+            format!("`{line}` exited 101\ntest result: FAILED. 2 passed; 1 failed"),
+            vec!["command:cargo test", "exit:101"],
+        ),
+        (
+            Vec::new(),
+            EngramExecutionOutcome::Unknown,
+            format!(
+                "`{line}` exited 101, which does not say whether its `pushd` or its test failed"
+            ),
+            vec!["command:cargo test"],
+        ),
+    ] {
+        let mut check = finished_check(0, engram_ready_basis_capture());
+        check.command = engram_check_command(&line).expect("the one-call form");
+        let end = check.end.as_mut().expect("a finished check");
+        end.exit = EngramCommandExit::Code(101);
+        end.result_lines = stated;
+        let resolved = engram_resolve_turn_checks(
+            &turn.session_id,
+            CHECK_GRANT,
+            vec![check],
+            std::time::Instant::now() + DEADLOCK_GUARD,
+        );
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0].outcome, outcome);
+        let (report, _) = turn.record(|record| {
+            engram_turn_report(
+                record,
+                &turn.session_id,
+                CHECK_GRANT,
+                EngramExecutionOutcome::Succeeded,
+                false,
+                None,
+                resolved,
+            )
+        });
+        assert_eq!(report.observations[0].outcome, outcome);
+        let evidence = &report.verification_evidence[0];
+        assert_eq!(evidence.summary.as_deref(), Some(summary.as_str()));
+        assert_eq!(evidence.refs, refs);
     }
 }
 
@@ -1372,7 +1541,7 @@ fn a_one_call_lines_evidence_names_the_line_and_never_pins_a_non_zero_exit_on_it
         format!("`{line}` exited 0")
     );
     assert_eq!(
-        engram_check_refs(&one_call, EngramCommandExit::Code(0)),
+        engram_check_refs(&one_call, EngramCommandExit::Code(0), &[]),
         ["command:cargo test", "exit:0"]
     );
     assert_eq!(
@@ -1380,15 +1549,236 @@ fn a_one_call_lines_evidence_names_the_line_and_never_pins_a_non_zero_exit_on_it
         format!("`{line}` exited 1, which does not say whether its `pushd` or its test failed")
     );
     assert_eq!(
-        engram_check_refs(&one_call, EngramCommandExit::Code(1)),
+        engram_check_refs(&one_call, EngramCommandExit::Code(1), &[]),
         ["command:cargo test"]
     );
+    // Unless its runner stated its result, which it did only once it ran.
+    let stated = ["test result: FAILED. 0 passed; 1 failed".to_owned()];
+    assert_eq!(
+        engram_check_summary(&one_call, EngramCommandExit::Code(1), &stated),
+        format!("`{line}` exited 1\ntest result: FAILED. 0 passed; 1 failed")
+    );
+    assert_eq!(
+        engram_check_refs(&one_call, EngramCommandExit::Code(1), &stated),
+        ["command:cargo test", "exit:1"]
+    );
+    // A directory too long for the bound is shortened from its start, so the
+    // test is always named.
+    let long_line = format!(
+        "pushd \"{}/{}\" && cargo test",
+        grammar_dir(),
+        "d".repeat(1100)
+    );
+    let long = engram_check_command(&long_line).expect("the one-call form");
+    let summary = engram_check_summary(&long, EngramCommandExit::Code(1), &[]);
+    let named = summary.split('`').nth(1).expect("the line is named");
+    assert!(named.starts_with("pushd \"…ddd"), "{summary}");
+    assert!(named.ends_with("ddd\" && cargo test"), "{summary}");
+    assert!(named.len() <= ENGRAM_CHECK_REF_MAX_BYTES, "{}", named.len());
+    // A test near the bound itself still leaves the line within it, its
+    // directory reduced to the ellipsis.
+    let near_line = format!(
+        "pushd \"{}\" && cargo test {}",
+        grammar_dir(),
+        "t".repeat(ENGRAM_CHECK_REF_MAX_BYTES - "cargo test ".len() - 5)
+    );
+    let near = engram_check_command(&near_line).expect("the one-call form");
+    let summary = engram_check_summary(&near, EngramCommandExit::Code(0), &[]);
+    let named = summary.split('`').nth(1).expect("the line is named");
+    assert!(
+        named.starts_with("pushd \"…\" && cargo test ttt"),
+        "{named}"
+    );
+    assert!(named.len() <= ENGRAM_CHECK_REF_MAX_BYTES, "{}", named.len());
     // A plain test's exit is its own.
     let plain = engram_check_command("cargo test").expect("a test");
     assert_eq!(
-        engram_check_refs(&plain, EngramCommandExit::Code(1)),
+        engram_check_refs(&plain, EngramCommandExit::Code(1), &[]),
         ["command:cargo test", "exit:1"]
     );
+}
+
+#[test]
+fn a_text_kept_by_its_end_stays_within_its_bound_at_a_character_boundary() {
+    // (text, bound, kept): an ellipsis marks a cut start, which never splits
+    // a character; with no room for the ellipsis nothing is kept.
+    for (text, max, kept) in [
+        ("abc", 5, "abc"),
+        ("abcde", 5, "abcde"),
+        ("abcdef", 5, "…ef"),
+        ("abcdef", 3, "…"),
+        ("abcdef", 2, ""),
+        ("aééé", 7, "aééé"),
+        ("aééé", 6, "…é"),
+        ("aééé", 5, "…é"),
+    ] {
+        let result = engram_keep_end_utf8(text, max);
+        assert_eq!(result, kept, "{text} within {max}");
+        assert!(result.len() <= max, "{text} within {max}: {result}");
+    }
+}
+
+#[test]
+fn only_a_runners_own_result_line_makes_a_one_call_failure_the_tests() {
+    // Whatever a shell prints when its `pushd`, or its reading of the line,
+    // fails is no runner's result line, for any runner, so the exit stays
+    // unknown; a runner's own result line makes it the test's failure.
+    let dir = grammar_dir();
+    let shell_failures = [
+        "bash: pushd: /c/missing: No such file or directory",
+        "The system cannot find the path specified.",
+        "At line:1 char:17\n+ pushd \"C:\\missing\" && cargo test\n+                 ~~\nThe token '&&' is \
+         not a valid statement separator in this version.",
+    ];
+    for (test, runner_failed) in [
+        ("cargo test", "test result: FAILED. 2 passed; 1 failed"),
+        ("go test ./...", "FAIL\texample.com/pkg\t0.012s"),
+        ("pytest -q", "1 failed, 2 passed in 0.52s"),
+        ("npm test", "Tests  1 failed | 2 passed (3)"),
+        (
+            "node scripts/test-launcher.mjs full",
+            "rust-tests: failed exit=101",
+        ),
+    ] {
+        let check = engram_check_command(&format!("pushd \"{dir}\" && {test}"))
+            .unwrap_or_else(|| panic!("`{test}` in the one-call form is a check"));
+        let outcome = |output: &str| {
+            let lines = engram_check_result_lines(&check.program, output);
+            engram_check_command_outcome(&check, EngramCommandExit::Code(1), &lines)
+        };
+        for output in shell_failures {
+            assert_eq!(
+                outcome(output),
+                Some(EngramExecutionOutcome::Unknown),
+                "{test}: {output}"
+            );
+        }
+        assert_eq!(
+            outcome(runner_failed),
+            Some(EngramExecutionOutcome::Failed),
+            "{test}: {runner_failed}"
+        );
+    }
+}
+
+/// The reason a line in the one-call form but for its Git Bash spelling of a
+/// drive in DIR is given.
+const GIT_BASH_DIR_REASON: &str = "its line is the one-call form but for its DIR, written in Git \
+     Bash's spelling of a drive (/c/…), which the form does not take, since not every shell \
+     reads it as that drive (PowerShell reads it as \\c\\… on the current drive)";
+
+#[test]
+fn a_git_bash_dir_line_is_told_each_part_the_form_does_not_take() {
+    let dir = grammar_dir();
+    let facts = EngramRemedyFacts {
+        template: Some("<test>"),
+        reports_directory: false,
+        workdir_inside: false,
+    };
+    let alone = engram_source_root_unconfirmed_line(
+        dir,
+        EngramUnconfirmedReason::OneCallGitBashDir { test_alone: true },
+        facts,
+    );
+    assert!(
+        alone.contains(&format!("because {GIT_BASH_DIR_REASON}.")),
+        "{alone}"
+    );
+    let not_alone = engram_source_root_unconfirmed_line(
+        dir,
+        EngramUnconfirmedReason::OneCallGitBashDir { test_alone: false },
+        facts,
+    );
+    assert!(
+        not_alone.contains(
+            "because its line starts as the one-call form, but with its DIR in Git Bash's \
+             spelling of a drive (/c/…), which not every shell reads as that drive (PowerShell \
+             reads it as \\c\\… on the current drive), and with more than its one test alone \
+             after its `pushd`: the form takes neither."
+        ),
+        "{not_alone}"
+    );
+    for line in [alone, not_alone] {
+        assert!(
+            line.contains("If it was meant to count here, run it in one call as"),
+            "{line}"
+        );
+    }
+}
+
+#[test]
+fn a_one_call_line_with_a_git_bash_dir_is_told_to_write_it_as_windows_names_it() {
+    // Claude's Bash tool is Git Bash on Windows, whose own spelling of a drive
+    // (`/c/…`) the form does not take: the agent is told so, with the form
+    // and DIR in Windows spelling, which then counts. Elsewhere `/c/…` is a
+    // path of its own.
+    for kind in PATH_KINDS {
+        let turn = CheckedTurn::start(&format!("one-call-git-bash{kind}"), true);
+        let worktree = name_turn_source_root(&turn);
+        let (root, readable) = root_as_named(&worktree);
+        if !cfg!(windows) {
+            // No drive to spell: the root's own `/…` path is the form's DIR
+            // where the form can read it, never a Git Bash near miss.
+            let line_with_test = format!("pushd \"{root}\" && cargo test");
+            assert_eq!(
+                engram_one_call_git_bash_dir(&line_with_test),
+                None,
+                "{kind}"
+            );
+            assert_eq!(
+                engram_check_command(&line_with_test).and_then(|check| check.directory),
+                readable.then(|| root.clone()),
+                "{kind}"
+            );
+            continue;
+        }
+        let git_bash_root = format!(
+            "/{}{}",
+            root[..1].to_ascii_lowercase(),
+            root[2..].replace('\\', "/")
+        );
+        let line_with_test = format!("pushd \"{git_bash_root}\" && cargo test");
+        start_without_directory(&turn, "git-bash", &line_with_test);
+        assert!(kept_checks(&turn).is_empty(), "{:?}", kept_checks(&turn));
+        let line = take_pending_line(&turn).expect("the agent is told why the test gets no credit");
+        end_command(&turn, "git-bash", &line_with_test);
+        if !readable {
+            // Not the form even in Windows spelling: a test after another
+            // command on its line.
+            assert!(
+                line.contains("ran after another command on its line"),
+                "{kind}: {line}"
+            );
+            assert!(line.contains(&near_miss_fallback(&root)), "{kind}: {line}");
+            continue;
+        }
+        assert!(
+            line.contains(&format!("because {GIT_BASH_DIR_REASON}.")),
+            "{kind}: {line}"
+        );
+        assert!(
+            line.ends_with(&format!(
+                "If it was meant to count here, run it in one call as \
+                 {}{ENGRAM_ONE_CALL_DIR_SPELLING} and nothing piped, redirected or chained after \
+                 the test.",
+                form_in(&root, "cargo test")
+            )),
+            "{kind}: {line}"
+        );
+
+        let windows = format!("pushd \"{root}\" && cargo test");
+        start_without_directory(&turn, "windows", &windows);
+        assert!(
+            kept_checks(&turn).iter().any(|(key, _)| key == "windows"),
+            "{kind}: {:?}",
+            kept_checks(&turn)
+        );
+        assert_eq!(
+            take_pending_line(&turn),
+            None,
+            "a credited test needs no word"
+        );
+    }
 }
 
 #[test]
@@ -1434,8 +1824,9 @@ fn a_one_call_line_with_something_after_its_test_is_told_to_run_the_test_alone()
             assert!(line.contains(reason), "{key}: {line}");
             assert!(
                 line.ends_with(&format!(
-                    "If it was meant to count here, run it in one call as {} and nothing piped, \
-                     redirected or chained after the test.",
+                    "If it was meant to count here, run it in one call as \
+                     {}{ENGRAM_ONE_CALL_DIR_SPELLING} and nothing piped, redirected or chained \
+                     after the test.",
                     form_in(&root, named_test)
                 )),
                 "{key}: {line}"
@@ -1579,10 +1970,18 @@ fn the_named_root_line_names_the_form_only_to_claude_and_for_a_root_the_form_rea
     };
     let line = engram_source_root_line(Some(&entry(plain)), "work a", "C:/p", true);
     assert!(
-        line.contains(
+        line.contains(&format!(
             "Tests count for it only when they run there: start each in one call as \
-             `pushd \"DIR\" && <test>`, with DIR the absolute directory in it where the test runs"
-        ),
+             `pushd \"DIR\" && <test>`, with DIR the absolute directory in it where the test \
+             runs{ENGRAM_ONE_CALL_DIR_SPELLING} and nothing piped"
+        )),
+        "{line}"
+    );
+    // On Windows it says how DIR is written, since Claude's Bash tool (Git
+    // Bash) favours a spelling the form does not take.
+    assert_eq!(
+        line.contains("not Git Bash's /c/…"),
+        cfg!(windows),
         "{line}"
     );
     // Not to a session that is told the form only once a test goes without

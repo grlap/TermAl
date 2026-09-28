@@ -240,16 +240,25 @@ only for a path the form can name, and advise a `cd` only into a path TermAl
 follows one into. Each such test runs once per kind of path, set by a suffix
 of its fixture's label, which becomes part of the project's path: plain,
 ` (x)` (the form names nothing there) and ` $x` (TermAl follows no `cd`
-there). So a default run takes every branch on any host, and
-`the_path_kinds_reach_each_branch_on_any_host` checks that it does. The
-product test temp may also be pointed at such a path, given as a native
-absolute path inside the repository, for example:
+there). A default run takes the ` (x)` and ` $x` branches on any host, as
+`the_unreadable_path_kinds_reach_their_branches_on_any_host` checks. The plain kind can
+only add to the host's temp path, so it takes the branch where the form can
+name the path, which credits a one-call line end to end, only where that
+temp path, as resolved, is one the form can name: ASCII letters, digits,
+spaces and `_ . - /`, as a default temp directory usually is. On a host
+whose temp path is not (a non-ASCII user name, for example), a default run
+passes without that branch; to run it there, point the product test temp at
+a plain directory inside the repository, given as a native absolute path:
 
 ```bash
-mkdir -p ".tmp/unreadable (x)"
-TERMAL_TEST_USER_TEMP="$(node -p "require('path').resolve('.tmp/unreadable (x)')")" \
+mkdir -p ".tmp/plain"
+TERMAL_TEST_USER_TEMP="$(node -p "require('path').resolve('.tmp/plain')")" \
   node scripts/test-launcher.mjs focused -- cargo test --bin termal one_call
 ```
+
+The repository's own path must then be plain too. The suite does not
+require a plain path, since a precondition on the host would make it a
+lottery.
 
 ## Frontend Testing Guidelines
 

@@ -680,71 +680,87 @@ happens elsewhere. The agent therefore names the item's worktree once with
   reports a failure never leaves a name the server kept. The budget starts
   when the handler runs: the time the request waits for a blocking worker,
   and the final write of the state, fall within that normal timeout.
-- **What the agent and the operator see.** The checkpoint card of a bound
-  turn names where it was measured: the root and the item, or "session
-  workdir (no worktree named)". The card is built from the root the turn
-  was admitted with, so a bound turn whose begin-time capture never ran
-  shows the workdir even if an entry exists. The agent gets a host line at
-  a newly bound claim, after it names or clears a root, and once a
-  recognised test of a mediated turn gets no check, whether or not it
-  finishes, with the remedy: when it started in another worktree than the
-  one the turn is measured in, and when TermAl cannot confirm it did not,
-  because it ran after another command on its line, because the runtime
-  reports no directory and its shell may be back in the session's workdir,
-  or because TermAl cannot place the shell (a change it cannot follow, or
-  another command still changing it). The named-root line names the
-  one-call form, `pushd "DIR" && TEST` with DIR the directory in the root
-  where the test runs and nothing piped, redirected or chained after the
-  test, to a Claude session, whose runtime alone reports no
-  directory and runs the line as the agent wrote it (Codex reports its
-  directory and wraps each line in a shell of its own; an ACP runtime may
-  do either), when the root is one the form reads. Any other session is
-  told the form only once a test of its gets no check in a shape the form
-  carries. A cannot-confirm line, and a started-elsewhere line
-  of a root session with a named root, name the form only for a simple test
-  the agent ran as a bare line (never for a line its runtime wrapped, which
-  could not run it), and only where the form can read the worktree's path.
-  They leave DIR to the agent (`pushd "DIR" && TEST`, with DIR the absolute
-  directory in the worktree where the test runs): TermAl names no directory
-  it would have to guess, since a test meant for one inside the worktree
-  would run somewhere else. They name a test's own command up to 256 bytes,
-  and `<test>` past that. A cannot-confirm line's remedy follows from four
-  facts, so each is one the session can carry out: the form, where it can
-  carry the test (it counts wherever the shell is); else, for a runtime
-  that reports its directory, the test as a line of its own with its
-  working directory set where it should run (a `cd` in a call of its own
-  would not carry over there); else, for a session whose workdir is in the
-  worktree, `cd "DIR"` in a call of its own, DIR the absolute directory in
-  the worktree where the test runs, which TermAl follows, then the test as a
-  line of its own, whether TermAl placed the shell, lost it, or saw the
-  test after another command, and so it keeps the directory the test was
-  meant for; or a new session, where TermAl follows no `cd` into the
-  worktree's path (one a shell would expand); else a session whose workdir
-  is in the worktree. A test run after another command on its line may
-  have been meant for another project, so its remedy is offered only "if it
-  was meant to count here". A bare line that starts as the one-call form
-  but holds more than its one test alone (piped, redirected, chained,
-  wrapped, or with a command between `pushd` and the test) is told so, with
-  the form as its remedy where the form can name the worktree, naming
-  `<test>` where TermAl cannot rebuild the test alone from the line. A new
-  line about a test
-  that got no check replaces an earlier one not yet delivered, so a run of
-  them never pushes out the bind or name line.
-  A started-elsewhere line without a named root tells the agent to name
-  that worktree. A
-  delegated session, which names no root, gets no bind line, and its
-  withheld-test line tells it to run the tests in its workdir. Lines
-  not yet delivered accumulate, at most four, so a later one does not hide
-  an earlier one; a line given again moves to the end instead of
-  repeating, so the last line tells the latest state (name, clear, name
-  again ends on the name). They come after the Engram
-  context fence, when one is delivered, and before the prompt. A line
-  leaves once the runtime accepts a prompt that carried it, turn grant or
-  not, so a dispatch refused before that keeps it for the next; a line set
-  after the prompt was built (a rebind while the begin is recovered) was
-  not in it and reaches the next prompt, and so does a line the prompt
-  carried that was given again after it was built, so the next prompt
-  still ends on the latest state.
+- **What the agent and the operator see.**
+  - *The checkpoint card* of a bound turn names where it was measured: the
+    root and the item, or "session workdir (no worktree named)". The card
+    is built from the root the turn was admitted with, so a bound turn
+    whose begin-time capture never ran shows the workdir even if an entry
+    exists.
+  - *When the agent gets a host line:* at a newly bound claim, after it
+    names or clears a root, and once a recognised test of a mediated turn
+    gets no check, whether or not it finishes, with the remedy. That is when
+    the test started in another worktree than the one the turn is measured
+    in, and when TermAl cannot confirm it did not: because it ran after
+    another command on its line, because the runtime reports no directory
+    and its shell may be back in the session's workdir, or because TermAl
+    cannot place the shell (a change it cannot follow, or another command
+    still changing it).
+  - *The form up front.* The named-root line names the one-call form,
+    `pushd "DIR" && TEST` with DIR the directory in the root where the test
+    runs and nothing piped, redirected or chained after the test, to a
+    Claude session, whose runtime alone reports no directory and runs the
+    line as the agent wrote it (Codex reports its directory and wraps each
+    line in a shell of its own; an ACP runtime may do either), when the
+    root is one the form reads. TermAl records a Claude command only from
+    its `Bash` tool, which runs bash, so the form never meets Windows
+    PowerShell 5.1, which cannot read `&&`. A test Claude runs through its
+    `PowerShell` tool is not recorded at all, so it gets no check and no
+    host line, in whatever shape. Any other session is told the
+    form only once a test of its gets no check in a shape the form carries.
+    On Windows, wherever the form is named, DIR is said to be written as a
+    Windows path (`C:\…` or `C:/…`, not Git Bash's `/c/…`), the spelling
+    Claude's Bash tool favours but the form does not take.
+  - *The form in a remedy.* A cannot-confirm line, and a started-elsewhere
+    line of a root session with a named root, name the form only for a
+    simple test the agent ran as a bare line (never for a line its runtime
+    wrapped, which could not run it), and only where the form can read the
+    worktree's path. They leave DIR to the agent: TermAl names no directory
+    it would have to guess, since a test meant for one inside the worktree
+    would run somewhere else. They name a test's own command up to 256
+    bytes, and `<test>` past that.
+  - *A cannot-confirm line's remedy* follows from four facts, so each is
+    one the session can carry out:
+    - where the form can carry the test, the form: it counts wherever the
+      shell is;
+    - else, for a runtime that reports its directory, the test as a line
+      of its own with its working directory set where it should run (a `cd`
+      in a call of its own would not carry over there);
+    - else, for a session whose workdir is in the worktree, `cd "DIR"` in a
+      call of its own, DIR the absolute directory in the worktree where the
+      test runs, which TermAl follows, then the test as a line of its own:
+      whether TermAl placed the shell, lost it, or saw the test after
+      another command, this keeps the directory the test was meant for;
+      where TermAl follows no `cd` into the worktree's path (one a shell
+      would expand), a new session instead;
+    - else a session whose workdir is in the worktree.
+  - *Near misses.* A test run after another command on its line may have
+    been meant for another project, so its remedy is offered only "if it
+    was meant to count here". A bare line that starts as the one-call form
+    but holds more than its one test alone (piped, redirected, chained,
+    wrapped, or with a command between `pushd` and the test) is told so,
+    with the form as its remedy where the form can name the worktree,
+    naming `<test>` where TermAl cannot rebuild the test alone from the
+    line. So is a bare line on Windows that starts as the one-call form but
+    writes its DIR in Git Bash's spelling of a drive (`/c/…`): it is told
+    that, and, where its test is not alone either, that too, with the form
+    and DIR written as a Windows path as its remedy.
+  - *Started elsewhere.* A started-elsewhere line without a named root
+    tells the agent to name that worktree. A delegated session, which
+    names no root, gets no bind line, and its withheld-test line tells it
+    to run the tests in its workdir.
+  - *Delivery.* A new line about a test that got no check replaces an
+    earlier one not yet delivered, so a run of them never pushes out the
+    bind or name line. Lines not yet delivered accumulate, at most four, so
+    a later one does not hide an earlier one; a line given again moves to
+    the end instead of repeating, so the last line tells the latest state
+    (name, clear, name again ends on the name). They come after the Engram
+    context fence, when one is delivered, and before the prompt. A line
+    leaves once the runtime accepts a prompt that carried it, turn grant or
+    not, so a dispatch refused before that keeps it for the next; a line
+    set after the prompt was built (a rebind while the begin is recovered)
+    was not in it and reaches the next prompt, and so does a line the
+    prompt carried that was given again after it was built, so the next
+    prompt still ends on the latest state.
 - **Limits.** The show receipt of the installed Engram carries no work id,
   so an evaluation is matched to its root by short reference. An evaluation
   is measured in a named root only when the requesting session is bound to
@@ -783,21 +799,29 @@ reports.
   (bash's builtins are case-sensitive), one double-quoted native absolute
   DIR made only of ASCII letters, digits, spaces and `_ . - /`, with `:`
   only after a Windows drive letter and `\` on Windows alone (no `.` or `..`
-  step, no doubled or trailing backslash, no network path), then `&&` and
+  step, no doubled or trailing backslash, no network path, and on Windows
+  no Git Bash `/c/…` spelling, which PowerShell reads as `\c\…` on the
+  current drive), then `&&` and
   one simple
   recognised test on its own, with nothing piped, redirected or chained
   after it (such a test could not pass anyway: a pipe hides its exit
   status). Bash, PowerShell 7 and cmd all run this line
   as a change of their own directory, across drives too, and run the test
   only once it succeeded, so the test runs in DIR; its check fingerprint is
-  the test's own. Its non-zero exit is an unknown outcome, not a failure,
-  since the change or the shell's reading of the line (Windows PowerShell
-  cannot parse `&&`) may have failed before the test ran; so the form never
-  yields failed evidence, a bound test that fails there showing as unknown
-  (Engram's `indeterminate`), which still refuses completion. Its evidence
-  says so too: the summary names the whole line and, for a non-zero exit,
-  that the exit does not say whether its `pushd` or its test failed, and
-  the refs give no exit then. Anything else
+  the test's own. A non-zero exit may come from the change or the shell's
+  reading of the line (Windows PowerShell cannot parse `&&`) before the
+  test ran, so it is a failure only when the test's runner stated its
+  result in the output (its result line, as the summary shows it: cargo's
+  `test result:`, pytest's closing summary, the vitest and jest totals,
+  go's package lines, the test launcher's verdict), since the runner then
+  ran and the line exits as its test did; otherwise it is an unknown
+  outcome (Engram's `indeterminate`), which still refuses completion, and
+  the form never yields failed evidence that is not the test's. Its
+  evidence says which: the summary names the whole line (its test as
+  normalised, a directory too long for the bound shortened from its start)
+  and, for a non-zero exit not known to be the test's, that the exit does
+  not say whether its `pushd` or its test failed, and the refs give no exit
+  then. Anything else
   that runs a test after another command, `cd DIR && TEST`, a wrapper
   around the form, the form with something after its test, `pushd DIR;
   TEST` or another directory change included, is not reported; the agent

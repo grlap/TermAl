@@ -286,16 +286,16 @@ fn the_summary_carries_only_result_lines_within_engram_bounds() {
     );
 
     assert_eq!(
-        engram_check_refs(&check, EngramCommandExit::Code(0)),
+        engram_check_refs(&check, EngramCommandExit::Code(0), &[]),
         ["command:cargo test", "exit:0"]
     );
     assert_eq!(
-        engram_check_refs(&check, EngramCommandExit::ReportedSuccess),
+        engram_check_refs(&check, EngramCommandExit::ReportedSuccess, &[]),
         ["command:cargo test"]
     );
     let long = engram_check_command(&format!("cargo test {}", "x".repeat(1100))).expect("a test");
     assert_eq!(
-        engram_check_refs(&long, EngramCommandExit::Code(0)),
+        engram_check_refs(&long, EngramCommandExit::Code(0), &[]),
         ["exit:0"],
         "an oversized command reference is dropped, not truncated"
     );
@@ -2137,8 +2137,10 @@ fn a_git_bash_drive_path_names_its_windows_directory() {
         )
     );
     assert_eq!(engram_msys_drive_path("/c"), "C:/");
-    for other in ["/cd/x", "c/x", "//server/share", "/"] {
+    assert!(engram_is_msys_drive_path(&msys) && engram_is_msys_drive_path("/c"));
+    for other in ["/cd/x", "c/x", "//server/share", "/", "C:/x", r"C:\x"] {
         assert_eq!(engram_msys_drive_path(other), other);
+        assert!(!engram_is_msys_drive_path(other), "{other}");
     }
 }
 

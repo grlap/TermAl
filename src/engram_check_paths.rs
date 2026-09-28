@@ -360,18 +360,24 @@ fn engram_network_path(path: &str) -> bool {
     }
 }
 
-/// `path` as Windows names it when Git Bash spells a drive the MSYS way
-/// (`/c/github/x` for `C:/github/x`), as Claude's shell on Windows does;
-/// unchanged on other systems and for any other path.
-fn engram_msys_drive_path(path: &str) -> std::borrow::Cow<'_, str> {
+/// Whether `path` is Git Bash's MSYS spelling of a Windows drive (`/c`, or
+/// `/c/github/x` for `C:/github/x`): only on Windows, where Git Bash spells a
+/// drive so; on another system `/c/…` is a path of its own.
+fn engram_is_msys_drive_path(path: &str) -> bool {
     let bytes = path.as_bytes();
-    if cfg!(windows)
+    cfg!(windows)
         && bytes.len() >= 2
         && bytes[0] == b'/'
         && bytes[1].is_ascii_alphabetic()
         && (bytes.len() == 2 || bytes[2] == b'/')
-    {
-        let drive = char::from(bytes[1]).to_ascii_uppercase();
+}
+
+/// `path` as Windows names it when Git Bash spells a drive the MSYS way
+/// (`engram_is_msys_drive_path`), as Claude's shell on Windows does;
+/// unchanged on other systems and for any other path.
+fn engram_msys_drive_path(path: &str) -> std::borrow::Cow<'_, str> {
+    if engram_is_msys_drive_path(path) {
+        let drive = char::from(path.as_bytes()[1]).to_ascii_uppercase();
         let rest = &path[2..];
         return std::borrow::Cow::Owned(format!(
             "{drive}:{}",

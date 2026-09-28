@@ -525,6 +525,26 @@ fn engram_truncate_utf8(text: &str, max: usize) -> &str {
     &text[..end]
 }
 
+/// `text` within `max` bytes, keeping its end: a longer one loses its start
+/// to an ellipsis (`ENGRAM_KEEP_END_ELLIPSIS`), cut at a character boundary;
+/// with no room for the ellipsis, nothing is kept.
+fn engram_keep_end_utf8(text: &str, max: usize) -> String {
+    if text.len() <= max {
+        return text.to_owned();
+    }
+    if max < ENGRAM_KEEP_END_ELLIPSIS.len() {
+        return String::new();
+    }
+    let mut start = text.len() - (max - ENGRAM_KEEP_END_ELLIPSIS.len());
+    while !text.is_char_boundary(start) {
+        start += 1;
+    }
+    format!("{ENGRAM_KEEP_END_ELLIPSIS}{}", &text[start..])
+}
+
+/// What `engram_keep_end_utf8` puts where it cut a text's start.
+const ENGRAM_KEEP_END_ELLIPSIS: &str = "…";
+
 /// At most this many result lines are kept from a check's output.
 const ENGRAM_CHECK_RESULT_LINE_LIMIT: usize = 32;
 
@@ -720,24 +740,43 @@ fn engram_check_showed_passing_tests(check: &EngramCheckCommand, result_lines: &
 /// result lines in output order, within Engram's bound. A size inventory is
 /// all or nothing: when its lines do not all fit, every one is left out and
 /// a note says how many, since a partial list would misstate which paths the
-/// check covered. A one-call line (`pushd "DIR" && TEST`) is named whole,
-/// and its non-zero exit is said not to be the test's alone: its `pushd`, or
-/// the shell's reading of the line, may have failed first
-/// (`engram_check_command_outcome`).
+/// check covered. A one-call line (`pushd "DIR" && TEST`) is named as TermAl
+/// reads it, within the bound: its test, as normalised, first, cut at its end
+/// only past the bound less the line's frame (as a plain command is cut past
+/// the bound), and its directory in what remains, shortened from its start
+/// behind an ellipsis when too long; a non-zero exit
+/// that is not known to be its test's own is said so: its `pushd`, or the
+/// shell's reading of the line, may have failed first
+/// (`engram_check_exit_is_the_tests`).
 fn engram_check_summary(
     check: &EngramCheckCommand,
     exit: EngramCommandExit,
     result_lines: &[String],
 ) -> String {
-    let line = match &check.directory {
-        Some(directory) => format!("pushd \"{directory}\" && {}", check.normalized),
-        None => check.normalized.clone(),
+    let command = match &check.directory {
+        // Within the bound as a whole: the test leaves room for the frame and
+        // at least the ellipsis of a shortened directory.
+        Some(directory) => {
+            let frame = "pushd \"\" && ".len();
+            let test = engram_truncate_utf8(
+                &check.normalized,
+                ENGRAM_CHECK_REF_MAX_BYTES - frame - ENGRAM_KEEP_END_ELLIPSIS.len(),
+            );
+            let directory =
+                engram_keep_end_utf8(directory, ENGRAM_CHECK_REF_MAX_BYTES - frame - test.len());
+            format!("pushd \"{directory}\" && {test}")
+        }
+        None => engram_truncate_utf8(&check.normalized, ENGRAM_CHECK_REF_MAX_BYTES).to_owned(),
     };
-    let command = engram_truncate_utf8(&line, ENGRAM_CHECK_REF_MAX_BYTES);
     let mut summary = match exit {
-        EngramCommandExit::Code(code) if code != 0 && check.directory.is_some() => format!(
-            "`{command}` exited {code}, which does not say whether its `pushd` or its test failed"
-        ),
+        EngramCommandExit::Code(code)
+            if !engram_check_exit_is_the_tests(check, exit, result_lines) =>
+        {
+            format!(
+                "`{command}` exited {code}, which does not say whether its `pushd` or its test \
+                 failed"
+            )
+        }
         EngramCommandExit::Code(code) => format!("`{command}` exited {code}"),
         EngramCommandExit::ReportedSuccess => {
             format!("`{command}` succeeded (the runtime reports no exit status)")
@@ -784,16 +823,21 @@ fn engram_check_summary(
 
 /// The verification references: the normalised command, unless it exceeds
 /// Engram's bound (the check fingerprint names it anyway), and, when known,
-/// its exit status. A one-call line's non-zero exit is not known to be its
-/// test's (`engram_check_summary`), so it is left out.
-fn engram_check_refs(check: &EngramCheckCommand, exit: EngramCommandExit) -> Vec<String> {
+/// its test's exit status: a one-call line's non-zero exit that is not known
+/// to be its test's own (`engram_check_exit_is_the_tests`, from the runner's
+/// `result_lines`) is left out.
+fn engram_check_refs(
+    check: &EngramCheckCommand,
+    exit: EngramCommandExit,
+    result_lines: &[String],
+) -> Vec<String> {
     let mut refs = Vec::new();
     let command = format!("command:{}", check.normalized);
     if command.len() <= ENGRAM_CHECK_REF_MAX_BYTES {
         refs.push(command);
     }
     if let EngramCommandExit::Code(code) = exit
-        && (code == 0 || check.directory.is_none())
+        && engram_check_exit_is_the_tests(check, exit, result_lines)
     {
         refs.push(format!("exit:{code}"));
     }
