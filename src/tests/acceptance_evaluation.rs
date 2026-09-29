@@ -2204,7 +2204,7 @@ fn acceptance_request_treats_an_unreadable_policy_as_unknown() {
                 Arc::default(),
                 show_receipt(Some("same_session")),
                 Err(EngramTransportError::deadline(
-                    "Engram acceptance-evaluation reader exceeded 10000 ms",
+                    "Engram acceptance-evaluation reader exceeded 20000 ms",
                 )),
             ),
         )

@@ -2,7 +2,11 @@
 // and engram_host_adapter. Owns receipt admission and diagnostic routes, not
 // settings persistence, runtime revocation, or Engram store repair.
 
-const ENGRAM_READINESS_TIMEOUT: Duration = Duration::from_secs(10);
+/// The readiness process budget (Verify, enable on Save), and the one
+/// wall-clock budget all absence probes of a Save share. Doubled from ten
+/// seconds on Greg's decision (2026-09-28): under CPU load a healthy Engram
+/// process misses a ten-second deadline.
+const ENGRAM_READINESS_TIMEOUT: Duration = Duration::from_secs(20);
 const ENGRAM_DIAGNOSTIC_DECLARATION_LIMIT: usize = 4096;
 const ENGRAM_DIAGNOSTIC_TEXT_LIMIT: usize = 4096;
 const ENGRAM_DIAGNOSTIC_REPORT_LIMIT: usize = 16 * 1024;

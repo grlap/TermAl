@@ -83,10 +83,48 @@ receipt, two eleven-second inventory response budgets and ten seconds of detach/
 headroom (68 seconds). It bounds waiting, not a blocked mutex or SQL commit.
 The MCP follow-up HTTP request has a separate derived allowance: release (68 s),
 two reconciliation responses (22 s), durability retry (5 s), unarchive response
-(31 s), and ordinary request overhead (30 s): 156 seconds. It is single-attempt,
+(31 s), the delivery of the child's turn (a gated admission of 20 s and, for a
+child holding a claim, its begin-time source capture of 40 s), and ordinary
+request overhead (30 s): 216 seconds. It is single-attempt,
 not automatically replayed on timeout; a network failure still has an unknown
 outcome and must be checked before retrying. Concurrent recovery returns a conflict
 instead of waiting indefinitely on another follow-up's recovery lock.
+Codex ends an MCP tool call after 60 seconds unless told otherwise, so TermAl
+gives Codex the delegation server's `tool_timeout_sec`: the longest any of
+these calls may take in the bridge, plus a five-second margin, so Codex does
+not end a call the bridge and the server are still deciding, as long as the
+bridge starts it at once:
+
+- a spawn, whose server binds the parent and the child and delivers the child's
+  first turn;
+- the follow-up recovery described above, with the delivery of the child's turn;
+- an acceptance evaluation request (its tracker reads, then its evaluator's
+  spawn) and its submission;
+- [source-root naming](engram-host-adapter.md#source-root);
+- the [review-freeze check](review-freeze-verification.md);
+- a mailbox send that wakes a session and delivers its turn;
+- a `termal_wait_delegations` call on one delegation with its default wait.
+
+A long call may take its allowance: its budget, what it may spend beyond an
+ordinary request, plus the ordinary 30 seconds. A default wait on one
+delegation may take 360 seconds: the wait (300 seconds), then its last status
+read, which may start at the deadline, and the result read when that read
+finds the delegation finished, 30 seconds each. So the tool timeout, the
+longest of these plus the margin, is always at least 365 seconds. The long
+calls and their budgets are one list in the bridge
+(`delegation_mcp_timeouts.rs`), which both the allowances and the tool
+timeout come from; the tool timeout also takes in the default wait.
+
+Codex's clock runs from the call, not from when the bridge starts it, and the
+bridge serves one call at a time. A call queued behind another, such as a
+long wait or a wait Codex has already cut, or one before which the bridge
+first reads the caller's classification or resolves a slash-command prompt,
+spends part of that time first. Codex can then report a timeout for it while
+the bridge still sends it afterwards. A spawn or an evaluation request is
+single-attempt but not idempotent, so before retrying one after such a
+timeout, look for the delegation it may already have made with
+`termal_list_delegations`.
+
 `termal_followup_session` waits for cleanup and
 unarchives before the next prompt. Explicit user input to a completed/failed
 Codex child uses the same follow-up path, preserving its transcript; canceled
@@ -913,6 +951,22 @@ runtime strings:
 - `MAX_DELEGATION_WAIT_TIMEOUT_MS = 1800000`
 - `DEFAULT_DELEGATION_WAIT_INTERVAL_MS = 1000`
 - `DEFAULT_DELEGATION_WAIT_TIMEOUT_MS = 300000`
+
+A Codex caller's wait is also cut at the delegation server's
+`tool_timeout_sec` (see the follow-up allowance above). It covers the default
+wait on one delegation, whether it answers `timedOut: true` or the result:
+the wait never sleeps past its deadline, and after the deadline only a last
+status read and a result read remain. Each further delegation a wait names
+adds a status read and a result read past the deadline. The tool timeout is
+shorter than the longest wait these allow. A Codex caller whose wait outlasts
+the tool timeout gets Codex's tool-timeout error instead of the wait's
+answer, while the bridge, which serves one call at a time, still runs that
+wait to its end, so the session's later delegation tool calls wait behind
+it, and Codex may cut those too while they wait, though they still run
+(see the tool timeout above). Such a caller should ask for a shorter
+`timeoutMs` or schedule a backend resume wait instead; the tool description
+says so too.
+
 Grouped parent-card UI remains separate Phase 3 work. Backend-scheduled result
 fan-in is available through `resume_after_delegations`.
 

@@ -36,9 +36,10 @@ fn engram_absence_now() -> std::time::Instant {
 
 fn validate_engram_absence_deadline(deadline: std::time::Instant) -> Result<(), ApiError> {
     if engram_absence_now() >= deadline {
-        return Err(ApiError::conflict(
-            "Engram absence inspection exceeded the shared 10 second Save budget",
-        ));
+        return Err(ApiError::conflict(format!(
+            "Engram absence inspection exceeded the shared {} second Save budget",
+            ENGRAM_READINESS_TIMEOUT.as_secs()
+        )));
     }
     Ok(())
 }

@@ -9,11 +9,22 @@
 
 const ENGRAM_CONTROL_SCHEMA_VERSION: u16 = 1;
 const ENGRAM_CAPABILITY_MAP_REVISION: i64 = 1;
-const ENGRAM_DEFAULT_CALL_TIMEOUT_MS: u64 = 10_000;
-/// Engram control calls are bounded to ten seconds. Lifecycle arbitration gets
-/// one additional second for the owning callback to publish its terminal state.
-const ENGRAM_CONTROL_SETTLE_TIMEOUT: Duration = Duration::from_secs(11);
-const ENGRAM_DISPATCH_BUDGET_MS: u64 = 10_000;
+/// The longest a project may bound one Engram control call (`deadline_ms`),
+/// and the bound when it sets none. Doubled from ten seconds on Greg's
+/// decision (2026-09-28): under CPU load a healthy call misses a ten-second
+/// deadline, in the running host as in the tests.
+const ENGRAM_MAX_CALL_TIMEOUT_MS: u64 = 20_000;
+const ENGRAM_DEFAULT_CALL_TIMEOUT_MS: u64 = ENGRAM_MAX_CALL_TIMEOUT_MS;
+/// Engram control calls are bounded to `ENGRAM_MAX_CALL_TIMEOUT_MS`, and an
+/// admission to `ENGRAM_DISPATCH_BUDGET_MS`, which is no longer. Lifecycle
+/// arbitration gets one additional second for the owning callback to publish
+/// its terminal state.
+const ENGRAM_CONTROL_SETTLE_TIMEOUT: Duration =
+    Duration::from_millis(ENGRAM_MAX_CALL_TIMEOUT_MS + 1_000);
+/// One shared remaining-time budget for every step of a gated admission,
+/// its durability fence included; equal to the call bound, so one call may
+/// take it all. Doubled from ten seconds with the call bound.
+const ENGRAM_DISPATCH_BUDGET_MS: u64 = ENGRAM_MAX_CALL_TIMEOUT_MS;
 // Only explicit Full Audit runs `engram doctor --json`; that audit is the
 // only consumer of this bound — it is not an ordinary Engram call timeout and
 // must not be confused with one. The value comes from measurement, not taste.
@@ -45,7 +56,9 @@ const ENGRAM_ENABLEMENT_DOCTOR_TIMEOUT: Duration = Duration::from_secs(30);
 // Engram's current store-open path may wait up to five seconds on SQLite's
 // writer lock. Bound the held-claims read (`engram_held_claims.rs`) above that
 // healthy contention window; a timeout or lock error remains an error, never
-// `None`.
+// `None`. Not one of the doubled load-sensitive limits: it bounds that lock
+// contention, not a process slowed by CPU load, and doubling it too is a
+// separate decision.
 #[cfg(not(test))]
 const ENGRAM_WORK_BINDING_COMMAND_TIMEOUT: Duration = Duration::from_secs(6);
 // The Rust suite spawns many fixture processes concurrently. Preserve the
@@ -54,6 +67,25 @@ const ENGRAM_WORK_BINDING_COMMAND_TIMEOUT: Duration = Duration::from_secs(6);
 #[cfg(test)]
 const ENGRAM_WORK_BINDING_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 const ENGRAM_WORK_BINDING_LOCK_RETRY_DELAY: Duration = Duration::from_millis(250);
+
+/// The longest one Engram bind off the admission path may take, as before a
+/// spawn (`bind_engram_target_uncoordinated_off_lock` with no admission
+/// start): when the session has a binding to recover, the rebind's status and
+/// checkpoint, which share one dispatch budget; then up to two attempts, the
+/// first and one after a stale-fence refusal, each a held-claims read (the
+/// work-binding timeout, whose lock retry runs within it, plus that retry's
+/// delay) and a bind at the longest call timeout a project may set.
+fn engram_unqueued_bind_worst_case(recovers: bool) -> Duration {
+    let recovery = if recovers {
+        Duration::from_millis(ENGRAM_DISPATCH_BUDGET_MS)
+    } else {
+        Duration::ZERO
+    };
+    let attempt = ENGRAM_WORK_BINDING_COMMAND_TIMEOUT
+        + ENGRAM_WORK_BINDING_LOCK_RETRY_DELAY
+        + Duration::from_millis(ENGRAM_MAX_CALL_TIMEOUT_MS);
+    recovery + attempt * 2
+}
 const ENGRAM_BOOT_RECOVERY_CONCURRENCY: usize = 8;
 const ENGRAM_CONTROL_MAX_FRAME_BYTES: usize = 256 * 1_024;
 // Resource policy, not a measured upper bound on reports. Doctor reports
@@ -4014,8 +4046,9 @@ impl AppState {
 
     /// A destructive session removal must not tear down the sidecar while a
     /// checkpoint started by another terminal callback is still in flight.
-    /// Control calls are deadline-bounded to at most ten seconds, so this
-    /// off-lock poll is finite and only exercised by that rare race.
+    /// Control calls are deadline-bounded to at most
+    /// `ENGRAM_MAX_CALL_TIMEOUT_MS`, so this off-lock poll is finite and only
+    /// exercised by that rare race.
     fn wait_for_engram_checkpoint_completion(&self, session_id: &str) {
         let deadline = std::time::Instant::now() + ENGRAM_CONTROL_SETTLE_TIMEOUT;
         loop {

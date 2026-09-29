@@ -118,7 +118,7 @@ impl AppState {
 fn run_review_freeze_checker(command: &mut Command) -> Result<std::process::Output> {
     run_bounded_read_process(
         command,
-        std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT + Duration::from_secs(5),
+        std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT + REVIEW_FREEZE_OBSERVER_GRACE,
         4096,
         true,
     )

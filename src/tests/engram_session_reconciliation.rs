@@ -304,8 +304,10 @@ fn absence_multi_target_save_is_atomic_on_success_refusal_and_budget_exhaustion(
         install_control_only_transport(&state, transport.clone());
         if outcome == "budget" {
             // Advance only the admission clock, not wall time: first proof is
-            // accepted at t=9; second preflight reaches t=11. Restarting a new
-            // ten-second budget at the second target would incorrectly launch.
+            // accepted a second before the shared budget ends; second preflight
+            // comes a second after it. Restarting a new budget at the second
+            // target would incorrectly launch.
+            let budget = ENGRAM_READINESS_TIMEOUT.as_secs();
             let start = Instant::now();
             TEST_ENGRAM_ABSENCE_NOW.with(|clock| clock.set(Some(start)));
             let mut checks = 0;
@@ -313,7 +315,7 @@ fn absence_multi_target_save_is_atomic_on_success_refusal_and_budget_exhaustion(
                 *hook.borrow_mut() = Some(Box::new(move || {
                     checks += 1;
                     if checks == 2 || checks == 3 {
-                        let elapsed = if checks == 2 { 9 } else { 11 };
+                        let elapsed = if checks == 2 { budget - 1 } else { budget + 1 };
                         TEST_ENGRAM_ABSENCE_NOW
                             .with(|clock| clock.set(Some(start + Duration::from_secs(elapsed))));
                     }
@@ -328,10 +330,13 @@ fn absence_multi_target_save_is_atomic_on_success_refusal_and_budget_exhaustion(
             let error = result.err().unwrap();
             assert_eq!(error.status, StatusCode::CONFLICT);
             assert!(
-                error.message.contains(if outcome == "budget" {
-                    "shared 10 second Save budget"
+                error.message.contains(&if outcome == "budget" {
+                    format!(
+                        "shared {} second Save budget",
+                        ENGRAM_READINESS_TIMEOUT.as_secs()
+                    )
                 } else {
-                    "control_session_token_mismatch"
+                    "control_session_token_mismatch".to_owned()
                 }),
                 "{}",
                 error.message

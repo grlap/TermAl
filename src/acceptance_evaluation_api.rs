@@ -21,8 +21,9 @@ const ACCEPTANCE_EVALUATION_SUBMIT_LABEL: &str = "acceptance-evaluation submissi
 // large one, so it is never the per-request read. The admitted set only spares
 // a wasted spawn: the tracker enforces the policy when the evaluation is
 // recorded. So a failed read (an older binary has no `show`) means "unknown",
-// never a refusal.
-const ACCEPTANCE_EVALUATION_POLICY_READ_TIMEOUT: Duration = Duration::from_secs(10);
+// never a refusal. Twenty seconds, doubled from ten on Greg's decision
+// (2026-09-28): under CPU load a healthy Engram process misses ten.
+const ACCEPTANCE_EVALUATION_POLICY_READ_TIMEOUT: Duration = Duration::from_secs(20);
 const ACCEPTANCE_EVALUATION_STORE_CHANGED_ERROR: &str = "the project's tracker store changed since this evaluation was requested; request a new evaluation";
 
 /// One tracker call through the lock-retry runner: two command timeouts and
@@ -34,7 +35,8 @@ fn acceptance_evaluation_call_worst_case(timeout: Duration) -> Duration {
 /// Worst-case time of one request: the windowed and the complete task read,
 /// every evidence continuation page, the policy read, and the capture of the
 /// declared source fingerprint, bounded by the freeze budget. The request
-/// path's own deadline and the bridge's HTTP allowance are both this, so the
+/// path's own deadline is this; the bridge's HTTP allowance is this and the
+/// evaluator's spawn on top (`DelegationLongCall::EvaluationRequest`), so the
 /// bridge never gives up on a request the backend is still serving.
 fn acceptance_evaluation_request_tracker_budget() -> Duration {
     let task_reads = 2 + (MAX_ACCEPTANCE_EVIDENCE_PAGES as u32 - 1);

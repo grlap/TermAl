@@ -758,6 +758,8 @@ include!("engram_session_reconciliation.rs");
 include!("coordination_instructions.rs");
 include!("delegation_mcp.rs");
 include!("delegation_mcp_source_root.rs");
+include!("delegation_mcp_timeouts.rs");
+include!("delegation_mcp_review_freeze.rs");
 include!("review_freeze.rs");
 include!("content_revision.rs");
 include!("engram_source_roots.rs");

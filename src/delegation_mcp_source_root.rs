@@ -1,12 +1,13 @@
 // The bridge side of `termal_name_source_root`: the MCP tool definition an
 // agent sees and the handler that forwards a call to
-// `POST /api/sessions/{id}/engram-source-root`. Owns only the tool's text,
-// argument shaping and the request's timeout. Does not own naming itself, its
-// validation or its budget (`engram_source_roots.rs`), or the bridge's
-// dispatch, caller classification and tool list (`delegation_mcp.rs`, which
-// calls both functions here). Split out of `delegation_mcp.rs`, which is
-// already past its size limit, so this tool adds only its dispatch and
-// tool-list entries there.
+// `POST /api/sessions/{id}/engram-source-root`. Owns only the tool's text and
+// argument shaping. Does not own naming itself, its validation or its budget
+// (`engram_source_roots.rs`), the allowance the bridge waits the request out
+// for (`delegation_mcp_timeouts.rs`), or the bridge's dispatch, caller
+// classification and tool list (`delegation_mcp.rs`, which calls both
+// functions here). Split out of `delegation_mcp.rs`, which is already past
+// its size limit, so this tool adds only its dispatch and tool-list entries
+// there.
 
 impl TermalDelegationMcpBridge {
     /// `termal_name_source_root` (engram_source_roots.rs): names, or with no
@@ -29,17 +30,13 @@ impl TermalDelegationMcpBridge {
             ),
         }
         // The server bounds naming by its own budget; waiting that on top of
-        // the normal allowance means a reported failure is never a name the
-        // server kept anyway.
+        // the normal request timeout means a reported failure is never a name
+        // the server kept anyway.
         let path = format!("/api/sessions/{}/engram-source-root", self.serving_session_id);
-        self.decode_response(
-            "POST",
+        self.post_long_call(
+            DelegationLongCall::SourceRootNaming,
             &path,
-            self.client
-                .post(self.url(&path))
-                .timeout(ENGRAM_SOURCE_ROOT_NAMING_BUDGET + self.request_timeout)
-                .json(&Value::Object(body))
-                .send(),
+            &Value::Object(body),
         )
     }
 }

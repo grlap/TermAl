@@ -100,8 +100,10 @@ uses it for both discovery and calls; older payloads without it fail closed.
 This is not a live authorization receipt: the endpoint still checks the current
 child, worktree, running attempt and policy before and after the subprocess.
 
-The check bounds process time (20 seconds internally, 25 seconds for the
-observer), output (128 MiB per Git stdout, 64 KiB retained stderr, 4 KiB checker stdout),
+The check bounds process time (40 seconds internally, 45 seconds for the
+observer; the MCP bridge waits that and its ordinary 30 seconds, and a Codex
+caller longer still, see
+[the delegation tool timeout](agent-delegation-sessions.md#completed-codex-child-thread-lifecycle)), output (128 MiB per Git stdout, 64 KiB retained stderr, 4 KiB checker stdout),
 manifest (1 MiB), and untracked input (20,000 entries, 128 MiB/file, 512 MiB total).
 Excess stderr is drained and discarded; Git failures embed at most 4 KiB of
 diagnostics so ordinary verification failure remains an observed failed check.

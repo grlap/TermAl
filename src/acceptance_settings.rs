@@ -336,7 +336,7 @@ impl AppState {
             request,
             |connection, args| {
                 let refs = args.iter().map(String::as_str).collect::<Vec<_>>();
-                // The same ten-second process budget bounds policy reads and writes.
+                // The same process budget bounds policy reads and writes.
                 run_engram_cli_command(
                     connection,
                     &refs,

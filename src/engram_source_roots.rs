@@ -50,8 +50,14 @@ struct EngramWorkSourceRoot {
 /// reads, the full list's reclaim and the captures share it, and what has not
 /// started when it runs out is skipped, conservatively. The MCP bridge waits
 /// this long on top of its normal request timeout, so a name is never kept
-/// after the tool call reported a failure.
-const ENGRAM_SOURCE_ROOT_NAMING_BUDGET: Duration = Duration::from_secs(40);
+/// after the tool call reported a failure. It holds the two captures a rename
+/// takes (the old root's seal, then the new root's measure), each of one full
+/// freeze budget, and the commit's reserve. The held reads and the path's
+/// validation come out of it too, so time they take shortens the second
+/// capture, which then reports the new root unmeasured, conservatively.
+const ENGRAM_SOURCE_ROOT_NAMING_BUDGET: Duration = Duration::from_secs(
+    2 * REVIEW_FREEZE_TIMEOUT.as_secs() + ENGRAM_SOURCE_ROOT_COMMIT_RESERVE.as_secs(),
+);
 
 /// The part of the naming budget the captures leave for the commit under the
 /// lock, so a slow capture reports the new root unmeasured (or seals no

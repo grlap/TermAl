@@ -1638,12 +1638,14 @@ fn delegation_mcp_send_timeout_reports_unknown_outcome_and_safe_retry() {
     // connect, and request upload cannot become the condition under test; the
     // server handshake below proves the request arrived before it withholds
     // the response.
+    // No wake budget either, so the send waits that deadline alone.
     let bridge = TermalDelegationMcpBridge::new_with_timeout(
         "session-parent".to_owned(),
         base_url,
         Duration::from_secs(5),
     )
-    .expect("bridge should initialize");
+    .expect("bridge should initialize")
+    .with_turn_delivery_budget(Duration::ZERO);
 
     let client = thread::spawn(move || {
         bridge.tool_send_to_session(json!({
@@ -1678,6 +1680,11 @@ fn delegation_mcp_send_timeout_reports_unknown_outcome_and_safe_retry() {
         message.contains("POST /api/sessions/session-parent/mailboxes/send")
             && message.contains("timed out after"),
         "the diagnostic must retain route and transport classification: {message}"
+    );
+    // It names the send's whole allowance, not what its last attempt had left.
+    assert!(
+        message.contains("timed out after 5s while"),
+        "the diagnostic must name the configured wait: {message}"
     );
 
     assert_eq!(request.method, "POST");
@@ -3267,6 +3274,64 @@ fn delegation_mcp_wait_polls_until_terminal_then_fetches_result() {
 }
 
 #[test]
+fn delegation_mcp_wait_past_its_deadline_still_reads_status_then_result() {
+    // A round that starts at or after the deadline still reads the status,
+    // and then the result of a finished delegation: a wait may spend two
+    // ordinary requests past its deadline, which the span of a default wait,
+    // and so Codex's tool timeout, covers.
+    let (base_url, requests, server) = spawn_test_mcp_http_server(2, move |request| {
+        assert_eq!(request.method, "GET");
+        match request.path.as_str() {
+            "/api/sessions/session-parent/delegations/delegation-late" => {
+                (200, json!({ "delegation": { "status": "completed" } }))
+            }
+            "/api/sessions/session-parent/delegations/delegation-late/result" => (
+                200,
+                json!({ "result": { "status": "completed", "summary": "late" } }),
+            ),
+            _ => (
+                404,
+                json!({ "error": format!("unexpected path {}", request.path) }),
+            ),
+        }
+    });
+    let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
+        .expect("bridge should initialize");
+
+    let response = bridge
+        .tool_wait_delegations(json!({
+            "delegationIds": ["delegation-late"],
+            "timeoutMs": 0
+        }))
+        .expect("wait should answer");
+
+    assert_eq!(response["timedOut"], false);
+    assert_eq!(
+        response.pointer("/results/0/result/result/summary"),
+        Some(&json!("late"))
+    );
+    server.join().expect("test server should join");
+    let paths: Vec<String> = requests
+        .lock()
+        .expect("request log mutex poisoned")
+        .iter()
+        .map(|request| request.path.clone())
+        .collect();
+    assert_eq!(
+        paths,
+        [
+            "/api/sessions/session-parent/delegations/delegation-late",
+            "/api/sessions/session-parent/delegations/delegation-late/result",
+        ]
+    );
+    assert_eq!(
+        termal_delegation_default_wait_span(),
+        Duration::from_millis(TERMAL_DELEGATION_MCP_DEFAULT_WAIT_TIMEOUT_MS)
+            + TERMAL_DELEGATION_MCP_HTTP_TIMEOUT * paths.len() as u32
+    );
+}
+
+#[test]
 fn delegation_mcp_wait_treats_completed_failed_and_canceled_as_terminal() {
     let (base_url, requests, server) = spawn_test_mcp_http_server(6, move |request| {
         assert_eq!(request.method, "GET");
@@ -4231,12 +4296,211 @@ fn delegation_followup_http_budget_covers_release_reconciliation_and_restore() {
         + CODEX_CHILD_UNARCHIVE_REPLY_TIMEOUT;
     assert_eq!(
         request.timeout().copied().unwrap(),
-        recovery + TERMAL_DELEGATION_MCP_HTTP_TIMEOUT,
+        recovery + termal_delegation_turn_delivery_budget() + TERMAL_DELEGATION_MCP_HTTP_TIMEOUT,
         "followup HTTP timeout must cover serial release/reconciliation/durability/unarchive plus ordinary request allowance"
     );
     assert_eq!(
         bridge.request_timeout, TERMAL_DELEGATION_MCP_HTTP_TIMEOUT,
         "ordinary requests keep their existing timeout"
+    );
+}
+
+#[test]
+fn delegation_mcp_transport_errors_name_the_allowance_that_ran_out() {
+    // No URL may name port 99999, so each request fails as it is built, with
+    // no socket involved; the error carries the wait that call was given, not
+    // the ordinary request timeout.
+    let bridge = TermalDelegationMcpBridge::new(
+        "session-parent".to_owned(),
+        "http://127.0.0.1:99999".to_owned(),
+    )
+    .unwrap();
+    let timeout_of = |result: Result<Value>| {
+        let error = result.expect_err("no request can be sent to port 99999");
+        if let Some(transport) = error.downcast_ref::<TermalDelegationTransportError>() {
+            return transport.timeout;
+        }
+        error
+            .downcast_ref::<TermalDelegationUnknownOutcome>()
+            .and_then(|unknown| unknown.transport_timeout)
+            .unwrap_or_else(|| panic!("a transport failure, not: {error:#}"))
+    };
+    let allowance = |call| bridge.allowance(call);
+    // A spawn says its outcome is unknown, since the child may exist, and
+    // where to look before spawning again.
+    let spawn = bridge.tool_spawn_session(json!({ "agent": "Claude", "prompt": "hello" }));
+    assert!(spawn.as_ref().is_err_and(|error| {
+        let text = error.to_string();
+        text.contains("outcome is unknown") && text.contains("termal_list_delegations")
+    }));
+    assert_eq!(timeout_of(spawn), allowance(DelegationLongCall::Spawn));
+    assert_eq!(
+        timeout_of(bridge.tool_name_source_root(json!({ "work": "w-1" }))),
+        allowance(DelegationLongCall::SourceRootNaming)
+    );
+    assert_eq!(
+        timeout_of(bridge.tool_review_freeze_check(json!({}))),
+        allowance(DelegationLongCall::ReviewFreeze)
+    );
+    assert_eq!(
+        timeout_of(bridge.tool_followup_session(
+            json!({ "delegationId": "delegation-child", "message": "Continue" })
+        )),
+        allowance(DelegationLongCall::Followup)
+    );
+    // An evaluation's request and submission, and a mailbox send, say their
+    // outcome is unknown and carry the wait that ran out as data.
+    let evaluate = bridge.tool_evaluate_acceptance(json!({ "workRef": "w-1" }));
+    assert!(
+        evaluate
+            .as_ref()
+            .is_err_and(|error| error.to_string().contains("outcome is unknown"))
+    );
+    assert_eq!(
+        timeout_of(evaluate),
+        allowance(DelegationLongCall::EvaluationRequest)
+    );
+    assert_eq!(
+        timeout_of(bridge.tool_submit_acceptance_evaluation(json!({}))),
+        allowance(DelegationLongCall::EvaluationSubmit)
+    );
+    let send = bridge.tool_send_to_session(json!({
+        "sessionId": "session-target",
+        "message": "hello",
+        "idempotencyKey": "k-1",
+    }));
+    // Rendered whole, as the coordination CLI prints it, the failure shows once.
+    let rendered = format!("{:#}", send.as_ref().expect_err("the send fails"));
+    assert_eq!(
+        rendered.matches("TermAl delegation API POST").count(),
+        1,
+        "{rendered}"
+    );
+    // Its safe replays share the allowance, and the error names it whole.
+    assert_eq!(timeout_of(send), allowance(DelegationLongCall::MailboxSend));
+    // A read-only reviewer's review-freeze call, through the real dispatch,
+    // goes out with the freeze allowance rather than an ordinary request's.
+    bridge.caller_is_delegation_child.set(true).unwrap();
+    bridge
+        .caller_requires_structured_review_result
+        .set(true)
+        .unwrap();
+    bridge.caller_allows_review_freeze.set(true).unwrap();
+    assert_eq!(
+        timeout_of(bridge.handle_tool_call(json!({
+            "name": TERMAL_REVIEW_FREEZE_TOOL_NAME,
+            "arguments": {},
+        }))),
+        allowance(DelegationLongCall::ReviewFreeze)
+    );
+}
+
+#[test]
+fn delegation_mcp_long_calls_treat_an_unreadable_success_as_an_unknown_outcome() {
+    // A success status whose body the bridge cannot read means the server may
+    // have acted: a spawn and an evaluation request say to look before asking
+    // again, and a submission to resend the same verdicts.
+    let unreadable = |call: &dyn Fn(&TermalDelegationMcpBridge) -> Result<Value>| {
+        let (base_url, server) =
+            spawn_test_mcp_http_server_with_raw_response(200, "not-json!".to_owned());
+        let bridge = TermalDelegationMcpBridge::new("session-parent".to_owned(), base_url)
+            .expect("bridge should initialize");
+        let message = call(&bridge)
+            .expect_err("an unreadable success leaves the outcome unknown")
+            .to_string();
+        server.join().expect("test server should join");
+        message
+    };
+    let spawn = unreadable(&|bridge| {
+        bridge.tool_spawn_session(json!({ "agent": "Claude", "prompt": "hello" }))
+    });
+    assert!(
+        spawn.contains("outcome is unknown") && spawn.contains("termal_list_delegations"),
+        "{spawn}"
+    );
+    let evaluate =
+        unreadable(&|bridge| bridge.tool_evaluate_acceptance(json!({ "workRef": "w-1" })));
+    assert!(
+        evaluate.contains("outcome is unknown") && evaluate.contains("termal_list_delegations"),
+        "{evaluate}"
+    );
+    let submit = unreadable(&|bridge| bridge.tool_submit_acceptance_evaluation(json!({})));
+    assert!(
+        submit.contains("outcome is unknown") && submit.contains("same verdicts"),
+        "{submit}"
+    );
+}
+
+#[test]
+fn delegation_mcp_bridge_and_codex_wait_out_the_server_budgets() {
+    let bridge = TermalDelegationMcpBridge::new(
+        "session-parent".to_owned(),
+        "http://127.0.0.1:1".to_owned(),
+    )
+    .unwrap();
+    // A deliberate second pin of the production review-freeze wait (freeze
+    // 40 s, grace 5 s, ordinary request 30 s), so a change to any shows here.
+    assert_eq!(
+        bridge.allowance(DelegationLongCall::ReviewFreeze),
+        Duration::from_secs(40 + 5 + 30)
+    );
+    // Every long call waits longer than an ordinary request, and Codex waits
+    // longer than the bridge on each, and than its own 60 s default.
+    let codex = termal_delegation_mcp_codex_config_with_command(
+        "termal",
+        "session-parent",
+        "http://127.0.0.1:1",
+    );
+    let tool_timeout = Duration::from_secs(
+        codex
+            .pointer("/mcp_servers/termal-delegation/tool_timeout_sec")
+            .and_then(Value::as_u64)
+            .expect("Codex should be told how long a TermAl tool call may take"),
+    );
+    for &call in DelegationLongCall::ALL {
+        let wait = bridge.allowance(call);
+        assert!(wait > TERMAL_DELEGATION_MCP_HTTP_TIMEOUT, "{call:?}");
+        assert!(
+            tool_timeout > wait,
+            "{call:?}: {tool_timeout:?} <= {wait:?}"
+        );
+    }
+    assert!(tool_timeout > Duration::from_secs(60));
+    // The follow-up's request goes out with its allowance.
+    let followup = bridge
+        .followup_request(
+            "/api/sessions/session-parent/delegations/d/followup",
+            &json!({}),
+        )
+        .build()
+        .unwrap();
+    assert_eq!(
+        followup.timeout().copied(),
+        Some(bridge.allowance(DelegationLongCall::Followup))
+    );
+}
+
+#[test]
+fn delegation_mcp_wait_description_states_the_codex_cut() {
+    let tools = mcp_tools_list_result();
+    let description = tools["tools"]
+        .as_array()
+        .expect("a tool list")
+        .iter()
+        .find(|tool| tool["name"] == "termal_wait_delegations")
+        .and_then(|tool| tool["description"].as_str())
+        .expect("the wait tool describes itself")
+        .to_owned();
+    let seconds = termal_delegation_mcp_codex_tool_timeout()
+        .as_secs_f64()
+        .ceil() as u64;
+    assert!(
+        description.contains(&format!("cut off after {seconds} seconds")),
+        "{description}"
+    );
+    assert!(
+        description.contains("termal_resume_after_delegations"),
+        "{description}"
     );
 }
 

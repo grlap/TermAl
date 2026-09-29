@@ -441,10 +441,10 @@ fn live_root_deadline_retains_cancelable_orchestrator_prompt() {
         "deadline",
         [BoundaryFault::DelayAfterReply {
             operation: "turn_evaluate",
-            delay: Duration::from_secs(11),
+            delay: Duration::from_millis(ENGRAM_DISPATCH_BUDGET_MS) + Duration::from_secs(1),
         }],
     );
-    let prompt = "Preserve orchestrator intent across the real ten-second admission deadline.";
+    let prompt = "Preserve orchestrator intent across the real admission deadline.";
     let started = std::time::Instant::now();
     let dispatch = dispatch_live_root(
         &fixture.state,
@@ -454,7 +454,7 @@ fn live_root_deadline_retains_cancelable_orchestrator_prompt() {
     );
     deliver_turn_dispatch(&fixture.state, dispatch)
         .expect("deadline is waiting, not a policy denial");
-    assert!(started.elapsed() >= Duration::from_secs(10));
+    assert!(started.elapsed() >= Duration::from_millis(ENGRAM_DISPATCH_BUDGET_MS));
     assert!(fixture.receiver.try_recv().is_err());
     assert!(fixture.transport.requests_for("turn_begin").is_empty());
     let id = {
@@ -585,9 +585,9 @@ fn live_root_writer_contention_and_retired_sidecar_still_admit_once() {
 fn live_root_default_budget_allows_replies_beyond_the_retired_limits() {
     assert_eq!(
         EngramProjectSettings::default().call_timeout(),
-        Duration::from_secs(10)
+        Duration::from_secs(20)
     );
-    assert_eq!(ENGRAM_DISPATCH_BUDGET_MS, 10_000);
+    assert_eq!(ENGRAM_DISPATCH_BUDGET_MS, 20_000);
 
     for (suffix, queued_source) in [
         ("delayed-direct", None),
@@ -633,7 +633,7 @@ fn live_root_default_budget_allows_replies_beyond_the_retired_limits() {
                 .expect("delayed operation should be observed");
             assert_eq!(observation.disposition, "delayed_after_reply");
             assert!(observation.elapsed > OLD_CALL_TIMEOUT);
-            assert!(observation.timeout <= Duration::from_secs(10));
+            assert!(observation.timeout <= Duration::from_millis(ENGRAM_DISPATCH_BUDGET_MS));
             assert!(observation.timeout > OLD_CALL_TIMEOUT);
         }
 

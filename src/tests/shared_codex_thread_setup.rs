@@ -1082,6 +1082,13 @@ engram_home = "case-colliding-home"
                 .is_some_and(|args| args.iter().any(|arg| arg == "delegation-mcp")),
             "the winning TermAl descriptor must launch the delegation bridge"
         );
+        assert!(
+            request
+                .pointer("/params/config/mcp_servers/termal-delegation/tool_timeout_sec")
+                .and_then(Value::as_u64)
+                .is_some_and(|seconds| seconds > 60),
+            "the winning TermAl descriptor must tell Codex to wait out the bridge"
+        );
         assert_eq!(
             request.pointer("/params/config/shell_environment_policy/inherit"),
             Some(&json!("none")),

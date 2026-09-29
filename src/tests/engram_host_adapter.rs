@@ -36,6 +36,9 @@ mod held_claims;
 #[path = "engram_phase_compat.rs"]
 mod phase_compat;
 
+#[path = "engram_unqueued_bind_budget.rs"]
+mod unqueued_bind_budget;
+
 use self::control_transport::{
     assert_engram_control_descendant_was_terminated, prepare_engram_control_process_tree_fixture,
 };

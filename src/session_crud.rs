@@ -1878,11 +1878,11 @@ impl AppState {
             .to_owned();
         if settings
             .deadline_ms
-            .is_some_and(|deadline_ms| deadline_ms == 0 || deadline_ms > 10_000)
+            .is_some_and(|deadline_ms| deadline_ms == 0 || deadline_ms > ENGRAM_MAX_CALL_TIMEOUT_MS)
         {
-            return Err(ApiError::bad_request(
-                "Engram deadline must be between 1 and 10000 ms",
-            ));
+            return Err(ApiError::bad_request(format!(
+                "Engram deadline must be between 1 and {ENGRAM_MAX_CALL_TIMEOUT_MS} ms",
+            )));
         }
         let (project_snapshot, retired_work_authority_grants) = {
             let inner = self.inner.lock().expect("state mutex poisoned");

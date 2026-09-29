@@ -843,7 +843,7 @@ fn review_freeze_git_failures_retain_operation_timing_budget_and_cause() {
         );
         assert!(
             rendered
-                .contains("remaining shared budget at call start: 7s; total shared budget: 20s"),
+                .contains("remaining shared budget at call start: 7s; total shared budget: 40s"),
             "{rendered}"
         );
         assert_eq!(error.chain().last().unwrap().to_string(), cause);

@@ -1,7 +1,15 @@
 // New host-owned review verification transport. Owns bounded child observation;
 // does not execute repository scripts, interpret shell text, or change policy.
 
-const REVIEW_FREEZE_TIMEOUT: Duration = Duration::from_secs(20);
+/// The shared budget of every pinned Git call of one freeze (and of the
+/// content revisions and source bases that reuse it). Doubled from 20 s on
+/// Greg's decision (2026-09-28): under CPU load Git calls take seconds each,
+/// in the running host as in the tests.
+const REVIEW_FREEZE_TIMEOUT: Duration = Duration::from_secs(40);
+/// How much longer than `REVIEW_FREEZE_TIMEOUT` the parent watches the
+/// `termal review-freeze-check` child, so the child's own budget, not the
+/// parent's wait, decides a slow freeze.
+const REVIEW_FREEZE_OBSERVER_GRACE: Duration = Duration::from_secs(5);
 const REVIEW_FREEZE_OUTPUT_LIMIT: usize = 128 * 1024 * 1024;
 
 #[derive(Serialize)]

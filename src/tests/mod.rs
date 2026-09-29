@@ -67,6 +67,7 @@ mod json_rpc;
 mod kimi;
 mod kimi_approvals;
 mod kimi_read_only;
+mod load_sensitive_limits;
 mod mailboxes;
 mod opencode_approvals;
 mod opencode_config;
@@ -724,6 +725,45 @@ fn write_test_http_response(
     content_type: &str,
     body: &str,
 ) {
+    if let Err(error) = try_write_test_http_response(stream, status, content_type, body) {
+        panic!("test response should write and shut down: {error:?}");
+    }
+}
+
+/// `write_test_http_response` for a response the product may abandon. A
+/// remote create whose remote is replaced mid-request rejects the response
+/// once its headers arrive, without reading the body, and its client may
+/// then close the connection, abortively when unread bytes remain, which
+/// resets it before the write side shuts down. A peer that has gone is
+/// therefore no fixture failure here: whether the product used the response
+/// is for the test's own assertions to judge. Any other error still fails.
+fn write_test_http_response_peer_may_abandon(
+    stream: &mut std::net::TcpStream,
+    status: StatusCode,
+    content_type: &str,
+    body: &str,
+) {
+    if let Err(error) = try_write_test_http_response(stream, status, content_type, body) {
+        assert!(
+            matches!(
+                error.kind(),
+                std::io::ErrorKind::ConnectionReset
+                    | std::io::ErrorKind::ConnectionAborted
+                    | std::io::ErrorKind::BrokenPipe
+                    | std::io::ErrorKind::NotConnected
+            ),
+            "test response should reach the peer or find it gone: {error:?}"
+        );
+    }
+}
+
+/// Writes one complete response and shuts the write side down.
+fn try_write_test_http_response(
+    stream: &mut std::net::TcpStream,
+    status: StatusCode,
+    content_type: &str,
+    body: &str,
+) -> std::io::Result<()> {
     let headers = format!(
         "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nConnection: close\r\nContent-Length: {}\r\n\r\n",
         status.as_u16(),
@@ -731,16 +771,10 @@ fn write_test_http_response(
         content_type,
         body.len(),
     );
-    stream
-        .write_all(headers.as_bytes())
-        .expect("test response headers should write");
-    stream
-        .write_all(body.as_bytes())
-        .expect("test response body should write");
-    stream.flush().expect("test response should flush");
-    stream
-        .shutdown(std::net::Shutdown::Write)
-        .expect("test response write side should shut down");
+    stream.write_all(headers.as_bytes())?;
+    stream.write_all(body.as_bytes())?;
+    stream.flush()?;
+    stream.shutdown(std::net::Shutdown::Write)
 }
 
 fn test_app_state() -> AppState {

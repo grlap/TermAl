@@ -103,7 +103,7 @@ fn spawn_remote_create_response_server(
             before_response
                 .take()
                 .expect("remote create callback should run once")();
-            write_test_http_response(
+            write_test_http_response_peer_may_abandon(
                 &mut stream,
                 StatusCode::CREATED,
                 "application/json",

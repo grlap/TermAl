@@ -136,12 +136,50 @@ fn root_unknown_bind_is_durable_and_cancelable_without_provider_delivery() {
 }
 
 #[test]
-fn root_default_admission_budget_is_ten_seconds() {
+fn root_default_admission_budget_is_twenty_seconds() {
     assert_eq!(
         EngramProjectSettings::default().call_timeout(),
-        Duration::from_secs(10)
+        Duration::from_secs(20)
     );
-    assert_eq!(ENGRAM_DISPATCH_BUDGET_MS, 10_000);
+    assert_eq!(ENGRAM_DISPATCH_BUDGET_MS, 20_000);
+}
+
+#[test]
+fn a_project_may_bound_an_engram_call_up_to_twenty_seconds() {
+    // The deadline check runs before the project is looked up, so an
+    // unknown project shows what the check alone decides.
+    let state = test_app_state();
+    let update = |deadline_ms| {
+        state
+            .update_project_engram_settings(
+                "no-such-project",
+                EngramProjectSettings {
+                    deadline_ms: Some(deadline_ms),
+                    ..Default::default()
+                },
+            )
+            .err()
+            .expect("an unknown project is never updated")
+    };
+    for refused in [0, 20_001] {
+        let error = update(refused);
+        assert_eq!(error.status, StatusCode::BAD_REQUEST, "{refused}");
+        assert!(
+            error
+                .message
+                .contains("Engram deadline must be between 1 and 20000 ms"),
+            "{refused}: {}",
+            error.message
+        );
+    }
+    // The cap itself passes the check and reaches the project lookup.
+    let error = update(20_000);
+    assert_eq!(error.status, StatusCode::NOT_FOUND, "{}", error.message);
+    assert!(
+        error.message.contains("project not found"),
+        "{}",
+        error.message
+    );
 }
 
 #[test]

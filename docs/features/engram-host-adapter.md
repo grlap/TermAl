@@ -96,7 +96,7 @@ Readiness must return an exit-0 v1 receipt with `scope: readiness`, `ready: true
 project id with `.engram-project` and the canonical database with the expected
 SHA-256 project path under the selected home. Matched stored/resolved host-path
 policy is required; unresolved or unbound reads do not authorize enablement.
-Verify/Save have a ten-second process budget; unsupported older binaries,
+Verify/Save have a twenty-second process budget; unsupported older binaries,
 malformed receipts, nonzero exits and timeouts fail closed, never falling back
 to doctor or silently initializing/repairing a store. Engram may probe the
 checkout with a temporary file to resolve filesystem identity.
@@ -390,7 +390,7 @@ The tracking, a debounced hint, decides alone only when the closing basis is
 missing; a turn whose begin-time basis is missing but whose closing basis
 exists cannot be cleared by the comparison and is reported as a change under
 a grant that mediates local mutation, the conservative answer. Each capture
-runs under the reviewer's shared twenty-second freeze budget, because a turn
+runs under the reviewer's shared forty-second freeze budget, because a turn
 closes at the host's busiest moment and a tighter bound would drop the basis
 when Git is merely slow; at the close the capture is taken before the
 checkpoint is claimed, so session teardown's settle wait for a checkpoint
@@ -498,7 +498,7 @@ shape, then compares it for equality.
   with `:` or `\`), a file that changes while it is read or cannot be read
   for any reason but absence, or an exceeded bound (200,000 paths, tracked
   and untracked together, 128 MiB for one file, 512 MiB read in all, the
-  twenty-second budget; a revision finished after the budget is not
+  forty-second budget; a revision finished after the budget is not
   returned). On a filesystem that ignores case, a tracked directory renamed
   in case only fails the path check the same way, because the index still
   spells it the old way. So does a tracked `.gitattributes` deleted from the
@@ -664,7 +664,7 @@ happens elsewhere. The agent therefore names the item's worktree once with
   project with Engram turned off, can be neither read nor cleared, so it
   stays until that session is removed; the full-list refusal names each
   entry's store.
-- **How long naming takes.** One budget of 40 seconds on the server covers
+- **How long naming takes.** One budget of 82 seconds on the server covers
   the held-claims reads, the path's validation (on its own thread), the
   reclaim and the captures (each capture counted with the turns' capture
   threads); what has not started when it runs out is skipped
@@ -679,7 +679,10 @@ happens elsewhere. The agent therefore names the item's worktree once with
   that budget on top of its normal request timeout, so a tool call that
   reports a failure never leaves a name the server kept. The budget starts
   when the handler runs: the time the request waits for a blocking worker,
-  and the final write of the state, fall within that normal timeout.
+  and the final write of the state, fall within that normal timeout. A Codex
+  caller waits longer still: TermAl gives Codex the delegation server's
+  `tool_timeout_sec`, covering the longest bridge allowance
+  ([Agent delegation sessions](./agent-delegation-sessions.md#completed-codex-child-thread-lifecycle)).
 - **What the agent and the operator see.**
   - *The checkpoint card* of a bound turn names where it was measured: the
     root and the item, or "session workdir (no worktree named)". The card
@@ -1150,7 +1153,7 @@ dispatch.
 
 ### Authorization timeout and retained prompts
 
-Ordinary gated admission uses one ten-second remaining-time budget across the
+Ordinary gated admission uses one twenty-second remaining-time budget across the
 work-binding read, binding, evaluation, begin, and host persistence
 acknowledgements. Base
 context reads remain a separate operation. A timeout or unavailable transport
@@ -1184,12 +1187,13 @@ or follow-up keeps its original prompt. An immutable mailbox head also covers
 its original wake boundary: recovery does not insert a second copy of that wake,
 while genuinely newer inbound sequences remain separate.
 
-The default timeout for an individual control call is also ten seconds (or the
-configured project call timeout). Outside admission this bounds each completion,
+The default timeout for an individual control call is also twenty seconds (or
+the configured project call timeout, which may not exceed twenty seconds).
+Outside admission this bounds each completion,
 project-reset or stale-begin checkpoint independently; these calls do not share
 the admission deadline. A completion checkpoint can
 therefore delay the next queued turn by that call timeout. Admission itself still
-uses one shared ten-second budget, not ten seconds per step.
+uses one shared twenty-second budget, not twenty seconds per step.
 
 Prepared bind and evaluation requests live on the existing queued prompt. They
 are acknowledged by the host persistence writer before transmission, retain
@@ -1252,7 +1256,7 @@ and all three presence flags false is admitted. The producer checks the session
 row, **all** grant rows for that session, and the retained grant anywhere in the
 store, including project mismatches and orphan rows. Missing/older commands,
 malformed or oversized receipts, nonzero exits and unresolved identity refuse
-recovery. A Save shares one ten-second inspection deadline, starting at the
+recovery. A Save shares one twenty-second inspection deadline, starting at the
 first eligible probe. Every later probe, pipe collection and evidence admission
 uses that same deadline; exhausted budgets refuse the Save and retain authority.
 The 16 KiB receipt limit applies per probe. This is not a bound on the whole
@@ -1341,7 +1345,7 @@ for want of evaluator authority.
    first, over a minute on a large one, so it is never the per-request read.
    An empty list is refused: that store does not evaluate acceptance. A
    missing key, or a read that fails (an older binary has no `show`) or
-   exceeds its 10-second bound, leaves the set unknown and refuses nothing:
+   exceeds its 20-second bound, leaves the set unknown and refuses nothing:
    the tracker enforces its policy when the evaluation is recorded;
 4. selects the mode: the task's pin, else the project's default when explicitly admitted,
    else `independent_session` when admitted
@@ -1686,7 +1690,7 @@ outcome: the exact payload/key remains retained for original-store recovery.
 A successful command returns `writeApplied: true`, even when a following read
 fails or the project settings change; an unavailable snapshot explains that the
 change applied to the selected store and disables further editing until refresh.
-Read and write process calls have a ten-second
+Read and write process calls have a twenty-second
 bound (policy reads retain the existing lock retry). Each router has two
 nonwaiting display-read slots and one separate policy-write slot. Aborted display
 reads may finish their bounded CLI work, but cannot consume the write slot.

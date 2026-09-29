@@ -45,9 +45,10 @@ const TERMAL_DELEGATION_DURABLE_APPEND_RETRY_CLAUSE: &str =
 /// then dephased per session by deterministic jitter (see
 /// `safe_replay_retry_jitter_percent`) so peers released by the same
 /// saturation event do not re-collide in lockstep. The WHOLE helper honors a
-/// single `request_timeout` budget: each attempt's HTTP timeout shrinks to
-/// the remaining budget, and no replay is attempted unless the remaining
-/// budget can fund its delay plus
+/// single budget its caller supplies (one `request_timeout`, or a long call's
+/// allowance such as `DelegationLongCall::MailboxSend`): each attempt's HTTP
+/// timeout shrinks to the remaining budget, and no replay is attempted unless
+/// the remaining budget can fund its delay plus
 /// `TERMAL_DELEGATION_SAFE_REPLAY_MIN_REPLAY_BUDGET` of useful request time —
 /// the caller then sees the last typed rejection rather than a
 /// budget-starved transport error. A cumulative end-to-end deadline across a
@@ -320,8 +321,12 @@ fn termal_delegation_mcp_codex_config_with_command(
     parent_session_id: &str,
     base_url: &str,
 ) -> Value {
-    let server =
-        termal_delegation_mcp_stdio_config_with_command(command, parent_session_id, base_url);
+    let mut server = json!(termal_delegation_mcp_stdio_config_with_command(
+        command,
+        parent_session_id,
+        base_url
+    ));
+    server["tool_timeout_sec"] = json!(termal_delegation_mcp_codex_tool_timeout_secs());
     let termal_env = termal_agent_process_env_with_command(command, parent_session_id, base_url);
     json!({
         "mcp_servers": {
@@ -677,6 +682,10 @@ struct TermalDelegationMcpBridge {
     // asserted without real waiting (no-flaky-tests law: no timing
     // assumptions, no wall-clock dependence).
     safe_replay_retry_sleeper: fn(Duration),
+    /// What a call that delivers a turn inline may spend beyond an ordinary
+    /// request (`termal_delegation_turn_delivery_budget`); tests may inject
+    /// a smaller one so a withheld response does not hold them for it.
+    turn_delivery_budget: Duration,
 }
 
 /// Root-versus-child classification of the session a bridge serves. The
@@ -770,6 +779,7 @@ impl TermalDelegationMcpBridge {
             caller_allows_review_freeze: OnceLock::new(),
             caller_allows_acceptance_evaluation: OnceLock::new(),
             safe_replay_retry_sleeper: std::thread::sleep,
+            turn_delivery_budget: termal_delegation_turn_delivery_budget(),
         })
     }
 
@@ -878,13 +888,7 @@ impl TermalDelegationMcpBridge {
             "termal_cancel_session" => self.tool_cancel_session(arguments),
             "termal_followup_session" => self.tool_followup_session(arguments),
             "termal_submit_review_result" => self.tool_submit_review_result(arguments),
-            "termal_review_freeze_check" => self.post_json(
-                &format!(
-                    "/api/sessions/{}/delegation-review-freeze",
-                    self.serving_session_id
-                ),
-                &arguments,
-            ),
+            "termal_review_freeze_check" => self.tool_review_freeze_check(arguments),
             "termal_evaluate_acceptance" => self.tool_evaluate_acceptance(arguments),
             "termal_submit_acceptance_evaluation" => {
                 self.tool_submit_acceptance_evaluation(arguments)
@@ -944,17 +948,27 @@ impl TermalDelegationMcpBridge {
             "writePolicy".to_owned(),
             canonical_mcp_write_policy(write_policy)?,
         );
-        self.post_json(
-            &format!("/api/sessions/{}/delegations", self.serving_session_id),
-            &Value::Object(body),
-        )
-        .map(|response| {
-            if include_session {
-                response
-            } else {
-                compact_mcp_spawn_result(response)
-            }
-        })
+        // Single attempt: a spawn creates a child. The server binds the parent
+        // and the child and delivers the child's first turn before it answers.
+        let path = format!("/api/sessions/{}/delegations", self.serving_session_id);
+        self.post_long_call(DelegationLongCall::Spawn, &path, &Value::Object(body))
+            .map(|response| {
+                if include_session {
+                    response
+                } else {
+                    compact_mcp_spawn_result(response)
+                }
+            })
+            .map_err(|err| {
+                if termal_delegation_outcome_is_unknown(&err) {
+                    let message = format!(
+                        "the spawn's outcome is unknown: the child may already exist. Call \
+                         termal_list_delegations before spawning again: {err}"
+                    );
+                    return termal_delegation_unknown_outcome(&err, message);
+                }
+                err
+            })
     }
 
     fn tool_list_delegations(&self, _arguments: Value) -> Result<Value> {
@@ -977,29 +991,20 @@ impl TermalDelegationMcpBridge {
             self.serving_session_id
         );
         // Single attempt: the host refuses a second active evaluator, but a
-        // replay after the first one finished would still spawn another. The
-        // backend bounds its tracker reads by the same budget before the
-        // ordinary creation work, so the HTTP allowance is that budget on top
-        // of the normal one.
-        self.decode_response(
-            "POST",
+        // replay after the first one finished would still spawn another.
+        self.post_long_call(
+            DelegationLongCall::EvaluationRequest,
             &path,
-            self.client
-                .post(self.url(&path))
-                .timeout(acceptance_evaluation_request_tracker_budget() + self.request_timeout)
-                .json(&Value::Object(body))
-                .send(),
+            &Value::Object(body),
         )
         .map(|response| compact_acceptance_evaluation_request_result(&response))
         .map_err(|err| {
-            if err
-                .downcast_ref::<TermalDelegationTransportError>()
-                .is_some()
-            {
-                return anyhow!(
+            if termal_delegation_outcome_is_unknown(&err) {
+                let message = format!(
                     "the acceptance evaluation request outcome is unknown: an evaluator may \
                      already be running. Call termal_list_delegations before asking again: {err}"
                 );
+                return termal_delegation_unknown_outcome(&err, message);
             }
             err
         })
@@ -1011,30 +1016,18 @@ impl TermalDelegationMcpBridge {
             self.serving_session_id
         );
         // Single attempt: the tracker's attempt key, not this bridge, makes
-        // the evaluator's own resend safe. The backend may run the tracker
-        // twice to resolve an unknown outcome and waits for the writer to
-        // acknowledge its state before and after, so the allowance covers that.
-        self.decode_response(
-            "POST",
-            &path,
-            self.client
-                .post(self.url(&path))
-                .timeout(acceptance_evaluation_submit_budget() + self.request_timeout)
-                .json(&arguments)
-                .send(),
-        )
-        .map_err(|err| {
-            if err
-                .downcast_ref::<TermalDelegationTransportError>()
-                .is_some()
-            {
-                return anyhow!(
-                    "the submission's outcome is unknown: the tracker may hold it. Submit exactly \
-                     the same verdicts again; the tracker replays them: {err}"
-                );
-            }
-            err
-        })
+        // the evaluator's own resend safe.
+        self.post_long_call(DelegationLongCall::EvaluationSubmit, &path, &arguments)
+            .map_err(|err| {
+                if termal_delegation_outcome_is_unknown(&err) {
+                    let message = format!(
+                        "the submission's outcome is unknown: the tracker may hold it. Submit exactly \
+                         the same verdicts again; the tracker replays them: {err}"
+                    );
+                    return termal_delegation_unknown_outcome(&err, message);
+                }
+                err
+            })
     }
 
     fn resolve_spawn_prompt_if_agent_command(
@@ -1196,9 +1189,10 @@ impl TermalDelegationMcpBridge {
             "/api/sessions/{}/delegations/{}/followup",
             self.serving_session_id, delegation_id
         );
-        self.decode_response(
+        self.decode_response_within(
             "POST",
             &path,
+            self.allowance(DelegationLongCall::Followup),
             self.followup_request(&path, &json!({ "message": message }))
                 .send(),
         )
@@ -1209,13 +1203,9 @@ impl TermalDelegationMcpBridge {
         // to replay blindly. Allow all serial recovery waits before the normal
         // HTTP allowance for admission/persistence. Contended recovery fails
         // fast instead of waiting for another caller's resume lock.
-        let recovery = CODEX_CHILD_RELEASE_WAIT_TIMEOUT
-            + CODEX_THREAD_RECONCILIATION_REPLY_TIMEOUT * 2
-            + CODEX_CHILD_RESULT_FENCE_TIMEOUT
-            + CODEX_CHILD_UNARCHIVE_REPLY_TIMEOUT;
         self.client
             .post(self.url(path))
-            .timeout(recovery + self.request_timeout)
+            .timeout(self.allowance(DelegationLongCall::Followup))
             .json(body)
     }
 
@@ -1257,7 +1247,11 @@ impl TermalDelegationMcpBridge {
         }
         let path = format!("/api/sessions/{}/mailboxes/send", self.serving_session_id);
         let response = self
-            .post_json_with_safe_replay(&path, &Value::Object(body))
+            .post_json_with_safe_replay_within(
+                &path,
+                &Value::Object(body),
+                self.allowance(DelegationLongCall::MailboxSend),
+            )
             .map_err(mailbox_send_bridge_error)?;
         let receipt =
             serde_json::from_value::<MailboxAppendReceipt>(response).map_err(|source| {
@@ -1691,7 +1685,12 @@ impl TermalDelegationMcpBridge {
                     "results": [],
                 }));
             }
-            std::thread::sleep(Duration::from_millis(poll_interval_ms));
+            // Never past the deadline: the next round answers timedOut then.
+            std::thread::sleep(termal_delegation_wait_poll_sleep(
+                Duration::from_millis(poll_interval_ms),
+                deadline,
+                std::time::Instant::now(),
+            ));
         }
     }
 
@@ -1869,19 +1868,13 @@ impl TermalDelegationMcpBridge {
     /// deliberately single-attempt so future endpoints cannot inherit replay
     /// merely by returning matching prose.
     fn get_json_with_safe_replay(&self, path: &str) -> Result<Value> {
-        self.request_json_with_safe_replay_retry("GET", path, |remaining| {
+        self.request_json_with_safe_replay_retry("GET", path, self.request_timeout, |remaining| {
             self.client.get(self.url(path)).timeout(remaining).send()
         })
     }
 
     fn post_json_with_safe_replay(&self, path: &str, body: &Value) -> Result<Value> {
-        self.request_json_with_safe_replay_retry("POST", path, |remaining| {
-            self.client
-                .post(self.url(path))
-                .timeout(remaining)
-                .json(body)
-                .send()
-        })
+        self.post_json_with_safe_replay_within(path, body, self.request_timeout)
     }
 
     /// Replays a request while the backend answers with a typed safe-replay
@@ -1889,9 +1882,10 @@ impl TermalDelegationMcpBridge {
     /// is provably safe). The closure rebuilds the request from scratch on every
     /// attempt — with a per-attempt HTTP timeout shrunk to the remaining
     /// overall budget — so GET and POST share one bounded policy and the
-    /// whole helper can never exceed one `request_timeout` of wall time
-    /// (apart from scheduler overhead; the jittered sleeps burn down the same
-    /// deadline). Anything else — transport failures, other
+    /// whole helper can never exceed its `budget` of wall time (one
+    /// `request_timeout`, or a longer allowance such as
+    /// `DelegationLongCall::MailboxSend`; apart from scheduler overhead, the jittered
+    /// sleeps burn down the same deadline). Anything else — transport failures, other
     /// statuses, even other 503s — returns on the first attempt untouched:
     /// without a recognized write or read safety clause there is no
     /// structural guarantee that replay is safe, and blind replay would be
@@ -1900,16 +1894,19 @@ impl TermalDelegationMcpBridge {
         &self,
         method: &'static str,
         path: &str,
+        budget: Duration,
         send: impl Fn(Duration) -> std::result::Result<reqwest::blocking::Response, reqwest::Error>,
     ) -> Result<Value> {
-        let deadline = std::time::Instant::now() + self.request_timeout;
+        let deadline = std::time::Instant::now() + budget;
         let mut completed_attempts = 0u32;
         loop {
             completed_attempts += 1;
             let remaining = deadline
                 .saturating_duration_since(std::time::Instant::now())
                 .max(Duration::from_millis(1));
-            let result = self.decode_response(method, path, send(remaining));
+            // A transport error names the whole budget, not what this attempt
+            // had left of it.
+            let result = self.decode_response_within(method, path, budget, send(remaining));
             let retry = completed_attempts < TERMAL_DELEGATION_SAFE_REPLAY_RETRY_ATTEMPTS
                 && result
                     .as_ref()
@@ -1944,58 +1941,17 @@ impl TermalDelegationMcpBridge {
         path: &str,
         response: std::result::Result<reqwest::blocking::Response, reqwest::Error>,
     ) -> Result<Value> {
-        let response = response.map_err(|source| TermalDelegationTransportError {
-            method,
-            path: path.to_owned(),
-            phase: "sending request",
-            timeout: self.request_timeout,
-            source,
-        })?;
-        let status = response.status();
-        let text = response
-            .text()
-            .map_err(|source| TermalDelegationTransportError {
-                method,
-                path: path.to_owned(),
-                phase: "reading response body",
-                timeout: self.request_timeout,
-                source,
-            })?;
-        if status.is_success() {
-            return serde_json::from_str(&text).map_err(|source| {
-                TermalDelegationResponseError {
-                    method,
-                    path: path.to_owned(),
-                    message: format!("failed to parse successful response JSON: {source}"),
-                }
-                .into()
-            });
-        }
-        let message = serde_json::from_str::<Value>(&text)
-            .ok()
-            .and_then(|value| {
-                value
-                    .get("error")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned)
-            })
-            .unwrap_or(text);
-        Err(TermalDelegationApiError { status, message }.into())
+        self.decode_response_within(method, path, self.request_timeout, response)
     }
 }
 
 fn mailbox_send_bridge_error(err: anyhow::Error) -> anyhow::Error {
-    if err
-        .downcast_ref::<TermalDelegationTransportError>()
-        .is_some()
-        || err
-            .downcast_ref::<TermalDelegationResponseError>()
-            .is_some()
-    {
-        return anyhow!(
+    if termal_delegation_outcome_is_unknown(&err) {
+        let message = format!(
             "mailbox send receipt was not received; the append outcome is unknown. Retry with the \
              same idempotencyKey to recover the original receipt safely: {err}"
         );
+        return termal_delegation_unknown_outcome(&err, message);
     }
     err
 }
@@ -2084,13 +2040,7 @@ fn correlate_board_receipt(
 /// `duplicate: true`, an uncommitted one applies fresh. Typed non-2xx API
 /// errors (400/404/409/503) pass through unchanged: their outcome is known.
 fn board_set_bridge_error(err: anyhow::Error) -> anyhow::Error {
-    if err
-        .downcast_ref::<TermalDelegationTransportError>()
-        .is_some()
-        || err
-            .downcast_ref::<TermalDelegationResponseError>()
-            .is_some()
-    {
+    if termal_delegation_outcome_is_unknown(&err) {
         return anyhow!(
             "board update receipt was not received; the write outcome is unknown. Retry the \
              exact same request with the SAME idempotencyKey: a committed write replays as \
@@ -2101,13 +2051,7 @@ fn board_set_bridge_error(err: anyhow::Error) -> anyhow::Error {
 }
 
 fn mailbox_acknowledgement_bridge_error(err: anyhow::Error) -> anyhow::Error {
-    if err
-        .downcast_ref::<TermalDelegationTransportError>()
-        .is_some()
-        || err
-            .downcast_ref::<TermalDelegationResponseError>()
-            .is_some()
-    {
+    if termal_delegation_outcome_is_unknown(&err) {
         return anyhow!(
             "mailbox acknowledgement response was not received; the cursor outcome is unknown. \
              For receipt acknowledgement, retry the same receipt unchanged. \
@@ -2458,7 +2402,10 @@ fn mcp_tools_list_result() -> Value {
             },
             {
                 "name": "termal_wait_delegations",
-                "description": "Synchronously poll parent-scoped delegations until any/all are terminal or timeout.",
+                "description": format!(
+                    "Synchronously poll parent-scoped delegations until any/all are terminal or timeout. A Codex caller is cut off after {} seconds, the delegation server's tool timeout, which covers the default wait on one delegation; a longer call gets Codex's error instead of the wait's answer, while the wait still runs here and holds this server's later calls, which Codex may cut while they wait though they still run: ask for a shorter timeoutMs, or schedule termal_resume_after_delegations instead of a long wait.",
+                    termal_delegation_mcp_codex_tool_timeout_secs()
+                ),
                 "inputSchema": {
                     "type": "object",
                     "required": ["delegationIds"],
