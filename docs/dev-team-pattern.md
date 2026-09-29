@@ -37,8 +37,10 @@ are grounded in its own greps and test runs, never in the implementer's
 summary alone.
 
 **The formal review gate — separate from both.** The repository-required
-dual `/review-changes` round (independent Codex + Claude `/review-code`
-children) is the only authority for check-in. The referee's audits explicitly
+dual `/review-changes` round (two independent read-only `/review-code`
+children of different vendors — Codex and Claude, with Kimi standing in for
+an unavailable Codex as CLAUDE.md's Commit and push section describes) is
+the only authority for check-in. The referee's audits explicitly
 never substitute for it. This is the rule that keeps advisory involvement
 from becoming false confidence.
 
@@ -167,8 +169,10 @@ the normal dual gate. The formal gate never tiers down.
 - **Correlated blind spots.** The referee's design advice shapes what the
   Claude gate-reviewer later reviews — partially reviewing its own family's
   thinking. Mitigations that held: the gate stays blind to design
-  provenance; both vendors always sit in the formal gate regardless of who
-  designed or implemented; the empirical parity gates carry objectivity no
+  provenance; two different vendors always sit in the formal gate regardless
+  of who designed or implemented — Codex and Claude, or Kimi in place of an
+  unavailable Codex, as the formal review gate above describes; the
+  empirical parity gates carry objectivity no
   model shares.
 - **Advisory false confidence.** Mitigated by the standing rule that the
   referee's CLEAN verdict is advisory and the dual gate alone authorizes

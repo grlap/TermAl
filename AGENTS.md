@@ -97,11 +97,22 @@ in Engram::Advisor's session, recorded verbatim):
 
 - A changeset may be committed without a further permission round trip only
   when all three hold for the exact tree committed:
-  1. The review pair (`/review-changes`: one Codex and one Claude
-     `/review-code` child, `writePolicy: readOnly`) has no outstanding
-     in-scope findings on the reviewed input, Low and Note included.
-     Pre-existing defects outside the change's scope, filed as their own
-     items with provenance, do not block.
+  1. The review pair (`/review-changes`: two independent read-only
+     `/review-code` children of different vendors, one Codex and one
+     Claude, `writePolicy: readOnly`; while Codex is unavailable — a usage
+     limit or outage met in this round, recorded on the item with the
+     refusal text — Kimi stands in for it, and an unavailable Claude
+     reviewer has no stand-in, under Greg's word to Termal::Opus2 of
+     2026-09-28, 21:20Z, 'let's go with 3. we could try how the new model
+     is working' (option 3 being Kimi as the
+     second reviewer while Codex is out), and to Engram::Opus of
+     2026-09-29, 'if clean you have a go', 'you should just check-in, that
+     should be the rule') has no outstanding in-scope findings on the
+     reviewed input, Low and Note included. Pre-existing defects outside
+     the change's scope, filed as their own items with provenance, do not
+     block. Engram's amendment of the same rule is its commit fc3c3aa; the
+     two coordinators decided on 2026-09-29 to narrow both projects' rule
+     to an unavailable Codex.
   2. The full gate is green on exactly that input, compiled from it, before
      every commit whether or not a commit prompt is shown.
   3. The tasks carry the evidence needed to close them.

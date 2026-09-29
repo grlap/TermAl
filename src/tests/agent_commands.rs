@@ -2856,7 +2856,7 @@ fn assert_command_excludes(command: &str, unexpected: &str, reason: &str) {
 // `/review-changes` owns top-level reviewer orchestration and must not
 // keep the parent turn active while waiting for reviewer fan-in.
 #[test]
-fn review_changes_pins_two_child_resume_wait_flow() {
+fn review_changes_pins_two_review_resume_wait_flow() {
     let review_changes = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/.claude/commands/review-changes.md"
@@ -2864,8 +2864,63 @@ fn review_changes_pins_two_child_resume_wait_flow() {
 
     assert_command_contains(
         review_changes,
+        "obtain the review pair — at most two reviews that count",
+        "/review-changes must bound the review to two reviews that count",
+    );
+    assert_command_contains(
+        review_changes,
+        "A round that ends with fewer than two reviews reports the missing reviewer as unavailable, spawns no further reviewer, and does not satisfy the commit rule's review pair.",
+        "/review-changes must not promise two reviews nor respawn to reach them",
+    );
+    assert_command_contains(
+        review_changes,
+        "at most one Kimi stand-in replacing an unavailable Codex reviewer",
+        "/review-changes must admit at most one stand-in, only for an unavailable Codex",
+    );
+    assert_command_contains(
+        review_changes,
+        "An unavailable Claude reviewer is reported as unavailable; no stand-in replaces it.",
+        "/review-changes must give an unavailable Claude reviewer no stand-in",
+    );
+    assert_command_contains(
+        review_changes,
+        "so a round makes at most three spawns and counts no more than two reviews",
+        "/review-changes must bound a round to three spawns and two counted reviews",
+    );
+    assert_command_contains(
+        review_changes,
+        "Never two reviewers of one vendor.",
+        "/review-changes must never count two reviewers of one vendor",
+    );
+    assert_command_contains(
+        review_changes,
+        "the stand-in is accepted only for an unavailable Codex",
+        "/review-changes must accept the stand-in only for an unavailable Codex",
+    );
+    assert_command_contains(
+        review_changes,
+        "When Codex is unavailable (a usage limit or outage met in this round, with its refusal text recorded on the item), spawn Kimi in its place: Agent `Kimi`, Prompt `/review-code`, Mode `reviewer`, Write policy `readOnly`, Title `Kimi /review-code`.",
+        "/review-changes must define an unavailable Codex and spawn the stand-in as a read-only reviewer",
+    );
+    assert_command_contains(
+        review_changes,
+        "When the Codex spawn fails because Codex is unavailable (a usage limit or outage met in this round), record the refusal text on the item and spawn Kimi in its place on the same freeze.",
+        "/review-changes must admit the stand-in after a failed spawn only for a usage limit or outage, with the refusal recorded",
+    );
+    assert_command_contains(
+        review_changes,
+        "if no stand-in has been spawned this round",
+        "/review-changes must cap the late stand-in at one per round",
+    );
+    assert_command_excludes(
+        review_changes,
         "attempt exactly two reviewer session spawns",
-        "/review-changes must attempt the bounded two-child review shape",
+        "/review-changes must not reintroduce the exactly-two-spawns wording beside the stand-in rule",
+    );
+    assert_command_contains(
+        review_changes,
+        "report\nthat reviewer as unavailable instead of spawning again",
+        "/review-changes must not respawn a failed stand-in",
     );
     assert_command_contains(
         review_changes,

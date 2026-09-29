@@ -1280,7 +1280,9 @@ Agent integration hooks:
 `/review-changes` depends on this MCP surface. Its final form should:
 - verify `termal_spawn_session` and `termal_resume_after_delegations` are
   available before spawning reviewers
-- spawn one Codex and one Claude read-only reviewer child session
+- spawn one Codex and one Claude read-only reviewer child session, with Kimi
+  standing in for an unavailable Codex as `.claude/commands/review-changes.md`
+  describes
 - schedule a backend resume wait instead of shell polling
 - fan in the returned result packets and update `docs/bugs.md` from the parent
   session only
