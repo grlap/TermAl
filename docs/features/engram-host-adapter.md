@@ -963,15 +963,54 @@ reports.
   session is in a turn as the check starts or ends. A session's command
   counts in the worktree it runs in, not only in the session's own: the
   directory its runtime reports, or, for a runtime that reports none, the
-  workdir and where its shell is presumed to be (a lost shell counts as
-  every worktree), and where a `cd` of its own leads, one in a script it
-  hands to a shell wrapper included. A session in a turn with such a
-  command running elsewhere counts there until the command ends; its next
-  turn forgets a background command. A command that writes elsewhere by
-  path (`git -C`, a redirection) is not seen. Each is marked on the
-  check as it happens, so a later report from that session cannot erase it,
-  and a mark made while the closing checkpoint waits for the snapshots still
-  counts. A read-only delegation child does not count. A command that
+  workdir and where its shell is presumed to be, and where a `cd` of its
+  own leads, one in a script it hands to a shell wrapper included. Where
+  TermAl cannot follow that shell (a `cd` after another command, in a
+  pipeline or group, or more than one on a line), the shell is lost among
+  the places it may be: where it was, where a move still pending leads, and
+  each absolute literal target of the changes since, at most 32 places. A
+  line that starts with a `cd` to a literal absolute directory and changes
+  directory nowhere else, outside a pipeline or group, follows the shell
+  again once it succeeds, unless another command's move is still pending as
+  it is reported. Any other change counts in every worktree, now and for
+  the lost shell's later commands: one whose target TermAl cannot read
+  (`cd $X`, `cd -`, `popd`, PowerShell's `cd..` and `cd\`, a drive switch
+  such as `D:`), a relative one (a subshell may leave the shell elsewhere to
+  take it from, and a link may make its `..` land elsewhere), a path that
+  does not exist yet when TermAl reads the line (the line may make it
+  first), even for a lone `cd`, one given more than its target (cmd's
+  `cd /d X`), and every change on a line that has a brace outside quotes (a
+  function body or script block, which may repeat it, or a brace expansion
+  such as `cd {a,b}`), repeats it in a loop, runs a command or process
+  substitution (`$(…)` or a backtick, even inside double quotes, or
+  `<(…)`), has a comment or a backslash next to a quote (whose quoting
+  TermAl may read otherwise than the shell), defines an alias, a function
+  or a trap, runs another shell, sources a script or runs one in the shell
+  itself (a `.ps1` or `.bat` script, `call`, `Invoke-Expression`), or runs
+  a command known to make, move or remove paths (`ln`, `mv`, `rm`, `rd`,
+  `find -delete`, any git subcommand but those that only read, behind any
+  keyword or wrapper such as `then` or `sudo`), and on a line where
+  anything but a command that only reads (`ls`, `cat`, `echo`, a read-only
+  git subcommand and the like) runs before its last change, since any other
+  program may re-point a link the target passes through. After the last
+  change, the list of programs that change paths is best effort, as for a
+  shell TermAl follows: another program that removes a nested `.git` there
+  is not seen, nor is a change of location a function defined earlier
+  makes, nor a script PowerShell or cmd runs in the shell itself without a
+  `.ps1` or `.bat` word (`& $script`, `.\setup`, a batch file run by its
+  bare name). A relative `cd` of a lost shell's command counts in every
+  worktree, for that command as it starts and for the shell's later
+  commands. A relative `cd` TermAl resolved from a place the shell has
+  since left (another command's move became pending in between) leaves the
+  shell's later commands counting in every worktree. A PowerShell wrapper
+  told to start elsewhere counts in every worktree. A session in a turn with
+  such a command running elsewhere counts there until the command ends; its
+  next turn forgets a background command. A command that writes elsewhere
+  by path (`git -C`, a redirection) is not seen, nor is a directory run as a
+  command, which a shell with `autocd` set changes to. Each is marked on
+  the check as it happens, so a later report from that session cannot erase
+  it, and a mark made while the closing checkpoint waits for the snapshots
+  still counts. A read-only delegation child does not count. A command that
   reuses an earlier command's key is a new command. Which worktree a
   session works in, and each of its commands runs in, is resolved off the
   state lock as it starts a turn and whenever it reports a command or an

@@ -750,6 +750,7 @@ include!("engram_turn_checks.rs");
 include!("engram_check_recognition.rs");
 include!("engram_one_call.rs");
 include!("engram_check_paths.rs");
+include!("engram_write_places.rs");
 include!("engram_check_toolchain.rs");
 include!("engram_control_transport.rs");
 include!("engram_readiness.rs");

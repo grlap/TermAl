@@ -460,33 +460,45 @@ fn engram_session_may_write(inner: &StateInner, index: usize) -> bool {
 const ENGRAM_RUNNING_COMMAND_LIMIT: usize = 64;
 
 /// The worktrees a command may write in, `None` for one TermAl cannot name:
-/// that of each directory it may run in (`engram_command_directories`, `None`
-/// for the workdir; none TermAl can name when it lost the runtime's shell),
-/// and that of each directory its own `cd` leads to from there, a `cd` in the
-/// script a shell wrapper runs (`bash -lc 'cd x && …'`) included; a
-/// PowerShell wrapper that starts its script elsewhere (`-WorkingDirectory`)
-/// may write in any. A command that writes elsewhere by path (`git -C`, a
-/// redirection) is not seen.
-/// Resolves on the file system, so never under the state lock.
+/// that of each place it may run in (`EngramCommandPlaces`, from
+/// `engram_command_write_places`), anywhere as well when those may be
+/// anywhere, and that of each place its own directory changes may lead to
+/// from there, those in the script a shell wrapper runs
+/// (`bash -lc 'cd x && …'`) included: a `cd` TermAl follows
+/// (`engram_shell_move`), or each absolute literal target of a line it cannot
+/// follow (`engram_line_changes`, `engram_resolve_lost_move`), with anywhere
+/// for any other change of such a line and for a target that does not
+/// resolve. A relative change of a lost shell may start from a place TermAl
+/// knows only as resolved, not as the shell spells it (a link's `..`), so it
+/// may lead anywhere too. A PowerShell wrapper that starts its script
+/// elsewhere (`-WorkingDirectory`) may write in any. A command that writes
+/// elsewhere by path (`git -C`, a redirection) is not seen. `ran_lost` is
+/// `ran`'s own changes already resolved for the shell TermAl loses to it
+/// (`engram_line_lost_move`), reused rather than resolved again when TermAl
+/// cannot follow `ran`: such a line keeps only absolute targets, which lead
+/// where they do from any place. Resolves on the file system, so never under
+/// the state lock.
 fn engram_command_worktrees(
     workdir: &str,
-    directories: Option<&[Option<String>]>,
+    places: &EngramCommandPlaces,
     ran: Option<&str>,
+    ran_lost: Option<&EngramLostMove>,
 ) -> Vec<Option<String>> {
-    let Some(directories) = directories else {
-        return vec![None];
-    };
-    let places = directories
+    let starts = places
+        .directories
         .iter()
         .map(|directory| match directory {
             Some(directory) => FsPath::new(workdir).join(directory),
             None => PathBuf::from(workdir),
         })
         .collect::<Vec<_>>();
-    let mut worktrees = places
+    let mut worktrees = starts
         .iter()
         .map(|place| Some(engram_worktree_root(place)))
         .collect::<Vec<_>>();
+    if places.anywhere {
+        worktrees.push(None);
+    }
     if let Some(ran) = ran {
         let (script, _) = engram_unwrap_shell_command(ran);
         let lines = if script == ran {
@@ -494,25 +506,41 @@ fn engram_command_worktrees(
         } else {
             vec![ran, script.as_str()]
         };
-        for line in lines {
+        let bases = if places.shell_lost {
+            vec![None]
+        } else {
+            starts
+                .iter()
+                .map(|place| Some(place.to_string_lossy().into_owned()))
+                .collect::<Vec<_>>()
+        };
+        for (index, line) in lines.into_iter().enumerate() {
             // A PowerShell wrapper told to start elsewhere may write there.
             if engram_wrapper_sets_directory(line) {
                 worktrees.push(None);
             }
-            match engram_shell_move(line) {
-                EngramShellMove::Stays => {}
-                EngramShellMove::To(to) => {
-                    for place in &places {
-                        let place = place.to_string_lossy();
-                        worktrees.push(
-                            (!engram_network_path(&place))
-                                .then(|| engram_resolve_shell_move(Some(&place), &to))
-                                .flatten()
-                                .map(|moved| engram_worktree_root(FsPath::new(&moved))),
-                        );
-                    }
+            let moved = match (engram_shell_move(line), ran_lost.filter(|_| index == 0)) {
+                (EngramShellMove::Stays, _) => continue,
+                (EngramShellMove::Lost, Some(lost)) => lost.clone(),
+                (EngramShellMove::Lost, None) => {
+                    engram_resolve_lost_move(&bases, &engram_line_changes(line))
                 }
-                EngramShellMove::Lost => worktrees.push(None),
+                (EngramShellMove::To(to), _) => engram_resolve_lost_move(
+                    &bases,
+                    &EngramLineChanges {
+                        targets: vec![to],
+                        hidden: false,
+                    },
+                ),
+            };
+            worktrees.extend(
+                moved
+                    .targets
+                    .iter()
+                    .map(|target| Some(engram_worktree_root(FsPath::new(target)))),
+            );
+            if moved.computed {
+                worktrees.push(None);
             }
         }
     }
@@ -742,7 +770,17 @@ impl AppState {
         // What this key's earlier starts said and where the command may run,
         // read under a brief lock, so the test's target can be resolved on
         // the file system off it.
-        let (workdir, credit_root, runtime, reported, places, position, started, child) = {
+        let (
+            workdir,
+            credit_root,
+            runtime,
+            reported,
+            places,
+            write_places,
+            position,
+            started,
+            child,
+        ) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_session_index(session_id) else {
                 return;
@@ -763,6 +801,7 @@ impl AppState {
                 cwd.map(str::to_owned)
                     .or_else(|| engram.running_command_keys.get(key).cloned().flatten()),
                 engram_command_directories(record, key, cwd),
+                engram_command_write_places(record, key, cwd),
                 engram_shell_position(record, key),
                 mediated.then(|| {
                     engram
@@ -774,10 +813,18 @@ impl AppState {
                 Self::engram_session_has_child_binding_shape_locked(&inner, session_id),
             )
         };
+        // Where the command's `cd` leads, from where its shell is presumed to
+        // be; it moves the shell only once the command has run. A line TermAl
+        // cannot follow loses the shell among the places its changes lead to.
+        let moving_to = match &shell_move {
+            EngramShellMove::To(to) => engram_resolve_shell_move(position.as_deref(), to),
+            _ => None,
+        };
+        let loss = engram_line_lost_move(&shell_move, ran, position.is_some());
         // The session's worktree and those the command may write in, resolved
         // here off the lock, for overlap marking under it.
         let workdir_worktree = engram_worktree_root(FsPath::new(&workdir));
-        let worktrees = engram_command_worktrees(&workdir, places.as_deref(), ran);
+        let worktrees = engram_command_worktrees(&workdir, &write_places, ran, loss.as_ref());
         let mediated = started.is_some();
         let target = started.and_then(|started| {
             let command = match ran {
@@ -836,12 +883,6 @@ impl AppState {
                     )
                 })
         };
-        // Where the command's `cd` leads, from where its shell is presumed to
-        // be; it moves the shell only once the command has run.
-        let moving_to = match &shell_move {
-            EngramShellMove::To(to) => engram_resolve_shell_move(position.as_deref(), to),
-            _ => None,
-        };
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let Some(index) = inner.find_session_index(session_id) else {
             return;
@@ -853,7 +894,14 @@ impl AppState {
             .expect("session index should be valid");
         engram_note_session_worktree(record, &workdir, workdir_worktree);
         engram_note_command_worktrees(record, key, worktrees);
-        engram_note_shell_move(record, key, &runtime, shell_move, moving_to);
+        engram_note_shell_move(
+            record,
+            key,
+            &runtime,
+            shell_move,
+            (position.as_deref(), moving_to),
+            loss,
+        );
         if let Some(line) = withheld_line {
             record.engram.set_pending_source_root_line(line);
         }
@@ -1022,7 +1070,7 @@ impl AppState {
                     .then(|| {
                         (
                             record.session.workdir.clone(),
-                            engram_command_directories(record, key, cwd),
+                            engram_command_write_places(record, key, cwd),
                         )
                     }),
                 engram
@@ -1056,9 +1104,10 @@ impl AppState {
             EngramShellMove::To(to) => engram_resolve_shell_move(position.as_deref(), to),
             _ => None,
         };
+        let loss = engram_line_lost_move(&shell_move, ran, position.is_some());
         // Where the running command may write now, as it is described.
-        let worktrees = running.map(|(workdir, directories)| {
-            engram_command_worktrees(&workdir, directories.as_deref(), ran)
+        let worktrees = running.map(|(workdir, places)| {
+            engram_command_worktrees(&workdir, &places, ran, loss.as_ref())
         });
         let stands = started
             .as_ref()
@@ -1087,7 +1136,14 @@ impl AppState {
         let record = inner
             .session_mut_by_index(index)
             .expect("session index should be valid");
-        engram_note_shell_move(record, key, &runtime, shell_move, moving_to);
+        engram_note_shell_move(
+            record,
+            key,
+            &runtime,
+            shell_move,
+            (position.as_deref(), moving_to),
+            loss,
+        );
         if let (Some(cwd), Some(remembered)) =
             (cwd, record.engram.running_command_keys.get_mut(key))
         {

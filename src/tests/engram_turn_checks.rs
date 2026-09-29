@@ -1444,19 +1444,29 @@ fn a_command_writes_where_it_runs_and_where_its_own_cd_leads() {
     let key = |path: &FsPath| Some(engram_worktree_root(path));
     let mut both = vec![key(&elsewhere), key(&turn.root)];
     both.sort();
-    let in_workdir: &[Option<String>] = &[None];
+    let in_workdir = &EngramCommandPlaces::at(vec![None]);
 
     assert_eq!(
-        engram_command_worktrees(&workdir, Some(in_workdir), Some("git status")),
+        engram_command_worktrees(&workdir, in_workdir, Some("git status"), None),
         [key(&elsewhere)]
     );
     assert_eq!(
-        engram_command_worktrees(&workdir, Some(&[Some(root.clone())]), Some("git status")),
+        engram_command_worktrees(
+            &workdir,
+            &EngramCommandPlaces::at(vec![Some(root.clone())]),
+            Some("git status"),
+            None
+        ),
         [key(&turn.root)],
         "a reported directory"
     );
     assert_eq!(
-        engram_command_worktrees(&workdir, Some(&[None, Some(root.clone())]), None),
+        engram_command_worktrees(
+            &workdir,
+            &EngramCommandPlaces::at(vec![None, Some(root.clone())]),
+            None,
+            None
+        ),
         both,
         "the workdir and where the shell is presumed to be"
     );
@@ -1465,7 +1475,7 @@ fn a_command_writes_where_it_runs_and_where_its_own_cd_leads() {
         format!("bash -lc \"cd '{root}' && git checkout -- README.md\""),
     ] {
         assert_eq!(
-            engram_command_worktrees(&workdir, Some(in_workdir), Some(&line)),
+            engram_command_worktrees(&workdir, in_workdir, Some(&line), None),
             both,
             "{line}"
         );
@@ -1475,21 +1485,29 @@ fn a_command_writes_where_it_runs_and_where_its_own_cd_leads() {
         "bash -lc 'cd \"$OTHER\" && git checkout -- README.md'",
     ] {
         assert!(
-            engram_command_worktrees(&workdir, Some(in_workdir), Some(line)).contains(&None),
+            engram_command_worktrees(&workdir, in_workdir, Some(line), None).contains(&None),
             "{line}"
         );
     }
     assert_eq!(
-        engram_command_worktrees(&workdir, None, Some("git status")),
-        [None],
-        "a shell TermAl lost"
+        engram_command_worktrees(
+            &workdir,
+            &EngramCommandPlaces {
+                anywhere: true,
+                ..EngramCommandPlaces::at(vec![None])
+            },
+            Some("git status"),
+            None
+        ),
+        [None, key(&elsewhere)],
+        "a shell TermAl lost where it cannot read"
     );
     for line in [
         "pwsh -wd ../elsewhere -Command git checkout -- README.md",
         "bash -lc 'pwsh -WorkingDirectory ../elsewhere -Command git checkout .'",
     ] {
         assert!(
-            engram_command_worktrees(&workdir, Some(in_workdir), Some(line)).contains(&None),
+            engram_command_worktrees(&workdir, in_workdir, Some(line), None).contains(&None),
             "a PowerShell wrapper started elsewhere may write anywhere: {line}"
         );
     }
@@ -2338,6 +2356,8 @@ fn a_check_runs_where_the_commands_before_it_left_a_shell_that_reports_no_direct
             runtime: Some(RuntimeToken::Claude("an-earlier-runtime".to_owned())),
             directory: None,
             pending: None,
+            lost_among: Vec::new(),
+            lost_unbounded: true,
         });
     });
     run_to("new-runtime", SIZE_TEST, Some(0));
@@ -2346,6 +2366,8 @@ fn a_check_runs_where_the_commands_before_it_left_a_shell_that_reports_no_direct
             runtime: record.runtime.runtime_token(),
             directory: None,
             pending: None,
+            lost_among: Vec::new(),
+            lost_unbounded: true,
         });
     });
     turn.recorder()
@@ -3827,3 +3849,7 @@ fn a_session_in_a_turn_on_a_named_root_is_a_writer_there_too() {
 // further; it uses the `CheckedTurn` fixture above.
 #[path = "engram_one_call_checks.rs"]
 mod one_call_checks;
+
+// Where a command of a shell TermAl lost may write, likewise a child module.
+#[path = "engram_lost_shell_overlap.rs"]
+mod lost_shell_overlap;

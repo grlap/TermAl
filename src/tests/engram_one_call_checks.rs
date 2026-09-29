@@ -812,7 +812,12 @@ fn a_one_call_line_writes_where_its_directory_is() {
         let (root, _) = root_as_named(&worktree);
         let line = format!("pushd \"{root}\" && cargo test");
         let workdir = turn.root.to_string_lossy().into_owned();
-        let worktrees = engram_command_worktrees(&workdir, Some(&[None][..]), Some(&line));
+        let worktrees = engram_command_worktrees(
+            &workdir,
+            &EngramCommandPlaces::at(vec![None]),
+            Some(&line),
+            None,
+        );
         let root_worktree = engram_worktree_root(&fs::canonicalize(&worktree).expect("canonical"));
         if cd_followed(&root) {
             assert!(

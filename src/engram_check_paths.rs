@@ -153,6 +153,10 @@ fn engram_worktree_root(workdir: &FsPath) -> String {
     key
 }
 
+/// At most this many places a lost shell is kept among
+/// (`EngramShellDirectory::lost_among`); past it, the shell may be anywhere.
+const ENGRAM_LOST_PLACES_LIMIT: usize = 32;
+
 /// Where the shell of one runtime is presumed to be, if it keeps a `cd`
 /// between commands (`engram_shell_move`). A runtime other than `runtime`
 /// starts its shell afresh in the workdir.
@@ -168,27 +172,81 @@ struct EngramShellDirectory {
     /// that failed may have stopped before or after its `cd`. At most one is
     /// pending; a second loses the shell.
     pending: Option<(String, Option<String>)>,
+    /// While TermAl cannot follow the shell (`directory` is `None`), every
+    /// place it may be in: where it was when TermAl lost it, where a move
+    /// then pending led, and each absolute literal target of the directory
+    /// changes since, resolved (`engram_resolve_lost_move`). Empty while the
+    /// shell is followed; at most `ENGRAM_LOST_PLACES_LIMIT`. It bounds where
+    /// a command of the lost shell may write (`engram_command_write_places`),
+    /// never where a test is credited.
+    lost_among: Vec<String>,
+    /// Whether a change since TermAl lost the shell named a target it cannot
+    /// place exactly (`engram_line_changes`, `engram_resolve_lost_move`:
+    /// `cd $X`, `popd`, a relative target, a loop), or the places grew past
+    /// their limit, so the shell may be anywhere.
+    lost_unbounded: bool,
 }
 
 impl EngramShellDirectory {
+    /// A shell of `runtime` in `directory`, followed.
+    fn at(runtime: Option<RuntimeToken>, directory: String) -> Self {
+        Self {
+            runtime,
+            directory: Some(directory),
+            pending: None,
+            lost_among: Vec::new(),
+            lost_unbounded: false,
+        }
+    }
+
     /// The record of `record`'s current runtime, which starts in the workdir
     /// when the runtime has none yet.
     fn current(record: &mut SessionRecord) -> &mut Self {
         let runtime = record.runtime.runtime_token();
         let workdir = record.session.workdir.clone();
-        let shell = record.engram.shell_directory.get_or_insert_with(|| Self {
-            runtime: runtime.clone(),
-            directory: Some(workdir.clone()),
-            pending: None,
-        });
+        let shell = record
+            .engram
+            .shell_directory
+            .get_or_insert_with(|| Self::at(runtime.clone(), workdir.clone()));
         if shell.runtime != runtime {
-            *shell = Self {
-                runtime,
-                directory: Some(workdir),
-                pending: None,
-            };
+            *shell = Self::at(runtime, workdir);
         }
         shell
+    }
+
+    /// TermAl can no longer follow the shell: it may be where it was, where a
+    /// move pending now leads, at any place it was already lost among, or at
+    /// one of `targets` (resolved places), each kept once however it is
+    /// spelled (`engram_exact_path_key`: a workdir and its resolved form);
+    /// anywhere instead when `computed` (a change named a target TermAl cannot
+    /// read or place), or once the places grow past `ENGRAM_LOST_PLACES_LIMIT`,
+    /// which keeps a long-lost shell from being judged against ever more
+    /// places. A shell that may be anywhere keeps no places: none can narrow
+    /// it until TermAl follows it again (`anchor`).
+    fn lose(&mut self, targets: Vec<String>, computed: bool) {
+        let mut among = std::mem::take(&mut self.lost_among);
+        among.extend(self.directory.take());
+        if let Some((_, target)) = self.pending.take() {
+            match target {
+                Some(target) => among.push(target),
+                None => self.lost_unbounded = true,
+            }
+        }
+        among.extend(targets);
+        among.sort_by_cached_key(|place| engram_exact_path_key(FsPath::new(place)));
+        among.dedup_by_key(|place| engram_exact_path_key(FsPath::new(place)));
+        self.lost_unbounded |= computed || among.len() > ENGRAM_LOST_PLACES_LIMIT;
+        if self.lost_unbounded {
+            among.clear();
+        }
+        self.lost_among = among;
+    }
+
+    /// TermAl follows the shell again, in `directory`.
+    fn anchor(&mut self, directory: String) {
+        self.directory = Some(directory);
+        self.lost_among.clear();
+        self.lost_unbounded = false;
     }
 }
 
@@ -225,11 +283,125 @@ const ENGRAM_DIRECTORY_CHANGES: [&str; 8] = [
 /// line that starts with `cd DIR` (`Set-Location DIR`, `pushd DIR`) for a
 /// literal DIR, and changes directory nowhere else, moves the shell to DIR.
 /// Any other change is one TermAl cannot follow: one with no directory or a
-/// computed one (`cd`, `cd -`, `cd ~/x`, `cd $DIR`), one back through a
+/// computed one (`cd`, `cd -`, `cd ~/x`, `cd $DIR`, PowerShell's `cd..` and
+/// `cd\`, a drive switch such as `D:`), one back through a
 /// stack (`popd`), one after another command, one in a group, subshell,
 /// pipeline or background job (which may or may not persist), and `eval`. A
 /// change made by a script the line runs or sources is not seen.
 fn engram_shell_move(line: &str) -> EngramShellMove {
+    let Some(EngramShellCommands {
+        written: commands,
+        bash: bash_commands,
+        grouped,
+    }) = engram_shell_commands(line)
+    else {
+        return EngramShellMove::Lost;
+    };
+    let as_bash = bash_commands.first();
+    // Every word counts, not only a command's first: a keyword (`then cd x`,
+    // `do cd x`), a wrapper (`xargs cd`) or anything else may stand before
+    // a command that changes directory; a shortcut such as `cd..` counts in
+    // command position only (`engram_word_changes_directory`). Both readings
+    // count.
+    let count = |commands: &[Vec<String>]| {
+        commands
+            .iter()
+            .map(|words| {
+                (0..words.len())
+                    .filter(|&index| engram_word_changes_directory(words, index))
+                    .count()
+            })
+            .sum::<usize>()
+    };
+    let changes = count(&commands).max(count(&bash_commands));
+    match (changes, commands.first()) {
+        (0, _) => EngramShellMove::Stays,
+        (1, Some(first)) if !grouped && engram_word_changes_directory(first, 0) => {
+            match first.as_slice() {
+                [program, directory]
+                    if engram_change_names_target(program)
+                        && engram_literal_directory(directory)
+                        && as_bash == Some(first) =>
+                {
+                    EngramShellMove::To(directory.clone())
+                }
+                _ => EngramShellMove::Lost,
+            }
+        }
+        _ => EngramShellMove::Lost,
+    }
+}
+
+/// Whether `word` names a command that changes the directory of the shell
+/// running it (`ENGRAM_DIRECTORY_CHANGES`), or `eval`, which may.
+fn engram_changes_directory(word: &str) -> bool {
+    let program = engram_program_name(word);
+    program == "eval" || ENGRAM_DIRECTORY_CHANGES.contains(&program.as_str())
+}
+
+/// Whether the word at `index` of a command's `words` changes the directory
+/// of the shell running it: a command that does (`engram_changes_directory`)
+/// wherever it stands, since a keyword or a wrapper may stand before it, and
+/// a shortcut (`engram_directory_shortcut`) in command position
+/// (`engram_command_position`), the only place a shell runs one: as an
+/// argument (`git add cd/deploy.yml`) it is a path.
+fn engram_word_changes_directory(words: &[String], index: usize) -> bool {
+    engram_changes_directory(&words[index])
+        || (engram_directory_shortcut(&words[index])
+            && engram_command_position(words) == Some(index))
+}
+
+/// Whether `word`, run as a command, changes directory without a target
+/// word: PowerShell's `cd..`, `cd\` and `cd~` functions and its drive
+/// functions (`D:`), and cmd's `cd` or `chdir` written against its target
+/// (`cd..`, `chdir\x`, `cd/d`, and after cmd's `=` or `,` separators, `cd=..`,
+/// `cd,..`) and drive switch (`D:`). A word bash reads as a file to run is
+/// not one, though it starts alike (`cd.log`, a script under a `cd`
+/// directory such as `cd/deploy.sh`): of the forms with a forward slash only
+/// cmd's `cd/d` counts.
+fn engram_directory_shortcut(word: &str) -> bool {
+    let word = word.to_ascii_lowercase();
+    matches!(word.as_bytes(), [drive, b':'] if drive.is_ascii_alphabetic())
+        || ["cd", "chdir"].iter().any(|change| {
+            word.strip_prefix(change).is_some_and(|rest| {
+                matches!(rest, "." | "~" | "/d")
+                    || rest.starts_with(['\\', '=', ','])
+                    || rest.starts_with("..")
+                    || rest.starts_with(".\\")
+            })
+        })
+}
+
+/// Whether the directory change `word` (`engram_changes_directory`) leads
+/// where the word after it names: not back through a stack (`popd`), not
+/// `eval`, and not a shortcut that names its own place
+/// (`engram_directory_shortcut`).
+fn engram_change_names_target(word: &str) -> bool {
+    !engram_directory_shortcut(word)
+        && !matches!(
+            engram_program_name(word).as_str(),
+            "popd" | "pop-location" | "eval"
+        )
+}
+
+/// The commands of a line as its shell runs them (`engram_shell_commands`).
+struct EngramShellCommands {
+    /// Each command's words as written, `builtin` and `command` taken away.
+    written: Vec<Vec<String>>,
+    /// The same commands as bash reads them, backslash escapes taken away: a
+    /// target bash reads otherwise than it is written (an unquoted
+    /// backslash) names a directory TermAl cannot be sure of, and an escaped
+    /// name (`c\d`) is a directory change all the same.
+    bash: Vec<Vec<String>>,
+    /// Whether a group, subshell, pipeline or background job (which may or
+    /// may not persist a change of directory) split the line.
+    grouped: bool,
+}
+
+/// The commands of `line`, split at `;`, `&&`, `||` and line breaks, and at a
+/// group, subshell, pipeline or background job; `None` for a line with an
+/// unclosed quote.
+fn engram_shell_commands(line: &str) -> Option<EngramShellCommands> {
     let mut segments = vec![String::new()];
     let mut grouped = false;
     let mut quote = None;
@@ -267,7 +439,7 @@ fn engram_shell_move(line: &str) -> EngramShellMove {
         previous = Some(character);
     }
     if quote.is_some() {
-        return EngramShellMove::Lost;
+        return None;
     }
     // `builtin cd` and `command cd` are `cd`.
     let command_words = |words: Vec<String>| {
@@ -277,53 +449,19 @@ fn engram_shell_move(line: &str) -> EngramShellMove {
             .count();
         words[skip..].to_vec()
     };
-    let commands = segments
-        .iter()
-        .filter_map(|segment| engram_shell_words(segment))
-        .map(command_words)
-        .filter(|words| !words.is_empty())
-        .collect::<Vec<_>>();
-    // The words as bash reads them, backslash escapes taken away: a target
-    // bash reads otherwise than it is written (an unquoted backslash) names
-    // a directory TermAl cannot be sure of, and an escaped name (`c\d`) is a
-    // directory change all the same.
-    let bash_commands = segments
-        .iter()
-        .filter_map(|segment| engram_shell_words_as(segment, true))
-        .map(command_words)
-        .filter(|words| !words.is_empty())
-        .collect::<Vec<_>>();
-    let as_bash = bash_commands.first();
-    let changes_directory = |word: &String| {
-        let program = engram_program_name(word);
-        program == "eval" || ENGRAM_DIRECTORY_CHANGES.contains(&program.as_str())
-    };
-    // Every word counts, not only a command's first: a keyword (`then cd x`,
-    // `do cd x`), a wrapper (`xargs cd`) or anything else may stand before
-    // a command that changes directory. Both readings count.
-    let count = |commands: &[Vec<String>]| {
-        commands
+    let read = |bash: bool| {
+        segments
             .iter()
-            .map(|words| words.iter().filter(|word| changes_directory(word)).count())
-            .sum::<usize>()
+            .filter_map(|segment| engram_shell_words_as(segment, bash))
+            .map(command_words)
+            .filter(|words| !words.is_empty())
+            .collect::<Vec<_>>()
     };
-    let changes = count(&commands).max(count(&bash_commands));
-    match (changes, commands.first()) {
-        (0, _) => EngramShellMove::Stays,
-        (1, Some(first)) if !grouped && changes_directory(&first[0]) => match first.as_slice() {
-            [program, directory]
-                if !matches!(
-                    engram_program_name(program).as_str(),
-                    "popd" | "pop-location" | "eval"
-                ) && engram_literal_directory(directory)
-                    && as_bash == Some(first) =>
-            {
-                EngramShellMove::To(directory.clone())
-            }
-            _ => EngramShellMove::Lost,
-        },
-        _ => EngramShellMove::Lost,
-    }
+    Some(EngramShellCommands {
+        written: read(false),
+        bash: read(true),
+        grouped,
+    })
 }
 
 /// Whether a `cd` argument names one directory as written: not a flag, a
@@ -499,39 +637,66 @@ fn engram_shell_position(record: &SessionRecord, key: &str) -> Option<String> {
 /// command `key`, with no directory, does to its shell (`engram_shell_move`):
 /// a move to `moving_to`, resolved from where the shell was, settles when the
 /// command ends (`engram_settle_shell_move`); one TermAl cannot follow, or a
-/// second move at once, loses the shell whether the command runs or not.
+/// second move at once, loses the shell whether the command runs or not,
+/// among the places it may then be (`EngramShellDirectory::lose`): `loss`,
+/// the line's own changes resolved (`engram_line_lost_move`), for a line
+/// TermAl cannot follow and for a relative `cd` of a shell it lost, which
+/// may lead anywhere. An absolute one still follows the shell again once it
+/// has run, unless another command's move is pending as it is reported.
+/// `position` is where the shell was presumed when `moving_to` was
+/// resolved (`engram_shell_position`, off the lock): a relative move
+/// resolved from a place the shell is no longer presumed in (another
+/// command's move became pending, or TermAl lost the shell, in between) is
+/// taken as unresolved, since it may start anywhere the shell now may be.
 /// Nothing when the runtime changed since `runtime` was read.
 fn engram_note_shell_move(
     record: &mut SessionRecord,
     key: &str,
     runtime: &Option<RuntimeToken>,
     shell_move: EngramShellMove,
-    moving_to: Option<String>,
+    (position, moving_to): (Option<&str>, Option<String>),
+    loss: Option<EngramLostMove>,
 ) {
     if shell_move == EngramShellMove::Stays || record.runtime.runtime_token() != *runtime {
         return;
     }
+    let relative = matches!(
+        &shell_move,
+        EngramShellMove::To(to) if !FsPath::new(engram_msys_drive_path(to).as_ref()).is_absolute()
+    );
+    let moving_to = moving_to
+        .filter(|_| !relative || engram_shell_position(record, key).as_deref() == position);
     let shell = EngramShellDirectory::current(record);
-    match shell_move {
-        // A repeated report of the same command is the same move.
-        EngramShellMove::To(_)
-            if shell
-                .pending
-                .as_ref()
-                .is_none_or(|(moving, _)| moving == key) =>
+    match (shell_move, loss) {
+        // A repeated report of the same command is the same move; a move
+        // TermAl resolved to one place settles when its command ends.
+        (EngramShellMove::To(_), _)
+            if (shell.directory.is_some() || moving_to.is_some())
+                && shell
+                    .pending
+                    .as_ref()
+                    .is_none_or(|(moving, _)| moving == key) =>
         {
             shell.pending = Some((key.to_owned(), moving_to));
         }
-        _ => {
-            shell.directory = None;
-            shell.pending = None;
+        // A line TermAl cannot follow, a second move at once, or a relative
+        // move of a shell it lost: the shell may be where it was or where the
+        // changes lead.
+        (_, Some(loss)) => shell.lose(loss.targets, loss.computed),
+        // The same, read before the shell changed under another command:
+        // where an absolute move leads; a relative one may lead anywhere.
+        (EngramShellMove::To(_), None) => {
+            let unresolved = moving_to.is_none();
+            shell.lose(moving_to.into_iter().collect(), unresolved);
         }
+        _ => shell.lose(Vec::new(), true),
     }
 }
 
 /// The command `key` of `record` ended: a `cd` it made settles. It moved
 /// the shell only when the command succeeded; a failure or an unknown end
-/// may have come before or after its `cd`, which loses the shell.
+/// may have come before or after its `cd`, which loses the shell, between
+/// where it was and where the `cd` leads.
 fn engram_settle_shell_move(
     record: &mut SessionRecord,
     key: &str,
@@ -550,10 +715,22 @@ fn engram_settle_shell_move(
         return;
     }
     let (_, target) = shell.pending.take().expect("a pending move");
-    shell.directory = match exit {
-        Some(EngramCommandExit::Code(0) | EngramCommandExit::ReportedSuccess) => target,
-        _ => None,
-    };
+    let moved = matches!(
+        exit,
+        Some(EngramCommandExit::Code(0) | EngramCommandExit::ReportedSuccess)
+    );
+    match (moved, target) {
+        (true, Some(target)) => shell.anchor(target),
+        // It moved the shell somewhere TermAl could not resolve as the line
+        // was reported (a directory the command made first, say): anywhere,
+        // until TermAl follows the shell again. It is not resolved now, which
+        // would read the file system under the state lock.
+        (true, None) => shell.lose(Vec::new(), true),
+        (false, target) => {
+            let unresolved = target.is_none();
+            shell.lose(target.into_iter().collect(), unresolved);
+        }
+    }
 }
 
 /// `engram_check_worktree_in` from every directory the command may run in
