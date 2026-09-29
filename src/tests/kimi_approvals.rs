@@ -125,10 +125,14 @@ fn exactly_one_allow_once_option_is_required() {
 
 #[test]
 fn only_allowlisted_tool_titles_are_auto_approvable() {
-    for title in ["Bash", "Write", "Edit", "CronCreate", "mcp__termal-delegation__termal_send_to_session", "mcp__a_b__c-d"] {
+    assert_eq!(
+        KIMI_AUTO_APPROVABLE_TOOL_TITLES,
+        &["Bash", "Write", "Edit", "CronCreate", "CronDelete"]
+    );
+    for title in ["Bash", "Write", "Edit", "CronCreate", "CronDelete", "mcp__termal-delegation__termal_send_to_session", "mcp__a_b__c-d"] {
         assert!(kimi_auto_approvable_title(title), "{title}");
     }
-    for title in ["AskUserQuestion", "ExitPlanMode", "Agent", "mcp__", "mcp__server", "mcp____tool", "mcp__a b__c", "bash"] {
+    for title in ["AskUserQuestion", "ExitPlanMode", "CronList", "CronUpdate", "Agent", "mcp__", "mcp__server", "mcp____tool", "mcp__a b__c", "bash", "crondelete"] {
         assert!(!kimi_auto_approvable_title(title), "{title}");
     }
 }
@@ -146,6 +150,22 @@ fn auto_approve_answers_an_allowlisted_tool_once() {
 }
 
 #[test]
+fn cron_delete_auto_approve_answers_once_without_a_card() {
+    let (state, id, rx, runtime) = running_kimi("auto-approve");
+    let mut request = permission("CronDelete", tool_options());
+    request["params"]["toolCall"]["content"][0]["content"]["text"] =
+        json!("Requesting approval to Deleting cron 01M3QD1AK09MGRDP3BPPJTAPT8");
+    deliver(&state, &id, &runtime, request, RUNTIME);
+    assert_eq!(
+        answered(&rx),
+        Some(json!({ "outcome": "selected", "optionId": "approve_once" })),
+        "CronDelete selects allow_once, never allow_always"
+    );
+    assert_eq!(manual_cards(&state, &id), 0);
+    assert_eq!(session(&state, &id).status, SessionStatus::Active);
+}
+
+#[test]
 fn questions_plans_and_ask_policy_stay_manual() {
     for (policy, title, options) in [
         ("auto-approve", "AskUserQuestion", question_options()),
@@ -160,7 +180,11 @@ fn questions_plans_and_ask_policy_stay_manual() {
             { "optionId": "plan_reject_and_exit", "kind": "reject_once" }
         ])),
         ("auto-approve", "SomeFutureTool", tool_options()),
+        ("auto-approve", "CronList", tool_options()),
+        ("auto-approve", "CronDelete", question_options()),
         ("ask", "Bash", tool_options()),
+        ("ask", "CronCreate", tool_options()),
+        ("ask", "CronDelete", tool_options()),
     ] {
         let (state, id, rx, runtime) = running_kimi(policy);
         deliver(&state, &id, &runtime, permission(title, options), RUNTIME);
@@ -232,12 +256,16 @@ fn the_read_only_gate_wins_over_the_session_policy() {
         inner.mark_delegation_mutated(delegation_index);
         inner.sync_running_read_only_delegation_index(delegation_index);
     }
-    // A write the auto-approve policy would allow: the gate refuses it.
-    deliver(&state, &id, &runtime, permission("Write", tool_options()), RUNTIME);
-    assert_eq!(
-        answered(&rx),
-        Some(json!({ "outcome": "selected", "optionId": "reject" }))
-    );
+    // The read-only gate refuses writes and cron requests before auto-approve.
+    for title in ["Write", "CronCreate", "CronDelete", "CronList"] {
+        deliver(&state, &id, &runtime, permission(title, tool_options()), RUNTIME);
+        assert_eq!(
+            answered(&rx),
+            Some(json!({ "outcome": "selected", "optionId": "reject" })),
+            "{title} must be refused by the read-only gate"
+        );
+        assert_eq!(manual_cards(&state, &id), 0, "{title}");
+    }
     // And the prompt runs in `default` whatever the session's own mode says.
     {
         let mut inner = state.inner.lock().unwrap();

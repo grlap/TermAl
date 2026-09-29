@@ -42,11 +42,19 @@ fn normalize_default_kimi_effort(value: &str) -> Result<String, ApiError> {
     Ok(trimmed.to_owned())
 }
 
-/// Tools Kimi Code 2.0.2 asks permission for that TermAl may auto-approve.
+/// Built-in tools whose permission requests TermAl may auto-approve.
+/// Kimi cron jobs belong to the current session, so delete complements create.
+/// CronList is excluded because Kimi normally runs it without asking permission.
+/// Contract: MoonshotAI/kimi-code f409caa21e71ce7beb158d29ffca1fed76216a64,
+/// docs/en/reference/tools.md#scheduled-tasks; see docs/features/kimi-cli-integration.md.
+const KIMI_AUTO_APPROVABLE_TOOL_TITLES: &[&str] =
+    &["Bash", "Write", "Edit", "CronCreate", "CronDelete"];
+
 /// Any other title (AskUserQuestion, ExitPlanMode, a future tool) stays a
 /// manual card: an allowlist fails safe where a denylist would not.
+/// MCP tools use their separate exact server/tool naming rule below.
 fn kimi_auto_approvable_title(title: &str) -> bool {
-    matches!(title, "Bash" | "Write" | "Edit" | "CronCreate") || kimi_is_mcp_tool_title(title)
+    KIMI_AUTO_APPROVABLE_TOOL_TITLES.contains(&title) || kimi_is_mcp_tool_title(title)
 }
 
 /// `mcp__<server>__<tool>`, the form Kimi names MCP tools in.

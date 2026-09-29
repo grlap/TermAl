@@ -172,8 +172,8 @@ settings, plus an app default for effort.
   - the session is Active, so a pending manual card suspends auto-approve;
   - no Stop is in progress;
   - the session is not a read-only delegation child;
-  - the tool is on the Kimi Code 2.0.2 allowlist: Bash, Write, Edit,
-    CronCreate, or an MCP tool named `mcp__<server>__<tool>`;
+  - the tool is on the host's allowlist: Bash, Write, Edit, CronCreate,
+    CronDelete, or an MCP tool named `mcp__<server>__<tool>`;
   - the request offers exactly one `allow_once` option. That option is
     selected; `allow_always` never is.
 - **What always stays a manual card.**
@@ -184,6 +184,16 @@ settings, plus an app default for effort.
   - Any other tool.
 - **A stale or stopping runtime** of an auto-approve session is answered
   `cancelled`, never approved.
+
+`CronDelete` was also observed requesting permission in Kimi Code 2.1.1.
+It cancels a scheduled job in the current Kimi session, complementing the
+already allowed `CronCreate`. Kimi's cron service removes only jobs in its
+own session state; an unknown id returns no job. `CronList` normally runs
+without asking and is deliberately absent from the host's allowlist. If it
+does send a permission request, that request stays manual. These cron contracts
+are documented in the upstream
+[scheduled tools reference](https://github.com/MoonshotAI/kimi-code/blob/f409caa21e71ce7beb158d29ffca1fed76216a64/docs/en/reference/tools.md#scheduled-tasks).
+Read-only delegation children still refuse all cron permission requests.
 
 ### Kimi's own mode: `kimiMode`
 
