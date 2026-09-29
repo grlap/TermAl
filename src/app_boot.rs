@@ -693,12 +693,12 @@ impl AppState {
             })
             .expect("failed to spawn persist thread");
 
-        let state_events_sender = broadcast::channel::<String>(128).0;
         let state_broadcast_mailbox = Arc::new(StateBroadcastMailbox::default());
 
         // Background state-broadcast thread: drains a bounded ordered mailbox
         // of state snapshots and delta payloads, serializes snapshots to JSON,
-        // and forwards each payload to the matching SSE broadcast channel.
+        // and forwards each payload, in that order, to the ordered stream
+        // channel `/api/events` reads.
         // Consecutive state snapshots coalesce before they reach this thread,
         // but a snapshot queued before a delta must be sent before that delta;
         // otherwise the browser can see delta N+1 while still waiting for
@@ -706,9 +706,25 @@ impl AppState {
         // large snapshot stalls this thread, the mailbox drops the oldest
         // pending work at capacity and clients repair any revision gap through
         // the existing `/api/state` recovery path.
-        let state_events_for_broadcast = state_events_sender.clone();
-        let delta_events_sender = broadcast::channel(256).0;
-        let delta_events_for_broadcast = delta_events_sender.clone();
+        //
+        // The stream channel holds 512 events of either kind. Tokio rounds a
+        // broadcast capacity up to a power of two, so 512 is the smallest
+        // capacity that covers the 128 snapshots plus 256 deltas the former
+        // separate channels held together; a burst that fit them does not
+        // lag here. A client that stays connected without reading keeps the
+        // latest 512 events alive until they are overwritten; in a quiet
+        // period when they are all snapshots that is up to 512 serialized
+        // snapshots where the former state channel held 128, so the memory a
+        // stalled client can pin scales with the snapshot's size. A client
+        // past the capacity gets `lagged` and a recovery snapshot.
+        let state_broadcast_senders = StateBroadcastSenders {
+            stream_events: broadcast::channel(512).0,
+            #[cfg(test)]
+            state_events: broadcast::channel(128).0,
+            #[cfg(test)]
+            delta_events: broadcast::channel(256).0,
+        };
+        let state_broadcast_senders_for_thread = state_broadcast_senders.clone();
         let state_broadcast_mailbox_for_thread = state_broadcast_mailbox.clone();
         std::thread::Builder::new()
             .name("termal-state-broadcast".to_owned())
@@ -716,8 +732,7 @@ impl AppState {
                 loop {
                     forward_state_broadcast_work(
                         state_broadcast_mailbox_for_thread.recv_next(),
-                        &state_events_for_broadcast,
-                        &delta_events_for_broadcast,
+                        &state_broadcast_senders_for_thread,
                     );
                 }
             })
@@ -739,8 +754,7 @@ impl AppState {
             orchestrator_templates_path: Arc::new(orchestrator_templates_path),
             orchestrator_templates_lock: Arc::new(Mutex::new(())),
             review_documents_lock: Arc::new(Mutex::new(())),
-            state_events: state_events_sender,
-            delta_events: delta_events_sender,
+            state_broadcast_senders,
             file_events: broadcast::channel(256).0,
             file_events_revision: Arc::new(AtomicU64::new(0)),
             persist_tx,

@@ -1,8 +1,8 @@
 /*
 State and persistence core
                  +------------------------+
-REST / runtimes ->| AppState              |-> state_events
-remote bridge  -> | - coordination shell  |-> delta_events
+REST / runtimes ->| AppState              |-> stream_events (state + delta, in order)
+remote bridge  -> | - coordination shell  |-> file_events
                   | - remote registry      |
                   | - shared Codex runtime |
                   +-----------+------------+
@@ -471,16 +471,62 @@ impl StateBroadcastMailbox {
     }
 }
 
-fn forward_state_broadcast_work(
-    work: StateBroadcastWork,
-    state_events: &broadcast::Sender<String>,
-    delta_events: &broadcast::Sender<String>,
-) {
+/// One `/api/events` event, a state snapshot or a delta, as the broadcaster
+/// published it (`StateBroadcastSenders::stream_events`).
+#[derive(Clone, Debug)]
+enum SseStreamEvent {
+    State(Arc<str>),
+    Delta(Arc<str>),
+}
+
+/// The broadcast channels a published snapshot or delta goes to.
+///
+/// `stream_events` carries snapshots and deltas together, in the order they
+/// were published: it is what `/api/events` streams. Two channels merged by
+/// the reader cannot keep that order, and a snapshot that overtakes an older
+/// delta makes the client drop the delta while the snapshot carries none of
+/// its message. Test builds also send each payload to a per-kind channel, so a
+/// test can observe snapshots or deltas alone; production builds have no such
+/// channel and make no second copy of a payload.
+#[derive(Clone)]
+struct StateBroadcastSenders {
+    stream_events: broadcast::Sender<SseStreamEvent>,
+    #[cfg(test)]
+    state_events: broadcast::Sender<String>,
+    #[cfg(test)]
+    delta_events: broadcast::Sender<String>,
+}
+
+impl StateBroadcastSenders {
+    /// Sends one serialized state snapshot. The ordered stream gets it first,
+    /// so a test that has seen a payload on a per-kind channel knows the
+    /// ordered stream already holds it.
+    fn send_state(&self, payload: String) {
+        #[cfg(test)]
+        let observed = payload.clone();
+        let _ = self
+            .stream_events
+            .send(SseStreamEvent::State(Arc::from(payload)));
+        #[cfg(test)]
+        let _ = self.state_events.send(observed);
+    }
+
+    /// Sends one serialized delta, in the same order as [`Self::send_state`].
+    fn send_delta(&self, payload: String) {
+        #[cfg(test)]
+        let observed = payload.clone();
+        let _ = self
+            .stream_events
+            .send(SseStreamEvent::Delta(Arc::from(payload)));
+        #[cfg(test)]
+        let _ = self.delta_events.send(observed);
+    }
+}
+
+fn forward_state_broadcast_work(work: StateBroadcastWork, senders: &StateBroadcastSenders) {
     match work {
         StateBroadcastWork::Snapshot(snapshot) => match serde_json::to_string(&snapshot) {
-            Ok(payload) => {
-                let _ = state_events.send(payload);
-            }
+            Ok(payload) => senders.send_state(payload),
             Err(err) => {
                 eprintln!(
                     "warning: failed to serialize SSE state snapshot at revision {}: {err}",
@@ -488,9 +534,7 @@ fn forward_state_broadcast_work(
                 );
             }
         },
-        StateBroadcastWork::DeltaPayload(payload) => {
-            let _ = delta_events.send(payload);
-        }
+        StateBroadcastWork::DeltaPayload(payload) => senders.send_delta(payload),
     }
 }
 
@@ -949,8 +993,9 @@ struct AppState {
     /// Must not be held at the same time as `self.inner`; review file I/O stays
     /// outside the main state mutex so disk writes do not stall unrelated state work.
     review_documents_lock: Arc<Mutex<()>>,
-    state_events: broadcast::Sender<String>,
-    delta_events: broadcast::Sender<String>,
+    /// Where published snapshots and deltas go: the ordered stream
+    /// `/api/events` reads, plus per-kind observer channels in test builds.
+    state_broadcast_senders: StateBroadcastSenders,
     file_events: broadcast::Sender<String>,
     #[cfg_attr(test, allow(dead_code))]
     file_events_revision: Arc<AtomicU64>,

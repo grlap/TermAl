@@ -266,8 +266,7 @@ impl OrderedStateBroadcasterHarness {
         let state = test_app_state();
         let session_id = test_session_id(&state, Agent::Codex);
         let mailbox = Arc::new(StateBroadcastMailbox::default());
-        let state_events_for_broadcast = state.state_events.clone();
-        let delta_events_for_broadcast = state.delta_events.clone();
+        let senders_for_broadcast = state.state_broadcast_senders.clone();
         let mailbox_for_thread = mailbox.clone();
         let stop = Arc::new(AtomicBool::new(false));
         let stop_for_thread = stop.clone();
@@ -285,11 +284,7 @@ impl OrderedStateBroadcasterHarness {
                     if stop_for_thread.load(Ordering::SeqCst) {
                         break;
                     }
-                    forward_state_broadcast_work(
-                        work,
-                        &state_events_for_broadcast,
-                        &delta_events_for_broadcast,
-                    );
+                    forward_state_broadcast_work(work, &senders_for_broadcast);
                     let _ = processed_tx.send(());
                 }
             })
@@ -2253,6 +2248,63 @@ async fn state_events_route_preserves_queued_snapshot_before_following_delta() {
     assert_eq!(delta["revision"].as_u64(), Some(expected_delta_revision));
 }
 
+// The other direction of the same order: a delta queued before a full snapshot
+// must reach `/api/events` before that snapshot, even when both are pending
+// before the route is polled again. The snapshot carries no message bodies and
+// the client ignores a delta older than the snapshot it adopted, so a newer
+// snapshot overtaking a messageCreated delta loses that message on the client.
+#[tokio::test]
+async fn state_events_route_preserves_queued_delta_before_following_snapshot() {
+    let mut harness = OrderedStateBroadcasterHarness::new();
+    let state = harness.state.clone();
+    let _files = HttpRouteTestFiles::capture(&state);
+    let session_id = harness.session_id.clone();
+    let app = app_router(state.clone());
+    let response = request_response(
+        &app,
+        Request::builder()
+            .method("GET")
+            .uri("/api/events")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let mut body = Box::pin(response.into_body().into_data_stream());
+
+    let initial_event = next_sse_event(&mut body).await;
+    let (initial_name, initial_data) = parse_sse_event(&initial_event);
+    assert_eq!(initial_name, "state");
+    let initial_state: StateResponse =
+        serde_json::from_str(&initial_data).expect("initial SSE payload should parse");
+    let expected_delta_revision = initial_state.revision + 1;
+    let expected_snapshot_revision = expected_delta_revision + 1;
+
+    let message_id = push_test_text_message(&state, &session_id, "Delta before snapshot");
+    let _project_root = create_ordered_sse_test_project(&state);
+    harness.release();
+    harness.wait_for_processed(2);
+
+    let delta_event = next_sse_event(&mut body).await;
+    let (delta_name, delta_data) = parse_sse_event(&delta_event);
+    assert_eq!(
+        delta_name, "delta",
+        "the delta queued first must not be overtaken by the later snapshot"
+    );
+    let delta: Value = serde_json::from_str(&delta_data).expect("delta SSE payload should parse");
+    assert_eq!(delta["type"], "messageCreated");
+    assert_eq!(delta["sessionId"], session_id);
+    assert_eq!(delta["messageId"], message_id);
+    assert_eq!(delta["revision"].as_u64(), Some(expected_delta_revision));
+
+    let snapshot_event = next_sse_event(&mut body).await;
+    let (snapshot_name, snapshot_data) = parse_sse_event(&snapshot_event);
+    assert_eq!(snapshot_name, "state");
+    let snapshot_state: StateResponse =
+        serde_json::from_str(&snapshot_data).expect("queued state payload should parse");
+    assert_eq!(snapshot_state.revision, expected_snapshot_revision);
+}
+
 // Pins the ordered broadcaster's downstream recovery contract through the real
 // `/api/events` route: when the mailbox feeds more deltas into the bounded SSE
 // broadcast channel than a client can retain, the route must emit the explicit
@@ -2428,12 +2480,14 @@ async fn state_events_route_emits_non_empty_lagged_marker_before_recovery_state(
 
     // `test_app_state()` uses a 16-slot broadcast channel; 64 sends is safely
     // past that capacity even if the route drains a few frames while we loop.
+    // The route reads the ordered stream channel.
     for _ in 0..64 {
         let payload =
             serde_json::to_string(&state.summary_snapshot()).expect("state should serialize");
         state
-            .state_events
-            .send(payload)
+            .state_broadcast_senders
+            .stream_events
+            .send(SseStreamEvent::State(Arc::from(payload.as_str())))
             .expect("route receiver should still be subscribed");
     }
 

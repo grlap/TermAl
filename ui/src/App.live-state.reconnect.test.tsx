@@ -3370,7 +3370,7 @@ describe("App live state — reconnect", () => {
   });
 
   it("adopts a Lagged-recovery state snapshot at the same revision when the backend signals lagged", async () => {
-    // Scenario: SSE delta channel fell past broadcast capacity, so the backend
+    // Scenario: the SSE stream fell past broadcast capacity, so the backend
     // emits a `lagged` marker followed by a recovery state snapshot. The
     // recovery snapshot may carry the same revision the client already saw
     // (the client read some events from the burst before falling behind).
@@ -3453,7 +3453,7 @@ describe("App live state — reconnect", () => {
       expect(screen.queryByText("Lagged recovery body.")).not.toBeInTheDocument();
 
       // No reconnect — the SSE stream stays open. The backend emits the
-      // `lagged` marker (because the delta channel overflowed) and immediately
+      // `lagged` marker (because the stream channel overflowed) and immediately
       // follows with a recovery snapshot at the same revision the client
       // already adopted.
       act(() => {

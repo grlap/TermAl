@@ -9,25 +9,30 @@
 // remote followers compare their own applied revision against the
 // source's.
 //
-// Two flavours of event leave the backend:
+// Two flavours of event leave the backend, both on one ordered channel
+// (`StateBroadcastSenders::stream_events`, which `/api/events` reads):
 //
 // - **State snapshots** — the metadata-first `StateResponse` shape, queued
-//   once per commit and pushed on the `state_events` channel by the ordered
-//   broadcaster thread. Used by
+//   once per commit and pushed by the ordered broadcaster thread. Used by
 //   new SSE clients and remote proxies that need a ground-truth
 //   snapshot after reconnect.
 // - **Delta events** (`DeltaEvent` in `wire.rs`) — narrow per-field
-//   updates queued behind any earlier state snapshot and then pushed on the
-//   `delta_events` channel by that same broadcaster thread. Clients that stay
-//   connected apply them to their local copy without re-parsing the whole state
-//   tree.
+//   updates queued behind any earlier state snapshot and then pushed by
+//   that same broadcaster thread. Clients that stay connected apply them to
+//   their local copy without re-parsing the whole state tree.
 //
-// There is also a third channel — `file_events` — for file-system
+// Snapshots and deltas must reach a client in the order they were
+// published, so they share the one channel; a reader merging two channels
+// could let a newer snapshot overtake an older delta. Test builds also send
+// each payload to a per-kind observer channel (`state_events`,
+// `delta_events`) so a test can watch one kind alone; production has none.
+//
+// There is also a separate channel — `file_events` — for file-system
 // watch notifications (see `workspace_watch.rs`). These are not tied
 // to the revision counter and fire independently whenever a watched
 // path changes; they exist so the UI's workspace tree can repaint
 // without waiting for a full state refresh, and because file-change
-// bursts would overwhelm the state channel.
+// bursts would overwhelm the state and delta stream.
 //
 // Mutation-stamp → persist pattern. `commit_locked` bumps every
 // mutated session's `mutation_stamp` via `session_mut_by_index`, and
@@ -364,20 +369,27 @@ impl AppState {
         Ok((inner.revision, dispatch))
     }
 
-    /// Returns a receiver on the `state_events` broadcast channel
-    /// (JSON-serialized metadata-first `StateResponse` snapshots). Each new SSE
-    /// subscriber in `api.rs` calls this to start receiving
-    /// post-revision snapshots; the initial snapshot is sent
-    /// separately from the connect handler.
+    /// Returns a receiver on the test-only `state_events` broadcast channel
+    /// (JSON-serialized metadata-first `StateResponse` snapshots), for tests
+    /// that observe snapshots alone; `/api/events` reads `stream_events`.
+    #[cfg(test)]
     fn subscribe_events(&self) -> broadcast::Receiver<String> {
-        self.state_events.subscribe()
+        self.state_broadcast_senders.state_events.subscribe()
     }
 
-    /// Returns a receiver on the `delta_events` broadcast channel
-    /// (JSON-serialized `DeltaEvent` payloads). Used by SSE clients
-    /// that want narrow per-field updates instead of full snapshots.
+    /// Returns a receiver on the test-only `delta_events` broadcast channel
+    /// (JSON-serialized `DeltaEvent` payloads), for tests that observe deltas
+    /// alone; `/api/events` reads `stream_events`.
+    #[cfg(test)]
     fn subscribe_delta_events(&self) -> broadcast::Receiver<String> {
-        self.delta_events.subscribe()
+        self.state_broadcast_senders.delta_events.subscribe()
+    }
+
+    /// Returns a receiver on the `stream_events` broadcast channel: state
+    /// snapshots and deltas together, in the order they were published. The
+    /// `/api/events` stream reads this one, never the per-kind channels.
+    fn subscribe_stream_events(&self) -> broadcast::Receiver<SseStreamEvent> {
+        self.state_broadcast_senders.stream_events.subscribe()
     }
 
     /// Returns a receiver on the `file_events` broadcast channel
@@ -427,7 +439,7 @@ impl AppState {
                 mailbox.publish_delta_payload(payload);
                 return;
             }
-            let _ = self.delta_events.send(payload);
+            self.state_broadcast_senders.send_delta(payload);
         }
     }
 
@@ -672,7 +684,7 @@ impl AppState {
     /// Publishes a pre-built snapshot as an SSE state event.
     ///
     /// Sends the owned snapshot to the background broadcaster mailbox, whose
-    /// thread serializes to JSON and forwards to `state_events` off the
+    /// thread serializes to JSON and forwards to the broadcast channels off the
     /// critical path. The mailbox coalesces consecutive snapshots, preserves
     /// retained snapshot-before-delta order, and drops oldest pending work on
     /// overflow instead of blocking a producer under the state mutex. Falls
@@ -685,9 +697,7 @@ impl AppState {
         }
 
         match serde_json::to_string(&snapshot) {
-            Ok(payload) => {
-                let _ = self.state_events.send(payload);
-            }
+            Ok(payload) => self.state_broadcast_senders.send_state(payload),
             Err(err) => {
                 eprintln!(
                     "warning: failed to serialize SSE state snapshot at revision {}: {err}",

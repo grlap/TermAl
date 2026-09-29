@@ -800,8 +800,11 @@ fn test_app_state() -> AppState {
         orchestrator_templates_path: Arc::new(test_temp_root.path().join("orchestrators.json")),
         orchestrator_templates_lock: Arc::new(Mutex::new(())),
         review_documents_lock: Arc::new(Mutex::new(())),
-        state_events: broadcast::channel(16).0,
-        delta_events: broadcast::channel(16).0,
+        state_broadcast_senders: StateBroadcastSenders {
+            stream_events: broadcast::channel(16).0,
+            state_events: broadcast::channel(16).0,
+            delta_events: broadcast::channel(16).0,
+        },
         file_events: broadcast::channel(16).0,
         file_events_revision: Arc::new(AtomicU64::new(0)),
         persist_tx: mpsc::channel().0,

@@ -753,8 +753,11 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
         orchestrator_templates_path: state.orchestrator_templates_path.clone(),
         orchestrator_templates_lock: state.orchestrator_templates_lock.clone(),
         review_documents_lock: state.review_documents_lock.clone(),
-        state_events: broadcast::channel(16).0,
-        delta_events: broadcast::channel(16).0,
+        state_broadcast_senders: StateBroadcastSenders {
+            stream_events: broadcast::channel(16).0,
+            state_events: broadcast::channel(16).0,
+            delta_events: broadcast::channel(16).0,
+        },
         file_events: broadcast::channel(16).0,
         file_events_revision: Arc::new(AtomicU64::new(0)),
         persist_tx: mpsc::channel().0,

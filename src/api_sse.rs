@@ -3,13 +3,14 @@
 // `state_events` is the big one: the Server-Sent Events endpoint
 // that the frontend subscribes to for live state updates. It:
 //
-// 1. Subscribes to the three `broadcast::Receiver` channels created
-//    in `sse_broadcast.rs` (`subscribe_events` for full snapshots,
-//    `subscribe_delta_events` for narrow delta events,
-//    `subscribe_file_events` for workspace file changes).
+// 1. Subscribes to the two `broadcast::Receiver` channels created
+//    in `sse_broadcast.rs` (`subscribe_stream_events` for full
+//    snapshots and narrow delta events together, in the order they
+//    were published, and `subscribe_file_events` for workspace file
+//    changes).
 // 2. Pushes an initial state snapshot over the wire so the client
 //    has ground truth before any deltas arrive.
-// 3. Multiplexes the three channels into one SSE stream with
+// 3. Multiplexes the two channels into one SSE stream with
 //    `event:` tags identifying each payload kind.
 // 4. Configures keep-alive pings so the connection stays live
 //    through idle periods and aggressive HTTP proxies.
@@ -211,8 +212,10 @@ async fn lagged_recovery_events(state: AppState) -> (Event, Event) {
 async fn state_events(
     State(state): State<AppState>,
 ) -> Sse<impl futures_core::Stream<Item = std::result::Result<Event, Infallible>>> {
-    let mut state_receiver = state.subscribe_events();
-    let mut delta_receiver = state.subscribe_delta_events();
+    // Snapshots and deltas arrive on one channel, in the order they were
+    // published. Merging two channels here cannot keep that order: whichever
+    // the select polls first overtakes the other when both are ready.
+    let mut stream_receiver = state.subscribe_stream_events();
     let mut file_receiver = state.subscribe_file_events();
     let mut shutdown_rx = state.subscribe_shutdown_signal();
     // Sticky pre-check: if shutdown was already triggered before this
@@ -249,9 +252,14 @@ async fn state_events(
 
                 _ = wait_for_shutdown_signal(&mut shutdown_rx) => break,
 
-                result = state_receiver.recv() => {
+                result = stream_receiver.recv() => {
                     match result {
-                        Ok(payload) => yield Ok(Event::default().event("state").data(payload)),
+                        Ok(SseStreamEvent::State(payload)) => {
+                            yield Ok(Event::default().event("state").data(&*payload));
+                        }
+                        Ok(SseStreamEvent::Delta(payload)) => {
+                            yield Ok(Event::default().event("delta").data(&*payload));
+                        }
                         Err(broadcast::error::RecvError::Lagged(_)) => {
                             // Lagged means the consumer fell past the broadcast
                             // channel capacity, so some events were dropped on the
@@ -273,22 +281,6 @@ async fn state_events(
                             // this body — it is reserved as a control marker.
                             // See bugs.md "Empty-data `lagged` SSE marker may
                             // not dispatch in browsers".
-                            let (lagged, recovery) = lagged_recovery_events(state.clone()).await;
-                            yield Ok(lagged);
-                            yield Ok(recovery);
-                        }
-                        Err(broadcast::error::RecvError::Closed) => break,
-                    }
-                }
-
-                result = delta_receiver.recv() => {
-                    match result {
-                        Ok(payload) => yield Ok(Event::default().event("delta").data(payload)),
-                        Err(broadcast::error::RecvError::Lagged(_)) => {
-                            // Same reasoning as the state-receiver Lagged branch:
-                            // emit a non-empty `lagged` marker (so browsers
-                            // actually dispatch it) before yielding the recovery
-                            // snapshot.
                             let (lagged, recovery) = lagged_recovery_events(state.clone()).await;
                             yield Ok(lagged);
                             yield Ok(recovery);
