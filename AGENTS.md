@@ -107,8 +107,14 @@ in Engram::Advisor's session, recorded verbatim):
      is working' (option 3 being Kimi as the
      second reviewer while Codex is out), and to Engram::Opus of
      2026-09-29, 'if clean you have a go', 'you should just check-in, that
-     should be the rule') has no outstanding in-scope findings on the
-     reviewed input, Low and Note included. Pre-existing defects outside
+     should be the rule') has no outstanding in-scope finding of Medium or
+     higher on the reviewed input, and every in-scope finding of Medium or
+     higher from earlier rounds was fixed and reviewed again; a Low or a
+     Note need not be fixed before the landing, and a Low left unfixed is
+     filed as its own item (Greg, 2026-09-30, in Engram::Opus's session:
+     'ignore Notes and trivial lows, that can be handled later. if they choose to fix low, fine, but
+     that is not must have', 'anything including Medium must be fixed').
+     Pre-existing defects outside
      the change's scope, filed as their own items with provenance, do not
      block. Engram's amendment of the same rule is its commit fc3c3aa; the
      two coordinators decided on 2026-09-29 to narrow both projects' rule

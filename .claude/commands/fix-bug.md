@@ -74,8 +74,8 @@ All checks must pass before proceeding.
 Invoke `/review-changes` directly in the active parent session to run validation and get independent `/review-code` sign-off from two reviewers of different vendors (Codex and Claude; Kimi stands in for an unavailable Codex) on the changes.
 
 After the review completes:
-- **Critical or High findings** → fix them, re-run Step 4, and re-review
-- **Medium or Low findings** → present to the user; proceed if they accept
+- **Critical, High or Medium findings** → fix them, re-run Step 4, and re-review
+- **Low or Note findings** → leave them unfixed and file each Low as its own item, or fix them, re-run Step 4, and re-review; an unfixed Low or Note does not block the landing (the commit rule's review condition)
 - **No findings** → proceed
 
 ## Step 6: Close the bug in beads

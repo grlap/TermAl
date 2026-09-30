@@ -3120,6 +3120,38 @@ fn commit_rule_pins_the_final_diff_audit_in_both_instruction_files() {
     );
 }
 
+// Which review findings block a landing: Medium and higher are fixed, a Low
+// or a Note is not required to be, and an unfixed Low is filed. Both
+// instruction files state it in the review condition of the commit rule, and
+// `/fix-bug` Step 5 follows it.
+#[test]
+fn commit_rule_pins_which_review_findings_block_a_landing() {
+    let agents = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/AGENTS.md"));
+    let claude = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/CLAUDE.md"));
+    let fix_bug = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/.claude/commands/fix-bug.md"
+    ));
+
+    for (name, instructions) in [("AGENTS.md", agents), ("CLAUDE.md", claude)] {
+        assert_command_contains(
+            instructions,
+            "has no outstanding in-scope finding of Medium or higher on the reviewed input, and every in-scope finding of Medium or higher from earlier rounds was fixed and reviewed again; a Low or a Note need not be fixed before the landing, and a Low left unfixed is filed as its own item (Greg, 2026-09-30, in Engram::Opus's session: 'ignore Notes and trivial lows, that can be handled later. if they choose to fix low, fine, but that is not must have', 'anything including Medium must be fixed').",
+            &format!("{name} must block a landing on Medium and higher only, file an unfixed Low, and cite Greg's words"),
+        );
+        assert_command_excludes(
+            instructions,
+            "Low and Note included",
+            &format!("{name} must no longer make a Low or a Note block a landing"),
+        );
+    }
+    assert_command_contains(
+        fix_bug,
+        "- **Critical, High or Medium findings** → fix them, re-run Step 4, and re-review\n- **Low or Note findings** → leave them unfixed and file each Low as its own item, or fix them, re-run Step 4, and re-review; an unfixed Low or Note does not block the landing (the commit rule's review condition)",
+        "/fix-bug must fix Medium and higher, file an unfixed Low, and send a fixed Low through the gate and review again",
+    );
+}
+
 #[test]
 fn legacy_review_command_names_are_removed() {
     let command_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
