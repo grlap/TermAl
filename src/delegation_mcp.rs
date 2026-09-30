@@ -511,6 +511,11 @@ impl AppState {
         Ok((config, engram_enabled))
     }
 
+    fn session_is_acceptance_evaluator_child(&self, session_id: &str) -> bool {
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        session_is_acceptance_evaluator_child_locked(&inner, session_id)
+    }
+
     fn termal_delegation_mcp_codex_config_with_engram(
         &self,
         parent_session_id: &str,
@@ -535,6 +540,21 @@ impl AppState {
             mcp_servers: mut servers,
             shell_environment_policy,
         } = seeded_config;
+        // A Codex child runs with approval policy `never` and puts no tool
+        // call to the host, so for an acceptance evaluator only the absence
+        // of a server keeps the tracker's tools from it. The user's servers
+        // may include the tracker's under any name; an evaluator gets the
+        // TermAl-owned servers alone, and no tracker descriptor even if a
+        // caller passes one. This withholds the tracker's MCP tools only:
+        // where a Codex child's shell runs unsandboxed, the tracker's CLI in
+        // that shell remains a separate route.
+        let acceptance_evaluator = self.session_is_acceptance_evaluator_child(parent_session_id);
+        let engram = if acceptance_evaluator {
+            servers.clear();
+            None
+        } else {
+            engram
+        };
 
         // Thread-level `config.mcp_servers` replaces Codex's whole configured
         // table. Begin with the user table copied into the shared CODEX_HOME,

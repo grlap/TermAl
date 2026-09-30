@@ -14653,6 +14653,7 @@ fn cold_claude_turn_start_does_not_reenter_state_mutex_for_engram_config() {
             None,
             None,
             engram_mcp,
+            false,
         );
         let outcome = match result {
             Ok(_) => {

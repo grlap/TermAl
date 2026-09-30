@@ -393,6 +393,7 @@ fn spawn_claude_runtime(
     resume_session_id: Option<String>,
     delegation_mcp_config: String,
     engram_mcp: Option<&TermalDelegationMcpStdioConfig>,
+    host_mcp_servers_only: bool,
     model_options_tx: Option<Sender<std::result::Result<Vec<SessionModelOption>, String>>>,
 ) -> Result<ClaudeRuntimeHandle> {
     if !state.agent_runtime_spawning_enabled {
@@ -422,7 +423,10 @@ fn spawn_claude_runtime(
         effort,
         resume_session_id.as_deref(),
     ));
-    command.arg("--mcp-config").arg(&mcp_config_file.path);
+    command.args(claude_cli_mcp_config_args(
+        &mcp_config_file.path,
+        host_mcp_servers_only,
+    ));
     command.env("CLAUDE_CODE_ENTRYPOINT", "termal");
     let termal_env = termal_agent_process_env(&session_id, &state.local_http_base_url())?;
     apply_agent_process_env(&mut command, Some(&termal_env), engram_mcp)?;

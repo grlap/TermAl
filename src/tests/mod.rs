@@ -59,6 +59,7 @@ mod engram_readiness;
 // under engram_host_adapter's turn_observations module, whose ClaimedRoot
 // fixture they share.
 mod engram_source_roots;
+mod evaluator_tool_access;
 mod file_changes;
 mod git;
 mod http_routes;

@@ -335,6 +335,8 @@ impl AppState {
         let retain_for_admission = pending_engram.is_some();
         let session_id = inner.sessions[index].session.id.clone();
         let engram_mcp = engram_mcp_runtime_config_for_session_locked(inner, &session_id);
+        let host_mcp_servers_only =
+            session_is_acceptance_evaluator_child_locked(inner, &session_id);
         let mut started = match self.start_turn_on_record(
             inner
                 .session_mut_by_index(index)
@@ -346,6 +348,7 @@ impl AppState {
             queued.pending_prompt.source.clone(),
             pending_engram,
             engram_mcp,
+            host_mcp_servers_only,
         ) {
             Ok(started) => started,
             Err(error) => {
@@ -417,6 +420,7 @@ impl AppState {
         source: Option<MessageSource>,
         mut pending_engram: Option<EngramPendingDispatch>,
         engram_mcp: Option<EngramMcpRuntimeConfig>,
+        host_mcp_servers_only: bool,
     ) -> std::result::Result<StartedTurn, ApiError> {
         if record.runtime_stop_in_progress {
             return Err(ApiError::conflict("session is stopping"));
@@ -559,6 +563,7 @@ impl AppState {
                             record.external_session_id.clone(),
                             delegation_mcp_config,
                             engram_mcp.as_ref().map(|config| &config.stdio),
+                            host_mcp_servers_only,
                             None,
                         )
                         .map_err(|err| {
@@ -2032,6 +2037,8 @@ impl AppState {
 
             if prioritize_manual_dispatch_over_blocked_queue {
                 let engram_mcp = engram_mcp_runtime_config_for_session_locked(&inner, session_id);
+                let host_mcp_servers_only =
+                    session_is_acceptance_evaluator_child_locked(&inner, session_id);
                 let started = self.start_turn_on_record(
                     inner
                         .session_mut_by_index(index)
@@ -2043,6 +2050,7 @@ impl AppState {
                     source,
                     None,
                     engram_mcp,
+                    host_mcp_servers_only,
                 )?;
                 engram_note_turn_started(&mut inner, index);
                 let revision = self
@@ -2108,6 +2116,8 @@ impl AppState {
             }
 
             let engram_mcp = engram_mcp_runtime_config_for_session_locked(&inner, session_id);
+            let host_mcp_servers_only =
+                session_is_acceptance_evaluator_child_locked(&inner, session_id);
             let started = self.start_turn_on_record(
                 inner
                     .session_mut_by_index(index)
@@ -2119,6 +2129,7 @@ impl AppState {
                 source,
                 None,
                 engram_mcp,
+                host_mcp_servers_only,
             )?;
             engram_note_turn_started(&mut inner, index);
             let revision = self

@@ -1642,6 +1642,22 @@ refusal. It carries the complete criteria and the bases and no context that
 could shrink, so a contract is briefed whole or refused alike whichever mode is
 selected.
 
+**No tracker MCP server.** An evaluator child is given no tracker MCP server:
+the host installs the tracker's MCP server for every session of an enabled
+project except an acceptance evaluator, and gives it no orientation read. A
+Claude evaluator starts with `--strict-mcp-config`, so it loads the
+host-written MCP configuration alone and no server named in the user's,
+project's or local Claude settings; its read-only gate also refuses every
+tracker tool and a shell command that runs the tracker's CLI. A Codex
+evaluator gets only the TermAl-owned servers, none seeded from the user's Codex
+configuration (a Codex child puts no tool call to the host, so only the absence
+of a server keeps the tracker's tools from it). So the brief's "Call no other
+tracker tool" holds for MCP tools by the child's configuration, not only by
+instruction. It does not yet hold for a Codex evaluator's shell: on Windows a
+read-only Codex child's shell runs without a sandbox, and the tracker's CLI in
+that shell remains a route to the store until read-only Codex children run
+sandboxed.
+
 **Submission.** The evaluator is read-only and cannot reach the tracker's own
 `evaluate` tool, so it calls `termal_submit_acceptance_evaluation`
 (`POST /api/sessions/{childId}/acceptance-evaluation`). Before any process
