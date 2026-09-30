@@ -7,11 +7,12 @@ import {
   openSync,
   readSync,
   readlinkSync,
+  realpathSync,
 } from "node:fs";
 import { spawn } from "node:child_process";
 import { devNull } from "node:os";
-import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 export const fingerprintComponentNames = Object.freeze([
   "root",
@@ -339,10 +340,20 @@ export async function main() {
   );
 }
 
-if (
-  process.argv[1] &&
-  pathToFileURL(process.argv[1]).href === import.meta.url
-) {
+// Node resolves this module's own path through links, while argv keeps the
+// caller's spelling: compare canonical paths, or a run through an alias
+// (macOS /var, a Windows junction) would exit silently without output.
+function invokedDirectly() {
+  if (!process.argv[1]) return false;
+  try {
+    return realpathSync.native(resolve(process.argv[1])) ===
+      realpathSync.native(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
+
+if (invokedDirectly()) {
   try {
     await main();
   } catch (error) {

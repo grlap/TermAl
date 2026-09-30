@@ -13,6 +13,7 @@ import {
   realpathSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative } from "node:path";
@@ -967,6 +968,44 @@ test("recover settles a dead worker's run as interrupted, and only the owner not
     });
     assert.equal(calls.length, 1);
     assert.equal(readFileSync(resultPath, "utf8"), bytes);
+  });
+});
+
+test("helper scripts run when started through a linked directory", async (t) => {
+  // macOS reaches its temp directory through /var -> /private/var, and a
+  // Windows junction is the same kind of alias. Node resolves a module's own
+  // URL through links while argv keeps the caller's spelling, so an entry
+  // guard comparing them lexically makes the script exit silently.
+  // The link targets a private copy of the scripts, so no cleanup can reach
+  // the checkout through it.
+  const base = mkdtempSync(join(testTempDirectory(), "launcher-link-"));
+  t.after(() => rmSync(base, { recursive: true, force: true }));
+  const real = join(base, "real");
+  mkdirSync(join(real, "scripts"), { recursive: true });
+  for (const name of ["test-launcher.mjs", "review-freeze-fingerprint.mjs", "test-temp-root.mjs"]) {
+    copyFileSync(join(projectRoot, "scripts", name), join(real, "scripts", name));
+  }
+  const linked = join(base, "linked");
+  symlinkSync(real, linked, "junction");
+  const run = (name, args = [], cwd = base) => new Promise((resolveRun) => {
+    const child = spawn(process.execPath, [join(linked, "scripts", name), ...args], {
+      cwd, env: fixtureEnv, stdio: ["ignore", "pipe", "pipe"], windowsHide: true,
+    });
+    let output = "";
+    child.stdout.on("data", (chunk) => { output += chunk; });
+    child.stderr.on("data", (chunk) => { output += chunk; });
+    child.once("close", (code) => resolveRun({ code, output }));
+  });
+  const launcher = await within(run("test-launcher.mjs"), "launcher through link");
+  assert.match(launcher.output, /FAIL launcher: usage:/u, launcher.output);
+  assert.equal(launcher.code, 1);
+  const tempRoot = await within(run("test-temp-root.mjs"), "temp root through link");
+  assert.match(tempRoot.output, /Usage: node scripts\/test-temp-root\.mjs/u, tempRoot.output);
+  assert.equal(tempRoot.code, 2);
+  await repository(t, async (root) => {
+    const fingerprint = await within(run("review-freeze-fingerprint.mjs", [], root), "fingerprint through link");
+    assert.match(fingerprint.output, /^headCommit=[0-9a-f]{40}$/mu, fingerprint.output);
+    assert.equal(fingerprint.code, 0);
   });
 });
 

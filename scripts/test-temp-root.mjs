@@ -6,7 +6,7 @@
 // launcher and Node fixture tests.
 import {
   lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync,
-  rmSync, writeFileSync,
+  realpathSync, rmSync, writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
@@ -240,7 +240,20 @@ export async function runInTestTemp(command, args, {
   return { exitCode, runRoot, beforeCount: before.length, afterCount: after.length };
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// Node resolves this module's own path through links, while argv keeps the
+// caller's spelling: compare canonical paths, or a run through an alias
+// (macOS /var, a Windows junction) would exit silently without running.
+function invokedDirectly() {
+  if (!process.argv[1]) return false;
+  try {
+    return realpathSync.native(resolve(process.argv[1])) ===
+      realpathSync.native(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
+
+if (invokedDirectly()) {
   const [command, ...args] = process.argv.slice(2);
   if (!command) {
     console.error("Usage: node scripts/test-temp-root.mjs <executable> [arguments...]");

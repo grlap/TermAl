@@ -12,6 +12,7 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  realpathSync,
   renameSync,
   statSync,
   unlinkSync,
@@ -1066,7 +1067,20 @@ async function main(args) {
   console.log(`STARTED ${runDir}\npid=${detached.pid} completion=mailbox:${options.notifyTo.trim()}\nEnd your turn; do not poll. Missing terminal results mean running/interrupted, not PASS.`);
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === script) {
+// Node resolves this module's own path through links (macOS /var is a link
+// to /private/var; a Windows junction or 8.3 name also differs), while argv
+// keeps the spelling the caller used: compare canonical paths, or a launcher
+// started through an alias would exit silently without running.
+function invokedDirectly() {
+  if (!process.argv[1]) return false;
+  try {
+    return realpathSync.native(resolve(process.argv[1])) === realpathSync.native(script);
+  } catch {
+    return false;
+  }
+}
+
+if (invokedDirectly()) {
   main(process.argv.slice(2)).catch((error) => {
     console.error(`FAIL launcher: ${error.message}`);
     process.exitCode = 1;
