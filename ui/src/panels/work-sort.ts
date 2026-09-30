@@ -50,8 +50,7 @@ function tie(a: WorkItem, b: WorkItem): number {
   return a.id.localeCompare(b.id) || a.source.localeCompare(b.source);
 }
 
-// Sorts a copy of the loaded rows; `null` keeps the source order (the Engram
-// page, then the Beads snapshot). Rows without a value (unassigned) come
+// Sorts a copy of the loaded rows; `null` keeps the Engram source order. Rows without a value (unassigned) come
 // last in both directions.
 export function sortWorkRows(rows: readonly WorkItem[], sort: WorkSort | null): WorkItem[] {
   const copy = [...rows];

@@ -10,20 +10,15 @@ export function WorkMemories({ projectId }: { projectId: string }) {
   const [draft, setDraft] = useState("");
   const [search, setSearch] = useState("");
   const [generation, setGeneration] = useState(0);
-  const [source, setSource] = useState<"all" | WorkMemorySource>("all");
   return <section className="work-memories" aria-label="Project memories">
     <p className="work-panel-caption">Retained project memories — not tasks, issue comments, or private session context. Read-only; memory text is never executed.</p>
     <form className="work-panel-filters" onSubmit={event => { event.preventDefault(); setSearch(draft.trim()); setGeneration(value => value + 1); }}>
       <label>Search memories <input value={draft} maxLength={2048} onChange={event => setDraft(event.target.value)} /></label>
-      <label>Memory source <select value={source} onChange={event => setSource(event.target.value as typeof source)}>
-        <option value="all">Both sources</option><option value="engram">Engram</option><option value="beads">Beads</option>
-      </select></label>
       <button type="submit">Search memories</button>
       <button type="button" onClick={() => setGeneration(value => value + 1)}>Refresh memories</button>
     </form>
-    <p className="work-panel-caption">Pages load automatically. Expand a memory in place to read its full text. Search uses each tracker’s own memory search; source limits are shown below.</p>
-    {(["engram", "beads"] as const).filter(value => source === "all" || source === value).map(value =>
-      <MemorySource key={`${projectId}:${value}:${generation}:${search}`} projectId={projectId} source={value} search={search} />)}
+    <p className="work-panel-caption">Pages load automatically. Expand a memory in place to read its full text. Search uses Engram’s memory search; source limits are shown below.</p>
+    <MemorySource key={`${projectId}:${generation}:${search}`} projectId={projectId} source="engram" search={search} />
   </section>;
 }
 
@@ -80,7 +75,6 @@ function MemorySource({ projectId, source, search }: { projectId: string; source
     {data && <>
       {data.state !== "ready" ? <p className="work-source-status" data-state={data.state}>{data.state}: {data.message}</p> : <>
         <p className="work-panel-caption">{data.items.length} loaded{busy ? " · Loading more…" : data.exhausted && !error ? " · All returned memories loaded" : " · Incomplete listing"} · Last page read: <WorkTime value={data.observedAt} /></p>
-        {source === "beads" && <p className="work-panel-caption">Beads does not provide memory dates.</p>}
         {data.items.length === 0 && <p>No matching project memories in {source}.</p>}
         <ul className="work-memory-list">{data.items.map(memory => <MemoryRow key={memory.key} memory={memory} projectId={projectId} source={source} readerId={data.readerId} />)}</ul>
         {data.omitted > 0 && <p>{data.omitted} more matches omitted; refine Search memories.</p>}

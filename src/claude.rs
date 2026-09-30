@@ -141,20 +141,56 @@ impl AppState {
                 self.delegation_control_plane_capability_allowed(session_id, capability)
             })
     }
+
+    /// What the host itself admits for this exact permission request, from
+    /// the session's current delegation authority.
+    fn claude_host_admission(&self, session_id: &str, message: &Value) -> ClaudeHostAdmission {
+        ClaudeHostAdmission {
+            control_plane: self.claude_control_plane_request_allowed(session_id, message),
+            tracker_reads: {
+                let inner = self.inner.lock().expect("state mutex poisoned");
+                read_only_child_tracker_reads_allowed_locked(&inner, session_id)
+            },
+        }
+    }
+}
+
+/// What the host admits for one permission request on its own authority,
+/// whatever the session's approval mode would otherwise answer.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct ClaudeHostAdmission {
+    /// The request names a TermAl control-plane tool and the session holds
+    /// that exact capability (`claude_control_plane_request_allowed`).
+    control_plane: bool,
+    /// The session is a read-only child that may read the tracker
+    /// (`read_only_child_tracker_reads_allowed_locked`). Which calls are reads
+    /// is decided per request by `engram_mcp_tool_call_only_reads`.
+    tracker_reads: bool,
+}
+
+impl From<bool> for ClaudeHostAdmission {
+    /// Control-plane access alone, with no tracker reads.
+    fn from(control_plane: bool) -> Self {
+        Self {
+            control_plane,
+            tracker_reads: false,
+        }
+    }
 }
 
 /// Classifies Claude control request. `delegation_child` is the session's
 /// delegation-child identity read together with `approval_mode` under one
-/// state lock (see `claude_control_request_context`). Control-plane access is
-/// for this exact message, resolved by `claude_control_plane_request_allowed`.
+/// state lock (see `claude_control_request_context`). `host_admission` is for
+/// this exact message, resolved by `claude_host_admission`.
 fn classify_claude_control_request(
     message: &Value,
     state: &mut ClaudeTurnState,
     approval_mode: ClaudeApprovalMode,
     delegation_child: bool,
     cwd: &str,
-    delegation_control_plane_access: bool,
+    host_admission: impl Into<ClaudeHostAdmission>,
 ) -> Result<Option<ClaudeControlRequestAction>> {
+    let host_admission = host_admission.into();
     if message.get("type").and_then(Value::as_str) == Some("control_request")
         && message.pointer("/request/subtype").and_then(Value::as_str)
             == Some("request_user_dialog")
@@ -263,7 +299,7 @@ fn classify_claude_control_request(
         return Ok(None);
     }
 
-    if delegation_control_plane_access
+    if host_admission.control_plane
         && delegation_control_plane_capability_for_claude_tool_name(&request.tool_name).is_some()
     {
         return Ok(Some(ClaudeControlRequestAction::Respond(
@@ -291,9 +327,9 @@ fn classify_claude_control_request(
                 updated_input: request.tool_input,
             })
         }
-        ClaudeApprovalMode::ReadOnlyAutoApprove => {
-            ClaudeControlRequestAction::Respond(read_only_claude_permission_decision(request, cwd))
-        }
+        ClaudeApprovalMode::ReadOnlyAutoApprove => ClaudeControlRequestAction::Respond(
+            read_only_claude_permission_decision(request, cwd, host_admission.tracker_reads),
+        ),
         ClaudeApprovalMode::Plan => {
             ClaudeControlRequestAction::Respond(ClaudePermissionDecision::Deny {
                 request_id: request.request_id,
@@ -449,11 +485,29 @@ fn parse_claude_ask_user_question_list(raw_questions: &[Value]) -> Result<Vec<Us
     Ok(questions)
 }
 
+/// Said when a read-only child that may read the tracker asks for a tracker
+/// call that is not one of the reads, so that it can adapt in one step.
+const CLAUDE_READ_ONLY_TRACKER_DENIAL: &str = "TermAl denied this tracker request because this \
+     Claude delegation is read-only. It may only read the tracker: `next` with `peek: true`, \
+     `ls`, `search`, `show`, and `memories` without a context generation, each with no argument \
+     other than the ones that read takes. Every other tracker call writes and belongs to the \
+     parent session.";
+
+/// The answer to one permission request of a read-only Claude child.
+/// `tracker_reads` is the host's admission for the session (see
+/// [`ClaudeHostAdmission`]); a tracker tool is judged by the tracker's list of
+/// reads and never by the workspace rules below it.
 fn read_only_claude_permission_decision(
     request: ClaudeToolPermissionRequest,
     cwd: &str,
+    tracker_reads: bool,
 ) -> ClaudePermissionDecision {
-    if claude_tool_permission_request_is_read_only(&request, cwd) {
+    let tracker_word = engram_mcp_tool_word(&request.tool_name);
+    let allowed = match tracker_word {
+        Some(word) => tracker_reads && engram_mcp_tool_call_only_reads(word, &request.tool_input),
+        None => claude_tool_permission_request_is_read_only(&request, cwd),
+    };
+    if allowed {
         return ClaudePermissionDecision::Allow {
             request_id: request.request_id,
             updated_input: request.tool_input,
@@ -462,9 +516,12 @@ fn read_only_claude_permission_decision(
 
     ClaudePermissionDecision::Deny {
         request_id: request.request_id,
-        message:
+        message: if tracker_word.is_some() && tracker_reads {
+            CLAUDE_READ_ONLY_TRACKER_DENIAL.to_owned()
+        } else {
             "TermAl denied this tool request because this Claude reviewer delegation is read-only."
-                .to_owned(),
+                .to_owned()
+        },
     }
 }
 

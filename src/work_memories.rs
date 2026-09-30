@@ -13,7 +13,7 @@ struct WorkMemoryQuery {
 
 impl WorkMemoryQuery {
     fn validate(&self, source: &str) -> Result<(), ApiError> {
-        if !matches!(source, "engram" | "beads") {
+        if source != "engram" {
             return Err(ApiError::bad_request("Unknown memory source"));
         }
         for value in [&self.search, &self.after, &self.key, &self.reader_id]
@@ -27,7 +27,6 @@ impl WorkMemoryQuery {
         }
         if (self.key.is_some() && (self.search.is_some() || self.after.is_some()))
             || (self.search.is_some() && self.after.is_some())
-            || (source == "beads" && (self.after.is_some() || self.reader_id.is_some()))
             || (source == "engram"
                 && (self.key.is_some() || self.after.is_some())
                 && self.reader_id.is_none())
@@ -39,23 +38,13 @@ impl WorkMemoryQuery {
         Ok(())
     }
 
-    fn arguments(&self, source: &str) -> Vec<String> {
-        let mut args = vec![
-            if source == "beads" && self.key.is_some() {
-                "recall"
-            } else {
-                "memories"
-            }
-            .into(),
-        ];
-        if source == "engram" {
-            args.push("--json".into());
-            if self.key.is_some() {
-                args.push("--full".into());
-            }
-            if let Some(after) = &self.after {
-                args.push(format!("--after={after}"));
-            }
+    fn arguments(&self) -> Vec<String> {
+        let mut args = vec!["memories".into(), "--json".into()];
+        if self.key.is_some() {
+            args.push("--full".into());
+        }
+        if let Some(after) = &self.after {
+            args.push(format!("--after={after}"));
         }
         if let Some(value) = self.key.as_ref().or(self.search.as_ref()) {
             // Positionals after -- cannot become flags, even for hostile keys.
@@ -123,73 +112,7 @@ fn normalize_work_memories(
 ) -> Result<WorkMemoryResponse, ApiError> {
     let invalid = || ApiError::bad_gateway("Invalid project memory receipt");
     let mut response = WorkMemoryResponse::empty(source);
-    if source == "beads" {
-        if let Some(key) = &query.key {
-            #[derive(Deserialize)]
-            struct Recall {
-                key: String,
-                found: bool,
-                value: Option<String>,
-            }
-            let receipt: Recall = serde_json::from_value(value).map_err(|_| invalid())?;
-            if receipt.key != *key {
-                return Err(invalid());
-            }
-            if !receipt.found {
-                return Err(ApiError::not_found("Memory no longer exists"));
-            }
-            let body = receipt.value.ok_or_else(invalid)?;
-            response.items.push(WorkMemoryItem {
-                key: key.clone(),
-                summary: body
-                    .lines()
-                    .next()
-                    .unwrap_or_default()
-                    .chars()
-                    .take(500)
-                    .collect(),
-                body: Some(body),
-                revision: None,
-                remembered_at: None,
-                actor: None,
-            });
-        } else {
-            let mut value = value;
-            // bd adds numeric schema_version alongside its key/value map.
-            // Older receipts omit it; never turn this metadata into a memory.
-            if let Some(version) = value.get("schema_version") {
-                if version != &serde_json::json!(1) {
-                    return Err(invalid());
-                }
-                value
-                    .as_object_mut()
-                    .ok_or_else(invalid)?
-                    .remove("schema_version");
-            }
-            let rows: std::collections::BTreeMap<String, String> =
-                serde_json::from_value(value).map_err(|_| invalid())?;
-            response.omitted = rows.len().saturating_sub(2000);
-            response.exhausted = response.omitted == 0;
-            response.items = rows
-                .into_iter()
-                .take(2000)
-                .map(|(key, body)| WorkMemoryItem {
-                    key,
-                    summary: body
-                        .lines()
-                        .next()
-                        .unwrap_or_default()
-                        .chars()
-                        .take(500)
-                        .collect(),
-                    body: None,
-                    revision: None,
-                    remembered_at: None,
-                    actor: None,
-                })
-                .collect();
-        }
-    } else if let Some(key) = &query.key {
+    if let Some(key) = &query.key {
         #[derive(Deserialize)]
         struct Full {
             key: String,
@@ -266,7 +189,6 @@ impl AppState {
         source: &str,
         query: WorkMemoryQuery,
         admit: impl FnOnce() -> Result<P, ApiError>,
-        options: BeadsReadOptions,
         cancelled: &std::sync::atomic::AtomicBool,
     ) -> Result<WorkMemoryResponse, ApiError> {
         query.validate(source)?;
@@ -286,47 +208,17 @@ impl AppState {
         // when their source vanished so clients cannot merge stale generations.
         let follow_up = query.key.is_some() || query.after.is_some();
         let read = || -> Result<WorkMemoryResponse, ApiError> {
-            if source == "engram" {
-                let target = target.map_err(ApiError::conflict)?;
-                validate_work_read_target(&target)?;
-                work_read_not_abandoned(cancelled)?;
-                let _permit = admit()?;
-                work_read_not_abandoned(cancelled)?;
-                self.validate_work_read_still_current(project_id, &target)?;
-                let value = run_work_read_command(&target.connection, &query.arguments(source))?;
-                self.validate_work_read_still_current(project_id, &target)?;
-                let mut response = normalize_work_memories(source, &query, value)?;
-                response.reader_id = Some(target.reader_key);
-                Ok(response)
-            } else {
-                let target = beads_read_target(&project)
-                    .map_err(ApiError::conflict)?
-                    .ok_or_else(|| ApiError::conflict("No .beads directory in this project"))?;
-                work_read_not_abandoned(cancelled)?;
-                let _permit = admit()?;
-                work_read_not_abandoned(cancelled)?;
-                let validate_current = || -> Result<(), ApiError> {
-                    let current = self.work_read_snapshot(project_id, None)?.0;
-                    if current.root_path != project.root_path
-                        || current.remote_id != project.remote_id
-                        || beads_read_target(&current)
-                            .map_err(ApiError::conflict)?
-                            .as_ref()
-                            != Some(&target)
-                    {
-                        return Err(ApiError::conflict("Memory source changed; refresh"));
-                    }
-                    Ok(())
-                };
-                validate_current()?;
-                let value = run_beads_read_command(
-                    &target,
-                    &query.arguments(source),
-                    std::time::Instant::now() + options.timeout,
-                )?;
-                validate_current()?;
-                normalize_work_memories(source, &query, value)
-            }
+            let target = target.map_err(ApiError::conflict)?;
+            validate_work_read_target(&target)?;
+            work_read_not_abandoned(cancelled)?;
+            let _permit = admit()?;
+            work_read_not_abandoned(cancelled)?;
+            self.validate_work_read_still_current(project_id, &target)?;
+            let value = run_work_read_command(&target.connection, &query.arguments())?;
+            self.validate_work_read_still_current(project_id, &target)?;
+            let mut response = normalize_work_memories(source, &query, value)?;
+            response.reader_id = Some(target.reader_key);
+            Ok(response)
         };
         match read() {
             Ok(response) => Ok(response),
@@ -348,15 +240,11 @@ async fn get_project_work_memories(
     State(state): State<AppState>,
     AxumPath((project_id, source)): AxumPath<(String, String)>,
     limiter: Option<axum::Extension<WorkReadLimiter>>,
-    beads_limiter: Option<axum::Extension<BeadsReadLimiter>>,
-    options: Option<axum::Extension<BeadsReadOptions>>,
     query: Result<Query<WorkMemoryQuery>, QueryRejection>,
 ) -> Result<Json<WorkMemoryResponse>, ApiError> {
     let Query(query) = query.map_err(|e| api_query_rejection("work memories", e))?;
     query.validate(&source)?;
     let limiter = limiter.map_or_else(|| WORK_READ_PERMITS.clone(), |v| v.0.0);
-    let beads_limiter = beads_limiter.map_or_else(|| BEADS_READ_PERMITS.clone(), |v| v.0.0);
-    let options = options.map_or_else(BeadsReadOptions::default, |v| v.0);
     let runtime = tokio::runtime::Handle::current();
     let cancelled = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let _abandoned = WorkReadAbandonGuard(cancelled.clone());
@@ -366,17 +254,7 @@ async fn get_project_work_memories(
                 &project_id,
                 &source,
                 query,
-                || {
-                    if source == "beads" {
-                        runtime.block_on(acquire_beads_read_permit_from(
-                            beads_limiter,
-                            options.timeout,
-                        ))
-                    } else {
-                        runtime.block_on(acquire_work_read_permit_from(limiter))
-                    }
-                },
-                options,
+                || runtime.block_on(acquire_work_read_permit_from(limiter)),
                 &cancelled,
             )
             .map(Json)

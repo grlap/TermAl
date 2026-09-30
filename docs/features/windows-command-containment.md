@@ -1,7 +1,7 @@
 # Windows command containment
 
 `src/windows_launch.rs` is the native launch primitive used by the terminal
-panel and bounded reads (review Git/checker, Work, Beads and toolchain probes).
+panel and bounded reads (review Git/checker, Work and toolchain probes).
 Unix keeps its existing `Command`, `SharedChild` and process-group behavior.
 The Engram runtime adapter still uses its existing transport; this change does
 not migrate agent runtimes or make a claim about all processes on the machine.

@@ -288,10 +288,18 @@ fn engram_fence_carried_for_own_command(
     engram_fence_carried_checks(record, worktrees, &cause);
 }
 
-/// How a fence names the holder's command `ran`: its program (the first word
-/// after a one-call form's `pushd "DIR" &&`) and the start of the SHA-256 of
-/// its whole line.
+/// How a fence names the holder's command `ran` (`engram_command_name`).
 fn engram_own_command_cause(ran: &str) -> String {
+    let (command, line) = engram_command_name(ran);
+    format!("this session ran {command} there {line}")
+}
+
+/// How a fence names the command line `ran`, as "a `PROGRAM` command" and
+/// "(line DIGEST)", the digest after whatever says where it ran: its program
+/// (the first word after a one-call form's `pushd "DIR" &&`) and the start of
+/// the SHA-256 of its whole line, never the line itself, which can carry a
+/// secret. Returned in two parts so a caller can put the place between them.
+fn engram_command_name(ran: &str) -> (String, String) {
     let ran = ran.trim();
     let line = engram_one_call_prefix(ran).map_or(ran, |(_, rest)| rest.trim());
     // Leading `NAME=value` assignments (and `env`) are skipped: their value
@@ -305,11 +313,138 @@ fn engram_own_command_cause(ran: &str) -> String {
         })
         .filter(|program| !program.is_empty())
         .unwrap_or_else(|| "unparsed".to_owned());
-    format!(
-        "this session ran a `{}` command there (line {})",
-        engram_truncate_utf8(&program, 40),
-        &sha256_hex(ran.as_bytes())[..12]
+    (
+        format!("a `{}` command", engram_truncate_utf8(&program, 40)),
+        format!("(line {})", &sha256_hex(ran.as_bytes())[..12]),
     )
+}
+
+/// What a session that may write just did, for the carried checks of the
+/// other sessions (`engram_fence_carried_for_other_session`). A carried check
+/// stays open for the length of a full gate, so only an act that may have
+/// written fences it; an ordinary check of a turn, open for one command,
+/// keeps the wider rule (`engram_mark_checks_overlapped_by`).
+#[derive(Clone, Copy, Debug)]
+enum EngramWriterAct<'a> {
+    /// It started a turn, or its turn's named source root became known, or a
+    /// command whose start it reported ended: nothing here says it wrote, so
+    /// no carried check is fenced. What it then runs or edits is reported as
+    /// it happens, and a change to a watched file fences on its own
+    /// (`note_engram_workspace_file_changes`).
+    Presence,
+    /// It reported a command that may write in `worktrees`
+    /// (`engram_command_worktrees`, as placed by
+    /// `engram_place_command_worktrees`: `unplaced` when TermAl could not
+    /// name where it ran, so it counts where its session works; `None` only
+    /// for a session whose own workdir was never resolved), with its line
+    /// `ran` when TermAl was told it.
+    Command {
+        worktrees: &'a [Option<String>],
+        ran: Option<&'a str>,
+        unplaced: bool,
+    },
+    /// A command of its ended whose start TermAl was never told: it may have
+    /// written wherever the session writes (`engram_writer_worktrees`).
+    UnreportedCommand,
+    /// It reported a file edit, which names no path: it may have written
+    /// wherever the session writes.
+    Edit,
+}
+
+/// Fences the carried checks of every session but the one at `writer` for
+/// what that session did (`act`), where it may have written under them:
+/// - a command fences the carried checks in the worktrees it may write in
+///   (one TermAl cannot place counts where its session works,
+///   `engram_place_command_worktrees`), unless it is a Claude session's line
+///   that only reads (`engram_session_command_reads_only`);
+/// - a file edit, and a command whose start was never reported, fence those
+///   in `writer_worktrees`, the worktrees the session writes in;
+/// - its presence alone fences none.
+/// The cause names the session and what it did, a command by its program and
+/// the digest of its line (`engram_command_name`), and says whether it was
+/// placed in the check's worktree or could not be placed and may have run
+/// there.
+fn engram_fence_carried_for_other_session(
+    inner: &mut StateInner,
+    writer: usize,
+    writer_worktrees: &[Option<String>],
+    act: EngramWriterAct<'_>,
+) {
+    // Most commands run while no other session carries a gate that a write
+    // could still reach: nothing is read or formatted for them.
+    let open = |carried: &EngramCarriedCheck| {
+        carried.fence.is_none() && carried.terminal_digest.is_none()
+    };
+    if matches!(act, EngramWriterAct::Presence)
+        || !inner.sessions.iter().enumerate().any(|(other, record)| {
+            other != writer && record.engram.carried_checks.iter().any(open)
+        })
+    {
+        return;
+    }
+    let record = &inner.sessions[writer];
+    let who = format!("session {} ({})", record.session.name, record.session.id);
+    let (worktrees, there, unplaced) = match act {
+        EngramWriterAct::Presence => return,
+        EngramWriterAct::Command {
+            worktrees,
+            ran,
+            unplaced,
+        } => {
+            if engram_session_command_reads_only(record, ran) {
+                return;
+            }
+            let (command, line) = match ran {
+                Some(ran) => engram_command_name(ran),
+                None => (
+                    "a command".to_owned(),
+                    "(its line TermAl was not told)".to_owned(),
+                ),
+            };
+            let nowhere = format!("{who} ran {command} that TermAl could not place {line}");
+            (
+                worktrees,
+                if unplaced {
+                    format!(
+                        "{who} ran {command} that TermAl could not place and that may have run \
+                         there {line}"
+                    )
+                } else {
+                    format!("{who} ran {command} there {line}")
+                },
+                nowhere,
+            )
+        }
+        EngramWriterAct::UnreportedCommand => (
+            writer_worktrees,
+            format!("{who} ran a command there whose start TermAl was not told"),
+            format!("{who} ran a command that TermAl could not place, whose start it was not told"),
+        ),
+        EngramWriterAct::Edit => (
+            writer_worktrees,
+            format!("{who} reported a file edit there"),
+            format!("{who} reported a file edit that TermAl could not place"),
+        ),
+    };
+    for (other, record) in inner.sessions.iter_mut().enumerate() {
+        if other == writer {
+            continue;
+        }
+        for carried in &mut record.engram.carried_checks {
+            if !open(carried) {
+                continue;
+            }
+            let root = engram_path_key(&carried.check.target.root);
+            let named = worktrees
+                .iter()
+                .any(|worktree| worktree.as_deref() == Some(root.as_str()));
+            if named {
+                carried.fence = Some(there.clone());
+            } else if worktrees.iter().any(Option::is_none) {
+                carried.fence = Some(unplaced.clone());
+            }
+        }
+    }
 }
 
 /// Whether the Bash line `ran`, started from `workdir`, only reads: the
@@ -1164,7 +1299,8 @@ fn engram_take_settled_carried_checks(
             .map(|found| settled.swap_remove(found).2);
         if let Some(cause) = &carried.fence {
             lines.push(carried.refusal_line(&format!(
-                "a write the host observed reached its worktree before it settled: {cause}"
+                "the host saw something that may have written in its worktree before it \
+                 settled: {cause}"
             )));
             continue;
         }
@@ -1363,12 +1499,40 @@ fn engram_note_carried_run_read(
     }
 }
 
+/// The scratch directory CLAUDE.md and AGENTS.md send every agent's scratch
+/// files, throwaway stores, test homes and logs to, at a worktree's root.
+/// The exemption assumes what this repository's .gitignore makes true: it is
+/// git-ignored and nothing under it is tracked, so no change under it reaches
+/// the launcher's input fingerprint or the host's source basis. Like the
+/// watcher's own ignored names (target, dist, node_modules), it is not
+/// checked per repository.
+const ENGRAM_WORKTREE_SCRATCH_DIRECTORY: &str = ".tmp";
+
+/// Whether a changed entry named `name` in the directory with exact key
+/// `directory_key` lies under the scratch directory at the root of its own
+/// worktree (exact key `worktree`), or is that directory itself. A worktree
+/// nested under another checkout's scratch directory is its own worktree, so
+/// a change in it is judged against its own root, not the enclosing one.
+/// Both keys are exact (`engram_exact_path_key`) and the name is compared
+/// exactly: an exemption must never widen by case folding, since on a
+/// case-sensitive volume `.TMP` is another directory, which Git does not
+/// ignore and which may hold source.
+fn engram_is_worktree_scratch(worktree: &str, directory_key: &str, name: Option<&str>) -> bool {
+    let worktree = worktree.trim_end_matches('/');
+    let scratch = format!("{worktree}/{ENGRAM_WORKTREE_SCRATCH_DIRECTORY}");
+    directory_key == scratch
+        || directory_key.starts_with(&format!("{scratch}/"))
+        || (directory_key == worktree && name == Some(ENGRAM_WORKTREE_SCRATCH_DIRECTORY))
+}
+
 impl AppState {
     /// The workspace watcher saw the files in `changes` change (its ignored
     /// directories, such as `.git`, `target` and `node_modules`, already left
     /// out): a carried check whose worktree holds one of them is fenced, with
-    /// the path. The worktrees are resolved off the state lock, once per
-    /// distinct directory, and only while some carried check is unfenced.
+    /// the path. A change under the `.tmp/` of its own worktree is left out
+    /// too (`engram_is_worktree_scratch`). The worktrees are resolved off the
+    /// state lock, once per distinct directory, and only while some carried
+    /// check is unfenced.
     fn note_engram_workspace_file_changes(&self, changes: &[WorkspaceFileChangeEvent]) {
         if changes.is_empty() {
             return;
@@ -1394,23 +1558,76 @@ impl AppState {
         if !open {
             return;
         }
-        let mut directories: Vec<(PathBuf, String)> = Vec::new();
+        let mut directories: Vec<PathBuf> = Vec::new();
         for change in changes {
             let path = FsPath::new(&change.path);
             let directory = path.parent().unwrap_or(path).to_path_buf();
-            if !directories.iter().any(|(known, _)| *known == directory) {
-                directories.push((directory, change.path.clone()));
+            if !directories.contains(&directory) {
+                directories.push(directory);
             }
         }
         let placed = if directories.len() > ENGRAM_CARRIED_WATCH_DIRECTORY_LIMIT {
             // Too many places to resolve: any carried check may be touched.
             vec![(None, format!("{} files changed at once", changes.len()))]
         } else {
-            directories
+            // Each directory once: its worktree key for routing the fence.
+            let resolved: Vec<(PathBuf, String)> = directories
                 .into_iter()
-                .map(|(directory, path)| (Some(engram_worktree_root(&directory)), path))
-                .collect()
+                .map(|directory| {
+                    let worktree = engram_worktree_root(&directory);
+                    (directory, worktree)
+                })
+                .collect();
+            // For the scratch test, the exact keys of a directory's worktree
+            // root and of itself, both resolved alike through their longest
+            // existing part, so a directory already gone when its event is
+            // handled still reads in its resolved spelling. They are resolved
+            // only for a path that names the scratch directory at all, and
+            // once per directory: every other path cannot be scratch, and
+            // resolving it would read the file system for each event of a
+            // build. A network path is not resolved, as its worktree key is
+            // not (`engram_worktree_root`), and so is never scratch.
+            let mut exact: Vec<(PathBuf, String, String)> = Vec::new();
+            let mut placed: Vec<(Option<String>, String)> = Vec::new();
+            for change in changes {
+                let path = FsPath::new(&change.path);
+                let directory = path.parent().unwrap_or(path);
+                let Some((_, worktree)) = resolved.iter().find(|(known, _)| known == directory)
+                else {
+                    continue;
+                };
+                let names_scratch = path.components().any(|component| {
+                    component.as_os_str() == std::ffi::OsStr::new(ENGRAM_WORKTREE_SCRATCH_DIRECTORY)
+                });
+                if names_scratch && !engram_network_path(&change.path) {
+                    if !exact.iter().any(|(known, _, _)| known == directory) {
+                        let canonical = engram_canonical_path(directory);
+                        exact.push((
+                            directory.to_path_buf(),
+                            engram_exact_path_key(&engram_worktree_root_path(&canonical)),
+                            engram_exact_path_key(&canonical),
+                        ));
+                    }
+                    let name = path.file_name().map(|name| name.to_string_lossy());
+                    if exact.iter().any(|(known, root_exact, key)| {
+                        known == directory
+                            && engram_is_worktree_scratch(root_exact, key, name.as_deref())
+                    }) {
+                        continue;
+                    }
+                }
+                if !placed
+                    .iter()
+                    .any(|(known, _)| known.as_deref() == Some(worktree.as_str()))
+                {
+                    placed.push((Some(worktree.clone()), change.path.clone()));
+                }
+            }
+            placed
         };
+        if placed.is_empty() {
+            return;
+        }
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         for record in inner.sessions.iter_mut() {
             for (worktree, path) in &placed {

@@ -302,9 +302,18 @@ fn native_windows_launch_kill_accepts_root_already_ended_by_job() {
 
 #[test]
 fn native_windows_launch_intermediate_exit_does_not_close_root_lease() {
+    // Fail on the first violated invariant. Exercise the corrected fixture
+    // repeatedly while the full suite's other libtest threads are active.
+    for round in 1..=50 {
+        assert_intermediate_exit_keeps_root_lease();
+        eprintln!("intermediate-exit survival round {round}/50 passed");
+    }
+}
+
+fn assert_intermediate_exit_keeps_root_lease() {
     let directory = scratch();
     let marker = directory.join("ready.json");
-    let mut spec = node_spec("root");
+    let mut spec = node_spec("root-independent");
     spec.arg(&marker);
     let launch = prepare(&spec).unwrap();
     let process = launch.process();
@@ -314,6 +323,28 @@ fn native_windows_launch_intermediate_exit_does_not_close_root_lease() {
         creation(process.handle.as_raw_handle()),
     );
     assert_eq!(members.len(), 3);
+    {
+        let job = launch.job.lock().expect("fixture job mutex poisoned");
+        let lease = job.as_ref().expect("fixture must have a native host lease");
+        for member in &members {
+            let mut in_host_job = 0;
+            assert_ne!(
+                unsafe {
+                    IsProcessInJob(
+                        member.handle.as_raw_handle(),
+                        lease.as_raw_handle(),
+                        &mut in_host_job,
+                    )
+                },
+                0
+            );
+            assert_ne!(
+                in_host_job, 0,
+                "fixture member {} escaped the host lease",
+                member.pid
+            );
+        }
+    }
     // Only this retained fixture member is ended. Kernel job ownership does
     // not treat intermediate exit as an instruction to close the host lease.
     assert_ne!(
@@ -321,6 +352,10 @@ fn native_windows_launch_intermediate_exit_does_not_close_root_lease() {
         0
     );
     members[1].assert_ended();
+    // The leaf has processed its parent's IPC closure and acknowledged it.
+    // A default libuv fork would instead die when the middle's own job closes.
+    let survived = ready(&directory.join("ready.json.leaf-survived"), &process);
+    assert_eq!(survived["pids"], serde_json::json!([members[2].pid]));
     assert_eq!(
         unsafe { WaitForSingleObject(members[0].handle.as_raw_handle(), 0) },
         WAIT_TIMEOUT

@@ -6,14 +6,13 @@ import type { Project } from "../types";
 import { readProjectWork, type WorkItem, type WorkListResponse } from "../work-visualizer-api";
 import { WorkPanel } from "./WorkPanel";
 
-vi.mock("../work-visualizer-api", () => ({ readProjectWork: vi.fn(), readWorkDetail: vi.fn(), readWorkBeadsDetail: vi.fn() }));
+vi.mock("../work-visualizer-api", () => ({ readProjectWork: vi.fn(), readWorkDetail: vi.fn() }));
 const projects = [{ id: "one", name: "One", rootPath: "/one", remoteId: "local" }, { id: "two", name: "Two", rootPath: "/two", remoteId: "local" }] as Project[];
 function item(id: string, labels: string[], source = "engram"): WorkItem {
   return { id, shortRef: id, title: `Task ${id}`, labels, source, priority: 2, kind: "task", lifecycle: "open", availability: "ready", assignedTo: null, parentId: null, blockedBy: [], prerequisites: [], updatedAt: "2026-09-16T10:00:00Z" };
 }
 function response(): WorkListResponse {
-  return { sources: [], readerId: "host:reader", observedAt: "now", page: { items: [item("a", ["storage", "reliability"]), item("b", ["storage"]), item("c", [])], total: 3, shownBefore: 0, more: false, after: null, hint: null },
-    beads: { items: [item("d", ["reliability"], "beads")], total: 1, shownBefore: 0, more: false, after: null, hint: null } };
+  return { sources: [], readerId: "host:reader", observedAt: "now", page: { items: [item("a", ["storage", "reliability"]), item("b", ["storage"]), item("c", []), item("d", ["reliability"])], total: 4, shownBefore: 0, more: false, after: null, hint: null } };
 }
 async function mount() {
   vi.mocked(readProjectWork).mockResolvedValue(response());
@@ -103,7 +102,7 @@ describe("Work label browsing", () => {
     const first = response();
     first.page!.more = true;
     first.page!.after = "next";
-    first.page!.total = 4;
+    first.page!.total = 5;
     let finish!: (value: WorkListResponse) => void;
     vi.mocked(readProjectWork).mockResolvedValueOnce(first).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
     render(<WorkPanel projects={projects} focusedProjectId="one" />);
@@ -112,8 +111,7 @@ describe("Work label browsing", () => {
     fireEvent.click(screen.getByRole("button", { name: "Labels" }));
     await waitFor(() => expect(readProjectWork).toHaveBeenCalledTimes(2));
     const next = response();
-    next.page = { items: [item("e", ["storage", "<img onerror=alert(1)>"])], total: 4, shownBefore: 3, more: false, after: null, hint: null };
-    next.beads = null;
+    next.page = { items: [item("e", ["storage", "<img onerror=alert(1)>"])], total: 5, shownBefore: 4, more: false, after: null, hint: null };
     await act(async () => finish(next));
     expect(screen.getByText(/3 unique items/)).toBeInTheDocument();
     expect(within(group("storage")).getByRole("button", { name: "e — Task e" })).toBeInTheDocument();

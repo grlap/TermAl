@@ -300,6 +300,28 @@ Reviewer leaves may perform read-only startup recovery required by their project
 instructions. They must not mutate the tracker or reconcile findings against its
 tasks; that work belongs to the parent after the reviews are consolidated.
 
+For a read-only Claude child the host's permission gate enforces this by the
+tracker tool's qualified name and its arguments. It admits the tracker's reads
+that record nothing (no row, no session registration, no change of focus or
+delivery): `next` with `peek: true`, `ls`, `search`, `show` in every form, and
+`memories` without a context generation. Each may carry only the arguments that
+read takes; an argument the gate does not know is refused, so one the tracker
+adds later is not admitted by default. Every other tracker call is denied with
+a message that lists the reads: `next` without a peek (it stages delivery), a
+context generation on `next` or `memories` (the host asserts it, and on
+`memories` it records an acknowledgement), and every word that writes (`add`,
+`claim`, `update`, `note`, `done`, `gate`, `evaluate`, `handoff`, `remember`,
+`forget`). The admission holds only for the running child of a delegation that
+is not an evaluator, on a runtime the host itself gave the tracker's server. An
+evaluator is briefed to call no tracker tool and its gate admits none.
+
+The other vendors differ today, and both differences are tracked as their own
+work. A read-only Kimi child's gate (`kimi_read_only.rs`) admits Bash reads and
+the TermAl result tools only, so it refuses every tracker tool, reads included.
+A Codex child runs with approval policy `never`, under which Codex puts no
+tracker call to the host: its reads work, and no host gate stands between it
+and a tracker write.
+
 ## Value To Parent Agents
 
 Delegation is useful to a parent agent even when that agent already has an

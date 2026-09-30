@@ -3,7 +3,7 @@ import type { WorkItem } from "../work-visualizer-api";
 import { defaultWorkSortDirection, nextWorkSort, sortWorkRows } from "./work-sort";
 
 function item(id: string, extra: Partial<WorkItem> = {}): WorkItem {
-  return { id, shortRef: id, title: id, kind: "task", lifecycle: "open", availability: "ready", priority: 2, labels: [], assignedTo: null, parentId: null, updatedAt: "2026-09-10T00:00:00Z", blockedBy: [], source: "beads", prerequisites: [], ...extra };
+  return { id, shortRef: id, title: id, kind: "task", lifecycle: "open", availability: "ready", priority: 2, labels: [], assignedTo: null, parentId: null, updatedAt: "2026-09-10T00:00:00Z", blockedBy: [], source: "alternate", prerequisites: [], ...extra };
 }
 const ids = (rows: WorkItem[]) => rows.map(row => row.id);
 
@@ -29,9 +29,9 @@ describe("work-sort", () => {
   it("sorts priority numerically, breaks ties by id then source, and keeps ties in place when reversed", () => {
     const rows = [item("n", { priority: 3 }), item("b", { priority: 0, source: "engram" }), item("b", { priority: 0 }), item("a", { priority: 0 }), item("m", { priority: 10 })];
     const ascending = sortWorkRows(rows, { key: "priority", direction: "asc" });
-    expect(ascending.map(row => `${row.source}:${row.id}`)).toEqual(["beads:a", "beads:b", "engram:b", "beads:n", "beads:m"]);
+    expect(ascending.map(row => `${row.source}:${row.id}`)).toEqual(["alternate:a", "alternate:b", "engram:b", "alternate:n", "alternate:m"]);
     const descending = sortWorkRows(rows, { key: "priority", direction: "desc" });
-    expect(descending.map(row => `${row.source}:${row.id}`)).toEqual(["beads:m", "beads:n", "beads:a", "beads:b", "engram:b"]);
+    expect(descending.map(row => `${row.source}:${row.id}`)).toEqual(["alternate:m", "alternate:n", "alternate:a", "alternate:b", "engram:b"]);
   });
 
   it("counts only unsatisfied prerequisites as waits-for and keeps unassigned rows last in both directions", () => {

@@ -38,7 +38,6 @@ vi.mock("./MonacoCodeEditor", () => ({
 vi.mock("./work-visualizer-api", () => ({
   readProjectWork: vi.fn(),
   readWorkDetail: vi.fn(),
-  readWorkBeadsDetail: vi.fn(),
 }));
 
 const originalScrollTo = HTMLElement.prototype.scrollTo;
@@ -104,18 +103,16 @@ describe("App Work launcher", () => {
       );
       vi.mocked(readProjectWork).mockResolvedValue({
         sources: [
-          { source: "engram", state: "absent", message: "No .engram-project file" },
-          { source: "beads", state: "ready", message: "Beads reads use the native bd binary" },
+          { source: "engram", state: "ready", message: "Ready" },
         ],
-        readerId: null,
+        readerId: "host:reader",
         observedAt: "now",
-        page: null,
-        beads: {
+        page: {
           items: [
             {
               id: "tm-goal", shortRef: "tm-goal", title: "Goal", kind: "task", lifecycle: "open",
               availability: "ready", priority: 2, labels: [], assignedTo: null, parentId: null,
-              updatedAt: "today", blockedBy: [], source: "beads", prerequisites: [],
+              updatedAt: "today", blockedBy: [], source: "engram", prerequisites: [],
             },
           ],
           total: 1, shownBefore: 0, more: false, after: null, hint: null,

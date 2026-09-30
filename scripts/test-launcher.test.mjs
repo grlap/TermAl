@@ -22,6 +22,7 @@ import { fileURLToPath } from "node:url";
 import {
   createRun,
   diagnostics,
+  ensureCargoTargetDirectory,
   executeRun,
   helperTestFiles,
   liveStage,
@@ -197,6 +198,60 @@ test("explicit Cargo and Rust toolchain selections are preserved and recorded", 
       source: "TERMAL_TEST_CARGO",
     });
     assert.equal(result.stages[0].command[0], process.execPath);
+  });
+});
+
+test("a fresh worktree gets its ignored Cargo build directory before any stage", async (t) => {
+  await repository(t, async (root, gitEnv) => {
+    const env = { ...gitEnv, TERMAL_TEST_CARGO: process.execPath };
+    delete env.CARGO_TARGET_DIR;
+    delete env.CARGO_BUILD_TARGET_DIR;
+    // What the first Cargo stage finds: the tagged directory or none, and
+    // never a sibling left for Cargo to make and rename.
+    const finds = (tagged) => [
+      "const assert = require('node:assert/strict');",
+      "const fs = require('node:fs');",
+      `assert.equal(fs.existsSync('target/CACHEDIR.TAG'), ${tagged});`,
+      "assert.deepEqual(fs.readdirSync('.').filter((name) => /^target.+/u.test(name)), []);",
+    ].join("");
+    const run = async (tagged, runEnv = env) => {
+      const runDir = await createRun({
+        root,
+        stages: [{ name: "cargo-check", command: "cargo", args: ["-e", finds(tagged)] }],
+        needsCargo: true,
+      }, runEnv);
+      return executeRun(runDir, runEnv);
+    };
+    // Git does not ignore it here: making it would change the frozen input.
+    assert.equal((await run(false)).state, "passed");
+    assert.equal(existsSync(join(root, "target")), false);
+
+    writeFileSync(join(root, ".gitignore"), "/target\n");
+    execFileSync("git", ["add", ".gitignore"], { cwd: root, env: gitEnv });
+    execFileSync("git", ["commit", "--quiet", "--no-gpg-sign", "-m", "ignore target"], {
+      cwd: root,
+      env: gitEnv,
+    });
+    // A build directory set elsewhere is Cargo's to make.
+    const elsewhere = { ...env, CARGO_TARGET_DIR: join(root, "elsewhere") };
+    assert.equal((await run(false, elsewhere)).state, "passed");
+    assert.equal(existsSync(join(root, "target")), false);
+
+    // Ignored, as in a Rust repository: made and tagged before the first
+    // stage, and the frozen input still matches before and after.
+    const result = await run(true);
+    assert.equal(result.state, "passed");
+    assert.equal(result.before, result.expectedFingerprint);
+    assert.equal(result.after, result.expectedFingerprint);
+    assert.match(
+      readFileSync(join(root, "target", "CACHEDIR.TAG"), "utf8"),
+      /^Signature: 8a477f597d28d172789f06886806bc55\n/u,
+    );
+
+    // An existing one is left as it is.
+    writeFileSync(join(root, "target", "CACHEDIR.TAG"), "kept\n");
+    assert.equal(ensureCargoTargetDirectory(root, env), false);
+    assert.equal(readFileSync(join(root, "target", "CACHEDIR.TAG"), "utf8"), "kept\n");
   });
 });
 

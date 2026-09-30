@@ -442,7 +442,7 @@ impl AppState {
             // root was known: an open check in it is marked now, as one in
             // the workdir was then.
             if named {
-                engram_mark_checks_overlapped_by(&mut inner, index);
+                engram_mark_checks_overlapped_by(&mut inner, index, EngramWriterAct::Presence);
             }
             place
         };

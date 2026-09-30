@@ -259,6 +259,41 @@ export async function createRun({
   return runDir;
 }
 
+const cacheDirectoryTag = [
+  "Signature: 8a477f597d28d172789f06886806bc55",
+  "# This file is a cache directory tag created by TermAl's test launcher for Cargo's build directory.",
+  "# For information about cache directory tags see https://bford.info/cachedir/",
+  "",
+].join("\n");
+
+// Cargo makes a missing build directory through a sibling named after it plus
+// random characters, tags it, and renames it into place. A host that watches
+// the worktree while a run is going ignores `target` but not that sibling, so
+// the first build in a fresh worktree would read as a source change during
+// the run. When Git ignores `target` at the root, so that making it cannot
+// change the frozen input, the launcher makes it before any stage, tagged as
+// Cargo tags it, and leaves Cargo nothing to create. A build directory set
+// elsewhere (CARGO_TARGET_DIR, CARGO_BUILD_TARGET_DIR), one that exists, and
+// one Git does not ignore are left as they are. Returns whether it made one.
+export function ensureCargoTargetDirectory(root, env = process.env) {
+  if (env.CARGO_TARGET_DIR || env.CARGO_BUILD_TARGET_DIR) return false;
+  const target = join(root, "target");
+  if (existsSync(target)) return false;
+  const ignored = spawnSync("git", ["check-ignore", "--quiet", "target/"], {
+    cwd: root,
+    env: isolatedGitEnvironment(env),
+    windowsHide: true,
+  });
+  if (ignored.error || ignored.status !== 0) return false;
+  mkdirSync(target, { recursive: true });
+  try {
+    writeFileSync(join(target, "CACHEDIR.TAG"), cacheDirectoryTag, { flag: "wx" });
+  } catch (error) {
+    if (error.code !== "EEXIST") throw error;
+  }
+  return true;
+}
+
 export async function runCommand(command, args, { cwd, env, log }) {
   const fd = openSync(log, "wx");
   try {
@@ -498,6 +533,7 @@ export async function executeRun(runDir, env = process.env, { onReady } = {}) {
         source: explicitCargo ? "TERMAL_TEST_CARGO" : "PATH",
       };
       save(resultPath, result);
+      ensureCargoTargetDirectory(request.root, childEnv);
     }
     const names = new Set();
     for (const stage of request.stages) {

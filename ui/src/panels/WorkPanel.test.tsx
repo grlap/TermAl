@@ -2,31 +2,30 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Project } from "../types";
 import { ApiRequestError } from "../api-request";
-import { readProjectWork, readWorkBeadsDetail, readWorkDetail, type WorkItem, type WorkListResponse, type WorkDetailResponse, type WorkPage } from "../work-visualizer-api";
+import { readProjectWork, readWorkDetail, type WorkItem, type WorkListResponse, type WorkDetailResponse, type WorkPage } from "../work-visualizer-api";
 import { WORK_AUTO_LOAD_TARGET_ROWS } from "./use-work-list";
 import { WorkPanel } from "./WorkPanel";
 import { WorkDetailsHeader } from "./WorkDetailsHeader";
 
-vi.mock("../work-visualizer-api", () => ({ readProjectWork: vi.fn(), readWorkDetail: vi.fn(), readWorkBeadsDetail: vi.fn() }));
+vi.mock("../work-visualizer-api", () => ({ readProjectWork: vi.fn(), readWorkDetail: vi.fn() }));
 const projects = [
   { id: "p-one", name: "One", rootPath: "/one", remoteId: "local" },
   { id: "p-two", name: "Two", rootPath: "/two", remoteId: "local" },
 ] as Project[];
 function page(title = "Visible task", after: string | null = null): WorkListResponse {
   return { sources: [{ source: "engram", state: "ready", message: "Engram reads use the host reader over the validated project store" }], readerId: "host:reader", observedAt: "now",
-    page: { items: [{ id: title, shortRef: "w-one", title, kind: "bug", lifecycle: "open", availability: "blocked", priority: 1, labels: ["decision"], assignedTo: "actor", parentId: null, updatedAt: "today", blockedBy: [], source: "engram", prerequisites: [] }], total: after ? 2 : 1, shownBefore: 0, more: !!after, after, hint: null },
-    beads: null };
+    page: { items: [{ id: title, shortRef: "w-one", title, kind: "bug", lifecycle: "open", availability: "blocked", priority: 1, labels: ["decision"], assignedTo: "actor", parentId: null, updatedAt: "today", blockedBy: [], source: "engram", prerequisites: [] }], total: after ? 2 : 1, shownBefore: 0, more: !!after, after, hint: null } };
 }
-function bead(id: string, title: string, extra: Partial<WorkItem> = {}): WorkItem {
-  return { id, shortRef: id, title, kind: "task", lifecycle: "open", availability: "ready", priority: 2, labels: [], assignedTo: null, parentId: null, updatedAt: "today", blockedBy: [], source: "beads", prerequisites: [], ...extra };
+function item(id: string, title: string, extra: Partial<WorkItem> = {}): WorkItem {
+  return { id, shortRef: id, title, kind: "task", lifecycle: "open", availability: "ready", priority: 2, labels: [], assignedTo: null, parentId: null, updatedAt: "today", blockedBy: [], source: "engram", prerequisites: [], ...extra };
 }
 // Mirrors the Rust fixture: a goal blocked by one loaded and one absent
 // prerequisite, its parent, and the ready item it waits for.
-function beadsPage(): WorkPage {
+function fixturePage(): WorkPage {
   return { items: [
-    bead("tm-root", "Root epic", { kind: "feature", availability: "active", assignedTo: "Termal::Codex" }),
-    bead("tm-root.1", "Blocked child", { parentId: "tm-root", availability: "blocked", priority: 1, prerequisites: [{ id: "tm-free", satisfied: false }, { id: "tm-closed", satisfied: true }] }),
-    bead("tm-free", "Ready bug", { kind: "bug", priority: 3 }),
+    item("tm-root", "Root epic", { kind: "feature", availability: "active", assignedTo: "Termal::Codex" }),
+    item("tm-root.1", "Blocked child", { parentId: "tm-root", availability: "blocked", priority: 1, prerequisites: [{ id: "tm-free", satisfied: false }, { id: "tm-closed", satisfied: true }] }),
+    item("tm-free", "Ready bug", { kind: "bug", priority: 3 }),
   ], total: 3, shownBefore: 0, more: false, after: null, hint: null };
 }
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(r => { resolve = r; }); return { promise, resolve }; }
@@ -105,7 +104,7 @@ describe("WorkPanel", () => {
   });
 
   it("sorts the table from a clicked header, reverses on the second click and shares one state with the sort control", async () => {
-    vi.mocked(readProjectWork).mockResolvedValue({ sources: [{ source: "beads", state: "ready", message: "bd" }], readerId: null, observedAt: "now", page: null, beads: beadsPage() });
+    vi.mocked(readProjectWork).mockResolvedValue({ sources: [{ source: "engram", state: "ready", message: "Ready" }], readerId: "host:reader", observedAt: "now", page: fixturePage() });
     render(<WorkPanel projects={projects} focusedProjectId="p-one" />);
     await screen.findByRole("button", { name: "tm-root — Root epic" });
     showTable();
@@ -140,11 +139,10 @@ describe("WorkPanel", () => {
     expect(header("Updated")).toHaveAttribute("aria-sort", "none");
   });
 
-  it("leads each tree row with the priority coloured by availability and shows a source glyph only for mixed sources", async () => {
-    const mixed = page("Engram row"); mixed.beads = beadsPage();
-    mixed.sources.push({ source: "beads", state: "ready", message: "Beads reads use the native bd binary" });
-    vi.mocked(readProjectWork).mockResolvedValueOnce(mixed);
-    const view = render(<WorkPanel projects={projects} focusedProjectId="p-one" />);
+  it("leads single-source tree rows with priority coloured by availability and omits source glyphs", async () => {
+    const loaded = page("Engram row"); loaded.page!.items.push(...fixturePage().items); loaded.page!.total = 4;
+    vi.mocked(readProjectWork).mockResolvedValueOnce(loaded);
+    render(<WorkPanel projects={projects} focusedProjectId="p-one" />);
     const engramRow = await screen.findByRole("button", { name: "w-one — Engram row" });
     // The lead precedes the title in reading order; the availability word is
     // there for assistive technology and on hover, the colour comes from it.
@@ -156,16 +154,8 @@ describe("WorkPanel", () => {
     expect(lead.compareDocumentPosition(engramRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     const freeRow = screen.getByRole("button", { name: "tm-free — Ready bug" });
     expect(freeRow.closest(".work-node-heading")!.querySelector(".work-priority")).toHaveAttribute("data-state", "ready");
-    // Both trackers are loaded, so every row names its source with a glyph.
-    expect(screen.getAllByRole("img", { name: "Source: Engram" })).toHaveLength(1);
-    expect(screen.getAllByRole("img", { name: "Source: Beads" })).toHaveLength(3);
     expect(screen.queryByText("engram")).not.toBeInTheDocument();
     expect(screen.queryByText("ready")).not.toBeInTheDocument();
-    view.unmount();
-    // A single-source project has nothing to tell apart: no glyphs at all.
-    vi.mocked(readProjectWork).mockResolvedValueOnce({ sources: [{ source: "beads", state: "ready", message: "bd" }], readerId: null, observedAt: "now", page: null, beads: beadsPage() });
-    render(<WorkPanel projects={projects} focusedProjectId="p-one" />);
-    await screen.findByRole("button", { name: "tm-free — Ready bug" });
     expect(screen.queryByRole("img", { name: /^Source: / })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "tm-root.1 — Blocked child" }).closest(".work-node-heading")!.querySelector(".work-priority")).toHaveAttribute("data-state", "blocked");
   });
@@ -352,11 +342,8 @@ describe("WorkPanel", () => {
     expect(readProjectWork).toHaveBeenLastCalledWith("p-one", expect.any(Object), expect.any(AbortSignal), { after: "c1", readerId: "host:reader" });
   });
 
-  it("stops reading ahead when a continuation makes no progress and counts only Engram rows against the target", async () => {
-    // A large Beads snapshot does not count: the Engram page still continues.
+  it("stops reading ahead when an Engram continuation makes no progress", async () => {
     const first = page("First", "c1"); first.page!.total = 2;
-    first.beads = { ...beadsPage(), items: Array.from({ length: 300 }, (_, index) => bead(`tm-${index}`, `Bead ${index}`)), total: 300 };
-    first.sources.push({ source: "beads", state: "ready", message: "Beads reads use the native bd binary" });
     // The continuation returns the same cursor and no new rows: valid, but
     // not progress. The chain stops instead of re-reading it to the cap.
     const stalled = page("First", "c1"); stalled.page!.items = []; stalled.page!.total = 2; stalled.page!.shownBefore = 1;
@@ -368,38 +355,14 @@ describe("WorkPanel", () => {
     expect(readProjectWork).toHaveBeenCalledTimes(2);
     expect(readProjectWork).toHaveBeenLastCalledWith("p-one", expect.any(Object), expect.any(AbortSignal), { after: "c1", readerId: "host:reader" });
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    expect(screen.getByText(/1 of 2 Engram items loaded · 300 of 300 Beads items loaded; 301 visible/)).toBeInTheDocument();
+    expect(screen.getByText(/1 of 2 Engram items loaded; 1 visible/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Load more work" })).toBeEnabled();
   });
 
-  it("dates a retained Beads snapshot to its own read, not to a later Engram page", async () => {
-    const first = page("First", "opaque"); first.beads = beadsPage(); first.observedAt = "2026-09-14T10:00:00Z";
-    first.sources.push({ source: "beads", state: "ready", message: "Beads reads use the native bd binary" });
-    const next = page("Second"); next.page!.total = 2; next.page!.shownBefore = 1; next.observedAt = "2026-09-14T11:00:00Z";
-    // The continuation is read automatically; holding it back keeps the
-    // first page's caption observable.
-    const pending = deferred<WorkListResponse>();
-    vi.mocked(readProjectWork).mockResolvedValueOnce(first).mockReturnValueOnce(pending.promise);
-    const { container } = render(<WorkPanel projects={projects} focusedProjectId="p-one" />);
-    await screen.findByRole("button", { name: "w-one — First" });
-    // Times are shown to the minute in the viewer's zone; the raw source value
-    // stays on the element, so the assertion names it without assuming a zone.
-    const caption = () => container.querySelector(".work-panel-caption:last-of-type")?.textContent;
-    expect(caption()).toMatch(/^Read completed: \d{4}-\d{2}-\d{2} \d{2}:\d{2}\. Refresh for current data\.$/);
-    expect(screen.getByTitle("2026-09-14T10:00:00Z")).toBeInTheDocument();
-    await act(async () => pending.resolve(next));
-    await screen.findByRole("button", { name: "w-one — Second" });
-    expect(caption()).toMatch(/^Engram read completed: \d{4}-\d{2}-\d{2} \d{2}:\d{2} · Beads snapshot from \d{4}-\d{2}-\d{2} \d{2}:\d{2}\. Refresh for current data\.$/);
-    expect(screen.getByTitle("2026-09-14T11:00:00Z")).toBeInTheDocument();
-    expect(screen.getByTitle("2026-09-14T10:00:00Z")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "tm-root — Root epic" })).toBeInTheDocument();
-  });
-
   it("keeps a selected kind visible when a refreshed snapshot no longer has it", async () => {
-    const first: WorkListResponse = { sources: [{ source: "beads", state: "ready", message: "Beads reads use the native bd binary" }],
-      readerId: null, observedAt: "now", page: null,
-      beads: { items: [bead("tm-dec", "Decision", { kind: "decision" }), bead("tm-t", "Task")], total: 2, shownBefore: 0, more: false, after: null, hint: null } };
-    const second: WorkListResponse = { ...first, beads: { ...first.beads!, items: [bead("tm-t", "Task")], total: 1 } };
+    const first: WorkListResponse = { sources: [{ source: "engram", state: "ready", message: "Ready" }],
+      readerId: "host:reader", observedAt: "now", page: { items: [item("tm-dec", "Decision", { kind: "decision" }), item("tm-t", "Task")], total: 2, shownBefore: 0, more: false, after: null, hint: null } };
+    const second: WorkListResponse = { ...first, page: { ...first.page!, items: [item("tm-t", "Task")], total: 1 } };
     vi.mocked(readProjectWork).mockResolvedValueOnce(first).mockResolvedValueOnce(second);
     render(<WorkPanel projects={projects} focusedProjectId="p-one" />);
     await screen.findByRole("button", { name: "tm-dec — Decision" });
@@ -407,7 +370,7 @@ describe("WorkPanel", () => {
     expect(screen.queryByRole("button", { name: "tm-t — Task" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Refresh work" }));
     await waitFor(() => expect(readProjectWork).toHaveBeenCalledTimes(2));
-    await screen.findByText(/1 of 1 Beads items loaded/);
+    await screen.findByText(/1 of 1 Engram items loaded/);
     // The kind is gone from the snapshot but not from the filter: the select
     // still shows it and the empty state explains the zero matches.
     expect(screen.getByRole("combobox", { name: "Kind (loaded rows)" })).toHaveValue("decision");
@@ -415,15 +378,15 @@ describe("WorkPanel", () => {
     expect(screen.getByText(/No matching rows in the loaded page/)).toBeInTheDocument();
   });
 
-  it("shows source, waits-for and parent in the table for Beads rows", async () => {
-    vi.mocked(readProjectWork).mockResolvedValue({ sources: [{ source: "beads", state: "ready", message: "Beads reads use the native bd binary" }],
-      readerId: null, observedAt: "now", page: null, beads: beadsPage() });
+  it("shows source, waits-for and parent in the table for Engram rows", async () => {
+    vi.mocked(readProjectWork).mockResolvedValue({ sources: [{ source: "engram", state: "ready", message: "Ready" }],
+      readerId: "host:reader", observedAt: "now", page: fixturePage() });
     render(<WorkPanel projects={projects} focusedProjectId="p-one" />);
     await screen.findByRole("button", { name: "tm-root.1 — Blocked child" });
     showTable();
     expect(screen.getByRole("columnheader", { name: "Source" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Waits for" })).toBeInTheDocument();
-    expect(screen.getAllByRole("cell", { name: "beads" })).toHaveLength(3);
+    expect(screen.getAllByRole("cell", { name: "engram" })).toHaveLength(3);
     // Prerequisites as the source reported them, satisfied ones marked; the
     // parent is shown with the reference, never inferred from the id.
     expect(screen.getByRole("cell", { name: "tm-free, tm-closed (satisfied)" })).toBeInTheDocument();
@@ -431,18 +394,16 @@ describe("WorkPanel", () => {
   });
 
   it("renders disabled and unavailable sources without claiming the project is empty", async () => {
-    vi.mocked(readProjectWork).mockResolvedValue({ sources: [{ source: "engram", state: "disabled", message: "Not enabled by operator" }, { source: "beads", state: "absent", message: "No .beads directory" }], page: null, beads: null, readerId: null, observedAt: "now" });
+    vi.mocked(readProjectWork).mockResolvedValue({ sources: [{ source: "engram", state: "disabled", message: "Not enabled by operator" }], page: null, readerId: null, observedAt: "now" });
     render(<WorkPanel projects={projects} focusedProjectId="p-one" />);
     expect(await screen.findByText(/Not enabled by operator/)).toBeInTheDocument();
-    expect(screen.getByText(/No \.beads directory/)).toBeInTheDocument();
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
     expect(screen.queryByText(/No work items match/)).not.toBeInTheDocument();
     expect(screen.queryByText(/items loaded/)).not.toBeInTheDocument();
   });
 
-  it("nests loaded Beads rows under the goals they block and keeps the hierarchy separate", async () => {
-    const response = page(); response.beads = beadsPage();
-    response.sources.push({ source: "beads", state: "ready", message: "Beads reads use the native bd binary" });
+  it("nests loaded Engram rows under the goals they block and keeps the hierarchy separate", async () => {
+    const response = page(); response.page!.items.push(...fixturePage().items); response.page!.total = 4;
     vi.mocked(readProjectWork).mockResolvedValue(response);
     render(<WorkPanel projects={projects} focusedProjectId="p-one" />);
     const goal = (await screen.findByRole("button", { name: "tm-root.1 — Blocked child" })).closest("li")!;
@@ -455,7 +416,7 @@ describe("WorkPanel", () => {
     expect(screen.getByText("No visible dependency links · 2 items")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "w-one — Visible task" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "tm-root — Root epic" })).toBeInTheDocument();
-    expect(screen.getByText(/1 of 1 Engram items loaded · 3 of 3 Beads items loaded; 4 visible/)).toBeInTheDocument();
+    expect(screen.getByText(/4 of 4 Engram items loaded; 4 visible/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Collapse tm-root.1" }));
     expect(screen.queryByRole("button", { name: "tm-free — Ready bug" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Expand tm-root.1" }));
@@ -472,51 +433,20 @@ describe("WorkPanel", () => {
     expect(readProjectWork).toHaveBeenCalledTimes(1);
   });
 
-  it("reads Beads details on demand without an Engram reader and renders relations as inert data", async () => {
-    vi.mocked(readProjectWork).mockResolvedValue({ sources: [{ source: "engram", state: "disabled", message: "Not enabled by operator" }, { source: "beads", state: "ready", message: "Beads reads use the native bd binary" }],
-      readerId: null, observedAt: "now", page: null, beads: beadsPage() });
-    vi.mocked(readWorkBeadsDetail).mockResolvedValue({ item: bead("tm-root.1", "Blocked child", { parentId: "tm-root", availability: "blocked", priority: 1 }), description: "Waits for <b>inert</b>", parent: "tm-root",
-      dependencies: [{ id: "tm-free", title: "Ready bug", status: "open", priority: 3, kind: "bug", dependencyType: "blocks" }], dependenciesUnread: 0, dependentCount: 0,
-      comments: [{ id: "c-1", author: "Greg", text: "First <i>inert</i>", createdAt: "2026-09-12T10:00:00Z" }], commentCount: 1, observedAt: "later" });
-    const { container } = render(<WorkPanel projects={projects} focusedProjectId="p-one" />);
-    const row = await screen.findByRole("button", { name: "tm-root.1 — Blocked child" });
-    fireEvent.click(row);
-    const details = await screen.findByRole("complementary", { name: "Work item details" });
-    expect(details).toHaveFocus();
-    expect(await within(details).findByText("Waits for <b>inert</b>")).toBeInTheDocument();
-    expect(readWorkBeadsDetail).toHaveBeenCalledWith("p-one", "tm-root.1", expect.any(AbortSignal));
-    expect(readWorkDetail).not.toHaveBeenCalled();
-    expect(within(details).getByText("blocks")).toBeInTheDocument();
-    expect(within(details).getByText("tm-free — Ready bug")).toBeInTheDocument();
-    expect(within(details).getByText("First <i>inert</i>")).toBeInTheDocument();
-    expect(within(details).getByText("Subtask of tm-root")).toBeInTheDocument();
-    expect(container.querySelector("b, i, script")).toBeNull();
-    expect(row).toHaveAttribute("aria-current", "true");
-    fireEvent.keyDown(details, { key: "Escape" });
-    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
-    expect(row).toHaveFocus();
-  });
-
-  it("keeps the Beads snapshot and its status across an Engram continuation", async () => {
-    const first = page("First", "opaque"); first.beads = beadsPage();
-    first.sources.push({ source: "beads", state: "ready", message: "Beads reads use the native bd binary" });
+  it("keeps loaded Engram rows across a continuation", async () => {
+    const first = page("First", "opaque");
     const next = page("Second"); next.page!.total = 2; next.page!.shownBefore = 1;
-    next.sources.push({ source: "beads", state: "ready", message: "second detection" });
     vi.mocked(readProjectWork).mockResolvedValueOnce(first).mockResolvedValueOnce(next);
     render(<WorkPanel projects={projects} focusedProjectId="p-one" />);
     // The continuation is read automatically after the first page.
     await screen.findByRole("button", { name: "w-one — Second" });
-    expect(screen.getByRole("button", { name: "tm-root — Root epic" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "w-one — First" })).toBeInTheDocument();
-    expect(screen.getByText(/2 of 2 Engram items loaded · 3 of 3 Beads items loaded; 5 visible/)).toBeInTheDocument();
-    expect(screen.getByText(/Beads reads use the native bd binary/)).toBeInTheDocument();
-    expect(screen.queryByText(/second detection/)).not.toBeInTheDocument();
+    expect(screen.getByText(/2 of 2 Engram items loaded; 2 visible/)).toBeInTheDocument();
     expect(readProjectWork).toHaveBeenCalledTimes(2);
   });
 
-  it("keeps the Beads snapshot when an Engram continuation is rejected", async () => {
-    const first = page("First", "opaque"); first.beads = beadsPage();
-    first.sources.push({ source: "beads", state: "ready", message: "Beads reads use the native bd binary" });
+  it("closes details and restores list focus when an Engram continuation is rejected", async () => {
+    const first = page("First", "opaque");
     // The continuation is read automatically; holding its rejection back lets
     // the drawer open on the first generation before that generation drops.
     let reject!: (error: unknown) => void;
@@ -536,34 +466,15 @@ describe("WorkPanel", () => {
     expect(document.activeElement).toHaveClass("work-panel-list");
     expect(screen.queryByRole("button", { name: /w-one/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "tm-root — Root epic" })).toBeInTheDocument();
     expect(screen.getByText(/engram: error/)).toBeInTheDocument();
-    expect(screen.getByText(/Beads reads use the native bd binary/)).toBeInTheDocument();
-    expect(screen.getByText(/3 of 3 Beads items loaded; 3 visible/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Load more work" })).not.toBeInTheDocument();
   });
 
-  it("shows a Beads detail failure as an alert and re-reads on Reload details", async () => {
-    vi.mocked(readProjectWork).mockResolvedValue({ sources: [{ source: "beads", state: "ready", message: "Beads reads use the native bd binary" }],
-      readerId: null, observedAt: "now", page: null, beads: beadsPage() });
-    vi.mocked(readWorkBeadsDetail)
-      .mockRejectedValueOnce(new ApiRequestError("request-failed", "Beads issue tm-free not found", { status: 404 }))
-      .mockResolvedValueOnce({ item: bead("tm-free", "Ready bug"), description: "Back again", parent: null, dependencies: [], dependenciesUnread: 0, dependentCount: 0, comments: [], commentCount: 0, observedAt: "later" });
-    render(<WorkPanel projects={projects} focusedProjectId="p-one" />);
-    fireEvent.click(await screen.findByRole("button", { name: "tm-free — Ready bug" }));
-    const details = await screen.findByRole("complementary", { name: "Work item details" });
-    expect(await within(details).findByRole("alert")).toHaveTextContent("Beads issue tm-free not found");
-    expect(within(details).queryByRole("heading", { level: 3 })).not.toBeInTheDocument();
-    fireEvent.click(within(details).getByRole("button", { name: "Reload details" }));
-    expect(await within(details).findByText("Back again")).toBeInTheDocument();
-    expect(within(details).queryByRole("alert")).not.toBeInTheDocument();
-    expect(readWorkBeadsDetail).toHaveBeenCalledTimes(2);
-  });
-
   it("returns focus to the list when the selected row's button is no longer mounted", async () => {
-    vi.mocked(readProjectWork).mockResolvedValue({ sources: [{ source: "beads", state: "ready", message: "Beads reads use the native bd binary" }],
-      readerId: null, observedAt: "now", page: null, beads: beadsPage() });
-    vi.mocked(readWorkBeadsDetail).mockResolvedValue({ item: bead("tm-free", "Ready bug"), description: "", parent: null, dependencies: [], dependenciesUnread: 0, dependentCount: 1, comments: [], commentCount: 0, observedAt: "now" });
+    vi.mocked(readProjectWork).mockResolvedValue({ sources: [{ source: "engram", state: "ready", message: "Ready" }],
+      readerId: "host:reader", observedAt: "now", page: fixturePage() });
+    vi.mocked(readWorkDetail).mockResolvedValue({ status: null, holder: null, heldUntil: null, notes: [],
+      notesWindow: { total: 0, shown: 0, newer: 0, older: 0, after: null, readCut: { projectPosition: 1, observedAt: "now", validUntilMs: null } } });
     render(<WorkPanel projects={projects} focusedProjectId="p-one" />);
     fireEvent.click(await screen.findByRole("button", { name: "tm-free — Ready bug" }));
     const details = await screen.findByRole("complementary", { name: "Work item details" });
@@ -576,25 +487,13 @@ describe("WorkPanel", () => {
 
   it("never claims an empty tracker while a source failed", async () => {
     vi.mocked(readProjectWork).mockResolvedValue({
-      sources: [{ source: "engram", state: "error", message: "engram work ls: exit code: 1: database is locked" }, { source: "beads", state: "ready", message: "Beads reads use the native bd binary" }],
+      sources: [{ source: "engram", state: "error", message: "engram work ls: exit code: 1: database is locked" }],
       readerId: null, observedAt: "now", page: null,
-      beads: { items: [], total: 0, shownBefore: 0, more: false, after: null, hint: null },
     });
     render(<WorkPanel projects={projects} focusedProjectId="p-one" />);
     expect(await screen.findByText(/not a complete tracker view/)).toBeInTheDocument();
     expect(screen.queryByText(/No work items match/)).not.toBeInTheDocument();
     expect(screen.getByText(/engram: error/)).toBeInTheDocument();
-  });
-
-  it("shows a Beads read failure as an explicit source error next to the Engram rows", async () => {
-    const response = page();
-    response.sources.push({ source: "beads", state: "error", message: "bd list: database is locked" });
-    vi.mocked(readProjectWork).mockResolvedValue(response);
-    render(<WorkPanel projects={projects} focusedProjectId="p-one" />);
-    expect(await screen.findByRole("button", { name: "w-one — Visible task" })).toBeInTheDocument();
-    expect(screen.getByText(/database is locked/)).toBeInTheDocument();
-    expect(screen.getByText(/1 of 1 Engram items loaded; 1 visible/)).toBeInTheDocument();
-    expect(screen.queryByText(/Beads items loaded/)).not.toBeInTheDocument();
   });
 
   it("applies source filters only on submit and labels local filtering as loaded-row filtering", async () => {
@@ -678,5 +577,12 @@ describe("WorkPanel", () => {
     expect(screen.getAllByText(/^Summary /).map(node => node.textContent)).toEqual(["Summary 4", "Summary 3", "Summary 2", "Summary 1"]);
     expect(screen.getAllByText("Status ownership not reported by source.")).toHaveLength(2);
     expect(screen.getAllByText("References not included by source.")).toHaveLength(2);
+  });
+  it("shows the empty Work state when no tracker is bound", async () => {
+    vi.mocked(readProjectWork).mockResolvedValue({sources:[{source:"engram",state:"absent",message:"No tracker is bound: no .engram-project declaration"}],page:null,readerId:null,observedAt:"now"});
+    render(<WorkPanel projects={projects} focusedProjectId="p-one" />);
+    expect(await screen.findByText("No tracker is bound to this project.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", {name:"Load more work"})).not.toBeInTheDocument();
+    expect(readWorkDetail).not.toHaveBeenCalled();
   });
 });

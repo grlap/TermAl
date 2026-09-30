@@ -3,7 +3,7 @@ import type { WorkItem } from "../work-visualizer-api";
 import { MAX_TREE_DEPTH, buildDependencyForest, buildHierarchyForest, type WorkTreeNode } from "./work-tree";
 
 function item(id: string, extra: Partial<WorkItem> = {}): WorkItem {
-  return { id, shortRef: id, title: id, kind: "task", lifecycle: "open", availability: "ready", priority: 2, labels: [], assignedTo: null, parentId: null, updatedAt: "today", blockedBy: [], source: "beads", prerequisites: [], ...extra };
+  return { id, shortRef: id, title: id, kind: "task", lifecycle: "open", availability: "ready", priority: 2, labels: [], assignedTo: null, parentId: null, updatedAt: "today", blockedBy: [], source: "alternate", prerequisites: [], ...extra };
 }
 function waits(id: string, on: string[], extra: Partial<WorkItem> = {}) {
   return item(id, { prerequisites: on.map(dep => ({ id: dep, satisfied: false })), ...extra });
@@ -42,8 +42,8 @@ describe("work-tree", () => {
     expect(forest.loose).toEqual([]);
     // The repeated reference knows which item it repeats, and the forest
     // knows where that item's one row lives, so a renderer can reveal it.
-    expect(forest.roots[0]!.children[1]!.repeatedItems).toEqual(["beads:c"]);
-    expect(forest.placedAt.get("beads:c")).toBe("beads:goal/beads:a/beads:c");
+    expect(forest.roots[0]!.children[1]!.repeatedItems).toEqual(["alternate:c"]);
+    expect(forest.placedAt.get("alternate:c")).toBe("alternate:goal/alternate:a/alternate:c");
   });
 
   it("stays linear on dense shared chains instead of exploding per path", () => {
@@ -149,9 +149,9 @@ describe("work-tree", () => {
   });
 
   it("never nests rows across sources even when identifiers collide", () => {
-    const forest = buildDependencyForest([waits("same", ["dep"], { source: "engram" }), item("dep", { source: "beads" })]);
+    const forest = buildDependencyForest([waits("same", ["dep"], { source: "engram" }), item("dep", { source: "alternate" })]);
     expect(forest.roots).toEqual([]);
-    expect(forest.loose.map(node => [node.item.source, node.item.id, node.absentUnsatisfied])).toEqual([["engram", "same", 1], ["beads", "dep", 0]]);
+    expect(forest.loose.map(node => [node.item.source, node.item.id, node.absentUnsatisfied])).toEqual([["engram", "same", 1], ["alternate", "dep", 0]]);
   });
 
   it("builds the hierarchy from loaded parents and survives a parent cycle", () => {

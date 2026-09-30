@@ -4,10 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiRequestError } from "../api-request";
 import { readProjectWork, type WorkFilters, type WorkListResponse } from "../work-visualizer-api";
 
-// The list as the panel sees it: the server's response plus, once a
-// continuation has re-read only Engram, the time the retained Beads snapshot
-// was actually read, so the caption never dates it to a later Engram page.
-export type WorkListResult = WorkListResponse & { beadsObservedAt?: string };
+export type WorkListResult = WorkListResponse;
 
 // Engram fits each receipt into 12 KiB, so a verbose page holds about a
 // dozen rows and the first read alone is a thin slice. The list follows the
@@ -18,16 +15,12 @@ export type WorkListResult = WorkListResponse & { beadsObservedAt?: string };
 export const WORK_AUTO_LOAD_TARGET_ROWS = 200;
 export const WORK_AUTO_LOAD_MAX_PAGES = 40;
 
-// The Engram generation is gone (invalid cursor, changed reader, changed
-// counts). The Beads snapshot was read independently on the first page and
-// stays; Engram becomes an explicit per-source error until the next refresh.
+// A stale reader invalidates every row and detail in the loaded generation.
+// Keep its explicit source error so the view can restore keyboard focus.
 function withoutEngramGeneration(previous: WorkListResult | null, message: string): WorkListResult | null {
-  if (!previous?.beads) return null;
-  return {
-    ...previous,
-    page: null,
-    readerId: null,
-    sources: previous.sources.map(source => source.source === "engram" ? { ...source, state: "error", message } : source),
+  return previous && {
+    ...previous, page: null, readerId: null,
+    sources: previous.sources.map(source => ({ ...source, state: "error", message })),
   };
 }
 
@@ -66,13 +59,6 @@ export function useWorkList(projectId: string, filters: WorkFilters) {
           throw new Error(message);
         }
         page.items = [...oldPage.items, ...page.items];
-        // A continuation re-reads only the Engram page; the Beads snapshot,
-        // its source status and its read time stay exactly as the first page
-        // reported them.
-        next.beads = previous.beads;
-        if (previous.beads) next.beadsObservedAt = previous.beadsObservedAt ?? previous.observedAt;
-        const beadsStatus = previous.sources.find(source => source.source === "beads");
-        if (beadsStatus) next.sources = next.sources.map(source => source.source === "beads" ? beadsStatus : source);
       }
       current.current = next; setResult(next);
     } catch (e) {

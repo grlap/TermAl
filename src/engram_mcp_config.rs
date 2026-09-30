@@ -23,6 +23,105 @@ const ENGRAM_REQUIRED_AGENT_PROCESS_ENV_NAMES: [&str; 3] =
 const ENGRAM_CONTEXT_NUDGE_MAX_BYTES: usize = 32 * 1024;
 const ENGRAM_CONTEXT_NUDGE_READER_LABEL: &str = "context nudge";
 
+/// The tracker's MCP tools that only read, each with the arguments it may
+/// carry. By Engram's own account of its words these record nothing: no row,
+/// no session or actor registration, no change of focus or delivery. A
+/// read-only child needs them for the start-up recovery its project's
+/// instructions require.
+///
+/// An argument that is not listed is refused, so one Engram adds later is not
+/// admitted by default. `memories` takes no context generation here: with one
+/// it records that the caller listed its memories. `next` only reads with
+/// `peek: true` (checked in `engram_mcp_tool_call_only_reads`); without it, it
+/// stages delivery and acknowledges the memory position. Every other word
+/// writes.
+const ENGRAM_MCP_READ_TOOLS: &[(&str, &[&str])] = &[
+    ("next", &["peek", "limit", "verbose"]),
+    (
+        "ls",
+        &[
+            "after", "all", "blocked", "label", "limit", "mine", "optional", "ready", "required",
+            "search", "under", "verbose",
+        ],
+    ),
+    ("search", &["query", "limit"]),
+    (
+        "show",
+        &[
+            "work_ref",
+            "after",
+            "evaluation",
+            "evaluations",
+            "full",
+            "gates",
+            "history",
+            "note",
+            "notes",
+        ],
+    ),
+    ("memories", &["after", "full", "query", "revision"]),
+];
+
+/// The tracker word in a server-qualified MCP tool name, when the name is one
+/// of the tracker server's tools (`mcp__engram__<word>`). The qualified name
+/// is the only identity a permission request carries; a bare leaf name never
+/// matches, and neither does a server whose name merely starts the same way.
+fn engram_mcp_tool_word(qualified_tool_name: &str) -> Option<&str> {
+    qualified_tool_name
+        .strip_prefix("mcp__")?
+        .strip_prefix(ENGRAM_MCP_SERVER_NAME)?
+        .strip_prefix("__")
+        .filter(|word| !word.is_empty())
+}
+
+/// Whether one call of a tracker tool only reads: its word is on the list,
+/// every argument it carries is listed for that word, and `next` peeks.
+fn engram_mcp_tool_call_only_reads(word: &str, input: &Value) -> bool {
+    let Some((_, allowed)) = ENGRAM_MCP_READ_TOOLS.iter().find(|(name, _)| *name == word) else {
+        return false;
+    };
+    let peeks = match input {
+        Value::Object(arguments) => {
+            if arguments
+                .keys()
+                .any(|argument| !allowed.contains(&argument.as_str()))
+            {
+                return false;
+            }
+            arguments.get("peek") == Some(&Value::Bool(true))
+        }
+        // No arguments at all is the plain form of the word.
+        Value::Null => false,
+        _ => return false,
+    };
+    word != "next" || peeks
+}
+
+/// Whether the host lets a session's read-only gate admit tracker reads: the
+/// session is the running child of a delegation that is not an evaluator, and
+/// the host itself installed the tracker's server on its runtime. An evaluator
+/// is briefed to call no tracker tool and gets none here.
+fn read_only_child_tracker_reads_allowed_locked(
+    inner: &StateInner,
+    child_session_id: &str,
+) -> bool {
+    let Some(delegation_index) = inner.find_delegation_index_by_child_session_id(child_session_id)
+    else {
+        return false;
+    };
+    let delegation = &inner.delegations[delegation_index];
+    delegation.child_session_id == child_session_id
+        && delegation.mode != DelegationMode::Evaluator
+        && delegation.status == DelegationStatus::Running
+        && inner
+            .find_session_index(child_session_id)
+            .and_then(|index| inner.sessions.get(index))
+            .is_some_and(|child| {
+                child.engram_mcp_installed.is_some()
+                    && child.session.parent_delegation_id.as_deref() == Some(delegation.id.as_str())
+            })
+}
+
 struct EngramMcpRuntimeConfig {
     stdio: TermalDelegationMcpStdioConfig,
     installed: EngramMcpInstalledDescriptor,

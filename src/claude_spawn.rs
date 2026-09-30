@@ -701,8 +701,7 @@ fn spawn_claude_runtime(
                         approval_mode,
                         delegation_child,
                         &reader_cwd,
-                        reader_state
-                            .claude_control_plane_request_allowed(&reader_session_id, &message),
+                        reader_state.claude_host_admission(&reader_session_id, &message),
                     ) {
                         Ok(action) => action,
                         Err(err) => {

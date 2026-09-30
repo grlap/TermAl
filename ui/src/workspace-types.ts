@@ -104,7 +104,7 @@ export type WorkspaceTestRunsTab = Omit<WorkspaceWorkTab, "kind"> & {
 };
 
 /**
- * Read-only Work tab (Engram + Beads visualizer). Like the Response Board,
+ * Read-only Work tab (Engram visualizer). Like the Response Board,
  * a pane holds at most one. The origin project is only the mount-time
  * fallback for the panel's own project selector.
  */

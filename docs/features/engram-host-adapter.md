@@ -978,8 +978,9 @@ reports.
   line that starts with a `cd` to a literal absolute directory and changes
   directory nowhere else, outside a pipeline or group, follows the shell
   again once it succeeds, unless another command's move is still pending as
-  it is reported. Any other change counts in every worktree, now and for
-  the lost shell's later commands: one whose target TermAl cannot read
+  it is reported. Any other change cannot be placed, now and for the lost
+  shell's later commands (what that means follows this list): one whose
+  target TermAl cannot read
   (`cd $X`, `cd -`, `popd`, PowerShell's `cd..` and `cd\`, a drive switch
   such as `D:`), a relative one (a subshell may leave the shell elsewhere to
   take it from, and a link may make its `..` land elsewhere), a path that
@@ -1004,12 +1005,27 @@ reports.
   is not seen, nor is a change of location a function defined earlier
   makes, nor a script PowerShell or cmd runs in the shell itself without a
   `.ps1` or `.bat` word (`& $script`, `.\setup`, a batch file run by its
-  bare name). A relative `cd` of a lost shell's command counts in every
-  worktree, for that command as it starts and for the shell's later
-  commands. A relative `cd` TermAl resolved from a place the shell has
-  since left (another command's move became pending in between) leaves the
-  shell's later commands counting in every worktree. A PowerShell wrapper
-  told to start elsewhere counts in every worktree. A session in a turn with
+  bare name). A relative `cd` of a lost shell's command cannot be placed
+  either, for that command as it starts and for the shell's later commands;
+  nor can the shell's later commands after a relative `cd` TermAl resolved
+  from a place the shell has since left (another command's move became
+  pending in between), nor a PowerShell wrapper told to start elsewhere. A
+  command TermAl cannot place counts where its session works: its workdir's
+  worktree and the named source root its turn works in, beside the places
+  it is known to be among. It does not count in every worktree. Read that
+  way, one session with a command running from a lost shell (a Claude
+  background call counts as running for the rest of its turn) marked every
+  check on the host, and no check earned credit while several sessions
+  worked. What this leaves unseen: a session that went into another
+  session's worktree by a `cd` TermAl could not follow, and wrote there
+  only transiently or only in a directory Git ignores. A write that stays
+  changes the source snapshots of the check it landed under, and for a
+  carried gate the launcher's fingerprint and the workspace watcher's view
+  too. A session whose own workdir was never resolved still counts in every
+  worktree, since nothing says where it works. A command of a Claude
+  session that only reads (what the read-only reviewer policy allows, read
+  by the Bash rules its commands follow) writes nowhere and counts nowhere;
+  another runtime's command always counts. A session in a turn with
   such a command running elsewhere counts there until the command ends; its
   next turn forgets a background command. A command that writes elsewhere
   by path (`git -C`, a redirection) is not seen, nor is a directory run as a
@@ -1175,10 +1191,16 @@ its launch (`src/engram_carried_checks.rs`).
   once it is carried. A session carries at most four; a fifth drops the
   oldest, whose holder is told.
 - **The fence.** From its launch until the host reads its run as ended,
-  any write the host observes in its worktree refuses it, and the refusal
-  names what wrote: another writable session's turn or command there (a
-  session's worktree is resolved before its turn starts, so one that has
-  reported nothing yet counts only where it works); a write through TermAl;
+  whatever the host sees that may have written in its worktree refuses it,
+  and the refusal names what that was: a command another writable session
+  runs where it may write there, unless that session is a Claude session
+  and the command only reads, as for the holder below (a command the host
+  cannot place counts where its session works, as for an ordinary check's
+  overlap above, and the line then says it could not be placed and may have
+  run there); a command of another session whose
+  start was never reported, and a file edit another session reports, each
+  where that session works (its workdir's worktree, resolved before its turn
+  starts, and its claim's named source root); a write through TermAl;
   a command of the holder's own whose place may be that worktree, including
   one a later description places there, unless the holder is a Claude
   session and the command only reads (what the read-only reviewer policy
@@ -1190,12 +1212,52 @@ its launch (`src/engram_carried_checks.rs`).
   which can carry a secret; any file edit the holder
   reports, since an edit report names no path; and a file the workspace
   watcher sees change in the worktree (outside the directories it ignores,
-  such as `.git`, `target` and `node_modules`), or any file change at all
-  in a batch that touches more than 256 directories. The watcher reports
+  such as `.git`, `target` and `node_modules`, and outside the worktree's
+  own `.tmp/`, the scratch directory the instructions send all scratch to;
+  in a repository that ignores it and tracks nothing under it, as this one
+  does, neither the launcher's fingerprint nor the source basis reads it,
+  and the host assumes that rather than checking it, as it does for the
+  watcher's own ignored names; it is matched exactly, never case-folded, so
+  a `.TMP` on a case-sensitive volume still fences; a worktree nested under
+  another checkout's `.tmp/` is judged against its own root), or any file change at all in a batch that touches
+  more than 256 directories. The watcher reports
   late, so its changes fence even after the run was read as ended; nothing
   else does, since a write after the run's end cannot reach what it tested,
   and one still there at settlement changes the source basis. The holder's
-  commands in other worktrees do not fence it.
+  commands in other worktrees do not fence it, and a Claude holder's
+  background launch does not move its shell into the gate's worktree: the
+  Bash tool runs a background call in a shell of its own and says so in the
+  call's result, so the launch's `pushd` ends with it and a later command
+  with no `pushd` of its own is placed where the session's shell already was.
+  Another runtime's unfinished command says no such thing, so the host loses
+  that shell between where it was and where the command's `cd` leads.
+  Another session being in a turn fences nothing by itself: a carried gate
+  stays open for the length of a full gate, so only an act that may have
+  written counts, and what that session then runs or edits is reported as it
+  happens. That holds once the gate is carried. At the launch presence still
+  counts: a launch made while another writable session is in a turn in that
+  worktree, or while another command of the holder is running, is not
+  carried (above), which is what covers a command that session started
+  before the launch and whose end says nothing. An ordinary check of a turn,
+  open for one command, keeps the wider rule (a writable session in a turn
+  in its worktree makes its outcome unknown). What the fence does not see:
+  a command run through Claude's PowerShell tool, which is not reported, and
+  a write by a tool call that is neither a command nor an edit (an MCP
+  tool, say). For those only the watcher is left, and it misses a write in a
+  directory it ignores such as `target`, one under the worktree's own
+  `.tmp/`, one in a worktree outside every watched root, and any event lost
+  to a watcher error, which is logged and fences nothing.
+- **Cargo's build directory.** Cargo makes a missing `target` through a
+  sibling at the worktree's root named `target` plus random characters,
+  which it tags and renames into place. The watcher ignores `target`, not
+  that sibling, so the first build in a fresh worktree would fence its own
+  gate. The host makes no exception for such a name: once the entry is gone
+  nothing tells Cargo's placeholder from a source file that was written and
+  removed. The launcher removes the cause instead: before its first stage
+  it makes `target` itself, tagged as a cache directory, when Git ignores
+  `target` at the root (so the frozen input cannot change) and neither
+  `CARGO_TARGET_DIR` nor `CARGO_BUILD_TARGET_DIR` points elsewhere
+  (`ensureCargoTargetDirectory` in `scripts/test-launcher.mjs`).
 - **The run.** The host finds the run in the worktree's Git `review-runs`
   directory: the earliest full-gate run whose request names that root (both
   resolved, so a launch through a link or alias of the directory still finds
@@ -1286,8 +1348,10 @@ its launch (`src/engram_carried_checks.rs`).
   metadata, outside the fenced worktree, so a rewrite there before the
   first terminal read is not seen. Only a Claude session's Bash tool
   reports its commands to the host: a command run through its PowerShell
-  tool never reaches the fence, and only the workspace watcher, which skips
-  its ignored directories and unwatched worktrees, can see what it wrote. As
+  tool never reaches the fence, nor does a write by a tool call that is
+  neither a command nor an edit, and only the workspace watcher, which skips
+  its ignored directories, the worktree's own `.tmp/` and unwatched
+  worktrees, can see what either wrote. As
   for a foreground check, the evidence model assumes an agent acting in good
   faith. [Tests](../test.md) names the form agents use.
 

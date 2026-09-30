@@ -26,7 +26,7 @@ export type WorkTreeNode = {
   satisfied?: boolean;
   /** Reported prerequisites that are still unsatisfied and not among the loaded rows. */
   absentUnsatisfied: number;
-  /** Reported prerequisites the source marked satisfied but never loaded (e.g. closed Beads blockers). */
+  /** Reported prerequisites the source marked satisfied but never loaded. */
   absentSatisfied: number;
   /** Loaded relations hidden from this view by a loaded-row filter: prerequisites here, the parent in the hierarchy. */
   hiddenByFilter: number;

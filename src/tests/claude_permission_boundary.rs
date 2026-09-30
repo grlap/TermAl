@@ -144,6 +144,218 @@ fn claude_read_only_allows_skill_loading_without_granting_write_permissions() {
     }
 }
 
+/// The decision for one tracker tool call of a read-only child, and the
+/// denial's text when it is refused.
+fn tracker_decision(
+    tool: &str,
+    input: Value,
+    tracker_reads: bool,
+) -> std::result::Result<(), String> {
+    let action = classify_claude_control_request(
+        &json!({"type":"control_request", "request_id":"tracker-boundary",
+            "request":{"subtype":"can_use_tool", "tool_name":tool, "input":input}}),
+        &mut ClaudeTurnState::default(),
+        ClaudeApprovalMode::ReadOnlyAutoApprove,
+        true,
+        ".",
+        ClaudeHostAdmission {
+            control_plane: false,
+            tracker_reads,
+        },
+    )
+    .unwrap()
+    .expect("permission request should reach the host classifier");
+    match action {
+        ClaudeControlRequestAction::Respond(ClaudePermissionDecision::Allow { .. }) => Ok(()),
+        ClaudeControlRequestAction::Respond(ClaudePermissionDecision::Deny { message, .. }) => {
+            Err(message)
+        }
+        _ => panic!("a read-only child's request is answered at once"),
+    }
+}
+
+// A project's instructions make every session read the tracker's orientation
+// and memories before it acts. A read-only child may do exactly that.
+#[test]
+fn claude_read_only_child_may_make_the_tracker_reads_that_record_nothing() {
+    for (word, input) in [
+        ("memories", json!({})),
+        ("memories", Value::Null),
+        ("memories", json!({"query":"landing-train", "full":true})),
+        ("memories", json!({"after":"greg", "revision":2})),
+        ("next", json!({"peek":true})),
+        ("next", json!({"peek":true, "limit":5, "verbose":false})),
+        ("ls", json!({})),
+        ("ls", json!({"ready":true, "limit":20, "after":"cursor"})),
+        ("search", json!({"query":"read-only", "limit":10})),
+        ("show", json!({"work_ref":"w-task"})),
+        (
+            "show",
+            json!({"work_ref":"w-task", "notes":true, "gates":true}),
+        ),
+        ("show", json!({"work_ref":"w-task", "note":"0123abcd"})),
+        ("show", json!({"work_ref":"w-task", "full":true})),
+    ] {
+        let tool = format!("mcp__engram__{word}");
+        assert_eq!(
+            tracker_decision(&tool, input.clone(), true),
+            Ok(()),
+            "{tool} {input}"
+        );
+        // Not for a child the host does not admit: an evaluator, or a runtime
+        // the host gave no tracker server.
+        let refused = tracker_decision(&tool, input.clone(), false).unwrap_err();
+        assert!(
+            refused.contains("this Claude reviewer delegation is read-only"),
+            "{tool} {input}: {refused}"
+        );
+    }
+}
+
+#[test]
+fn claude_read_only_child_is_refused_every_tracker_call_that_writes() {
+    let mut refused = Vec::new();
+    // Every word that writes, whatever it carries.
+    for word in [
+        "add", "claim", "update", "note", "done", "gate", "evaluate", "handoff", "remember",
+        "forget",
+    ] {
+        refused.push((word, json!({})));
+        refused.push((word, json!({"work_ref":"w-task", "text":"x"})));
+    }
+    refused.extend([
+        // `next` without a peek stages delivery and acknowledges memories.
+        ("next", json!({})),
+        ("next", Value::Null),
+        ("next", json!({"peek":false})),
+        ("next", json!({"peek":"true"})),
+        ("next", json!({"peek":null})),
+        // A context generation is the host's to assert, and on `memories` it
+        // records that the caller listed them.
+        (
+            "next",
+            json!({"peek":true, "context_generation":"termal-1"}),
+        ),
+        ("memories", json!({"context_generation":"termal-1"})),
+        // An argument the list does not name is not judged, so it is refused.
+        ("show", json!({"work_ref":"w-task", "acknowledge":true})),
+        ("ls", json!({"claim":true})),
+        ("search", json!({"query":"x", "save":true})),
+        // Not an argument object.
+        ("show", json!("w-task")),
+        ("memories", json!(["x"])),
+        // Not a word of the tracker's MCP surface.
+        ("core", json!({})),
+        ("", json!({})),
+    ]);
+    for (word, input) in refused {
+        let tool = format!("mcp__engram__{word}");
+        let message = tracker_decision(&tool, input.clone(), true).unwrap_err();
+        if word.is_empty() {
+            // `mcp__engram__` names no tool of the tracker's server.
+            assert!(
+                message.contains("reviewer delegation is read-only"),
+                "{message}"
+            );
+            continue;
+        }
+        // The denial says which tracker calls are reads, so the child adapts.
+        assert_eq!(message, CLAUDE_READ_ONLY_TRACKER_DENIAL, "{tool} {input}");
+    }
+    assert!(CLAUDE_READ_ONLY_TRACKER_DENIAL.contains("`next` with `peek: true`"));
+}
+
+// The qualified name is the only identity a permission request carries: a
+// tool of another server, or a bare leaf name, is never read as the tracker's.
+#[test]
+fn claude_read_only_tracker_reads_match_the_tracker_servers_qualified_name_only() {
+    for tool in [
+        "memories",
+        "mcp__memories",
+        "mcp__other__memories",
+        "mcp__engram_x__memories",
+        "mcp__engramx__memories",
+        "mcp__Engram__memories",
+        "mcp__termal-delegation__memories",
+    ] {
+        assert!(tracker_decision(tool, json!({}), true).is_err(), "{tool}");
+        assert_eq!(engram_mcp_tool_word(tool), None, "{tool}");
+    }
+    assert_eq!(
+        engram_mcp_tool_word("mcp__engram__memories"),
+        Some("memories")
+    );
+    // Admitting tracker reads admits nothing else.
+    for (tool, input) in [
+        ("Write", json!({"file_path":"sentinel", "content":"no"})),
+        ("Bash", json!({"command":"git add ."})),
+        ("mcp__other__write", json!({})),
+    ] {
+        assert!(tracker_decision(tool, input, true).is_err(), "{tool}");
+    }
+    assert_eq!(
+        tracker_decision("Read", json!({"file_path":"src/main.rs"}), true),
+        Ok(())
+    );
+}
+
+// Which sessions the host admits: the running child of a delegation that is
+// not an evaluator, on a runtime the host itself gave the tracker's server.
+#[test]
+fn tracker_reads_are_admitted_for_a_running_non_evaluator_child_with_the_hosts_server() {
+    let state = test_app_state();
+    let parent = test_session_id(&state, Agent::Claude);
+    let (delegation_id, child) =
+        super::delegation_support::install_required_review_delegation(&state, &parent);
+    let admitted = |state: &AppState, session_id: &str| {
+        let inner = state.inner.lock().unwrap();
+        read_only_child_tracker_reads_allowed_locked(&inner, session_id)
+    };
+    let message = json!({"type":"control_request", "request_id":"tracker-admission",
+        "request":{"subtype":"can_use_tool", "tool_name":"mcp__engram__memories", "input":{}}});
+
+    // The host gave this runtime no tracker server: nothing of that name is its.
+    assert!(!admitted(&state, &child));
+    {
+        let mut inner = state.inner.lock().unwrap();
+        let index = inner.find_session_index(&child).unwrap();
+        inner.sessions[index].engram_mcp_installed = Some(EngramMcpInstalledDescriptor {
+            binary_path: "C:/tools/engram.exe".to_owned(),
+            home: "C:/engram-home".to_owned(),
+            actor_id: "dev/reviewer".to_owned(),
+            actor_context: None,
+            store_key: None,
+            work_authority_grant: None,
+        });
+    }
+    assert!(admitted(&state, &child));
+    assert_eq!(
+        state.claude_host_admission(&child, &message),
+        ClaudeHostAdmission {
+            control_plane: false,
+            tracker_reads: true,
+        }
+    );
+    // The parent is no delegation child, and an unknown session is nobody.
+    assert!(!admitted(&state, &parent));
+    assert!(!admitted(&state, "session-unknown"));
+
+    let set = |change: &dyn Fn(&mut DelegationRecord)| {
+        let mut inner = state.inner.lock().unwrap();
+        let index = inner.find_delegation_index(&delegation_id).unwrap();
+        change(&mut inner.delegations[index]);
+    };
+    // An evaluator is briefed to call no tracker tool, and gets none.
+    set(&|delegation| delegation.mode = DelegationMode::Evaluator);
+    assert!(!admitted(&state, &child));
+    assert!(!state.claude_host_admission(&child, &message).tracker_reads);
+    set(&|delegation| delegation.mode = DelegationMode::Explorer);
+    assert!(admitted(&state, &child));
+    // A delegation that has ended admits nothing.
+    set(&|delegation| delegation.status = DelegationStatus::Completed);
+    assert!(!admitted(&state, &child));
+}
+
 fn assert_permission(tool: &str, input: Value, authority: bool, allowed: bool) {
     let action = classify_claude_control_request(
         &json!({"type":"control_request", "request_id":"permission-boundary",

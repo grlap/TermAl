@@ -40,22 +40,17 @@ export function WorkRowChips({ item, mixedSources }: { item: WorkItem; mixedSour
   </>;
 }
 
-const SOURCE_LABELS: Record<string, string> = { engram: "Engram", beads: "Beads" };
+const SOURCE_LABELS: Record<string, string> = { engram: "Engram" };
 
-// Beads: three beads on a string. Engram: a cell with its nucleus. A source
+// Engram: a cell with its nucleus. A source
 // this UI does not know keeps its name as text rather than an invented glyph.
 export function WorkSourceIcon({ source }: { source: string }) {
   const label = SOURCE_LABELS[source];
   if (!label) return <span className="work-chip work-chip-source" data-source={source}>{source}</span>;
   return <span className="work-source" data-source={source} role="img" aria-label={`Source: ${label}`} title={label}>
-    {source === "beads"
-      ? <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-        <path d="M1 8h14" stroke="currentColor" strokeWidth="1" />
-        <circle cx="4" cy="8" r="2.2" fill="currentColor" /><circle cx="8" cy="8" r="2.2" fill="currentColor" /><circle cx="12" cy="8" r="2.2" fill="currentColor" />
-      </svg>
-      : <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+    <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
         <path d="M8 1.5 13.6 4.75v6.5L8 14.5 2.4 11.25v-6.5Z" fill="none" stroke="currentColor" strokeWidth="1.2" />
         <circle cx="8" cy="8" r="2.2" fill="currentColor" />
-      </svg>}
+    </svg>
   </span>;
 }

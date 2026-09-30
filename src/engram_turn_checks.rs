@@ -538,7 +538,9 @@ fn engram_session_may_write(inner: &StateInner, index: usize) -> bool {
 /// be kept until the session's next turn.
 const ENGRAM_RUNNING_COMMAND_LIMIT: usize = 64;
 
-/// The worktrees a command may write in, `None` for one TermAl cannot name:
+/// The worktrees a command may write in, `None` for one TermAl cannot name
+/// (which its caller then reads as where the session works,
+/// `engram_place_command_worktrees`, rather than as every worktree):
 /// that of each place it may run in (`EngramCommandPlaces`, from
 /// `engram_command_write_places`), anywhere as well when those may be
 /// anywhere, and that of each place its own directory changes may lead to
@@ -628,6 +630,63 @@ fn engram_command_worktrees(
     worktrees
 }
 
+/// The key of the named source root the turn of `record` works in, while
+/// it holds a grant. The record keeps the root after the turn ends, until the
+/// next grant begins, so it counts only while a grant is held: a later turn
+/// that begins none does not work there.
+fn engram_turn_named_root_key(record: &SessionRecord) -> Option<String> {
+    record
+        .engram
+        .active_turn_source_root
+        .as_ref()
+        .filter(|_| record.engram.active_grant_id.is_some())
+        .map(|turn_root| engram_path_key(FsPath::new(&turn_root.root)))
+}
+
+/// `worktrees`, where a command of `record` may write
+/// (`engram_command_worktrees`), with a place TermAl cannot name read as
+/// where its session works rather than as every worktree on the host: its
+/// workdir's worktree, as last resolved, and its turn's named source root,
+/// beside the places the command is known to be among (a lost shell's).
+/// Also whether there was such a place. A session whose own workdir was
+/// never resolved still counts anywhere (`None`): nothing says where it
+/// works.
+///
+/// What this leaves unseen: a session that went into another session's
+/// worktree by a `cd` TermAl could not follow, and wrote there only
+/// transiently or only in a directory Git ignores. A write that stays is
+/// caught by the source snapshots of the check it landed under, and for a
+/// carried gate by the launcher's fingerprint and the workspace watcher too.
+/// The wider reading, that such a command may have run in every worktree,
+/// marked every check on the host for as long as one session had a command
+/// running from a shell TermAl had lost (a Claude background call counts as
+/// running for the rest of its turn), so no check earned credit while
+/// several sessions worked.
+fn engram_place_command_worktrees(
+    record: &SessionRecord,
+    worktrees: Vec<Option<String>>,
+) -> (Vec<Option<String>>, bool) {
+    if !worktrees.iter().any(Option::is_none) {
+        return (worktrees, false);
+    }
+    let mut placed: Vec<Option<String>> = worktrees.into_iter().filter(Option::is_some).collect();
+    placed.push(engram_session_worktree(record));
+    placed.extend(engram_turn_named_root_key(record).map(Some));
+    placed.sort();
+    placed.dedup();
+    (placed, true)
+}
+
+/// Whether the command line `ran` of `record` only reads: a Claude
+/// session's line, which its Bash tool runs, read as Bash
+/// (`engram_command_reads_only`). Another runtime's line may run under a
+/// shell whose reading differs, and a command whose line TermAl was not told
+/// cannot be read at all, so neither does.
+fn engram_session_command_reads_only(record: &SessionRecord, ran: Option<&str>) -> bool {
+    record.session.agent == Agent::Claude
+        && ran.is_some_and(|ran| engram_command_reads_only(ran, &record.session.workdir))
+}
+
 /// Records in `record` that its command `key` may write in `worktrees`,
 /// beside any recorded for it already: a later report of where it runs does
 /// not undo what it may have written where it ran before.
@@ -662,7 +721,7 @@ fn engram_note_turn_started(inner: &mut StateInner, index: usize) {
         .engram
         .running_command_worktrees
         .clear();
-    engram_mark_checks_overlapped_by(inner, index);
+    engram_mark_checks_overlapped_by(inner, index, EngramWriterAct::Presence);
 }
 
 /// The key of the worktree the session in `record` works in, as last resolved
@@ -702,14 +761,7 @@ fn engram_writer_worktrees(inner: &StateInner, index: usize) -> Vec<Option<Strin
         // The record keeps the root after the turn ends, until the next grant
         // begins, so it counts only while a grant is held: a later turn that
         // begins none does not work there.
-        .chain(
-            record
-                .engram
-                .active_turn_source_root
-                .as_ref()
-                .filter(|_| record.engram.active_grant_id.is_some())
-                .map(|turn_root| Some(engram_path_key(FsPath::new(&turn_root.root)))),
-        )
+        .chain(engram_turn_named_root_key(record).map(Some))
         .chain(
             record
                 .engram
@@ -756,28 +808,31 @@ fn engram_other_writer_in(inner: &StateInner, index: usize, root: &str) -> bool 
 /// while it can matter rather than reconstructed from a timestamp later. A
 /// read-only delegation child cannot write. Runs under the state lock, on
 /// worktrees resolved before; one never resolved marks every open check.
-fn engram_mark_checks_overlapped_by(inner: &mut StateInner, writer: usize) {
+///
+/// A carried check of another session, which stays open for the length of a
+/// full gate rather than of one command, is fenced only for what `act` says
+/// the writer did (`engram_fence_carried_for_other_session`): its presence in
+/// a turn fences none.
+fn engram_mark_checks_overlapped_by(
+    inner: &mut StateInner,
+    writer: usize,
+    act: EngramWriterAct<'_>,
+) {
     if engram_session_may_write(inner, writer) {
         let worktrees = engram_writer_worktrees(inner, writer);
-        let session = &inner.sessions[writer].session;
-        let cause = format!(
-            "session {} ({}) was in a turn or ran a command there",
-            session.name, session.id
-        );
-        engram_mark_open_checks_in_worktrees(inner, &worktrees, Some(writer), &cause);
+        engram_mark_open_turn_checks_in_worktrees(inner, &worktrees, Some(writer));
+        engram_fence_carried_for_other_session(inner, writer, &worktrees, act);
     }
 }
 
-/// Marks as overlapped every check still open to writes, but those of the
-/// session at `except`, that ran in one of `worktrees` (every one, for a
-/// worktree TermAl could not name), and fences every carried check there
-/// with `cause` (`engram_fence_carried_checks`). A check carries the
-/// worktree it ran in, so this touches no file system.
-fn engram_mark_open_checks_in_worktrees(
+/// Marks as overlapped every check of a turn still open to writes, but those
+/// of the session at `except`, that ran in one of `worktrees` (every one, for
+/// a worktree TermAl could not name). A check carries the worktree it ran
+/// in, so this touches no file system.
+fn engram_mark_open_turn_checks_in_worktrees(
     inner: &mut StateInner,
     worktrees: &[Option<String>],
     except: Option<usize>,
-    cause: &str,
 ) {
     for (other, record) in inner.sessions.iter_mut().enumerate() {
         if Some(other) == except {
@@ -790,6 +845,19 @@ fn engram_mark_open_checks_in_worktrees(
                 check.overlapped = true;
             }
         }
+    }
+}
+
+/// `engram_mark_open_turn_checks_in_worktrees` for every session, and every
+/// carried check in `worktrees` fenced with `cause`
+/// (`engram_fence_carried_checks`): for a write TermAl itself made there.
+fn engram_mark_open_checks_in_worktrees(
+    inner: &mut StateInner,
+    worktrees: &[Option<String>],
+    cause: &str,
+) {
+    engram_mark_open_turn_checks_in_worktrees(inner, worktrees, None);
+    for record in &mut inner.sessions {
         engram_fence_carried_checks(record, worktrees, cause);
     }
 }
@@ -985,10 +1053,23 @@ impl AppState {
             .session_mut_by_index(index)
             .expect("session index should be valid");
         engram_note_session_worktree(record, &workdir, workdir_worktree);
+        // A place TermAl cannot name counts where the session works.
+        let (worktrees, unplaced) = engram_place_command_worktrees(record, worktrees);
         // The holder's own command where one of its carried checks runs
         // fences it, unless it only reads.
         engram_fence_carried_for_own_command(record, &worktrees, ran);
-        engram_note_command_worktrees(record, key, worktrees);
+        // A command that only reads writes nowhere: it is kept as running,
+        // so its end is known to have had a start, with no place to write in.
+        let reads_only = engram_session_command_reads_only(record, ran);
+        engram_note_command_worktrees(
+            record,
+            key,
+            if reads_only {
+                Vec::new()
+            } else {
+                worktrees.clone()
+            },
+        );
         engram_note_shell_move(
             record,
             key,
@@ -1000,7 +1081,17 @@ impl AppState {
         if let Some(line) = withheld_line {
             record.engram.set_pending_source_root_line(line);
         }
-        engram_mark_checks_overlapped_by(&mut inner, index);
+        // A carried check of another session is fenced for this command
+        // where it may write, unless it only reads.
+        engram_mark_checks_overlapped_by(
+            &mut inner,
+            index,
+            EngramWriterAct::Command {
+                worktrees: &worktrees,
+                ran,
+                unplaced,
+            },
+        );
         let engram = &inner.sessions[index].engram;
         if engram.work_binding.is_none() {
             return;
@@ -1266,9 +1357,27 @@ impl AppState {
             // It may write where it is now said to run, under a check
             // another session has open there (unless it ended meanwhile), and
             // under a carried check of its own session.
+            let (worktrees, unplaced) = engram_place_command_worktrees(record, worktrees);
             engram_fence_carried_for_own_command(record, &worktrees, ran);
-            engram_note_command_worktrees(record, key, worktrees);
-            engram_mark_checks_overlapped_by(&mut inner, index);
+            let reads_only = engram_session_command_reads_only(record, ran);
+            engram_note_command_worktrees(
+                record,
+                key,
+                if reads_only {
+                    Vec::new()
+                } else {
+                    worktrees.clone()
+                },
+            );
+            engram_mark_checks_overlapped_by(
+                &mut inner,
+                index,
+                EngramWriterAct::Command {
+                    worktrees: &worktrees,
+                    ran,
+                    unplaced,
+                },
+            );
         }
     }
 
@@ -1325,7 +1434,24 @@ impl AppState {
             &workdir,
             workdir_worktree,
         );
-        engram_mark_checks_overlapped_by(&mut inner, index);
+        // A command whose start was reported fenced the carried checks of
+        // other sessions then, by its line and where it may write. One whose
+        // start TermAl was never told (a runtime that reports only a
+        // command's end) may have written wherever the session writes.
+        let start_reported = inner.sessions[index]
+            .engram
+            .running_command_worktrees
+            .iter()
+            .any(|(running, _)| running == key);
+        engram_mark_checks_overlapped_by(
+            &mut inner,
+            index,
+            if start_reported {
+                EngramWriterAct::Presence
+            } else {
+                EngramWriterAct::UnreportedCommand
+            },
+        );
         // Only a check of the grant the session runs under can be reported;
         // one a grant left behind as it ended takes no closing snapshot.
         let grant_id = inner.sessions[index].engram.active_grant_id.clone();
@@ -1476,7 +1602,7 @@ impl AppState {
         let workspace = engram_worktree_root(path);
         let cause = format!("TermAl wrote {}", path.display());
         let mut inner = self.inner.lock().expect("state mutex poisoned");
-        engram_mark_open_checks_in_worktrees(&mut inner, &[Some(workspace)], None, &cause);
+        engram_mark_open_checks_in_worktrees(&mut inner, &[Some(workspace)], &cause);
     }
 
     /// Resolves off the state lock the worktree `session_id` works in and
@@ -1532,7 +1658,7 @@ impl AppState {
             &workdir,
             workdir_worktree,
         );
-        engram_mark_checks_overlapped_by(&mut inner, index);
+        engram_mark_checks_overlapped_by(&mut inner, index, EngramWriterAct::Edit);
         for check in &mut inner.sessions[index].engram.active_turn_checks {
             if check.open_to_writes() {
                 check.overlapped = true;

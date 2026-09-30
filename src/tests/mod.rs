@@ -116,7 +116,6 @@ mod test_run_waits;
 mod test_runs;
 mod turns;
 mod work_visualizer;
-mod work_visualizer_beads;
 mod workspace;
 mod workspace_labels;
 

@@ -19,14 +19,13 @@ describe("Work memories", () => {
   });
 
   it("only reads memories when their separate Work view is opened", async () => {
-    vi.mocked(readProjectWork).mockResolvedValue({ sources: [], page: null, beads: null, readerId: null, observedAt: "now" });
+    vi.mocked(readProjectWork).mockResolvedValue({ sources: [], page: null, readerId: null, observedAt: "now" });
     render(<WorkPanel projects={[{ id: "one", name: "One" }] as Project[]} focusedProjectId="one" />);
     await waitFor(() => expect(readProjectWork).toHaveBeenCalledTimes(1));
     expect(readWorkMemories).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Memories" }));
-    await waitFor(() => expect(readWorkMemories).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(readWorkMemories).toHaveBeenCalledTimes(1));
     expect(await within(region("engram")).findByRole("button", { name: "guide" })).toBeInTheDocument();
-    expect(within(region("beads")).getByRole("button", { name: "guide" })).toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: "Label (source filter)" })).not.toBeInTheDocument();
   });
 
@@ -51,22 +50,21 @@ describe("Work memories", () => {
     expect(button).toHaveFocus();
   });
 
-  it("keeps the other source visible on failure and searches both only on submit", async () => {
+  it("shows read failures and searches Engram only on submit", async () => {
     vi.mocked(readWorkMemories).mockImplementation(async (_project, source) => {
       if (source === "engram") throw new Error("Engram unavailable");
       return page(source);
     });
     render(<WorkMemories projectId="one" />);
     await screen.findByText(/Engram unavailable/);
-    expect(within(region("beads")).getByRole("button", { name: "guide" })).toBeInTheDocument();
     fireEvent.change(screen.getByRole("textbox", { name: "Search memories" }), { target: { value: "store safety" } });
-    expect(readWorkMemories).toHaveBeenCalledTimes(2);
+    expect(readWorkMemories).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole("button", { name: "Search memories" }));
-    await waitFor(() => expect(readWorkMemories).toHaveBeenCalledTimes(4));
-    expect(readWorkMemories).toHaveBeenCalledWith("one", "beads", { search: "store safety" }, expect.any(AbortSignal));
+    await waitFor(() => expect(readWorkMemories).toHaveBeenCalledTimes(2));
+    expect(readWorkMemories).toHaveBeenCalledWith("one", "engram", { search: "store safety" }, expect.any(AbortSignal));
   });
 
-  it("pages Engram and refuses a mismatched reader without discarding Beads", async () => {
+  it("pages Engram and refuses a mismatched reader and discards stale data", async () => {
     vi.mocked(readWorkMemories).mockImplementation(async (_project, source, query) => {
       const result = page(source, query.after ? "later" : "guide");
       if (source === "engram") {
@@ -79,10 +77,9 @@ describe("Work memories", () => {
     render(<WorkMemories projectId="one" />);
     await screen.findByText(/Memory listing changed/);
     expect(within(region("engram")).queryByRole("button", { name: "guide" })).not.toBeInTheDocument();
-    expect(within(region("beads")).getByRole("button", { name: "guide" })).toBeInTheDocument();
   });
 
-  it("appends a valid Engram continuation without rereading Beads", async () => {
+  it("appends a valid Engram continuation", async () => {
     vi.mocked(readWorkMemories).mockImplementation(async (_project, source, query) => {
       const result = page(source, query.after ? "later" : "guide");
       if (source === "engram" && !query.after) { result.nextAfter = "guide"; result.exhausted = false; }
@@ -93,13 +90,11 @@ describe("Work memories", () => {
     expect(within(region("engram")).getByRole("button", { name: "guide" })).toBeInTheDocument();
     expect(within(region("engram")).getByText(/2 loaded/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Load more engram memories" })).not.toBeInTheDocument();
-    expect(vi.mocked(readWorkMemories).mock.calls.filter(call => call[1] === "beads")).toHaveLength(1);
   });
 
   it("renders pages progressively, requests one page at a time, and loads through the final page", async () => {
     let finish!: (value: WorkMemoryResponse) => void;
     vi.mocked(readWorkMemories).mockImplementation(async (_project, source, query) => {
-      if (source === "beads") return page(source);
       if (query.after === "guide") return new Promise(resolve => { finish = resolve; });
       const result = page(source, query.after ? "last" : "guide");
       if (!query.after) { result.nextAfter = "guide"; result.exhausted = false; }
@@ -108,12 +103,12 @@ describe("Work memories", () => {
     render(<WorkMemories projectId="one" />);
     expect(await within(region("engram")).findByRole("button", { name: "guide" })).toBeInTheDocument();
     expect(within(region("engram")).getByText(/1 loaded · Loading more/)).toBeInTheDocument();
-    expect(readWorkMemories).toHaveBeenCalledTimes(3);
+    expect(readWorkMemories).toHaveBeenCalledTimes(2);
     const second = page("engram", "middle"); second.nextAfter = "middle"; second.exhausted = false;
     await act(async () => finish(second));
     await within(region("engram")).findByRole("button", { name: "last" });
     expect(within(region("engram")).getByText(/3 loaded · All returned memories loaded/)).toBeInTheDocument();
-    expect(readWorkMemories).toHaveBeenCalledTimes(4);
+    expect(readWorkMemories).toHaveBeenCalledTimes(3);
   });
 
   it.each(["cursor", "duplicate", "empty"])("stops an invalid %s continuation without looping", async kind => {
@@ -131,7 +126,7 @@ describe("Work memories", () => {
     render(<WorkMemories projectId="one" />);
     await screen.findByText(/Memory listing changed/);
     expect(within(region("engram")).queryByRole("button", { name: "guide" })).not.toBeInTheDocument();
-    expect(readWorkMemories).toHaveBeenCalledTimes(3);
+    expect(readWorkMemories).toHaveBeenCalledTimes(2);
   });
 
   it.each([429, 502, 409])("stops on HTTP %s and only discards stale-reader data", async status => {
@@ -144,8 +139,7 @@ describe("Work memories", () => {
     render(<WorkMemories projectId="one" />);
     await screen.findByText(/Loading stopped: Read failed/);
     expect(!!within(region("engram")).queryByRole("button", { name: "guide" })).toBe(status !== 409);
-    expect(readWorkMemories).toHaveBeenCalledTimes(3);
-    expect(within(region("beads")).getByRole("button", { name: "guide" })).toBeInTheDocument();
+    expect(readWorkMemories).toHaveBeenCalledTimes(2);
   });
 
   it("aborts a pending continuation on leaving without requesting another page", async () => {
@@ -163,7 +157,7 @@ describe("Work memories", () => {
     expect(continuationSignal?.aborted).toBe(true);
     const late = page("engram", "later"); late.nextAfter = "later"; late.exhausted = false;
     await act(async () => finish(late));
-    expect(readWorkMemories).toHaveBeenCalledTimes(3);
+    expect(readWorkMemories).toHaveBeenCalledTimes(2);
   });
 
   it("expands rows independently, cancels collapsed bodies, and displays honest date metadata", async () => {
@@ -182,7 +176,6 @@ describe("Work memories", () => {
     const guide = await within(region("engram")).findByRole("button", { name: "guide" });
     expect(within(region("engram")).getByText(/Revision date:/)).toBeInTheDocument();
     expect(region("engram").querySelector("time[datetime='2026-09-16T10:14:33Z']")).not.toBeNull();
-    expect(within(region("beads")).getByText("Beads does not provide memory dates.")).toBeInTheDocument();
     guide.focus(); fireEvent.click(guide);
     expect(guide).toHaveFocus();
     const firstSignal = bodySignal;
@@ -219,14 +212,15 @@ describe("Work memories", () => {
   it("shows empty versus unavailable distinctly and discloses omitted matches", async () => {
     vi.mocked(readWorkMemories).mockImplementation(async (_project, source) => {
       const result = page(source); result.items = [];
-      if (source === "beads") { result.state = "unavailable"; result.message = "No .beads directory"; }
-      else { result.omitted = 9; result.exhausted = false; }
+      result.omitted = 9; result.exhausted = false;
       return result;
     });
     render(<WorkMemories projectId="one" />);
     expect(await screen.findByText("No matching project memories in engram.")).toBeInTheDocument();
     expect(screen.getByText(/9 more matches omitted/)).toBeInTheDocument();
-    expect(screen.getByText(/unavailable: No .beads/)).toBeInTheDocument();
-    expect(screen.queryByText("No matching project memories in beads.")).not.toBeInTheDocument();
+    vi.mocked(readWorkMemories).mockResolvedValue({ ...page("engram"), items: [], state: "unavailable", message: "Reader is not configured" });
+    fireEvent.click(screen.getByRole("button", { name: "Refresh memories" }));
+    expect(await screen.findByText("unavailable: Reader is not configured")).toBeInTheDocument();
+    expect(screen.queryByText("No matching project memories in engram.")).not.toBeInTheDocument();
   });
 });
