@@ -1468,7 +1468,7 @@ fn a_writer_in_another_worktree_leaves_an_open_check_alone() {
             .clear();
         let mut inner = turn.state.inner.lock().expect("state mutex poisoned");
         let index = inner.find_session_index(&other).expect("other session");
-        engram_mark_checks_overlapped_by(&mut inner, index);
+        engram_mark_checks_overlapped_by(&mut inner, index, EngramWriterAct::Presence);
     }
     assert!(
         !turn.record(|record| record.engram.active_turn_checks[0].overlapped),
@@ -1480,7 +1480,7 @@ fn a_writer_in_another_worktree_leaves_an_open_check_alone() {
         let index = inner.find_session_index(&other).expect("other session");
         inner.sessions[index].session.workdir =
             elsewhere.join("sub").to_string_lossy().into_owned();
-        engram_mark_checks_overlapped_by(&mut inner, index);
+        engram_mark_checks_overlapped_by(&mut inner, index, EngramWriterAct::Presence);
     }
     assert!(turn.record(|record| record.engram.active_turn_checks[0].overlapped));
     pending.finish(None);
@@ -3874,6 +3874,29 @@ fn a_lost_checkpoint_naming_an_environment_code_keeps_the_evidence() {
 
 /// A linked worktree of the turn's repository at `.worktrees/wt`, made the
 /// turn's named source root as a turn admitted with it would carry it.
+/// Gives the session `session` of `turn`'s state a turn under a grant that
+/// works in the named source root `root`, as a claim's name would.
+fn name_other_session_source_root(turn: &CheckedTurn, session: &str, root: &FsPath) {
+    let (root, common_dir_key) = validate_engram_source_root(
+        &root.to_string_lossy(),
+        &turn.root.to_string_lossy(),
+        &turn.root.to_string_lossy(),
+    )
+    .expect("the worktree can be named");
+    let mut inner = turn.state.inner.lock().expect("state mutex poisoned");
+    let index = inner.find_session_index(session).expect("the other session");
+    let engram = &mut inner.sessions[index].engram;
+    engram.active_grant_id = Some("other-session-grant".to_owned());
+    engram.active_turn_source_root = Some(EngramTurnSourceRoot {
+        root,
+        common_dir_key,
+        short_ref: "w-other-session".to_owned(),
+        claim_id: "claim-other-session".to_owned(),
+        generation: 0,
+        sealed_revision: None,
+    });
+}
+
 fn name_turn_source_root(turn: &CheckedTurn) -> PathBuf {
     let worktree = turn.root.join(".worktrees").join("wt");
     run_git_test_command(

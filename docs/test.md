@@ -255,10 +255,27 @@ neither, and TermAl records nothing for it. While it runs, a command the
 holding session runs in that worktree refuses the credit unless the session
 is a Claude session and the command only reads (such as `git status`,
 `git diff`, or `node scripts/test-launcher.mjs summary RUN_DIRECTORY` from
-the repository root). So do another writable session's turn or command
-there, any file edit the holding session reports, and any file change
-TermAl's workspace watcher sees there; TermAl says which and why before the
-next prompt. A command run through Claude's PowerShell tool is not reported
+the repository root). A Claude session's background launch leaves its shell
+where it was, because the Bash tool runs a background call in a shell of its
+own: a later command with no `pushd` of its own runs where the session's
+shell already was, not in the gate's worktree. The credit is also refused
+by a command another writable session runs in that worktree, unless that
+session is a Claude session and the command only reads (a command TermAl
+cannot place counts where its session works: its workdir's worktree and its
+claim's named source root, not every worktree on the host); by a file edit
+reported by another session that works there; by any
+file edit the holding session reports; and by any file change TermAl's
+workspace watcher sees there, except under the worktree's own `.tmp/`
+scratch directory. Once the gate is carried, another session being in a turn
+refuses nothing by itself. At the launch it does: a gate launched while
+another writable session is in a turn in that worktree, or while another
+command of the holder is running, is not carried at all. TermAl says which
+and why before the next prompt. The launcher makes Cargo's `target`
+directory itself before the first stage, when Git ignores it and no
+`CARGO_TARGET_DIR` points elsewhere: Cargo would otherwise make it through
+a temporary sibling (`target` plus random characters) that the watcher does
+not ignore, and the first build in a fresh worktree would refuse its own
+gate. A command run through Claude's PowerShell tool is not reported
 to TermAl, so only the watcher can see what it writes. Once the run has
 ended, a write no longer refuses it, except a change the watcher reports
 late, which may have landed while it ran; a source change still there at the

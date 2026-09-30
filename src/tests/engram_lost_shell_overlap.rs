@@ -4,8 +4,11 @@
 // directory changes name a place TermAl can be sure of (an absolute literal
 // target) and which may lead anywhere, the places a lost shell is kept among
 // until TermAl follows it again, and that a lost shell leaves an open check
-// in a worktree its changes cannot reach alone while any other change still
-// marks it. Does not own following a shell or crediting a test
+// in a worktree its changes cannot reach alone, while a change TermAl cannot
+// place counts where its session works (its workdir's worktree and its
+// turn's named source root) rather than in every worktree, and a Claude
+// session's read-only command counts nowhere. Does not own following a
+// shell or crediting a test
 // (src/tests/engram_turn_checks.rs and its one-call child). New module, a
 // child of src/tests/engram_turn_checks.rs, whose `CheckedTurn` fixture it
 // uses.
@@ -766,13 +769,16 @@ fn a_lost_shell_elsewhere_leaves_an_open_check_alone_until_its_changes_may_reach
 }
 
 #[test]
-fn a_change_termal_cannot_place_exactly_still_marks_every_open_check() {
+fn a_change_termal_cannot_place_exactly_counts_where_its_session_works() {
     // A target TermAl cannot read, a relative one, one the line may make
-    // first, and one on a line that loops may each lead into the check's
-    // worktree, now and for the lost shell's later commands.
+    // first, and one on a line that loops may each lead anywhere. Such a
+    // command, and the lost shell's later commands, count where their session
+    // works: they mark an open check in that worktree and leave one in
+    // another worktree alone, rather than marking every check on the host.
     let turn = CheckedTurn::start("lost-anywhere", true);
     let other = sibling_worktree(&turn, "lost-anywhere-other");
     fs::create_dir_all(other.join("sub")).expect("a directory in the other repository");
+    fs::create_dir_all(turn.root.join("sub")).expect("a directory in the checked repository");
     for line in [
         "cd \"$OTHER\" && git checkout -- README.md".to_owned(),
         "(cd sub); cd sub; git checkout -- README.md".to_owned(),
@@ -789,31 +795,48 @@ fn a_change_termal_cannot_place_exactly_still_marks_every_open_check() {
             line_path(&other.join("sub"))
         ),
     ] {
-        let pending = open_check(&turn);
-        let (session, mut recorder) = writer_in(&turn, &other);
-        run_command(&mut recorder, "first", "git status");
-        assert!(!overlapped(&turn), "before: {line}");
-        recorder
-            .command_started("moves", &line)
-            .expect("the start should record");
-        assert!(
-            running_worktrees(&turn, &session, "moves").contains(&None),
-            "{line}"
-        );
-        assert!(overlapped(&turn), "{line}");
-        recorder
-            .command_completed_with_exit(
-                "moves",
-                &line,
-                "",
-                CommandStatus::Success,
-                EngramCommandExit::Code(0),
-            )
-            .expect("the end should record");
-        turn.record_mut(|record| record.engram.active_turn_checks[0].overlapped = false);
-        run_command(&mut recorder, "after", "git checkout -- README.md");
-        assert!(overlapped(&turn), "the shell may still be anywhere: {line}");
-        pending.finish(None);
+        for (workdir, works_here) in [(&other, false), (&turn.root, true)] {
+            let pending = open_check(&turn);
+            let (session, mut recorder) = writer_in(&turn, workdir);
+            // Unplaced as TermAl reads the line, whoever runs it.
+            assert!(
+                engram_command_worktrees(
+                    &workdir.to_string_lossy(),
+                    &EngramCommandPlaces::at(vec![None]),
+                    Some(&line),
+                    None
+                )
+                .contains(&None),
+                "{line}"
+            );
+            recorder
+                .command_started("moves", &line)
+                .expect("the start should record");
+            let worktrees = running_worktrees(&turn, &session, "moves");
+            assert!(
+                !worktrees.contains(&None)
+                    && worktrees.contains(&Some(engram_worktree_root(workdir))),
+                "{line}: {worktrees:?}"
+            );
+            assert_eq!(overlapped(&turn), works_here, "{line}");
+            recorder
+                .command_completed_with_exit(
+                    "moves",
+                    &line,
+                    "",
+                    CommandStatus::Success,
+                    EngramCommandExit::Code(0),
+                )
+                .expect("the end should record");
+            turn.record_mut(|record| record.engram.active_turn_checks[0].overlapped = false);
+            run_command(&mut recorder, "after", "git checkout -- README.md");
+            assert_eq!(
+                overlapped(&turn),
+                works_here,
+                "the lost shell's later command: {line}"
+            );
+            pending.finish(None);
+        }
     }
     // cmd's `cd /d DIR` names its target after a switch: the switch is no
     // target, and the change may lead anywhere.
@@ -881,11 +904,13 @@ fn a_command_reported_more_than_once_writes_where_it_first_did() {
 }
 
 #[test]
-fn a_relative_change_of_a_lost_shell_may_write_anywhere_as_it_starts() {
+fn a_relative_change_of_a_lost_shell_counts_where_its_session_works_as_it_starts() {
     // The lost shell may be in a place TermAl knows only as resolved, not
     // as the shell spells it: through a link, bash's `cd ..` may land in a
-    // worktree none of the resolved places' parents is. The command itself
-    // counts in every worktree as it starts, not only the shell after it.
+    // worktree none of the resolved places' parents is. TermAl cannot place
+    // the command, so it counts where its session works as it starts, not
+    // only the shell after it: in its workdir's worktree, and in the named
+    // source root its turn works in.
     let turn = CheckedTurn::start("lost-relative-now", true);
     let other = sibling_worktree(&turn, "lost-relative-now-other");
     fs::create_dir_all(other.join("crates")).expect("a directory in the other repository");
@@ -903,7 +928,36 @@ fn a_relative_change_of_a_lost_shell_may_write_anywhere_as_it_starts() {
         .command_started("up", "cd .. && git checkout -- README.md")
         .expect("the start should record");
     let worktrees = running_worktrees(&turn, &session, "up");
-    assert!(worktrees.contains(&None), "{worktrees:?}");
+    assert!(
+        !worktrees.contains(&None) && worktrees.contains(&Some(engram_worktree_root(&other))),
+        "{worktrees:?}"
+    );
+    assert!(
+        !overlapped(&turn),
+        "its session works elsewhere: the check keeps its credit"
+    );
+    recorder
+        .command_completed_with_exit(
+            "up",
+            "cd .. && git checkout -- README.md",
+            "",
+            CommandStatus::Success,
+            EngramCommandExit::Code(0),
+        )
+        .expect("the end should record");
+
+    // The same session, its turn now working in the checked worktree as its
+    // claim's named source root: the same command counts there.
+    name_other_session_source_root(&turn, &session, &turn.root);
+    recorder
+        .command_started("up-again", "cd .. && git checkout -- README.md")
+        .expect("the start should record");
+    let worktrees = running_worktrees(&turn, &session, "up-again");
+    assert!(
+        !worktrees.contains(&None)
+            && worktrees.contains(&Some(engram_worktree_root(&turn.root))),
+        "{worktrees:?}"
+    );
     assert!(overlapped(&turn), "marked as the command starts");
     pending.finish(None);
 }
@@ -1002,4 +1056,35 @@ fn a_relative_change_resolves_from_each_start_only_while_the_shell_is_followed()
     let line = format!("cd \"{}\"", line_path(&turn.root.join("sub")));
     let worktrees = engram_command_worktrees(&workdir, &lost, Some(&line), None);
     assert_eq!(worktrees, [root]);
+}
+
+#[test]
+fn a_claude_sessions_read_only_command_in_the_checked_worktree_leaves_the_check_alone() {
+    // A command that only reads writes nowhere. Only a Claude session's line
+    // is read as Bash; the same line from another runtime may run under a
+    // shell that reads it otherwise, so it still counts where it runs.
+    let turn = CheckedTurn::start("read-only-here", true);
+    let other = sibling_worktree(&turn, "read-only-here-other");
+    let project_id = turn.record(|record| {
+        record
+            .session
+            .project_id
+            .clone()
+            .expect("the root belongs to a project")
+    });
+    let line = format!("pushd \"{}\" && git status", line_path(&turn.root));
+    for (label, agent, marks) in [("claude", Agent::Claude, false), ("codex", Agent::Codex, true)] {
+        let pending = open_check(&turn);
+        let session = create_test_project_session(&turn.state, agent, &project_id, &other);
+        SessionRecorder::new(turn.state.clone(), session.clone())
+            .command_started("look", &line)
+            .expect("the start should record");
+        assert_eq!(overlapped(&turn), marks, "{label}");
+        assert_eq!(
+            running_worktrees(&turn, &session, "look").is_empty(),
+            !marks,
+            "{label}: a reading command is kept as running with nowhere to write"
+        );
+        pending.finish(None);
+    }
 }

@@ -936,7 +936,172 @@ fn another_session_running_a_command_in_the_worktree_refuses_the_gate() {
     finish_run(&worktree, "passed", &"f".repeat(64));
     let checkpoint = turn.finish();
 
-    assert_refused(&turn, &checkpoint, "was in a turn or ran a command there");
+    // The line names what the other session ran, never a turn.
+    assert_refused(&turn, &checkpoint, "ran a `git` command there (line ");
+    let line = turn
+        .record(|record| record.engram.pending_source_root_line.clone())
+        .expect("the holder should be told");
+    assert!(
+        line.contains("may have written in its worktree") && !line.contains("was in a turn"),
+        "{line}"
+    );
+}
+
+/// The fence of the turn's one carried gate.
+fn carried_fence(turn: &CheckedTurn) -> Option<String> {
+    turn.record(|record| record.engram.carried_checks[0].fence.clone())
+}
+
+#[test]
+fn another_claude_sessions_read_only_command_in_the_worktree_leaves_the_gate_credited() {
+    // Reading a worktree while its gate runs (a status, a log, a file read)
+    // writes nothing: a Claude session's line is read as Bash, as the
+    // holder's own is.
+    let (turn, worktree) = named_turn("carried-other-reads");
+    let project_id = turn.record(|record| record.session.project_id.clone().unwrap());
+    let reader = create_test_project_session(&turn.state, Agent::Claude, &project_id, &worktree);
+    launch_gate(&turn, &worktree, false);
+    let mut recorder = SessionRecorder::new(turn.state.clone(), reader);
+    for (key, line) in [
+        ("status", "git status --short"),
+        ("log", "git log --oneline -5"),
+        ("read", "cat README.md"),
+    ] {
+        recorder
+            .command_started(key, line)
+            .expect("the reader's command should record");
+        recorder
+            .command_completed_with_exit(
+                key,
+                line,
+                "",
+                CommandStatus::Success,
+                EngramCommandExit::ReportedSuccess,
+            )
+            .expect("the reader's command should end");
+        assert_eq!(carried_fence(&turn), None, "{line}");
+    }
+    let run = finish_run(&worktree, "passed", &"f".repeat(64));
+    let checkpoint = turn.finish();
+    assert_credited(&turn, &checkpoint, &run, "succeeded");
+
+    // Another runtime's line may run under a shell that reads it otherwise,
+    // so the same text from it still refuses the gate.
+    let (turn, worktree) = named_turn("carried-other-reads-codex");
+    let project_id = turn.record(|record| record.session.project_id.clone().unwrap());
+    let reader = create_test_project_session(&turn.state, Agent::Codex, &project_id, &worktree);
+    launch_gate(&turn, &worktree, false);
+    SessionRecorder::new(turn.state.clone(), reader)
+        .command_started("status", "git status --short")
+        .expect("the reader's command should record");
+    finish_run(&worktree, "passed", &"f".repeat(64));
+    let checkpoint = turn.finish();
+    assert_refused(&turn, &checkpoint, "ran a `git` command there (line ");
+}
+
+#[test]
+fn another_sessions_command_fences_only_where_it_may_write() {
+    // Placed in another worktree, a writing command leaves the gate alone.
+    let (turn, worktree) = named_turn("carried-other-elsewhere");
+    let project_id = turn.record(|record| record.session.project_id.clone().unwrap());
+    let elsewhere = sibling_worktree(&turn, "carried-other-elsewhere-sibling");
+    let writer = create_test_project_session(&turn.state, Agent::Claude, &project_id, &elsewhere);
+    launch_gate(&turn, &worktree, false);
+    let mut recorder = SessionRecorder::new(turn.state.clone(), writer);
+    recorder
+        .command_started("write", "touch notes.txt")
+        .expect("the writer's command should record");
+    recorder
+        .command_completed_with_exit(
+            "write",
+            "touch notes.txt",
+            "",
+            CommandStatus::Success,
+            EngramCommandExit::ReportedSuccess,
+        )
+        .expect("the writer's command should end");
+    assert_eq!(carried_fence(&turn), None);
+
+    // One TermAl cannot place counts where its session works, which is not
+    // here: the gate keeps its credit.
+    recorder
+        .command_started("lost", UNPLACED_WRITE)
+        .expect("the writer's command should record");
+    assert_eq!(carried_fence(&turn), None);
+    let run = finish_run(&worktree, "passed", &"f".repeat(64));
+    let checkpoint = turn.finish();
+    assert_credited(&turn, &checkpoint, &run, "succeeded");
+}
+
+/// A writing line TermAl cannot place: its `cd` names no literal directory.
+const UNPLACED_WRITE: &str = "cd \"$SOMEWHERE\" && touch notes.txt";
+
+#[test]
+fn an_unplaced_command_refuses_a_carried_gate_where_its_session_works() {
+    // In the session's own workdir.
+    let (turn, worktree) = named_turn("carried-unplaced-workdir");
+    let project_id = turn.record(|record| record.session.project_id.clone().unwrap());
+    let writer = create_test_project_session(&turn.state, Agent::Claude, &project_id, &worktree);
+    launch_gate(&turn, &worktree, false);
+    SessionRecorder::new(turn.state.clone(), writer)
+        .command_started("lost", UNPLACED_WRITE)
+        .expect("the writer's command should record");
+    finish_run(&worktree, "passed", &"f".repeat(64));
+    let checkpoint = turn.finish();
+    assert_refused(
+        &turn,
+        &checkpoint,
+        "ran a `cd` command that TermAl could not place and that may have run there (line ",
+    );
+
+    // In the named source root its turn works in, whatever its workdir.
+    let (turn, worktree) = named_turn("carried-unplaced-named-root");
+    let project_id = turn.record(|record| record.session.project_id.clone().unwrap());
+    let elsewhere = sibling_worktree(&turn, "carried-unplaced-named-root-sibling");
+    let writer = create_test_project_session(&turn.state, Agent::Claude, &project_id, &elsewhere);
+    launch_gate(&turn, &worktree, false);
+    let mut recorder = SessionRecorder::new(turn.state.clone(), writer.clone());
+    recorder
+        .command_started("lost", UNPLACED_WRITE)
+        .expect("the writer's command should record");
+    assert_eq!(carried_fence(&turn), None, "it works elsewhere so far");
+    name_other_session_source_root(&turn, &writer, &worktree);
+    recorder
+        .command_started("lost-again", UNPLACED_WRITE)
+        .expect("the writer's command should record");
+    finish_run(&worktree, "passed", &"f".repeat(64));
+    let checkpoint = turn.finish();
+    assert_refused(
+        &turn,
+        &checkpoint,
+        "ran a `cd` command that TermAl could not place and that may have run there (line ",
+    );
+}
+
+#[test]
+fn a_command_whose_start_was_never_reported_fences_where_its_session_writes() {
+    // A runtime that reports only a command's end gives no line to read and
+    // no place but the session's own.
+    let (turn, worktree) = named_turn("carried-other-end-only");
+    let project_id = turn.record(|record| record.session.project_id.clone().unwrap());
+    let other = create_test_project_session(&turn.state, Agent::Claude, &project_id, &worktree);
+    launch_gate(&turn, &worktree, false);
+    SessionRecorder::new(turn.state.clone(), other)
+        .command_completed_with_exit(
+            "unannounced",
+            "git status",
+            "",
+            CommandStatus::Success,
+            EngramCommandExit::ReportedSuccess,
+        )
+        .expect("the end should record");
+    finish_run(&worktree, "passed", &"f".repeat(64));
+    let checkpoint = turn.finish();
+    assert_refused(
+        &turn,
+        &checkpoint,
+        "ran a command there whose start TermAl was not told",
+    );
 }
 
 #[test]
@@ -1289,9 +1454,10 @@ fn a_gate_launched_in_the_one_call_form_is_carried_and_credited() {
 }
 
 #[test]
-fn another_session_starting_a_turn_fences_a_carried_gate_of_its_own_worktree_only() {
-    // It has reported nothing since TermAl started, so its worktree is
-    // resolved as its turn starts rather than taken to be every one.
+fn another_session_starting_a_turn_leaves_a_carried_gate_alone_until_it_writes() {
+    // A turn start says nothing was written: the gate is fenced only when the
+    // session reports what may write, a file edit here, and then only in the
+    // worktree that session works in.
     for same_worktree in [true, false] {
         let (turn, worktree) = named_turn("carried-turn-start");
         launch_gate(&turn, &worktree, false);
@@ -1320,13 +1486,165 @@ fn another_session_starting_a_turn_fences_a_carried_gate_of_its_own_worktree_onl
             )
             .expect("the other session should start a turn");
         assert!(matches!(dispatched, DispatchTurnResult::Dispatched(_)));
-
         assert_eq!(
-            turn.record(|record| record.engram.carried_checks[0].fence.is_some()),
-            same_worktree,
-            "same_worktree={same_worktree}"
+            carried_fence(&turn),
+            None,
+            "a turn start alone fences nothing: same_worktree={same_worktree}"
         );
+
+        turn.state.note_engram_workspace_edit(&other);
+        let fence = carried_fence(&turn);
+        assert_eq!(fence.is_some(), same_worktree, "{fence:?}");
+        if let Some(fence) = fence {
+            assert!(fence.ends_with("reported a file edit there"), "{fence}");
+        }
     }
+}
+
+/// The Claude holder's launch of the full gate in `worktree` in the one-call
+/// form its instructions give, its result marking only the launch: the form
+/// `run_in_background` takes.
+fn launch_gate_in_the_background_one_call(turn: &CheckedTurn, worktree: &FsPath) -> String {
+    let root = engram_source_root_display(
+        &fs::canonicalize(worktree)
+            .expect("the worktree canonicalizes")
+            .to_string_lossy(),
+    );
+    let line = format!("pushd \"{root}\" && node scripts/test-launcher.mjs full");
+    let mut recorder = turn.recorder();
+    recorder
+        .command_started("gate", &line)
+        .expect("the launch should record");
+    turn.wait_for_snapshots();
+    recorder
+        .command_completed_with_exit(
+            "gate",
+            &line,
+            "",
+            CommandStatus::Success,
+            EngramCommandExit::NotFinished,
+        )
+        .expect("the launch result should record");
+    assert_eq!(turn.record(|record| record.engram.carried_checks.len()), 1);
+    let start_basis =
+        turn.record(|record| record.engram.carried_checks[0].check.start_basis.clone());
+    start_basis.wait_until(std::time::Instant::now() + DEADLOCK_GUARD);
+    root
+}
+
+/// Where TermAl presumes the turn's shell is, and whether it has lost it.
+fn shell_place(turn: &CheckedTurn) -> (Option<String>, bool) {
+    turn.record(|record| {
+        let shell = record
+            .engram
+            .shell_directory
+            .as_ref()
+            .expect("a command was reported");
+        (
+            shell
+                .directory
+                .as_ref()
+                .map(|directory| engram_path_key(FsPath::new(directory))),
+            shell.lost_unbounded || !shell.lost_among.is_empty(),
+        )
+    })
+}
+
+#[test]
+fn a_background_launch_leaves_a_claude_sessions_shell_where_it_was() {
+    // Claude's Bash tool runs a background call in a shell of its own: the
+    // `pushd` of the launch moves nothing, so the holder's later command runs
+    // where its shell already was, not in the gate's worktree.
+    let (turn, worktree) = named_turn("carried-background-shell");
+    turn.record_mut(|record| record.session.agent = Agent::Claude);
+    let workdir = turn.record(|record| engram_path_key(FsPath::new(&record.session.workdir)));
+    let root = launch_gate_in_the_background_one_call(&turn, &worktree);
+    assert_eq!(shell_place(&turn), (Some(workdir.clone()), false));
+
+    let mut recorder = turn.recorder();
+    recorder
+        .command_started("write-elsewhere", "touch notes.txt")
+        .expect("the command should record");
+    recorder
+        .command_completed_with_exit(
+            "write-elsewhere",
+            "touch notes.txt",
+            "",
+            CommandStatus::Success,
+            EngramCommandExit::ReportedSuccess,
+        )
+        .expect("the command should end");
+    assert_eq!(carried_fence(&turn), None);
+    assert_eq!(shell_place(&turn), (Some(workdir), false));
+
+    // The same command sent into the gate's worktree still refuses it.
+    let into_the_gate = format!("pushd \"{root}\" && touch notes.txt");
+    turn.recorder()
+        .command_started("write-there", &into_the_gate)
+        .expect("the command should record");
+    finish_run(&worktree, "passed", &"f".repeat(64));
+    let checkpoint = turn.finish();
+    assert_refused(
+        &turn,
+        &checkpoint,
+        "this session ran a `touch` command there",
+    );
+}
+
+#[test]
+fn only_a_claude_background_call_keeps_the_shell_a_pushd_would_move() {
+    // A foreground `pushd "DIR" && COMMAND` that succeeds moves the shell.
+    let (turn, worktree) = named_turn("carried-foreground-shell");
+    turn.record_mut(|record| record.session.agent = Agent::Claude);
+    let root = engram_source_root_display(
+        &fs::canonicalize(&worktree)
+            .expect("the worktree canonicalizes")
+            .to_string_lossy(),
+    );
+    let line = format!("pushd \"{root}\" && git status");
+    let mut recorder = turn.recorder();
+    recorder
+        .command_started("look", &line)
+        .expect("the command should record");
+    recorder
+        .command_completed_with_exit(
+            "look",
+            &line,
+            "",
+            CommandStatus::Success,
+            EngramCommandExit::ReportedSuccess,
+        )
+        .expect("the command should end");
+    assert_eq!(
+        shell_place(&turn),
+        (Some(engram_path_key(FsPath::new(&root))), false)
+    );
+
+    // Another runtime's unfinished command says nothing of the shell it ran
+    // in: TermAl loses the shell between where it was and where the `pushd`
+    // leads, as before.
+    let (turn, worktree) = named_turn("carried-unfinished-shell");
+    turn.record_mut(|record| record.session.agent = Agent::Cursor);
+    let root = engram_source_root_display(
+        &fs::canonicalize(&worktree)
+            .expect("the worktree canonicalizes")
+            .to_string_lossy(),
+    );
+    let line = format!("pushd \"{root}\" && npm run watch");
+    let mut recorder = turn.recorder();
+    recorder
+        .command_started("watch", &line)
+        .expect("the command should record");
+    recorder
+        .command_completed_with_exit(
+            "watch",
+            &line,
+            "",
+            CommandStatus::Success,
+            EngramCommandExit::NotFinished,
+        )
+        .expect("the command should record its launch");
+    assert_eq!(shell_place(&turn), (None, true));
 }
 
 #[test]
@@ -2539,4 +2857,166 @@ fn a_delegated_session_is_told_its_background_gate_is_not_carried() {
         "{line}"
     );
     assert!(!line.contains("termal_name_source_root"), "{line}");
+}
+
+#[test]
+fn only_the_scratch_directory_at_its_own_worktree_root_is_scratch() {
+    let root = if cfg!(windows) { "c:/repo" } else { "/repo" };
+    let nested = format!("{root}/.tmp/wt-x");
+    // Under the worktree's own .tmp/, at any depth, or .tmp itself.
+    assert!(engram_is_worktree_scratch(
+        root,
+        &format!("{root}/.tmp"),
+        Some("a.log")
+    ));
+    assert!(engram_is_worktree_scratch(
+        root,
+        &format!("{root}/.tmp/probe/deep"),
+        Some("a")
+    ));
+    assert!(engram_is_worktree_scratch(root, root, Some(".tmp")));
+    // Not scratch: the worktree's own files, a directory that only starts
+    // with the name, or .tmp deeper in the tree.
+    assert!(!engram_is_worktree_scratch(root, root, Some("README.md")));
+    assert!(!engram_is_worktree_scratch(
+        root,
+        &format!("{root}/.tmpx"),
+        Some("a")
+    ));
+    assert!(!engram_is_worktree_scratch(
+        root,
+        &format!("{root}/src/.tmp"),
+        Some("a")
+    ));
+    // Exact: on a case-sensitive volume .TMP is another directory, which Git
+    // does not ignore and which may hold source.
+    assert!(!engram_is_worktree_scratch(
+        root,
+        &format!("{root}/.TMP"),
+        Some("a")
+    ));
+    assert!(!engram_is_worktree_scratch(root, root, Some(".TMP")));
+    assert!(!engram_is_worktree_scratch(root, root, None));
+    // A worktree nested under another checkout's .tmp/ is judged against its
+    // own root: its source files are not scratch, its own .tmp/ is.
+    assert!(!engram_is_worktree_scratch(
+        &nested,
+        &format!("{nested}/src"),
+        Some("lib.rs")
+    ));
+    assert!(engram_is_worktree_scratch(
+        &nested,
+        &format!("{nested}/.tmp"),
+        Some("a")
+    ));
+}
+
+#[test]
+fn a_scratch_write_under_tmp_leaves_a_carried_gate_alone_and_a_source_write_does_not() {
+    let (turn, worktree) = named_turn("carried-scratch");
+    launch_gate(&turn, &worktree, false);
+    let canonical = fs::canonicalize(&worktree).unwrap();
+    let scratch = canonical.join(".tmp").join("probe");
+    fs::create_dir_all(&scratch).expect("the scratch directory should be created");
+    fs::write(scratch.join("run.log"), "scratch\n").unwrap();
+    let change = |path: PathBuf| WorkspaceFileChangeEvent {
+        path: path.to_string_lossy().into_owned(),
+        kind: WorkspaceFileChangeKind::Modified,
+        root_path: None,
+        session_id: None,
+        mtime_ms: None,
+        size_bytes: None,
+    };
+    turn.state.note_engram_workspace_file_changes(&[
+        change(scratch.join("run.log")),
+        change(canonical.join(".tmp")),
+        // A scratch directory already gone when its event is handled.
+        change(canonical.join(".tmp").join("gone").join("x.log")),
+    ]);
+    assert!(
+        turn.record(|record| record.engram.carried_checks[0].fence.is_none()),
+        "{:?}",
+        turn.record(|record| record.engram.carried_checks[0].fence.clone())
+    );
+
+    // A batch mixing scratch and source fences, naming the source path.
+    turn.state.note_engram_workspace_file_changes(&[
+        change(scratch.join("other.log")),
+        change(canonical.join("README.md")),
+    ]);
+    let fence = turn
+        .record(|record| record.engram.carried_checks[0].fence.clone())
+        .expect("the source write fences the gate");
+    assert!(fence.contains("README.md"), "{fence}");
+    finish_run(&worktree, "passed", &"f".repeat(64));
+    let checkpoint = turn.finish();
+    assert_refused(&turn, &checkpoint, "a file in its worktree changed");
+}
+
+#[test]
+fn a_launch_while_another_writable_session_is_in_a_turn_there_is_not_carried() {
+    // Once a gate is carried, another session's presence in a turn fences
+    // nothing. This rule at the launch is what covers a command that session
+    // started before it, whose end would say nothing: such a launch is not
+    // carried at all.
+    let (turn, worktree) = named_turn("carried-launch-beside-session");
+    let project_id = turn.record(|record| record.session.project_id.clone().unwrap());
+    let other = create_test_project_session(&turn.state, Agent::Codex, &project_id, &worktree);
+    turn.state.note_engram_session_worktree_off_lock(&other);
+    {
+        let mut inner = turn.state.inner.lock().expect("state mutex poisoned");
+        let index = inner.find_session_index(&other).expect("other session");
+        inner.sessions[index].session.status = SessionStatus::Active;
+    }
+    launch_command(&turn, &worktree, GATE, EngramCommandExit::NotFinished);
+    assert_dropped_at_launch(&turn, "another command or another writable session");
+
+    // In a turn in another worktree, it leaves the launch alone.
+    let (turn, worktree) = named_turn("carried-launch-beside-session-elsewhere");
+    let project_id = turn.record(|record| record.session.project_id.clone().unwrap());
+    let elsewhere = sibling_worktree(&turn, "carried-launch-beside-session-sibling");
+    let other = create_test_project_session(&turn.state, Agent::Codex, &project_id, &elsewhere);
+    turn.state.note_engram_session_worktree_off_lock(&other);
+    {
+        let mut inner = turn.state.inner.lock().expect("state mutex poisoned");
+        let index = inner.find_session_index(&other).expect("other session");
+        inner.sessions[index].session.status = SessionStatus::Active;
+    }
+    launch_gate(&turn, &worktree, false);
+    assert_eq!(carried_fence(&turn), None);
+}
+
+#[test]
+fn another_sessions_command_later_described_in_the_worktree_refuses_the_gate() {
+    // An ACP runtime may give a command's directory only in a later update:
+    // the description places it, and gives no line to read.
+    let (turn, worktree) = named_turn("carried-other-described");
+    let project_id = turn.record(|record| record.session.project_id.clone().unwrap());
+    let elsewhere = sibling_worktree(&turn, "carried-other-described-sibling");
+    let other = create_test_project_session(&turn.state, Agent::Cursor, &project_id, &elsewhere);
+    launch_gate(&turn, &worktree, false);
+    let mut recorder = SessionRecorder::new(turn.state.clone(), other);
+    recorder
+        .command_started_in(
+            "late",
+            "write-things",
+            Some("write-things"),
+            Some(&elsewhere.to_string_lossy()),
+        )
+        .expect("the start should record");
+    assert_eq!(carried_fence(&turn), None);
+    let cwd = fs::canonicalize(&worktree)
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    recorder
+        .command_described("late", None, Some(&cwd))
+        .expect("the description should record");
+    finish_run(&worktree, "passed", &"f".repeat(64));
+    let checkpoint = turn.finish();
+    assert_refused(
+        &turn,
+        &checkpoint,
+        "ran a command there (its line TermAl was not told)",
+    );
 }

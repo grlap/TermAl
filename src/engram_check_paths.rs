@@ -696,13 +696,21 @@ fn engram_note_shell_move(
 /// The command `key` of `record` ended: a `cd` it made settles. It moved
 /// the shell only when the command succeeded; a failure or an unknown end
 /// may have come before or after its `cd`, which loses the shell, between
-/// where it was and where the `cd` leads.
+/// where it was and where the `cd` leads. A Claude Bash call launched in the
+/// background (`run_in_background`, which its result reports as
+/// `EngramCommandExit::NotFinished`) runs in a shell of its own, as the tool
+/// says in that result ("directory changes made by the backgrounded command
+/// do not apply to subsequent commands"): its `cd` moves nothing, and the
+/// session's shell stays where it was, still followed. Another runtime's
+/// unfinished command says no such thing, so it loses the shell as before.
 fn engram_settle_shell_move(
     record: &mut SessionRecord,
     key: &str,
     exit: Option<EngramCommandExit>,
 ) {
     let runtime = record.runtime.runtime_token();
+    let ran_in_its_own_shell =
+        record.session.agent == Agent::Claude && exit == Some(EngramCommandExit::NotFinished);
     let Some(shell) = record.engram.shell_directory.as_mut() else {
         return;
     };
@@ -715,6 +723,9 @@ fn engram_settle_shell_move(
         return;
     }
     let (_, target) = shell.pending.take().expect("a pending move");
+    if ran_in_its_own_shell {
+        return;
+    }
     let moved = matches!(
         exit,
         Some(EngramCommandExit::Code(0) | EngramCommandExit::ReportedSuccess)
