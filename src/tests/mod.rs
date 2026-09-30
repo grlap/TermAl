@@ -74,6 +74,7 @@ mod opencode_approvals;
 mod opencode_config;
 mod orchestrator;
 mod phase_sync;
+mod read_only_orientation;
 mod review_freeze;
 mod test_temp_paths;
 mod work_memories;
