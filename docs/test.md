@@ -139,6 +139,13 @@ refusing and the run stays `UNKNOWN`, which is never a pass: start a new run
 instead of editing its evidence. If a killed `recover` left `recovery.lock`
 behind, remove that file by hand once no other `recover` is running.
 
+When a command is launched through TermAl's native Windows terminal or bounded
+reader with confirmed job membership, the host owns a kill-on-close job and
+ends its members after observing root exit. An `unavailable` launch can run
+without that job. The standalone launcher and `recover` do not provide that ownership.
+See [Windows command containment](features/windows-command-containment.md) for
+the reported status, packaged-process limits and retained-handle fixture proof.
+
 If an admitted worker cannot save its terminal result, for example because
 `results.json` cannot be replaced, it sends one best-effort `UNKNOWN` notice
 under the separate key `termal-tests:RUN_ID:runner-error`. That notice points to

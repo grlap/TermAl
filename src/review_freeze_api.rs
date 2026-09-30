@@ -71,32 +71,54 @@ impl AppState {
         child: &str,
         request: ReviewFreezeRequest,
     ) -> Result<ReviewFreezeResponse, ApiError> {
-        self.verify_review_freeze_with_runner(child, request, run_review_freeze_checker)
+        self.verify_review_freeze_with_commands(child, request, |command, _fixture_command| {
+            run_bounded_read_command(
+                command,
+                std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT + REVIEW_FREEZE_OBSERVER_GRACE,
+                4096,
+                true,
+            )
+        })
     }
 
     // Internal executor boundary permits deterministic transport/identity
     // integration tests. It is not a caller-controlled executable or API field.
+    #[cfg(test)]
     fn verify_review_freeze_with_runner(
         &self,
         child: &str,
         request: ReviewFreezeRequest,
         run: impl FnOnce(&mut Command) -> Result<std::process::Output>,
     ) -> Result<ReviewFreezeResponse, ApiError> {
+        self.verify_review_freeze_with_commands(child, request, |_, command| run(command))
+    }
+
+    fn verify_review_freeze_with_commands(
+        &self,
+        child: &str,
+        request: ReviewFreezeRequest,
+        run: impl FnOnce(&mut BoundedReadCommand, &mut Command) -> Result<std::process::Output>,
+    ) -> Result<ReviewFreezeResponse, ApiError> {
         request
             .validate()
             .map_err(|e| ApiError::bad_request(e.to_string()))?;
         let identity = self.review_freeze_child_identity(child)?;
-        let mut command =
-            Command::new(std::env::current_exe().map_err(|e| ApiError::internal(e.to_string()))?);
-        command.args([
+        let executable = std::env::current_exe().map_err(|e| ApiError::internal(e.to_string()))?;
+        let mut command = BoundedReadCommand::new(&executable);
+        // Keep the existing private Command fixture executor intact. Both
+        // specifications are built here from the same explicit inputs.
+        let mut fixture_command = Command::new(&executable);
+        let args = [
             "review-freeze-check",
             &identity.0,
             &request.manifest_path,
             &request.expected_fingerprint,
-        ]);
+        ];
+        command.args(args);
+        fixture_command.args(args);
         // No executable or cwd may be supplied by the tool caller. The worker
         // never starts server mode or opens TermAl's persistence stores.
-        let output = run(&mut command)
+        let output = run(&mut command, &mut fixture_command)
             .map_err(|e| ApiError::internal(format!("review checker did not complete: {e:#}")))?;
         if self.review_freeze_child_identity(child)? != identity {
             return Err(ApiError::conflict(
@@ -115,6 +137,7 @@ impl AppState {
     }
 }
 
+#[cfg(test)]
 fn run_review_freeze_checker(command: &mut Command) -> Result<std::process::Output> {
     run_bounded_read_process(
         command,

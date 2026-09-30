@@ -475,10 +475,20 @@ fn run_terminal_shell_command_with_timeout_and_stream(
     cancellation: Option<Arc<AtomicBool>>,
 ) -> Result<TerminalCommandResponse, ApiError> {
     let (shell_label, mut child_command) = build_terminal_shell_command(command);
-    configure_terminal_process_tree(&mut child_command);
     let started_at = std::time::Instant::now();
+    #[cfg(windows)]
+    let (process, process_tree) = {
+        child_command.current_dir(workdir);
+        let launch = windows_launch::prepare(&child_command).map_err(|err| {
+            ApiError::internal(format!("failed to start terminal command: {err}"))
+        })?;
+        (launch.process(), launch)
+    };
+    #[cfg(not(windows))]
+    configure_terminal_process_tree(&mut child_command);
+    #[cfg(not(windows))]
     let process = Arc::new(
-        SharedChild::spawn(
+        host_command::spawn_shared(
             child_command
                 .current_dir(workdir)
                 .stdin(Stdio::null())
@@ -487,6 +497,7 @@ fn run_terminal_shell_command_with_timeout_and_stream(
         )
         .map_err(|err| ApiError::internal(format!("failed to start terminal command: {err}")))?,
     );
+    #[cfg(not(windows))]
     let process_tree = match TerminalProcessTree::attach(&process) {
         Ok(process_tree) => process_tree,
         Err(err) => {
@@ -610,12 +621,8 @@ fn run_terminal_shell_command_with_timeout_and_stream(
         process_tree
             .kill(&process, "terminal command")
             .map_err(|err| ApiError::internal(format!("{err:#}")))?;
-        status = wait_for_shared_child_exit_timeout(
-            &process,
-            Duration::from_millis(250),
-            "terminal command",
-        )
-        .map_err(|err| ApiError::internal(format!("{err:#}")))?;
+        status = terminal_wait_timeout(&process, Duration::from_millis(250), "terminal command")
+            .map_err(|err| ApiError::internal(format!("{err:#}")))?;
     } else {
         process_tree
             .cleanup_after_shell_exit(&process, "terminal command")
@@ -941,19 +948,59 @@ fn terminal_process_group_id(process_id: u32, label: &str) -> Result<libc::pid_t
         .map_err(|_| anyhow!("{label} process id {process_id} cannot fit in pid_t"))
 }
 
-fn wait_for_terminal_command_status(
-    process: &Arc<SharedChild>,
+trait TerminalWait: Send + Sync + 'static {
+    fn terminal_wait(&self) -> io::Result<std::process::ExitStatus>;
+    fn terminal_timeout(
+        process: &Arc<Self>,
+        timeout: Duration,
+        label: &str,
+    ) -> Result<Option<std::process::ExitStatus>>;
+}
+impl TerminalWait for SharedChild {
+    fn terminal_wait(&self) -> io::Result<std::process::ExitStatus> {
+        self.wait()
+    }
+    fn terminal_timeout(
+        process: &Arc<Self>,
+        timeout: Duration,
+        label: &str,
+    ) -> Result<Option<std::process::ExitStatus>> {
+        wait_for_shared_child_exit_timeout(process, timeout, label)
+    }
+}
+#[cfg(windows)]
+impl TerminalWait for windows_launch::WindowsChild {
+    fn terminal_wait(&self) -> io::Result<std::process::ExitStatus> {
+        self.wait()
+    }
+    fn terminal_timeout(
+        process: &Arc<Self>,
+        timeout: Duration,
+        _label: &str,
+    ) -> Result<Option<std::process::ExitStatus>> {
+        Ok(process.wait_timeout(timeout)?)
+    }
+}
+fn terminal_wait_timeout<P: TerminalWait>(
+    process: &Arc<P>,
+    timeout: Duration,
+    label: &str,
+) -> Result<Option<std::process::ExitStatus>> {
+    P::terminal_timeout(process, timeout, label)
+}
+fn wait_for_terminal_command_status<P: TerminalWait>(
+    process: &Arc<P>,
     timeout: Option<Duration>,
     cancellation: Option<&AtomicBool>,
 ) -> Result<(Option<std::process::ExitStatus>, bool), ApiError> {
     if let Some(timeout) = timeout {
-        return wait_for_shared_child_exit_timeout(process, timeout, "terminal command")
+        return terminal_wait_timeout(process, timeout, "terminal command")
             .map(|status| (status, false))
             .map_err(|err| ApiError::internal(format!("{err:#}")));
     }
     let Some(cancellation) = cancellation else {
         return process
-            .wait()
+            .terminal_wait()
             .map(|status| (Some(status), false))
             .map_err(|err| {
                 ApiError::internal(format!(
@@ -966,7 +1013,7 @@ fn wait_for_terminal_command_status(
         std::sync::mpsc::sync_channel::<io::Result<std::process::ExitStatus>>(1);
     let waiter_process = process.clone();
     std::thread::spawn(move || {
-        let result = waiter_process.wait();
+        let result = waiter_process.terminal_wait();
         let _ = done_tx.send(result);
     });
 
@@ -993,7 +1040,6 @@ fn wait_for_terminal_command_status(
 
 #[cfg(windows)]
 fn configure_terminal_process_tree(command: &mut Command) {
-    use std::os::windows::process::CommandExt;
     use windows_sys::Win32::System::Threading::CREATE_SUSPENDED;
 
     command.creation_flags(CREATE_SUSPENDED);
@@ -1107,10 +1153,14 @@ fn assign_terminal_process_to_job(
 }
 
 /// Builds the platform shell command used by the terminal panel.
-fn build_terminal_shell_command(command: &str) -> (&'static str, Command) {
+#[cfg(windows)]
+type TerminalShellCommand = windows_launch::LaunchSpec;
+#[cfg(not(windows))]
+type TerminalShellCommand = Command;
+fn build_terminal_shell_command(command: &str) -> (&'static str, TerminalShellCommand) {
     #[cfg(windows)]
     {
-        let mut shell = Command::new("powershell.exe");
+        let mut shell = TerminalShellCommand::new("powershell.exe");
         shell.args([
             "-NoLogo",
             "-NoProfile",

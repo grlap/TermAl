@@ -18,7 +18,7 @@ impl CapturedStderrProcess {
     pub(super) fn spawn(command: &mut Command) -> Self {
         command.stdout(Stdio::null()).stderr(Stdio::piped());
         let process =
-            Arc::new(SharedChild::spawn(command).expect("spawn captured diagnostic process"));
+            Arc::new(host_command::spawn_shared(command).expect("spawn captured diagnostic process"));
         let (exit_tx, exit_rx) = mpsc::channel();
         let mut owner = Self {
             process,

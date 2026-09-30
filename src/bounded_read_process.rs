@@ -1,6 +1,100 @@
 // Shared finite read-command transport, introduced for host freeze and Work
 // reads. Owns child/group and bounded pipe observation, not caller authority,
 // command construction or response parsing. Extracted from review_freeze_process.rs.
+#[cfg(windows)]
+type BoundedReadCommand = windows_launch::LaunchSpec;
+#[cfg(not(windows))]
+type BoundedReadCommand = Command;
+
+// This is constructed at the read caller, rather than copying opaque Command
+// state. The adapter keeps its separate transport during this migration.
+#[cfg(windows)]
+fn bounded_read_command(binary: &FsPath) -> BoundedReadCommand {
+    if binary
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("ps1"))
+    {
+        let mut command = BoundedReadCommand::new("powershell.exe");
+        command
+            .args(["-NoLogo", "-NoProfile", "-NonInteractive", "-File"])
+            .arg(binary);
+        command
+    } else {
+        BoundedReadCommand::new(binary)
+    }
+}
+#[cfg(not(windows))]
+fn bounded_read_command(binary: &FsPath) -> BoundedReadCommand {
+    engram_command(binary)
+}
+
+fn run_bounded_read_command(
+    command: &mut BoundedReadCommand,
+    deadline: std::time::Instant,
+    output_limit: usize,
+    own_tree: bool,
+) -> Result<std::process::Output> {
+    #[cfg(not(windows))]
+    {
+        run_bounded_read_process(command, deadline, output_limit, own_tree)
+    }
+    #[cfg(windows)]
+    {
+        let _ = own_tree;
+        run_bounded_read_windows_with_setup(command, deadline, output_limit, |_| Ok(()))
+    }
+}
+
+// Same private setup boundary as the legacy transport: tests can pin every
+// fixture identity and force leader exit before the supervisor observes it.
+#[cfg(windows)]
+fn run_bounded_read_windows_with_setup(
+    command: &mut BoundedReadCommand,
+    deadline: std::time::Instant,
+    output_limit: usize,
+    before_observe: impl FnOnce(&Arc<windows_launch::WindowsChild>) -> Result<()>,
+) -> Result<std::process::Output> {
+    command.creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW);
+    if deadline <= std::time::Instant::now() {
+        bail!("bounded read deadline exceeded before launch");
+    }
+    let launch = windows_launch::prepare(command)?;
+    let process = launch.process();
+    let result = (|| {
+        let stdout = process
+            .take_stdout()
+            .context("bounded read process stdout missing")?;
+        let stderr = process
+            .take_stderr()
+            .context("bounded read process stderr missing")?;
+        let out = bounded_read_pipe(stdout, output_limit, false);
+        let err = bounded_read_pipe(stderr, 64 * 1024, true);
+        launch.resume_after_attach(&process)?;
+        before_observe(&process)?;
+        let status = process
+            .wait_timeout(deadline.saturating_duration_since(std::time::Instant::now()))?
+            .context("bounded read deadline exceeded")?;
+        launch.cleanup_after_shell_exit(&process, "bounded read")?;
+        let pipe_deadline = std::time::Instant::now() + Duration::from_secs(1);
+        let stdout =
+            out.recv_timeout(pipe_deadline.saturating_duration_since(std::time::Instant::now()))??;
+        let stderr =
+            err.recv_timeout(pipe_deadline.saturating_duration_since(std::time::Instant::now()))??;
+        Ok(std::process::Output {
+            status,
+            stdout,
+            stderr,
+        })
+    })();
+    if result.is_err() {
+        if let Err(error) = launch.kill(&process, "bounded read") {
+            eprintln!("bounded read> cleanup: {error:#}");
+        }
+        let _ = process.wait();
+    }
+    result
+}
+
 fn bounded_read_pipe(
     mut reader: impl std::io::Read + Send + 'static,
     limit: usize,
@@ -32,6 +126,7 @@ fn bounded_read_pipe(
     rx
 }
 
+#[cfg(any(not(windows), test))]
 fn run_bounded_read_process(
     command: &mut Command,
     deadline: std::time::Instant,
@@ -43,6 +138,7 @@ fn run_bounded_read_process(
 
 // The setup boundary lets ownership tests force leader exit before observation.
 // Production never installs another waiter or exposes this hook to callers.
+#[cfg(any(not(windows), test))]
 fn run_bounded_read_process_with_setup(
     command: &mut Command,
     deadline: std::time::Instant,
@@ -50,6 +146,10 @@ fn run_bounded_read_process_with_setup(
     own_tree: bool,
     before_observe: impl FnOnce(&Arc<SharedChild>) -> Result<()>,
 ) -> Result<std::process::Output> {
+    #[cfg(windows)]
+    eprintln!(
+        "windows launch> unavailable: legacy Command has opaque launch settings; using legacy job ownership"
+    );
     // Unix Git children stay in the checker process group, so terminating
     // the outer checker also terminates an in-flight Git read. Windows jobs
     // compose and retain descendant ownership even across nested jobs.
@@ -59,7 +159,6 @@ fn run_bounded_read_process_with_setup(
     }
     #[cfg(windows)]
     {
-        use std::os::windows::process::CommandExt;
         use windows_sys::Win32::System::Threading::{CREATE_NO_WINDOW, CREATE_SUSPENDED};
         command.creation_flags(CREATE_NO_WINDOW | CREATE_SUSPENDED);
     }
@@ -69,7 +168,7 @@ fn run_bounded_read_process_with_setup(
         .stderr(Stdio::piped());
     // new(Child) calls try_wait and can reap an already-exited leader. spawn
     // preserves the PID even if exit happens before it returns to this worker.
-    let process = Arc::new(SharedChild::spawn(command)?);
+    let process = Arc::new(host_command::spawn_shared(command)?);
     let tree = match if own_tree {
         TerminalProcessTree::attach(&process).map(Some)
     } else {
@@ -144,6 +243,7 @@ fn run_bounded_read_process_with_setup(
     result
 }
 
+#[cfg(any(not(windows), test))]
 fn terminate_read_process_tree(
     tree: &TerminalProcessTree,
     process: &Arc<SharedChild>,
@@ -164,6 +264,7 @@ fn terminate_read_process_tree(
     }
 }
 
+#[cfg(any(not(windows), test))]
 fn read_child_has_exited(process: &Arc<SharedChild>) -> io::Result<bool> {
     #[cfg(unix)]
     {

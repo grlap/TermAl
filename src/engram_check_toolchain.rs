@@ -247,14 +247,14 @@ fn engram_probe_output(
     if std::time::Instant::now() >= deadline {
         return None;
     }
-    let mut command = Command::new(program);
+    let mut command = BoundedReadCommand::new(program);
     command
         .args(args)
         .current_dir(directory)
         .env("RUSTUP_AUTO_INSTALL", "0");
     // Owning the tree matters on Unix too: a probe runs straight from the
     // host, not inside a checker process whose group ends with it.
-    let output = run_bounded_read_process(
+    let output = run_bounded_read_command(
         &mut command,
         deadline,
         ENGRAM_TOOLCHAIN_PROBE_OUTPUT_MAX_BYTES,

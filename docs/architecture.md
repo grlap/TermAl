@@ -1515,6 +1515,7 @@ termal/
 |   |-- instructions.rs      # instruction search graph traversal + document classification
 |   |-- git.rs               # git diff loading, status parsing, worktree readers, repo sync
 |   |-- terminal.rs          # terminal run/stream, process-tree lifecycle, output buffer
+|   |-- windows_launch.rs    # typed native launch, retained handles and separate job lease
 |   |-- review.rs            # review-document persistence + change-set-id validation
 |   |-- workspace_queries.rs # workspace layout CRUD + agent command listing
 |   |-- workspace_watch.rs   # workspace file watcher threads

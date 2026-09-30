@@ -270,8 +270,8 @@ fn run_beads_read_command(
 /// so the project's own `.beads` is the only store the child can open. The
 /// launch itself goes through `engram_command`, which runs a native binary
 /// directly and a test fixture (.ps1/.sh) through its interpreter by argv.
-fn beads_read_command(target: &BeadsReadTarget, args: &[String]) -> std::process::Command {
-    let mut command = engram_command(&target.binary_path);
+fn beads_read_command(target: &BeadsReadTarget, args: &[String]) -> BoundedReadCommand {
+    let mut command = bounded_read_command(&target.binary_path);
     command
         .arg("--readonly")
         .arg("--json")
@@ -319,7 +319,7 @@ fn run_beads_read_process(
             "Beads read command exceeds the process launch bound; shorten the label filter",
         ));
     }
-    let output = run_bounded_read_process(&mut command, deadline, BEADS_READ_OUTPUT_LIMIT, true)
+    let output = run_bounded_read_command(&mut command, deadline, BEADS_READ_OUTPUT_LIMIT, true)
         .map_err(|e| ApiError::bad_gateway(format!("{operation}: {e:#}")))?;
     let std::process::Output {
         status,

@@ -99,8 +99,8 @@ impl ReviewFreezeGit {
         Ok(fs::canonicalize(String::from_utf8(dir)?.trim())?)
     }
 
-    fn command(&self, args: &[&str]) -> Command {
-        let mut command = Command::new(&self.binary);
+    fn command(&self, args: &[&str]) -> BoundedReadCommand {
+        let mut command = BoundedReadCommand::new(&self.binary);
         for (name, _) in std::env::vars_os() {
             if name
                 .to_string_lossy()
@@ -150,7 +150,7 @@ impl ReviewFreezeGit {
         let mut command = self.command(args);
         let started = std::time::Instant::now();
         let remaining_at_start = self.deadline.saturating_duration_since(started);
-        let output = run_bounded_read_process(
+        let output = run_bounded_read_command(
             &mut command,
             self.deadline,
             REVIEW_FREEZE_OUTPUT_LIMIT,

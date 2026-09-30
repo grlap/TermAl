@@ -32,8 +32,7 @@ fn run_work_read_command(
         Some("memories") => "engram work memories",
         _ => return Err(ApiError::bad_request("Unsupported Work read operation")),
     };
-    let mut command = engram_command(&connection.binary_path);
-    apply_engram_connection_environment(&mut command, connection);
+    let mut command = work_read_launch_command(connection);
     command
         .arg("--home")
         .arg(&connection.home)
@@ -57,7 +56,7 @@ fn run_work_read_command(
             "Work read command is too large; shorten filters or cursor",
         ));
     }
-    let output = run_bounded_read_process(
+    let output = run_bounded_read_command(
         &mut command,
         std::time::Instant::now() + ENGRAM_WORK_BINDING_COMMAND_TIMEOUT,
         8 * 1024 * 1024,
@@ -85,4 +84,24 @@ fn run_work_read_command(
     }
     serde_json::from_slice(&stdout)
         .map_err(|e| ApiError::bad_gateway(format!("{operation}: invalid JSON: {e}")))
+}
+
+fn work_read_launch_command(connection: &EngramConnectionConfig) -> BoundedReadCommand {
+    let mut command = bounded_read_command(&connection.binary_path);
+    #[cfg(not(windows))]
+    apply_engram_connection_environment(&mut command, connection);
+    #[cfg(windows)]
+    {
+        command
+            .current_dir(&connection.project_root)
+            .env(ENGRAM_HOME_ENV, &connection.home)
+            .env(ENGRAM_ACTOR_ID_ENV, &connection.actor_id)
+            .env(ENGRAM_SESSION_ID_ENV, &connection.session_id);
+        if let Some(context) = &connection.actor_context {
+            command.env(ENGRAM_ACTOR_CONTEXT_ENV, context);
+        } else {
+            command.env_remove(ENGRAM_ACTOR_CONTEXT_ENV);
+        }
+    }
+    command
 }

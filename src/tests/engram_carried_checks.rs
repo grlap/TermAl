@@ -161,17 +161,16 @@ fn a_fence_names_the_holders_command_without_its_line() {
 fn exited_process() -> (std::process::Child, u32) {
     #[cfg(windows)]
     let mut child = {
-        use std::os::windows::process::CommandExt;
         use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
         // No console window: a test must not flash one on the desktop.
-        std::process::Command::new("cmd")
+        Command::new("cmd")
             .args(["/C", "exit 0"])
             .creation_flags(CREATE_NO_WINDOW)
             .spawn()
             .expect("a short process should start")
     };
     #[cfg(not(windows))]
-    let mut child = std::process::Command::new("true")
+    let mut child = Command::new("true")
         .spawn()
         .expect("a short process should start");
     let pid = child.id();

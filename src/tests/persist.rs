@@ -3839,7 +3839,7 @@ fn sqlite_missing_prompt_history_emits_a_diagnostic_without_resurrecting_prompts
         .map_or(module_path!(), |(_, module)| module);
     let exact_test_filter = format!("{test_module}::{TEST_NAME}");
     for &(case, expected_count) in CASES {
-        let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+        let mut command = Command::new(std::env::current_exe().unwrap());
         command
             .args(["--exact", &exact_test_filter, "--nocapture"])
             .env(CASE_ENV, case);
