@@ -406,7 +406,7 @@ impl AppState {
     /// starts, so a rename or a clear during the capture seals it
     /// (`name_engram_source_root`); the capture then sets only the basis.
     fn record_engram_turn_start_basis_off_lock(&self, session_id: &str, grant_id: &str) {
-        let place = {
+        let (place, other_roots_read) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_session_index(session_id) else {
                 return;
@@ -432,6 +432,31 @@ impl AppState {
                     )
                 })
                 .map(EngramTurnSourceRoot::from_entry);
+            // One grant reports to one binding. Other held roots explain a
+            // refused or shared-root test, without widening that grant.
+            let other_roots_read =
+                if Self::engram_session_has_child_binding_shape_locked(&inner, session_id) {
+                    None
+                } else {
+                    Self::engram_binding_target_for_session_shape_locked(&inner, session_id, true)
+                        .ok()
+                        .flatten()
+                        .and_then(|target| {
+                            let store = target.settings.authority_store_key.as_ref()?;
+                            let roots = inner
+                                .engram_work_source_roots
+                                .iter()
+                                .filter(|entry| {
+                                    entry.store == *store
+                                        && entry.named_by_session == session_id
+                                        && (entry.work_id != binding.work_id
+                                            || entry.claim_id != binding.claim_id)
+                                })
+                                .cloned()
+                                .collect::<Vec<_>>();
+                            (!roots.is_empty()).then_some((target, roots))
+                        })
+                };
             let place = turn_root.as_ref().map_or_else(
                 || EngramBasisPlace::Workdir(record.session.workdir.clone()),
                 EngramTurnSourceRoot::place,
@@ -444,10 +469,42 @@ impl AppState {
             if named {
                 engram_mark_checks_overlapped_by(&mut inner, index, EngramWriterAct::Presence);
             }
-            place
+            (place, other_roots_read)
         };
+        let other_roots = other_roots_read
+            .and_then(|(target, roots)| {
+                let held = target
+                    .adapter
+                    .read_held_claims(&target.connection, ENGRAM_WORK_BINDING_COMMAND_TIMEOUT)
+                    .ok()?;
+                Some(
+                    roots
+                        .into_iter()
+                        .filter(|entry| {
+                            held.items.iter().any(|claim| {
+                                claim.work_id == entry.work_id && claim.claim_id == entry.claim_id
+                            })
+                        })
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .unwrap_or_default();
+        {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let roots = other_roots
+                .into_iter()
+                .filter(|entry| inner.engram_work_source_roots.contains(entry))
+                .collect();
+            if let Some(index) = inner.find_session_index(session_id)
+                && inner.sessions[index].engram.active_grant_id.as_deref() == Some(grant_id)
+            {
+                inner.sessions[index].engram.active_turn_other_source_roots = roots;
+            }
+        }
         #[cfg(test)]
-        if let Some(during) = TEST_ENGRAM_DURING_TURN_START_CAPTURE.with(|hook| hook.borrow_mut().take()) {
+        if let Some(during) =
+            TEST_ENGRAM_DURING_TURN_START_CAPTURE.with(|hook| hook.borrow_mut().take())
+        {
             during();
         }
         let basis = self.engram_source_basis_within(&place, REVIEW_FREEZE_TIMEOUT);

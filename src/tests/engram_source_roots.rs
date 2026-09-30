@@ -436,36 +436,33 @@ fn a_sealed_revision_stands_in_only_when_the_root_is_gone() {
 }
 
 #[test]
-fn an_evaluation_uses_the_root_of_the_claim_its_session_is_bound_to() {
+fn an_evaluation_uses_the_root_of_its_requested_claim() {
     let entries = vec![entry("a", "claim-1", "session-1", 3)];
-    let binding = EngramControlWorkBinding {
-        root_execution_id: "root".to_owned(),
+    let claim = AcceptanceEvaluationSourceClaim {
         work_id: "work-a".to_owned(),
-        run_id: "run".to_owned(),
-        work_revision: 1,
         claim_id: "claim-1".to_owned(),
-        claim_fence: 1,
     };
-    let root = engram_evaluation_source_root(&entries, &store(), Some(&binding), "w-a", None)
+    let root = engram_evaluation_source_root(&entries, &store(), Some(&claim), "w-a", None)
         .expect("matched on the short ref when the receipt has no work id");
     assert_eq!(root.generation, 3);
     assert!(root.still_named(&entries, &store()));
     assert!(
-        engram_evaluation_source_root(&entries, &store(), Some(&binding), "w-other", None).is_none(),
+        engram_evaluation_source_root(&entries, &store(), Some(&claim), "w-other", None).is_none(),
         "the evaluation of another work is not measured there"
     );
     assert!(
-        engram_evaluation_source_root(&entries, &store(), Some(&binding), "w-a", Some("work-other"))
+        engram_evaluation_source_root(&entries, &store(), Some(&claim), "w-a", Some("work-other"))
             .is_none(),
         "a work id, when the receipt carries one, decides"
     );
-    let other_claim = EngramControlWorkBinding {
+    let other_claim = AcceptanceEvaluationSourceClaim {
         claim_id: "claim-2".to_owned(),
-        ..binding.clone()
+        ..claim.clone()
     };
     assert!(
-        engram_evaluation_source_root(&entries, &store(), Some(&other_claim), "w-a", None).is_none(),
-        "a session bound to another claim measures its workdir"
+        engram_evaluation_source_root(&entries, &store(), Some(&other_claim), "w-a", None)
+            .is_none(),
+        "a different requested claim cannot inherit this named root"
     );
     assert!(engram_evaluation_source_root(&entries, &store(), None, "w-a", None).is_none());
     let renamed = vec![entry("a", "claim-1", "session-1", 4)];

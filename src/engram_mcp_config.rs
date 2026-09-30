@@ -184,6 +184,12 @@ struct EngramContextNudgeTarget {
     session_id: String,
     host_instance_id: String,
     generation: u64,
+    /// False for a read-only delegation child. With a generation, the
+    /// tracker's orientation tells the reader to list memories under it, a
+    /// call a read-only child's gate refuses; without one it gives no such
+    /// directive, and the child reads its memories with the plain listing,
+    /// which a read-only Claude child's gate admits.
+    advertise_context_generation: bool,
     timeout: Duration,
 }
 
@@ -406,6 +412,8 @@ impl AppState {
                     if !project_declared {
                         return EngramContextNudgePreparation::NotApplicable;
                     }
+                    let advertise_context_generation =
+                        !session_is_read_only_delegation_child_locked(&inner, session_id);
                     let target = EngramContextNudgeTarget {
                         command: PathBuf::from(command),
                         home: home.to_owned(),
@@ -416,6 +424,7 @@ impl AppState {
                         session_id: session_id.to_owned(),
                         host_instance_id: self.server_instance_id.clone(),
                         generation,
+                        advertise_context_generation,
                         timeout: ENGRAM_WORK_BINDING_COMMAND_TIMEOUT,
                     };
                     let record = inner
@@ -554,15 +563,15 @@ fn run_engram_context_nudge(
     if let Some(actor_context) = target.actor_context.as_deref() {
         command.arg("--actor-context").arg(actor_context);
     }
+    // Startup and post-compaction context are advisory and may be
+    // truncated or never sent. Only the agent's ordinary next advances.
+    // Generation informs the read-only memories.changed signal. Peek
+    // neither persists nor acknowledges that memory advertisement.
+    command.arg("next").arg("--peek");
+    if target.advertise_context_generation {
+        command.arg("--context-generation").arg(context_generation);
+    }
     command
-        .arg("next")
-        // Startup and post-compaction context are advisory and may be
-        // truncated or never sent. Only the agent's ordinary next advances.
-        // Generation informs the read-only memories.changed signal. Peek
-        // neither persists nor acknowledges that memory advertisement.
-        .arg("--peek")
-        .arg("--context-generation")
-        .arg(context_generation)
         .env(ENGRAM_HOME_ENV, &target.home)
         .env(ENGRAM_ACTOR_ID_ENV, &target.actor_id)
         .env(ENGRAM_SESSION_ID_ENV, &target.session_id);
@@ -684,6 +693,25 @@ fn session_is_acceptance_evaluator_child_locked(inner: &StateInner, session_id: 
             delegation.child_session_id == session_id
                 && delegation.mode == DelegationMode::Evaluator
         })
+}
+
+/// Whether `session_id` is the child of a read-only delegation, whatever the
+/// delegation's status: a follow-up turn to a finished read-only delegation is
+/// dispatched before the delegation is marked running again, and is still
+/// read-only. A child whose delegation record is missing counts as read-only.
+fn session_is_read_only_delegation_child_locked(inner: &StateInner, session_id: &str) -> bool {
+    let Some(delegation_id) = inner
+        .find_session_index(session_id)
+        .and_then(|index| inner.sessions.get(index))
+        .and_then(|record| record.session.parent_delegation_id.as_deref())
+    else {
+        return false;
+    };
+    inner
+        .delegations
+        .iter()
+        .find(|delegation| delegation.id == delegation_id)
+        .is_none_or(|delegation| delegation.write_policy == DelegationWritePolicy::ReadOnly)
 }
 
 fn engram_mcp_runtime_config_for_session_locked(

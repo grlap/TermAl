@@ -258,23 +258,14 @@ impl AcceptanceEvaluationSourceRoot {
     }
 }
 
-/// The claim the requesting session was bound to when an evaluation was
-/// requested with no root named, recorded on its target: the claim, not the
+/// The requested work's live claim when an evaluation was requested with
+/// no root named, recorded on its target: the claim, not the
 /// session's binding at submission, decides whether a root was named since.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AcceptanceEvaluationSourceClaim {
     work_id: String,
     claim_id: String,
-}
-
-impl AcceptanceEvaluationSourceClaim {
-    fn from_binding(binding: &EngramControlWorkBinding) -> Self {
-        Self {
-            work_id: binding.work_id.clone(),
-            claim_id: binding.claim_id.clone(),
-        }
-    }
 }
 
 /// Whether the root the evaluation `target` was requested on is no longer
@@ -343,18 +334,17 @@ fn acceptance_evaluation_source_root_changed_error(
 
 /// The source root of the work an acceptance evaluation of `work_ref` (with
 /// `work_id` when the tracker's receipt carried it) judges, as the requesting
-/// session is bound to it: the entry of that session's bound claim, when the
-/// claim is on this work. A session bound to another claim, or to none,
-/// measures its workdir.
+/// session holds it: the entry of the requested work's live claim. The
+/// control session's bound claim does not select an evaluation's tree.
 fn engram_evaluation_source_root(
     entries: &[EngramWorkSourceRoot],
     store: &EngramAuthorityStoreKey,
-    binding: Option<&EngramControlWorkBinding>,
+    claim: Option<&AcceptanceEvaluationSourceClaim>,
     work_ref: &str,
     work_id: Option<&str>,
 ) -> Option<AcceptanceEvaluationSourceRoot> {
-    let binding = binding?;
-    engram_work_source_root_for_claim(entries, store, &binding.work_id, &binding.claim_id)
+    let claim = claim?;
+    engram_work_source_root_for_claim(entries, store, &claim.work_id, &claim.claim_id)
         .filter(|entry| {
             work_id.map_or(entry.short_ref == work_ref, |work_id| entry.work_id == work_id)
         })

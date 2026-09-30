@@ -1,5 +1,5 @@
 // Host entry points for Engram acceptance evaluations. Owns the parent-side
-// request (read the task and the policy within one budget, select the mode,
+// request (read the task, caller claims and policy within one budget, select the mode,
 // spawn the one evaluator a task may have) and the evaluator-only submission
 // (current-child authority, the persisted submission state, then `engram work
 // evaluate` under the evaluator's own identity, resent once when its outcome
@@ -39,7 +39,7 @@ fn acceptance_evaluation_call_worst_case(timeout: Duration) -> Duration {
 /// evaluator's spawn on top (`DelegationLongCall::EvaluationRequest`), so the
 /// bridge never gives up on a request the backend is still serving.
 fn acceptance_evaluation_request_tracker_budget() -> Duration {
-    let task_reads = 2 + (MAX_ACCEPTANCE_EVIDENCE_PAGES as u32 - 1);
+    let task_reads = 3 + (MAX_ACCEPTANCE_EVIDENCE_PAGES as u32 - 1);
     acceptance_evaluation_call_worst_case(ENGRAM_WORK_BINDING_COMMAND_TIMEOUT) * task_reads
         + acceptance_evaluation_call_worst_case(ACCEPTANCE_EVALUATION_POLICY_READ_TIMEOUT)
         + REVIEW_FREEZE_TIMEOUT
@@ -86,11 +86,12 @@ fn acceptance_evaluation_notices<const N: usize>(notices: [Option<String>; N]) -
 }
 
 /// What must still fit after a continuation page: that page, the complete
-/// task read, the policy read and the source capture. Paging stops once the
+/// task read, the caller's held-claims read, the policy read and the source
+/// capture. Paging stops once the
 /// deadline cannot fund it; the steps that decide the request are never the
 /// ones cut.
 fn acceptance_evaluation_paging_reserve() -> Duration {
-    acceptance_evaluation_call_worst_case(ENGRAM_WORK_BINDING_COMMAND_TIMEOUT) * 2
+    acceptance_evaluation_call_worst_case(ENGRAM_WORK_BINDING_COMMAND_TIMEOUT) * 3
         + acceptance_evaluation_call_worst_case(ACCEPTANCE_EVALUATION_POLICY_READ_TIMEOUT)
         + REVIEW_FREEZE_TIMEOUT
 }
@@ -398,13 +399,14 @@ fn acceptance_evaluation_spawn_admission_locked(
     // The root was looked up before the fingerprint was taken off the lock;
     // a rename, a clear or a first name since then would leave the evaluator
     // judging a tree the work is no longer (or not yet) measured in.
-    let binding = inner
-        .find_session_index(parent_session_id)
-        .and_then(|index| inner.sessions[index].engram.work_binding.as_ref());
+    let claim = seed.source_root.as_ref().map(|root| AcceptanceEvaluationSourceClaim {
+        work_id: root.work_id.clone(),
+        claim_id: root.claim_id.clone(),
+    });
     let root_now = engram_evaluation_source_root(
         &inner.engram_work_source_roots,
         &seed.store,
-        binding,
+        claim.as_ref().or(seed.source_claim.as_ref()),
         &seed.work_ref,
         seed.work_id.as_deref(),
     );
@@ -650,19 +652,28 @@ impl AppState {
                 "An evaluator model override requires an explicit agent (Claude or Codex)",
             ));
         }
-        let (target, parent_workdir, parent_agent, defaults) = {
+        let (target, parent_workdir, parent_agent, defaults, held_connection) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_visible_session_index(parent_session_id)
                 .ok_or_else(ApiError::local_session_missing)?;
+            let target = acceptance_evaluation_host_target_locked(&inner, parent_session_id)?;
+            let mut held_connection = target.connection.clone();
+            let record = &inner.sessions[index];
+            let (actor_id, actor_context) =
+                engram_runtime_actor_identity(&inner.preferences.engram.developer_name, record);
+            held_connection.actor_id = actor_id;
+            held_connection.actor_context = actor_context;
+            held_connection.session_id = parent_session_id.to_owned();
             (
-                acceptance_evaluation_host_target_locked(&inner, parent_session_id)?,
+                target,
                 inner.sessions[index].session.workdir.clone(),
                 inner.sessions[index].session.agent,
                 engram_project_for_session_locked(&inner, parent_session_id)
                     .and_then(|project| project.engram.as_ref())
                     .and_then(|settings| settings.acceptance_evaluation.clone())
                     .unwrap_or_default(),
+                held_connection,
             )
         };
         // The ref is caller text: never hand it to a shell shim or to a store
@@ -728,6 +739,67 @@ impl AppState {
             .map_err(|e| acceptance_evaluation_transport_error("engram work show --full", e))?;
         let task = parse_acceptance_evaluation_task(show, full)?;
 
+        // The request names its work independently of the control turn's
+        // binding. Read live claims under the requester's own identity;
+        // host-reader identity would list the host reader's claims instead.
+        let mut held_args = vec![
+            "work".to_owned(),
+            "--actor-id".to_owned(),
+            held_connection.actor_id.clone(),
+            "--session-id".to_owned(),
+            held_connection.session_id.clone(),
+        ];
+        if let Some(context) = held_connection.actor_context.as_ref() {
+            held_args.extend(["--actor-context".to_owned(), context.clone()]);
+        }
+        held_args.extend(["core".to_owned(), "held".to_owned(), "--json".to_owned()]);
+        let held: EngramHeldClaims = serde_json::from_value(
+            read(
+                &held_connection,
+                &held_args,
+                ENGRAM_WORK_BINDING_COMMAND_TIMEOUT,
+            )
+            .map_err(|e| acceptance_evaluation_transport_error("engram work core held", e))?,
+        )
+        .map_err(|e| {
+            ApiError::bad_gateway(format!("engram work core held: invalid receipt: {e}"))
+        })?;
+        // Validate the rows before deciding that the requested work is
+        // unheld. A missing canonical id must not hide a matching short ref
+        // and silently choose the requester's workdir.
+        let mut requested_claim = None;
+        for claim in &held.items {
+            if claim.work_id.trim().is_empty() || claim.claim_id.trim().is_empty() {
+                return Err(ApiError::bad_gateway(
+                    "engram work core held: a claim has no work or claim id",
+                ));
+            }
+            let matches_ref = claim.short_ref == task.work_ref;
+            let matches_id = task.work_id.as_ref().is_some_and(|id| claim.work_id == *id);
+            if !matches_ref && !matches_id {
+                continue;
+            }
+            if !matches_ref || task.work_id.is_some() && !matches_id {
+                return Err(ApiError::bad_gateway(
+                    "engram work core held: requested claim has inconsistent work identity",
+                ));
+            }
+            if requested_claim.is_some() {
+                return Err(ApiError::bad_gateway(
+                    "engram work core held: requested work has more than one claim row",
+                ));
+            }
+            requested_claim = Some(AcceptanceEvaluationSourceClaim {
+                work_id: claim.work_id.clone(),
+                claim_id: claim.claim_id.clone(),
+            });
+        }
+        if requested_claim.is_none() && held.omitted > 0 {
+            return Err(ApiError::conflict(
+                "engram work core held omitted claims and did not list the requested work; its source claim cannot be resolved",
+            ));
+        }
+
         let admitted = match read_acceptance_control_policy(connection, &read) {
             Ok(policy) => acceptance_evaluation_admitted_modes(&policy),
             Err(error) => {
@@ -754,28 +826,25 @@ impl AppState {
         .map_err(ApiError::conflict)?;
         // The declared fingerprint is taken only by the modes that use it,
         // after the reads, on the worktree the evaluator reads: the work's
-        // named source root when the requesting session is bound to its claim
+        // named source root when the requesting session holds its claim
         // (`engram_source_roots.rs`), where the evaluator child then runs;
         // otherwise the parent's workdir, which is also the child's (cwd None).
-        // With no root named, the claim the session is bound to is kept, so
+        // With no root named, the requested work's claim is kept, so
         // a root named for it later refuses the submission whatever the
         // session is bound to by then.
         let (source_root, source_claim) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
-            let binding = inner
-                .find_session_index(parent_session_id)
-                .and_then(|index| inner.sessions[index].engram.work_binding.clone());
             let source_root = engram_evaluation_source_root(
                 &inner.engram_work_source_roots,
                 &target.store,
-                binding.as_ref(),
+                requested_claim.as_ref(),
                 &task.work_ref,
                 task.work_id.as_deref(),
             );
-            let source_claim = binding
-                .as_ref()
-                .filter(|_| source_root.is_none())
-                .map(AcceptanceEvaluationSourceClaim::from_binding);
+            let source_claim = source_root
+                .is_none()
+                .then(|| requested_claim.clone())
+                .flatten();
             (source_root, source_claim)
         };
         let place = source_root.as_ref().map_or_else(
@@ -792,7 +861,7 @@ impl AppState {
                  fingerprint is taken.",
                 task.work_ref
             )
-        });
+        }).or_else(|| requested_claim.as_ref().map(|_| format!("The evaluation of `{}` reads this session's workdir {evaluator_dir}: no source root named for the requested work's claim.", task.work_ref)));
         let unmeasured = |fingerprint: &Option<String>| {
             fingerprint
                 .is_none()

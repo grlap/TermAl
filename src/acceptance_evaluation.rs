@@ -152,7 +152,7 @@ struct AcceptanceEvaluationTargetSeed {
     source_fingerprint: Option<String>,
     /// The work's named source root it was taken on, if any.
     source_root: Option<AcceptanceEvaluationSourceRoot>,
-    /// With no root named, the claim the requesting session was bound to.
+    /// With no root named, the requested work's live claim held by the requester.
     source_claim: Option<AcceptanceEvaluationSourceClaim>,
     /// The work's id when the tracker's receipt carried it, with which the
     /// root is looked up again as the evaluator is created.

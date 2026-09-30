@@ -304,7 +304,10 @@ For a read-only Claude child the host's permission gate enforces this by the
 tracker tool's qualified name and its arguments. It admits the tracker's reads
 that record nothing (no row, no session registration, no change of focus or
 delivery): `next` with `peek: true`, `ls`, `search`, `show` in every form, and
-`memories` without a context generation. Each may carry only the arguments that
+`memories` without a context generation. The host's own orientation read for a
+read-only child carries no context generation either, so the tracker does not
+direct it to a call its gate refuses (see
+[Engram host adapter](./engram-host-adapter.md)). Each may carry only the arguments that
 read takes; an argument the gate does not know is refused, so one the tracker
 adds later is not admitted by default. Every other tracker call is denied with
 a message that lists the reads: `next` without a peek (it stages delivery), a
