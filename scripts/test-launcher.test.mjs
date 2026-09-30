@@ -10,6 +10,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -261,7 +262,9 @@ test("stage cwd controls the real child directory and relative file lookup", asy
       const assert = require('node:assert/strict');
       const fs = require('node:fs');
       const path = require('node:path');
-      assert.equal(process.cwd(), ${JSON.stringify(ui)});
+      // The temp directory may be reached through an alias (macOS /var is a
+      // link to /private/var), and the child sees the resolved spelling.
+      assert.equal(fs.realpathSync.native(process.cwd()), fs.realpathSync.native(${JSON.stringify(ui)}));
       assert.equal(fs.readFileSync('relative-fixture.txt', 'utf8'), 'ui-relative\\n');
       assert.equal(path.basename(process.cwd()), 'ui');
     `;
@@ -271,7 +274,7 @@ test("stage cwd controls the real child directory and relative file lookup", asy
     }, fixtureEnv);
     const result = await executeRun(runDir, fixtureEnv);
     assert.equal(result.state, "passed");
-    assert.equal(result.stages[0].cwd, ui);
+    assert.equal(realpathSync.native(result.stages[0].cwd), realpathSync.native(ui));
     assert.equal(result.stages[0].code, 0);
   });
 });
@@ -314,7 +317,14 @@ test("clean pass retains logs and summarizes without passing-test lists", async 
       root,
       stages: [stage("clean", "console.log('ok 1 - passing-marker')")],
     }, fixtureEnv);
-    assert.match(relative(join(root, ".git", "review-runs"), runDir), /^test-[^\\/]+$/u);
+    // The fixture root comes from the temp directory, which may be spelled
+    // through an alias (a Windows CI runner's 8.3 RUNNER~1, macOS /var for
+    // /private/var), while the run directory comes from Git's canonical path:
+    // compare canonical spellings.
+    assert.match(
+      relative(realpathSync.native(join(root, ".git", "review-runs")), realpathSync.native(runDir)),
+      /^test-[^\\/]+$/u,
+    );
     assert.equal(json(join(runDir, "results.json")).state, "running");
     const result = await executeRun(runDir, fixtureEnv);
     assert.equal(result.state, "passed");
