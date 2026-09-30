@@ -865,6 +865,8 @@ impl AppState {
         let (
             workdir,
             credit_root,
+            bound_work,
+            other_roots,
             runtime,
             reported,
             places,
@@ -889,6 +891,13 @@ impl AppState {
                         turn_root.common_dir_key.clone(),
                     )
                 }),
+                engram.work_binding.as_ref().map(|binding| {
+                    engram
+                        .active_turn_source_root
+                        .as_ref()
+                        .map_or_else(|| binding.work_id.clone(), |root| root.short_ref.clone())
+                }),
+                engram.active_turn_other_source_roots.clone(),
                 record.runtime.runtime_token(),
                 cwd.map(str::to_owned)
                     .or_else(|| engram.running_command_keys.get(key).cloned().flatten()),
@@ -944,37 +953,76 @@ impl AppState {
         let credit = credit_root
             .as_ref()
             .map(|(root, common_dir_key)| (root.as_path(), common_dir_key.as_str()));
-        let withheld_line = if !mediated {
-            None
-        } else if let Some(check) = recognised.as_ref() {
-            target
-                .is_none()
-                .then(|| {
-                    engram_uncredited_test_line(
-                        check,
-                        None,
-                        &workdir,
-                        places.as_deref(),
-                        credit,
-                        child,
-                        reported.is_some(),
-                    )
-                })
-                .flatten()
-        } else {
-            ran.and_then(|ran| Some((engram_embedded_test(ran)?, EngramNearMiss::of(ran))))
-                .and_then(|(check, near_miss)| {
-                    engram_uncredited_test_line(
-                        &check,
-                        Some(near_miss),
-                        &workdir,
-                        places.as_deref(),
-                        credit,
-                        child,
-                        reported.is_some(),
-                    )
-                })
-        };
+        let other_claim_line =
+            recognised
+                .as_ref()
+                .filter(|_| mediated && !child)
+                .and_then(|command| {
+                    let others = other_roots
+                        .iter()
+                        .filter(|entry| {
+                            engram_check_worktree_from(
+                                command,
+                                FsPath::new(&workdir),
+                                places.as_deref(),
+                                Some((FsPath::new(&entry.root), entry.common_dir_key.as_str())),
+                            )
+                            .is_some()
+                        })
+                        .map(|entry| entry.short_ref.as_str())
+                        .collect::<Vec<_>>();
+                    if others.is_empty() {
+                        return None;
+                    }
+                    let bound = bound_work.as_deref()?;
+                    let others = others.join(", ");
+                    Some(if target.is_some() {
+                        format!(
+                            "[TermAl] A recognised test in a shared named root is reported for \
+                        bound item {bound} only; {others} receives no credit. Make that item \
+                        the focus and run its test in the next turn for its own credit."
+                        )
+                    } else {
+                        format!(
+                            "[TermAl] A recognised test ran in the named root of {others}, \
+                        outside bound item {bound}'s root, and gets no credit for {bound}. \
+                        Make that item the focus and run its test in the next turn."
+                        )
+                    })
+                });
+        let withheld_line = other_claim_line.or_else(|| {
+            if !mediated {
+                None
+            } else if let Some(check) = recognised.as_ref() {
+                target
+                    .is_none()
+                    .then(|| {
+                        engram_uncredited_test_line(
+                            check,
+                            None,
+                            &workdir,
+                            places.as_deref(),
+                            credit,
+                            child,
+                            reported.is_some(),
+                        )
+                    })
+                    .flatten()
+            } else {
+                ran.and_then(|ran| Some((engram_embedded_test(ran)?, EngramNearMiss::of(ran))))
+                    .and_then(|(check, near_miss)| {
+                        engram_uncredited_test_line(
+                            &check,
+                            Some(near_miss),
+                            &workdir,
+                            places.as_deref(),
+                            credit,
+                            child,
+                            reported.is_some(),
+                        )
+                    })
+            }
+        });
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let Some(index) = inner.find_session_index(session_id) else {
             return;
@@ -1094,8 +1142,7 @@ impl AppState {
             };
             record.engram.active_turn_checks.remove(oldest);
         }
-        let start_basis =
-            engram_spawn_basis_capture(target.basis_place(), &workers);
+        let start_basis = engram_spawn_basis_capture(target.basis_place(), &workers);
         // The toolchain is named as the check starts, from the overrides it
         // ran under, not from whatever they say when the turn closes.
         let toolchain = if engram_cargo_toolchain_selector(&command).is_some() {

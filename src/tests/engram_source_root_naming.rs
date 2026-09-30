@@ -1311,3 +1311,266 @@ fn a_name_given_again_after_a_clear_is_the_last_line_the_agent_reads() {
         "the name is not repeated: {pending}"
     );
 }
+
+
+#[test]
+fn recognised_tests_name_the_bound_claim_and_the_other_live_named_claim() {
+    for case in ["distinct", "shared", "expired"] {
+        let label = format!("two-claims-{case}");
+        let claimed = ClaimedRoot::new(
+            &label,
+            vec![
+                bind_reply("two-claims-token"),
+                grant_reply("two-claims-grant"),
+                begin_reply("two-claims-grant"),
+                checkpoint_reply("two-claims-grant"),
+            ],
+        );
+        let first = add_claimed_root_worktree(&claimed.root);
+        let second = if case == "shared" {
+            first.clone()
+        } else {
+            let second = claimed.root.join(".worktrees/second");
+            run_git_test_command(
+                &claimed.root,
+                &[
+                    "worktree",
+                    "add",
+                    "--quiet",
+                    "-b",
+                    "second",
+                    second.to_str().expect("UTF-8 fixture path"),
+                ],
+            );
+            second
+        };
+        let mut held = claimed_root_held(&label);
+        let first_ref = held.items[0].short_ref.clone();
+        held.items.push(EngramHeldClaim {
+            work_id: "work-second".to_owned(),
+            short_ref: "w-second".to_owned(),
+            claim_id: "claim-second".to_owned(),
+            ..Default::default()
+        });
+        name_root(&claimed, &label, Some(&first), vec![held.clone()]).expect("first root named");
+        claimed
+            .state
+            .name_engram_source_root(
+                &claimed.session_id,
+                EngramSourceRootRequest {
+                    work: "w-second".to_owned(),
+                    path: Some(Some(second.to_string_lossy().into_owned())),
+                },
+            )
+            .expect("second root named");
+        if case == "expired" {
+            held.items.pop();
+            claimed.transport.replace_held_claims([Ok(held)]);
+        }
+        deliver_turn_dispatch(&claimed.state, claimed.dispatch()).expect("turn delivered");
+        let _ = received_prompt(&claimed);
+        claimed.record(|record| record.engram.pending_source_root_line = None);
+        claimed.state.note_engram_command_started(
+            &claimed.session_id,
+            "test",
+            Some("cargo test"),
+            Some(second.to_str().expect("UTF-8 fixture path")),
+        );
+        let line = pending_line(&claimed).expect("test routing is explained");
+        let checks = claimed.record(|record| record.engram.active_turn_checks.len());
+        if case == "expired" {
+            assert!(
+                !line.contains("w-second"),
+                "a released claim is not presented as held: {line}"
+            );
+            assert!(line.contains("run the tests in that root"), "{line}");
+            assert_eq!(checks, 0);
+        } else {
+            assert!(
+                line.contains(&first_ref),
+                "the line identifies the bound claim: {line}"
+            );
+            assert!(
+                line.contains("w-second"),
+                "the line identifies the other held claim: {line}"
+            );
+            assert!(
+                line.contains("focus") && line.contains("next turn"),
+                "the remedy names the next turn: {line}"
+            );
+            assert_eq!(
+                checks,
+                usize::from(case == "shared"),
+                "one bound claim only"
+            );
+        }
+        claimed
+            .state
+            .finish_turn_ok_if_runtime_matches(&claimed.session_id, &claimed.runtime_token())
+            .expect("turn closes without rerouting its grant");
+    }
+}
+
+#[test]
+fn focusing_another_named_claim_rebinds_its_next_turn_and_test_evidence() {
+    let label = "focused-named-claim";
+    let claimed = ClaimedRoot::new(
+        label,
+        vec![
+            bind_reply("first-token"),
+            grant_reply("first-grant"),
+            begin_reply("first-grant"),
+            checkpoint_reply("first-grant"),
+            status_reply("ready"),
+            rebind_reply("second-token"),
+            grant_reply("second-grant"),
+            begin_reply("second-grant"),
+            checkpoint_reply("second-grant"),
+        ],
+    );
+    let first = add_claimed_root_worktree(&claimed.root);
+    let second = claimed.root.join(".worktrees/second");
+    run_git_test_command(
+        &claimed.root,
+        &[
+            "worktree",
+            "add",
+            "--quiet",
+            "-b",
+            "second",
+            second.to_str().expect("UTF-8 fixture path"),
+        ],
+    );
+    let mut held = claimed_root_held(label);
+    let first_binding = held.items[0]
+        .control_binding
+        .clone()
+        .expect("first binding");
+    let second_binding = test_control_work_binding("focused-second", 1);
+    held.items.push(EngramHeldClaim {
+        work_id: second_binding.work_id.clone(),
+        short_ref: "w-second".to_owned(),
+        claim_id: second_binding.claim_id.clone(),
+        claim_fence: second_binding.claim_fence,
+        focused: false,
+        control_binding: Some(second_binding.clone()),
+    });
+    name_root(&claimed, label, Some(&first), vec![held.clone()]).expect("first root named");
+    claimed
+        .state
+        .name_engram_source_root(
+            &claimed.session_id,
+            EngramSourceRootRequest {
+                work: "w-second".to_owned(),
+                path: Some(Some(second.to_string_lossy().into_owned())),
+            },
+        )
+        .expect("second root named");
+    deliver_turn_dispatch(&claimed.state, claimed.dispatch()).expect("first turn delivered");
+    let _ = received_prompt(&claimed);
+    claimed
+        .state
+        .finish_turn_ok_if_runtime_matches(&claimed.session_id, &claimed.runtime_token())
+        .expect("first turn completes");
+
+    held.items[0].focused = false;
+    held.items[1].focused = true;
+    let selected = select_engram_held_binding(
+        held.items.clone(),
+        held.omitted,
+        EngramBindingPreference {
+            current: Some(&first_binding),
+            refused: &[],
+        },
+    );
+    assert_eq!(
+        selected,
+        Some(second_binding.clone()),
+        "focus wins over current binding"
+    );
+    claimed
+        .transport
+        .work_bindings
+        .lock()
+        .expect("binding reads mutex poisoned")
+        .push_back(Ok(selected));
+    claimed.transport.replace_held_claims([Ok(held)]);
+    deliver_turn_dispatch(&claimed.state, claimed.dispatch()).expect("focused turn delivered");
+    let _ = received_prompt(&claimed);
+    claimed.record(|record| {
+        assert_eq!(record.engram.work_binding, Some(second_binding.clone()));
+        assert_eq!(
+            record
+                .engram
+                .active_turn_source_root
+                .as_ref()
+                .map(|root| root.short_ref.as_str()),
+            Some("w-second")
+        );
+    });
+    let wait = || {
+        let captures = claimed.record(|record| {
+            record
+                .engram
+                .active_turn_checks
+                .iter()
+                .flat_map(|check| {
+                    std::iter::once(check.start_basis.clone())
+                        .chain(check.end.as_ref().map(|end| end.end_basis.clone()))
+                })
+                .collect::<Vec<_>>()
+        });
+        for capture in captures {
+            capture.wait_until(std::time::Instant::now() + DEADLOCK_GUARD);
+        }
+    };
+    claimed.state.note_engram_command_started(
+        &claimed.session_id,
+        "focused-test",
+        Some("cargo test"),
+        Some(second.to_str().expect("UTF-8 fixture path")),
+    );
+    wait();
+    assert_eq!(
+        claimed.record(|record| record.engram.active_turn_checks.len()),
+        1
+    );
+    claimed.state.note_engram_command_finished(
+        &claimed.session_id,
+        "focused-test",
+        "cargo test",
+        "test result: ok. 1 passed",
+        Some(EngramCommandExit::Code(0)),
+    );
+    wait();
+    claimed
+        .state
+        .finish_turn_ok_if_runtime_matches(&claimed.session_id, &claimed.runtime_token())
+        .expect("focused turn completes");
+    let requests = claimed.transport.requests();
+    let rebind = requests
+        .iter()
+        .filter(|r| r.request["operation"] == "session_bind")
+        .last()
+        .unwrap();
+    assert_eq!(rebind.request["work_binding"], json!(second_binding));
+    let checkpoint = requests
+        .iter()
+        .filter(|r| r.request["operation"] == "turn_checkpoint")
+        .last()
+        .unwrap();
+    assert_eq!(
+        checkpoint.request["verification_evidence"]
+            .as_array()
+            .map(Vec::len),
+        Some(1)
+    );
+    assert_eq!(
+        checkpoint.request["observations"][0]["outcome"],
+        "succeeded"
+    );
+    assert_eq!(
+        checkpoint.request["observations"][0]["source_basis"]["workspace_id"].as_str(),
+        fs::canonicalize(&second).unwrap().to_str()
+    );
+}

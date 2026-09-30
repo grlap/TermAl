@@ -391,6 +391,8 @@ fn fixture_reader(
             .push((connection.clone(), args.to_vec()));
         if args.first().map(String::as_str) == Some("control-policy") {
             policy.clone()
+        } else if args.iter().any(|arg| arg == "held") {
+            Ok(json!({"items": [], "omitted": 0}))
         } else if args.iter().any(|arg| arg == "--full") {
             Ok(full_receipt())
         } else {
@@ -1972,8 +1974,8 @@ fn acceptance_request_reads_as_the_host_and_spawns_an_evaluator_with_the_target(
         .unwrap();
 
     let calls = calls.lock().unwrap();
-    assert_eq!(calls.len(), 3);
-    for (connection, _) in calls.iter() {
+    assert_eq!(calls.len(), 4);
+    for (connection, _) in calls.iter().filter(|(_, args)| !args.iter().any(|arg| arg == "held")) {
         // Reads run as the host reader and never register the requester.
         assert_eq!(connection.session_id, WORK_HOST_READER_SESSION_ID);
         assert!(
@@ -2003,7 +2005,9 @@ fn acceptance_request_reads_as_the_host_and_spawns_an_evaluator_with_the_target(
     assert_eq!(full_args[..5], expected_show_args[..5]);
     assert_eq!(full_args[5..], ["show", "w-task", "--full", "--json"]);
     // The policy head, never the whole-store `doctor` audit.
-    assert_eq!(calls[2].1, ["control-policy", "show"]);
+    assert!(calls[2].1.iter().any(|arg| arg == "held"));
+    assert_eq!(calls[2].0.session_id, parent);
+    assert_eq!(calls[3].1, ["control-policy", "show"]);
 
     let wire = serde_json::to_value(&response).unwrap();
     assert_eq!(wire["mode"], "independent_session");
@@ -2445,6 +2449,8 @@ fn acceptance_request_pages_older_evidence_into_the_brief() {
             .push((connection.clone(), args.to_vec()));
         if args.first().map(String::as_str) == Some("control-policy") {
             Ok(policy_receipt(Some(&["independent_session"])))
+        } else if args.iter().any(|arg| arg == "held") {
+            Ok(json!({"items": [], "omitted": 0}))
         } else if args.iter().any(|arg| arg == "--full") {
             Ok(full_receipt())
         } else if args.iter().any(|arg| arg == "--after") {
@@ -2478,8 +2484,9 @@ fn acceptance_request_pages_older_evidence_into_the_brief() {
         ]
     );
     assert_eq!(tails[2], ["show", "w-task", "--full", "--json"]);
-    assert_eq!(calls[3].1, ["control-policy", "show"]);
-    assert_eq!(calls.len(), 4);
+    assert!(calls[3].1.iter().any(|arg| arg == "held"));
+    assert_eq!(calls[4].1, ["control-policy", "show"]);
+    assert_eq!(calls.len(), 5);
 
     let wire = serde_json::to_value(&response).unwrap();
     let prompt = wire["delegation"]["prompt"]
@@ -2512,6 +2519,8 @@ fn acceptance_request_reports_the_evidence_behind_a_refused_continuation() {
             .push((connection.clone(), args.to_vec()));
         if args.first().map(String::as_str) == Some("control-policy") {
             Ok(policy_receipt(Some(&["independent_session"])))
+        } else if args.iter().any(|arg| arg == "held") {
+            Ok(json!({"items": [], "omitted": 0}))
         } else if args.iter().any(|arg| arg == "--full") {
             Ok(full_receipt())
         } else if args.iter().any(|arg| arg == "--after") {
@@ -2722,6 +2731,8 @@ fn acceptance_request_refuses_to_spawn_when_the_store_changed_during_the_reads()
             // The last off-lock read: the operator re-points the project now.
             rotate_store(&rotating, &rotated_project, &rotated_root);
             Ok(policy_receipt(Some(&["independent_session"])))
+        } else if args.iter().any(|arg| arg == "held") {
+            Ok(json!({"items": [], "omitted": 0}))
         } else if args.iter().any(|arg| arg == "--full") {
             Ok(full_receipt())
         } else {
@@ -4638,6 +4649,8 @@ fn acceptance_same_session_brief_holds_complete_criteria_within_the_bound_or_ref
     let reader = move |_: &EngramConnectionConfig, args: &[String], _: Duration| {
         if args.first().map(String::as_str) == Some("control-policy") {
             Ok(policy_receipt(Some(&["same_session"])))
+        } else if args.iter().any(|arg| arg == "held") {
+            Ok(json!({"items": [], "omitted": 0}))
         } else if args.iter().any(|arg| arg == "--full") {
             Ok(oversized.clone())
         } else {
@@ -4994,6 +5007,8 @@ fn endless_evidence_reader(
         if args.first().map(String::as_str) == Some("control-policy") {
             // Nothing is spawned, so the test stays process-free.
             Ok(policy_receipt(Some(&["same_session"])))
+        } else if args.iter().any(|arg| arg == "held") {
+            Ok(json!({"items": [], "omitted": 0}))
         } else if args.iter().any(|arg| arg == "--full") {
             Ok(full_receipt())
         } else {
@@ -5013,15 +5028,16 @@ fn acceptance_request_budget_covers_every_read_with_its_retry() {
     let policy =
         ACCEPTANCE_EVALUATION_POLICY_READ_TIMEOUT * 2 + ENGRAM_WORK_BINDING_LOCK_RETRY_DELAY;
     assert_eq!(MAX_ACCEPTANCE_EVIDENCE_PAGES, 8);
-    // Two task reads, seven continuation pages, one policy read, and the
+    // Two task reads, seven continuation pages, one held-claims read,
+    // one policy read, and the
     // source capture under the freeze budget.
     assert_eq!(
         acceptance_evaluation_request_tracker_budget(),
-        call * 9 + policy + REVIEW_FREEZE_TIMEOUT
+        call * 10 + policy + REVIEW_FREEZE_TIMEOUT
     );
     assert_eq!(
         acceptance_evaluation_paging_reserve(),
-        call * 2 + policy + REVIEW_FREEZE_TIMEOUT
+        call * 3 + policy + REVIEW_FREEZE_TIMEOUT
     );
     // Two sends, two acknowledged states (`pending` before, the outcome
     // after) and the second source capture.
@@ -5041,7 +5057,7 @@ fn acceptance_request_budget_covers_every_read_with_its_retry() {
             endless_evidence_reader(calls.clone()),
         )
         .unwrap();
-    assert_eq!(calls.load(Ordering::SeqCst), 2 + 7 + 1);
+    assert_eq!(calls.load(Ordering::SeqCst), 2 + 7 + 1 + 1);
 }
 
 #[test]
@@ -5069,7 +5085,7 @@ fn acceptance_request_stops_paging_once_its_deadline_cannot_fund_another_page() 
         )
         .unwrap();
     // The windowed read, two pages, then the reads that decide the request.
-    assert_eq!(calls.load(Ordering::SeqCst), 1 + 2 + 1 + 1);
+    assert_eq!(calls.load(Ordering::SeqCst), 1 + 2 + 1 + 1 + 1);
     assert_eq!(
         serde_json::to_value(&response).unwrap()["mode"],
         "same_session"
@@ -5086,7 +5102,7 @@ fn acceptance_request_stops_paging_once_its_deadline_cannot_fund_another_page() 
             std::time::Instant::now,
         )
         .unwrap();
-    assert_eq!(calls.load(Ordering::SeqCst), 3);
+    assert_eq!(calls.load(Ordering::SeqCst), 4);
 }
 
 // ---- one active evaluation per task --------------------------------------
@@ -5202,7 +5218,9 @@ fn acceptance_requests_racing_for_one_task_spawn_exactly_one_evaluator() {
                     if args.first().map(String::as_str) == Some("control-policy") {
                         barrier.wait();
                         Ok(policy_receipt(Some(&["independent_session"])))
-                    } else if args.iter().any(|arg| arg == "--full") {
+                    } else if args.iter().any(|arg| arg == "held") {
+            Ok(json!({"items": [], "omitted": 0}))
+        } else if args.iter().any(|arg| arg == "--full") {
                         Ok(full_receipt())
                     } else {
                         Ok(show_receipt(None))
@@ -5389,7 +5407,9 @@ fn acceptance_creation_racing_a_followup_leaves_exactly_one_active_evaluator() {
                     if args.first().map(String::as_str) == Some("control-policy") {
                         barrier.wait();
                         Ok(policy_receipt(Some(&["independent_session"])))
-                    } else if args.iter().any(|arg| arg == "--full") {
+                    } else if args.iter().any(|arg| arg == "held") {
+            Ok(json!({"items": [], "omitted": 0}))
+        } else if args.iter().any(|arg| arg == "--full") {
                         Ok(full_receipt())
                     } else {
                         Ok(show_receipt(None))

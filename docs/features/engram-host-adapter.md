@@ -838,8 +838,18 @@ reports.
   written, its quoting kept, so each argument is the one the runner saw.
 - **Which worktree.** A check is credited to the turn's worktree, the
   claim's named [source root](#source-root) when there is one and else the
-  session's worktree, only when TermAl can tell it tested that worktree:
-  the command runs there (in
+  session's worktree, only when TermAl can tell it tested that worktree.
+  One turn reports evidence for one bound claim. At admission the host reads
+  the caller's other live claims that have named roots, solely for notices.
+  A test in another held claim's distinct root receives no credit for the
+  bound claim; the line names both items and tells the agent to make the
+  other item the focus and run its test in the next turn. A shared root
+  reports the test for the bound item only and names the other item that
+  receives no credit. Roots named for no live held claim keep the ordinary
+  outside-root refusal. A failed held-claims read keeps that refusal too.
+  Making another held item the focus rebinds the next turn to it and its
+  named root. These notices never route one grant's evidence to several claims.
+  TermAl can tell a check tested that worktree when the command runs there (in
   the directory the runtime reports, Codex's item `cwd` or ACP's
   `rawInput.cwd`, else the session's workdir, a subdirectory included), and
   no argument names a place outside it. Every argument, what follows each
@@ -1480,8 +1490,9 @@ for want of evaluator authority.
 `{ "workRef", "agent"?, "model"? }`. TermAl:
 
 1. builds the [Work view](work-visualizer.md)'s host reader for the session's
-   project, so both reads run under the operator-validated binary, home and
-   store, and neither registers the requesting session in the tracker. A
+   project, so task and policy reads run under the operator-validated binary,
+   home and store without registering the requesting session. A held-claims
+   read uses that same binary, home and store with the requester's own identity. A
    project without an enabled, verified integration is refused with the
    reader's reason;
 2. reads the task in two calls, because the tracker's CLI refuses `--full`
@@ -1528,8 +1539,14 @@ tool, including the `source_fingerprint` when there is one.
 that use it (never for `sub_agent`), the host takes the
 [content revision](#content-revision) of the worktree the evaluator reads:
 the work's named [source root](#source-root) when the requesting session is
-bound to the claim that named it (the evaluator child then runs there), else
-the parent's worktree (it runs in the parent's workdir). The value
+holding the claim that named it (the evaluator child then runs there), else
+the parent's worktree (it runs in the parent's workdir). The host resolves
+that claim from a live `work core held` read under the requesting session's
+own identity, independently of its turn's bound item. A held requested
+item without a named root uses the workdir and receives an explicit notice;
+an omitted requested claim or a malformed held receipt refuses the request.
+The evaluator reads the live tree and keeps the requested claim and root
+name generation for admission and submission checks. The value
 comes from the same function as every basis the turns report. The capture
 runs on its own thread and is abandoned at the freeze budget, so a slow file
 read cannot hold the request past the allowance the bridge gives it; an

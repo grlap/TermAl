@@ -8,6 +8,167 @@
 // size the architecture lens allows for a test file.
 use super::*;
 
+#[test]
+fn acceptance_requested_claim_controls_the_root_even_when_another_claim_is_bound() {
+    for case in ["shared", "distinct", "unnamed"] {
+        let (state, project, parent, root) = fixture();
+        install_store(&state, &project, &root);
+        make_workdir_a_worktree(&root);
+        fs::write(
+            root.join(".gitignore"),
+            ".engram-project\nprojects/\nwork-read-args.txt\n.worktrees/\n",
+        )
+        .unwrap();
+        run_git_test_command(&root, &["add", ".gitignore"]);
+        run_git_test_command(&root, &["commit", "--quiet", "-m", "ignore worktrees"]);
+        let first = root.join(".worktrees/first");
+        run_git_test_command(
+            &root,
+            &[
+                "worktree",
+                "add",
+                "--quiet",
+                "-b",
+                "first",
+                first.to_str().unwrap(),
+            ],
+        );
+        let requested = if case == "distinct" {
+            let second = root.join(".worktrees/second");
+            run_git_test_command(
+                &root,
+                &[
+                    "worktree",
+                    "add",
+                    "--quiet",
+                    "-b",
+                    "second",
+                    second.to_str().unwrap(),
+                ],
+            );
+            second
+        } else {
+            first.clone()
+        };
+        fs::write(first.join("judged.txt"), "first named tree\n").unwrap();
+        if case == "distinct" {
+            fs::write(requested.join("judged.txt"), "requested named tree\n").unwrap();
+        }
+        let store = established_store(&state, &project).unwrap();
+        let named = |work: &str, path: &FsPath, generation| {
+            let (named_root, common_dir_key) = validate_engram_source_root(
+                &path.to_string_lossy(),
+                &root.to_string_lossy(),
+                &root.to_string_lossy(),
+            )
+            .unwrap();
+            EngramWorkSourceRoot {
+                store: store.clone(),
+                work_id: format!("work-{work}"),
+                short_ref: format!("w-{work}"),
+                claim_id: format!("claim-{work}"),
+                claim_fence: 1,
+                root: named_root,
+                common_dir_key,
+                named_by_session: parent.clone(),
+                named_at: "2026-09-30T00:00:00Z".to_owned(),
+                generation,
+            }
+        };
+        {
+            let mut inner = state.inner.lock().unwrap();
+            inner.engram_work_source_roots = vec![named("other", &first, 1)];
+            if case != "unnamed" {
+                inner
+                    .engram_work_source_roots
+                    .push(named("task", &requested, 2));
+            }
+            let index = inner.find_session_index(&parent).unwrap();
+            inner.sessions[index].engram.work_binding = Some(EngramControlWorkBinding {
+                root_execution_id: "root-other".to_owned(),
+                work_id: "work-other".to_owned(),
+                run_id: "run-other".to_owned(),
+                work_revision: 1,
+                claim_id: "claim-other".to_owned(),
+                claim_fence: 1,
+            });
+        }
+        super::delegation_support::install_delegation_codex_runtime(
+            &state,
+            "requested-claim-runtime",
+        );
+        let (expected_actor, expected_context) = {
+            let inner = state.inner.lock().expect("state mutex poisoned");
+            let record = &inner.sessions[inner.find_session_index(&parent).unwrap()];
+            (
+                format!("{}/codex", inner.preferences.engram.developer_name),
+                engram_actor_context(&record.session),
+            )
+        };
+        let mut show = show_receipt(None);
+        show["status"]["work"]["work_id"] = json!("work-task");
+        let base = fixture_reader(
+            Arc::default(),
+            show,
+            Ok(policy_receipt(Some(&["independent_session"]))),
+        );
+        let held_reads = std::cell::Cell::new(0);
+        let response = state.request_acceptance_evaluation_with_runner(&parent, evaluation_request(Some(Agent::Codex)), |connection, args, timeout| {
+            if args.iter().any(|arg| arg == "held") {
+                held_reads.set(held_reads.get() + 1);
+                assert_eq!(connection.session_id, parent, "held claims are read as the requesting session");
+                assert_ne!(connection.session_id, WORK_HOST_READER_SESSION_ID);
+                assert_eq!(connection.actor_id, expected_actor);
+                assert_eq!(connection.actor_context, expected_context);
+                Ok(json!({"items": [
+                    {"work_id":"work-other", "short_ref":"w-other", "claim_id":"claim-other", "claim_fence":1, "focused":true},
+                    {"work_id":"work-task", "short_ref":"w-task", "claim_id":"claim-task", "claim_fence":1, "focused":false}
+                ], "omitted":0}))
+            } else { base(connection, args, timeout) }
+        }).unwrap();
+        let AcceptanceEvaluationRequestResponse::Spawned {
+            delegation, notice, ..
+        } = response
+        else {
+            panic!("evaluator expected")
+        };
+        let record = delegation.delegation;
+        let target = record.acceptance_evaluation.unwrap();
+        let expected_dir = if case == "unnamed" { &root } else { &requested };
+        let expected = content_revision(expected_dir).unwrap().1;
+        assert_eq!(
+            record.cwd,
+            normalize_user_facing_path(&fs::canonicalize(expected_dir).unwrap()),
+            "{case}"
+        );
+        assert_eq!(target.source_fingerprint, Some(expected), "{case}");
+        if case == "unnamed" {
+            assert!(target.source_root.is_none());
+            assert_eq!(
+                target.source_claim,
+                Some(AcceptanceEvaluationSourceClaim {
+                    work_id: "work-task".to_owned(),
+                    claim_id: "claim-task".to_owned()
+                })
+            );
+            assert!(
+                notice
+                    .as_deref()
+                    .is_some_and(|notice| notice.contains("w-task")
+                        && notice.contains("no source root named")),
+                "{notice:?}"
+            );
+        } else {
+            let source = target.source_root.unwrap();
+            assert_eq!(source.work_id, "work-task");
+            assert_eq!(source.claim_id, "claim-task");
+            assert_eq!(source.generation, 2);
+            assert!(target.source_claim.is_none());
+        }
+        assert_eq!(held_reads.get(), 1);
+    }
+}
+
 /// The parent's workdir as a committed Git worktree, so a content revision
 /// can be taken on it. The fixture's tracker home is this same directory, and
 /// the scripted tracker writes its store and its argument log there while the
@@ -347,11 +508,13 @@ fn acceptance_request_on_a_named_source_root_runs_and_measures_the_evaluator_the
         .request_acceptance_evaluation_with_runner(
             &parent,
             evaluation_request(Some(Agent::Codex)),
-            fixture_reader(
-                Arc::default(),
-                show_receipt(None),
-                Ok(policy_receipt(Some(&["independent_session"]))),
-            ),
+            |connection, args, timeout| {
+                if args.iter().any(|arg| arg == "held") {
+                    Ok(json!({"items":[{"work_id":"work-task","short_ref":"w-task","claim_id":"claim-task","claim_fence":1}],"omitted":0}))
+                } else {
+                    fixture_reader(Arc::default(), show_receipt(None), Ok(policy_receipt(Some(&["independent_session"]))))(connection, args, timeout)
+                }
+            },
         )
         .unwrap();
     let AcceptanceEvaluationRequestResponse::Spawned {
@@ -484,8 +647,8 @@ fn acceptance_evaluator_creation_refuses_a_root_that_changed_during_the_request_
         criteria_count: 2,
         store: store.clone(),
         source_fingerprint: None,
+        source_claim: source_root.is_none().then(|| AcceptanceEvaluationSourceClaim {work_id:"work-requested".to_owned(), claim_id:"claim-requested".to_owned()}),
         source_root,
-        source_claim: None,
         work_id: Some("work-requested".to_owned()),
     };
     let mut inner = state.inner.lock().unwrap();
@@ -649,4 +812,115 @@ fn acceptance_submission_is_refused_when_the_work_gets_its_first_root_while_eval
             .submission,
         AcceptanceEvaluationSubmission::None
     ));
+}
+
+
+#[test]
+fn acceptance_requested_claim_refuses_an_omitted_or_malformed_held_receipt() {
+    for (receipt, status) in [
+        (json!({"items": [], "omitted": 1}), StatusCode::CONFLICT),
+        (
+            json!({"items": [{"work_id": "work-task", "short_ref": "w-task", "claim_id": ""}]}),
+            StatusCode::BAD_GATEWAY,
+        ),
+        (json!({"unexpected": []}), StatusCode::BAD_GATEWAY),
+    ] {
+        let (state, project, parent, root) = fixture();
+        install_store(&state, &project, &root);
+        let base = fixture_reader(
+            Arc::default(),
+            show_receipt(None),
+            Ok(policy_receipt(Some(&["independent_session"]))),
+        );
+        let error = state
+            .request_acceptance_evaluation_with_runner(
+                &parent,
+                evaluation_request(Some(Agent::Codex)),
+                |connection, args, timeout| {
+                    if args.iter().any(|arg| arg == "held") {
+                        Ok(receipt.clone())
+                    } else {
+                        base(connection, args, timeout)
+                    }
+                },
+            )
+            .err()
+            .expect("an unresolved requested claim never silently chooses the workdir");
+        assert_eq!(error.status, status, "{}", error.message);
+        assert!(error.message.contains("held"), "{}", error.message);
+        assert!(
+            state
+                .inner
+                .lock()
+                .expect("state mutex poisoned")
+                .delegations
+                .is_empty(),
+            "no evaluator is created on the wrong source basis"
+        );
+    }
+}
+
+#[test]
+fn acceptance_requested_claim_refuses_missing_or_inconsistent_canonical_identity() {
+    for (case, row) in [
+        (
+            "missing work id",
+            json!({"short_ref": "w-task", "claim_id": "claim-task"}),
+        ),
+        (
+            "empty work id",
+            json!({"work_id": "", "short_ref": "w-task", "claim_id": "claim-task"}),
+        ),
+        (
+            "wrong work id",
+            json!({"work_id": "work-other", "short_ref": "w-task", "claim_id": "claim-task"}),
+        ),
+        (
+            "wrong short ref",
+            json!({"work_id": "work-task", "short_ref": "w-other", "claim_id": "claim-task"}),
+        ),
+    ] {
+        let (state, project, parent, root) = fixture();
+        install_store(&state, &project, &root);
+        make_workdir_a_worktree(&root);
+        super::delegation_support::install_delegation_codex_runtime(
+            &state,
+            "malformed-claim-runtime",
+        );
+        let mut show = show_receipt(None);
+        show["status"]["work"]["work_id"] = json!("work-task");
+        let base = fixture_reader(
+            Arc::default(),
+            show,
+            Ok(policy_receipt(Some(&["independent_session"]))),
+        );
+        let response = state.request_acceptance_evaluation_with_runner(
+            &parent,
+            evaluation_request(Some(Agent::Codex)),
+            |connection, args, timeout| {
+                if args.iter().any(|arg| arg == "held") {
+                    Ok(json!({"items": [row], "omitted": 0}))
+                } else {
+                    base(connection, args, timeout)
+                }
+            },
+        );
+        let error = response.err().expect(case);
+        assert_eq!(
+            error.status,
+            StatusCode::BAD_GATEWAY,
+            "{case}: {}",
+            error.message
+        );
+        assert!(error.message.contains("held"), "{case}: {}", error.message);
+        assert!(
+            state
+                .inner
+                .lock()
+                .expect("state mutex poisoned")
+                .delegations
+                .is_empty(),
+            "{case}: no evaluator is created with an unresolved source claim"
+        );
+    }
 }

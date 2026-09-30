@@ -2308,6 +2308,9 @@ struct EngramSessionState {
     /// the workdir. Set at admission, so a root named during the turn takes
     /// effect at the next one. In memory only.
     active_turn_source_root: Option<EngramTurnSourceRoot>,
+    /// Other live claims named by this session, sampled at admission only
+    /// for test-routing notices. They never receive this grant's evidence.
+    active_turn_other_source_roots: Vec<EngramWorkSourceRoot>,
     /// Host lines put before the agent's prompt about where its turns on
     /// claimed work are measured (`engram_source_root_line`), one per line,
     /// until the runtime accepts a prompt that carried them: a dispatch
@@ -2416,6 +2419,7 @@ impl Default for EngramSessionState {
             active_turn_intent_fingerprint: None,
             active_turn_start_basis: None,
             active_turn_source_root: None,
+            active_turn_other_source_roots: Vec::new(),
             pending_source_root_line: None,
             source_root_line_delivery: None,
             active_turn_report: None,
@@ -5173,6 +5177,7 @@ impl AppState {
                 record.engram.active_turn_intent_fingerprint = released_intent;
                 record.engram.active_turn_start_basis = None;
                 record.engram.active_turn_source_root = None;
+                record.engram.active_turn_other_source_roots.clear();
                 record.engram.active_turn_report = None;
                 record.engram.active_turn_report_fallback = None;
                 // A begin recorded as uncertain while it was in flight has
