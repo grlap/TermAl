@@ -410,7 +410,9 @@ fn engram_is_test_command(program: &str, args: &[String]) -> bool {
         "node" => {
             let launcher = arg(0)
                 .is_some_and(|script| script.replace('\\', "/").ends_with("test-launcher.mjs"));
-            if !launcher || args.iter().any(|word| word == "--detach") {
+            // A detached run is a launch, carried until it settles
+            // (`engram_carried_checks.rs`); only a full gate is carried.
+            if !launcher || (args.iter().any(|word| word == "--detach") && arg(1) != Some("full")) {
                 return false;
             }
             match arg(1) {
@@ -692,6 +694,12 @@ fn engram_passed_count(line: &str) -> Option<u64> {
     before.split_whitespace().next_back()?.parse().ok()
 }
 
+/// The test stages of the launcher's full gate: a passed one is the host's
+/// evidence that tests ran, for a foreground gate's result lines
+/// (`engram_check_showed_passing_tests`) and a carried gate's terminal record
+/// (`engram_read_carried_run`) alike.
+const ENGRAM_LAUNCHER_FULL_TEST_STAGES: &[&str] = &["rust-tests", "vitest"];
+
 /// Whether the check's result lines show that at least one test ran and
 /// passed. A run that tested nothing can exit 0 (a filter that matched
 /// nothing, a collect-only or list mode, an npm script that runs no tests),
@@ -724,13 +732,15 @@ fn engram_check_showed_passing_tests(check: &EngramCheckCommand, result_lines: &
                     .and_then(|words| words.get(2))
                     .map(String::as_str)
                 {
-                    Some("full") => &["rust-tests: passed", "vitest: passed"],
-                    Some("live") => &["engram-live: passed"],
+                    Some("full") => ENGRAM_LAUNCHER_FULL_TEST_STAGES,
+                    Some("live") => &["engram-live"],
                     _ => &[],
                 };
-            result_lines
-                .iter()
-                .any(|line| test_stages.contains(&line.as_str()))
+            result_lines.iter().any(|line| {
+                test_stages
+                    .iter()
+                    .any(|stage| line.strip_suffix(": passed") == Some(*stage))
+            })
         }
         _ => false,
     }

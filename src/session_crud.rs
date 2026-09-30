@@ -2950,8 +2950,16 @@ impl AppState {
                             record.engram.begins_recorded,
                         )
                     });
+                    let carried_lines = engram_carried_checks_reset_lines(
+                        record,
+                        "its project's Engram settings changed before it settled",
+                    );
                     record.engram = EngramSessionState::default();
                     record.engram.dispatch_generation = dispatch_generation;
+                    for line in carried_lines {
+                        eprintln!("engram> session={} {line}", record.session.id);
+                        record.engram.set_pending_source_root_line(line);
+                    }
                     if let Some((routing_token, uncertain_grant_id, begins_recorded)) =
                         same_store_carry_over
                     {
@@ -4683,6 +4691,14 @@ impl AppState {
                         .expect("session index should be valid");
                     if record.session.project_id.as_deref() == Some(project_id.as_str()) {
                         record.session.project_id = None;
+                    }
+                    // Its project, and with it Engram, is gone: the carried
+                    // gates are logged, and no prompt will be measured again.
+                    for line in engram_carried_checks_reset_lines(
+                        record,
+                        "its project was removed before it settled",
+                    ) {
+                        eprintln!("engram> session={} {line}", record.session.id);
                     }
                     record.engram = EngramSessionState::default();
                     record.engram.dispatch_generation = dispatch_generation;

@@ -41,6 +41,20 @@ command that writes.
   line names what to do instead. A test Claude runs through its
   PowerShell tool is not recorded. The host records the result as
   verification evidence on the turn's closing checkpoint.
+  A full gate outlasts a Claude tool call's 10-minute cap: in a root session
+  measured in a named source root, launch it in the same form,
+  `pushd "DIR" && node scripts/test-launcher.mjs full`, in the Bash tool's
+  background mode (or with `--detach` from a runtime that can
+  notify a coordinator), then end the turn. The host carries it and
+  records its result, passed or failed, on a later checkpoint of the same
+  claim. While the run is going, any command the session runs in that
+  worktree refuses the credit, except, in a Claude session, one that only
+  reads (such as `git status`, `git diff`, or
+  `node scripts/test-launcher.mjs summary RUN_DIRECTORY` from the repository
+  root); so do a file edit the session reports, another writable session's
+  turn or command there, a file change the host's watcher sees there, and a
+  source change still there at that checkpoint. An evaluation requested
+  before the record lands goes stale when it lands (docs/test.md).
 - Do not commit or push without explicit authority from the user or the
   current instructions. Where this file has a commit-and-push section, that
   section says what counts; until it has one, this sentence is the rule.

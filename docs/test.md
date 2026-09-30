@@ -218,6 +218,50 @@ so one scheduler spike does not reject a gate while sustained starvation still
 fails before frontend tests start. Windows reports process CPU availability
 without presenting its unsupported load-average value as real system load.
 
+### Credit for a background or detached gate
+
+A full gate takes longer than a Claude tool call may run (10 minutes), so a
+session that needs the gate as evidence for an Engram item it holds launches
+it in the background, in the item's named source root:
+
+```bash
+pushd "C:\path\to\worktree" && node scripts/test-launcher.mjs full
+```
+
+with the Bash tool's background mode, then ends the turn. A runtime that can
+notify a coordinator may launch it with `--detach` instead. Only a root
+session whose turn is measured in the item's named source root gets credit
+this way; a delegated session is told its gate is not carried. The gate goes
+alone on its line: a launch joined to another command, or a `--detach`
+launch that failed, earns no credit and TermAl says so; relaunch two minutes
+or more later, since a launch that follows an unmatched one sooner is
+refused as ambiguous. TermAl carries the
+launch past the turn and credits the run as a passed test check on the
+holder's next checkpoint for the same claim, when every stage the run
+requested passed, among them `rust-tests` or `vitest`, its input
+fingerprints before and after are present and agree, its terminal record is
+the one TermAl first read as terminal, the worktree's source is unchanged,
+and no write TermAl can observe reached the worktree before the run ended.
+A failed run with a complete record is recorded as failed; a run that was
+stopped or interrupted, or whose launcher died without a result, is
+neither, and TermAl records nothing for it. While it runs, a command the
+holding session runs in that worktree refuses the credit unless the session
+is a Claude session and the command only reads (such as `git status`,
+`git diff`, or `node scripts/test-launcher.mjs summary RUN_DIRECTORY` from
+the repository root). So do another writable session's turn or command
+there, any file edit the holding session reports, and any file change
+TermAl's workspace watcher sees there; TermAl says which and why before the
+next prompt. A command run through Claude's PowerShell tool is not reported
+to TermAl, so only the watcher can see what it writes. Once the run has
+ended, a write no longer refuses it, except a change the watcher reports
+late, which may have landed while it ran; a source change still there at the
+checkpoint does. A host restart during the run loses the credit, and TermAl
+says so after it. An acceptance evaluation requested before the record lands
+is judged without it, and Engram marks it stale when the record lands (a
+check recorded after an evaluation's evidence basis makes it stale), so
+request it after the checkpoint that records the gate. The full rules are in
+[the Engram host adapter's carried background gates](features/engram-host-adapter.md#carried-background-gates).
+
 ## Backend Testing Guidelines
 
 Prefer focused Rust tests in `src/tests.rs` for:

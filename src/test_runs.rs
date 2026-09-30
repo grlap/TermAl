@@ -801,6 +801,10 @@ impl AppState {
                         // a wait may dispatch a turn.
                         state.refresh_test_run_waits();
                     }
+                    // A carried gate's terminal record is read as soon as the
+                    // tick finds it, so its digest is the first terminal read
+                    // (`engram_carried_checks.rs`).
+                    state.poll_engram_carried_runs();
                     std::thread::sleep(TEST_RUN_TICK);
                 }
             });

@@ -331,6 +331,11 @@ struct EngramTurnCheck {
     /// content it did not test: its outcome is unknown. Set when the overlap
     /// happens, never reconstructed later.
     overlapped: bool,
+    /// For a launcher full gate still being launched: a file change the
+    /// workspace watcher saw in its worktree meanwhile. It carries over as the
+    /// fence of the carried check (`engram_carry_check`), since the run may
+    /// have tested that change.
+    watcher_fence: Option<String>,
     end: Option<EngramTurnCheckEnd>,
 }
 
@@ -357,6 +362,78 @@ struct EngramResolvedCheck {
     /// (`engram_toolchain_label`); the check then has no environment
     /// evidence.
     toolchain: Option<String>,
+    /// The check's own command ended successfully, whatever `outcome` became
+    /// after an overlap or missing passing-test evidence downgraded it
+    /// (`engram_withhold_unjudged_successes`).
+    ran_successfully: bool,
+}
+
+/// Why a check whose command ended successfully is withheld from the report
+/// (`engram_withhold_unjudged_successes`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EngramWithheldReason {
+    /// Another command, an edit or another writable session reached its
+    /// worktree while it was open to writes.
+    Overlapped,
+    /// Its output showed no passing test.
+    NoPassingTest,
+}
+
+/// A check the report leaves out, with why, for the log and for the line its
+/// holder gets before the next prompt (`engram_withheld_check_line`).
+#[derive(Clone, Debug)]
+struct EngramWithheldCheck {
+    program: String,
+    fingerprint: String,
+    reason: EngramWithheldReason,
+}
+
+/// Takes out of `resolved` every check whose command ended successfully but
+/// which the report could only send as unknown: it overlapped a write, or its
+/// output showed no passing test. Engram judges an item's bound criterion by
+/// the newest verification of its kind, and counts an indeterminate one as
+/// not passed, so sending it would hide an earlier pass at the same revision
+/// without saying anything the host can judge. A check whose command failed
+/// stays, overlapped or not: withheld, it would leave an older pass the
+/// newest record. A pass still counts only at the root's newest revision, so
+/// a withheld record cannot keep a stale one alive.
+fn engram_withhold_unjudged_successes(
+    resolved: &mut Vec<EngramResolvedCheck>,
+) -> Vec<EngramWithheldCheck> {
+    let mut withheld = Vec::new();
+    resolved.retain(|kept| {
+        if !kept.ran_successfully || kept.outcome != EngramExecutionOutcome::Unknown {
+            return true;
+        }
+        withheld.push(EngramWithheldCheck {
+            program: kept.check.command.program.clone(),
+            fingerprint: engram_check_fingerprint(&kept.check.command),
+            reason: if kept.check.overlapped {
+                EngramWithheldReason::Overlapped
+            } else {
+                EngramWithheldReason::NoPassingTest
+            },
+        });
+        false
+    });
+    withheld
+}
+
+/// The line the holder of a withheld check gets before its next prompt,
+/// naming the test by program and fingerprint as the log does: the command
+/// line itself can carry a secret.
+fn engram_withheld_check_line(withheld: &EngramWithheldCheck) -> String {
+    let why = match withheld.reason {
+        EngramWithheldReason::Overlapped => {
+            "another command, an edit or another writable session reached its worktree while it ran"
+        }
+        EngramWithheldReason::NoPassingTest => "its output shows no passing test",
+    };
+    format!(
+        "{ENGRAM_CHECK_CREDIT_LINE_PREFIX} a {} test (check {}) ended successfully but earned no \
+         credit and was not recorded: {why}. Run it again on its own to record it.",
+        withheld.program, withheld.fingerprint
+    )
 }
 
 /// The checks of `grant_id` that can be reported, with their snapshots
@@ -403,6 +480,7 @@ fn engram_resolve_turn_checks(
         };
         // Success needs positive evidence that tests ran and passed; an
         // overlapped check may have run on content no snapshot saw.
+        let ran_successfully = outcome == EngramExecutionOutcome::Succeeded;
         let outcome = if check.overlapped
             || (outcome == EngramExecutionOutcome::Succeeded && !end.showed_passing_tests)
         {
@@ -416,6 +494,7 @@ fn engram_resolve_turn_checks(
             outcome,
             basis,
             toolchain: None,
+            ran_successfully,
         });
     }
     let excess = resolved.len().saturating_sub(ENGRAM_TURN_CHECK_LIMIT);
@@ -680,18 +759,25 @@ fn engram_other_writer_in(inner: &StateInner, index: usize, root: &str) -> bool 
 fn engram_mark_checks_overlapped_by(inner: &mut StateInner, writer: usize) {
     if engram_session_may_write(inner, writer) {
         let worktrees = engram_writer_worktrees(inner, writer);
-        engram_mark_open_checks_in_worktrees(inner, &worktrees, Some(writer));
+        let session = &inner.sessions[writer].session;
+        let cause = format!(
+            "session {} ({}) was in a turn or ran a command there",
+            session.name, session.id
+        );
+        engram_mark_open_checks_in_worktrees(inner, &worktrees, Some(writer), &cause);
     }
 }
 
 /// Marks as overlapped every check still open to writes, but those of the
 /// session at `except`, that ran in one of `worktrees` (every one, for a
-/// worktree TermAl could not name). A check carries the worktree it ran in,
-/// so this touches no file system.
+/// worktree TermAl could not name), and fences every carried check there
+/// with `cause` (`engram_fence_carried_checks`). A check carries the
+/// worktree it ran in, so this touches no file system.
 fn engram_mark_open_checks_in_worktrees(
     inner: &mut StateInner,
     worktrees: &[Option<String>],
     except: Option<usize>,
+    cause: &str,
 ) {
     for (other, record) in inner.sessions.iter_mut().enumerate() {
         if Some(other) == except {
@@ -704,6 +790,7 @@ fn engram_mark_open_checks_in_worktrees(
                 check.overlapped = true;
             }
         }
+        engram_fence_carried_checks(record, worktrees, cause);
     }
 }
 
@@ -720,14 +807,19 @@ impl EngramTurnCheck {
 }
 
 /// Whether `record` holds a check of the grant it runs under that is still
-/// open to writes. A grant can end without its report (a compensating close,
-/// a project reset), leaving its checks until the next grant clears them;
-/// they will never be reported, so they no longer count.
+/// open to writes, or a carried check not yet fenced
+/// (`engram_carried_checks.rs`), which stays open across turns. A grant can
+/// end without its report (a compensating close, a project reset), leaving
+/// its checks until the next grant clears them; they will never be
+/// reported, so they no longer count.
 fn engram_has_open_check(record: &SessionRecord) -> bool {
     let engram = &record.engram;
     engram.active_turn_checks.iter().any(|check| {
         engram.active_grant_id.as_deref() == Some(check.grant_id.as_str()) && check.open_to_writes()
-    })
+    }) || engram
+        .carried_checks
+        .iter()
+        .any(|carried| carried.fence.is_none())
 }
 
 impl AppState {
@@ -893,6 +985,9 @@ impl AppState {
             .session_mut_by_index(index)
             .expect("session index should be valid");
         engram_note_session_worktree(record, &workdir, workdir_worktree);
+        // The holder's own command where one of its carried checks runs
+        // fences it, unless it only reads.
+        engram_fence_carried_for_own_command(record, &worktrees, ran);
         engram_note_command_worktrees(record, key, worktrees);
         engram_note_shell_move(
             record,
@@ -1024,6 +1119,7 @@ impl AppState {
             sandbox,
             start_basis,
             overlapped: others_running || other_writer || named_late,
+            watcher_fence: None,
             end: None,
         });
     }
@@ -1168,7 +1264,9 @@ impl AppState {
                 .any(|(running, _)| running == key)
         {
             // It may write where it is now said to run, under a check
-            // another session has open there (unless it ended meanwhile).
+            // another session has open there (unless it ended meanwhile), and
+            // under a carried check of its own session.
+            engram_fence_carried_for_own_command(record, &worktrees, ran);
             engram_note_command_worktrees(record, key, worktrees);
             engram_mark_checks_overlapped_by(&mut inner, index);
         }
@@ -1261,14 +1359,44 @@ impl AppState {
                 .retain(|(running, _)| running != key);
         }
         let workers = record.engram.capture_workers.clone();
-        let Some(check) = record
+        let Some(position) = record
             .engram
             .active_turn_checks
-            .iter_mut()
-            .find(|check| running_check(check))
+            .iter()
+            .position(|check| running_check(check))
         else {
             return;
         };
+        // A launcher full gate whose result marks only its launch is carried
+        // past this turn until its run settles, or dropped when it can earn
+        // no credit (`engram_carried_checks.rs`).
+        match engram_launch_disposition(
+            &record.engram.active_turn_checks[position].command,
+            exit.unwrap_or(EngramCommandExit::Unknown),
+        ) {
+            EngramLaunchDisposition::Ordinary => {}
+            EngramLaunchDisposition::Carry => {
+                let mut launched = record.engram.active_turn_checks.remove(position);
+                launched.overlapped |= other_writer;
+                if let Some(line) = engram_carry_check(record, launched) {
+                    eprintln!("engram> session={session_id} {line}");
+                    record.engram.set_pending_source_root_line(line);
+                }
+                return;
+            }
+            EngramLaunchDisposition::Drop(why) => {
+                let dropped = record.engram.active_turn_checks.remove(position);
+                // A compound launch may still have started a run.
+                if why == ENGRAM_LAUNCH_DROP_COMPOUND {
+                    engram_note_unmatched_launch(record, &dropped.target.root, &dropped.started_at);
+                }
+                let line = engram_dropped_launch_line(&dropped.command, why);
+                eprintln!("engram> session={session_id} {line}");
+                record.engram.set_pending_source_root_line(line);
+                return;
+            }
+        }
+        let check = &mut record.engram.active_turn_checks[position];
         let (result_lines, showed_passing_tests) = match parsed {
             Some((finished, result_lines, showed_passing_tests)) if finished == check.command => {
                 (result_lines, showed_passing_tests)
@@ -1346,8 +1474,9 @@ impl AppState {
             return;
         }
         let workspace = engram_worktree_root(path);
+        let cause = format!("TermAl wrote {}", path.display());
         let mut inner = self.inner.lock().expect("state mutex poisoned");
-        engram_mark_open_checks_in_worktrees(&mut inner, &[Some(workspace)], None);
+        engram_mark_open_checks_in_worktrees(&mut inner, &[Some(workspace)], None, &cause);
     }
 
     /// Resolves off the state lock the worktree `session_id` works in and
@@ -1409,6 +1538,9 @@ impl AppState {
                 check.overlapped = true;
             }
         }
+        // An edit report names no path, so it fences every carried check of
+        // the session whose run is still going.
+        engram_fence_carried_checks_for_edit(&mut inner.sessions[index]);
     }
 }
 
@@ -1472,7 +1604,13 @@ fn engram_turn_report(
             toolchain,
             ..
         } = resolved;
-        let check_id = format!("{session_id}:{grant_id}:{}:{}", check.sequence, check.key);
+        // The grant the check ran under, which is the report's own grant
+        // except for a gate carried from an earlier turn, whose sequence and
+        // key are unique only within the grant it launched under.
+        let check_id = format!(
+            "{session_id}:{}:{}:{}",
+            check.grant_id, check.sequence, check.key
+        );
         if mutation_granted && last_reported.as_deref() != Some(basis.source_revision.as_str()) {
             report.observations.push(EngramExecutionObservationInput {
                 observation_id: sha256_hex(format!("termal-turn-change:{check_id}").as_bytes()),
@@ -1546,7 +1684,16 @@ fn engram_turn_report(
                     end.exit,
                     &end.result_lines,
                 )),
-                refs: engram_check_refs(&check.command, end.exit, &end.result_lines),
+                refs: {
+                    let mut refs = engram_check_refs(&check.command, end.exit, &end.result_lines);
+                    // A gate carried from an earlier turn is recorded under
+                    // this turn's grant; the grant it launched under is kept
+                    // as provenance (`engram_carried_checks.rs`).
+                    if check.grant_id != grant_id {
+                        refs.push(format!("launched-under-grant:{}", check.grant_id));
+                    }
+                    refs
+                },
             });
     }
     let own_observation = |reported_revision: Option<String>| {

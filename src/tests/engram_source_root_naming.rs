@@ -912,6 +912,7 @@ fn a_watcher_event_in_a_named_root_beside_the_workdir_counts_while_the_grant_is_
             common_dir_key: "unused".to_owned(),
             short_ref: format!("w-{label}"),
             claim_id: "claim-watched".to_owned(),
+            generation: 0,
             sealed_revision: None,
         });
     });
@@ -1037,6 +1038,7 @@ fn a_watcher_event_in_the_named_root_counts_when_another_sessions_scope_carries_
             common_dir_key: "unused".to_owned(),
             short_ref: format!("w-{label}"),
             claim_id: "claim-watched".to_owned(),
+            generation: 0,
             sealed_revision: None,
         });
     });

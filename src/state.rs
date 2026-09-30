@@ -993,6 +993,10 @@ struct AppState {
     /// Must not be held at the same time as `self.inner`; review file I/O stays
     /// outside the main state mutex so disk writes do not stall unrelated state work.
     review_documents_lock: Arc<Mutex<()>>,
+    /// Serializes carried-run polls (`poll_engram_carried_runs`), so a
+    /// terminal read made off the state lock is stored before another poll,
+    /// or a checkpoint's settlement after it, can read the same run.
+    engram_carried_poll_lock: Arc<Mutex<()>>,
     /// Where published snapshots and deltas go: the ordered stream
     /// `/api/events` reads, plus per-kind observer channels in test builds.
     state_broadcast_senders: StateBroadcastSenders,

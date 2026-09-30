@@ -112,6 +112,28 @@ impl EngramSessionState {
             .map(|pending| pending.lines().map(str::to_owned).collect::<Vec<_>>())
             .unwrap_or_default();
         let uncredited = line.starts_with(ENGRAM_UNCREDITED_TEST_LINE_PREFIX);
+        // Lines about a check's credit merge into one, so several of them
+        // never push a bind or name line out. One a prompt in flight carries
+        // is left as it is, so its delivery takes it out when the runtime
+        // accepts that prompt, and the new line waits on its own.
+        let line = if line.starts_with(ENGRAM_CHECK_CREDIT_LINE_PREFIX) {
+            let in_flight = self
+                .source_root_line_delivery
+                .as_ref()
+                .map(|(delivered, _)| delivered.lines().map(str::to_owned).collect::<Vec<_>>())
+                .unwrap_or_default();
+            match lines.iter().position(|pending| {
+                pending.starts_with(ENGRAM_CHECK_CREDIT_LINE_PREFIX) && !in_flight.contains(pending)
+            }) {
+                Some(position) => {
+                    let earlier = lines.remove(position);
+                    engram_merge_credit_lines(&earlier, &line)
+                }
+                None => line,
+            }
+        } else {
+            line
+        };
         lines.retain(|pending| {
             *pending != line
                 && !(uncredited && pending.starts_with(ENGRAM_UNCREDITED_TEST_LINE_PREFIX))
@@ -163,6 +185,9 @@ struct EngramTurnSourceRoot {
     common_dir_key: String,
     short_ref: String,
     claim_id: String,
+    /// The name's generation (`EngramWorkSourceRoot::generation`), which a
+    /// check carried past this turn keeps to settle only under the same name.
+    generation: u64,
     /// The root's revision when a rename or a clear during this turn sealed
     /// it. The close uses it only when the root is gone
     /// (`engram_named_root_absent`); it knows of no edit made after the seal.
@@ -176,6 +201,7 @@ impl EngramTurnSourceRoot {
             common_dir_key: entry.common_dir_key.clone(),
             short_ref: entry.short_ref.clone(),
             claim_id: entry.claim_id.clone(),
+            generation: entry.generation,
             sealed_revision: None,
         }
     }

@@ -1951,6 +1951,7 @@ fn test_app_state_with_live_persist_channel() -> (AppState, mpsc::Receiver<Persi
         orchestrator_templates_path: Arc::new(test_temp_root.path().join("orchestrators.json")),
         orchestrator_templates_lock: Arc::new(Mutex::new(())),
         review_documents_lock: Arc::new(Mutex::new(())),
+        engram_carried_poll_lock: Arc::new(Mutex::new(())),
         state_broadcast_senders: StateBroadcastSenders {
             stream_events: broadcast::channel(16).0,
             state_events: broadcast::channel(16).0,

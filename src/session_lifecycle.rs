@@ -1014,6 +1014,11 @@ impl AppState {
             EngramCheckpointOutcome::Failed(detail) => Some(detail),
             EngramCheckpointOutcome::Skipped | EngramCheckpointOutcome::Succeeded => None,
         };
+        // Where the session writes, for the overlap marks the drained turn's
+        // start makes under the lock.
+        if options.dispatch_queued_prompts_on_success {
+            self.note_engram_session_worktree_off_lock(session_id);
+        }
         let prepared_queued_turn = options
             .dispatch_queued_prompts_on_success
             .then(|| self.prepare_next_queued_turn_engram_off_lock(session_id))

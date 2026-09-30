@@ -754,6 +754,7 @@ impl AppState {
             orchestrator_templates_path: Arc::new(orchestrator_templates_path),
             orchestrator_templates_lock: Arc::new(Mutex::new(())),
             review_documents_lock: Arc::new(Mutex::new(())),
+            engram_carried_poll_lock: Arc::new(Mutex::new(())),
             state_broadcast_senders,
             file_events: broadcast::channel(256).0,
             file_events_revision: Arc::new(AtomicU64::new(0)),

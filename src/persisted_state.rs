@@ -350,6 +350,11 @@ struct PersistedSessionRecord {
     engram_begins_recorded: bool,
     #[serde(default)]
     engram_dispatch_generation: u64,
+    /// One marker per background full gate carried when the record was
+    /// written (`engram_carried_checks.rs`). A host restart loses the carried
+    /// checks themselves; loading tells each holder its run lost its credit.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    engram_carried_launches: Vec<EngramCarriedLaunchMarker>,
     #[serde(skip)]
     message_start_index: usize,
     /// Runtime-only instruction for the SQLite serializer. Full snapshots set
@@ -440,6 +445,12 @@ impl PersistedSessionRecord {
             engram_uncertain_grant_id: record.engram.uncertain_grant_id.clone(),
             engram_begins_recorded: record.engram.begins_recorded,
             engram_dispatch_generation: record.engram.dispatch_generation,
+            engram_carried_launches: record
+                .engram
+                .carried_checks
+                .iter()
+                .map(EngramCarriedCheck::marker)
+                .collect(),
             message_start_index: record.message_start_index,
             persist_prompt_history: true,
             session,
@@ -542,6 +553,13 @@ impl PersistedSessionRecord {
         // is rebuilt from it so a loaded session never advertises a stale
         // paused/unpaused state from an older snapshot.
         record.session.queue_paused = record.orchestrator_auto_dispatch_blocked;
+        // A background full gate carried when the host went down lost its
+        // credit: the host could not watch its worktree meanwhile.
+        for marker in &self.engram_carried_launches {
+            let line = engram_carried_lost_to_restart_line(marker);
+            eprintln!("engram> session={} {line}", record.session.id);
+            record.engram.set_pending_source_root_line(line);
+        }
         // Migrate older retained entries only when their transcript position
         // is still known. Current records explicitly distinguish a definitive
         // unpromoted disposition from missing legacy evidence; only the latter

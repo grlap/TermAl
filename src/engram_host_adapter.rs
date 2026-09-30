@@ -2239,6 +2239,18 @@ struct EngramSessionState {
     /// TermAl saw them start and end (`engram_turn_checks.rs`). In memory
     /// only; cleared when the next grant is mirrored.
     active_turn_checks: Vec<EngramTurnCheck>,
+    /// Launcher full gates whose result marked only their launch, carried
+    /// past the turn that launched them until they settle
+    /// (`engram_carried_checks.rs`). In memory; a marker of each is persisted
+    /// so a restart can tell the holder the run lost its credit.
+    carried_checks: Vec<EngramCarriedCheck>,
+    /// The run directories carried checks of this session settled or
+    /// dropped used, newest last (`engram_note_consumed_runs`). In memory.
+    carried_consumed_runs: Vec<PathBuf>,
+    /// Background full-gate launches of this session that left without a
+    /// run found for them, by root key and launch time, newest last
+    /// (`engram_note_unmatched_launch`). In memory.
+    carried_unmatched_launches: Vec<(String, String)>,
     /// Commands running in that turn, so a check knows whether another
     /// command ran beside it, each with the directory its runtime reported,
     /// which a repeated start may leave out. In memory only.
@@ -2390,6 +2402,9 @@ impl Default for EngramSessionState {
             work_binding_refresh_rebinds: 0,
             turn_begun_since_binding_read: false,
             active_turn_checks: Vec::new(),
+            carried_checks: Vec::new(),
+            carried_consumed_runs: Vec::new(),
+            carried_unmatched_launches: Vec::new(),
             running_command_keys: BTreeMap::new(),
             running_command_worktrees: Vec::new(),
             workdir_worktree: None,
@@ -3803,6 +3818,12 @@ impl AppState {
         turn_outcome: Option<EngramExecutionOutcome>,
         project_reset_owner_generation: Option<u64>,
     ) -> EngramCheckpointOutcome {
+        // A carried gate whose run ended since the index last looked is read
+        // now, so this checkpoint can settle it (`engram_carried_checks.rs`);
+        // a session with none to read waits on no poll.
+        if self.engram_session_has_pollable_carried_checks(session_id) {
+            self.poll_engram_carried_runs();
+        }
         // First, under the lock: which grant this checkpoint would close and
         // whether its report needs a fresh basis. Nothing is claimed yet, so
         // the bounded basis capture that follows runs outside the
@@ -3829,6 +3850,8 @@ impl AppState {
                         place,
                         sealed,
                         inner.sessions[index].engram.active_turn_checks.clone(),
+                        engram_carried_checks_to_settle(&inner.sessions[index]),
+                        inner.sessions[index].engram.capture_workers.clone(),
                     )),
                     EngramTurnReportPlan::Nothing | EngramTurnReportPlan::Cached(_) => None,
                 };
@@ -3849,8 +3872,8 @@ impl AppState {
         // the three together, so the close that gates the next prompt waits
         // at most the freeze bound once: what is not ready by then is
         // withheld or goes unlabelled.
-        let (end_basis, mut resolved_checks) = match capture {
-            Some((place, sealed, checks)) => {
+        let (end_basis, mut resolved_checks, mut settled_carried) = match capture {
+            Some((place, sealed, checks, carried, workers)) => {
                 let deadline = std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT;
                 let end_basis = self.engram_turn_end_basis_within(
                     &place,
@@ -3859,9 +3882,11 @@ impl AppState {
                 );
                 let resolved_checks =
                     engram_resolve_turn_checks(session_id, &planned_grant_id, checks, deadline);
-                (end_basis, resolved_checks)
+                // Carried gates settle within the same budget.
+                let settled_carried = engram_settle_carried_checks(&carried, &workers, deadline);
+                (end_basis, resolved_checks, settled_carried)
             }
-            None => (None, Vec::new()),
+            None => (None, Vec::new(), Vec::new()),
         };
         #[cfg(test)]
         wait_at_test_engram_turn_report_gate(self, session_id);
@@ -3910,6 +3935,35 @@ impl AppState {
                         &inner.sessions[index].engram.active_turn_checks,
                         &mut resolved_checks,
                     );
+                    // Carried gates: the settled ones credited while still
+                    // unfenced, the ones that can no longer be credited
+                    // dropped, and their holder told either way. They come
+                    // first, since they launched before this turn's checks.
+                    let carried_count = engram_credit_carried_checks(
+                        &mut inner,
+                        index,
+                        session_id,
+                        std::mem::take(&mut settled_carried),
+                        &mut resolved_checks,
+                    );
+                    // A check the host cannot judge after a successful run
+                    // is left out and its holder told why, before the next
+                    // prompt.
+                    for withheld in engram_withhold_unjudged_successes(&mut resolved_checks) {
+                        eprintln!(
+                            "engram> session={session_id} {} check {} is not reported: its \
+                             command succeeded but {:?} left it unjudged",
+                            withheld.program, withheld.fingerprint, withheld.reason
+                        );
+                        inner
+                            .session_mut_by_index(index)
+                            .expect("session index should be valid")
+                            .engram
+                            .set_pending_source_root_line(engram_withheld_check_line(&withheld));
+                    }
+                    // A credited carried gate is never withheld (its outcome
+                    // is passed or failed), so it still leads the checks.
+                    engram_trim_turn_checks(&mut resolved_checks, carried_count);
                     let (report, fallback) = engram_turn_report(
                         &inner.sessions[index],
                         session_id,

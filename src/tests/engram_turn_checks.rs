@@ -61,6 +61,11 @@ fn a_test_command_is_recognised_through_one_shell_wrapper() {
         assert!(check.simple, "{command}");
     }
     assert_eq!(recognised("cargo test").program, "cargo");
+    assert_eq!(
+        recognised("node scripts/test-launcher.mjs full --detach --notify session-1").program,
+        "node",
+        "a detached full gate is a launch the host carries"
+    );
     for (command, dialect) in [
         ("cargo test", EngramShellDialect::Unknown),
         ("bash -lc 'cargo test'", EngramShellDialect::Bash),
@@ -92,7 +97,9 @@ fn a_test_command_is_recognised_through_one_shell_wrapper() {
         "cd crate && cargo test",
         "npm install",
         "echo cargo test",
-        "node scripts/test-launcher.mjs full --detach --notify session-1",
+        // Only a full gate may be detached: it is carried as a launch
+        // (`engram_carried_checks.rs`).
+        "node scripts/test-launcher.mjs live --detach --notify session-1",
         // A focused launcher run executes whatever follows `--`.
         "node scripts/test-launcher.mjs focused -- true",
         "node scripts/test-launcher.mjs focused",
@@ -474,6 +481,7 @@ fn a_test_run_passes_only_on_evidence_that_tests_passed() {
         sandbox: None,
         start_basis: engram_ready_basis_capture(),
         overlapped: false,
+        watcher_fence: None,
         end: Some(EngramTurnCheckEnd {
             completed_at: "2026-09-24T00:00:01.000Z".to_owned(),
             exit: EngramCommandExit::Code(0),
@@ -490,6 +498,66 @@ fn a_test_run_passes_only_on_evidence_that_tests_passed() {
     );
     assert_eq!(resolved.len(), 1);
     assert_eq!(resolved[0].outcome, EngramExecutionOutcome::Unknown);
+}
+
+#[test]
+fn only_a_success_the_host_cannot_judge_is_withheld() {
+    // A downgraded success would be sent as unknown and hide an earlier pass;
+    // a failure, overlapped or not, and a judged success are kept.
+    let resolved = |outcome, ran_successfully, overlapped| {
+        let mut check = finished_check(0, engram_ready_basis_capture());
+        check.overlapped = overlapped;
+        EngramResolvedCheck {
+            end: check.end.clone().expect("a finished check"),
+            check,
+            outcome,
+            basis: EngramExecutionSourceBasis {
+                workspace_id: "C:/w".to_owned(),
+                source_revision: "revision".to_owned(),
+            },
+            toolchain: None,
+            ran_successfully,
+        }
+    };
+    let mut checks = vec![
+        resolved(EngramExecutionOutcome::Unknown, true, true),
+        resolved(EngramExecutionOutcome::Unknown, true, false),
+        resolved(EngramExecutionOutcome::Unknown, false, true),
+        resolved(EngramExecutionOutcome::Failed, false, false),
+        resolved(EngramExecutionOutcome::Succeeded, true, false),
+    ];
+
+    let withheld = engram_withhold_unjudged_successes(&mut checks);
+
+    assert_eq!(
+        withheld
+            .iter()
+            .map(|check| check.reason)
+            .collect::<Vec<_>>(),
+        [
+            EngramWithheldReason::Overlapped,
+            EngramWithheldReason::NoPassingTest
+        ]
+    );
+    assert_eq!(
+        checks.iter().map(|check| check.outcome).collect::<Vec<_>>(),
+        [
+            EngramExecutionOutcome::Unknown,
+            EngramExecutionOutcome::Failed,
+            EngramExecutionOutcome::Succeeded
+        ]
+    );
+    let line = engram_withheld_check_line(&withheld[0]);
+    assert!(
+        line.starts_with(&format!(
+            "{ENGRAM_CHECK_CREDIT_LINE_PREFIX} a cargo test (check "
+        )),
+        "{line}"
+    );
+    assert!(
+        !line.contains("--"),
+        "the command line is not repeated: {line}"
+    );
 }
 
 #[test]
@@ -756,6 +824,18 @@ impl CheckedTurn {
         subdirectory: Option<&str>,
         checkpoints: Vec<ScriptedEngramControlResponse>,
     ) -> Self {
+        Self::start_with_turns(label, claimed, subdirectory, checkpoints, 1)
+    }
+
+    /// As `start_with`, with Engram answering the work binding for `turns`
+    /// dispatched turns, so a test may dispatch the later ones itself.
+    fn start_with_turns(
+        label: &str,
+        claimed: bool,
+        subdirectory: Option<&str>,
+        checkpoints: Vec<ScriptedEngramControlResponse>,
+        turns: usize,
+    ) -> Self {
         use_toolchain_label(Some(FIXTURE_TOOLCHAIN));
         let (state, runtime_rx) =
             test_app_state_with_delegation_codex_runtime(&format!("engram-turn-check-{label}"));
@@ -799,7 +879,7 @@ impl CheckedTurn {
             ]
             .into_iter()
             .chain(checkpoints),
-            [Ok(binding)],
+            (0..turns).map(|_| Ok(binding.clone())).collect::<Vec<_>>(),
         );
         install_control_only_transport(&state, transport.clone());
         let dispatch = match state
@@ -1096,23 +1176,69 @@ fn a_test_the_source_moved_under_is_withheld() {
     assert_eq!(observations[0]["source_changed"], true);
 }
 
+/// Asserts that `checkpoint` carries no evidence for the test the turn ran,
+/// only the turn's own observation, and that the holder was told before its
+/// next prompt that the test earned no credit, and `why`.
+fn assert_withheld_and_told(turn: &CheckedTurn, checkpoint: &Value, why: &str) {
+    assert!(
+        checkpoint.get("verification_evidence").is_none(),
+        "{checkpoint:#}"
+    );
+    assert!(
+        checkpoint.get("environment_evidence").is_none(),
+        "{checkpoint:#}"
+    );
+    assert_eq!(
+        observations(checkpoint).len(),
+        1,
+        "only the turn's own observation: {checkpoint:#}"
+    );
+    let line = turn
+        .record(|record| record.engram.pending_source_root_line.clone())
+        .expect("the holder should be told");
+    assert!(
+        line.contains("ended successfully but earned no credit") && line.contains(why),
+        "{line}"
+    );
+}
+
+/// Runs a command beside the check the turn is running, as another command
+/// of the same agent.
+fn run_beside(turn: &CheckedTurn) {
+    let mut recorder = turn.recorder();
+    recorder
+        .command_started("other", "git status")
+        .expect("the start should record");
+    recorder
+        .command_completed_with_exit(
+            "other",
+            "git status",
+            "",
+            CommandStatus::Success,
+            EngramCommandExit::Code(0),
+        )
+        .expect("the end should record");
+}
+
 #[test]
-fn a_test_another_command_ran_beside_is_reported_as_unknown() {
+fn a_successful_test_another_command_ran_beside_is_withheld_and_its_holder_told() {
+    // Sent as unknown, it would be the newest verification of its kind and
+    // hide an earlier pass at the same revision.
     let turn = CheckedTurn::start("beside", true);
     turn.run("check-1", SIZE_TEST, EngramCommandExit::Code(0), || {
-        let mut recorder = turn.recorder();
-        recorder
-            .command_started("other", "git status")
-            .expect("the start should record");
-        recorder
-            .command_completed_with_exit(
-                "other",
-                "git status",
-                "",
-                CommandStatus::Success,
-                EngramCommandExit::Code(0),
-            )
-            .expect("the end should record");
+        run_beside(&turn);
+    });
+    let checkpoint = turn.finish();
+
+    assert_withheld_and_told(&turn, &checkpoint, "reached its worktree while it ran");
+}
+
+#[test]
+fn a_failed_test_another_command_ran_beside_is_still_reported() {
+    // Withheld, a failure would leave an older pass the newest record.
+    let turn = CheckedTurn::start("beside-failed", true);
+    turn.run("check-1", SIZE_TEST, EngramCommandExit::Code(1), || {
+        run_beside(&turn);
     });
     let checkpoint = turn.finish();
 
@@ -1121,7 +1247,30 @@ fn a_test_another_command_ran_beside_is_reported_as_unknown() {
 }
 
 #[test]
-fn a_test_another_session_in_the_workspace_was_busy_during_is_unknown() {
+fn a_successful_test_whose_output_shows_no_passing_test_is_withheld_and_its_holder_told() {
+    let turn = CheckedTurn::start("no-passing-test", true);
+    let mut recorder = turn.recorder();
+    recorder
+        .command_started("check-1", SIZE_TEST)
+        .expect("the start should record");
+    turn.wait_for_snapshots();
+    recorder
+        .command_completed_with_exit(
+            "check-1",
+            SIZE_TEST,
+            "running 0 tests\ntest result: ok. 0 passed; 0 failed",
+            CommandStatus::Success,
+            EngramCommandExit::Code(0),
+        )
+        .expect("the end should record");
+    turn.wait_for_snapshots();
+    let checkpoint = turn.finish();
+
+    assert_withheld_and_told(&turn, &checkpoint, "its output shows no passing test");
+}
+
+#[test]
+fn a_successful_test_another_session_in_the_workspace_was_busy_during_is_withheld() {
     // Another writable session in the same workspace that reported a command
     // while the check ran may have written under it, even though it was idle
     // at the check's start and end.
@@ -1152,11 +1301,7 @@ fn a_test_another_session_in_the_workspace_was_busy_during_is_unknown() {
         });
         let checkpoint = turn.finish();
 
-        assert_eq!(
-            observations(&checkpoint)[0]["outcome"],
-            "unknown",
-            "{subdirectory:?}"
-        );
+        assert_withheld_and_told(&turn, &checkpoint, "reached its worktree while it ran");
     }
 }
 
@@ -1186,6 +1331,7 @@ fn a_check_stays_open_to_writes_until_both_snapshots_are_taken() {
         sandbox: None,
         start_basis: settled(),
         overlapped: false,
+        watcher_fence: None,
         end: Some(EngramTurnCheckEnd {
             completed_at: "2026-09-24T00:00:01.000Z".to_owned(),
             exit: EngramCommandExit::Code(0),
@@ -1219,7 +1365,10 @@ fn a_check_stays_open_to_writes_until_both_snapshots_are_taken() {
 /// A finished check of `CHECK_GRANT` at `sequence` whose closing snapshot is
 /// `end_basis`.
 /// Also used by the source-root naming tests, a sibling module.
-pub(super) fn finished_check(sequence: usize, end_basis: Arc<EngramBasisCapture>) -> EngramTurnCheck {
+pub(super) fn finished_check(
+    sequence: usize,
+    end_basis: Arc<EngramBasisCapture>,
+) -> EngramTurnCheck {
     EngramTurnCheck {
         grant_id: CHECK_GRANT.to_owned(),
         key: format!("check-{sequence}"),
@@ -1235,6 +1384,7 @@ pub(super) fn finished_check(sequence: usize, end_basis: Arc<EngramBasisCapture>
         sandbox: None,
         start_basis: engram_ready_basis_capture(),
         overlapped: false,
+        watcher_fence: None,
         end: Some(EngramTurnCheckEnd {
             completed_at: "2026-09-24T00:00:01.000Z".to_owned(),
             exit: EngramCommandExit::Code(0),
@@ -1624,6 +1774,7 @@ fn an_overlap_marked_while_the_checkpoint_waited_is_carried_into_the_report() {
             source_revision: "revision".to_owned(),
         },
         toolchain: None,
+        ran_successfully: true,
     };
     let mut marked = finished_check(0, engram_ready_basis_capture());
     marked.overlapped = true;
@@ -1729,7 +1880,7 @@ fn a_background_command_counts_as_running_for_the_rest_of_the_turn() {
     turn.run("check-1", SIZE_TEST, EngramCommandExit::Code(0), || {});
     let checkpoint = turn.finish();
 
-    assert_eq!(observations(&checkpoint)[0]["outcome"], "unknown");
+    assert_withheld_and_told(&turn, &checkpoint, "reached its worktree while it ran");
 }
 
 #[test]
@@ -1945,6 +2096,7 @@ fn resolved_check(sequence: usize, revision: &str, toolchain: &str) -> EngramRes
             source_revision: revision.to_owned(),
         },
         toolchain: Some(toolchain.to_owned()),
+        ran_successfully: true,
     }
 }
 
@@ -3747,6 +3899,7 @@ fn name_turn_source_root(turn: &CheckedTurn) -> PathBuf {
             common_dir_key,
             short_ref: "w-turn-check".to_owned(),
             claim_id: "claim-turn-check".to_owned(),
+            generation: 0,
             sealed_revision: None,
         });
     });
@@ -3813,7 +3966,8 @@ fn a_test_outside_the_named_root_is_withheld_and_the_agent_is_told() {
 fn a_session_in_a_turn_on_a_named_root_is_a_writer_there_too() {
     let turn = CheckedTurn::start("writer-in-named-root", true);
     let worktree = name_turn_source_root(&turn);
-    let root_key = engram_path_key(&fs::canonicalize(&worktree).expect("the worktree canonicalizes"));
+    let root_key =
+        engram_path_key(&fs::canonicalize(&worktree).expect("the worktree canonicalizes"));
 
     let worktrees = {
         let inner = turn.state.inner.lock().expect("state mutex poisoned");
@@ -3853,3 +4007,8 @@ mod one_call_checks;
 // Where a command of a shell TermAl lost may write, likewise a child module.
 #[path = "engram_lost_shell_overlap.rs"]
 mod lost_shell_overlap;
+
+// Background and detached gates carried past their turn, likewise a child
+// module.
+#[path = "engram_carried_checks.rs"]
+mod carried_checks;

@@ -795,7 +795,8 @@ reports.
   `npx vitest`, `npx jest`, `pytest`, `python -m pytest`, `go test`, or the
   test launcher (`node …/test-launcher.mjs full|live`, or `focused -- X`
   where X is itself a recognised test, since a focused run executes whatever
-  follows `--`) without `--detach`. A run with `--no-run`, `--list`,
+  follows `--`), with `--detach` only for a full gate, whose launch is
+  carried (below). A run with `--no-run`, `--list`,
   `--collect-only` (pytest's `--co`), go's `-list` or `-c` tests nothing
   and is not recognised. A line may instead be the one-call form, exactly
   `pushd "DIR" && TEST`: a bare line with no wrapper, `pushd` in lower case
@@ -942,7 +943,9 @@ reports.
   and any other error, or an interrupted command, is unknown. A background
   run's result marks its launch, so it is not reported, and it counts as
   running for the rest of the turn, taking no closing snapshot; a denied
-  command stops counting as running.
+  command stops counting as running. A launcher full gate launched in the
+  background, or detached with `--detach`, is instead carried past its
+  turn and settled when its run ends (Carried background gates, below).
 - **Passed needs evidence.** A run that tested nothing can exit 0, so a check
   claims success only when a result line shows tests passed: cargo's
   `test result:` or nextest's `Summary` with more than zero passed, pytest's
@@ -1128,6 +1131,165 @@ reports.
 - **Bounds.** At most 16 checks per turn, the latest kept, and 4 environment
   records; a check past them is reported without one, which an unpinned
   requirement allows. A source basis over 512 bytes is not sent.
+- **A success the host cannot judge is withheld.** A check whose own command
+  ended successfully but which could only be reported as unknown, because it
+  overlapped a write or its output shows no passing test, is not sent at all.
+  Engram judges a criterion bound to a kind by the newest verification of
+  that kind and counts an indeterminate one as not passed, so an unknown
+  record would hide an earlier pass at the same revision while saying
+  nothing the host can judge. The host logs it, and its holder is told
+  before the next prompt that the check earned no credit and why. A check
+  whose command failed is sent as before, overlapped or not: withheld, it
+  would leave an older pass the newest record. A pass still counts only at
+  the root's newest revision, so withholding cannot keep a stale one alive.
+
+#### Carried background gates
+
+A full gate outlasts a Claude tool call, which is capped at 10 minutes, so it
+runs in the runtime's background mode or detached, and its result marks only
+its launch (`src/engram_carried_checks.rs`).
+
+- **Carrying.** When the launch of `node …/test-launcher.mjs full` (in the
+  background, or with `--detach` and a successful launch) is recognised in a
+  turn on claimed work measured in its named source root, the check moves off
+  the turn and is carried by its session, with its start source basis, its
+  claim and the root's generation. A launch in a turn with no named root, in
+  another worktree, or beside another command or writer is not carried, and
+  the holder is told why. A launch that can earn no credit is dropped, never
+  recorded as a test result, and its holder is told why: one on a line that
+  runs more than the gate (`… full; git checkout …`,
+  `… full --detach && …`), since what the rest of the line wrote in that
+  call is outside the fence, and a `--detach` launch that failed, which
+  started no run. A launch carried less than two minutes after another
+  launch of the session in the same worktree that has no run matched to it
+  (one fenced before a poll found its run, one that left unmatched, or one
+  dropped or not carried at its launch, which may still have started a run)
+  is refused at the next checkpoint: a run found then could be either's, and
+  the host does not guess. Two minutes bounds what matching can confuse,
+  since it takes only runs that started at most ten seconds before a launch;
+  every line that asks the holder to launch again names that wait. A
+  delegated session, measured in its workdir with no named root, never has a
+  gate carried and is told to leave the gate to the root session holding the
+  claim. A file change the workspace
+  watcher sees in the worktree while a full gate is being launched fences it
+  once it is carried. A session carries at most four; a fifth drops the
+  oldest, whose holder is told.
+- **The fence.** From its launch until the host reads its run as ended,
+  any write the host observes in its worktree refuses it, and the refusal
+  names what wrote: another writable session's turn or command there (a
+  session's worktree is resolved before its turn starts, so one that has
+  reported nothing yet counts only where it works); a write through TermAl;
+  a command of the holder's own whose place may be that worktree, including
+  one a later description places there, unless the holder is a Claude
+  session and the command only reads (what the read-only reviewer policy
+  allows, such as `git status` or `git diff`, or the repository's own
+  `node scripts/test-launcher.mjs summary RUN` run from its root; the line is
+  read by the Bash rules Claude's commands follow, so another runtime's
+  commands always fence), named by its program (after any leading
+  `NAME=value` assignments) and a fingerprint of its line, never the line,
+  which can carry a secret; any file edit the holder
+  reports, since an edit report names no path; and a file the workspace
+  watcher sees change in the worktree (outside the directories it ignores,
+  such as `.git`, `target` and `node_modules`), or any file change at all
+  in a batch that touches more than 256 directories. The watcher reports
+  late, so its changes fence even after the run was read as ended; nothing
+  else does, since a write after the run's end cannot reach what it tested,
+  and one still there at settlement changes the source basis. The holder's
+  commands in other worktrees do not fence it.
+- **The run.** The host finds the run in the worktree's Git `review-runs`
+  directory: the earliest full-gate run whose request names that root (both
+  resolved, so a launch through a link or alias of the directory still finds
+  its run), that started at or after the launch, less ten seconds for the
+  lag between the launcher's start and the host's stamp of it, and, when the
+  request names its owner (the launching session's `TERMAL_SESSION_ID`), is
+  owned by the holder. A run that started in those ten seconds but had
+  already ended by the launch belongs to an earlier launch, and so does a
+  run a settled or dropped launch of the session used (the newest sixteen
+  are kept), so neither is taken. On the run index's tick, and before each
+  checkpoint, it reads the run's `results.json`; the first read that finds
+  it terminal (it has `ended`, or a state other than `running`) keeps the
+  record's SHA-256. The reads run off the state lock, one poll at a time, so
+  a read is stored before any other poll, or a checkpoint that polls first,
+  can read the same run, and a check read as terminal is not read by a poll
+  again; settlement reads the record once more and refuses one that differs
+  from that first terminal read. (Should two terminal reads ever disagree,
+  the check is refused too.) A checkpoint of a session with nothing to read
+  does not wait on a poll. A request root on a network path is compared as
+  written, never resolved, since resolving it can block. A check
+  that can no longer be credited (fenced, its launcher gone, its run never
+  found, its six hours over) is not read again and finds no new run, so a
+  later launch of the session can take one. A run directory whose request
+  can never match the launch (another root, mode or owner, or an earlier
+  start) is not read again. If no run is found within ten minutes of the
+  launch, the launch started none. A run with no terminal record whose
+  responsible process (`results.json`'s pid, else the request's
+  `creatorPid`) is provably gone, by the run index's own liveness test, will
+  never end. The record is read again after that test, since the launcher
+  may have ended the run and exited in between, and a read that names
+  another process (a detached run's creator handing over to its worker) has
+  that one tested too.
+- **Settlement.** At the holder's next checkpoint on the same claim id,
+  measured in the same root generation, a carried check whose run is
+  terminal settles. It is credited as a test check when: the record still
+  has the digest first read; every stage its request lists passed with code
+  0 and no error, among them a test stage the host recognises (the full
+  gate's `rust-tests` or `vitest`, as for a foreground gate), and the exit
+  code is 0 (a complete record that says failed is recorded as failed);
+  its expected, before and after input fingerprints, and the request's, are
+  present and equal; a fresh source basis equals the one taken at the
+  launch; nothing fenced it; and the host still records the same generation
+  for its claim. A source snapshot not ready within the checkpoint's budget
+  judges nothing: the check stays carried, still fenced and pinned to its
+  first terminal read, for the next checkpoint. One that failed, at the
+  launch or at settlement, never will give a basis, so the check is refused
+  at once. Its producer observation is
+  timed at the run's `ended`, which is also the verification's
+  `completed_at`; it is stored under the settling turn's grant, and the
+  grant it launched under is kept as the `launched-under-grant:ID`
+  reference. Its observation id is built from the grant it launched under,
+  where its command's sequence and key are unique. The summary names the
+  run, each stage in the launcher's own line (`rust-tests: failed exit=101`),
+  the run directory and the input fingerprint; the stage lines make a failed
+  run's exit its stages' own even in the one-call form, where an exit alone
+  could be its `pushd`'s.
+- **Refusal.** A carried check that fails any of those is dropped, not sent,
+  and its holder is told before the next prompt that it earned no credit and
+  why. A run that ended neither passed nor failed (stopped, or interrupted,
+  such as one the launcher's `recover` settled as failed and interrupted) is
+  neither a pass nor a failure: it is dropped, never recorded as failed. So
+  is a run whose launcher is gone without a terminal record; the holder is
+  told to settle it with `recover` and run the gate again. So is a run whose
+  record lacks an input fingerprint from before or after its stages (one
+  that ended before the launcher measured its input), a launch whose run was
+  not found within ten minutes, one whose claim was released or whose root
+  was renamed or cleared, and one six hours after its launch whose run has
+  not ended, or has ended but was never settled because the holder's
+  checkpoints since were on another claim or source root; the holder is told
+  which. Every line about a check's credit is logged as it is set. Those
+  that wait for the same prompt are merged into one, so they seldom push out
+  a line about the session's source root; past 1,600 bytes the merge keeps
+  the newest and cuts the front, saying so. A line a prompt in flight
+  carries is not merged into, so accepting that prompt takes it out and the
+  new one waits for the next. A reset of the session's Engram
+  state drops its carried gates: when the project's Engram settings change,
+  each holder is told its gate earned no credit, and when the project is
+  removed, which ends Engram for the session, the gates are logged.
+- **Restart.** Carried checks live in memory; a marker of each is persisted
+  with the session. A host restart loses the checks, since the host could not
+  watch the worktree while it was down, and loading the marker tells the
+  holder that the run lost its credit.
+- **What it attests.** The host observed the launch, observed no write it
+  can see reach the worktree until settlement, and read a terminal record
+  that agrees with itself and with the source. It does not attest that no
+  write happened outside the host's sight: the launcher's records are
+  agent-writable, and its run directory lies in the main checkout's Git
+  metadata, outside the fenced worktree, so a rewrite there before the
+  first terminal read is not seen. Only a Claude session's Bash tool
+  reports its commands to the host: a command run through its PowerShell
+  tool never reaches the fence, and only the workspace watcher, which skips
+  its ignored directories and unwatched worktrees, can see what it wrote. As
+  for a foreground check, the evidence model assumes an agent acting in good
+  faith. [Tests](../test.md) names the form agents use.
 
 The whole report is cached per grant and resent verbatim. Engram refuses a
 report whole, and evidence adds ways to be refused, so a refused report that

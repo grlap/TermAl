@@ -954,3 +954,8 @@ fn live_root_restart_after_lost_begin_never_blindly_redelivers() {
     drop(restarted);
     drop(root_guard);
 }
+
+// Carried background gates against the real store, a child module so the
+// launcher's `live` mode runs them.
+#[path = "engram_carried_gate_live.rs"]
+mod carried_gate_live;

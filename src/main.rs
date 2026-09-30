@@ -747,6 +747,7 @@ include!("engram_evaluation_refusal.rs");
 include!("engram_work_binding_refresh.rs");
 include!("engram_held_claims.rs");
 include!("engram_turn_checks.rs");
+include!("engram_carried_checks.rs");
 include!("engram_check_recognition.rs");
 include!("engram_one_call.rs");
 include!("engram_check_paths.rs");
