@@ -129,6 +129,8 @@ retried. It then sends the completion under the run's own key, but only when run
 by the session that owns the run; a coordinator may settle and read the run but
 not speak for its owner. A second `recover` changes nothing and never resends a
 delivered completion.
+[Host architecture](features/host-architecture.md#84-launcher-recovery-is-a-declaration-about-a-run)
+describes how a recovered run is recorded in the proposed execution record.
 
 Only the launcher's own pid is checked. A stage process that outlived a killed
 foreground launcher is not waited for: its exit status and diagnostics are never

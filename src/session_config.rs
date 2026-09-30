@@ -883,6 +883,8 @@ impl AppState {
         }
         let agent = inner.sessions[index].session.agent;
         let engram_mcp = engram_mcp_runtime_config_for_session_locked(&inner, session_id);
+        let host_mcp_servers_only =
+            session_is_acceptance_evaluator_child_locked(&inner, session_id);
         let record = inner
             .session_mut_by_index(index)
             .expect("session index should be valid");
@@ -953,6 +955,7 @@ impl AppState {
                 record.external_session_id.clone(),
                 delegation_mcp_config,
                 engram_mcp.as_ref().map(|config| &config.stdio),
+                host_mcp_servers_only,
                 Some(response_tx),
             )
             .map_err(|err| {

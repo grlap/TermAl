@@ -3271,6 +3271,7 @@ fn start_turn_on_record_rejects_remote_proxy_sessions() {
         None,
         None,
         None,
+        false,
     ) {
         Ok(_) => panic!("remote proxy sessions should reject local turn dispatch"),
         Err(error) => error,
@@ -3312,6 +3313,7 @@ fn start_turn_on_record_rejects_invalid_remote_proxy_identity() {
         None,
         None,
         None,
+        false,
     ) {
         Ok(_) => panic!("invalid proxy identity should reject local turn dispatch"),
         Err(error) => error,

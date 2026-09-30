@@ -9,6 +9,9 @@ project. It is not a full PTY emulator. Each submitted command runs through the
 backend, streams output back to the panel, and is kept in that terminal tab's
 history.
 
+[Host architecture](./host-architecture.md) proposes one owner for launching
+and supervising this and every other host process.
+
 ## UX
 
 - Terminal tabs can be opened from workspace context.

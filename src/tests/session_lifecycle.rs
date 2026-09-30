@@ -228,6 +228,7 @@ fn lightweight_test_state_rejects_direct_claude_runtime_spawning() {
         None,
         String::new(),
         None,
+        false,
         None,
     );
 

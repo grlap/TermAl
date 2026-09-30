@@ -13,6 +13,8 @@
 //   `ClaudeApprovalMode` enum to the right `--permission-mode` flag
 // - `claude_cli_persistent_args` — argv for a long-lived stdio session,
 //   matching the Claude Code VS Code extension process contract
+// - `claude_cli_mcp_config_args` — the host-written MCP configuration,
+//   alone when the session may use no other MCP server
 //
 // **Inbound message parsing** (called from `claude.rs` when a
 // handshake / system message arrives):
@@ -120,6 +122,24 @@ fn claude_cli_persistent_args(
     if let Some(resume_session_id) = resume_session_id {
         args.extend(["--resume".to_owned(), resume_session_id.to_owned()]);
     }
+    args
+}
+
+/// Points Claude at the host-written MCP configuration. Claude also loads
+/// servers from the user, project and local settings it reads; with
+/// `host_servers_only` it loads the host's servers alone, so a server the
+/// user's configuration names cannot reach a session that must have none.
+/// The strict flag goes first because `--mcp-config` takes a list.
+fn claude_cli_mcp_config_args(
+    config_path: &FsPath,
+    host_servers_only: bool,
+) -> Vec<std::ffi::OsString> {
+    let mut args = Vec::new();
+    if host_servers_only {
+        args.push("--strict-mcp-config".into());
+    }
+    args.push("--mcp-config".into());
+    args.push(config_path.as_os_str().to_owned());
     args
 }
 

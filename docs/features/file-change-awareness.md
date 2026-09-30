@@ -28,6 +28,8 @@ and tab switches. [Code Navigation MCP](./code-navigation-mcp.md) consumes the
 same file-change invalidation signal for source indexes. When a persisted buffer
 is rehydrated, the rebase / conflict semantics described in this document are
 what decide how that buffer meets the current on-disk version.
+[Host architecture](./host-architecture.md) proposes that the watcher's
+consumers read its coalesced batches through one host event stream.
 
 ## Goals
 

@@ -841,6 +841,7 @@ fn opencode_prompt_dispatch_does_not_inject_repository_instruction_files() {
                 None,
                 None,
                 None,
+                false,
             )
             .expect("OpenCode turn should dispatch")
     };

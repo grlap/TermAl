@@ -350,6 +350,12 @@ impl AppState {
                 if !record.is_local_session() {
                     return EngramContextNudgePreparation::NotApplicable;
                 }
+                // An evaluator has no tracker server and is briefed by the
+                // host alone; an orientation of its own would only point it
+                // at tracker calls it cannot make.
+                if session_is_acceptance_evaluator_child_locked(&inner, session_id) {
+                    return EngramContextNudgePreparation::NotApplicable;
+                }
                 // Reuse the pending orientation snapshot until runtime admission.
                 // This is only a local prompt cache: peek neither stages nor
                 // acknowledges an Engram delivery page, including on refresh.
@@ -661,6 +667,21 @@ fn engram_mcp_stdio_config_for_session_locked(
     engram_mcp_runtime_config_for_session_locked(inner, session_id).map(|config| config.stdio)
 }
 
+/// Whether `session_id` is the child of an acceptance-evaluation delegation.
+/// An evaluator is briefed from the tracker by the host and records its
+/// verdicts through the host's submission tool, so it is given no tracker
+/// server of its own: a tracker call it makes is absent by construction, not
+/// refused by an instruction in its brief.
+fn session_is_acceptance_evaluator_child_locked(inner: &StateInner, session_id: &str) -> bool {
+    inner
+        .find_delegation_index_by_child_session_id(session_id)
+        .map(|index| &inner.delegations[index])
+        .is_some_and(|delegation| {
+            delegation.child_session_id == session_id
+                && delegation.mode == DelegationMode::Evaluator
+        })
+}
+
 fn engram_mcp_runtime_config_for_session_locked(
     inner: &StateInner,
     session_id: &str,
@@ -669,6 +690,9 @@ fn engram_mcp_runtime_config_for_session_locked(
         .find_session_index(session_id)
         .and_then(|index| inner.sessions.get(index))?;
     if !session.is_local_session() {
+        return None;
+    }
+    if session_is_acceptance_evaluator_child_locked(inner, session_id) {
         return None;
     }
     let project = engram_project_for_session_locked(inner, session_id)?;

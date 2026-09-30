@@ -48,3 +48,4 @@ design decisions, and future plans.
 - [WhatsApp Integration](./whatsapp-integration.md)
 - [Engram Host Adapter](./engram-host-adapter.md)
 - [Test Runs](./test-runs.md)
+- [Host Architecture](./host-architecture.md)
