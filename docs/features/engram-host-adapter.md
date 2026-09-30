@@ -225,7 +225,16 @@ are read through `work memories`. Repeated peeks with a new generation can keep
 reporting `changed: true` without persisting or acknowledging that advertisement.
 Only an advancing `next` with that generation acknowledges it; acknowledgement
 is not proof that the agent read the memories. The host also uses generation
-locally to reject stale nudge results and order deferred refreshes. The agent
+locally to reject stale nudge results and order deferred refreshes.
+For a read-only delegation child TermAl leaves `--context-generation` out. With a
+generation, Engram's orientation tells the reader to list memories under it, a
+call the child's read-only gate refuses. Without one it gives no such directive,
+and the child reads its memories with a plain `work memories`, as its project's
+instructions require: a read-only Claude child's gate admits that read (see
+[agent delegation sessions](./agent-delegation-sessions.md)), and a Codex child
+puts no tool call to the host. A read-only Kimi child's gate still refuses every
+tracker tool, which that brief tracks as its own gap. The host still keeps its
+generation locally. The agent
 continues ordinary advancing `work next` through MCP; host orientation does not
 replace that read.
 This protects the delivery cursor, not the completeness of recovery: the host
