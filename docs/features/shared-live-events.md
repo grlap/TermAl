@@ -3,6 +3,8 @@
 See [architecture](../architecture.md) for application recovery boundaries and
 [multi-browser workspaces](./multi-browser-workspaces.md) for layout persistence.
 This brief is listed in the [feature index](./README.md).
+[Host architecture](./host-architecture.md#411-the-client-stream) proposes the
+server's ordering and overflow contract for the stream this hub consumes.
 
 Opening several TermAl browser tabs must leave HTTP capacity for navigation,
 session hydration, workspace saves and prompts. HTTP/1 browsers commonly permit

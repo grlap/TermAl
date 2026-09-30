@@ -1011,3 +1011,5 @@ and a run that has left the index shows "not indexed" and no elapsed time.
   coordinators outside TermAl.
 - [Work Visualizer](./work-visualizer.md): the tab pattern the Test Runs tab
   follows.
+- [Host Architecture](./host-architecture.md): the proposed execution record,
+  in which a launcher run is one kind of execution.

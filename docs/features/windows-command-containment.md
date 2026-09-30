@@ -11,6 +11,8 @@ inheritable duplicates exist only inside that lock, and close before it is
 released. The lock never covers a wait or output collection. A source check
 rejects raw command/shared-child creation bypasses outside the bridge and its
 explicitly guarded standard-library test references.
+[Host architecture](./host-architecture.md#7-process-launch-and-supervision)
+proposes one supervisor that owns this primitive and every other host launch.
 
 Each native launch records its process id and typed containment result in the
 host diagnostics before the process resumes:

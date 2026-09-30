@@ -1986,6 +1986,10 @@ context nudges are deadline-bounded, JSON control replies are typed, routing
 tokens stay host-private, and TermAl never opens Engram's SQLite database
 directly.
 
+The proposed split of this adapter by ownership, the contract it keeps with
+Engram, and the order in which its parts move are in
+[Host architecture](./host-architecture.md).
+
 ## Operator verification
 
 Before enabling a repository, verify the same binary, marker, and home TermAl

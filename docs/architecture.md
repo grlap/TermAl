@@ -23,6 +23,14 @@ archive execution and retry barriers. No archive wait holds the shared state loc
 See [the delegation feature contract](features/agent-delegation-sessions.md#follow-up-admission-and-failure-ownership)
 for cancellation, persistence failures, queued attempt identity and restart limits.
 
+## Host architecture brief
+
+[Host architecture](features/host-architecture.md) is the proposed structure for
+recorded host observations, the `/api/events` ordering and overflow contract,
+the split of the Engram host adapter, state owned by one component each, process
+supervision and the execution record. Until its steps land, the sections below
+describe the code as it is.
+
 ## No-legacy audit — 2026-09-05
 
 This audit covers Rust, frontend TypeScript, scripts, tests and documentation.
