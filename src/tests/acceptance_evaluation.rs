@@ -10,6 +10,9 @@ use std::sync::atomic::AtomicUsize;
 #[path = "acceptance_evaluation_source.rs"]
 mod source;
 
+#[path = "acceptance_evaluation_omissions.rs"]
+mod omissions;
+
 type RecordedEngramCalls = Arc<Mutex<Vec<(EngramConnectionConfig, Vec<String>)>>>;
 
 fn modes(words: &[&str]) -> Vec<String> {

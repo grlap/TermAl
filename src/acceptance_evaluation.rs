@@ -305,12 +305,15 @@ struct AcceptanceEvaluationTask {
     /// Oldest first, as the tracker's window orders them.
     evidence: Vec<AcceptanceEvaluationEvidence>,
     evidence_omitted: usize,
+    /// The last successful read boundary and the host reason it stopped there.
+    evidence_paging: AcceptanceEvidencePaging,
 }
 
 fn parse_acceptance_evaluation_task(
     windowed: Value,
     full: Value,
 ) -> std::result::Result<AcceptanceEvaluationTask, ApiError> {
+    let evidence_paging = acceptance_evidence_paging(&windowed);
     let show: EngramShowForEvaluation = serde_json::from_value(windowed)
         .map_err(|e| ApiError::bad_gateway(format!("engram work show: invalid receipt: {e}")))?;
     let contract: EngramShowFullForEvaluation = serde_json::from_value(full).map_err(|e| {
@@ -388,6 +391,7 @@ fn parse_acceptance_evaluation_task(
             })
             .collect(),
         evidence_omitted: show.notes_omitted.unwrap_or(0),
+        evidence_paging,
     })
 }
 
@@ -543,6 +547,107 @@ fn acceptance_brief_evidence_line(
     )
 }
 
+/// Recovery information about pages the host did not read. The continuation
+/// is opaque: keep it whole or explicitly omit it, never emit a partial token.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct AcceptanceEvidencePaging {
+    continuation: Option<String>,
+    continuation_bytes: usize,
+    continuation_omitted: bool,
+    read_cut: Option<Value>,
+    reason: Option<String>,
+}
+
+const MAX_ACCEPTANCE_CONTINUATION_BYTES: usize = 8_192;
+
+fn acceptance_evidence_paging(page: &Value) -> AcceptanceEvidencePaging {
+    let continuation = acceptance_evidence_continuation(page);
+    let continuation_bytes = continuation.as_ref().map_or(0, String::len);
+    let continuation_omitted = continuation_bytes > MAX_ACCEPTANCE_CONTINUATION_BYTES;
+    let read_cut = page
+        .pointer("/notes_window/read_cut")
+        .and_then(Value::as_object)
+        .map(|cut| {
+            let mut bounded = serde_json::Map::new();
+            for field in ["project_position", "valid_until_ms"] {
+                if let Some(number) = cut.get(field).and_then(Value::as_u64) {
+                    bounded.insert(field.to_owned(), json!(number));
+                }
+            }
+            if let Some(at) = cut.get("observed_at").and_then(Value::as_str) {
+                bounded.insert(
+                    "observed_at".to_owned(),
+                    json!(acceptance_brief_text(at, 128)),
+                );
+            }
+            Value::Object(bounded)
+        });
+    AcceptanceEvidencePaging {
+        continuation: continuation.filter(|_| !continuation_omitted),
+        continuation_bytes,
+        continuation_omitted,
+        read_cut,
+        reason: page
+            .get("acceptance_paging_stop")
+            .and_then(Value::as_str)
+            .filter(|reason| {
+                matches!(
+                    *reason,
+                    "page_limit"
+                        | "entry_limit"
+                        | "time_budget"
+                        | "transport_failure"
+                        | "missing_continuation"
+                )
+            })
+            .map(str::to_owned),
+    }
+}
+
+/// The same bounded, explicit locator inventory returned in both request forms.
+fn acceptance_brief_omissions(cuts: &AcceptanceBriefCuts) -> Value {
+    let group = |locators: &[String]| {
+        let unnamed = locators
+            .len()
+            .saturating_sub(MAX_ACCEPTANCE_BRIEF_CUT_LOCATORS);
+        json!({"count": locators.len(), "locators": &locators[unnamed..],
+            "locatorsOmitted": unnamed})
+    };
+    json!({
+        "clipped": group(&cuts.clipped),
+        "leftOut": group(&cuts.left_out),
+        "cutByTracker": group(&cuts.cut_by_tracker),
+        "unread": {
+            "count": cuts.unread,
+            "locatorsKnown": false,
+            "continuation": cuts.paging.continuation,
+            "continuationBytes": cuts.paging.continuation_bytes,
+            "continuationOmitted": cuts.paging.continuation_omitted,
+            "readCut": cuts.paging.read_cut,
+            "reason": cuts.paging.reason,
+        }
+    })
+}
+
+fn acceptance_brief_unread_boundary(cuts: &AcceptanceBriefCuts) -> Option<String> {
+    if cuts.unread == 0 {
+        return None;
+    }
+    let continuation = if let Some(token) = &cuts.paging.continuation {
+        format!("continuation at that read cut: {}", json!(token))
+    } else if cuts.paging.continuation_omitted {
+        format!(
+            "continuation not shown: {} bytes exceed the host bound",
+            cuts.paging.continuation_bytes
+        )
+    } else {
+        "no continuation was supplied".to_owned()
+    };
+    Some(format!("Unread evidence: {} entries; individual unread locators are unknown; paging stopped: {}; {}; read cut: {}. The continuation describes the captured boundary and may have expired; it grants no tracker access.",
+        cuts.unread, cuts.paging.reason.as_deref().unwrap_or("not reported"), continuation,
+        cuts.paging.read_cut.as_ref().map_or("not supplied".to_owned(), Value::to_string)))
+}
+
 /// What a brief does not carry whole. The requester is told, because an
 /// evaluator that could not read a record can only answer
 /// insufficient-evidence, and the requester can record the proof where it
@@ -557,6 +662,7 @@ struct AcceptanceBriefCuts {
     cut_by_tracker: Vec<String>,
     /// Older than the last page the host read: never seen by it.
     unread: usize,
+    paging: AcceptanceEvidencePaging,
 }
 
 impl AcceptanceBriefCuts {
@@ -632,12 +738,52 @@ fn acceptance_brief_cut_notice(work_ref: &str, cuts: &AcceptanceBriefCuts) -> Op
             if cuts.unread == 1 { "was" } else { "were" }
         ));
     }
+    let boundary = if cuts.paging.reason.is_some() {
+        acceptance_brief_unread_boundary(cuts)
+            .map(|line| format!(" {line}"))
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
     Some(format!(
         "The evaluator's brief for `{}` does not carry all of its evidence whole: {}. A verdict \
          that depends on one of these can only be insufficient-evidence; record what it needs in \
-         a new note, since the newest entries are the last to be cut.",
+         a new note, since the newest entries are the last to be cut.{boundary}",
         acceptance_brief_text(work_ref, MAX_ACCEPTANCE_BRIEF_LABEL_CHARS),
         parts.join("; ")
+    ))
+}
+
+/// This session may read evidence through its existing tracker tools. Listing
+/// bodies omitted from its brief must not forbid passing on evidence it reads.
+fn acceptance_same_session_brief_cuts(task: &AcceptanceEvaluationTask) -> AcceptanceBriefCuts {
+    AcceptanceBriefCuts {
+        left_out: task
+            .evidence
+            .iter()
+            .map(|entry| acceptance_brief_text(&entry.locator, MAX_ACCEPTANCE_BRIEF_LABEL_CHARS))
+            .collect(),
+        unread: task.evidence_omitted,
+        paging: task.evidence_paging.clone(),
+        ..AcceptanceBriefCuts::default()
+    }
+}
+
+fn acceptance_same_session_cut_notice(
+    work_ref: &str,
+    cuts: &AcceptanceBriefCuts,
+) -> Option<String> {
+    if cuts.is_empty() {
+        return None;
+    }
+    let boundary = acceptance_brief_unread_boundary(cuts)
+        .map(|line| format!(" {line}"))
+        .unwrap_or_default();
+    Some(format!(
+        "This brief for `{}` carries no evidence bodies. Read the recorded evidence with your own permitted `show --notes --gates` tools before judging it. The host read {} not carried in this brief ({}).{boundary}",
+        acceptance_brief_text(work_ref, MAX_ACCEPTANCE_BRIEF_LABEL_CHARS),
+        acceptance_entry_count(cuts.left_out.len()),
+        acceptance_brief_locator_list(&cuts.left_out),
     ))
 }
 
@@ -712,6 +858,7 @@ fn render_acceptance_evaluator_brief(
     let mut cuts = AcceptanceBriefCuts {
         left_out: left_out.iter().map(locator_of).collect(),
         unread: task.evidence_omitted,
+        paging: task.evidence_paging.clone(),
         ..AcceptanceBriefCuts::default()
     };
     let mut evidence = Vec::with_capacity(listed.len() + 1);
@@ -737,6 +884,9 @@ fn render_acceptance_evaluator_brief(
         ));
     } else if omitted > 0 {
         evidence.push(format!("  ({omitted} older entries not shown)"));
+    }
+    if let Some(boundary) = acceptance_brief_unread_boundary(&cuts) {
+        evidence.push(format!("  {boundary}"));
     }
     let prompt = format!(
         "You are an acceptance evaluator. Another session did the work below and asks\n\
@@ -764,6 +914,11 @@ checked. Missing proof is insufficient-evidence, never pass.\n\
 entry counted as not shown was not given to you: you have not read the rest.\n  \
 Where a verdict depends on it, give insufficient-evidence and name that\n  \
 locator in the rationale; never infer what the missing part says.\n\
+- Evidence not shown does not establish that proof is absent on the item.\n  \
+Where a verdict depends on omitted evidence, say 'not shown' in the rationale\n  \
+and name the known locator or captured continuation; unknown unread locators\n  \
+must stay unknown. Keep the insufficient-evidence verdict; do not invent a\n  \
+new verdict or infer missing proof.\n\
 - The rationale states what you checked and what you found, in one or two\n  \
 sentences on a single line.\n\
 - Submit once with {submit_tool}. If the host returns a\n  \
@@ -825,6 +980,9 @@ fn render_same_session_acceptance_brief(
     let source = source_fingerprint
         .map(|fingerprint| format!(", source_fingerprint {fingerprint}"))
         .unwrap_or_default();
+    let cuts = acceptance_same_session_brief_cuts(task);
+    let omissions = acceptance_same_session_cut_notice(&task.work_ref, &cuts)
+        .unwrap_or_else(|| "No evidence entries were omitted.".to_owned());
     format!(
         "Acceptance evaluation of {work_ref} runs in this session (mode same_session); no \
 evaluator was spawned.\n\
@@ -836,7 +994,9 @@ Record it with your own Engram `evaluate` tool: mode same_session, acceptance_ba
 {acceptance_basis}, evidence_basis {evidence_basis}{source}, and exactly one verdict per criterion \
 (pass, fail, insufficient_evidence or needs_human) with a rationale saying what you checked and \
 what you found. A pass must cite at least one evidence locator from `show {work_ref} --notes \
---gates`. Missing proof is insufficient_evidence, never pass.",
+--gates`. Missing proof is insufficient_evidence, never pass.\n\n\
+Evidence not shown in this brief: {omissions}\n\
+Omitted evidence does not establish that proof is absent on the item; say 'not shown' in the rationale with the known locator or continuation if it was not read.",
         work_ref = acceptance_brief_text(&task.work_ref, MAX_ACCEPTANCE_BRIEF_LABEL_CHARS),
         criteria = acceptance_brief_criteria(task),
         acceptance_basis = task.acceptance_basis,
@@ -1258,6 +1418,7 @@ fn merge_acceptance_evidence_pages(first: &mut Value, older_pages: Vec<Value>) {
     let still_older = last
         .pointer("/notes_window/older")
         .and_then(Value::as_u64)
+        .or_else(|| last.get("notes_omitted").and_then(Value::as_u64))
         .unwrap_or(0);
     let mut merged = Vec::new();
     for page in older_pages.iter().rev() {
@@ -1270,6 +1431,9 @@ fn merge_acceptance_evidence_pages(first: &mut Value, older_pages: Vec<Value>) {
     }
     first["notes"] = Value::Array(merged);
     first["notes_omitted"] = json!(still_older);
+    // The last page may omit its window. Do not retain the consumed first
+    // page's cursor or count as if it described evidence still unread.
+    first["notes_window"] = last.get("notes_window").cloned().unwrap_or(Value::Null);
 }
 
 /// What the requesting agent needs from a spawned evaluation: the ids to wait
@@ -1291,6 +1455,7 @@ fn compact_acceptance_evaluation_request_result(response: &Value) -> Value {
         "status": delegation.get("status"),
         "acceptanceEvaluation": delegation.get("acceptanceEvaluation"),
         "notice": response.get("notice"),
+        "evidenceOmissions": response.get("evidenceOmissions"),
         "next": "Wait with termal_resume_after_delegations for this delegationId; the fan-in says what the tracker recorded. Do not request another evaluation of the same task while this one runs.",
     })
 }
