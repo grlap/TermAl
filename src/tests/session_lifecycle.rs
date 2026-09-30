@@ -494,7 +494,7 @@ fn private_claude_mcp_config_is_released_on_first_valid_stdout_line() {
 #[test]
 fn lightweight_test_state_rejects_direct_shared_codex_runtime_spawning() {
     let state = test_app_state();
-    let result = spawn_shared_codex_runtime(state);
+    let result = spawn_shared_codex_runtime(state, SharedCodexProfile::Default);
 
     let err = match result {
         Ok(_) => panic!("lightweight test state must not start a real Codex runtime"),

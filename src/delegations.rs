@@ -3778,26 +3778,16 @@ fn validate_delegation_cwd_input(cwd: &str) -> Result<(), ApiError> {
     Ok(())
 }
 
+/// A read-only Codex child runs in Codex's read-only sandbox on every
+/// platform. On Windows that sandbox cannot start the Store-packaged
+/// PowerShell 7, so a read-only session runs on an app-server of its own
+/// whose shell is Windows PowerShell 5.1 (`shared_codex_profile.rs`).
 fn delegation_codex_sandbox_mode(write_policy: &DelegationWritePolicy) -> CodexSandboxMode {
     match write_policy {
-        DelegationWritePolicy::ReadOnly => delegation_codex_read_only_sandbox_mode(),
+        DelegationWritePolicy::ReadOnly => CodexSandboxMode::ReadOnly,
         DelegationWritePolicy::IsolatedWorktree { .. } => CodexSandboxMode::WorkspaceWrite,
         DelegationWritePolicy::SharedWorktree { .. } => CodexSandboxMode::WorkspaceWrite,
     }
-}
-
-#[cfg(windows)]
-fn delegation_codex_read_only_sandbox_mode() -> CodexSandboxMode {
-    // Codex's Windows sandbox can fail before read-only review commands run
-    // (`windows sandbox: spawn setup refresh`). Keep the delegation write policy
-    // read-only, but avoid the sandbox path that prevents reviewers from reading
-    // the repository at all.
-    CodexSandboxMode::DangerFullAccess
-}
-
-#[cfg(not(windows))]
-fn delegation_codex_read_only_sandbox_mode() -> CodexSandboxMode {
-    CodexSandboxMode::ReadOnly
 }
 
 fn prepare_isolated_delegation_worktree(

@@ -545,9 +545,9 @@ impl AppState {
         // of a server keeps the tracker's tools from it. The user's servers
         // may include the tracker's under any name; an evaluator gets the
         // TermAl-owned servers alone, and no tracker descriptor even if a
-        // caller passes one. This withholds the tracker's MCP tools only:
-        // where a Codex child's shell runs unsandboxed, the tracker's CLI in
-        // that shell remains a separate route.
+        // caller passes one. This withholds the tracker's MCP tools; the
+        // tracker's CLI in the child's shell is held by Codex's read-only
+        // sandbox, which an evaluator runs in (`shared_codex_profile.rs`).
         let acceptance_evaluator = self.session_is_acceptance_evaluator_child(parent_session_id);
         let engram = if acceptance_evaluator {
             servers.clear();

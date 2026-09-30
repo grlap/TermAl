@@ -82,16 +82,17 @@ impl AppState {
             return self.proxy_remote_list_codex_mcp_servers(session_id);
         }
 
-        let agent = {
+        // The session's own app-server answers: each profile has its own
+        // Codex home and MCP configuration.
+        let (agent, profile) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_visible_session_index(session_id)
                 .ok_or_else(|| ApiError::not_found("session not found"))?;
-            inner
+            let record = inner
                 .session_by_index(index)
-                .expect("session index should be valid")
-                .session
-                .agent
+                .expect("session index should be valid");
+            (record.session.agent, record.shared_codex_profile())
         };
         if agent != Agent::Codex {
             return Err(ApiError::bad_request(
@@ -118,7 +119,8 @@ impl AppState {
                 params.insert("cursor".to_owned(), Value::String(cursor.clone()));
             }
 
-            let result = self.perform_codex_json_rpc_request(
+            let result = self.perform_codex_json_rpc_request_for(
+                profile,
                 "mcpServerStatus/list",
                 Value::Object(params),
                 codex_mcp_request_timeout(deadline)?,

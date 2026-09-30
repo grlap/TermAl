@@ -337,6 +337,16 @@ impl AppState {
             }
         }
 
+        // Checked before any field of the record is written.
+        if record.session.agent == Agent::Codex {
+            if let Some(refusal) = request
+                .sandbox_mode
+                .and_then(|sandbox_mode| record.codex_sandbox_change_refusal(sandbox_mode))
+            {
+                return Err(ApiError::conflict(refusal));
+            }
+        }
+
         if let Some(name) = request.name.as_deref() {
             let trimmed = name.trim();
             if trimmed.is_empty() {
@@ -583,8 +593,18 @@ impl AppState {
                 }
                 record.session.codex_fast_mode = next_fast_mode;
                 if let Some(sandbox_mode) = request.sandbox_mode {
+                    let profile_before = record.shared_codex_profile();
                     record.codex_sandbox_mode = sandbox_mode;
                     record.session.sandbox_mode = Some(sandbox_mode);
+                    // A session without a thread creates it on the app-server
+                    // its sandbox needs; one attached to the other profile's
+                    // app-server starts on the right one at its next turn.
+                    if record.external_session_id.is_none()
+                        && record.shared_codex_profile() != profile_before
+                        && matches!(record.runtime, SessionRuntime::Codex(_))
+                    {
+                        record.runtime_reset_required = true;
+                    }
                 }
                 if let Some(approval_policy) = request.approval_policy {
                     record.codex_approval_policy = approval_policy;
@@ -1027,10 +1047,12 @@ impl AppState {
                     ));
                 }
                 SessionRuntime::None => {
+                    let profile = record.shared_codex_profile();
                     let handle = spawn_codex_runtime(
                         self.clone(),
                         record.session.id.clone(),
                         record.session.workdir.clone(),
+                        profile,
                     )
                     .map_err(|err| {
                         ApiError::internal(format!(
@@ -1038,6 +1060,7 @@ impl AppState {
                         ))
                     })?;
                     record.runtime = SessionRuntime::Codex(handle.clone());
+                    record.attach_to_shared_codex_profile(profile);
                     handle
                 }
             };

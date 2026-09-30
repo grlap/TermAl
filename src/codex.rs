@@ -32,8 +32,9 @@ fn spawn_codex_runtime(
     state: AppState,
     session_id: String,
     _workdir: String,
+    profile: SharedCodexProfile,
 ) -> Result<CodexRuntimeHandle> {
-    let shared_runtime = state.shared_codex_runtime()?;
+    let shared_runtime = state.shared_codex_runtime_for(profile)?;
     let shared_session = SharedCodexSessionHandle {
         runtime: shared_runtime.clone(),
         session_id,
@@ -326,12 +327,16 @@ fn start_shared_codex_rpc_command(
     }
 }
 
-fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
+fn spawn_shared_codex_runtime(
+    state: AppState,
+    profile: SharedCodexProfile,
+) -> Result<SharedCodexRuntime> {
     if !state.agent_runtime_spawning_enabled {
         bail!("agent runtime spawning is disabled for this AppState");
     }
-    // Codex threads carry their own cwd, so one shared app-server can serve all sessions.
-    let codex_home = prepare_termal_codex_home(&state.default_workdir, "shared-app-server")?;
+    // Codex threads carry their own cwd, so one shared app-server can serve
+    // every session of a profile.
+    let codex_home = prepare_termal_codex_home(&state.default_workdir, profile.codex_home_scope())?;
     let runtime_id = Uuid::new_v4().to_string();
     let mut command = codex_command()?;
     command
@@ -341,6 +346,15 @@ fn spawn_shared_codex_runtime(state: AppState) -> Result<SharedCodexRuntime> {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    if profile == SharedCodexProfile::ReadOnlySandbox {
+        // Codex resolves its shell from this process's PATH. Without a
+        // PowerShell 7 on it, Codex uses Windows PowerShell 5.1, which its
+        // read-only sandbox can start; see `shared_codex_profile.rs`. The
+        // Codex executable itself was resolved above, before PATH changes.
+        let path = shared_codex_read_only_sandbox_path()
+            .ok_or_else(|| anyhow!("cannot build the PATH for the read-only Codex app-server"))?;
+        command.env("PATH", path);
+    }
     // This process hosts many TermAl sessions. Never let process-global
     // TermAl or Engram identity leak into all of them; each thread receives
     // its exact identity through `shell_environment_policy.set` instead.

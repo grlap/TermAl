@@ -326,6 +326,10 @@ struct PersistedSessionRecord {
     codex_approval_policy: CodexApprovalPolicy,
     codex_reasoning_effort: CodexReasoningEffort,
     codex_sandbox_mode: CodexSandboxMode,
+    /// Absent from records written before app-server profiles existed; such
+    /// a thread lives in the default Codex home.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    codex_thread_profile: Option<SharedCodexProfile>,
     external_session_id: Option<String>,
     #[serde(default, skip_serializing_if = "VecDeque::is_empty")]
     queued_prompts: VecDeque<QueuedPromptRecord>,
@@ -434,6 +438,7 @@ impl PersistedSessionRecord {
             codex_approval_policy: record.codex_approval_policy,
             codex_reasoning_effort: record.codex_reasoning_effort,
             codex_sandbox_mode: record.codex_sandbox_mode,
+            codex_thread_profile: record.codex_thread_profile,
             external_session_id: record.external_session_id.clone(),
             queued_prompts: record.queued_prompts.clone(),
             queued_peer_messages: record.queued_peer_messages.clone(),
@@ -504,6 +509,7 @@ impl PersistedSessionRecord {
             codex_approval_policy: self.codex_approval_policy,
             codex_reasoning_effort: self.codex_reasoning_effort,
             codex_sandbox_mode: self.codex_sandbox_mode,
+            codex_thread_profile: self.codex_thread_profile,
             external_session_id: self.external_session_id,
             pending_claude_approvals: HashMap::new(),
             pending_claude_user_inputs: HashMap::new(),

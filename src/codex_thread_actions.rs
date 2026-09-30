@@ -67,7 +67,8 @@ impl AppState {
         }
 
         let context = self.resolve_codex_thread_action_context(session_id)?;
-        let fork_result = self.perform_codex_json_rpc_request(
+        let fork_result = self.perform_codex_json_rpc_request_for(
+            context.shared_codex_profile,
             "thread/fork",
             json!({
                 "threadId": context.thread_id,
@@ -142,6 +143,8 @@ impl AppState {
         record.session.approval_policy = Some(approval_policy);
         record.codex_sandbox_mode = sandbox_mode;
         record.session.sandbox_mode = Some(sandbox_mode);
+        // The fork lives beside its source thread, in that app-server's home.
+        record.codex_thread_profile = Some(context.shared_codex_profile);
         record.codex_reasoning_effort = reasoning_effort;
         record.session.reasoning_effort = Some(reasoning_effort);
         set_record_external_session_id(&mut record, Some(fork_thread_id.clone()));
@@ -227,7 +230,11 @@ impl AppState {
         if matches!(previous_outcome, Some(CodexReleaseOutcome::Ambiguous(_)))
             && context.thread_state != Some(CodexThreadState::Archived)
         {
-            let confirmed_archived = self.probe_codex_archive_state(&context.thread_id, true);
+            let confirmed_archived = self.probe_codex_archive_state(
+                context.shared_codex_profile,
+                &context.thread_id,
+                true,
+            );
             if !confirmed_archived {
                 let previous = {
                     let inner = self.inner.lock().expect("state mutex poisoned");
@@ -238,7 +245,11 @@ impl AppState {
                 if !previous
                     .as_ref()
                     .is_some_and(|release| release.archive_origin_has_exited(self))
-                    || !self.probe_codex_archive_state(&context.thread_id, false)
+                    || !self.probe_codex_archive_state(
+                        context.shared_codex_profile,
+                        &context.thread_id,
+                        false,
+                    )
                 {
                     return Err(ApiError::conflict(
                         "previous Codex archive is still unconfirmed; retry after it completes or the old runtime exits",
@@ -334,10 +345,12 @@ impl AppState {
         let outcome = (|| {
             // Preserve and confirm any terminal-result obligation before archive.
             barrier.retry_durability(self)?;
-            let runtime = self.shared_codex_runtime().map_err(|error| {
-                ApiError::internal(format!("failed to start Codex runtime: {error:#}"))
-            })?;
-            barrier.record_archive_origin(&runtime);
+            let runtime = self
+                .shared_codex_runtime_for(context.shared_codex_profile)
+                .map_err(|error| {
+                    ApiError::internal(format!("failed to start Codex runtime: {error:#}"))
+                })?;
+            barrier.record_archive_origin(&runtime, context.shared_codex_profile);
             archive_attempted = true;
             if let Err(error) = self.perform_codex_json_rpc_request_on_runtime(
                 &runtime,
@@ -349,9 +362,17 @@ impl AppState {
             ) {
                 rejected = matches!(error, CodexResponseError::JsonRpc(_));
                 eprintln!("codex archive> thread={} error={error}", context.thread_id);
-                if !self.probe_codex_archive_state(&context.thread_id, true) {
-                    confirmed_not_archived =
-                        rejected && self.probe_codex_archive_state(&context.thread_id, false);
+                if !self.probe_codex_archive_state(
+                    context.shared_codex_profile,
+                    &context.thread_id,
+                    true,
+                ) {
+                    confirmed_not_archived = rejected
+                        && self.probe_codex_archive_state(
+                            context.shared_codex_profile,
+                            &context.thread_id,
+                            false,
+                        );
                     return Err(error.into_api_error("thread/archive"));
                 }
             }
@@ -401,7 +422,11 @@ impl AppState {
     /// Positive identity in archived inventory is evidence; absence, a page
     /// budget or probe errors leave the archive failure unresolved. This query
     /// runs only after a failed archive, never as a startup sweep.
-    fn confirm_codex_thread_archived(&self, thread_id: &str) -> Result<bool, ApiError> {
+    fn confirm_codex_thread_archived(
+        &self,
+        profile: SharedCodexProfile,
+        thread_id: &str,
+    ) -> Result<bool, ApiError> {
         {
             let inner = self.inner.lock().expect("state mutex poisoned");
             if inner.sessions.iter().any(|record| {
@@ -411,16 +436,21 @@ impl AppState {
                 return Ok(true); // A matching late notification is positive evidence too.
             }
         }
-        self.confirm_codex_thread_in_inventory(thread_id, true)
+        self.confirm_codex_thread_in_inventory(profile, thread_id, true)
     }
 
     // Absence is normal; probe failure is operational evidence and gets its
     // own diagnostic on every automatic/manual/retry reconciliation path.
-    fn probe_codex_archive_state(&self, thread_id: &str, archived: bool) -> bool {
+    fn probe_codex_archive_state(
+        &self,
+        profile: SharedCodexProfile,
+        thread_id: &str,
+        archived: bool,
+    ) -> bool {
         let result = if archived {
-            self.confirm_codex_thread_archived(thread_id)
+            self.confirm_codex_thread_archived(profile, thread_id)
         } else {
-            self.confirm_codex_thread_in_inventory(thread_id, false)
+            self.confirm_codex_thread_in_inventory(profile, thread_id, false)
         };
         result.unwrap_or_else(|error| {
             eprintln!("codex archive reconciliation> thread={thread_id} archived={archived} probe_error={}", error.message);
@@ -432,6 +462,7 @@ impl AppState {
     // non-archive; missing/partial pages never establish the opposite state.
     fn confirm_codex_thread_in_inventory(
         &self,
+        profile: SharedCodexProfile,
         thread_id: &str,
         archived: bool,
     ) -> Result<bool, ApiError> {
@@ -443,7 +474,7 @@ impl AppState {
             if remaining.is_zero() {
                 return Ok(false);
             }
-            let page = self.perform_codex_json_rpc_request("thread/list", json!({
+            let page = self.perform_codex_json_rpc_request_for(profile, "thread/list", json!({
                 "archived": archived, "limit": 100, "cursor": cursor, "modelProviders": [],
                 "sourceKinds": ["cli", "vscode", "exec", "appServer", "subAgent",
                     "subAgentReview", "subAgentCompact", "subAgentThreadSpawn", "subAgentOther", "unknown"]
@@ -508,7 +539,8 @@ impl AppState {
                 "the current Codex thread is not archived",
             ));
         }
-        self.perform_codex_json_rpc_request(
+        self.perform_codex_json_rpc_request_for(
+            context.shared_codex_profile,
             "thread/unarchive",
             json!({
                 "threadId": context.thread_id,
@@ -576,7 +608,8 @@ impl AppState {
         }
 
         let context = self.resolve_codex_thread_action_context(session_id)?;
-        self.perform_codex_json_rpc_request(
+        self.perform_codex_json_rpc_request_for(
+            context.shared_codex_profile,
             "thread/compact/start",
             json!({
                 "threadId": context.thread_id,
@@ -643,7 +676,8 @@ impl AppState {
         }
 
         let context = self.resolve_codex_thread_action_context(session_id)?;
-        let rollback_result = self.perform_codex_json_rpc_request(
+        let rollback_result = self.perform_codex_json_rpc_request_for(
+            context.shared_codex_profile,
             "thread/rollback",
             json!({
                 "threadId": context.thread_id,

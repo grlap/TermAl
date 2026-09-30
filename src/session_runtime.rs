@@ -26,6 +26,8 @@ struct CodexThreadActionContext {
     project_id: Option<String>,
     reasoning_effort: CodexReasoningEffort,
     sandbox_mode: CodexSandboxMode,
+    /// The app-server that holds this session's thread.
+    shared_codex_profile: SharedCodexProfile,
     thread_id: String,
     thread_state: Option<CodexThreadState>,
     workdir: String,

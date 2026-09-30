@@ -69,14 +69,7 @@ fn delegation_prompt_tells_child_to_fail_fast_on_blocking_tooling() {
 }
 
 fn expected_codex_read_only_delegation_sandbox_mode() -> CodexSandboxMode {
-    #[cfg(windows)]
-    {
-        CodexSandboxMode::DangerFullAccess
-    }
-    #[cfg(not(windows))]
-    {
-        CodexSandboxMode::ReadOnly
-    }
+    CodexSandboxMode::ReadOnly
 }
 
 fn test_app_state() -> AppState {

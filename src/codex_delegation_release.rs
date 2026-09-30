@@ -90,7 +90,7 @@ struct CodexDelegationRelease {
     followup_restore_owned: std::sync::atomic::AtomicBool,
     // Retain process identity, not its writer sender (which would keep the
     // runtime channel alive). A replaced slot alone does not prove exit.
-    archive_origin: Mutex<Option<(String, Arc<SharedChild>)>>,
+    archive_origin: Mutex<Option<(String, Arc<SharedChild>, SharedCodexProfile)>>,
 }
 
 impl CodexDelegationRelease {
@@ -106,12 +106,12 @@ impl CodexDelegationRelease {
                 && matches!(*outcome, Some(CodexReleaseOutcome::NotSent(_))))
     }
 
-    fn record_archive_origin(&self, runtime: &SharedCodexRuntime) {
+    fn record_archive_origin(&self, runtime: &SharedCodexRuntime, profile: SharedCodexProfile) {
         *self
             .archive_origin
             .lock()
             .expect("Codex archive origin mutex poisoned") =
-            Some((runtime.runtime_id.clone(), runtime.process.clone()));
+            Some((runtime.runtime_id.clone(), runtime.process.clone(), profile));
     }
 
     fn archive_origin_has_exited(&self, state: &AppState) -> bool {
@@ -120,14 +120,13 @@ impl CodexDelegationRelease {
             .lock()
             .expect("Codex archive origin mutex poisoned")
             .clone();
-        let Some((runtime_id, process)) = origin else {
+        let Some((runtime_id, process, profile)) = origin else {
             return false;
         };
+        // A replacement in the same profile's slot: that is the app-server a
+        // new inventory sample of this thread goes to.
         let replacement = state
-            .shared_codex_runtime
-            .lock()
-            .expect("shared Codex runtime mutex poisoned")
-            .as_ref()
+            .running_shared_codex_runtime(profile)
             .is_some_and(|current| current.runtime_id != runtime_id);
         // Both facts precede the inventory probe. Never infer successful kill
         // from slot removal or signal delivery; errors remain ambiguous.
@@ -323,18 +322,13 @@ impl CodexDelegationReleaseTicket {
                 let mut confirmed_not_archived = false;
                 let outcome = (|| -> Result<(), ApiError> {
                     release.confirm_durability(&state, &terminal, connected, waiter)?;
-                    let current = state
-                        .shared_codex_runtime
-                        .lock()
-                        .expect("shared Codex runtime mutex poisoned")
-                        .as_ref()
-                        .is_some_and(|current| current.runtime_id == runtime.runtime_id);
-                    if !current {
+                    let Some(profile) = state.shared_codex_profile_holding(&runtime.runtime_id)
+                    else {
                         return Err(ApiError::conflict(
                             "Codex runtime changed before child thread archive",
                         ));
-                    }
-                    release.record_archive_origin(&runtime);
+                    };
+                    release.record_archive_origin(&runtime, profile);
                     let (response_tx, response_rx) = mpsc::channel();
                     runtime
                         .input_tx
@@ -364,13 +358,7 @@ impl CodexDelegationReleaseTicket {
                             }
                         })
                         .and_then(|reply| reply);
-                    let current = state
-                        .shared_codex_runtime
-                        .lock()
-                        .expect("shared Codex runtime mutex poisoned")
-                        .as_ref()
-                        .is_some_and(|current| current.runtime_id == runtime.runtime_id);
-                    if !current {
+                    if state.shared_codex_profile_holding(&runtime.runtime_id) != Some(profile) {
                         return Err(ApiError::conflict(
                             "Codex runtime changed during child thread archive",
                         ));
@@ -381,9 +369,9 @@ impl CodexDelegationReleaseTicket {
                             "codex child archive> session={session_id} thread={thread_id} \
                              error={error}"
                         );
-                        if !state.probe_codex_archive_state(&thread_id, true) {
-                            confirmed_not_archived =
-                                rejected && state.probe_codex_archive_state(&thread_id, false);
+                        if !state.probe_codex_archive_state(profile, &thread_id, true) {
+                            confirmed_not_archived = rejected
+                                && state.probe_codex_archive_state(profile, &thread_id, false);
                             return Err(ApiError::internal(format!(
                                 "child thread archive is unconfirmed: {error}"
                             )));
@@ -443,11 +431,8 @@ impl AppState {
     // ownership even if Stop has made its local status Stopping. This is not a
     // manual thread action and must not bypass a live runtime or queued prompt.
     fn rearchive_undispatched_codex_child(&self, session_id: &str) -> Result<(), ApiError> {
-        let runtime = self
-            .shared_codex_runtime
-            .lock()
-            .expect("shared Codex runtime mutex poisoned")
-            .clone();
+        let profile = self.shared_codex_profile_of_session(session_id);
+        let runtime = self.running_shared_codex_runtime(profile);
         let ticket = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let delegation_index = inner
@@ -567,7 +552,8 @@ impl AppState {
             // Background compensation retains ownership without booting a new
             // server. An explicit retry must bootstrap it itself, otherwise
             // an empty lazy slot would keep rejecting this request forever.
-            self.shared_codex_runtime().map_err(|error| {
+            let profile = self.shared_codex_profile_of_session(session_id);
+            self.shared_codex_runtime_for(profile).map_err(|error| {
                 ApiError::internal(format!(
                     "failed to start Codex runtime for archive compensation: {error:#}",
                 ))
@@ -629,17 +615,18 @@ impl AppState {
                 // A timed-out archive can finish after an active sample while
                 // its process lives. A confirmed exit plus a replacement lets
                 // a new active sample settle that ambiguity safely.
-                archived = thread_id
-                    .as_deref()
-                    .is_some_and(|thread_id| self.probe_codex_archive_state(thread_id, true));
+                let profile = self.shared_codex_profile_of_session(session_id);
+                archived = thread_id.as_deref().is_some_and(|thread_id| {
+                    self.probe_codex_archive_state(profile, thread_id, true)
+                });
                 let confirmed_active = !archived
                     && (matches!(release, Some(CodexReleaseOutcome::Rejected(_)))
                         || barrier
                             .as_ref()
                             .is_some_and(|barrier| barrier.archive_origin_has_exited(self)))
-                    && thread_id
-                        .as_deref()
-                        .is_some_and(|thread_id| self.probe_codex_archive_state(thread_id, false));
+                    && thread_id.as_deref().is_some_and(|thread_id| {
+                        self.probe_codex_archive_state(profile, thread_id, false)
+                    });
                 if !archived && !confirmed_active {
                     return Err(ApiError::conflict(format!(
                         "Codex child cleanup was not confirmed; retry after cleanup completes or the old runtime exits. If recovering with manual Archive, choose Unarchive afterwards before continuing: {error}"

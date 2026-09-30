@@ -140,10 +140,15 @@ fn discover_codex_home_candidates(
 }
 
 /// Handles Codex home scope is importable.
+/// The read-only app-server's home holds only read-only sessions' threads,
+/// which the default app-server cannot resume; an orphaned one is left
+/// unimported rather than routed to a home that lacks it.
 fn codex_home_scope_is_importable(path: &FsPath) -> bool {
     path.file_name()
         .and_then(|value| value.to_str())
-        .map_or(true, |scope| scope != "repl")
+        .map_or(true, |scope| {
+            scope != "repl" && scope != SharedCodexProfile::ReadOnlySandbox.codex_home_scope()
+        })
 }
 
 /// Pushes Codex home candidate.

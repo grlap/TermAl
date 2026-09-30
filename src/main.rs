@@ -828,6 +828,7 @@ include!("turn_dispatch.rs");
 include!("session_crud.rs");
 include!("sse_broadcast.rs");
 include!("shared_codex_mgr.rs");
+include!("shared_codex_profile.rs");
 include!("workspace_queries.rs");
 include!("session_identity.rs");
 include!("session_sync.rs");

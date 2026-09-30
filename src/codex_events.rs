@@ -378,12 +378,7 @@ fn handle_shared_codex_app_server_message(
     // notifications still describe a persisted thread. Do not discard this
     // evidence solely because its logical session has already detached.
     if matches!(method, "thread/archived" | "thread/unarchived") {
-        let current_server = state
-            .shared_codex_runtime
-            .lock()
-            .expect("shared Codex runtime mutex poisoned")
-            .as_ref()
-            .is_some_and(|runtime| runtime.runtime_id == runtime_id);
+        let current_server = state.shared_codex_profile_holding(runtime_id).is_some();
         if current_server {
             let mut inner = state.inner.lock().expect("state mutex poisoned");
             if let Some(index) = inner.find_session_index(&session_id) {

@@ -1749,10 +1749,12 @@ evaluator gets only the TermAl-owned servers, none seeded from the user's Codex
 configuration (a Codex child puts no tool call to the host, so only the absence
 of a server keeps the tracker's tools from it). So the brief's "Call no other
 tracker tool" holds for MCP tools by the child's configuration, not only by
-instruction. It does not yet hold for a Codex evaluator's shell: on Windows a
-read-only Codex child's shell runs without a sandbox, and the tracker's CLI in
-that shell remains a route to the store until read-only Codex children run
-sandboxed.
+instruction. A Codex evaluator's shell runs in Codex's read-only sandbox, on
+Windows too (see
+[agent delegation sessions](./agent-delegation-sessions.md#enforcement-model)),
+which refuses its filesystem writes, so the tracker's CLI run in that shell
+cannot write the store's files. The sandbox limits filesystem writes, not local
+network calls.
 
 **Submission.** The evaluator is read-only and cannot reach the tracker's own
 `evaluate` tool, so it calls `termal_submit_acceptance_evaluation`

@@ -54,10 +54,20 @@ fn reuses_shared_codex_runtime_across_sessions() {
         .lock()
         .expect("shared Codex runtime mutex poisoned") = Some(runtime.clone());
 
-    let first = spawn_codex_runtime(state.clone(), "session-a".to_owned(), "/tmp".to_owned())
-        .expect("first Codex handle should attach");
-    let second = spawn_codex_runtime(state.clone(), "session-b".to_owned(), "/tmp".to_owned())
-        .expect("second Codex handle should attach");
+    let first = spawn_codex_runtime(
+        state.clone(),
+        "session-a".to_owned(),
+        "/tmp".to_owned(),
+        SharedCodexProfile::Default,
+    )
+    .expect("first Codex handle should attach");
+    let second = spawn_codex_runtime(
+        state.clone(),
+        "session-b".to_owned(),
+        "/tmp".to_owned(),
+        SharedCodexProfile::Default,
+    )
+    .expect("second Codex handle should attach");
 
     assert_eq!(first.runtime_id, "shared-codex");
     assert_eq!(second.runtime_id, "shared-codex");

@@ -799,7 +799,11 @@ fn archive_inventory_request_pins_all_sources_filters_and_pagination() {
                     .unwrap();
             }
         });
-        let found = state.confirm_codex_thread_in_inventory("wanted-thread", archived);
+        let found = state.confirm_codex_thread_in_inventory(
+            SharedCodexProfile::Default,
+            "wanted-thread",
+            archived,
+        );
         drop(state);
         worker.join().unwrap();
         assert!(found.unwrap());

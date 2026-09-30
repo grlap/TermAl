@@ -10,7 +10,7 @@
 // children.
 //
 // Lifecycle. The runtime is lazy: nothing starts until the first
-// Codex session asks for it (`shared_codex_runtime`), at which point
+// Codex session asks for it (`shared_codex_runtime_for`), at which point
 // `spawn_shared_codex_runtime` (in `src/codex.rs`) forks the process
 // and performs the JSON-RPC `initialize` / `initialized` handshake.
 // Every later Codex session that spawns piggybacks on the same
@@ -21,7 +21,12 @@
 // each of them via `handle_runtime_exit_if_matches` (see
 // `src/turn_lifecycle.rs`).
 //
-// Mutex pattern. `shared_codex_runtime` lives in `Arc<Mutex<Option<_>>>`
+// Profiles. On Windows, read-only-sandbox sessions run on a second such
+// app-server (`src/shared_codex_profile.rs`); everything above holds per
+// profile, and one profile's exit leaves the other's sessions alone.
+//
+// Mutex pattern. Each profile's slot (`shared_codex_runtime` and
+// `shared_codex_read_only_runtime`) lives in `Arc<Mutex<Option<_>>>`
 // on `AppState`, intentionally separate from `AppState.inner`. The
 // first-time handshake blocks for up to a few minutes, so holding the
 // main state mutex during spawn would freeze every other session. The
@@ -43,9 +48,9 @@
 // shared prologue for the operations in `src/codex_thread_actions.rs`.
 
 impl AppState {
-    /// Returns the shared Codex app-server runtime, spawning it on first
-    /// demand. Subsequent callers get a clone of the same handle so every
-    /// Codex-backed session in this `AppState` funnels through one child
+    /// Returns the shared Codex app-server runtime of `profile`, spawning it
+    /// on first demand. Subsequent callers get a clone of the same handle so
+    /// every Codex-backed session of that profile funnels through one child
     /// process and one JSON-RPC wire.
     ///
     /// The runtime mutex is held only long enough to clone-or-spawn the
@@ -53,18 +58,121 @@ impl AppState {
     /// handshake cannot freeze other sessions. When the backing child
     /// exits, [`Self::clear_shared_codex_runtime_if_matches`] zeros this
     /// slot so the next caller triggers a fresh spawn.
-    fn shared_codex_runtime(&self) -> Result<SharedCodexRuntime> {
+    ///
+    /// Each profile has a slot of its own (`shared_codex_profile.rs`); a
+    /// session uses the one its sandbox mode needs.
+    fn shared_codex_runtime_for(&self, profile: SharedCodexProfile) -> Result<SharedCodexRuntime> {
         let mut shared_runtime = self
-            .shared_codex_runtime
+            .shared_codex_runtime_slot(profile)
             .lock()
             .expect("shared Codex runtime mutex poisoned");
         if let Some(runtime) = shared_runtime.clone() {
             return Ok(runtime);
         }
+        #[cfg(test)]
+        if let Some(runtime) = self.test_read_only_slot_fallback(profile) {
+            return Ok(runtime);
+        }
 
-        let runtime = spawn_shared_codex_runtime(self.clone())?;
+        let runtime = spawn_shared_codex_runtime(self.clone(), profile)?;
         *shared_runtime = Some(runtime.clone());
         Ok(runtime)
+    }
+
+    /// The running app-server of `profile`, without spawning one.
+    fn running_shared_codex_runtime(
+        &self,
+        profile: SharedCodexProfile,
+    ) -> Option<SharedCodexRuntime> {
+        let running = self
+            .shared_codex_runtime_slot(profile)
+            .lock()
+            .expect("shared Codex runtime mutex poisoned")
+            .clone();
+        #[cfg(test)]
+        let running = running.or_else(|| self.test_read_only_slot_fallback(profile));
+        running
+    }
+
+    /// Tests install, replace and clear one scripted app-server in the
+    /// default slot and exercise delegation logic, not app-server placement.
+    /// In test builds an EMPTY read-only slot is therefore served from the
+    /// default one, so no test starts a real app-server for a read-only
+    /// child; tests of the placement fill the read-only slot themselves. The
+    /// caller has found the read-only slot empty and may still hold its lock,
+    /// so this takes only the default slot's lock.
+    #[cfg(test)]
+    fn test_read_only_slot_fallback(
+        &self,
+        profile: SharedCodexProfile,
+    ) -> Option<SharedCodexRuntime> {
+        if profile != SharedCodexProfile::ReadOnlySandbox {
+            return None;
+        }
+        self.shared_codex_runtime
+            .lock()
+            .expect("shared Codex runtime mutex poisoned")
+            .clone()
+    }
+
+    fn shared_codex_runtime_slot(
+        &self,
+        profile: SharedCodexProfile,
+    ) -> &Arc<Mutex<Option<SharedCodexRuntime>>> {
+        match profile {
+            SharedCodexProfile::Default => &self.shared_codex_runtime,
+            SharedCodexProfile::ReadOnlySandbox => &self.shared_codex_read_only_runtime,
+        }
+    }
+
+    /// The profile whose slot holds the runtime `runtime_id`, or `None` when
+    /// no slot holds it (torn down or replaced).
+    fn shared_codex_profile_holding(&self, runtime_id: &str) -> Option<SharedCodexProfile> {
+        [
+            SharedCodexProfile::Default,
+            SharedCodexProfile::ReadOnlySandbox,
+        ]
+        .into_iter()
+        .find(|profile| {
+            self.shared_codex_runtime_slot(*profile)
+                .lock()
+                .expect("shared Codex runtime mutex poisoned")
+                .as_ref()
+                .is_some_and(|runtime| runtime.runtime_id == runtime_id)
+        })
+    }
+
+    /// The profile a session's thread operations use, from its record.
+    fn shared_codex_profile_of_session(&self, session_id: &str) -> SharedCodexProfile {
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        inner
+            .find_session_index(session_id)
+            .map(|index| inner.sessions[index].shared_codex_profile())
+            .unwrap_or(SharedCodexProfile::Default)
+    }
+
+    /// Takes the runtime with `runtime_id` out of whichever slot holds it,
+    /// with the profile of that slot.
+    fn take_shared_codex_runtime_if_matches(
+        &self,
+        runtime_id: &str,
+    ) -> Option<(SharedCodexProfile, SharedCodexRuntime)> {
+        [
+            SharedCodexProfile::Default,
+            SharedCodexProfile::ReadOnlySandbox,
+        ]
+        .into_iter()
+        .find_map(|profile| {
+            let mut slot = self
+                .shared_codex_runtime_slot(profile)
+                .lock()
+                .expect("shared Codex runtime mutex poisoned");
+            slot.as_ref()
+                .is_some_and(|runtime| runtime.runtime_id == runtime_id)
+                .then(|| slot.take())
+                .flatten()
+                .map(|runtime| (profile, runtime))
+        })
     }
 
     /// Sends a JSON-RPC request to the shared Codex runtime and blocks on
@@ -77,9 +185,10 @@ impl AppState {
     /// the remote call). The three error paths map to `ApiError`: a
     /// transport/queueing failures, missing results and timeouts surface
     /// as `internal`; a Codex-side JSON-RPC error comes back as
-    /// `bad_request`. Used by the Codex
-    /// thread actions in `src/codex_thread_actions.rs` and the
-    /// model-list pagination path in `src/codex_rpc.rs`.
+    /// `bad_request`. Production callers name the profile of the thread they
+    /// act on ([`Self::perform_codex_json_rpc_request_for`]); this default-
+    /// profile form is kept for tests.
+    #[cfg(test)]
     fn perform_codex_json_rpc_request(
         &self,
         method: &str,
@@ -92,13 +201,43 @@ impl AppState {
 
     // Archive recovery must distinguish a server rejection from a timeout;
     // the latter removes only the local waiter, not the server operation.
+    #[cfg(test)]
     fn perform_codex_json_rpc_request_typed(
         &self,
         method: &str,
         params: Value,
         timeout: Duration,
     ) -> Result<Value, CodexResponseError> {
-        let runtime = self.shared_codex_runtime().map_err(|err| {
+        self.perform_codex_json_rpc_request_typed_for(
+            SharedCodexProfile::Default,
+            method,
+            params,
+            timeout,
+        )
+    }
+
+    /// As [`Self::perform_codex_json_rpc_request`], on the app-server of
+    /// `profile`: a request about one session's thread goes to the
+    /// app-server that holds that thread.
+    fn perform_codex_json_rpc_request_for(
+        &self,
+        profile: SharedCodexProfile,
+        method: &str,
+        params: Value,
+        timeout: Duration,
+    ) -> Result<Value, ApiError> {
+        self.perform_codex_json_rpc_request_typed_for(profile, method, params, timeout)
+            .map_err(|error| error.into_api_error(method))
+    }
+
+    fn perform_codex_json_rpc_request_typed_for(
+        &self,
+        profile: SharedCodexProfile,
+        method: &str,
+        params: Value,
+        timeout: Duration,
+    ) -> Result<Value, CodexResponseError> {
+        let runtime = self.shared_codex_runtime_for(profile).map_err(|err| {
             CodexResponseError::Transport(format!("failed to start shared Codex runtime: {err:#}"))
         })?;
         self.perform_codex_json_rpc_request_on_runtime(&runtime, method, params, timeout)
@@ -205,6 +344,7 @@ impl AppState {
                 .session
                 .sandbox_mode
                 .unwrap_or(record.codex_sandbox_mode),
+            shared_codex_profile: record.shared_codex_profile(),
             thread_id,
             thread_state: normalized_codex_thread_state(
                 record.session.agent,
@@ -228,20 +368,27 @@ impl AppState {
     /// the stdout reader's EOF path and the `wait()` thread already fail
     /// pending requests and retire the runtime (`src/codex.rs`).
     fn shared_codex_stdout_silence_if_matches(&self, runtime_id: &str) -> Option<Duration> {
-        let shared_runtime = self
-            .shared_codex_runtime
-            .lock()
-            .expect("shared Codex runtime mutex poisoned");
-        shared_runtime
-            .as_ref()
-            .filter(|runtime| runtime.runtime_id == runtime_id)
-            .map(|runtime| {
-                runtime
-                    .stdout_activity
-                    .lock()
-                    .expect("shared Codex stdout activity mutex poisoned")
-                    .elapsed()
-            })
+        [
+            SharedCodexProfile::Default,
+            SharedCodexProfile::ReadOnlySandbox,
+        ]
+        .into_iter()
+        .find_map(|profile| {
+            let shared_runtime = self
+                .shared_codex_runtime_slot(profile)
+                .lock()
+                .expect("shared Codex runtime mutex poisoned");
+            shared_runtime
+                .as_ref()
+                .filter(|runtime| runtime.runtime_id == runtime_id)
+                .map(|runtime| {
+                    runtime
+                        .stdout_activity
+                        .lock()
+                        .expect("shared Codex stdout activity mutex poisoned")
+                        .elapsed()
+                })
+        })
     }
 
     /// Zeros the shared runtime slot if and only if it still holds the
@@ -251,25 +398,14 @@ impl AppState {
     /// threads (the writer, the stdout reader, the `wait()` thread, a
     /// stdin watchdog) can race to report the failure, and in the
     /// meantime another session may have already triggered
-    /// [`Self::shared_codex_runtime`] to spawn a replacement. Clearing
+    /// [`Self::shared_codex_runtime_for`] to spawn a replacement. Clearing
     /// the slot unconditionally would clobber the fresh runtime and
     /// leave its clients orphaned. Only the handler whose runtime still
     /// matches may take the slot and terminate the child.
     fn clear_shared_codex_runtime_if_matches(&self, runtime_id: &str) -> Result<()> {
-        let removed_runtime = {
-            let mut shared_runtime = self
-                .shared_codex_runtime
-                .lock()
-                .expect("shared Codex runtime mutex poisoned");
-            if shared_runtime
-                .as_ref()
-                .is_some_and(|runtime| runtime.runtime_id == runtime_id)
-            {
-                shared_runtime.take()
-            } else {
-                None
-            }
-        };
+        let removed_runtime = self
+            .take_shared_codex_runtime_if_matches(runtime_id)
+            .map(|(_, runtime)| runtime);
 
         if let Some(runtime) = removed_runtime {
             runtime.kill().with_context(|| {
@@ -314,21 +450,13 @@ impl AppState {
                 return Ok(());
             }
         }
-        let removed_runtime = {
-            let mut shared_runtime = self
-                .shared_codex_runtime
-                .lock()
-                .expect("shared Codex runtime mutex poisoned");
-            if shared_runtime
-                .as_ref()
-                .is_some_and(|runtime| runtime.runtime_id == runtime_id)
-            {
-                shared_runtime.take()
-            } else {
-                None
-            }
-        };
-        let claimed_shared_slot = removed_runtime.is_some();
+        // The profile of the slot the runtime held: a lost app-server
+        // requires a rebind only of the sessions that run on that profile.
+        let (claimed_profile, removed_runtime) =
+            match self.take_shared_codex_runtime_if_matches(runtime_id) {
+                Some((profile, runtime)) => (Some(profile), Some(runtime)),
+                None => (None, None),
+            };
 
         let (session_exits, engram_rebind_session_ids) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
@@ -352,7 +480,7 @@ impl AppState {
                 .filter(|record| {
                     record.session.agent == Agent::Codex
                         && record.engram.routing_token.is_some()
-                        && (claimed_shared_slot
+                        && (claimed_profile == Some(record.shared_codex_profile())
                             || matches!(
                                 &record.runtime,
                                 SessionRuntime::Codex(handle)

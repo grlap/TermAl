@@ -1069,6 +1069,10 @@ struct AppState {
     telegram_relay_runtime: Arc<Mutex<TelegramRelayRuntime>>,
     /// Lazily created shared Codex app-server reused across Codex sessions.
     shared_codex_runtime: Arc<Mutex<Option<SharedCodexRuntime>>>,
+    /// The app-server for read-only-sandbox Codex sessions on Windows
+    /// (`SharedCodexProfile::ReadOnlySandbox`), started on first demand like
+    /// the default one.
+    shared_codex_read_only_runtime: Arc<Mutex<Option<SharedCodexRuntime>>>,
     /// Runtime ids whose exit cascade has already been claimed. Several
     /// worker threads may report one shared-process death; only the first may
     /// terminalize sessions or rebind Engram.
@@ -1771,6 +1775,11 @@ struct SessionRecord {
     codex_approval_policy: CodexApprovalPolicy,
     codex_reasoning_effort: CodexReasoningEffort,
     codex_sandbox_mode: CodexSandboxMode,
+    /// The app-server profile whose Codex home holds this session's thread,
+    /// fixed when the session attaches to an app-server before it has a
+    /// thread. `None` for a thread created before profiles existed, which
+    /// lives in the default home. See `shared_codex_profile.rs`.
+    codex_thread_profile: Option<SharedCodexProfile>,
     external_session_id: Option<String>,
     pending_claude_approvals: HashMap<String, ClaudePendingApproval>,
     pending_claude_user_inputs: HashMap<String, ClaudePendingUserInput>,

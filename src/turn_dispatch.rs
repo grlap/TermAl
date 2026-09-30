@@ -395,7 +395,7 @@ impl AppState {
     ///   and force a fresh session runtime on this turn.
     /// - Route to the right spawn helper based on `record.session.agent`:
     ///   `spawn_claude_runtime`, the shared Codex runtime (see
-    ///   [`Self::shared_codex_runtime`]), or `spawn_acp_runtime`.
+    ///   [`Self::shared_codex_runtime_for`]), or `spawn_acp_runtime`.
     /// - Stamp `active_turn_start_message_count` so SSE deltas can later
     ///   attribute subsequent messages to this turn.
     /// - Route expanded prompts (slash-command expansions) separately
@@ -628,10 +628,12 @@ impl AppState {
                         ));
                     }
                     SessionRuntime::None => {
+                        let profile = record.shared_codex_profile();
                         let handle = spawn_codex_runtime(
                             self.clone(),
                             record.session.id.clone(),
                             record.session.workdir.clone(),
+                            profile,
                         )
                         .map_err(|err| {
                             ApiError::internal(format!(
@@ -639,6 +641,7 @@ impl AppState {
                             ))
                         })?;
                         record.runtime = SessionRuntime::Codex(handle.clone());
+                        record.attach_to_shared_codex_profile(profile);
                         handle
                     }
                 };

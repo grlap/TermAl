@@ -31,6 +31,7 @@ mod codex_delegation_release;
 mod codex_discovery;
 mod codex_home;
 mod codex_protocol;
+mod codex_read_only_profile;
 mod codex_thread_recovery;
 mod codex_threads;
 mod content_revision;
@@ -824,6 +825,7 @@ fn test_app_state() -> AppState {
         state_broadcast_mailbox: None,
         telegram_relay_runtime: Arc::new(Mutex::new(TelegramRelayRuntime::default())),
         shared_codex_runtime: Arc::new(Mutex::new(None)),
+        shared_codex_read_only_runtime: Arc::new(Mutex::new(None)),
         shared_codex_exit_claims: Arc::new(Mutex::new(HashSet::new())),
         agent_runtime_spawning_enabled: false,
         test_acp_runtime_overrides: Arc::new(Mutex::new(Vec::new())),
