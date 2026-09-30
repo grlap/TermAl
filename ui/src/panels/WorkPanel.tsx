@@ -1,11 +1,10 @@
 // New Work surface (workspace tab). Owns independent project selection, the
-// view switch and the merged loaded-row presentation across sources. Does not
+// view switch and the loaded Engram row presentation. Does not
 // edit trackers, infer holder identity, or run suggestions.
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type { Project } from "../types";
 import type { WorkFilters, WorkItem } from "../work-visualizer-api";
 import { useWorkList } from "./use-work-list";
-import { WorkBeadDetails } from "./WorkBeadDetails";
 import { WorkItemDetails } from "./WorkItemDetails";
 import type { WorkSelection } from "./WorkRow";
 import { WORK_SORT_COLUMNS, defaultWorkSortDirection, sortWorkRows, type WorkSort, type WorkSortKey } from "./work-sort";
@@ -36,7 +35,7 @@ export function WorkPanel({ projects, focusedProjectId }: { projects: readonly P
       setSelected(e.target.value);
       try { localStorage.setItem(PROJECT_KEY, e.target.value); } catch { /* Selection remains usable in memory. */ }
     }}>{projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label>
-    <p className="work-panel-caption">Read-only work visualizer · Engram and Beads. No task edits, claims, or automatic enablement.</p>
+    <p className="work-panel-caption">Read-only work visualizer · Engram. No task edits, claims, or automatic enablement.</p>
     {projectId ? <WorkProjectView key={projectId} projectId={projectId} /> : <p>No project available. Add a project to inspect its work sources.</p>}
   </section>;
 }
@@ -91,10 +90,9 @@ function WorkResults({ projectId, filters, view, sort, onSortChange }: {
   const detailTrigger = useRef<HTMLButtonElement | null>(null);
   const listContainer = useRef<HTMLDivElement | null>(null);
   const page = result?.page;
-  const beads = result?.beads;
   // Stable row identity lets the tree memoise its forest across selection and
   // collapse re-renders.
-  const loaded = useMemo(() => [...(page?.items ?? []), ...(beads?.items ?? [])], [page, beads]);
+  const loaded = useMemo(() => page?.items ?? [], [page]);
   // The selected kind stays an option even when a refreshed snapshot has no
   // rows of it: the filter is then visibly active with no matches, never
   // silently applied behind "All".
@@ -105,10 +103,9 @@ function WorkResults({ projectId, filters, view, sort, onSortChange }: {
   // One sort model serves the control below and the table headers; it orders
   // loaded rows only and never touches the sources' pages or identities.
   const rows = useMemo(() => sortWorkRows(loaded.filter(row => (!kind || row.kind === kind) && matchesWorkLabels(row, labels, labelMode)), sort), [loaded, kind, labels, labelMode, sort]);
-  const total = (page?.total ?? 0) + (beads?.total ?? 0);
+  const total = page?.total ?? 0;
   const loadedSummary = [
     page && `${page.items.length} of ${page.total} Engram items loaded`,
-    beads && `${beads.items.length} of ${beads.total} Beads items loaded`,
   ].filter(Boolean).join(" · ");
   const select = (item: WorkItem, trigger: HTMLButtonElement) => { detailTrigger.current = trigger; setSelection({ source: item.source, ref: item.shortRef }); };
   const closeDetails = () => {
@@ -124,7 +121,7 @@ function WorkResults({ projectId, filters, view, sort, onSortChange }: {
   // focus: like closeDetails, park it on the list rather than the body.
   const readerId = result?.readerId ?? null;
   useEffect(() => {
-    if (!selection || selection.source === "beads" || readerId) return;
+    if (!selection || readerId) return;
     setSelection(null);
     const active = document.activeElement;
     if (active && active !== document.body && active.isConnected) return;
@@ -132,8 +129,7 @@ function WorkResults({ projectId, filters, view, sort, onSortChange }: {
     if (trigger?.isConnected) trigger.focus(); else listContainer.current?.focus();
   }, [selection, readerId]);
   const details = !selection ? null
-    : selection.source === "beads" ? <WorkBeadDetails key={`beads:${selection.ref}`} projectId={projectId} issueId={selection.ref} onClose={closeDetails} />
-      : result?.readerId ? <WorkItemDetails key={`${result.readerId}:${selection.ref}`} projectId={projectId} workRef={selection.ref} readerId={result.readerId} onClose={closeDetails} />
+    : result?.readerId ? <WorkItemDetails key={`${result.readerId}:${selection.ref}`} projectId={projectId} workRef={selection.ref} readerId={result.readerId} onClose={closeDetails} />
         : null;
   return <>
     <div className="work-panel-actions">
@@ -143,7 +139,9 @@ function WorkResults({ projectId, filters, view, sort, onSortChange }: {
     {result?.sources.map(source => <p key={source.source} className="work-source-status" data-state={source.state}>
       <strong>{source.source}: {source.state}</strong> — {source.message}
     </p>)}
-    {(page || beads) && result && <>
+    {result && !page && result.sources.some(source => source.state === "absent") && <p>No tracker is bound to this project.</p>}
+    {result && !page && result.sources.some(source => source.state === "error") && <div className="work-panel-list" ref={listContainer} tabIndex={-1}><p>No rows from the readable sources. A source failed (see its status above), so this is not a complete tracker view.</p></div>}
+    {page && result && <>
       <div className="work-panel-filters">
         <WorkLabelPicker rows={loaded} selected={labels} onChange={setLabels} mode={labelMode} onModeChange={setLabelMode} />
         <label>Kind (loaded rows) <select value={kind} onChange={e => setKind(e.target.value)}><option value="">All</option>
@@ -159,9 +157,7 @@ function WorkResults({ projectId, filters, view, sort, onSortChange }: {
         </button>}
       </div>
       <p>{loadedSummary}; {rows.length} visible. Filters and sorting (the control above or a table header) apply only to loaded rows.</p>
-      <p className="work-panel-caption">{result.beadsObservedAt && result.beadsObservedAt !== result.observedAt
-        ? <>Engram read completed: <WorkTime value={result.observedAt} /> · Beads snapshot from <WorkTime value={result.beadsObservedAt} />. Refresh for current data.</>
-        : <>Read completed: <WorkTime value={result.observedAt} />. Refresh for current data.</>}</p>
+      <p className="work-panel-caption">Read completed: <WorkTime value={result.observedAt} />. Refresh for current data.</p>
       <div className="work-panel-body" data-details={details ? "open" : "closed"}>
         <div className="work-panel-list" ref={listContainer} tabIndex={-1}>
           {view === "table"
@@ -172,7 +168,6 @@ function WorkResults({ projectId, filters, view, sort, onSortChange }: {
             ? "No rows from the readable sources. A source failed (see its status above), so this is not a complete tracker view."
             : total === 0 ? "No work items match the source filters." : "No matching rows in the loaded page(s). More source items may exist."}</p>}
           {page?.hint && <p>{page.hint}</p>}
-          {beads?.hint && <p>{beads.hint}</p>}
           {page?.more && <p>More Engram items remain.{!page.after && " No continuation is available; the source page is byte-limited. See its hint above."}</p>}
           {page?.more && page.after && <button type="button" disabled={busy} onClick={more}>Load more work</button>}
         </div>

@@ -390,10 +390,6 @@ fn app_router_with_acceptance_policy_limiter(
             "/api/projects/{id}/work/engram/{work_ref}",
             get(get_project_work_detail),
         )
-        .route(
-            "/api/projects/{id}/work/beads/{issue_id}",
-            get(get_project_work_beads_detail),
-        )
         .route("/api/test-runs", get(get_test_runs))
         .route("/api/test-runs/{run_id}", get(get_test_run))
         .route(
@@ -781,7 +777,6 @@ include!("work_visualizer_types.rs");
 include!("work_visualizer_process.rs");
 include!("work_visualizer.rs");
 include!("work_visualizer_detail.rs");
-include!("work_visualizer_beads.rs");
 include!("work_memories.rs");
 include!("test_runs.rs");
 include!("test_runs_disk.rs");

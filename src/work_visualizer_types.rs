@@ -42,7 +42,7 @@ impl WorkListQuery {
     }
 
     fn arguments(&self) -> Vec<String> {
-        // Open work only, like the Beads snapshot: `--all` would add every
+        // Open work only: `--all` would add every
         // completed, cancelled and superseded item to the default view.
         let mut args = vec!["ls", "--verbose", "--json", "--limit", "20"]
             .into_iter()
@@ -79,9 +79,6 @@ struct WorkListResponse {
     reader_id: Option<String>,
     observed_at: String,
     page: Option<WorkPage>,
-    /// Beads rows share the item model but never the Engram reader/cursor
-    /// contract: one full read, no continuation, explicit per-source errors.
-    beads: Option<WorkPage>,
 }
 
 /// A blocking relation ("waits for"), distinct from parent/child hierarchy.

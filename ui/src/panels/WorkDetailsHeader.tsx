@@ -1,4 +1,4 @@
-// Shared Work drawer heading, split from WorkItemDetails and WorkBeadDetails.
+// Shared Work drawer heading, split from WorkItemDetails.
 // Owns compact, accessible controls; fetching and close/focus behavior stay in callers.
 export function WorkDetailsHeader({ workRef, onReload, onClose }: {
   workRef: string; onReload: () => void; onClose: () => void;

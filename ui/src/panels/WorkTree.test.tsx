@@ -9,7 +9,7 @@ function waits(id: string, on: string[]): WorkItem {
 
 describe("WorkTree", () => {
   it.each(["dependencies", "hierarchy"] as const)("keeps the leading group together and discloses unknown sources and deferred availability in %s", mode => {
-    const deferred = { ...waits("later", []), availability: "deferred", assignedTo: "Long assignment", source: "beads" };
+    const deferred = { ...waits("later", []), availability: "deferred", assignedTo: "Long assignment", source: "engram" };
     const unknown = { ...waits("other", []), source: "future-tracker" };
     const rows = [deferred, unknown];
     const view = render(<WorkTree rows={rows} universe={rows} mode={mode} selection={null} onSelect={() => {}} />);
@@ -30,7 +30,7 @@ describe("WorkTree", () => {
     // grid row. Priority and ID share the heading row; geometry needs a browser.
     expect(within(main).queryByText("Long assignment")).not.toBeInTheDocument();
     expect(within(main.parentElement!).getByText("Long assignment")).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: "Source: Beads" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Source: Engram" })).toBeInTheDocument();
     const fallback = screen.getByText("future-tracker");
     expect(fallback).toHaveClass("work-chip-source");
     expect(fallback).toHaveAttribute("data-source", "future-tracker");

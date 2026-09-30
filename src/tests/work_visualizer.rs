@@ -95,12 +95,7 @@ fn work_detection_and_invalid_requests_do_not_request_cli_capacity() {
     let never_admit =
         || -> Result<(), ApiError> { panic!("metadata-only request asked for a CLI permit") };
     let response = state
-        .list_project_work_with_admission(
-            &project,
-            WorkListQuery::default(),
-            never_admit,
-            never_admit,
-        )
+        .list_project_work_with_admission(&project, WorkListQuery::default(), never_admit)
         .unwrap();
     assert!(response.page.is_none());
     let error = state
@@ -110,7 +105,6 @@ fn work_detection_and_invalid_requests_do_not_request_cli_capacity() {
                 search: Some("x".repeat(20_000)),
                 ..Default::default()
             },
-            never_admit,
             never_admit,
         )
         .unwrap_err();
@@ -896,4 +890,135 @@ fn work_detail_process_passes_exact_arguments_and_rejects_stale_reader_or_cursor
             .status,
         StatusCode::CONFLICT
     );
+}
+
+#[tokio::test]
+async fn work_without_a_binding_is_empty_without_admitting_a_reader() {
+    let (state, project, _, root) = fixture();
+    // Retired tracker metadata must not be detected or read as a fallback.
+    fs::create_dir(root.join(".beads")).unwrap();
+    let limiter = Arc::new(tokio::sync::Semaphore::new(0));
+    let app = app_router(state).layer(axum::Extension(WorkReadLimiter(limiter)));
+    let (status, response): (StatusCode, Value) = request_json(
+        &app,
+        Request::builder()
+            .uri(format!("/api/projects/{project}/work"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(response["page"].is_null());
+    assert!(response["readerId"].is_null());
+    assert_eq!(response["sources"].as_array().unwrap().len(), 1);
+    assert_eq!(response["sources"][0]["state"], "absent");
+    assert!(
+        response["sources"][0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("No tracker is bound")
+    );
+    assert!(response.get("beads").is_none());
+    assert!(!root.join("work-read-args.txt").exists());
+}
+
+#[test]
+fn dropping_the_handler_future_sets_the_abandon_flag() {
+    // Both surviving list and memories handlers leave this flag for their
+    // blocking worker when the browser drops the handler future.
+    let cancelled = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let guard = WorkReadAbandonGuard(cancelled.clone());
+    assert!(!cancelled.load(std::sync::atomic::Ordering::Relaxed));
+    drop(guard);
+    assert!(cancelled.load(std::sync::atomic::Ordering::Relaxed));
+}
+
+#[test]
+fn engram_admission_failures_are_isolated_only_when_they_are_source_conditions() {
+    let (state, project, _, root) = fixture();
+    install_store(&state, &project, &root);
+    let busy_admission = || -> Result<(), ApiError> {
+        Err(ApiError::from_status(
+            StatusCode::TOO_MANY_REQUESTS,
+            "Work reads busy; retry shortly",
+        ))
+    };
+    let busy = state
+        .list_project_work_with_admission(&project, WorkListQuery::default(), busy_admission)
+        .unwrap();
+    assert_eq!(busy.sources.len(), 1);
+    assert_eq!(busy.sources[0].source, "engram");
+    assert_eq!(busy.sources[0].state, "error");
+    assert!(busy.sources[0].message.contains("busy"));
+    assert!(busy.page.is_none() && busy.reader_id.is_none());
+    let continuation = state
+        .list_project_work_with_admission(
+            &project,
+            WorkListQuery {
+                after: Some("cursor".into()),
+                reader_id: Some(host_reader_key(&state, &project)),
+                ..Default::default()
+            },
+            busy_admission,
+        )
+        .unwrap_err();
+    assert_eq!(continuation.status, StatusCode::TOO_MANY_REQUESTS);
+    let internal = state
+        .list_project_work_with_admission(&project, WorkListQuery::default(), || {
+            Err::<(), _>(ApiError::internal("Work read limiter closed"))
+        })
+        .unwrap_err();
+    assert_eq!(internal.status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(!root.join("work-read-args.txt").exists());
+}
+
+#[test]
+fn engram_list_reads_stop_when_the_request_was_abandoned() {
+    let (state, project, _, root) = fixture();
+    install_store(&state, &project, &root);
+    for already_abandoned in [true, false] {
+        let abandoned = std::sync::atomic::AtomicBool::new(already_abandoned);
+        let error = state
+            .list_project_work_with_options(
+                &project,
+                WorkListQuery::default(),
+                || {
+                    // Also cover cancellation while the worker waits for admission.
+                    abandoned.store(true, std::sync::atomic::Ordering::Relaxed);
+                    Ok::<(), ApiError>(())
+                },
+                &abandoned,
+            )
+            .unwrap_err();
+        assert_eq!(error.status.as_u16(), 499);
+        assert!(!root.join("work-read-args.txt").exists());
+    }
+}
+
+#[tokio::test]
+async fn removed_tracker_routes_are_refused_without_cli_admission() {
+    let (state, project, _, root) = fixture();
+    install_store(&state, &project, &root);
+    let app = app_router(state).layer(axum::Extension(WorkReadLimiter(Arc::new(
+        tokio::sync::Semaphore::new(0),
+    ))));
+    for (route, expected) in [
+        ("work-memories/beads", StatusCode::BAD_REQUEST),
+        ("work/beads/retired", StatusCode::NOT_FOUND),
+    ] {
+        let response = tokio::time::timeout(
+            Duration::from_secs(2),
+            app.clone().oneshot(
+                Request::builder()
+                    .uri(format!("/api/projects/{project}/{route}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            ),
+        )
+        .await
+        .expect("removed route waited for CLI admission")
+        .unwrap();
+        assert_eq!(response.status(), expected);
+        assert!(!root.join("work-read-args.txt").exists());
+    }
 }

@@ -10,13 +10,10 @@ fn memory_queries_are_bounded_and_positionals_cannot_become_options() {
     };
     assert!(query.validate("engram").is_ok());
     assert_eq!(
-        query.arguments("engram"),
+        query.arguments(),
         ["memories", "--json", "--", "--delete; $(evil)"]
     );
-    assert_eq!(
-        query.arguments("beads"),
-        ["memories", "--", "--delete; $(evil)"]
-    );
+    assert!(query.validate("beads").is_err());
     assert!(query.validate("other").is_err());
     for query in [
         WorkMemoryQuery {
@@ -45,53 +42,20 @@ fn memory_queries_are_bounded_and_positionals_cannot_become_options() {
 #[test]
 fn memory_receipts_preserve_source_semantics_and_fail_closed() {
     let list = WorkMemoryQuery::default();
-    let beads = normalize_work_memories(
-        "beads",
-        &list,
-        serde_json::json!({"schema_version":1,"guide":"First\nSecret second line"}),
-    )
-    .unwrap();
-    assert_eq!(beads.items[0].summary, "First");
-    assert!(beads.items[0].body.is_none());
-    assert!(
-        normalize_work_memories("beads", &list, serde_json::json!({"schema_version":1}))
-            .unwrap()
-            .items
-            .is_empty()
-    );
-    assert!(normalize_work_memories("beads", &list, serde_json::json!({"bad":42})).is_err());
-    assert!(
-        normalize_work_memories("beads", &list, serde_json::json!({"schema_version":2})).is_err()
-    );
+    let page = normalize_work_memories("engram", &list, serde_json::json!({
+        "memories":[{"key":"guide","revision":2,"first_line":"First", "remembered_at":"now","actor_id":"greg/termal"}],
+        "next_after":null,"omitted_count":0,"exhausted":true
+    })).unwrap();
+    assert_eq!(page.items[0].summary, "First");
+    assert!(page.items[0].body.is_none());
     let detail = WorkMemoryQuery {
         key: Some("guide".into()),
+        reader_id: Some("reader".into()),
         ..Default::default()
     };
-    let full = normalize_work_memories(
-        "beads",
-        &detail,
-        serde_json::json!({"key":"guide","found":true,"value":"Full <script> inert"}),
-    )
-    .unwrap();
+    let full = normalize_work_memories("engram", &detail, serde_json::json!({"key":"guide","revision":2,"body":"Full <script> inert","remembered_at":"now","actor_id":"greg/termal"})).unwrap();
     assert_eq!(full.items[0].body.as_deref(), Some("Full <script> inert"));
-    assert_eq!(
-        normalize_work_memories(
-            "beads",
-            &detail,
-            serde_json::json!({"key":"guide","found":false})
-        )
-        .unwrap_err()
-        .status,
-        StatusCode::NOT_FOUND
-    );
-    assert!(
-        normalize_work_memories(
-            "beads",
-            &detail,
-            serde_json::json!({"key":"wrong","found":true,"value":"body"})
-        )
-        .is_err()
-    );
+    assert!(normalize_work_memories("engram", &detail, serde_json::json!({"key":"wrong","revision":2,"body":"body","remembered_at":"now","actor_id":"greg/termal"})).is_err());
     assert!(
         normalize_work_memories(
             "engram",
@@ -160,4 +124,31 @@ async fn memory_http_uses_established_reader_paging_detail_and_rejects_stale_key
         args.contains("memories") && args.contains("--full") && args.contains("termal-work-view")
     );
     assert!(!args.contains("recall") && !args.contains("remember\n"));
+}
+
+#[test]
+fn engram_memory_reads_stop_when_the_request_was_abandoned() {
+    let (state, project, _, root) = super::work_visualizer::fixture();
+    super::work_visualizer::install_store(&state, &project, &root);
+    for already_abandoned in [true, false] {
+        let abandoned = std::sync::atomic::AtomicBool::new(already_abandoned);
+        let error = state
+            .read_work_memories(
+                &project,
+                "engram",
+                WorkMemoryQuery::default(),
+                || {
+                    assert!(
+                        !already_abandoned,
+                        "abandoned memory read requested admission"
+                    );
+                    abandoned.store(true, std::sync::atomic::Ordering::Relaxed);
+                    Ok::<(), ApiError>(())
+                },
+                &abandoned,
+            )
+            .unwrap_err();
+        assert_eq!(error.status.as_u16(), 499);
+        assert!(!root.join("work-read-args.txt").exists());
+    }
 }

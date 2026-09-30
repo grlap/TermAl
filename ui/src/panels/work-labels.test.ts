@@ -7,7 +7,7 @@ const item = (id: string, labels: string[], source = "engram") => ({ id, labels,
 
 describe("loaded Work labels", () => {
   it("counts each label once per item, with cross-source identities kept separate", () => {
-    const rows = [item("a", ["storage", "storage", "api"]), item("a", ["storage"], "beads"), item("b", [])];
+    const rows = [item("a", ["storage", "storage", "api"]), item("a", ["storage"], "alternate"), item("b", [])];
     expect([...workLabelCounts(rows)]).toEqual([["storage", 2], ["api", 1]]);
     expect(groupWorkLabels(rows).map(group => [group.label, group.items.length])).toEqual([["api", 1], ["storage", 2], ["Unlabelled", 1]]);
   });

@@ -3,8 +3,7 @@
 ## Delivery and scope
 
 Tracked in `tm-m6r1`. This is a read-only view, not another tracker or a
-migration/synchronization service. Engram is the primary source; Beads is read
-through the same row model. Placement is a **Work workspace tab**, opened from
+migration/synchronization service. Work items and retained project memories are read from Engram only. Placement is a **Work workspace tab**, opened from
 the persistent "Open Work" dock action next to the Response Board action; there
 is no Work dock section. The tab has its own project selector, independent of
 the Files panel, with the origin session's project as the mount-time fallback.
@@ -15,7 +14,6 @@ The delivery slices agreed with Greg are:
   item details/notes, explicit unavailable/error states.
 - **1b:** hierarchy/dependency tree, live query pins on the Response Board,
   verified holder-to-session navigation, retained project memories.
-- **2:** Beads adapter and source-aware task links.
 - **3:** write actions only after a separate product decision.
 
 See [architecture](../architecture.md) and the
@@ -25,25 +23,22 @@ single-state model and its assumptions about holder identities and zero writes.
 
 ### Current implementation boundary
 
-The implemented scope is 1a, the tree half of 1b, and the Beads read adapter
-from 2, all with **explicit refresh**, not a live activity subscription. Project
+The implemented scope is 1a, the tree half of 1b and retained project memories, all with **explicit refresh**, not a live activity subscription. Project
 changes and submitted filters start fresh reads; source markers and integration
 settings are rechecked on every read. Automatic refresh on file/activity
 changes, the decision/live-holder badge, Response Board pins, holder-to-session
 navigation remain follow-ups. The Memories view reads retained project memories
-from both trackers (see below). Details show holder labels
+from Engram (see below). Details show holder labels
 without navigation; rows show assignment, not an inferred executing session.
 Full note bodies are not fetched yet.
 
 Validation uses isolated CLI fixtures and component tests. Acceptance against a
 running host — the operator-enabled Engram store read by the host reader with
-no agent session bound, including right after a host restart, and a real `bd`
-store — is still required before calling the feature complete.
+no agent session bound, including right after a host restart — is still required before calling the feature complete.
 
 ### Views
 
-The tab offers three views over the same loaded rows (Engram page plus Beads
-snapshot), all read-only:
+The tab offers five views, all read-only; the task views share the loaded Engram pages:
 
 - **Dependencies** (default): goals on top, what they wait for nested. A row is
   a root when no visible row waits for it; members of a blocking cycle are
@@ -57,20 +52,17 @@ snapshot), all read-only:
   root, so an arbitrarily long chain never exhausts the builder or renderer
   stack and the promised root always exists. A
   prerequisite that is not visible is disclosed as a count, never invented:
-  "waits for N not loaded" (unsatisfied), "N satisfied · not loaded" (e.g.
-  closed Beads blockers, which the open list never contains) and "N hidden by
+  "waits for N not loaded" (unsatisfied), "N satisfied · not loaded" and "N hidden by
   filter" (loaded but excluded by a kind or label filter). Satisfied prerequisites
   are marked. Rows with no visible blocking relation, including rows whose
   only prerequisites are not visible, are listed flat under "No visible
-  dependency links". Edges come only from the source receipts (Engram
-  `blocked_by`, Beads `blocks` dependencies) and never cross sources.
-- **Hierarchy**: parent on top, subtasks nested (Engram `parent_id`, Beads
-  `parent-child` edges — never the dotted id spelling). A child whose parent
+  dependency links". Edges come only from Engram’s `blocked_by` receipt, never inferred from titles or hierarchy.
+- **Hierarchy**: parent on top, subtasks nested (Engram `parent_id` — never the dotted id spelling). A child whose parent
   is loaded but hidden by a kind or label filter is shown as a root with "parent
   hidden by filter"; a parent that was never loaded is not disclosed, the
   same rule as the dependency counts. Blocking relations never appear here;
   the two relations are deliberately separate trees.
-  Neither tree is virtualised; the Beads cap and Engram paging bound the
+  Neither tree is virtualised; Engram paging bounds the
   rendered size.
 - **Labels**: collapsible, flat groups for each label, followed by Unlabelled.
   A multi-label item appears in each matching group, but the visible count
@@ -89,9 +81,7 @@ snapshot), all read-only:
 In both trees a row reads as priority, then reference and title: the priority
 chip's colour is the availability (green ready, red blocked, blue claimed or
 active, gold deferred or waiting, grey closed), with the word kept on hover and
-as hidden text for assistive technology. The source appears as a small glyph
-(three beads; a cell for Engram) only when the loaded rows come from both
-trackers; a single-source project shows none. Assignment stays a text chip.
+as hidden text for assistive technology. The Engram-only trees need no source glyph. Assignment stays a text chip.
 The toggle, priority and title stay together; long titles wrap within the
 available row width, with trailing metadata wrapping below when necessary.
 
@@ -108,8 +98,7 @@ options; no local label action starts a source read. Empty labels, if emitted,
 are displayed explicitly as `(empty label)`, not treated as Unlabelled.
 
 Kind/label filtering and sorting apply to loaded rows only. Selecting a row opens its
-details beside the list: Engram details need the list's reader key; Beads
-details are a separate `show` + `comments` read and need no Engram reader.
+details beside the list: Engram details need the list's reader key.
 Only the active pane tab is mounted, so activating the Work tab again after
 another tab is a refresh: it starts fresh reads and resets filters, selection
 and collapse state (tracked follow-up: keep that state per workspace tab).
@@ -118,32 +107,29 @@ and collapse state (tracked follow-up: keep that state per workspace tab).
 
 ### Project memories
 
-The Memories view starts independent reads for Engram and Beads only when
-opened. Source errors/unavailability are shown separately from a successful
-empty listing. Search is submitted to each source, not silently restricted to
+The Memories view starts Engram reads only when opened. Source errors/unavailability are shown separately from a successful
+empty listing. Search is submitted to Engram, not silently restricted to
 already loaded rows. Changing project/search, refreshing, or leaving the view
 aborts client requests and fences late results. Unfiltered Engram pages load
 automatically and sequentially until no continuation remains, displaying each
 page as it arrives. A failed read stops loading without automatic retries;
 transport failures retain the partial list, while stale readers, duplicate
-keys, and non-progressing cursors discard the incompatible listing. Source
-search limits and Beads' listing cap remain explicitly disclosed.
+keys, and non-progressing cursors discard the incompatible listing. Engram search limits remain explicitly disclosed.
 Each memory expands in place using its chevron/key button; multiple memories
 can stay open independently. Collapsing cancels the full-body request; Escape
 collapses the focused row and returns focus to its toggle. Opening reads the
 current full body. Engram's `rememberedAt` is the current version's creation
 time, shown as **Revision date**, not the memory's original creation date.
-Revision and author are displayed when supplied; Beads supplies no dates or
-revision/author metadata. Text is inert, not rendered HTML,
+Revision and author are displayed when supplied. Text is inert, not rendered HTML,
 executed, or injected into an agent context. Switching between Memories and
 task views remounts their results and resets local selection/filter state.
 
-`GET /api/projects/{id}/work-memories/{source}` accepts `engram` or `beads`.
+`GET /api/projects/{id}/work-memories/{source}` accepts only `engram`.
 Query: optional `search`, or `key` for full text, or Engram `after` for the next
 unfiltered key-ordered page. Engram full/continuation reads require the list's
 `readerId`. These combinations are mutually exclusive; query text is capped
 at 2048 UTF-8 bytes with no controls or blank values. Unknown source/fields or
-invalid combinations return 400, missing project or Beads memory 404, stale
+invalid combinations return 400, missing project 404, stale
 Engram reader 409, busy follow-ups 429, and CLI/receipt failures 502. Initial
 source conditions return 200 with `state: unavailable|error` and `message`,
 not a misleading empty success. Internal errors remain HTTP failures.
@@ -162,16 +148,6 @@ changes, not memory revisions. Duplicate/repeating continuations are refused.
   Filtered searches disclose `omitted_count`; unfiltered lists expose
   `next_after`. Bodies are fetched only on request. Contract inspected in
   Engram's project-memory service and CLI handlers; fixtures cover HTTP wiring.
-- Beads: native argv-only `--readonly --json memories [-- SEARCH]` and
-  `--readonly --json recall -- KEY`, under the selected project root with
-  Beads store environment overrides removed. Verified on installed 1.2.2:
-  listing is a key/body object plus numeric `schema_version: 1`; recall is
-  `{found,key,value,schema_version}`. The host strips schema metadata, returns
-  only first-line previews (500 characters), caps the result at 2000 keys and
-  discloses omitted rows. bd itself reads full values for listing; this is not
-  an on-demand store read even though the browser receives summaries only.
-  No direct Dolt access. Existing Beads output/deadline/admission bounds apply.
-
 Live acceptance against the newly built host is still required; fixture tests
 do not establish that the running host serves these endpoints.
 
@@ -246,7 +222,7 @@ Verified by Engram::Codex on `d0182e7`, recorded in the comments on `tm-m6r1`.
 List: `engram --home ABS --project-file ABS work --actor-id {developer}/termal
 --session-id termal-work-view ls --verbose --json --limit 20` — open work
 only; `--all` (completed, cancelled, superseded) is deliberately not passed,
-so the default view matches the Beads snapshot, which lists open issues.
+so the default view contains open work.
 Verbose rows contain `work` and a separate readiness overlay. Compact output
 truncates titles and is not a replacement for the verbose model.
 
@@ -296,95 +272,6 @@ different items are not a single atomic snapshot. `current_status` and
 CLI nonzero exit, non-JSON output, malformed payloads and timeouts are errors,
 never empty lists. The UI shows the failed operation and diagnostic.
 
-## Beads read contract
-
-Detection is metadata-only: a `.beads` directory in a local project plus a
-resolvable native `bd` binary. Resolution order is `TERMAL_BEADS_BINARY`, then
-`bd` on `PATH`; an npm launcher (`bd.cmd` → `node bd.js` → `bd.exe`) resolves to
-the native `bd.exe` beside it, and `.cmd`/`.bat`/`.js` shims or `#!` scripts
-are rejected so filters never pass through a shell (isolated `.ps1`/`.sh`
-fixtures are allowed only in tests). Presence is not health: the source is
-`absent` without a store, `unavailable` without a valid binary, and `error`
-when a read fails; none of these is an empty tracker.
-
-Every command is `bd --readonly --json …` with an argv vector, cwd at the
-project root, `BEADS_DIR`/`BEADS_DB` removed from the child environment (bd
-consults them before cwd discovery), one 20 s deadline per snapshot or detail
-and a 16 MiB output cap. `--readonly` is Beads' own read-only mode; reads do
-not append to `.beads/interactions.jsonl`. Beads reads have their own
-two-permit admission (at most 23 s wait — the 20 s budget plus a 3 s margin
-for the bounded reader's process-tree termination and pipe grace after a
-deadline, so a permit never outlives the wait — then 429 reported as a per-source
-error on the list route) so a slow or locked Dolt store never consumes Engram
-capacity; the Engram permit is released before the Beads snapshot starts. A
-first page reads Engram and then Beads sequentially in one blocking worker,
-so the worst case before any response is the Engram admission wait plus its
-read deadline plus the Beads admission wait plus the snapshot deadline
-(tracked follow-up: read the two sources concurrently or as separate
-requests so their latency is as independent as their errors). The Beads
-detail also checks that the `show` and `comments` receipts name the requested
-issue, since bd resolves prefixes and aliases.
-
-| Operation | Command | Mapping |
-|---|---|---|
-| List | `list --limit 0 [--label=<label>]` (open rows, bd's own label filter; every row carries its edges inline — `blocks`, `parent-child`, `relates-to`, `discovered-from` — and `dependency_count` counts its `blocks` edges), then `show <blockers missing from the open snapshot>` in batches of 80 ids under the same deadline | `closed` → lifecycle completed / availability closed; `in_progress` → open/active; `blocked` → open/blocked; `deferred` → open/deferred; `open` → open/blocked when an unsatisfied `blocks` edge exists, else open/ready; any other status is shown verbatim, never guessed as ready. `prerequisites` are the `blocks` edges; `satisfied` only on positive evidence: the blocker is not open here **and** `show` reports it `closed`. A blocker bd hides from the default list (gates, infra) or does not know stays unsatisfied. Parent = the `parent-child` edge, never the id spelling, so reparented or orphaned dotted ids follow the tracker. |
-| Detail | `show <id>` and `comments <id>` | Description, parent, typed dependencies (`blocks`, `parent-child`, …), dependent count, comments; all inert text. Relation records are parsed one by one: a record the host cannot read (a sparse external reference) is counted in `dependenciesUnread` instead of failing the drawer, and the drawer's availability follows the list's rule — reconciled against the receipt's `dependency_count` (for `show` that count covers every relation type, unlike `list`, where it is `blocks` only; verified on bd 1.2.2) and against the named parent's record, so a partial receipt shows `unknown`, never `ready`. |
-
-Beads rows are one snapshot per list request: no continuation, no reader
-identity. `search` and `availability` filters apply to the snapshot in the
-host; `label` is passed to bd (`--label=`) before the display cap. Normal list
-receipts carry labels when present (verified 2026-09-16 on bd 1.2.2 build
-`6c124203e771` with `list --limit 0`, including an issue with two labels;
-this corrects the earlier claim that list receipts omitted labels).
-The adapter preserves these labels and treats an omitted empty field as `[]`;
-it never requests `--skip-labels`. bd parses the source flag as a comma-separated list
-with AND semantics, so `a,b` means "both labels" for Beads while Engram treats
-it as one label. The `ready` rule (open, no unsatisfied `blocks` edge) was
-checked against bd's own `ready --limit 0` on this store: 250 of 250 rows
-agree (bd excludes `in_progress`, `blocked`, `deferred` and `hooked` issues,
-which the adapter maps to non-ready availabilities). Blocking through a
-`parent-child` edge is not applied by the adapter; no row in this store has
-an unblocked child under a blocked parent, so bd's behaviour for that case
-was not observed. Edges come from the list receipt itself, reconciled per row:
-a row whose receipt carries fewer `blocks` records than its
-`dependency_count`, a parent without its `parent-child` record, or a record
-that does not parse gets availability `unknown` (never a guessed `ready`) —
-the records that were read still show (a parent, a blocking prerequisite) —
-and the count is disclosed in the page hint. Verified on this store (449 open
-rows): `dependency_count` equals the inline `blocks` count on every row and
-`parent` always has its record. Blocker-status reads are bounded to eight
-`show` batches of 80 ids per snapshot, and a batch is launched only while at
-least three seconds of the deadline remain: blocker ids beyond that bound, in
-a batch bd refuses because it knows none of the ids (a mixed batch succeeds
-and omits the unknown ones), or references that are not Beads identifiers
-(a cross-project reference is never passed to bd), count as unsatisfied and
-are disclosed in the hint. Only bd's refusal of unknown ids is absorbed that way — its
-`no issue found matching` lines (on either stream) must name every requested
-id and match the whole supported refusal, not a substring: additional errors
-on the same line (or in the JSON error envelope) also fail the read. No other
-error line may be present; a benign notice (a version-update
-warning) is ignored, a notice that reports an error, failure or lock is not —
-so a store
-failure such as a locked Dolt database, even beside an unknown-id line, a
-launch failure, an exhausted deadline (a deadline that has already passed
-launches nothing) or a non-JSON/malformed receipt fails the snapshot. A label so long that the `bd list` argv would exceed the
-process launch bound is a Beads source error (never a failed request): the
-Engram page still arrives. Measured on this repository's
-store: `list` ≈ 0.5 s, one `show` batch ≈ 0.9 s. Prerequisite state is
-decided on the full open
-snapshot; only afterwards are the filtered rows capped at 2000 in source
-order, with `more: true` and a hint naming the omitted count. Rows that do
-not parse, or carry a malformed id or an out-of-range priority, are skipped
-and counted in the hint instead of failing the tracker view; a receipt in
-which no row parses is a changed contract and fails the snapshot. Binary
-resolution searches only absolute PATH entries. Identifiers are ASCII letters, digits,
-`.`, `-` and `_`, at most 128 bytes and not beginning with `-`. Receipt shapes
-verified on bd 1.2.2: comment ids are strings; an empty comment receipt is
-`[]` (a `null` receipt is treated as empty); list rows omit
-`dependencies`/`parent` when absent; `show` prints an array even for one id,
-omits `dependencies`/`parent` when absent and, given several ids, silently
-omits unknown ones.
-
 ## HTTP read API
 
 Engram routes use the host reader over the operator-configured binary, home
@@ -393,16 +280,16 @@ fields and invalid values return 400.
 
 | Route | Query | Response |
 |---|---|---|
-| `GET /api/projects/{id}/work` | Optional `search`, `label`, `availability` (`ready` or `blocked`), `after`, `readerId`. `after` requires the original reader key and unchanged filters and skips the Beads snapshot: the continuation reports the Beads source as `skipped` without detecting it, and the UI keeps the first page's snapshot, status and read time. | `sources` entries (`source`, `state`, `message`), nullable `readerId` (`host:` plus a configuration digest), `page` and `beads`, `observedAt`. Page: `items`, `total`, `shownBefore`, `more`, nullable `after` and `hint`. Items expose `source`, lifecycle, availability, priority, labels, assignment, hierarchy and `prerequisites` (`id`, `satisfied`) separately. |
+| `GET /api/projects/{id}/work` | Optional `search`, `label`, `availability` (`ready` or `blocked`), `after`, `readerId`. `after` requires the original reader key and unchanged filters. | `sources` entries (`source`, `state`, `message`), nullable `readerId` (`host:` plus a configuration digest), `page`, `observedAt`. Page: `items`, `total`, `shownBefore`, `more`, nullable `after` and `hint`. Items expose `source`, lifecycle, availability, priority, labels, assignment, hierarchy and `prerequisites` (`id`, `satisfied`) separately. |
 | `GET /api/projects/{id}/work/engram/{work_ref}` | Required `readerId` from the list; optional notes `after`. Reference must be nonempty, at most 256 bytes, contain no controls and not begin with `-`. | Nullable `status`, `holder`, `heldUntil`; `notes`; `notesWindow` with `total`, `shown`, `newer`, `older`, nullable `after`, and `readCut` (`projectPosition`, `observedAt`, nullable `validUntilMs`). First page includes status; continuations do not replace it. |
-| `GET /api/projects/{id}/work/beads/{issue_id}` | None. Identifier rules as above. | `item`, `description`, nullable `parent`, `dependencies` (`id`, `title`, `status`, `priority`, `kind`, `dependencyType`), `dependenciesUnread` (declared relation records the host could not read: missing from the receipt or unparseable), `dependentCount`, `comments` (`id`, nullable `author`, `text`, `createdAt`), `commentCount`, `observedAt`. 404 when bd knows no such issue (unknown, or deleted since the list; a closed issue still opens, since `show` returns it); 409 when the project has no readable Beads store; 429 when the Beads admission is busy; 502 for launch, receipt or id-mismatch failures. |
 
 Initial source detection returns 200 with `page: null` for absent, disabled,
-unavailable or unsupported sources; this does not claim an empty tracker.
+unavailable or unsupported sources. With no `.engram-project` declaration, the
+view says **No tracker is bound to this project** and shows no rows. Disabled or
+unavailable bindings remain explicit source conditions, not empty trackers.
 Missing projects return 404. On a first page, an Engram admission (429),
 reader or store (409), CLI or receipt (502) failure becomes an `engram` source
-`error` and the Beads snapshot is still read (and vice versa); the sources
-never hide each other. Internal failures on either path (5xx other than 502,
+`error`; no readable page is returned. Internal failures (5xx other than 502,
 or a 400 launch-bound rejection) still fail the request.
 A continuation serves only the Engram page, so its failures stay hard errors:
 unavailable readers, a changed reader configuration or invalid cursors return 409 (discard
@@ -415,14 +302,10 @@ capacity, then returns 429 with an explicit retry message. Aborted browser reads
 can finish server-side within the six-second process budget plus at most one
 second of post-exit pipe collection; replacements wait
 for capacity instead of immediately failing on routine project/filter switches.
-An abandoned list or detail request (the browser aborted it) sets a
-server-side flag when its handler is dropped: no further admission is taken
-for it — Engram or Beads — a permit granted after the flag was set is
-returned before any command is launched (the flag is re-checked right after
-each admission, and before the detail's `comments` command), and remaining
-Beads status batches are disclosed unread rather than launched, so a routine
-project or filter switch never parks both Beads permits behind reads nobody
-will receive. A process already launched still runs to its own deadline.
+An abandoned list or memories request (the browser aborted it) sets a
+server-side flag when its handler is dropped: a permit granted after the flag
+was set is returned before any command launches. A process already launched
+still runs to its own deadline.
 There is no automatic retry loop. Details take keyboard focus when opened;
 Escape closes them and returns focus to the invoking row.
 
@@ -436,8 +319,7 @@ reader has its own read cut; conflicting observations mean unknown. Until
 proven, render a label without a link.
 
 Response Board pins of a Work table query and verified holder-to-session jumps
-are the remaining 1b items. Closed items are not listed by default from either source
-(Engram `ls` without `--all`, `bd list` default); an explicit closed-history
-view would be a separate read with its own cap, for both sources at once.
+are the remaining 1b items. Closed items are not listed by default (Engram `ls` without `--all`); an
+explicit closed-history view would be a separate read with its own cap.
 
 The [Test Runs](./test-runs.md) tab follows this tab's pattern.
