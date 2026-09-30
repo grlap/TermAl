@@ -815,7 +815,7 @@ impl AppState {
                         .flatten()
                         .map(|model| model.trim().to_owned())
                 });
-                let prompt = build_acceptance_evaluator_prompt(
+                let AcceptanceEvaluatorBrief { prompt, cuts } = build_acceptance_evaluator_brief(
                     &task,
                     &evaluator_dir,
                     MAX_ACCEPTANCE_BRIEF_BYTES,
@@ -851,6 +851,9 @@ impl AppState {
                     ),
                     root_notice,
                     unmeasured,
+                    // The requester learns which records its judge did not
+                    // get whole while it can still record the proof elsewhere.
+                    acceptance_brief_cut_notice(&task.work_ref, &cuts),
                 ]);
                 Ok(AcceptanceEvaluationRequestResponse::Spawned {
                     delegation,

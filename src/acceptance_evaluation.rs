@@ -21,7 +21,16 @@ const MAX_ACCEPTANCE_BRIEF_BYTES: usize = MAX_DELEGATION_PROMPT_BYTES;
 const MAX_ACCEPTANCE_BRIEF_TITLE_CHARS: usize = 300;
 const MAX_ACCEPTANCE_BRIEF_OUTCOME_BYTES: usize = 16_000;
 const ACCEPTANCE_BRIEF_OUTCOME_TRUNCATION_MARKER: &str = "[outcome truncated by the host]";
+// An evidence entry is listed whole. Only when the brief does not fit is an
+// entry clipped, oldest first, to this many characters with a marker that
+// says so; the same bound holds the host's own one-line reasons.
 const MAX_ACCEPTANCE_BRIEF_SUMMARY_CHARS: usize = 600;
+// How many locators one group of a cut names, in the brief's line about the
+// entries left out and in the requester's notice; older ones are counted. It
+// is above the entry cap, so that in an ordinary read every entry the host
+// clipped or left out is named, and it bounds what a store of many small
+// records can add to the brief's floor and to the response.
+const MAX_ACCEPTANCE_BRIEF_CUT_LOCATORS: usize = 64;
 // Bounds of the stored receipt extract.
 const MAX_ACCEPTANCE_RECEIPT_HASH_CHARS: usize = 128;
 const MAX_ACCEPTANCE_RECEIPT_WORD_CHARS: usize = 64;
@@ -252,6 +261,15 @@ struct EngramShowNoteForEvaluation {
     summary: Option<String>,
     #[serde(default)]
     non_holder: bool,
+    /// The stored body's size, whatever the window shows of it.
+    #[serde(default)]
+    body_bytes: Option<u64>,
+    /// The window left this record's body out.
+    #[serde(default)]
+    body_omitted: bool,
+    /// The window cut this record's body.
+    #[serde(default)]
+    summary_truncated: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -263,6 +281,11 @@ struct AcceptanceEvaluationEvidence {
     summary: Option<String>,
     /// A non-holder observation is context; the tracker refuses it as a citation.
     non_holder: bool,
+    /// The stored body's size in bytes, when the tracker said it.
+    body_bytes: Option<u64>,
+    /// The tracker's window left the body out or cut it: `summary` is not the
+    /// whole record.
+    cut_by_tracker: bool,
 }
 
 /// One open task as the evaluator needs it: bases, pin and evidence index from
@@ -341,6 +364,15 @@ fn parse_acceptance_evaluation_task(
             .notes
             .into_iter()
             .map(|note| AcceptanceEvaluationEvidence {
+                // A record that carries no text and is not said to be empty
+                // was not shown either: an older tracker names no flag for it.
+                cut_by_tracker: note.body_omitted
+                    || note.summary_truncated
+                    || (note.body_bytes != Some(0)
+                        && note
+                            .summary
+                            .as_deref()
+                            .map_or(true, |summary| acceptance_brief_line(summary).is_empty())),
                 locator: note.locator,
                 kind: match note.family.as_str() {
                     Some("gates") => "gate".to_owned(),
@@ -352,6 +384,7 @@ fn parse_acceptance_evaluation_task(
                 created_at: note.created_at,
                 summary: note.summary,
                 non_holder: note.non_holder,
+                body_bytes: note.body_bytes,
             })
             .collect(),
         evidence_omitted: show.notes_omitted.unwrap_or(0),
@@ -432,7 +465,32 @@ fn acceptance_brief_criteria(task: &AcceptanceEvaluationTask) -> String {
         .join("\n")
 }
 
-fn acceptance_brief_evidence_line(evidence: &AcceptanceEvaluationEvidence) -> String {
+/// `body` cut to its first `MAX_ACCEPTANCE_BRIEF_SUMMARY_CHARS` characters,
+/// with the marker that says so, or `None` when that is not shorter than the
+/// body itself. The sizes are those of the one-line text the brief lists.
+fn acceptance_brief_clipped_body(body: &str, locator: &str) -> Option<String> {
+    let (end, _) = body
+        .char_indices()
+        .nth(MAX_ACCEPTANCE_BRIEF_SUMMARY_CHARS)?;
+    let kept = body[..end].trim_end();
+    let clipped = format!(
+        "{kept} [clipped by the host: {} of {} bytes shown; locator {locator}]",
+        kept.len(),
+        body.len()
+    );
+    (clipped.len() < body.len()).then_some(clipped)
+}
+
+/// One evidence entry as the brief lists it, and whether the host clipped it.
+/// A body is listed whole; with `clip` it is cut to the entry bound where that
+/// makes the entry shorter. Every cut, the host's or the tracker's, is said on
+/// the entry with its locator and the sizes known, so that an evaluator never
+/// takes a part for the whole record.
+fn acceptance_brief_evidence_line(
+    evidence: &AcceptanceEvaluationEvidence,
+    clip: bool,
+) -> (String, bool) {
+    let locator = acceptance_brief_text(&evidence.locator, MAX_ACCEPTANCE_BRIEF_LABEL_CHARS);
     let mut attribution = acceptance_brief_text(&evidence.kind, MAX_ACCEPTANCE_BRIEF_LABEL_CHARS);
     if let Some(by) = evidence.by.as_deref() {
         attribution.push_str(", by ");
@@ -445,91 +503,242 @@ fn acceptance_brief_evidence_line(evidence: &AcceptanceEvaluationEvidence) -> St
             MAX_ACCEPTANCE_BRIEF_LABEL_CHARS,
         ));
     }
-    let summary = evidence
+    let body = evidence
         .summary
         .as_deref()
-        .map(|summary| acceptance_brief_text(summary, MAX_ACCEPTANCE_BRIEF_SUMMARY_CHARS))
-        .filter(|summary| !summary.is_empty())
-        .unwrap_or_else(|| "(body not shown)".to_owned());
+        .map(acceptance_brief_line)
+        .filter(|body| !body.is_empty());
+    let mut clipped = false;
+    let mut text = match body {
+        None if evidence.cut_by_tracker => "(body not shown)".to_owned(),
+        None => "(empty)".to_owned(),
+        Some(body) => match clip
+            .then(|| acceptance_brief_clipped_body(&body, &locator))
+            .flatten()
+        {
+            Some(short) => {
+                clipped = true;
+                short
+            }
+            None => body,
+        },
+    };
+    if evidence.cut_by_tracker {
+        text.push_str(&match evidence.body_bytes {
+            Some(bytes) => format!(
+                " [not shown in full by the tracker: {bytes} bytes stored; locator {locator}]"
+            ),
+            None => format!(" [not shown in full by the tracker; locator {locator}]"),
+        });
+    }
     // Saying so here spares the evaluator a refused submission.
     let citable = if evidence.non_holder || !is_citable_acceptance_locator(&evidence.locator) {
         " [context only: the tracker refuses this as a citation]"
     } else {
         ""
     };
-    format!(
-        "  - {} ({attribution}){citable}: {summary}",
-        acceptance_brief_text(&evidence.locator, MAX_ACCEPTANCE_BRIEF_LABEL_CHARS)
+    (
+        format!("  - {locator} ({attribution}){citable}: {text}"),
+        clipped,
     )
+}
+
+/// What a brief does not carry whole. The requester is told, because an
+/// evaluator that could not read a record can only answer
+/// insufficient-evidence, and the requester can record the proof where it
+/// will be read. Locators are oldest first, one line each.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct AcceptanceBriefCuts {
+    /// Listed, cut by the host to fit the brief.
+    clipped: Vec<String>,
+    /// Read from the tracker and not listed: past the entry cap, or no room.
+    left_out: Vec<String>,
+    /// Listed as the tracker's window gave them: no body, or a cut one.
+    cut_by_tracker: Vec<String>,
+    /// Older than the last page the host read: never seen by it.
+    unread: usize,
+}
+
+impl AcceptanceBriefCuts {
+    fn is_empty(&self) -> bool {
+        self.clipped.is_empty()
+            && self.left_out.is_empty()
+            && self.cut_by_tracker.is_empty()
+            && self.unread == 0
+    }
+}
+
+/// The evaluator's task text and what it does not carry whole.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct AcceptanceEvaluatorBrief {
+    prompt: String,
+    cuts: AcceptanceBriefCuts,
+}
+
+fn acceptance_entry_count(count: usize) -> String {
+    if count == 1 {
+        "1 entry".to_owned()
+    } else {
+        format!("{count} entries")
+    }
+}
+
+/// The newest `MAX_ACCEPTANCE_BRIEF_CUT_LOCATORS` of `locators`, which are
+/// oldest first, and how many older ones are only counted.
+fn acceptance_brief_locator_list(locators: &[String]) -> String {
+    let unnamed = locators
+        .len()
+        .saturating_sub(MAX_ACCEPTANCE_BRIEF_CUT_LOCATORS);
+    let named = locators[unnamed..].join(", ");
+    if unnamed == 0 {
+        named
+    } else {
+        format!("{named} and {unnamed} older")
+    }
+}
+
+/// One sentence for the requester about what the evaluator's brief does not
+/// carry whole, or none when it carries every record whole.
+fn acceptance_brief_cut_notice(work_ref: &str, cuts: &AcceptanceBriefCuts) -> Option<String> {
+    if cuts.is_empty() {
+        return None;
+    }
+    let mut parts = Vec::new();
+    if !cuts.clipped.is_empty() {
+        parts.push(format!(
+            "the host clipped {} to fit ({})",
+            acceptance_entry_count(cuts.clipped.len()),
+            acceptance_brief_locator_list(&cuts.clipped)
+        ));
+    }
+    if !cuts.left_out.is_empty() {
+        parts.push(format!(
+            "the host left out {} it had read ({})",
+            acceptance_entry_count(cuts.left_out.len()),
+            acceptance_brief_locator_list(&cuts.left_out)
+        ));
+    }
+    if !cuts.cut_by_tracker.is_empty() {
+        parts.push(format!(
+            "the tracker's window did not give {} in full ({})",
+            acceptance_entry_count(cuts.cut_by_tracker.len()),
+            acceptance_brief_locator_list(&cuts.cut_by_tracker)
+        ));
+    }
+    if cuts.unread > 0 {
+        parts.push(format!(
+            "{} older than the host's reads {} not read",
+            acceptance_entry_count(cuts.unread),
+            if cuts.unread == 1 { "was" } else { "were" }
+        ));
+    }
+    Some(format!(
+        "The evaluator's brief for `{}` does not carry all of its evidence whole: {}. A verdict \
+         that depends on one of these can only be insufficient-evidence; record what it needs in \
+         a new note, since the newest entries are the last to be cut.",
+        acceptance_brief_text(work_ref, MAX_ACCEPTANCE_BRIEF_LABEL_CHARS),
+        parts.join("; ")
+    ))
 }
 
 /// The evaluator's task text. Built only from tracker reads, never from the
 /// requesting session: the session whose work is judged does not get to brief
-/// its judge. To fit `max_bytes` it drops the oldest evidence first and then
-/// shortens the outcome; it never drops or cuts a criterion, and refuses only
-/// when the criteria do not fit with no context left to give up.
-fn build_acceptance_evaluator_prompt(
+/// its judge. Evidence is listed whole. To fit `max_bytes` it clips the oldest
+/// listed entries first, then leaves the oldest out, and only then shortens
+/// the outcome; every such cut is said in the brief and returned for the
+/// requester. It never drops or cuts a criterion, and refuses only when the
+/// criteria do not fit with no context left to give up.
+fn build_acceptance_evaluator_brief(
     task: &AcceptanceEvaluationTask,
     cwd: &str,
     max_bytes: usize,
-) -> std::result::Result<String, ApiError> {
-    // Context shrinks before anything is said about the criteria: evidence,
-    // oldest first, down to none with the outcome still at its own bound; only
-    // then the outcome, down to its marker.
-    let mut shown = task
+) -> std::result::Result<AcceptanceEvaluatorBrief, ApiError> {
+    // Context shrinks before anything is said about the criteria, and the
+    // newest evidence gives way last: entries are clipped oldest first, then
+    // left out oldest first, down to none with the outcome still at its own
+    // bound; only then the outcome, down to its marker.
+    let listed = task
         .evidence
         .len()
         .min(MAX_ACCEPTANCE_BRIEF_EVIDENCE_ENTRIES);
-    loop {
-        let prompt = render_acceptance_evaluator_prompt(
+    let windows = (0..=listed)
+        .map(|clipped| (listed, clipped))
+        .chain((0..listed).rev().map(|shown| (shown, shown)));
+    for (shown, clipped) in windows {
+        let brief = render_acceptance_evaluator_brief(
             task,
             cwd,
             shown,
+            clipped,
             MAX_ACCEPTANCE_BRIEF_OUTCOME_BYTES,
         );
-        if prompt.len() <= max_bytes {
-            return Ok(prompt);
+        if brief.prompt.len() <= max_bytes {
+            return Ok(brief);
         }
-        if shown == 0 {
-            break;
-        }
-        shown -= 1;
     }
-    let floor = render_acceptance_evaluator_prompt(task, cwd, 0, 0);
-    if floor.len() > max_bytes {
+    let floor = render_acceptance_evaluator_brief(task, cwd, 0, 0, 0)
+        .prompt
+        .len();
+    if floor > max_bytes {
         // True only now: no context is left to give up.
-        return Err(acceptance_contract_too_large(task, floor.len(), max_bytes));
+        return Err(acceptance_contract_too_large(task, floor, max_bytes));
     }
     // One byte joins the kept text to the marker the floor already carries.
-    let outcome_bytes = (max_bytes - floor.len())
+    let outcome_bytes = (max_bytes - floor)
         .saturating_sub(1)
         .min(MAX_ACCEPTANCE_BRIEF_OUTCOME_BYTES);
-    Ok(render_acceptance_evaluator_prompt(
+    Ok(render_acceptance_evaluator_brief(
         task,
         cwd,
+        0,
         0,
         outcome_bytes,
     ))
 }
 
-fn render_acceptance_evaluator_prompt(
+/// The brief that lists the newest `shown` entries, the oldest `clipped` of
+/// them cut to the entry bound, with the outcome held to `outcome_bytes`.
+fn render_acceptance_evaluator_brief(
     task: &AcceptanceEvaluationTask,
     cwd: &str,
     shown: usize,
+    clipped: usize,
     outcome_bytes: usize,
-) -> String {
-    let omitted = task.evidence_omitted + (task.evidence.len() - shown);
-    let mut evidence = task.evidence[task.evidence.len() - shown..]
-        .iter()
-        .map(acceptance_brief_evidence_line)
-        .collect::<Vec<_>>();
+) -> AcceptanceEvaluatorBrief {
+    let (left_out, listed) = task.evidence.split_at(task.evidence.len() - shown);
+    let locator_of = |evidence: &AcceptanceEvaluationEvidence| {
+        acceptance_brief_text(&evidence.locator, MAX_ACCEPTANCE_BRIEF_LABEL_CHARS)
+    };
+    let mut cuts = AcceptanceBriefCuts {
+        left_out: left_out.iter().map(locator_of).collect(),
+        unread: task.evidence_omitted,
+        ..AcceptanceBriefCuts::default()
+    };
+    let mut evidence = Vec::with_capacity(listed.len() + 1);
+    for (index, entry) in listed.iter().enumerate() {
+        let (line, was_clipped) = acceptance_brief_evidence_line(entry, index < clipped);
+        if was_clipped {
+            cuts.clipped.push(locator_of(entry));
+        }
+        if entry.cut_by_tracker {
+            cuts.cut_by_tracker.push(locator_of(entry));
+        }
+        evidence.push(line);
+    }
     if evidence.is_empty() {
         evidence.push("  (none shown)".to_owned());
     }
-    if omitted > 0 {
+    let omitted = cuts.unread + cuts.left_out.len();
+    if !cuts.left_out.is_empty() {
+        evidence.push(format!(
+            "  ({omitted} older entries not shown; the host read and left out {}: {})",
+            cuts.left_out.len(),
+            acceptance_brief_locator_list(&cuts.left_out)
+        ));
+    } else if omitted > 0 {
         evidence.push(format!("  ({omitted} older entries not shown)"));
     }
-    format!(
+    let prompt = format!(
         "You are an acceptance evaluator. Another session did the work below and asks\n\
 whether it meets its acceptance criteria. You judge; you do not fix.\n\
 \n\
@@ -551,6 +760,10 @@ or needs-human.\n\
 - A pass must cite at least one locator from the list above that supports it,\n  \
 and you must have checked the claim against the workspace wherever it can be\n  \
 checked. Missing proof is insufficient-evidence, never pass.\n\
+- An entry marked as clipped or as not shown in full is incomplete, and an\n  \
+entry counted as not shown was not given to you: you have not read the rest.\n  \
+Where a verdict depends on it, give insufficient-evidence and name that\n  \
+locator in the rationale; never infer what the missing part says.\n\
 - The rationale states what you checked and what you found, in one or two\n  \
 sentences on a single line.\n\
 - Submit once with {submit_tool}. If the host returns a\n  \
@@ -565,7 +778,8 @@ of the result packet described below.",
         evidence = evidence.join("\n"),
         cwd = acceptance_brief_text(cwd, MAX_DELEGATION_CWD_CHARS),
         submit_tool = TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_TOOL_NAME,
-    )
+    );
+    AcceptanceEvaluatorBrief { prompt, cuts }
 }
 
 /// The one refusal both briefs give when the complete criteria do not fit

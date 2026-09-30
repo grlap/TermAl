@@ -399,6 +399,15 @@ fn fixture_reader(
     }
 }
 
+/// The text of the evaluator's brief alone, for the tests that read only it.
+fn build_acceptance_evaluator_prompt(
+    task: &AcceptanceEvaluationTask,
+    cwd: &str,
+    max_bytes: usize,
+) -> std::result::Result<String, ApiError> {
+    build_acceptance_evaluator_brief(task, cwd, max_bytes).map(|brief| brief.prompt)
+}
+
 fn evaluation_request(agent: Option<Agent>) -> RequestAcceptanceEvaluationRequest {
     RequestAcceptanceEvaluationRequest {
         work_ref: "w-task".to_owned(),
@@ -574,12 +583,21 @@ fn acceptance_evaluator_brief_strips_control_characters_and_applies_caps() {
     )));
     assert!(!prompt.contains(&"o".repeat(16_001)));
     assert!(prompt.contains(&format!("  1. {}\n", "c".repeat(3_000))));
-    assert!(!prompt.contains(&"s".repeat(601)));
-    // Newest 40 of 47 stay; 7 dropped here plus the 5 the tracker omitted.
+    // Evidence that fits is listed whole: no entry is cut to a fixed length.
+    assert!(prompt.contains(&format!("note 44 {}\n", "s".repeat(700))));
+    assert!(!prompt.contains("[clipped by the host"), "{prompt}");
+    // Newest 40 of 47 stay; 7 left out here, by locator, plus the 5 the
+    // tracker's window never gave.
     assert_eq!(prompt.matches("\n  - ").count(), 40);
-    assert!(!prompt.contains("00000006cafe"));
-    assert!(prompt.contains("00000007cafe"));
-    assert!(prompt.contains("  (12 older entries not shown)\n"));
+    assert!(!prompt.contains("  - 00000006cafe"));
+    assert!(prompt.contains("  - 00000007cafe"));
+    assert!(
+        prompt.contains(
+            "  (12 older entries not shown; the host read and left out 7: 00000000cafe, \
+             00000001cafe, 00000002cafe, 00000003cafe, 00000004cafe, 00000005cafe, 00000006cafe)\n"
+        ),
+        "{prompt}"
+    );
     for uncitable in ["0000002dcafe:3", "dddddddd4444"] {
         let line = prompt
             .lines()
@@ -587,15 +605,23 @@ fn acceptance_evaluator_brief_strips_control_characters_and_applies_caps() {
             .expect("context entry stays listed");
         assert!(line.contains("[context only"), "{line}");
     }
-    assert!(prompt.contains("0000002dcafe:3 (note) [context only"));
-    assert!(prompt.contains("(body not shown)"));
+    // A record the tracker listed without its text says so, by locator.
+    assert!(
+        prompt.contains(
+            "  - 0000002dcafe:3 (note) [context only: the tracker refuses this as a citation]: \
+             (body not shown) [not shown in full by the tracker; locator 0000002dcafe:3]\n"
+        ),
+        "{prompt}"
+    );
 
-    // A tighter budget drops the oldest evidence first, never a criterion.
+    // A tighter budget clips and then leaves out the oldest evidence first,
+    // never a criterion.
     let tight = build_acceptance_evaluator_prompt(&task, "/work/repo", 28 * 1024).unwrap();
     assert!(tight.len() <= 28 * 1024);
     assert!(tight.contains("dddddddd4444") && tight.contains("  2. second criterion\n"));
     assert!(tight.contains(&format!("  1. {}\n", "c".repeat(3_000))));
     assert!(tight.matches("\n  - ").count() < 40);
+    assert!(tight.contains("[clipped by the host: "), "{tight}");
     let too_small = build_acceptance_evaluator_prompt(&task, "/work/repo", 1024).unwrap_err();
     assert_eq!(too_small.status, StatusCode::CONFLICT);
     assert!(
@@ -648,6 +674,291 @@ fn acceptance_evaluator_brief_carries_a_requirement_placed_late_in_a_criterion()
             .contains("the acceptance contract is too large to brief an evaluator"),
         "{}",
         refused.message
+    );
+}
+
+/// One holder's note as the tracker's window lists it whole.
+fn evidence_note(index: usize, body: &str) -> Value {
+    json!({"locator": format!("{index:08x}cafe"), "kind": "generic", "family": "notes",
+        "by": "greg/claude", "created_at": "2026-09-18T10:00:00Z", "non_holder": false,
+        "body_bytes": body.len(), "summary": body})
+}
+
+/// Thirty notes of 4 000 bytes each, the proof of each at its very end.
+fn long_evidence_task() -> (AcceptanceEvaluationTask, impl Fn(usize) -> String) {
+    let body_of = |index: usize| format!("n{index:02}-{}-PROOF{index:02}", "x".repeat(3_988));
+    assert_eq!(body_of(0).len(), 4_000);
+    let mut show = show_receipt(None);
+    show["notes"] = json!(
+        (0..30)
+            .map(|index| evidence_note(index, &body_of(index)))
+            .collect::<Vec<_>>()
+    );
+    (
+        parse_acceptance_evaluation_task(show, full_receipt()).unwrap(),
+        body_of,
+    )
+}
+
+// A holder's proof often sits late in a long note, and the evaluator may call
+// no tracker tool: the brief lists the note whole, not its first 600 characters.
+#[test]
+fn acceptance_evaluator_brief_lists_a_long_note_whole() {
+    let proof = "PROOF: the gate's run directory is review-runs/test-1234 at content-v1:abcd";
+    let body = format!("{} {proof}", "p".repeat(4_096 - proof.len() - 1));
+    assert_eq!(body.len(), 4_096);
+    assert!(body.find(proof).unwrap() > 3_000);
+    let mut show = show_receipt(None);
+    show["notes"] = json!([evidence_note(1, &body)]);
+    let task = parse_acceptance_evaluation_task(show, full_receipt()).unwrap();
+
+    let brief =
+        build_acceptance_evaluator_brief(&task, "/work/repo", MAX_ACCEPTANCE_BRIEF_BYTES).unwrap();
+    assert!(
+        brief.prompt.contains(&format!(
+            "  - 00000001cafe (note, by greg/claude, 2026-09-18T10:00:00Z): {body}\n"
+        )),
+        "{}",
+        brief.prompt
+    );
+    assert!(!brief.prompt.contains("[clipped by the host"));
+    assert!(!brief.prompt.contains("[not shown in full by the tracker"));
+    assert!(!brief.prompt.contains("older entries not shown"));
+    // Nothing was cut, so the requester is told nothing.
+    assert_eq!(brief.cuts, AcceptanceBriefCuts::default());
+    assert_eq!(acceptance_brief_cut_notice("w-task", &brief.cuts), None);
+}
+
+// 120 000 bytes of evidence against 65 536: the newest entries stay whole and
+// the oldest are clipped, each saying so with its locator and both sizes.
+#[test]
+fn acceptance_evaluator_brief_clips_the_oldest_entries_first_and_says_so() {
+    let (task, body_of) = long_evidence_task();
+    let brief =
+        build_acceptance_evaluator_brief(&task, "/work/repo", MAX_ACCEPTANCE_BRIEF_BYTES).unwrap();
+    assert!(brief.prompt.len() <= MAX_ACCEPTANCE_BRIEF_BYTES);
+
+    let clipped = brief.cuts.clipped.len();
+    assert!((1..30).contains(&clipped), "{clipped}");
+    assert_eq!(
+        brief.cuts.clipped,
+        (0..clipped)
+            .map(|index| format!("{index:08x}cafe"))
+            .collect::<Vec<_>>()
+    );
+    assert!(brief.cuts.left_out.is_empty() && brief.cuts.cut_by_tracker.is_empty());
+    assert_eq!(brief.cuts.unread, 0);
+    assert!(!brief.prompt.contains("older entries not shown"));
+    for index in 0..30 {
+        let head = format!("  - {index:08x}cafe (note, by greg/claude, 2026-09-18T10:00:00Z): ");
+        let line = brief
+            .prompt
+            .lines()
+            .find(|line| line.starts_with(&head))
+            .expect("every entry stays listed");
+        let body = body_of(index);
+        if index < clipped {
+            assert_eq!(
+                line[head.len()..],
+                format!(
+                    "{} [clipped by the host: 600 of 4000 bytes shown; locator {index:08x}cafe]",
+                    &body[..600]
+                )
+            );
+        } else {
+            assert_eq!(line[head.len()..], body, "entry {index} is whole");
+        }
+    }
+    // No more is clipped than the budget requires.
+    assert!(
+        render_acceptance_evaluator_brief(
+            &task,
+            "/work/repo",
+            30,
+            clipped - 1,
+            MAX_ACCEPTANCE_BRIEF_OUTCOME_BYTES
+        )
+        .prompt
+        .len()
+            > MAX_ACCEPTANCE_BRIEF_BYTES
+    );
+    // The evaluator is told what a marked entry means for a verdict.
+    assert!(
+        brief.prompt.contains(
+            "- An entry marked as clipped or as not shown in full is incomplete, and an\n  \
+             entry counted as not shown was not given to you: you have not read the rest.\n  \
+             Where a verdict depends on it, give insufficient-evidence and name that\n  \
+             locator in the rationale; never infer what the missing part says.\n"
+        ),
+        "{}",
+        brief.prompt
+    );
+    // The requester is told which entries its judge did not get whole.
+    let notice = acceptance_brief_cut_notice("w-task", &brief.cuts).expect("a cut is reported");
+    assert!(
+        notice.starts_with(&format!(
+            "The evaluator's brief for `w-task` does not carry all of its evidence whole: the \
+             host clipped {clipped} entries to fit (00000000cafe, 00000001cafe"
+        )),
+        "{notice}"
+    );
+    assert_eq!(notice.matches("cafe").count(), clipped, "{notice}");
+}
+
+// With every listed entry clipped and still no room, the oldest are left out,
+// and the brief and the requester's notice name them.
+#[test]
+fn acceptance_evaluator_brief_names_the_entries_it_leaves_out() {
+    let (task, _) = long_evidence_task();
+    let bare = render_acceptance_evaluator_brief(
+        &task,
+        "/work/repo",
+        0,
+        0,
+        MAX_ACCEPTANCE_BRIEF_OUTCOME_BYTES,
+    )
+    .prompt
+    .len();
+    let max_bytes = bare + 3_000;
+    let brief = build_acceptance_evaluator_brief(&task, "/work/repo", max_bytes).unwrap();
+    assert!(brief.prompt.len() <= max_bytes);
+
+    let shown = brief.prompt.matches("\n  - ").count();
+    assert!((1..30).contains(&shown), "{shown}");
+    let locators = |range: std::ops::Range<usize>| {
+        range
+            .map(|index| format!("{index:08x}cafe"))
+            .collect::<Vec<_>>()
+    };
+    // The newest stay, all of them clipped; the oldest are left out.
+    assert_eq!(brief.cuts.left_out, locators(0..30 - shown));
+    assert_eq!(brief.cuts.clipped, locators(30 - shown..30));
+    assert!(
+        brief.prompt.contains(&format!(
+            "  ({left} older entries not shown; the host read and left out {left}: {})\n",
+            brief.cuts.left_out.join(", "),
+            left = 30 - shown
+        )),
+        "{}",
+        brief.prompt
+    );
+    // One entry more would not have fitted.
+    assert!(
+        render_acceptance_evaluator_brief(
+            &task,
+            "/work/repo",
+            shown + 1,
+            shown + 1,
+            MAX_ACCEPTANCE_BRIEF_OUTCOME_BYTES
+        )
+        .prompt
+        .len()
+            > max_bytes
+    );
+    let notice = acceptance_brief_cut_notice("w-task", &brief.cuts).expect("a cut is reported");
+    assert!(
+        notice.contains(&format!(
+            "the host clipped {} to fit ({}); the host left out {} entries it had read ({}).",
+            acceptance_entry_count(shown),
+            brief.cuts.clipped.join(", "),
+            30 - shown,
+            brief.cuts.left_out.join(", ")
+        )),
+        "{notice}"
+    );
+}
+
+// The tracker's own window may list a record without its body, or with a cut
+// one. The brief cannot show more than it was given, so it says which.
+#[test]
+fn acceptance_evaluator_brief_marks_what_the_tracker_window_did_not_give_whole() {
+    let mut show = show_receipt(None);
+    show["notes"] = json!([
+        {"locator": "aaaaaaaa0001", "kind": "generic", "family": "notes", "by": "greg/claude",
+            "body_bytes": 90_000, "body_omitted": true,
+            "detail": "engram work show w-task --note aaaaaaaa0001"},
+        {"locator": "aaaaaaaa0002", "kind": "generic", "family": "notes", "by": "greg/claude",
+            "body_bytes": 20_000, "summary": "The first part", "summary_truncated": true},
+        // An older tracker names no flag: a record without text was not shown.
+        {"locator": "aaaaaaaa0003", "kind": "generic", "family": "notes"},
+        {"locator": "aaaaaaaa0004", "kind": "generic", "family": "notes", "by": "greg/claude",
+            "body_bytes": 15, "summary": "Whole and short"},
+        {"locator": "aaaaaaaa0005", "kind": "generic", "family": "notes", "body_bytes": 0,
+            "summary": ""},
+    ]);
+    show["notes_omitted"] = json!(5);
+    let task = parse_acceptance_evaluation_task(show, full_receipt()).unwrap();
+    let brief =
+        build_acceptance_evaluator_brief(&task, "/work/repo", MAX_ACCEPTANCE_BRIEF_BYTES).unwrap();
+    assert!(
+        brief.prompt.contains(
+            "  - aaaaaaaa0001 (note, by greg/claude): (body not shown) [not shown in full by the \
+             tracker: 90000 bytes stored; locator aaaaaaaa0001]\n  \
+             - aaaaaaaa0002 (note, by greg/claude): The first part [not shown in full by the \
+             tracker: 20000 bytes stored; locator aaaaaaaa0002]\n  \
+             - aaaaaaaa0003 (note): (body not shown) [not shown in full by the tracker; locator \
+             aaaaaaaa0003]\n  \
+             - aaaaaaaa0004 (note, by greg/claude): Whole and short\n  \
+             - aaaaaaaa0005 (note): (empty)\n  \
+             (5 older entries not shown)\n"
+        ),
+        "{}",
+        brief.prompt
+    );
+    let marked = ["aaaaaaaa0001", "aaaaaaaa0002", "aaaaaaaa0003"].map(str::to_owned);
+    assert_eq!(
+        brief.cuts,
+        AcceptanceBriefCuts {
+            cut_by_tracker: marked.to_vec(),
+            unread: 5,
+            ..AcceptanceBriefCuts::default()
+        }
+    );
+    assert_eq!(
+        acceptance_brief_cut_notice("w-task", &brief.cuts).as_deref(),
+        Some(
+            "The evaluator's brief for `w-task` does not carry all of its evidence whole: the \
+             tracker's window did not give 3 entries in full (aaaaaaaa0001, aaaaaaaa0002, \
+             aaaaaaaa0003); 5 entries older than the host's reads were not read. A verdict that \
+             depends on one of these can only be insufficient-evidence; record what it needs in \
+             a new note, since the newest entries are the last to be cut."
+        )
+    );
+}
+
+#[test]
+fn acceptance_brief_cut_notice_counts_what_it_does_not_name() {
+    let locators = (0..70)
+        .map(|index| format!("{index:08x}cafe"))
+        .collect::<Vec<_>>();
+    // The newest 64 are named; the six older are counted.
+    let list = acceptance_brief_locator_list(&locators);
+    assert!(list.starts_with("00000006cafe, 00000007cafe, "), "{list}");
+    assert!(list.ends_with(", 00000045cafe and 6 older"), "{list}");
+    assert_eq!(
+        list.matches("cafe").count(),
+        MAX_ACCEPTANCE_BRIEF_CUT_LOCATORS
+    );
+    assert_eq!(
+        acceptance_brief_locator_list(&locators[..2]),
+        "00000000cafe, 00000001cafe"
+    );
+
+    let notice = acceptance_brief_cut_notice(
+        "w-task",
+        &AcceptanceBriefCuts {
+            clipped: vec!["aaaaaaaa0001".to_owned()],
+            unread: 1,
+            ..AcceptanceBriefCuts::default()
+        },
+    )
+    .unwrap();
+    assert!(
+        notice.contains(
+            ": the host clipped 1 entry to fit (aaaaaaaa0001); 1 entry older than the host's \
+             reads was not read. "
+        ),
+        "{notice}"
     );
 }
 
@@ -1742,6 +2053,62 @@ fn acceptance_request_reads_as_the_host_and_spawns_an_evaluator_with_the_target(
     assert!(delegation_state_summary_from_record(stored).acceptance_evaluation_allowed);
 }
 
+// The requester learns which records its judge did not get whole from the
+// answer to its own request, before a verdict comes back short of evidence.
+#[test]
+fn acceptance_request_tells_the_requester_what_the_brief_does_not_carry_whole() {
+    let (state, project, parent, root) = fixture();
+    install_store(&state, &project, &root);
+    super::delegation_support::install_delegation_codex_runtime(
+        &state,
+        "acceptance-cut-notice-runtime",
+    );
+    let mut show = show_receipt(None);
+    show["notes"][0] = json!({"locator": "aaaaaaaa1111", "kind": "generic", "family": "notes",
+        "by": "greg/claude", "body_bytes": 90_000, "body_omitted": true});
+    let response = state
+        .request_acceptance_evaluation_with_runner(
+            &parent,
+            evaluation_request(Some(Agent::Codex)),
+            fixture_reader(
+                Arc::default(),
+                show,
+                Ok(policy_receipt(Some(&["independent_session"]))),
+            ),
+        )
+        .unwrap();
+    let wire = serde_json::to_value(&response).unwrap();
+    let notice = wire["notice"].as_str().expect("the cut is reported");
+    assert!(
+        notice.contains(
+            "The evaluator's brief for `w-task` does not carry all of its evidence whole: the \
+             tracker's window did not give 1 entry in full (aaaaaaaa1111). A verdict that depends \
+             on one of these can only be insufficient-evidence"
+        ),
+        "{notice}"
+    );
+    // It joins the request's other notices and reaches the agent's compact result.
+    assert!(
+        notice.contains(ACCEPTANCE_EVALUATION_UNMEASURED_SOURCE_NOTICE),
+        "{notice}"
+    );
+    assert_eq!(
+        compact_acceptance_evaluation_request_result(&wire)["notice"],
+        wire["notice"]
+    );
+    let AcceptanceEvaluationRequestResponse::Spawned { delegation, .. } = response else {
+        panic!("an independent evaluation spawns an evaluator");
+    };
+    assert!(
+        delegation.delegation.prompt.contains(
+            "  - aaaaaaaa1111 (note, by greg/claude): (body not shown) [not shown in full by the \
+             tracker: 90000 bytes stored; locator aaaaaaaa1111]\n"
+        ),
+        "{}",
+        delegation.delegation.prompt
+    );
+}
+
 #[test]
 fn acceptance_request_returns_a_same_session_brief_without_spawning() {
     let (state, project, parent, root) = fixture();
@@ -2124,6 +2491,79 @@ fn acceptance_request_pages_older_evidence_into_the_brief() {
     let newest = prompt.find("aaaaaaaa1111").expect("the first page stays");
     assert!(oldest < newest, "evidence is listed oldest first");
     assert!(!prompt.contains("older entries not shown"), "{prompt}");
+}
+
+// The tracker refuses a continuation page once anything was written in the
+// project after the first read. The request keeps that read and its basis; the
+// records on the pages it never got are counted as not shown, in the brief and
+// to the requester, and no locator is invented for them.
+#[test]
+fn acceptance_request_reports_the_evidence_behind_a_refused_continuation() {
+    let (state, project, parent, root) = fixture();
+    install_store(&state, &project, &root);
+    let calls: RecordedEngramCalls = Arc::default();
+    let seen = calls.clone();
+    let mut first = show_receipt(None);
+    first["notes_omitted"] = json!(3);
+    first["notes_window"] = json!({"after": "s1-token", "older": 3, "newer": 0});
+    let reader = move |connection: &EngramConnectionConfig, args: &[String], _: Duration| {
+        seen.lock()
+            .unwrap()
+            .push((connection.clone(), args.to_vec()));
+        if args.first().map(String::as_str) == Some("control-policy") {
+            Ok(policy_receipt(Some(&["independent_session"])))
+        } else if args.iter().any(|arg| arg == "--full") {
+            Ok(full_receipt())
+        } else if args.iter().any(|arg| arg == "--after") {
+            Err(EngramTransportError::transport(
+                "show read cut changed or expired; start a fresh window",
+            ))
+        } else {
+            Ok(first.clone())
+        }
+    };
+    let response = state
+        .request_acceptance_evaluation_with_runner(
+            &parent,
+            evaluation_request(Some(Agent::Codex)),
+            reader,
+        )
+        .unwrap();
+
+    // One continuation was tried and refused; it is not tried again.
+    let continuations = calls
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(_, args)| args.iter().any(|arg| arg == "--after"))
+        .count();
+    assert_eq!(continuations, 1);
+
+    let wire = serde_json::to_value(&response).unwrap();
+    // The bases are the first read's, and so is the evidence.
+    assert_eq!(
+        wire["delegation"]["acceptanceEvaluation"]["evidenceBasis"],
+        42
+    );
+    let prompt = wire["delegation"]["prompt"]
+        .as_str()
+        .expect("the evaluator's brief");
+    assert!(
+        prompt.contains("aaaaaaaa1111") && prompt.contains("bbbbbbbb2222"),
+        "{prompt}"
+    );
+    assert!(
+        prompt.contains("  (3 older entries not shown)\n"),
+        "{prompt}"
+    );
+    let notice = wire["notice"].as_str().expect("the omission is reported");
+    assert!(
+        notice.contains(
+            "The evaluator's brief for `w-task` does not carry all of its evidence whole: 3 \
+             entries older than the host's reads were not read."
+        ),
+        "{notice}"
+    );
 }
 
 #[test]
@@ -4047,7 +4487,9 @@ fn acceptance_evaluator_brief_shrinks_non_ascii_context_before_it_blames_the_cri
 
     // Less room than the outcome's own bound: the evidence is gone and the
     // outcome gives way too, down to whatever still fits.
-    let floor = render_acceptance_evaluator_prompt(&task, "/work/repo", 0, 0).len();
+    let floor = render_acceptance_evaluator_brief(&task, "/work/repo", 0, 0, 0)
+        .prompt
+        .len();
     let tight = build_acceptance_evaluator_prompt(&task, "/work/repo", floor + 5_000).unwrap();
     assert!(tight.len() <= floor + 5_000);
     assert!(tight.contains(criteria));
@@ -4099,7 +4541,7 @@ fn acceptance_evaluator_brief_fits_exactly_with_its_complete_outcome_and_no_evid
     let mut full = full_receipt();
     full["work"]["outcome"] = json!("ok");
     let task = parse_acceptance_evaluation_task(show_receipt(None), full).unwrap();
-    let complete = render_acceptance_evaluator_prompt(&task, "/work/repo", 0, usize::MAX);
+    let complete = render_acceptance_evaluator_brief(&task, "/work/repo", 0, 0, usize::MAX).prompt;
     assert!(complete.contains("Outcome: ok\n"), "{complete}");
 
     // Exactly its size: the two evidence entries go, the outcome stays whole.
@@ -4128,7 +4570,7 @@ fn acceptance_evaluator_brief_fits_exactly_with_its_complete_outcome_and_no_evid
     let mut full = full_receipt();
     full["work"]["outcome"] = json!("The route answers every request with its own status.");
     let task = parse_acceptance_evaluation_task(show_receipt(None), full).unwrap();
-    let complete = render_acceptance_evaluator_prompt(&task, "/work/repo", 0, usize::MAX);
+    let complete = render_acceptance_evaluator_brief(&task, "/work/repo", 0, 0, usize::MAX).prompt;
     assert_eq!(
         build_acceptance_evaluator_prompt(&task, "/work/repo", complete.len()).unwrap(),
         complete

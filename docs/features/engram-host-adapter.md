@@ -1609,12 +1609,28 @@ answer, so they are never truncated and never dropped. The rest is context, and
 it is measured in UTF-8 bytes, the unit of the 65 536-byte prompt cap it
 competes for: the outcome is kept to 16 000 bytes, cut on a character boundary
 with an explicit `[outcome truncated by the host]` marker; the evidence list
-keeps the newest 40 entries and states how many older ones are not shown; an
-entry the tracker would refuse as a citation (a non-holder observation, a
-restored-record member) is marked as context only. When the brief must shrink,
-context gives way first and in this order: evidence entries, oldest first, down
-to none with the outcome still at its own bound; only then the outcome, down to
+keeps the newest 40 entries, each with its body whole, and states how many
+older ones are not shown; an entry the tracker would refuse as a citation (a
+non-holder observation, a restored-record member) is marked as context only.
+The evaluator may call no tracker tool, so what the brief does not show it has
+not read, and the brief never cuts a record silently. When the brief must
+shrink, context gives way first and in this order: the listed entries are
+clipped to their first 600 characters, oldest first, each ending in
+`[clipped by the host: SHOWN of TOTAL bytes shown; locator LOCATOR]` (the
+sizes are those of the one-line text); then entries are left out, oldest
+first, down to none with the outcome still at its own bound, and the line that
+counts them names the ones the host had read, `(N older entries not shown; the
+host read and left out M: LOCATOR, …)`; only then the outcome, down to
 its marker alone (an outcome shorter than the marker is never traded for it).
+A record the tracker's own window listed without its body or with a cut one
+(`body_omitted`, `summary_truncated`, or no text at all) ends in
+`[not shown in full by the tracker: TOTAL bytes stored; locator LOCATOR]`.
+The brief's rules tell the evaluator that such an entry is incomplete and that
+a verdict depending on it is `insufficient-evidence` naming the locator. The
+request's answer tells the requester the same in its `notice`: which entries
+the host clipped, which it left out, which the tracker's window did not give in
+full, and how many older ones were never read, naming at most 64 locators per
+group. It says nothing when every record is carried whole.
 Only when the complete criteria do not fit with no context left is the request
 refused, with `409` "the acceptance contract is too large to brief an
 evaluator", which states the bytes the criteria take and the limit. Non-ASCII
