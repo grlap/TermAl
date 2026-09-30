@@ -182,6 +182,7 @@ struct EngramContextNudgeTarget {
     actor_id: String,
     actor_context: Option<String>,
     session_id: String,
+    host_instance_id: String,
     generation: u64,
     timeout: Duration,
 }
@@ -413,6 +414,7 @@ impl AppState {
                         actor_id,
                         actor_context,
                         session_id: session_id.to_owned(),
+                        host_instance_id: self.server_instance_id.clone(),
                         generation,
                         timeout: ENGRAM_WORK_BINDING_COMMAND_TIMEOUT,
                     };
@@ -534,7 +536,9 @@ impl AppState {
 fn run_engram_context_nudge(
     target: &EngramContextNudgeTarget,
 ) -> std::result::Result<String, String> {
-    let context_generation = format!("termal-{}", target.generation);
+    // A fresh host UUID prevents reuse after restore or a crash before persistence.
+    // Keep the existing counter for context boundaries within this host run.
+    let context_generation = format!("termal-{}-{}", target.host_instance_id, target.generation);
     let mut command = engram_command(&target.command);
     configure_terminal_process_tree(&mut command);
     command

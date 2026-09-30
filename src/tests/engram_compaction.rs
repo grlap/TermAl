@@ -129,11 +129,11 @@ fn startup_and_compaction_nudges_peek_without_consuming_truncated_or_unsent_cont
             1,
             "peek must include the generation for its read-only changed signal"
         );
-        let expected_generation = if after_compaction {
-            "termal-2"
-        } else {
-            "termal-1"
-        };
+        let expected_generation = format!(
+            "termal-{}-{}",
+            state.server_instance_id,
+            if after_compaction { 2 } else { 1 }
+        );
         assert!(
             args.windows(2).any(|pair| {
                 pair[0] == "--context-generation" && pair[1] == expected_generation
@@ -415,4 +415,127 @@ fn compaction_deferred_page_is_ready_for_prompt_admission() {
         cache.context_needs_preparation(),
         "settings invalidation must still block admission for a fresh read"
     );
+}
+
+fn context_argv(root: &Path) -> Vec<String> {
+    #[cfg(windows)]
+    {
+        serde_json::from_str(
+            fs::read_to_string(root.join("work-context-args.json"))
+                .expect("orientation argv receipt")
+                .trim_start_matches('\u{feff}'),
+        )
+        .expect("orientation argv JSON")
+    }
+    #[cfg(not(windows))]
+    {
+        fs::read_to_string(root.join("work-context-args.txt"))
+            .expect("orientation argv receipt")
+            .split_whitespace()
+            .map(str::to_owned)
+            .collect()
+    }
+}
+
+fn context_token(root: &Path) -> String {
+    let args = context_argv(root);
+    let tokens = args
+        .windows(2)
+        .filter(|pair| pair[0] == "--context-generation")
+        .map(|pair| pair[1].clone())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        tokens.len(),
+        1,
+        "one context-generation argv value: {args:?}"
+    );
+    tokens[0].clone()
+}
+
+#[test]
+fn context_generation_restored_session_never_reuses_a_previous_host_token() {
+    let (state, id, root) = fixture(false);
+    fs::write(root.join(".engram-project"), "fixture-work-next-delivery\n").unwrap();
+    assert_eq!(
+        state.prepare_engram_context_nudge_off_lock(&id),
+        EngramContextNudgePreparation::Ready
+    );
+    let startup_token = context_token(&root);
+    delivered(&state, &id);
+    state.mark_engram_context_nudge_pending(&id);
+    assert_eq!(
+        state.prepare_engram_context_nudge_off_lock(&id),
+        EngramContextNudgePreparation::Ready
+    );
+    let advanced_token = context_token(&root);
+    assert_ne!(
+        advanced_token, startup_token,
+        "compaction advances the token"
+    );
+    {
+        let inner = state.inner.lock().expect("state mutex");
+        let record = &inner.sessions[inner.find_session_index(&id).expect("session")];
+        assert_eq!(record.engram.context_nudge_generation, 2);
+        persist_state(state.persistence_path.as_ref(), &inner).expect("persist advanced session");
+    }
+    let loaded = load_state(state.persistence_path.as_ref())
+        .expect("load persisted session")
+        .expect("persisted state exists");
+    let restored = test_app_state();
+    assert_ne!(restored.server_instance_id, state.server_instance_id);
+    *restored.inner.lock().expect("state mutex") = loaded;
+    assert_eq!(
+        restored.prepare_engram_context_nudge_off_lock(&id),
+        EngramContextNudgePreparation::Ready
+    );
+    let restored_token = context_token(&root);
+    assert!(
+        restored_token != startup_token && restored_token != advanced_token,
+        "a restarted host must not reuse any earlier token: startup={startup_token}, advanced={advanced_token}, restored={restored_token}"
+    );
+    assert_eq!(
+        restored_token,
+        format!("termal-{}-1", restored.server_instance_id)
+    );
+    let reads_after_restart = reads(&root);
+    assert_eq!(
+        restored.prepare_engram_context_nudge_off_lock(&id),
+        EngramContextNudgePreparation::Ready
+    );
+    assert_eq!(
+        reads(&root),
+        reads_after_restart,
+        "same context reuses its cached read"
+    );
+    assert_eq!(context_token(&root), restored_token);
+}
+
+#[test]
+fn context_generation_orientation_token_is_plain_with_host_uuid_and_full_counter() {
+    for generation in [1, u64::MAX] {
+        let (state, id, root) = fixture(false);
+        fs::write(root.join(".engram-project"), "fixture-work-next-delivery\n").unwrap();
+        {
+            let mut inner = state.inner.lock().expect("state mutex");
+            let index = inner.find_session_index(&id).expect("session");
+            inner.sessions[index].engram.context_nudge_generation = generation;
+        }
+        assert_eq!(
+            state.prepare_engram_context_nudge_off_lock(&id),
+            EngramContextNudgePreparation::Ready
+        );
+        let token = context_token(&root);
+        assert_eq!(
+            token,
+            format!("termal-{}-{generation}", state.server_instance_id)
+        );
+        assert!((1..=256).contains(&token.len()));
+        assert!(!token.starts_with('-'));
+        assert!(
+            token
+                .bytes()
+                .all(|byte| { byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-') }),
+            "Engram plain-token contract: {token}"
+        );
+    }
 }

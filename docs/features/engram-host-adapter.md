@@ -211,7 +211,7 @@ engram --project-file <project>/.engram-project --home <home> \
   work --actor-id <developer>/<agent-kind> \
   --session-id <termal-session-id> \
   --actor-context 'agent=<kind>;model=<model>;reasoning=<effort>' next --peek \
-  --context-generation termal-<generation>
+  --context-generation termal-<host-uuid>-<generation>
 ```
 
 Both startup and post-compaction use the same non-advancing orientation read:
@@ -225,9 +225,15 @@ are read through `work memories`. Repeated peeks with a new generation can keep
 reporting `changed: true` without persisting or acknowledging that advertisement.
 Only an advancing `next` with that generation acknowledges it; acknowledgement
 is not proof that the agent read the memories. The host also uses generation
-locally to reject stale nudge results and order deferred refreshes. The agent
-continues ordinary advancing `work next` through MCP; host orientation does not
-replace that read.
+locally to reject stale nudge results and order deferred refreshes. The token
+combines the host's fresh startup UUID with that existing counter; restoring a
+session starts a new token even if its counter resets. This also avoids reuse
+when a crash happens before asynchronous state persistence. Each session may
+therefore receive the memories directive once after each host restart. The token
+uses only ASCII letters, digits and dashes and stays below Engram's 256-character
+limit, including a full 64-bit counter. Within a host run, the same context
+boundaries advance the counter as before. The agent continues ordinary advancing
+`work next` through MCP; host orientation does not replace that read.
 This protects the delivery cursor, not the completeness of recovery: the host
 prepares the nudge at the next TermAl prompt dispatch, not synchronously at the
 compaction boundary. It does not guarantee an Engram block before the model's
