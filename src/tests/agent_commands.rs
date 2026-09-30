@@ -3039,6 +3039,87 @@ fn review_changes_pins_two_review_resume_wait_flow() {
     );
 }
 
+// `/review-changes` Step 7 is the final-diff audit of authority text before a
+// landing; its header announces it.
+#[test]
+fn review_changes_pins_final_diff_audit() {
+    let review_changes = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/.claude/commands/review-changes.md"
+    ));
+
+    assert_command_contains(
+        review_changes,
+        "## Step 7: Audit the final diff before a landing of authority text Authority text is the text whose change conditions (a), (b) and (c) of the Commit and push section of AGENTS.md and CLAUDE.md cover. When the reviewed change touches it, the session that holds the final frozen input, the parent or, where integration changed the input, the integration owner, sends the final frozen change (the diff of its tracked files and the content of each untracked file), the input fingerprint that the gate's run recorded for it, and the list of recorded messages that word each changed passage of authority text to the auditing coordinator by TermAl mailbox. The change is neither committed nor pushed before the audit of that input is recorded on the item as passed.",
+        "/review-changes must define authority text by the commit rule's conditions and have the holder of the final input send all of it to the auditor before any commit or push",
+    );
+    assert_command_contains(
+        review_changes,
+        "The auditing coordinator is the project's task coordinator; where the task coordinator wrote the change, it is the other project's coordinator. A changed passage is each sentence or heading of authority text that the word-level diff of the change against its base commit (`git diff --word-diff BASE`) adds, alters or removes, each sentence and heading of an untracked file of authority text counting as added; text that differs only in whitespace is not a changed passage. The auditing coordinator reads the final frozen change line by line against the sentences whose concurrence is recorded on the item, runs a script that looks for each added or altered passage in those sentences, as an exact string after whitespace normalisation and with Markdown list and quote markers at line starts removed, and judges for each removed passage whether a recorded concurrence names it as removed. The auditing coordinator notes on the item the input fingerprint, which recorded message governs each changed passage, the script's result for each added or altered passage and the judgement for each removed one. The audit passes when the script finds every added or altered passage and every removed passage is named as removed, and fails otherwise. Other files in the frozen change are covered by the gate and the review pair, not by the audit.",
+        "/review-changes must keep the author from auditing, define added, altered and removed passages against the base commit with untracked files counted as added, require the scripted exact-string search and the word-level diff, bind the audit to the input fingerprint and limit it to authority text",
+    );
+    assert_command_contains(
+        review_changes,
+        "A passage of authority text that no recorded concurrence quotes whole is concurred, word for word, or taken out before the landing. A change of the input, such as taking a passage out, needs a new freeze, gate, review pair and audit. A concurrence recorded after the freeze leaves the input unchanged: it needs no new freeze, gate or review pair, but the audit is repeated, and the conditions of the Commit and push section hold for that wording as for any other.",
+        "/review-changes must say what a gap found by the audit requires and keep the commit rule's conditions for a late concurrence",
+    );
+    assert_command_contains(
+        review_changes,
+        "When the reviewed change touches authority text, Step 7's final-diff audit follows the review pair, and the change is neither committed nor pushed before that audit is recorded on the item as passed.",
+        "/review-changes must announce the final-diff audit in its header",
+    );
+}
+
+/// The text of a file's `## Commit and push` section, heading included, up
+/// to the next second-level heading, with line endings normalised.
+fn commit_and_push_section(instructions: &str) -> String {
+    let instructions = instructions.replace("\r\n", "\n");
+    let start = instructions
+        .find("## Commit and push")
+        .expect("the instructions must have a Commit and push section");
+    let rest = &instructions[start..];
+    let end = rest[3..].find("\n## ").map_or(rest.len(), |index| index + 3);
+    rest[..end].to_owned()
+}
+
+// `/review-changes` Step 7 defines authority text by the conditions of the
+// Commit and push section, so that section's audit condition, its push check
+// and its agreement between the two instruction files are pinned here.
+#[test]
+fn commit_rule_pins_the_final_diff_audit_in_both_instruction_files() {
+    let agents = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/AGENTS.md"));
+    let claude = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/CLAUDE.md"));
+
+    for (name, instructions) in [("AGENTS.md", agents), ("CLAUDE.md", claude)] {
+        assert_command_contains(
+            instructions,
+            "(b) Greg has been sent the exact wording and its consequence before the landing, and (c) the final-diff audit that `/review-changes` requires is recorded on the item as passed before the landing; an objection from Greg, by any route, stops it.",
+            &format!("{name} must make a passed and recorded final-diff audit a condition of an authority-text landing"),
+        );
+        assert_command_contains(
+            instructions,
+            "recording his words, narrowing, or clarifying needs only (a), (b) and (c).",
+            &format!("{name} must apply the audit to recordings, narrowings and clarifications"),
+        );
+        assert_command_contains(
+            instructions,
+            "For a change that conditions (a), (b) and (c) below cover, the integration owner also verifies that the final-diff audit recorded on the item passed and that it names the input fingerprint of the reviewed and gated input.",
+            &format!("{name} must have the integration owner check the audit and its fingerprint before a push"),
+        );
+        assert_command_contains(
+            instructions,
+            "Outside the standing rule's three conditions above, a commit or push needs Greg's own word in the acting session.",
+            &format!("{name} must name the standing rule's conditions, not the authority-text rule's"),
+        );
+    }
+
+    assert_eq!(
+        commit_and_push_section(agents),
+        commit_and_push_section(claude),
+        "AGENTS.md and CLAUDE.md must carry the same Commit and push section"
+    );
+}
+
 #[test]
 fn legacy_review_command_names_are_removed() {
     let command_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

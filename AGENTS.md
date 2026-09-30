@@ -131,11 +131,14 @@ in Engram::Advisor's session, recorded verbatim):
 - Before every push under this rule, including for a commit made directly
   on master, the integration owner must verify that master's tip is the
   reviewed and gated commit, that `origin/master` still matches the reviewed
-  integration base, and that the push is a fast-forward. If any check fails,
-  do not push: coordinate integration and validate and review the resulting
-  input before publishing. Push from the master checkout, then verify that
-  the remote contains that commit. Never rebase or force-push to bypass
-  these checks.
+  integration base, and that the push is a fast-forward. For a change that
+  conditions (a), (b) and (c) below cover, the integration owner also
+  verifies that the final-diff audit recorded on the item passed and that
+  it names the input fingerprint of the reviewed and gated input. If any
+  check fails, do not push: coordinate integration and validate and review
+  the resulting input before publishing. Push from the master checkout,
+  then verify that the remote contains that commit. Never rebase or
+  force-push to bypass these checks.
 - The integration owner is the session assigned to integrate the change
   onto master (as of 2026-09-27: Termal::Opus2); send the handoff by TermAl
   mailbox. If no owner has been assigned, request the assignment from the
@@ -147,29 +150,31 @@ in Engram::Advisor's session, recorded verbatim):
   file that grants or limits commit, push, tracker or approval authority,
   land under the standing rule only after (a) both projects' coordinators
   (as of 2026-09-28: Engram::Fable and Termal::Fable2) have recorded their
-  concurrence on the exact wording in the item's notes, and (b) Greg has
-  been sent the exact wording and its consequence before the landing; an
-  objection from Greg, by any route, stops it. An edit that widens agent
-  authority — a new act granted, or a condition of this rule loosened —
-  also needs Greg's recorded word on that widening, verbatim with its
-  source, by any route; recording his words, narrowing, or clarifying needs
-  only (a) and (b). No other approval is asked.
-- Outside the three conditions above, a commit or push needs Greg's own
-  word in the acting session. Outside this standing rule, a word relayed
-  by another session never carries a commit or push. This rule grants no
-  restart, deploy or global-configuration authority; those actions need
-  Greg's explicit word. A landing under it also installs the binary built
-  from the exact gated tree (Greg, 2026-09-23, recorded in Engram's
-  instructions and extended to TermAl on 2026-09-27: his word "commit"
-  for a presented changeset also authorizes pushing it and installing its
-  build; and 2026-09-28, on the install/restart split: 'Fable ma racje to
-  dobra regula. W sumie mamy system kontroli. Agenci moga podejnowac takie
-  decyzje.'): the integration owner, outside any gate window, puts it at
-  target/release/termal.exe in the master checkout, where the host runs it
-  from, renaming the running binary aside as a backup, and records its
-  hash. Installing is not deploying: the running host keeps its build
-  until Greg restarts it on the restart signal (build hash and reason).
-  Nothing is installed outside the repository.
+  concurrence on the exact wording in the item's notes, (b) Greg has been
+  sent the exact wording and its consequence before the landing, and (c)
+  the final-diff audit that `/review-changes` requires is recorded on the
+  item as passed before the landing; an objection from Greg, by any route,
+  stops it. An edit that widens agent authority — a new act granted, or a
+  condition of this rule loosened — also needs Greg's recorded word on that
+  widening, verbatim with its source, by any route; recording his words,
+  narrowing, or clarifying needs only (a), (b) and (c). No other approval
+  is asked.
+- Outside the standing rule's three conditions above, a commit or push
+  needs Greg's own word in the acting session. Outside this standing rule,
+  a word relayed by another session never carries a commit or push. This
+  rule grants no restart, deploy or global-configuration authority; those
+  actions need Greg's explicit word. A landing under it also installs the
+  binary built from the exact gated tree (Greg, 2026-09-23, recorded in
+  Engram's instructions and extended to TermAl on 2026-09-27: his word
+  "commit" for a presented changeset also authorizes pushing it and
+  installing its build; and 2026-09-28, on the install/restart split:
+  'Fable ma racje to dobra regula. W sumie mamy system kontroli. Agenci
+  moga podejnowac takie decyzje.'): the integration owner, outside any
+  gate window, puts it at target/release/termal.exe in the master checkout,
+  where the host runs it from, renaming the running binary aside as a
+  backup, and records its hash. Installing is not deploying: the running
+  host keeps its build until Greg restarts it on the restart signal (build
+  hash and reason). Nothing is installed outside the repository.
 - Use explicit paths only: never `git add -A` or `git add -u`, and never
   include `.beads/interactions.jsonl` in a commit.
 - Do not amend, rebase or force-push. Commit message bodies (below the

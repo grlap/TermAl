@@ -27,6 +27,10 @@ TermAl injects this result protocol into every reviewer-mode child; the
 repository's `/review-code` command does not need to contain the submission
 schema or an opt-in marker.
 
+When the reviewed change touches authority text, Step 7's final-diff audit
+follows the review pair, and the change is neither committed nor pushed
+before that audit is recorded on the item as passed.
+
 Required MCP tools:
 - `termal_spawn_session`
 - `termal_get_session_status`
@@ -209,3 +213,44 @@ Outside the explicitly authorized Step 2 gate-failure remediation, this is an
 ordinary review workflow: do not modify source or test files, and make tracker
 updates only through `bd`. Delegated reviewer children remain inspection-only;
 the Step 2 exception never authorizes product-semantic changes.
+
+## Step 7: Audit the final diff before a landing of authority text
+
+Authority text is the text whose change conditions (a), (b) and (c) of the
+Commit and push section of AGENTS.md and CLAUDE.md cover. When the reviewed
+change touches it, the session that holds the final frozen input, the
+parent or, where integration changed the input, the integration owner,
+sends the final frozen change (the diff of its tracked files and the
+content of each untracked file), the input fingerprint that the gate's run
+recorded for it, and the list of recorded messages that word each changed
+passage of authority text to the auditing coordinator by TermAl mailbox.
+The change is neither committed nor pushed before the audit of that input
+is recorded on the item as passed.
+
+The auditing coordinator is the project's task coordinator; where the task
+coordinator wrote the change, it is the other project's coordinator. A
+changed passage is each sentence or heading of authority text that the
+word-level diff of the change against its base commit (`git diff
+--word-diff BASE`) adds, alters or removes, each sentence and heading of an
+untracked file of authority text counting as added; text that differs only
+in whitespace is not a changed passage. The
+auditing coordinator reads the final frozen change line by line against the
+sentences whose concurrence is recorded on the item, runs a script that
+looks for each added or altered passage in those sentences, as an exact
+string after whitespace normalisation and with Markdown list and quote
+markers at line starts removed, and judges for each removed passage whether
+a recorded concurrence names it as removed. The auditing coordinator notes
+on the item the input fingerprint, which recorded message governs each
+changed passage, the script's result for each added or altered passage and
+the judgement for each removed one. The audit passes when the script finds
+every added or altered passage and every removed passage is named as
+removed, and fails otherwise. Other files in the frozen change are covered
+by the gate and the review pair, not by the audit.
+
+A passage of authority text that no recorded concurrence quotes whole is
+concurred, word for word, or taken out before the landing. A change of the
+input, such as taking a passage out, needs a new freeze, gate, review pair
+and audit. A concurrence recorded after the freeze leaves the input
+unchanged: it needs no new freeze, gate or review pair, but the audit is
+repeated, and the conditions of the Commit and push section hold for that
+wording as for any other.
