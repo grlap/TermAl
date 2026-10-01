@@ -139,9 +139,9 @@ async fn run_terminal_command(
             ScopedPathMode::ExistingPath,
         )?;
         // The command may write under a mediated turn's open check.
-        state.note_engram_host_write(&workdir);
+        state.engram_host().host_write(&workdir);
         let result = run_terminal_shell_command(&command, &workdir);
-        state.note_engram_host_write(&workdir);
+        state.engram_host().host_write(&workdir);
         result
     })
     .await
@@ -276,14 +276,14 @@ async fn run_terminal_command_stream(
             let result = tokio::task::spawn_blocking(move || {
                 let _permit = permit;
                 // The command may write under a mediated turn's open check.
-                task_state.note_engram_host_write(&workdir);
+                task_state.engram_host().host_write(&workdir);
                 let result = run_terminal_shell_command_streaming(
                     &command,
                     &workdir,
                     command_stream_tx,
                     task_cancellation,
                 );
-                task_state.note_engram_host_write(&workdir);
+                task_state.engram_host().host_write(&workdir);
                 result
             })
             .await

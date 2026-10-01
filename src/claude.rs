@@ -2118,7 +2118,7 @@ fn handle_claude_bash_result(
     };
     let command = tool_use.command.as_deref().unwrap_or("Bash");
     let exit =
-        engram_claude_command_exit(is_error, interrupted, tool_use.run_in_background, detail);
+        EngramHost::claude_command_exit(is_error, interrupted, tool_use.run_in_background, detail);
     recorder.command_completed_with_exit(tool_use_id, command, output.trim_end(), status, exit)
 }
 

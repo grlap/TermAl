@@ -194,7 +194,7 @@ async fn apply_git_file_action(
 
         // The action may rewrite files under a mediated turn's open check,
         // while it runs.
-        state.note_engram_host_write(&repo_root);
+        state.engram_host().host_write(&repo_root);
         let applied = (|| -> Result<(), ApiError> {
             match request.action {
                 GitFileAction::Stage => {
@@ -230,7 +230,7 @@ async fn apply_git_file_action(
             }
             Ok(())
         })();
-        state.note_engram_host_write(&repo_root);
+        state.engram_host().host_write(&repo_root);
         applied?;
 
         Ok(load_git_status_for_path(&workdir)?)
@@ -294,14 +294,14 @@ async fn commit_git_changes(
 
         // A commit's hooks (formatters, lint-staged) may rewrite files under a
         // mediated turn's open check, while it runs.
-        state.note_engram_host_write(&repo_root);
+        state.engram_host().host_write(&repo_root);
         let output = git_command()
             .arg("-C")
             .arg(&repo_root)
             .args(["commit", "-m"])
             .arg(message)
             .output();
-        state.note_engram_host_write(&repo_root);
+        state.engram_host().host_write(&repo_root);
         let output = output
             .map_err(|err| ApiError::internal(format!("failed to create git commit: {err}")))?;
 
@@ -413,9 +413,9 @@ async fn sync_git_changes(
         }
         // A pull may rewrite files under a mediated turn's open check, while
         // it runs.
-        state.note_engram_host_write(&workdir);
+        state.engram_host().host_write(&workdir);
         let synced = sync_git_repo(&workdir);
-        state.note_engram_host_write(&workdir);
+        state.engram_host().host_write(&workdir);
         synced
     })
     .await?;

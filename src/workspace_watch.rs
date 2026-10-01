@@ -64,7 +64,7 @@ fn run_workspace_file_watcher(state: AppState) {
             Ok(Ok(event)) => {
                 let changes = workspace_file_changes_from_notify_event(&event, &watch_scopes);
                 state.record_active_turn_file_changes(&changes);
-                state.note_engram_workspace_file_changes(&changes);
+                state.engram_host().workspace_files_changed(&changes);
                 for change in changes {
                     let key = workspace_file_change_event_key(&change);
                     pending_changes

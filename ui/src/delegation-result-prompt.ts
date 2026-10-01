@@ -17,6 +17,8 @@ export type DelegationPromptResult = Pick<
   | "summary"
   | "findings"
   | "changedFiles"
+  | "observedWorkspaceChanges"
+  | "observedWorkspaceChangesOmitted"
   | "filesInspected"
   | "commandsRun"
   | "notes"
@@ -94,6 +96,18 @@ export function formatDelegationResultPrompt(result: DelegationPromptResult) {
       "",
       "Changed files:",
       ...changedFiles.map((path) => formatListItem(path, "unknown path")),
+    );
+  }
+  const observedWorkspaceChanges = result.observedWorkspaceChanges ?? [];
+  const observationsOmitted = result.observedWorkspaceChangesOmitted ?? 0;
+  if (observedWorkspaceChanges.length > 0 || observationsOmitted > 0) {
+    bodySections.push(
+      "",
+      "Changes observed in the workspace during the run (not attributed to the child):",
+      ...observedWorkspaceChanges.map((path) => formatListItem(path, "unknown path")),
+      ...(observationsOmitted > 0
+        ? [`${observationsOmitted} additional observed paths omitted from this result.`]
+        : []),
     );
   }
   const filesInspected = result.filesInspected ?? [];

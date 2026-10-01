@@ -231,32 +231,60 @@ fn acceptance_request_declares_the_content_revision_of_the_evaluators_worktree()
 
 #[test]
 fn acceptance_same_session_request_hands_the_session_its_content_revision() {
-    let (state, project, parent, root) = fixture();
-    install_store(&state, &project, &root);
-    make_workdir_a_worktree(&root);
-    let response = state
-        .request_acceptance_evaluation_with_runner(
-            &parent,
-            evaluation_request(None),
-            fixture_reader(
-                Arc::default(),
-                show_receipt(None),
-                Ok(policy_receipt(Some(&["same_session"]))),
-            ),
-        )
-        .unwrap();
-    let expected = content_revision(&root).unwrap().1;
-    let wire = serde_json::to_value(&response).unwrap();
-    assert_eq!(wire["sourceFingerprint"], expected.as_str());
-    assert!(wire.get("notice").is_none());
-    assert!(
-        wire["brief"]
-            .as_str()
-            .unwrap()
-            .contains(&format!("source_fingerprint {expected}")),
-        "{}",
-        wire["brief"]
-    );
+    for has_notes in [true, false] {
+        let (state, project, parent, root) = fixture();
+        install_store(&state, &project, &root);
+        make_workdir_a_worktree(&root);
+        let mut receipt = show_receipt(None);
+        if !has_notes {
+            receipt["notes"] = json!([]);
+        }
+        let response = state
+            .request_acceptance_evaluation_with_runner(
+                &parent,
+                evaluation_request(None),
+                fixture_reader(
+                    Arc::default(),
+                    receipt,
+                    Ok(policy_receipt(Some(&["same_session"]))),
+                ),
+            )
+            .unwrap();
+        let expected = content_revision(&root).unwrap().1;
+        let wire = serde_json::to_value(&response).unwrap();
+        assert_eq!(wire["sourceFingerprint"], expected.as_str());
+        if has_notes {
+            assert!(wire["notice"].as_str().unwrap().contains("aaaaaaaa1111"));
+            assert!(!wire["notice"]
+                .as_str()
+                .unwrap()
+                .contains("can only be insufficient-evidence"));
+            assert!(!wire["brief"]
+                .as_str()
+                .unwrap()
+                .contains("can only be insufficient-evidence"));
+            assert!(wire["brief"]
+                .as_str()
+                .unwrap()
+                .contains("A pass must cite at least one evidence locator"));
+            assert_eq!(wire["evidenceOmissions"]["leftOut"]["count"], 2);
+            assert_eq!(
+                wire["evidenceOmissions"]["leftOut"]["locators"],
+                json!(["aaaaaaaa1111", "bbbbbbbb2222"])
+            );
+        } else {
+            assert!(wire.get("notice").is_none());
+            assert_eq!(wire["evidenceOmissions"]["leftOut"]["count"], 0);
+        }
+        assert!(
+            wire["brief"]
+                .as_str()
+                .unwrap()
+                .contains(&format!("source_fingerprint {expected}")),
+            "{}",
+            wire["brief"]
+        );
+    }
 }
 
 #[test]

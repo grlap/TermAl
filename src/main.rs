@@ -18,6 +18,8 @@ src/orchestrators.rs, and the Telegram relay fragments named below.
 */
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
+mod engram_host;
+use engram_host::{EngramHost, EngramRecorderObservation};
 mod host_command;
 use host_command::Command;
 #[cfg(windows)]

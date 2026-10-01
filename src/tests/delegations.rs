@@ -1800,11 +1800,17 @@ async fn delegation_result_route_uses_camel_case_json_shape() {
                 id: files_id,
                 timestamp: stamp_now(),
                 author: Author::Assistant,
-                title: "Agent changed 1 file".to_owned(),
-                files: vec![FileChangeSummaryEntry {
-                    path: "src/main.rs".to_owned(),
-                    kind: WorkspaceFileChangeKind::Modified,
-                }],
+                title: "Workspace changes observed during the run".to_owned(),
+                files: vec![
+                    FileChangeSummaryEntry {
+                        path: "src/main.rs".to_owned(),
+                        kind: WorkspaceFileChangeKind::Modified,
+                    },
+                    FileChangeSummaryEntry {
+                        path: ".tmp/another-worktree/src/lib.rs".to_owned(),
+                        kind: WorkspaceFileChangeKind::Modified,
+                    },
+                ],
             },
         );
         push_message_on_record(
@@ -1860,7 +1866,14 @@ async fn delegation_result_route_uses_camel_case_json_shape() {
             "message": "Route result carries review findings."
         }])
     );
-    assert_eq!(result["changedFiles"], json!(["src/main.rs"]));
+    assert!(
+        result.get("changedFiles").is_none(),
+        "workspace observations must not be attributed to the read-only child: {result}"
+    );
+    assert_eq!(
+        result["observedWorkspaceChanges"],
+        json!([".tmp/another-worktree/src/lib.rs", "src/main.rs"])
+    );
     assert_eq!(
         result["commandsRun"],
         json!([{
@@ -1972,6 +1985,133 @@ async fn delegation_routes_reject_wrong_parent() {
     assert_eq!(fetched.delegation.status, DelegationStatus::Running);
 
     let _ = fs::remove_file(state.persistence_path.as_path());
+}
+
+#[test]
+fn delegation_workspace_observations_preserve_writing_policies_and_legacy_results() {
+    let paths = vec![".tmp/peer/src/lib.rs".to_owned(), "src/main.rs".to_owned()];
+    for policy in [
+        DelegationWritePolicy::ReadOnly,
+        DelegationWritePolicy::SharedWorktree {
+            owned_paths: vec!["src".to_owned()],
+        },
+        DelegationWritePolicy::IsolatedWorktree {
+            owned_paths: vec!["src".to_owned()],
+            worktree_path: Some(".tmp/isolated".to_owned()),
+        },
+    ] {
+        let state = test_app_state();
+        let parent = test_session_id(&state, Agent::Codex);
+        let created = state
+            .create_read_only_delegation(
+                &parent,
+                CreateDelegationRequest {
+                    prompt: "Inspect the workspace".to_owned(),
+                    title: None,
+                    cwd: None,
+                    agent: Some(Agent::Codex),
+                    model: None,
+                    mode: Some(DelegationMode::Explorer),
+                    write_policy: Some(DelegationWritePolicy::ReadOnly),
+                },
+            )
+            .unwrap();
+        let child_id = &created.delegation.child_session_id;
+        {
+            let mut inner = state.inner.lock().unwrap();
+            let index = inner
+                .find_delegation_index_by_child_session_id(child_id)
+                .unwrap();
+            // Exercise the result policy independently of worktree creation.
+            inner.delegations[index].write_policy = policy.clone();
+            let child_index = inner.find_session_index(child_id).unwrap();
+            let id = inner.next_message_id();
+            push_message_on_record(
+                &mut inner.sessions[child_index],
+                Message::FileChanges {
+                    id,
+                    timestamp: stamp_now(),
+                    author: Author::Assistant,
+                    title: "Observed workspace changes".to_owned(),
+                    files: paths
+                        .iter()
+                        .chain(paths.iter())
+                        .map(|path| FileChangeSummaryEntry {
+                            path: path.clone(),
+                            kind: WorkspaceFileChangeKind::Modified,
+                        })
+                        .collect(),
+                },
+            );
+        }
+        finish_delegation_child_with_assistant_text(&state, child_id, "Finished inspection.");
+        state
+            .refresh_delegation_for_child_session(child_id)
+            .unwrap();
+        let result = state
+            .get_delegation_result(&parent, &created.delegation.id)
+            .unwrap()
+            .result;
+        if policy == DelegationWritePolicy::ReadOnly {
+            assert!(result.changed_files.is_empty());
+            assert_eq!(result.observed_workspace_changes, paths);
+        } else {
+            assert_eq!(result.changed_files, paths);
+            assert!(result.observed_workspace_changes.is_empty());
+        }
+
+        // Simulate an older persisted packet, including a child whose transcript
+        // is no longer loaded. Reads must use the saved observations, not rescan.
+        {
+            let mut inner = state.inner.lock().unwrap();
+            let index = inner
+                .find_delegation_index_by_child_session_id(child_id)
+                .unwrap();
+            let mut persisted = serde_json::to_value(&inner.delegations[index]).unwrap();
+            persisted["result"]
+                .as_object_mut()
+                .unwrap()
+                .remove("observedWorkspaceChanges");
+            persisted["result"]["changedFiles"] = json!(paths);
+            inner.delegations[index] = serde_json::from_value(persisted).unwrap();
+            let child_index = inner.find_session_index(child_id).unwrap();
+            inner.sessions[child_index].session.messages.clear();
+        }
+        let result = state
+            .get_delegation_result(&parent, &created.delegation.id)
+            .unwrap()
+            .result;
+        let status = state
+            .get_delegation(&parent, &created.delegation.id)
+            .unwrap();
+        let api = serde_json::to_value(&status).unwrap();
+        let fan_in = delegation_wait_result_section(&status.delegation);
+        if policy == DelegationWritePolicy::ReadOnly {
+            assert!(result.changed_files.is_empty());
+            assert_eq!(result.observed_workspace_changes, paths);
+            assert!(api["delegation"]["result"].get("changedFiles").is_none());
+            assert_eq!(
+                api["delegation"]["result"]["observedWorkspaceChanges"],
+                json!(paths)
+            );
+            assert!(fan_in.contains("Changed files:\n- None"));
+            assert!(fan_in.contains(
+                "Changes observed in the workspace during the run (not attributed to the child):"
+            ));
+        } else {
+            assert_eq!(result.changed_files, paths);
+            assert!(result.observed_workspace_changes.is_empty());
+            assert_eq!(api["delegation"]["result"]["changedFiles"], json!(paths));
+            assert!(!fan_in.contains("not attributed to the child"));
+        }
+        if policy == DelegationWritePolicy::ReadOnly {
+            assert!(fan_in.contains("2 paths retained; 0 additional paths omitted"));
+            assert!(!fan_in.contains(".tmp/peer/src/lib.rs"));
+        } else {
+            assert!(fan_in.contains(".tmp/peer/src/lib.rs"));
+            assert!(fan_in.contains("src/main.rs"));
+        }
+    }
 }
 
 #[test]

@@ -17,6 +17,200 @@ fn structured_review_test_app_state() -> AppState {
 }
 
 #[test]
+fn structured_review_snapshots_workspace_observations_without_attribution() {
+    let (state, _root_sender_id, parent) = mailbox_test_state();
+    let (delegation_id, child_id) = install_required_review_delegation(&state, &parent);
+    let observe = |path: &str| {
+        let mut inner = state.inner.lock().unwrap();
+        let index = inner.find_session_index(&child_id).unwrap();
+        let id = inner.next_message_id();
+        push_message_on_record(
+            &mut inner.sessions[index],
+            Message::FileChanges {
+                id,
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                title: "Observed workspace changes".to_owned(),
+                files: vec![FileChangeSummaryEntry {
+                    path: path.to_owned(),
+                    kind: WorkspaceFileChangeKind::Modified,
+                }],
+            },
+        );
+    };
+    observe(".tmp/peer/src/lib.rs");
+    state
+        .submit_delegation_review_result(&child_id, structured_review_request())
+        .unwrap();
+    finish_delegation_child_with_assistant_text(&state, &child_id, "Finished review.");
+    state
+        .refresh_delegation_for_child_session(&child_id)
+        .unwrap();
+
+    let persisted = load_state(state.persistence_path.as_path())
+        .unwrap()
+        .unwrap();
+    let saved = persisted
+        .delegations
+        .iter()
+        .find(|d| d.id == delegation_id)
+        .unwrap();
+    let result = saved.result.as_ref().unwrap();
+    assert!(result.changed_files.is_empty());
+    assert_eq!(result.observed_workspace_changes, [".tmp/peer/src/lib.rs"]);
+    assert_eq!(result.summary, "One medium issue found.");
+    assert_eq!(result.findings.len(), 1);
+
+    observe("after-review.rs");
+    let packet = state
+        .get_delegation_result(&parent, &delegation_id)
+        .unwrap();
+    assert_eq!(
+        packet.result.observed_workspace_changes,
+        [".tmp/peer/src/lib.rs"]
+    );
+    assert!(packet.result.changed_files.is_empty());
+}
+
+#[test]
+fn delegation_terminal_paths_preserve_pending_watcher_observations() {
+    for terminal_path in [
+        "child removal",
+        "parent removal",
+        "structured removal",
+        "failure",
+        "cancel",
+        "missing result",
+    ] {
+        for read_only in [true, false] {
+            let (state, _sender, parent) = mailbox_test_state();
+            let (id, child) = install_required_review_delegation(&state, &parent);
+            let root = state.persistence_path.parent().unwrap().to_path_buf();
+            let path = root.join("peer-change.rs").to_string_lossy().into_owned();
+            {
+                let mut inner = state.inner.lock().unwrap();
+                let index = inner.find_session_index(&child).unwrap();
+                let record = &mut inner.sessions[index];
+                record.session.workdir = root.to_string_lossy().into_owned();
+                record.session.status = SessionStatus::Active;
+                record.active_turn_start_message_count = Some(record.session.messages.len());
+                if !read_only {
+                    let index = inner.find_delegation_index(&id).unwrap();
+                    inner.delegations[index].write_policy = DelegationWritePolicy::SharedWorktree {
+                        owned_paths: vec![".".to_owned()],
+                    };
+                }
+            }
+            state.record_active_turn_file_changes(&[WorkspaceFileChangeEvent {
+                path: path.clone(),
+                kind: WorkspaceFileChangeKind::Modified,
+                root_path: None,
+                session_id: Some(child.clone()),
+                mtime_ms: None,
+                size_bytes: None,
+            }]);
+            {
+                let inner = state.inner.lock().unwrap();
+                let index = inner.find_session_index(&child).unwrap();
+                assert!(
+                    inner.sessions[index]
+                        .active_turn_file_changes
+                        .contains_key(&path)
+                );
+                assert!(
+                    child_workspace_observed_changes(&inner.sessions[index].session).is_empty()
+                );
+            }
+            match terminal_path {
+                "child removal" => {
+                    state.kill_session(&child).unwrap();
+                }
+                "parent removal" => {
+                    state.kill_session(&parent).unwrap();
+                }
+                "structured removal" => {
+                    state
+                        .submit_delegation_review_result(&child, structured_review_request())
+                        .unwrap();
+                    state.kill_session(&child).unwrap();
+                }
+                "missing result" => {
+                    finish_delegation_child_with_assistant_text(&state, &child, "No typed result.");
+                    state.refresh_delegation_for_child_session(&child).unwrap();
+                }
+                _ => {
+                    let mut inner = state.inner.lock().unwrap();
+                    let index = inner.find_delegation_index(&id).unwrap();
+                    if terminal_path == "failure" {
+                        mark_delegation_failed_locked(&mut inner, index, "runtime failed").unwrap();
+                    } else {
+                        mark_delegation_canceled_locked(&mut inner, index, None).unwrap();
+                    }
+                }
+            }
+            let inner = state.inner.lock().unwrap();
+            let result = inner
+                .delegations
+                .iter()
+                .find(|d| d.id == id)
+                .unwrap()
+                .result
+                .as_ref()
+                .unwrap();
+            assert!(result.changed_files.is_empty(), "{terminal_path}");
+            assert_eq!(
+                result.observed_workspace_changes,
+                if read_only { vec![path] } else { vec![] },
+                "{terminal_path}, readOnly={read_only}"
+            );
+            assert_eq!(result.observed_workspace_changes_omitted, 0);
+        }
+    }
+}
+
+#[test]
+fn structured_review_bounds_observation_paths_and_accounts_for_omissions() {
+    for path_suffix in ["x".to_owned(), "\u{1}".repeat(1000), "界".repeat(20_000)] {
+        let (state, _sender, parent) = mailbox_test_state();
+        let (id, child) = install_required_review_delegation(&state, &parent);
+        {
+            let mut inner = state.inner.lock().unwrap();
+            let index = inner.find_session_index(&child).unwrap();
+            for n in 0..500 {
+                inner.sessions[index].active_turn_file_changes.insert(
+                    format!("{n:04}/{path_suffix}"),
+                    WorkspaceFileChangeKind::Modified,
+                );
+            }
+        }
+        state
+            .submit_delegation_review_result(&child, structured_review_request())
+            .unwrap();
+        state.kill_session(&child).unwrap();
+        let result = state.get_delegation_result(&parent, &id).unwrap().result;
+        assert!(result.changed_files.is_empty());
+        assert!(result.observed_workspace_changes.len() <= MAX_DELEGATION_OBSERVED_PATHS);
+        assert!(
+            serde_json::to_vec(&result.observed_workspace_changes)
+                .unwrap()
+                .len()
+                <= MAX_DELEGATION_OBSERVED_PATH_BYTES + 2
+        );
+        assert_eq!(
+            result.observed_workspace_changes.len() + result.observed_workspace_changes_omitted,
+            500
+        );
+        assert_eq!(result.summary, "One medium issue found.");
+        assert_eq!(result.findings.len(), 1);
+        // Repeated legacy-compatible reads must not count omitted paths twice.
+        assert_eq!(
+            state.get_delegation_result(&parent, &id).unwrap().result,
+            result
+        );
+    }
+}
+
+#[test]
 fn structured_result_is_durable_before_child_archive_and_active_review_is_not_released() {
     let (state, _root_sender_id, parent) = mailbox_test_state();
     let (delegation_id, child_id) = install_required_review_delegation(&state, &parent);

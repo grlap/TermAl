@@ -13,7 +13,7 @@ function formatPrompt(
     Partial<
       Pick<
         DelegationPromptResult,
-        "findings" | "changedFiles" | "filesInspected" | "commandsRun" | "notes"
+        "findings" | "changedFiles" | "observedWorkspaceChanges" | "observedWorkspaceChangesOmitted" | "filesInspected" | "commandsRun" | "notes"
       >
     >,
 ) {
@@ -45,6 +45,28 @@ function expectedPrompt(
 }
 
 describe("formatDelegationResultPrompt", () => {
+  it("reports omitted observations even when no path fits the result budget", () => {
+    const prompt = formatPrompt({
+      childSessionId: "child-1", status: "completed", summary: "Reviewed.",
+      observedWorkspaceChangesOmitted: 500,
+    });
+    expect(prompt).toContain("not attributed to the child");
+    expect(prompt).toContain("500 additional observed paths omitted from this result.");
+    expect(prompt).not.toContain("Changed files:");
+  });
+
+  it("labels workspace observations without attributing writes to the child", () => {
+    const prompt = formatPrompt({
+      childSessionId: "read-only-child",
+      status: "completed",
+      summary: "Read-only inspection completed.",
+      observedWorkspaceChanges: ["src/peer.rs", ".tmp/peer/src/lib.rs"],
+    });
+    expect(prompt).toContain("Changes observed in the workspace during the run (not attributed to the child):");
+    expect(prompt).toContain("- src/peer.rs");
+    expect(prompt).toContain("- .tmp/peer/src/lib.rs");
+    expect(prompt).not.toContain("Changed files:");
+  });
   it("formats empty summaries with a fallback", () => {
     expect(
       formatPrompt({

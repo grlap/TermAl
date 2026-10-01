@@ -964,7 +964,10 @@ impl AppState {
             } else {
                 inner.revision
             };
-            let result = inner.delegations[index].result.clone();
+            let record = &inner.delegations[index];
+            let result = record.result.as_ref().map(|result| {
+                delegation_result_for_policy(result, &record.write_policy).into_owned()
+            });
             let acceptance_evaluation = inner.delegations[index]
                 .acceptance_evaluation
                 .as_ref()
@@ -2674,7 +2677,11 @@ fn limit_delegation_wait_resume_prompt(prompt: String) -> String {
 }
 
 fn delegation_wait_result_section(delegation: &DelegationRecord) -> String {
-    let result = delegation.result.as_ref();
+    let normalized = delegation
+        .result
+        .as_ref()
+        .map(|result| delegation_result_for_policy(result, &delegation.write_policy));
+    let result = normalized.as_deref();
     let summary = result
         .map(|result| result.summary.trim())
         .filter(|summary| !summary.is_empty())
@@ -2753,6 +2760,15 @@ fn delegation_wait_result_section(delegation: &DelegationRecord) -> String {
         changed_files,
         notes
     );
+    if let Some(result) = result.filter(|result| {
+        !result.observed_workspace_changes.is_empty()
+            || result.observed_workspace_changes_omitted > 0
+    }) {
+        section.push_str(&format!(
+            "\n\nChanges observed in the workspace during the run (not attributed to the child): {} paths retained; {} additional paths omitted. Retrieve retained paths with `termal_get_session_result`.",
+            result.observed_workspace_changes.len(), result.observed_workspace_changes_omitted,
+        ));
+    }
     // The child's prose is not the record: say what the tracker accepted.
     if let Some(evaluation) = delegation.acceptance_evaluation.as_ref() {
         section.push_str("\n\n");
@@ -3020,7 +3036,7 @@ fn refresh_delegation_from_child_locked(
                         "Durable structured review result was quarantined during recovery: {reason}"
                     ));
                 }
-                let result = DelegationResult {
+                let mut result = DelegationResult {
                     delegation_id: delegation.id.clone(),
                     child_session_id: delegation.child_session_id.clone(),
                     status: DelegationStatus::Failed,
@@ -3032,10 +3048,13 @@ fn refresh_delegation_from_child_locked(
                         message: "Structured review result was not submitted; findings are unavailable, not empty.".to_owned(),
                     }],
                     changed_files: Vec::new(),
+                    observed_workspace_changes: Vec::new(),
+                    observed_workspace_changes_omitted: 0,
                     files_inspected: Vec::new(),
                     commands_run: Vec::new(),
                     notes: unavailable_notes,
                 };
+                record_delegation_workspace_observations(inner, &delegation, &mut result);
                 {
                     let record = inner.delegations.get_mut(delegation_index)?;
                     record.status = DelegationStatus::Failed;
@@ -3066,17 +3085,20 @@ fn refresh_delegation_from_child_locked(
                     parent_card_delta,
                 });
             }
-            let result = DelegationResult {
+            let mut result = DelegationResult {
                 delegation_id: delegation.id.clone(),
                 child_session_id: delegation.child_session_id.clone(),
                 status: DelegationStatus::Completed,
                 summary,
                 findings,
                 changed_files,
+                observed_workspace_changes: Vec::new(),
+                observed_workspace_changes_omitted: 0,
                 files_inspected,
                 commands_run,
                 notes,
             };
+            record_delegation_workspace_observations(inner, &delegation, &mut result);
             let public_summary = compact_delegation_public_summary(&result.summary);
             {
                 let record = inner.delegations.get_mut(delegation_index)?;
@@ -3430,17 +3452,20 @@ fn mark_delegation_failed_locked(
             )]
         })
         .unwrap_or_default();
-    let result = DelegationResult {
+    let mut result = DelegationResult {
         delegation_id: delegation.id.clone(),
         child_session_id: delegation.child_session_id.clone(),
         status: DelegationStatus::Failed,
         summary: summary.to_owned(),
         findings: Vec::new(),
         changed_files: Vec::new(),
+        observed_workspace_changes: Vec::new(),
+        observed_workspace_changes_omitted: 0,
         files_inspected: Vec::new(),
         commands_run: Vec::new(),
         notes: recovery_notes,
     };
+    record_delegation_workspace_observations(inner, &delegation, &mut result);
     let record = inner.delegations.get_mut(delegation_index)?;
     record.status = DelegationStatus::Failed;
     record.queued_followup_prompt_id = None;
@@ -3483,17 +3508,20 @@ fn mark_delegation_canceled_locked(
     let canceled_at = stamp_now();
     let raw_summary = reason.as_deref().unwrap_or("Delegation canceled.");
     let public_summary = compact_delegation_public_summary(raw_summary);
-    let result = DelegationResult {
+    let mut result = DelegationResult {
         delegation_id: delegation.id.clone(),
         child_session_id: delegation.child_session_id.clone(),
         status: DelegationStatus::Canceled,
         summary: raw_summary.to_owned(),
         findings: Vec::new(),
         changed_files: Vec::new(),
+        observed_workspace_changes: Vec::new(),
+        observed_workspace_changes_omitted: 0,
         files_inspected: Vec::new(),
         commands_run: Vec::new(),
         notes: Vec::new(),
     };
+    record_delegation_workspace_observations(inner, &delegation, &mut result);
     let record = inner.delegations.get_mut(delegation_index)?;
     record.status = DelegationStatus::Canceled;
     record.queued_followup_prompt_id = None;
@@ -4176,7 +4204,7 @@ fn delegation_child_outcome_from_result(
     DelegationChildOutcome::Completed {
         summary: result.summary,
         findings: result.findings,
-        changed_files: child_changed_files(&child.session),
+        changed_files: child_workspace_observed_changes(&child.session),
         files_inspected: result.files_inspected,
         commands_run: child_commands_run(&child.session),
         notes: result.notes,
@@ -4535,7 +4563,9 @@ fn truncate_to_byte_limit_with_marker(mut value: String, max_bytes: usize, marke
     value
 }
 
-fn child_changed_files(session: &Session) -> Vec<String> {
+// FileChanges comes from the workspace watcher, not a record of who wrote.
+// Writing delegations retain the legacy changedFiles contract for now.
+fn child_workspace_observed_changes(session: &Session) -> Vec<String> {
     let mut files = BTreeSet::new();
     for message in &session.messages {
         if let Message::FileChanges { files: entries, .. } = message {
@@ -4545,6 +4575,77 @@ fn child_changed_files(session: &Session) -> Vec<String> {
         }
     }
     files.into_iter().collect()
+}
+
+/// Older read-only packets persisted watcher paths as changedFiles. Reclassify
+/// those at the read boundary, accounting for omitted paths without rewriting history.
+fn delegation_result_for_policy<'a>(
+    result: &'a DelegationResult,
+    policy: &DelegationWritePolicy,
+) -> std::borrow::Cow<'a, DelegationResult> {
+    if *policy != DelegationWritePolicy::ReadOnly
+        || (result.changed_files.is_empty() && result.observed_workspace_changes.is_empty())
+    {
+        return std::borrow::Cow::Borrowed(result);
+    }
+    let mut normalized = result.clone();
+    let mut observed: BTreeSet<_> = normalized.observed_workspace_changes.into_iter().collect();
+    observed.extend(std::mem::take(&mut normalized.changed_files));
+    normalized.observed_workspace_changes = observed.into_iter().collect();
+    bound_delegation_workspace_observations(&mut normalized);
+    std::borrow::Cow::Owned(normalized)
+}
+
+/// Snapshot observations when the result settles, including structured reviews
+/// and unsuccessful children. Later API reads never pull in post-run writes.
+fn record_delegation_workspace_observations(
+    inner: &StateInner,
+    delegation: &DelegationRecord,
+    result: &mut DelegationResult,
+) {
+    if delegation.write_policy != DelegationWritePolicy::ReadOnly {
+        return;
+    }
+    let mut observed: BTreeSet<_> = std::mem::take(&mut result.observed_workspace_changes)
+        .into_iter()
+        .collect();
+    observed.extend(std::mem::take(&mut result.changed_files));
+    if let Some(index) = inner.find_session_index(&delegation.child_session_id) {
+        let child = &inner.sessions[index];
+        observed.extend(child_workspace_observed_changes(&child.session));
+        // Removal can settle a child before its normal turn-end transcript flush.
+        observed.extend(child.active_turn_file_changes.keys().cloned());
+    }
+    result.observed_workspace_changes = observed.into_iter().collect();
+    bound_delegation_workspace_observations(result);
+}
+
+const MAX_DELEGATION_OBSERVED_PATHS: usize = 200;
+const MAX_DELEGATION_OBSERVED_PATH_BYTES: usize = 16 * 1024;
+
+fn is_zero_count(count: &usize) -> bool {
+    *count == 0
+}
+
+fn bound_delegation_workspace_observations(result: &mut DelegationResult) {
+    let mut bytes = 0;
+    let mut retained = 0;
+    // Count encoded bytes so even control characters in a filename stay bounded.
+    for path in &result.observed_workspace_changes {
+        let encoded_bytes = serde_json::to_string(path)
+            .expect("path is JSON serializable")
+            .len() + 1;
+        if retained == MAX_DELEGATION_OBSERVED_PATHS
+            || bytes + encoded_bytes > MAX_DELEGATION_OBSERVED_PATH_BYTES
+        {
+            break;
+        }
+        bytes += encoded_bytes;
+        retained += 1;
+    }
+    result.observed_workspace_changes_omitted = result.observed_workspace_changes_omitted
+        .saturating_add(result.observed_workspace_changes.len() - retained);
+    result.observed_workspace_changes.truncate(retained);
 }
 
 fn child_commands_run(session: &Session) -> Vec<DelegationCommandResult> {

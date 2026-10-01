@@ -236,6 +236,7 @@ enum AcceptanceEvaluationRequestResponse {
         /// An earlier evaluator of the same task ended with an open write.
         #[serde(skip_serializing_if = "Option::is_none")]
         notice: Option<String>,
+        evidence_omissions: Value,
     },
     SameSession {
         mode: AcceptanceEvaluationMode,
@@ -249,6 +250,7 @@ enum AcceptanceEvaluationRequestResponse {
         brief: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         notice: Option<String>,
+        evidence_omissions: Value,
     },
 }
 
@@ -703,15 +705,20 @@ impl AppState {
         let mut older_pages = Vec::new();
         let mut collected = acceptance_evidence_page_len(&show);
         let mut after = acceptance_evidence_continuation(&show);
+        let mut paging_stop = None;
         while let Some(token) = after.take() {
-            if older_pages.len() + 1 >= MAX_ACCEPTANCE_EVIDENCE_PAGES
-                || collected >= MAX_ACCEPTANCE_BRIEF_EVIDENCE_ENTRIES
-            {
+            if older_pages.len() + 1 >= MAX_ACCEPTANCE_EVIDENCE_PAGES {
+                paging_stop = Some("page_limit");
+                break;
+            }
+            if collected >= MAX_ACCEPTANCE_BRIEF_EVIDENCE_ENTRIES {
+                paging_stop = Some("entry_limit");
                 break;
             }
             // A slow store shortens the brief; it never outruns the caller's
             // HTTP allowance or starves the reads that decide the request.
             if now() + acceptance_evaluation_paging_reserve() > deadline {
+                paging_stop = Some("time_budget");
                 eprintln!(
                     "acceptance evaluation> the read budget for `{work_ref}` is spent; the brief lists the evidence read so far"
                 );
@@ -728,6 +735,7 @@ impl AppState {
                     older_pages.push(page);
                 }
                 Err(error) => {
+                    paging_stop = Some("transport_failure");
                     eprintln!(
                         "acceptance evaluation> older evidence of `{work_ref}` was not read; the brief lists the newest entries only: {error}"
                     );
@@ -735,6 +743,19 @@ impl AppState {
             }
         }
         merge_acceptance_evidence_pages(&mut show, older_pages);
+        let unread = show
+            .pointer("/notes_window/older")
+            .and_then(Value::as_u64)
+            .or_else(|| show.get("notes_omitted").and_then(Value::as_u64))
+            .unwrap_or(0);
+        show["notes_omitted"] = json!(unread);
+        // A tracker that reports older records without a cursor has not proved
+        // that those records are absent. Never synthesize their identities.
+        show["acceptance_paging_stop"] = json!(if unread > 0 {
+            paging_stop.or(Some("missing_continuation"))
+        } else {
+            None
+        });
         let full = read(connection, &full_args, ENGRAM_WORK_BINDING_COMMAND_TIMEOUT)
             .map_err(|e| acceptance_evaluation_transport_error("engram work show --full", e))?;
         let task = parse_acceptance_evaluation_task(show, full)?;
@@ -929,11 +950,13 @@ impl AppState {
                     mode,
                     work_ref: task.work_ref,
                     notice,
+                    evidence_omissions: acceptance_brief_omissions(&cuts),
                 })
             }
             AcceptanceEvaluationMode::SameSession => {
                 let source_fingerprint = self.acceptance_evaluation_source_revision(&place);
                 let unmeasured = unmeasured(&source_fingerprint);
+                let cuts = acceptance_same_session_brief_cuts(&task);
                 Ok(AcceptanceEvaluationRequestResponse::SameSession {
                     mode,
                     brief: build_same_session_acceptance_brief(
@@ -952,7 +975,9 @@ impl AppState {
                         ),
                         root_notice,
                         unmeasured,
+                        acceptance_same_session_cut_notice(&task.work_ref, &cuts),
                     ]),
+                    evidence_omissions: acceptance_brief_omissions(&cuts),
                     work_ref: task.work_ref,
                 })
             }

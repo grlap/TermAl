@@ -104,7 +104,7 @@ async fn put_review(
         // write counts as it starts and as it ends, as any write through
         // TermAl does (outside the review lock, which the state lock never
         // nests inside).
-        state.note_engram_host_write(&review_path);
+        state.engram_host().host_write(&review_path);
         let persisted_review = {
             let _review_guard = state
                 .review_documents_lock
@@ -116,7 +116,7 @@ async fn put_review(
                 Ok(persisted)
             })
         };
-        state.note_engram_host_write(&review_path);
+        state.engram_host().host_write(&review_path);
         let persisted_review = persisted_review?;
         Ok(ReviewDocumentResponse {
             review_file_path: review_path.to_string_lossy().into_owned(),

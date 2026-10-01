@@ -1257,6 +1257,11 @@ struct DelegationResult {
     findings: Vec<DelegationFinding>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     changed_files: Vec<String>,
+    /// Watcher observations during the run, never attribution to the child.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    observed_workspace_changes: Vec<String>,
+    #[serde(default, skip_serializing_if = "is_zero_count")]
+    observed_workspace_changes_omitted: usize,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     files_inspected: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -2224,7 +2229,7 @@ where
 
     // The record as persisted carries an open acceptance write's argument
     // list, which is host-private; a client gets the record without it.
-    let client_record = record
+    let mut client_record = record
         .acceptance_evaluation
         .as_ref()
         .filter(|target| {
@@ -2237,6 +2242,22 @@ where
             acceptance_evaluation: Some(target.client_view()),
             ..record.clone()
         });
+    if record.write_policy == DelegationWritePolicy::ReadOnly
+        && [&record.result, &record.submitted_review_result]
+            .into_iter()
+            .flatten()
+            .any(|result| {
+                !result.changed_files.is_empty() || !result.observed_workspace_changes.is_empty()
+            })
+    {
+        let client = client_record.get_or_insert_with(|| record.clone());
+        for result in [&mut client.result, &mut client.submitted_review_result]
+            .into_iter()
+            .flatten()
+        {
+            *result = delegation_result_for_policy(result, &record.write_policy).into_owned();
+        }
+    }
     ApiDelegationRecord {
         record: client_record.as_ref().unwrap_or(record),
         review_result_required: record.mode == DelegationMode::Reviewer,

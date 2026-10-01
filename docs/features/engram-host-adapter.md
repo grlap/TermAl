@@ -1744,16 +1744,51 @@ request's answer tells the requester the same in its `notice`: which entries
 the host clipped, which it left out, which the tracker's window did not give in
 full, and how many older ones were never read, naming at most 64 locators per
 group. It says nothing when every record is carried whole.
+
+Both request modes also return `evidenceOmissions`, retained in the compact
+spawn response. Its `clipped`, `leftOut`, and `cutByTracker` groups contain
+`count`, the newest at most 64 `locators`, and `locatorsOmitted` for identities
+not included in that list. `unread` contains the count of older unvisited
+records, `locatorsKnown: false`, the opaque `continuation` and `readCut` from
+the last successful page, and a host `reason`: `page_limit`, `entry_limit`,
+`time_budget`, `transport_failure`, or `missing_continuation`. No additional
+tracker reads are made. The brief names the same captured unread boundary.
+A continuation may have expired; it describes the captured read, and grants
+an evaluator no additional tracker access. If its token exceeds 8 192 bytes,
+it is omitted whole, with `continuationOmitted: true` and `continuationBytes`;
+a partial token is never presented as usable. Missing cut or continuation
+fields stay null. Individual unread note identities remain unknown.
+
+The evaluator must distinguish evidence **not shown** from proof absent on
+the item. If its verdict depends on omitted evidence, it keeps the existing
+`insufficient-evidence` verdict but says "not shown" in its rationale, naming
+the known locator or captured continuation. It may not infer the missing
+proof or treat a visibility limit as a failed criterion.
 Only when the complete criteria do not fit with no context left is the request
 refused, with `409` "the acceptance contract is too large to brief an
 evaluator", which states the bytes the criteria take and the limit. Non-ASCII
 context therefore shortens the brief; it never produces that refusal for small
 criteria.
 
+Omission metadata is also shrinkable prompt context. If its full locator list
+or captured continuation would force that refusal, the brief first uses counts
+instead of locator names and omits the continuation whole, saying that those
+details were not shown to fit the brief. If needed, a short omission notice
+replaces the remaining boundary prose. The request response still carries the
+same bounded locator inventory, full permitted continuation and captured read
+cut; shrinking their presentation never changes `evidenceOmissions`, a verdict
+word, the pass-citation rules, or a criterion. A partial continuation is never
+presented as usable.
+
 The `same_session` brief is held to the same 65 536-byte bound and the same
-refusal. It carries the complete criteria and the bases and no context that
-could shrink, so a contract is briefed whole or refused alike whichever mode is
-selected.
+refusal. It carries the complete criteria and the bases; its omission details
+can shrink before a contract is refused, just as in the independent brief.
+Its response describes all evidence that this host brief does not carry,
+with the same bounded omission inventory and captured unread boundary; its
+brief names those details or explicitly says they were not shown to fit. The
+session may use its own permitted tracker tools to inspect the evidence.
+Its omission notice directs the session to those reads; it does not force
+`insufficient-evidence` for evidence the session subsequently reads and checks.
 
 **No tracker MCP server.** An evaluator child is given no tracker MCP server:
 the host installs the tracker's MCP server for every session of an enabled

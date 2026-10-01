@@ -1791,11 +1791,16 @@ describe("delegation command surface", () => {
       serverInstanceId: "server-a",
       result: makeResult({
         filesInspected: ["src/example.rs"],
+        observedWorkspaceChanges: [".tmp/peer/src/lib.rs"],
+        observedWorkspaceChangesOmitted: 500,
         notes: ["Inspected only Rust sources; frontend behavior was not verified"],
       }),
     });
     const result = await getDelegationResultCommand("parent-1", "delegation-1");
     expect(result.filesInspected).toEqual(["src/example.rs"]);
+    expect(result.observedWorkspaceChanges).toEqual([".tmp/peer/src/lib.rs"]);
+    expect(result.observedWorkspaceChangesOmitted).toBe(500);
+    expect(result.changedFiles).toEqual([]);
     expect(result.notes).toEqual(["Inspected only Rust sources; frontend behavior was not verified"]);
   });
 

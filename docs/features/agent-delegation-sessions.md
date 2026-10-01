@@ -459,7 +459,6 @@ When a child finishes, TermAl records a compact result packet:
       "message": "Programmatic release path lacks a post-idle unmount assertion."
     }
   ],
-  "changedFiles": [],
   "commandsRun": [
     {
       "command": "npx vitest run src/panels/VirtualizedConversationMessageList.test.tsx",
@@ -469,6 +468,21 @@ When a child finishes, TermAl records a compact result packet:
   "notes": []
 }
 ```
+
+For read-only delegations, `changedFiles` is empty (and omitted in JSON).
+Watcher paths instead appear in `observedWorkspaceChanges`, labelled in result
+text as changes observed in the workspace during the run, not attributed to the
+child. They may include another session's edits in the same checkout or a nested
+worktree. Observations alone do not prove a read-only violation; review-freeze
+checks still compare the reviewed source. Older saved read-only results are
+projected into this shape using their saved write policy. Writing delegations
+retain their existing `changedFiles` behavior. Empty observation lists are omitted.
+Results retain at most 200 sorted observed paths within a 16 KiB JSON-encoded
+path budget. `observedWorkspaceChangesOmitted` counts additional paths omitted
+from the result. Fan-in reports counts and points to the result API for the
+retained list, keeping observation volume from obscuring another child's findings.
+The snapshot uses the child session's transcript and pending watcher buffer;
+on reused children it may also include observations from earlier turns.
 
 The compact packet is deliberately bounded because it is copied into broad
 state, SSE, and fan-in prompts. It is not the transport for byte-complete child
@@ -1502,6 +1516,8 @@ type DelegationResult = {
   summary: string;
   findings?: DelegationFinding[];
   changedFiles?: string[];
+  observedWorkspaceChanges?: string[];
+  observedWorkspaceChangesOmitted?: number;
   filesInspected?: string[];
   commandsRun?: DelegationCommandResult[];
   notes?: string[];
@@ -1698,6 +1714,8 @@ type DelegationResultPacket = {
   summary: string;
   findings: DelegationFinding[];
   changedFiles: string[];
+  observedWorkspaceChanges?: string[];
+  observedWorkspaceChangesOmitted?: number;
   filesInspected: string[];
   commandsRun: DelegationCommandResult[];
   notes: string[];
