@@ -1759,6 +1759,35 @@ it is omitted whole, with `continuationOmitted: true` and `continuationBytes`;
 a partial token is never presented as usable. Missing cut or continuation
 fields stay null. Individual unread note identities remain unknown.
 
+**Bound criteria and verification records.** Engram admits a pass on a
+criterion bound to a typed host check (the task's `acceptance_bindings`, read
+from the same `--full` revision as the criteria) only with basis `observed`
+and citations that are each a passed host-minted verification record of the
+bound kind; a `judgment` basis, or a note or gate cited beside the record,
+refuses the whole verdict. A pass with basis `observed` on an unbound
+criterion likewise cites only passed verification records. Both briefs
+therefore put each bound criterion's binding on the line after it,
+"[bound to a host-recorded \`KIND\` check: a pass needs basis observed and
+cites only verification records of kind KIND that passed, nothing else]" (naming a
+pinned command fingerprint where there is one), and state the admission rule:
+a judgment pass may cite notes and gates, and on a citation refusal the
+evaluator resubmits without the citation that does not qualify rather than
+downgrade the verdict. The independent brief's evidence list labels each
+host-minted verification record `verification KIND RESULT at REVISION`
+instead of `note`; the `same_session` brief, which carries no evidence
+bodies, lists the verification records the host read, newest first, with the
+same label (at most 16). That list is context: when the brief must shrink it
+keeps at most 4 records of a bound kind, then none, saying how many were read
+and where to read them. A pinned binding (Engram's `check_fingerprint`) names
+its fingerprint and says the evidence list does not show each record's, so a
+record of another command does not qualify. A binding or a verification field that is not a short
+lowercase tracker word is left out of the brief rather than echoed, and
+Engram still enforces it. The evaluation target persists the bindings, and
+the submission (below) refuses a bound pass on any basis but `observed` with
+the rule stated, before the tracker runs: Engram's own refusal names a
+citation as its cause, which led evaluators to downgrade a pass that a
+qualifying record supported.
+
 The evaluator must distinguish evidence **not shown** from proof absent on
 the item. If its verdict depends on omitted evidence, it keeps the existing
 `insufficient-evidence` verdict but says "not shown" in its rationale, naming
@@ -1815,8 +1844,10 @@ runs TermAl checks authority and shape: exactly one verdict per criterion;
 `pass`, `fail`, `insufficient-evidence` or `needs-human`; an optional basis of
 `observed`, `asserted`, `judgment` or `human-required`; a single-line
 rationale of at most 2 000 characters; at most 8 evidence locators per
-criterion, each 8 to 64 lowercase hex characters; and at least one locator on
-every pass. TermAl then runs, as the evaluator:
+criterion, each 8 to 64 lowercase hex characters; at least one locator on
+every pass; and basis `observed` on a pass of a criterion bound to a typed
+check (a missing basis is `judgment`), refused with `400` naming the bound
+kind and the admissible citation. TermAl then runs, as the evaluator:
 
 ```text
 engram work --actor-id <child seat> --session-id <child session> [--actor-context …]

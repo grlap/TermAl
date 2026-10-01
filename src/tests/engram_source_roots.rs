@@ -527,6 +527,7 @@ fn an_evaluation_whose_work_was_renamed_is_refused_at_its_first_submission() {
                 acceptance_basis: 1,
                 evidence_basis: 1,
                 criteria_count: 1,
+                bindings: Vec::new(),
                 attempt_key: "delegation-a".to_owned(),
                 store: Some(store()),
                 source_fingerprint: source_fingerprint.clone(),

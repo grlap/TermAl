@@ -145,6 +145,8 @@ struct AcceptanceEvaluationTargetSeed {
     acceptance_basis: i64,
     evidence_basis: i64,
     criteria_count: usize,
+    /// The criteria bound to a typed host check, which the submission checks.
+    bindings: Vec<AcceptanceCriterionBinding>,
     /// The store the reads above ran against.
     store: EngramAuthorityStoreKey,
     /// The content revision of the evaluator's worktree, taken after the
@@ -167,6 +169,7 @@ impl AcceptanceEvaluationTargetSeed {
             acceptance_basis: self.acceptance_basis,
             evidence_basis: self.evidence_basis,
             criteria_count: self.criteria_count,
+            bindings: self.bindings,
             attempt_key,
             store: Some(self.store),
             source_fingerprint: self.source_fingerprint,
@@ -242,6 +245,117 @@ struct EngramShowFullWorkForEvaluation {
     outcome: String,
     #[serde(default)]
     acceptance: Vec<String>,
+    /// The criteria bound to a typed host check: Engram admits a pass on one
+    /// only with basis observed and passed verification records of that kind.
+    #[serde(default)]
+    acceptance_bindings: Vec<EngramAcceptanceBindingForEvaluation>,
+}
+
+#[derive(Debug, Deserialize)]
+struct EngramAcceptanceBindingForEvaluation {
+    criterion: usize,
+    requirement: EngramAcceptanceRequirementForEvaluation,
+}
+
+/// Engram's `VerificationRequirement` as `show --full` serializes it: the pin
+/// is `check_fingerprint`.
+#[derive(Debug, Deserialize)]
+struct EngramAcceptanceRequirementForEvaluation {
+    check_kind: String,
+    #[serde(default)]
+    check_fingerprint: Option<String>,
+}
+
+/// One criterion's binding as the briefs state it and the submission checks
+/// it. Only bounded tracker words are kept: a binding that is not one is
+/// dropped from the brief rather than echoed, and Engram still enforces it.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AcceptanceCriterionBinding {
+    criterion: usize,
+    check_kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    fingerprint: Option<String>,
+}
+
+/// A short lowercase tracker word (a check kind, a result) that may go into a
+/// prompt as it is.
+fn is_acceptance_tracker_word(value: &str) -> bool {
+    (1..=32).contains(&value.len())
+        && value
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
+}
+
+fn acceptance_criterion_bindings(
+    bindings: Vec<EngramAcceptanceBindingForEvaluation>,
+    criteria_count: usize,
+) -> Vec<AcceptanceCriterionBinding> {
+    let mut kept: Vec<AcceptanceCriterionBinding> = bindings
+        .into_iter()
+        .filter(|binding| (1..=criteria_count).contains(&binding.criterion))
+        .filter(|binding| is_acceptance_tracker_word(&binding.requirement.check_kind))
+        .map(|binding| AcceptanceCriterionBinding {
+            criterion: binding.criterion,
+            check_kind: binding.requirement.check_kind,
+            fingerprint: binding
+                .requirement
+                .check_fingerprint
+                .filter(|fingerprint| is_citable_acceptance_locator(fingerprint)),
+        })
+        .collect();
+    kept.sort_by_key(|binding| binding.criterion);
+    kept.dedup_by_key(|binding| binding.criterion);
+    kept
+}
+
+/// A host-minted verification record as the tracker's window shows it.
+#[derive(Debug, Deserialize)]
+struct EngramVerificationForEvaluation {
+    #[serde(default)]
+    check_kind: Option<String>,
+    #[serde(default)]
+    result: Option<String>,
+    #[serde(default)]
+    source_revision: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct AcceptanceEvidenceVerification {
+    check_kind: String,
+    result: String,
+    source_revision: Option<String>,
+}
+
+/// The typed fields of a verification record, kept only as bounded words: they
+/// are tracker text going into a prompt, and a record without a check kind and
+/// a result is listed without the marker rather than with a guessed one.
+fn acceptance_evidence_verification(
+    verification: &EngramVerificationForEvaluation,
+) -> Option<AcceptanceEvidenceVerification> {
+    let check_kind = verification
+        .check_kind
+        .as_deref()
+        .filter(|kind| is_acceptance_tracker_word(kind))?;
+    let result = verification
+        .result
+        .as_deref()
+        .filter(|result| is_acceptance_tracker_word(result))?;
+    let source_revision = verification
+        .source_revision
+        .as_deref()
+        .filter(|revision| {
+            (1..=96).contains(&revision.len())
+                && revision
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == ':' || c == '-' || c == '.')
+        })
+        .map(str::to_owned);
+    Some(AcceptanceEvidenceVerification {
+        check_kind: check_kind.to_owned(),
+        result: result.to_owned(),
+        source_revision,
+    })
 }
 
 #[derive(Debug, Deserialize)]
@@ -270,6 +384,9 @@ struct EngramShowNoteForEvaluation {
     /// The window cut this record's body.
     #[serde(default)]
     summary_truncated: bool,
+    /// Present on a host-minted verification record.
+    #[serde(default)]
+    verification: Option<EngramVerificationForEvaluation>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -286,6 +403,9 @@ struct AcceptanceEvaluationEvidence {
     /// The tracker's window left the body out or cut it: `summary` is not the
     /// whole record.
     cut_by_tracker: bool,
+    /// A host-minted verification record: the only citation Engram admits for
+    /// a pass with basis observed.
+    verification: Option<AcceptanceEvidenceVerification>,
 }
 
 /// One open task as the evaluator needs it: bases, pin and evidence index from
@@ -299,6 +419,9 @@ struct AcceptanceEvaluationTask {
     title: String,
     outcome: String,
     criteria: Vec<String>,
+    /// The criteria bound to a typed host check, by position, of the same
+    /// revision as `criteria`.
+    bindings: Vec<AcceptanceCriterionBinding>,
     pinned_mode: Option<String>,
     acceptance_basis: i64,
     evidence_basis: i64,
@@ -354,12 +477,17 @@ fn parse_acceptance_evaluation_task(
             "`{work_ref}` was revised while it was being read; request the evaluation again"
         )));
     }
+    let bindings = acceptance_criterion_bindings(
+        contract.work.acceptance_bindings,
+        contract.work.acceptance.len(),
+    );
     Ok(AcceptanceEvaluationTask {
         work_ref: work.short_ref,
         work_id: work.work_id.filter(|work_id| !work_id.is_empty()),
         title: contract.work.title,
         outcome: contract.work.outcome,
         criteria: contract.work.acceptance,
+        bindings,
         pinned_mode: work.evaluation_mode,
         acceptance_basis,
         evidence_basis,
@@ -376,8 +504,14 @@ fn parse_acceptance_evaluation_task(
                             .summary
                             .as_deref()
                             .map_or(true, |summary| acceptance_brief_line(summary).is_empty())),
+                verification: note
+                    .verification
+                    .as_ref()
+                    .filter(|_| note.kind.as_str() == Some("verification"))
+                    .and_then(acceptance_evidence_verification),
                 locator: note.locator,
                 kind: match note.family.as_str() {
+                    _ if note.kind.as_str() == Some("verification") => "verification".to_owned(),
                     Some("gates") => "gate".to_owned(),
                     Some("notes") => "note".to_owned(),
                     Some("observations") => "observation".to_owned(),
@@ -410,6 +544,7 @@ impl AcceptanceEvaluationTask {
             acceptance_basis: self.acceptance_basis,
             evidence_basis: self.evidence_basis,
             criteria_count: self.criteria.len(),
+            bindings: self.bindings.clone(),
             store,
             source_fingerprint,
             source_root,
@@ -460,14 +595,48 @@ fn is_citable_acceptance_locator(locator: &str) -> bool {
 
 /// Every criterion, complete: a verdict covers the whole criterion, so a
 /// requirement the evaluator never saw would be judged unread.
+/// A bound criterion carries its binding on its own line, since what Engram
+/// admits for its pass differs from an unbound one.
 fn acceptance_brief_criteria(task: &AcceptanceEvaluationTask) -> String {
     task.criteria
         .iter()
         .enumerate()
-        .map(|(index, criterion)| format!("  {}. {}", index + 1, acceptance_brief_line(criterion)))
+        .map(|(index, criterion)| {
+            let position = index + 1;
+            let line = format!("  {position}. {}", acceptance_brief_line(criterion));
+            match task
+                .bindings
+                .iter()
+                .find(|binding| binding.criterion == position)
+            {
+                Some(binding) => format!("{line}\n     {}", acceptance_brief_binding(binding)),
+                None => line,
+            }
+        })
         .collect::<Vec<_>>()
         .join("\n")
 }
+
+fn acceptance_brief_binding(binding: &AcceptanceCriterionBinding) -> String {
+    // The evidence list does not show a record's own command fingerprint, so a
+    // pinned binding says that the pin, not only the kind, decides.
+    let pinned = binding
+        .fingerprint
+        .as_deref()
+        .map(|fingerprint| {
+            format!(
+                " with command fingerprint {fingerprint} (the evidence list does not show each record's fingerprint; a record of another command does not qualify)"
+            )
+        })
+        .unwrap_or_default();
+    format!(
+        "[bound to a host-recorded `{kind}` check{pinned}: a pass needs basis observed and cites only verification records of kind {kind} that passed, nothing else]",
+        kind = binding.check_kind,
+    )
+}
+
+/// Engram's admission rule for a pass, as both briefs state it.
+const ACCEPTANCE_BRIEF_ADMISSION_RULE: &str = "A pass with basis observed may cite only host-minted verification records that passed (each marked `verification <kind> passed` in the evidence list); a pass on a bound criterion must use basis observed and cite only records of its bound kind. A judgment pass may cite notes and gates. If the tracker refuses a citation, resubmit without the citation that does not qualify; downgrade the verdict only when no qualifying record exists.";
 
 /// `body` cut to its first `MAX_ACCEPTANCE_BRIEF_SUMMARY_CHARS` characters,
 /// with the marker that says so, or `None` when that is not shorter than the
@@ -495,7 +664,21 @@ fn acceptance_brief_evidence_line(
     clip: bool,
 ) -> (String, bool) {
     let locator = acceptance_brief_text(&evidence.locator, MAX_ACCEPTANCE_BRIEF_LABEL_CHARS);
-    let mut attribution = acceptance_brief_text(&evidence.kind, MAX_ACCEPTANCE_BRIEF_LABEL_CHARS);
+    let mut attribution = match evidence.verification.as_ref() {
+        // The typed fields are what Engram matches a bound criterion against.
+        Some(verification) => {
+            let mut marker = format!(
+                "verification {} {}",
+                verification.check_kind, verification.result
+            );
+            if let Some(revision) = verification.source_revision.as_deref() {
+                marker.push_str(" at ");
+                marker.push_str(revision);
+            }
+            marker
+        }
+        None => acceptance_brief_text(&evidence.kind, MAX_ACCEPTANCE_BRIEF_LABEL_CHARS),
+    };
     if let Some(by) = evidence.by.as_deref() {
         attribution.push_str(", by ");
         attribution.push_str(&acceptance_brief_text(by, MAX_ACCEPTANCE_BRIEF_LABEL_CHARS));
@@ -975,6 +1158,7 @@ or needs-human.\n\
 - A pass must cite at least one locator from the list above that supports it,\n  \
 and you must have checked the claim against the workspace wherever it can be\n  \
 checked. Missing proof is insufficient-evidence, never pass.\n\
+- {admission_rule}\n\
 - An entry marked as clipped or as not shown in full is incomplete, and an\n  \
 entry counted as not shown was not given to you: you have not read the rest.\n  \
 Where a verdict depends on it, give insufficient-evidence and name that\n  \
@@ -998,6 +1182,7 @@ of the result packet described below.",
         evidence = evidence.join("\n"),
         cwd = acceptance_brief_text(cwd, MAX_DELEGATION_CWD_CHARS),
         submit_tool = TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_TOOL_NAME,
+        admission_rule = ACCEPTANCE_BRIEF_ADMISSION_RULE,
     );
     AcceptanceEvaluatorBrief { prompt, cuts }
 }
@@ -1019,8 +1204,9 @@ fn acceptance_contract_too_large(
 
 /// `same_session` spawns nothing: the caller judges its own work and records
 /// it through its own tracker tool, against the bases read here. It carries no
-/// evidence bodies. Its omission inventory is context that can shrink before
-/// the complete criteria are refused under the evaluator's same byte bound.
+/// evidence bodies. Its omission inventory and its verification list are
+/// context that shrink before the complete criteria are refused under the
+/// evaluator's same byte bound.
 /// `source_fingerprint` is the host's content revision of this session's
 /// worktree, taken when the evaluation was requested; the brief asks the
 /// session to declare it, so its own turn's report of that same revision does
@@ -1083,14 +1269,94 @@ Record it with your own Engram `evaluate` tool: mode same_session, acceptance_ba
 {acceptance_basis}, evidence_basis {evidence_basis}{source}, and exactly one verdict per criterion \
 (pass, fail, insufficient_evidence or needs_human) with a rationale saying what you checked and \
 what you found. A pass must cite at least one evidence locator from `show {work_ref} --notes \
---gates`. Missing proof is insufficient_evidence, never pass.\n\n\
+--gates`. Missing proof is insufficient_evidence, never pass. {admission_rule}\n\n\
+{verifications}\
 Evidence not shown in this brief: {omissions}\n\
 Omitted evidence does not establish that proof is absent on the item; say 'not shown' in the rationale with the known locator or continuation if it was not read.",
         work_ref = acceptance_brief_text(&task.work_ref, MAX_ACCEPTANCE_BRIEF_LABEL_CHARS),
         criteria = acceptance_brief_criteria(task),
         acceptance_basis = task.acceptance_basis,
         evidence_basis = task.evidence_basis,
+        admission_rule = ACCEPTANCE_BRIEF_ADMISSION_RULE,
+        verifications = acceptance_same_session_verifications(task, detail),
     )
+}
+
+/// At most this many verification records are listed in a same-session
+/// brief, newest first; the rest stay readable with `show`.
+const MAX_ACCEPTANCE_SAME_SESSION_VERIFICATIONS: usize = 16;
+
+/// At compact detail, at most this many records of a bound kind are listed.
+const MAX_ACCEPTANCE_SAME_SESSION_COMPACT_VERIFICATIONS: usize = 4;
+
+/// The host-minted verification records the host read, newest first, marked
+/// as the independent brief marks them, so that a same-session evaluator can
+/// pick a citation Engram admits. Empty when the host read none. The list is
+/// context, so it shrinks with the omission detail before the complete
+/// criteria are refused: compact keeps only a few records of a bound kind,
+/// minimal names none and says how many were read.
+fn acceptance_same_session_verifications(
+    task: &AcceptanceEvaluationTask,
+    detail: AcceptanceOmissionDetail,
+) -> String {
+    let read: Vec<&AcceptanceEvaluationEvidence> = task
+        .evidence
+        .iter()
+        .rev()
+        .filter(|evidence| {
+            evidence.verification.is_some() && is_citable_acceptance_locator(&evidence.locator)
+        })
+        .collect();
+    if read.is_empty() {
+        return String::new();
+    }
+    let (records, limit): (Vec<&AcceptanceEvaluationEvidence>, usize) = match detail {
+        AcceptanceOmissionDetail::Full => (read.clone(), MAX_ACCEPTANCE_SAME_SESSION_VERIFICATIONS),
+        AcceptanceOmissionDetail::Compact => (
+            read.iter()
+                .copied()
+                .filter(|evidence| {
+                    evidence.verification.as_ref().is_some_and(|verification| {
+                        task.bindings
+                            .iter()
+                            .any(|binding| binding.check_kind == verification.check_kind)
+                    })
+                })
+                .collect(),
+            MAX_ACCEPTANCE_SAME_SESSION_COMPACT_VERIFICATIONS,
+        ),
+        AcceptanceOmissionDetail::Minimal => (Vec::new(), 0),
+    };
+    let shown = records.len().min(limit);
+    let mut lines = vec![if shown == 0 {
+        format!(
+            "Verification records: the host read {} and lists none to fit the brief; read them with `show --notes --gates`.",
+            read.len()
+        )
+    } else {
+        "Verification records the host read, newest first:".to_owned()
+    }];
+    for evidence in records.iter().take(limit) {
+        let Some(verification) = evidence.verification.as_ref() else {
+            continue;
+        };
+        let at = verification
+            .source_revision
+            .as_deref()
+            .map(|revision| format!(" at {revision}"))
+            .unwrap_or_default();
+        lines.push(format!(
+            "  - {} (verification {} {}{at})",
+            evidence.locator, verification.check_kind, verification.result
+        ));
+    }
+    if shown > 0 && read.len() > shown {
+        lines.push(format!(
+            "  ({} more verification records the host read are not listed; read them with `show --notes --gates`)",
+            read.len() - shown
+        ));
+    }
+    format!("{}\n\n", lines.join("\n"))
 }
 
 /// Model-facing request accepted by `termal_submit_acceptance_evaluation`.
@@ -1207,6 +1473,40 @@ impl SubmitAcceptanceEvaluationRequest {
             if verdict == "pass" && entry.evidence.is_empty() {
                 return Err(format!(
                     "criterion {position}: a pass must cite at least one evidence locator; without proof the verdict is insufficient-evidence"
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// A pass on a bound criterion Engram would refuse for its basis, caught
+    /// here with the rule said plainly: the tracker's own refusal names a
+    /// citation as the cause, which misleads an evaluator into downgrading.
+    fn validate_bindings(
+        &self,
+        bindings: &[AcceptanceCriterionBinding],
+    ) -> std::result::Result<(), String> {
+        for entry in &self.verdicts {
+            if acceptance_verdict_word(&entry.verdict) != Some("pass") {
+                continue;
+            }
+            let Some(binding) = bindings
+                .iter()
+                .find(|binding| binding.criterion == entry.criterion)
+            else {
+                continue;
+            };
+            let basis = entry
+                .basis
+                .as_deref()
+                .and_then(acceptance_basis_word)
+                .unwrap_or("judgment");
+            if basis != "observed" {
+                return Err(format!(
+                    "criterion {position} is bound to a host-recorded `{kind}` check: a pass on it needs basis observed (this one is {basis}) and must cite only verification records of kind {kind} that passed, with no note or gate beside them. Resubmit it that way; give insufficient-evidence only if no such record passed at the judged revision",
+                    position = entry.criterion,
+                    kind = binding.check_kind,
+                    basis = basis.replace('_', "-"),
                 ));
             }
         }

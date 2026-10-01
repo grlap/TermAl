@@ -1397,6 +1397,11 @@ struct DelegationAcceptanceEvaluation {
     acceptance_basis: i64,
     evidence_basis: i64,
     criteria_count: usize,
+    /// The criteria bound to a typed host check when the brief was read: the
+    /// submission refuses a pass on one that Engram could not admit. Empty on a
+    /// record persisted before it was kept, which then submits as before.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    bindings: Vec<AcceptanceCriterionBinding>,
     /// One key per spawn (the delegation id): the tracker replays an identical
     /// resend and refuses different content once one is recorded.
     attempt_key: String,
@@ -1554,6 +1559,8 @@ struct PersistedDelegationAcceptanceEvaluation {
     acceptance_basis: i64,
     evidence_basis: i64,
     criteria_count: usize,
+    #[serde(default)]
+    bindings: Vec<AcceptanceCriterionBinding>,
     attempt_key: String,
     #[serde(default)]
     store: Option<EngramAuthorityStoreKey>,
@@ -1593,6 +1600,7 @@ impl From<PersistedDelegationAcceptanceEvaluation> for DelegationAcceptanceEvalu
             acceptance_basis: persisted.acceptance_basis,
             evidence_basis: persisted.evidence_basis,
             criteria_count: persisted.criteria_count,
+            bindings: persisted.bindings,
             attempt_key: persisted.attempt_key,
             store: persisted.store,
             source_fingerprint: persisted.source_fingerprint,

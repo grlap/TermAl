@@ -550,6 +550,12 @@ export type DelegationAcceptanceEvaluation = {
   acceptanceBasis: number;
   evidenceBasis: number;
   criteriaCount: number;
+  /**
+   * The criteria bound to a typed host check when the brief was read; absent
+   * when none were. Host bookkeeping for the submission's check; the UI does
+   * not read it.
+   */
+  bindings?: { criterion: number; checkKind: string; fingerprint?: string }[];
   attemptKey: string;
   /** The tracker store the brief was read from. */
   store?: { projectId: string; databasePath: string } | null;
