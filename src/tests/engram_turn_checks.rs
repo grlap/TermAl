@@ -4035,3 +4035,8 @@ mod lost_shell_overlap;
 // module.
 #[path = "engram_carried_checks.rs"]
 mod carried_checks;
+
+// The first extraction's end-to-end proof against its base, likewise a child
+// module.
+#[path = "engram_first_extraction.rs"]
+mod first_extraction;
