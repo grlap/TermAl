@@ -2404,6 +2404,11 @@ struct EngramSessionState {
     abort_retry_saved: bool,
     /// The pending acknowledgement of the settlement. In memory only.
     abort_retry_fence: Option<EngramAbortAckWaiter>,
+    /// The queue head a user Stop held while its authorization waited or its
+    /// automatic retry was pending. A held delegation reports such a head as
+    /// stopped rather than as an unknown delivery. Saved with the session; a
+    /// different head makes it stale.
+    stopped_prompt_id: Option<String>,
 }
 
 impl Default for EngramSessionState {
@@ -2463,6 +2468,7 @@ impl Default for EngramSessionState {
             abort_retry_acknowledged: false,
             abort_retry_saved: false,
             abort_retry_fence: None,
+            stopped_prompt_id: None,
         }
     }
 }

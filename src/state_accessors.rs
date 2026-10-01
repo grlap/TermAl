@@ -459,6 +459,7 @@ mod visible_session_hydration_error_tests {
             queued_followup_prompt_id: None,
             review_result_submission_attempt: 1,
             acceptance_evaluation: None,
+            attempt: DelegationAttemptState::default(),
         };
         let mut explorer_record = record.clone();
         explorer_record.id = "delegation-2".to_owned();

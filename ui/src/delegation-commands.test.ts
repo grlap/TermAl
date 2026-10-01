@@ -528,7 +528,7 @@ describe("delegation command surface", () => {
     type ErrorResult = Extract<WaitDelegationsResult, { outcome: "error" }>;
     type NonErrorResult = Extract<
       WaitDelegationsResult,
-      { outcome: "completed" | "timeout" }
+      { outcome: "completed" | "attentionRequired" | "timeout" }
     >;
     type SpawnBatchErrorResult = Extract<
       SpawnReviewerBatchCommandResult,
@@ -544,7 +544,7 @@ describe("delegation command surface", () => {
       error: WaitDelegationErrorPacket;
     }>();
     expectTypeOf<NonErrorResult>().toMatchTypeOf<{
-      outcome: "completed" | "timeout";
+      outcome: "completed" | "attentionRequired" | "timeout";
       error?: never;
     }>();
     expectTypeOf<SpawnBatchErrorResult>().toMatchTypeOf<{
@@ -2053,6 +2053,108 @@ describe("delegation command surface", () => {
       revision: 10,
       serverInstanceId: "server-a",
     });
+  });
+
+  it("ends on a held delegation as attentionRequired and keeps its hold", async () => {
+    const hold = {
+      reason: "admissionDeferred" as const,
+      heldSince: "2026-10-01T20:00:00.000Z",
+      lastActivityAt: "2026-10-01T20:00:00.000Z",
+      generation: 1,
+      retryEligible: true,
+      actions: ["resume" as const, "cancel" as const],
+      detail: "Engram: Waiting/Unknown.",
+      promptId: "message-9",
+    };
+    stubFetchResponses(
+      {
+        revision: 11,
+        serverInstanceId: "server-a",
+        delegation: makeDelegation({
+          id: "delegation-1",
+          status: "completed",
+        }),
+      },
+      {
+        revision: 11,
+        serverInstanceId: "server-a",
+        delegation: makeDelegation({
+          id: "delegation-2",
+          childSessionId: "child-2",
+          status: "held",
+          hold,
+        }),
+      },
+    );
+
+    const result = await waitDelegationsCommand(
+      "parent-1",
+      ["delegation-1", "delegation-2"],
+      {
+        pollIntervalMs: MIN_DELEGATION_WAIT_INTERVAL_MS,
+        timeoutMs: 100,
+      },
+    );
+    expect(result.outcome).toBe("attentionRequired");
+    expect(result.completed.map((record) => record.id)).toEqual([
+      "delegation-1",
+    ]);
+    expect(result.held.map((record) => record.id)).toEqual(["delegation-2"]);
+    expect(result.held[0]?.hold).toEqual(hold);
+    expect(result.pending).toEqual([]);
+  });
+
+  it("keeps refreshing a held delegation while a sibling still runs", async () => {
+    vi.useFakeTimers();
+    const hold = {
+      reason: "retryScheduled" as const,
+      heldSince: "2026-10-01T20:00:00.000Z",
+      lastActivityAt: "2026-10-01T20:00:00.000Z",
+      generation: 2,
+      retryEligible: true,
+      actions: ["resume" as const, "cancel" as const],
+      detail: "Engram: retry scheduled.",
+      promptId: "message-9",
+    };
+    const held = (status: "held" | "running" | "completed") =>
+      makeDelegation({
+        id: "delegation-1",
+        status,
+        ...(status === "held" ? { hold } : {}),
+      });
+    const sibling = (status: "running" | "completed") =>
+      makeDelegation({ id: "delegation-2", childSessionId: "child-2", status });
+    const fetchMock = stubFetchResponses(
+      { revision: 1, serverInstanceId: "server-a", delegation: held("held") },
+      { revision: 1, serverInstanceId: "server-a", delegation: sibling("running") },
+      { revision: 2, serverInstanceId: "server-a", delegation: held("running") },
+      { revision: 2, serverInstanceId: "server-a", delegation: sibling("running") },
+      { revision: 3, serverInstanceId: "server-a", delegation: held("completed") },
+      { revision: 3, serverInstanceId: "server-a", delegation: sibling("completed") },
+    );
+    const timeoutMs = MIN_DELEGATION_WAIT_INTERVAL_MS * 10;
+
+    const wait = waitDelegationsCommand(
+      "parent-1",
+      ["delegation-1", "delegation-2"],
+      { pollIntervalMs: MIN_DELEGATION_WAIT_INTERVAL_MS, timeoutMs },
+    );
+    const assertion = expect(wait).resolves.toMatchObject({
+      outcome: "completed",
+      held: [],
+      pending: [],
+      completed: [
+        { id: "delegation-1", status: "completed" },
+        { id: "delegation-2", status: "completed" },
+      ],
+    });
+    await vi.advanceTimersByTimeAsync(timeoutMs);
+    await assertion;
+    // The held delegation was fetched again in every round, not cached.
+    const heldFetches = fetchMock.mock.calls.filter(([url]) =>
+      String(url).includes("delegation-1"),
+    );
+    expect(heldFetches).toHaveLength(3);
   });
 
   it("times out without canceling pending delegations", async () => {

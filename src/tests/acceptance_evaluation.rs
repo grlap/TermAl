@@ -102,6 +102,7 @@ fn install_evaluator_delegation(
             store,
             ..evaluation_target(&delegation_id, criteria_count)
         }),
+        attempt: DelegationAttemptState::default(),
     });
     state.commit_locked(&mut inner).unwrap();
     (delegation_id, child_session_id)
@@ -4052,6 +4053,7 @@ fn acceptance_submit_replays_the_original_arguments_after_host_drift() {
             serde_json::to_value(DelegationStatusResponse {
                 revision: 1,
                 delegation: record.clone(),
+                turn: None,
                 server_instance_id: state.server_instance_id.clone(),
             })
             .unwrap(),

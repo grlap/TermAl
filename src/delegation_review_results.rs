@@ -735,6 +735,7 @@ fn terminalize_submitted_review_result_locked(
         let record = inner.delegations.get_mut(delegation_index)?;
         record.status = lifecycle_status;
         record.completed_at = Some(terminal_at.clone());
+        clear_delegation_attempt_presentation(record);
         record.queued_followup_prompt_id = None;
         record.result = Some(result.clone());
         record.submitted_review_result = None;

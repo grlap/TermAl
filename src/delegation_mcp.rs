@@ -933,6 +933,7 @@ impl TermalDelegationMcpBridge {
             "termal_get_session_status" => self.tool_get_session_status(arguments),
             "termal_get_session_result" => self.tool_get_session_result(arguments),
             "termal_cancel_session" => self.tool_cancel_session(arguments),
+            "termal_resume_session" => self.tool_resume_session(arguments),
             "termal_followup_session" => self.tool_followup_session(arguments),
             "termal_submit_review_result" => self.tool_submit_review_result(arguments),
             "termal_review_freeze_check" => self.tool_review_freeze_check(arguments),
@@ -1222,6 +1223,20 @@ impl TermalDelegationMcpBridge {
         self.post_json(
             &format!(
                 "/api/sessions/{}/delegations/{}/cancel",
+                self.serving_session_id, delegation_id
+            ),
+            &json!({}),
+        )
+    }
+
+    fn tool_resume_session(&self, arguments: Value) -> Result<Value> {
+        let delegation_id =
+            required_path_identifier(arguments.get("delegationId"), "delegationId")?;
+        // Single attempt: a resume starts a fresh admission of the retained
+        // prompt; the backend refuses a hold that does not offer it.
+        self.post_json(
+            &format!(
+                "/api/sessions/{}/delegations/{}/resume",
                 self.serving_session_id, delegation_id
             ),
             &json!({}),
@@ -1695,14 +1710,26 @@ impl TermalDelegationMcpBridge {
                         .is_some_and(is_terminal_delegation_status)
                 })
                 .count();
+            // A held child needs the caller now; it ends the wait without
+            // counting as terminal, and it has no result to fetch.
+            let held_ids = delegation_ids
+                .iter()
+                .zip(&statuses)
+                .filter(|(_, status)| delegation_status_from_response(status) == Some("held"))
+                .map(|(id, _)| id.clone())
+                .collect::<Vec<_>>();
+            let attention_count = terminal_count + held_ids.len();
             let satisfied = if mode == "any" {
-                terminal_count > 0
+                attention_count > 0
             } else {
-                terminal_count == delegation_ids.len()
+                attention_count == delegation_ids.len()
             };
             if satisfied {
                 let mut results = Vec::new();
                 for id in &delegation_ids {
+                    if held_ids.contains(id) {
+                        continue;
+                    }
                     match self.get_json(&format!(
                         "/api/sessions/{}/delegations/{}/result",
                         self.serving_session_id, id
@@ -1720,6 +1747,8 @@ impl TermalDelegationMcpBridge {
                 return Ok(json!({
                     "mode": mode,
                     "timedOut": false,
+                    "waitOutcome": if held_ids.is_empty() { "completed" } else { "attentionRequired" },
+                    "held": held_ids,
                     "statuses": statuses,
                     "results": results,
                 }));
@@ -2450,7 +2479,7 @@ fn mcp_tools_list_result() -> Value {
             {
                 "name": "termal_wait_delegations",
                 "description": format!(
-                    "Synchronously poll parent-scoped delegations until any/all are terminal or timeout. A Codex caller is cut off after {} seconds, the delegation server's tool timeout, which covers the default wait on one delegation; a longer call gets Codex's error instead of the wait's answer, while the wait still runs here and holds this server's later calls, which Codex may cut while they wait though they still run: ask for a shorter timeoutMs, or schedule termal_resume_after_delegations instead of a long wait.",
+                    "Synchronously poll parent-scoped delegations until any/all are terminal or held, or timeout. A held child ends the wait with waitOutcome attentionRequired; it has not completed and has no result. A Codex caller is cut off after {} seconds, the delegation server's tool timeout, which covers the default wait on one delegation; a longer call gets Codex's error instead of the wait's answer, while the wait still runs here and holds this server's later calls, which Codex may cut while they wait though they still run: ask for a shorter timeoutMs, or schedule termal_resume_after_delegations instead of a long wait.",
                     termal_delegation_mcp_codex_tool_timeout_secs()
                 ),
                 "inputSchema": {
@@ -2466,7 +2495,7 @@ fn mcp_tools_list_result() -> Value {
             },
             {
                 "name": "termal_resume_after_delegations",
-                "description": "Schedule a durable TermAl backend resume wait for parent-scoped delegations.",
+                "description": "Schedule a durable TermAl backend resume wait for parent-scoped delegations. It wakes the parent once when all (mode all) or one (mode any) of them are terminal or held. A held child is reported with waitOutcome attentionRequired, its reason and supported actions; it has not completed, and a new wait is needed for its result after resuming it.",
                 "inputSchema": {
                     "type": "object",
                     "required": ["delegationIds"],
@@ -2674,6 +2703,19 @@ fn mcp_tools_list_result() -> Value {
         &mut result,
         "termal_followup_session",
         acceptance_evaluation_request_tool_definition(),
+    );
+    insert_mcp_tool_after(
+        &mut result,
+        "termal_cancel_session",
+        json!({
+            "name": "termal_resume_session",
+            "description": "Resume a HELD parent-scoped TermAl delegation: retry its retained prompt through a fresh admission. Allowed only when the delegation's hold lists the resume action; a hold whose delivery is unknown or that was stopped offers only cancel. The answer reports the delegation afterwards (queued while admitting, running, or held again).",
+            "inputSchema": {
+                "type": "object",
+                "required": ["delegationId"],
+                "properties": { "delegationId": { "type": "string" } }
+            }
+        }),
     );
     insert_mcp_tool_after(
         &mut result,

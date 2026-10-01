@@ -364,6 +364,9 @@ struct PersistedSessionRecord {
     /// was durable, so loading rebuilds its retry.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     engram_abort_retry: Option<EngramAbortRetry>,
+    /// The queue head a user Stop held (`EngramSessionState::stopped_prompt_id`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    engram_stopped_prompt_id: Option<String>,
     #[serde(skip)]
     message_start_index: usize,
     /// Runtime-only instruction for the SQLite serializer. Full snapshots set
@@ -462,6 +465,7 @@ impl PersistedSessionRecord {
                 .map(EngramCarriedCheck::marker)
                 .collect(),
             engram_abort_retry: record.engram.abort_retry.clone(),
+            engram_stopped_prompt_id: record.engram.stopped_prompt_id.clone(),
             message_start_index: record.message_start_index,
             persist_prompt_history: true,
             session,
@@ -545,6 +549,7 @@ impl PersistedSessionRecord {
                 dispatch_generation: self.engram_dispatch_generation,
                 rebind_required: self.engram_routing_token.is_some(),
                 abort_retry: self.engram_abort_retry.clone(),
+                stopped_prompt_id: self.engram_stopped_prompt_id.clone(),
                 ..EngramSessionState::default()
             },
             engram_boot_recovery_pending: false,

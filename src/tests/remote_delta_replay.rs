@@ -710,6 +710,7 @@ fn informational_remote_delta_watermarks_retry_concurrent_dirty_persistence() {
             delegation_id: "remote-delegation-1".to_owned(),
             status: DelegationStatus::Running,
             updated_at: "2026-08-26T05:30:00Z".to_owned(),
+            hold: None,
         },
         23,
     );

@@ -232,18 +232,29 @@ export type DelegationStatusCommandResult = {
   serverInstanceId: string;
 };
 
-export type WaitDelegationsOutcome = "completed" | "timeout" | "error";
+/**
+ * `attentionRequired`: every watched delegation is terminal or held, and at
+ * least one is held. A held delegation has not completed; wait again after
+ * resuming it to be woken by its result.
+ */
+export type WaitDelegationsOutcome =
+  | "completed"
+  | "attentionRequired"
+  | "timeout"
+  | "error";
 
 export type WaitDelegationsBaseResult = {
   delegations: DelegationSummary[];
   completed: DelegationSummary[];
+  /** Held: needs its parent's attention, not terminal. */
+  held: DelegationSummary[];
   pending: DelegationSummary[];
   revision: number | null;
   serverInstanceId: string | null;
 };
 
 export type WaitDelegationsSuccessResult = WaitDelegationsBaseResult & {
-  outcome: "completed" | "timeout";
+  outcome: "completed" | "attentionRequired" | "timeout";
   error?: never;
 };
 
@@ -263,6 +274,11 @@ export type WaitDelegationsOptions = {
 
 export function delegationStatusIsTerminal(status: DelegationStatus) {
   return status === "completed" || status === "failed" || status === "canceled";
+}
+
+/** A wait ends on a terminal delegation or a held one, which needs attention. */
+function delegationStatusEndsWait(status: DelegationStatus) {
+  return delegationStatusIsTerminal(status) || status === "held";
 }
 
 export function delegationTitleFromPrompt(prompt: string) {
@@ -819,6 +835,9 @@ async function waitDelegationsWithTransport(
   for (;;) {
     const pendingIds = ids.filter((id) => {
       const record = recordsById.get(id);
+      // Held records are refetched too: a hold can clear (a retry, another
+      // caller's Resume) while a sibling still runs. Only terminal records
+      // are final.
       return record === undefined || !delegationStatusIsTerminal(record.status);
     });
 
@@ -920,7 +939,7 @@ async function waitDelegationsWithTransport(
       .map((id) => recordsById.get(id))
       .filter(
         (record): record is DelegationRecord =>
-          record !== undefined && !delegationStatusIsTerminal(record.status),
+          record !== undefined && !delegationStatusEndsWait(record.status),
       );
     if (pending.length === 0 && recordsById.size === ids.length) {
       return waitDelegationsResult(
@@ -1071,6 +1090,9 @@ function delegationSummary(record: DelegationRecord): DelegationSummary {
   if (record.acceptanceEvaluation) {
     summary.acceptanceEvaluation = record.acceptanceEvaluation;
   }
+  if (record.hold) {
+    summary.hold = record.hold;
+  }
   if (record.result) {
     summary.result = {
       delegationId: record.result.delegationId,
@@ -1111,12 +1133,17 @@ function waitDelegationsResult(
   const completed = delegations.filter((record) =>
     delegationStatusIsTerminal(record.status),
   );
+  const held = delegations.filter((record) => record.status === "held");
   const pending = delegations.filter(
-    (record) => !delegationStatusIsTerminal(record.status),
+    (record) => !delegationStatusEndsWait(record.status),
   );
+  if (outcome === "completed" && held.length > 0) {
+    outcome = "attentionRequired";
+  }
   const base = {
     delegations,
     completed,
+    held,
     pending,
     revision,
     serverInstanceId,

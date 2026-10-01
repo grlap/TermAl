@@ -48,6 +48,7 @@ pub(super) fn install_required_review_delegation(
         queued_followup_prompt_id: None,
         review_result_submission_attempt: 1,
         acceptance_evaluation: None,
+        attempt: DelegationAttemptState::default(),
     });
     state.commit_locked(&mut inner).unwrap();
     (delegation_id, child_session_id)

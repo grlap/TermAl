@@ -4233,6 +4233,7 @@ fn link_engram_mcp_test_descendant(
         queued_followup_prompt_id: None,
         review_result_submission_attempt: 0,
         acceptance_evaluation: None,
+        attempt: DelegationAttemptState::default(),
     });
     state
         .commit_locked(&mut inner)

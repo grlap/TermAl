@@ -18,6 +18,7 @@ import type {
   CursorMode,
   DelegationAcceptanceEvaluation,
   DelegationRecord,
+  DelegationTurnDelivery,
   DelegationResult,
   DelegationSummary,
   GeminiApprovalMode,
@@ -196,12 +197,16 @@ export type DelegationResponse = {
   revision: number;
   delegation: DelegationRecord;
   childSession: Session;
+  /** How the first turn was left (202 when held). */
+  firstTurn?: DelegationTurnDelivery | null;
   serverInstanceId: string;
 };
 
 export type DelegationStatusResponse = {
   revision: number;
   delegation: DelegationRecord;
+  /** On a follow-up or resume: how the turn it started was left. */
+  turn?: DelegationTurnDelivery | null;
   serverInstanceId: string;
 };
 

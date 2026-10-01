@@ -36,8 +36,12 @@ fn compact_mcp_spawn_result(response: Value) -> Value {
             "reviewResultRequired",
             "postSubmissionTransportError",
             "reviewResultRecoveryError",
+            "hold",
         ],
     );
+    if let Some(first_turn) = response.get("firstTurn") {
+        result["firstTurn"] = first_turn.clone();
+    }
     if delegation["status"]
         .as_str()
         .is_some_and(is_terminal_delegation_status)

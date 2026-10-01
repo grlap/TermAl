@@ -105,6 +105,7 @@ pub(super) fn delegation_child(
         queued_followup_prompt_id: None,
         review_result_submission_attempt: 0,
         acceptance_evaluation: None,
+        attempt: DelegationAttemptState::default(),
     });
     state.commit_locked(&mut inner).unwrap();
     child_session_id

@@ -432,6 +432,10 @@ fn app_router_with_acceptance_policy_limiter(
             post(followup_delegation),
         )
         .route(
+            "/api/sessions/{id}/delegations/{delegation_id}/resume",
+            post(resume_delegation),
+        )
+        .route(
             "/api/sessions/{id}/delegation-waits",
             post(create_delegation_wait),
         )
@@ -840,6 +844,7 @@ include!("state_accessors.rs");
 include!("state_boot.rs");
 include!("state_inner.rs");
 include!("delegations.rs");
+include!("delegation_attempt_state.rs");
 include!("delegation_followup_admission.rs");
 include!("delegation_result_parser.rs");
 include!("ids.rs");

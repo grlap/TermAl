@@ -39,6 +39,7 @@ fn board_test_delegation_record(
         queued_followup_prompt_id: None,
         review_result_submission_attempt: 0,
         acceptance_evaluation: None,
+        attempt: DelegationAttemptState::default(),
     }
 }
 

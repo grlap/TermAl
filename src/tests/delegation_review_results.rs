@@ -311,6 +311,7 @@ fn reviewer_delegation_prompt_injects_termal_owned_result_protocol() {
         queued_followup_prompt_id: None,
         review_result_submission_attempt: 1,
         acceptance_evaluation: None,
+        attempt: DelegationAttemptState::default(),
     };
     let prompt = build_delegation_prompt(&record);
     assert!(prompt.contains("Read-only startup recovery required by project instructions"));
@@ -361,6 +362,7 @@ fn non_reviewer_delegation_prompt_does_not_inject_review_result_protocol() {
         queued_followup_prompt_id: None,
         review_result_submission_attempt: 0,
         acceptance_evaluation: None,
+        attempt: DelegationAttemptState::default(),
     };
 
     let prompt = build_delegation_prompt(&record);

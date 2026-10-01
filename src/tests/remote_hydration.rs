@@ -2665,6 +2665,7 @@ fn remote_delegation_delta_advances_revision_without_local_record() {
         review_result_recovery_error: None,
         result: None,
         acceptance_evaluation: None,
+        hold: None,
     };
     let result = DelegationResultSummary {
         delegation_id: delegation.id.clone(),
@@ -2682,6 +2683,7 @@ fn remote_delegation_delta_advances_revision_without_local_record() {
             delegation_id: delegation.id.clone(),
             status: DelegationStatus::Running,
             updated_at: "2026-04-05 10:00:02".to_owned(),
+            hold: None,
         },
         DeltaEvent::DelegationCompleted {
             revision: 9,

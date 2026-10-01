@@ -227,7 +227,20 @@ fn deliver_turn_dispatch(state: &AppState, dispatch: TurnDispatch) -> TurnDispat
 }
 
 /// Performs delivery on the caller for ready commands, or on the Fast worker.
+/// A dispatch may leave a delegation child held, start the attempt it was
+/// queued for, or release a hold; the delegation's attempt state follows
+/// whatever it left (a no-op for a session that is not a delegation child).
 fn deliver_turn_dispatch_now(
+    state: &AppState,
+    dispatch: TurnDispatch,
+) -> TurnDispatchDeliveryOutcome {
+    let session_id = dispatch.session_id().to_owned();
+    let outcome = deliver_prepared_turn_dispatch_now(state, dispatch);
+    state.sync_delegation_attempt_for_child_session(&session_id);
+    outcome
+}
+
+fn deliver_prepared_turn_dispatch_now(
     state: &AppState,
     dispatch: TurnDispatch,
 ) -> TurnDispatchDeliveryOutcome {
@@ -1295,7 +1308,22 @@ async fn create_session_delegation(
     let response =
         run_blocking_api(move || state.create_read_only_delegation(&parent_session_id, request))
             .await?;
-    Ok((StatusCode::CREATED, Json(response)))
+    Ok((delegation_turn_response_status(&response), Json(response)))
+}
+
+/// 201 for a delegation whose turn was started; 202 when it was created but
+/// its turn is held, so a client that reads only the status still knows the
+/// work was accepted and has not run.
+fn delegation_turn_response_status(response: &DelegationResponse) -> StatusCode {
+    if response
+        .first_turn
+        .as_ref()
+        .is_some_and(|turn| turn.state == DelegationTurnDeliveryState::Held)
+    {
+        StatusCode::ACCEPTED
+    } else {
+        StatusCode::CREATED
+    }
 }
 
 /// Lists compact delegation metadata owned by one parent session.
@@ -1364,12 +1392,37 @@ async fn followup_delegation(
     AxumPath((parent_session_id, delegation_id)): AxumPath<(String, String)>,
     State(state): State<AppState>,
     Json(request): Json<FollowupDelegationRequest>,
-) -> Result<Json<DelegationStatusResponse>, ApiError> {
+) -> Result<(StatusCode, Json<DelegationStatusResponse>), ApiError> {
     let response = run_blocking_api(move || {
         state.followup_delegation(&parent_session_id, &delegation_id, request.message)
     })
     .await?;
-    Ok(Json(response))
+    Ok((delegation_status_turn_response_status(&response), Json(response)))
+}
+
+/// 200 for a follow-up or resume whose turn was started; 202 when its turn is
+/// held, as for a spawn (`delegation_turn_response_status`).
+fn delegation_status_turn_response_status(response: &DelegationStatusResponse) -> StatusCode {
+    if response
+        .turn
+        .as_ref()
+        .is_some_and(|turn| turn.state == DelegationTurnDeliveryState::Held)
+    {
+        StatusCode::ACCEPTED
+    } else {
+        StatusCode::OK
+    }
+}
+
+/// Resumes a delegation's held turn when its hold offers that.
+async fn resume_delegation(
+    AxumPath((parent_session_id, delegation_id)): AxumPath<(String, String)>,
+    State(state): State<AppState>,
+) -> Result<(StatusCode, Json<DelegationStatusResponse>), ApiError> {
+    let response =
+        run_blocking_api(move || state.resume_delegation(&parent_session_id, &delegation_id))
+            .await?;
+    Ok((delegation_status_turn_response_status(&response), Json(response)))
 }
 
 /// Schedules a parent resume after one or more delegations become terminal.

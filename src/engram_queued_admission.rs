@@ -487,6 +487,10 @@ impl AppState {
         if let Some(queued) = record.queued_prompts.front_mut() {
             queued.engram_interrupted = true;
         }
+        record.engram.stopped_prompt_id = record
+            .queued_prompts
+            .front()
+            .map(|queued| queued.pending_prompt.id.clone());
         // A Stop of a retried admission (`engram_abort_retry.rs`) ends its
         // automatic retry in the same write that holds the head again.
         record.engram.abort_retry = None;

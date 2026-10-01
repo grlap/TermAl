@@ -16,6 +16,9 @@ mod retained_disposition;
 #[path = "engram_abort_retry.rs"]
 mod abort_retry;
 
+#[path = "engram_delegation_held.rs"]
+mod delegation_held;
+
 #[test]
 fn root_known_defer_resume_uses_new_evaluation_identity() {
     let (state, session, receiver, transport) = root_fixture([

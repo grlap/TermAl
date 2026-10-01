@@ -596,6 +596,8 @@ export type DelegationAcceptanceEvaluation = {
 export type DelegationStatus =
   | "queued"
   | "running"
+  /** Non-terminal: the child's turn is withheld (see `DelegationHold`). */
+  | "held"
   | "completed"
   | "failed"
   | "canceled";
@@ -663,6 +665,45 @@ export type DelegationRecord = {
   postSubmissionTransportError?: string | null;
   reviewResultRecoveryError?: string | null;
   acceptanceEvaluation?: DelegationAcceptanceEvaluation | null;
+  /** Present while `status` is `held`. */
+  hold?: DelegationHold | null;
+};
+
+export type DelegationHoldReason =
+  | "admissionDeferred"
+  | "persistenceUnknown"
+  | "retryScheduled"
+  | "deliveryUnknown"
+  | "stopped";
+
+export type DelegationHoldAction = "resume" | "cancel";
+
+/** Why a delegation's current attempt is held and what may be done to it. */
+export type DelegationHold = {
+  reason: DelegationHoldReason;
+  heldSince: string;
+  lastActivityAt: string;
+  generation: number;
+  retryEligible: boolean;
+  nextRetryAt?: string | null;
+  actions: DelegationHoldAction[];
+  detail: string;
+  promptId: string;
+  attempts?: number;
+};
+
+export type DelegationTurnDeliveryState =
+  | "delivered"
+  | "scheduled"
+  | "queued"
+  | "held"
+  | "superseded";
+
+/** How the turn a create or follow-up started was left. */
+export type DelegationTurnDelivery = {
+  state: DelegationTurnDeliveryState;
+  hold?: DelegationHold | null;
+  detail?: string | null;
 };
 
 export type DelegationSummary = Omit<
@@ -685,6 +726,7 @@ export type DelegationWaitRecord = {
 
 export type DelegationWaitConsumedReason =
   | "completed"
+  | "attentionRequired"
   | "parentSessionStopped"
   | "parentSessionUnavailable"
   | "parentSessionRemoved";
@@ -1259,6 +1301,8 @@ export type DelegationUpdatedEvent = {
   delegationId: string;
   status: DelegationStatus;
   updatedAt: string;
+  /** The hold while `status` is `held`; null otherwise. */
+  hold?: DelegationHold | null;
 };
 
 export type DelegationCompletedEvent = {

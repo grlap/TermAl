@@ -253,6 +253,7 @@ fn delegation(id: &str) -> DelegationRecord {
         queued_followup_prompt_id: None,
         review_result_submission_attempt: 2,
         acceptance_evaluation: None,
+        attempt: DelegationAttemptState::default(),
     }
 }
 

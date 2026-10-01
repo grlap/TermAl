@@ -60,7 +60,7 @@ function cancelDelegationTerminalErrorMessage(
 ) {
   // Cancel returns the server's latest delegation status. Failed means the
   // cancel was a no-op against an errored delegation; completed/canceled are
-  // idempotent terminal no-ops, and queued/running mean the request was
+  // idempotent terminal no-ops, and queued/running/held mean the request was
   // accepted or is still being reflected by follow-up SSE updates.
   switch (status) {
     case "failed":
@@ -69,6 +69,7 @@ function cancelDelegationTerminalErrorMessage(
     case "canceled":
     case "queued":
     case "running":
+    case "held":
       return null;
     default:
       return `Delegation cancel returned ${delegationStatusFallbackLabel(
@@ -91,6 +92,8 @@ function delegationChildUnavailableStatusLabel(
       return "still queued";
     case "running":
       return "still running";
+    case "held":
+      return "held, waiting for resume or cancel";
     default:
       return delegationStatusFallbackLabel(status);
   }

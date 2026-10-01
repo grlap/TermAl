@@ -557,6 +557,9 @@ fn delegation_last_user_prompt_id_locked(inner: &StateInner, session_id: &str) -
 }
 
 impl DelegationFollowupAdmission {
+    // The admitted snapshot, before delivery; responses read the delegation
+    // after it instead (`delegation_status_after_followup_turn`).
+    #[cfg(test)]
     fn admitted_response(&self) -> Option<DelegationStatusResponse> {
         let inner = self.state.inner.lock().expect("state mutex poisoned");
         let (revision, delegation) = inner
@@ -567,6 +570,7 @@ impl DelegationFollowupAdmission {
         Some(DelegationStatusResponse {
             revision: *revision,
             delegation: delegation.clone(),
+            turn: None,
             server_instance_id: self.state.server_instance_id.clone(),
         })
     }

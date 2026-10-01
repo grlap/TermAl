@@ -122,6 +122,7 @@ fn serialized_delegation_child_state(child_session_id: &str, mode: DelegationMod
         queued_followup_prompt_id: None,
         review_result_submission_attempt: u32::from(mode == DelegationMode::Reviewer),
         acceptance_evaluation: None,
+        attempt: DelegationAttemptState::default(),
     };
     let delegation = serde_json::to_value(delegation_state_summary_from_record(&record))
         .expect("broad-state delegation capability should serialize");
@@ -415,6 +416,7 @@ fn delegation_mcp_base_tools_list_includes_role_scoped_tools() {
             "termal_get_session_status",
             "termal_get_session_result",
             "termal_cancel_session",
+            "termal_resume_session",
             "termal_wait_delegations",
             "termal_resume_after_delegations",
             "termal_resume_after_test_runs",

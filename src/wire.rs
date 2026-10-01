@@ -1177,9 +1177,142 @@ enum DelegationMode {
 enum DelegationStatus {
     Queued,
     Running,
+    /// The current attempt is non-terminal but its turn is withheld (an
+    /// Engram admission deferred, unconfirmed, interrupted or stopped): no
+    /// provider execution is under way and none completed. A stored record
+    /// keeps `running` while it holds; clients are told `held` (see
+    /// `DelegationAttemptState`).
+    Held,
     Completed,
     Failed,
     Canceled,
+}
+
+/// Why a delegation's current attempt is held.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum DelegationHoldReason {
+    /// Engram deferred the admission, or its outcome was parked before any
+    /// handoff; the retained prompt was never delivered. Resume retries it.
+    AdmissionDeferred,
+    /// The host withheld a delivery it proved unsent but could not yet
+    /// confirm its own record of that is durable. It retries automatically
+    /// once the record is confirmed.
+    PersistenceUnknown,
+    /// Proven unsent and durably recorded; an automatic retry is scheduled.
+    RetryScheduled,
+    /// The authorization was interrupted and the host cannot prove the
+    /// prompt was not delivered. It will not resend it: cancel it, or
+    /// reconcile with Engram first.
+    DeliveryUnknown,
+    /// The user stopped the authorization. The prompt is retained until it
+    /// is canceled.
+    Stopped,
+}
+
+/// What may be done to a held attempt, offered only when it is safe.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum DelegationHoldAction {
+    /// Retry the retained prompt now (`termal_resume_session`).
+    Resume,
+    /// Cancel the delegation (`termal_cancel_session`).
+    Cancel,
+}
+
+/// A held attempt as clients see it.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DelegationHold {
+    reason: DelegationHoldReason,
+    /// When the attempt's retained prompt was first held (RFC 3339).
+    held_since: String,
+    /// When the held attempt last changed (it entered the hold, its reason
+    /// changed, or a retry was attempted), RFC 3339. Status reads never move
+    /// it.
+    last_activity_at: String,
+    /// Increases each time the attempt enters a hold or its hold changes, so
+    /// a notification names the exact hold it reported.
+    generation: u64,
+    retry_eligible: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    next_retry_at: Option<String>,
+    #[serde(default)]
+    actions: Vec<DelegationHoldAction>,
+    /// The child's own guidance line for the held prompt.
+    #[serde(default)]
+    detail: String,
+    /// The retained queued prompt of the child the hold is for.
+    #[serde(default)]
+    prompt_id: String,
+    /// Delivery attempts the host aborted for that prompt so far.
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    attempts: u32,
+}
+
+fn is_zero_u32(value: &u32) -> bool {
+    *value == 0
+}
+
+/// Presentation of a stored `running` attempt that has not reached provider
+/// execution. The stored status stays `running`, so the ownership gates of
+/// the current attempt are unchanged; every client projection reports the
+/// status `public_delegation_status` derives from this state instead.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DelegationAttemptState {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    hold: Option<DelegationHold>,
+    /// The current attempt's prompt is admitting or queued behind a child
+    /// that is not executing it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pending_start: bool,
+    /// The last hold generation used; kept after a hold clears so the next
+    /// hold of this delegation never reuses a generation.
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    hold_generation: u64,
+}
+
+fn is_zero_u64(value: &u64) -> bool {
+    *value == 0
+}
+
+/// The status clients see for a delegation.
+fn public_delegation_status(record: &DelegationRecord) -> DelegationStatus {
+    if record.status != DelegationStatus::Running {
+        return record.status;
+    }
+    if record.attempt.hold.is_some() {
+        DelegationStatus::Held
+    } else if record.attempt.pending_start {
+        DelegationStatus::Queued
+    } else {
+        DelegationStatus::Running
+    }
+}
+
+/// How the first turn of a created delegation (or a follow-up's turn) was
+/// left when the create call returned.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum DelegationTurnDeliveryState {
+    Delivered,
+    Scheduled,
+    Queued,
+    Held,
+    /// A newer owner took the turn over; read the delegation's current state.
+    Superseded,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DelegationTurnDelivery {
+    state: DelegationTurnDeliveryState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    hold: Option<DelegationHold>,
+    /// Why delivery was held when the host reported an uncertainty.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    detail: Option<String>,
 }
 
 /// Delegated child write policy. Backend support currently accepts
@@ -1684,6 +1817,10 @@ struct DelegationRecord {
     /// Evaluation target and recorded outcome; present only in evaluator mode.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     acceptance_evaluation: Option<DelegationAcceptanceEvaluation>,
+    /// Whether the current attempt is held or has not started; maintained
+    /// from the child by `refresh_delegation_from_child_locked`.
+    #[serde(flatten)]
+    attempt: DelegationAttemptState,
 }
 
 /// Determines when a delegation wait resumes its parent session.
@@ -1741,6 +1878,9 @@ struct DelegationSummary {
     /// What an evaluator delegation judged and what the tracker recorded.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     acceptance_evaluation: Option<DelegationAcceptanceEvaluation>,
+    /// Present while `status` is `held`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    hold: Option<DelegationHold>,
 }
 
 /// Minimal delegation identity and MCP capability metadata carried by broad
@@ -1795,6 +1935,10 @@ struct DelegationResponse {
     #[serde(serialize_with = "serialize_delegation_record_for_api")]
     delegation: DelegationRecord,
     child_session: Session,
+    /// How the turn this call started was left: on create the first turn, on
+    /// a follow-up its turn. Absent on responses that started no turn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    first_turn: Option<DelegationTurnDelivery>,
     #[serde(deserialize_with = "deserialize_nonempty_server_instance_id")]
     server_instance_id: String,
 }
@@ -1805,6 +1949,9 @@ struct DelegationStatusResponse {
     revision: u64,
     #[serde(serialize_with = "serialize_delegation_record_for_api")]
     delegation: DelegationRecord,
+    /// On a follow-up: how the turn it started was left. Absent elsewhere.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    turn: Option<DelegationTurnDelivery>,
     #[serde(deserialize_with = "deserialize_nonempty_server_instance_id")]
     server_instance_id: String,
 }
@@ -1890,6 +2037,9 @@ struct DelegationWaitResponse {
 #[serde(rename_all = "camelCase")]
 enum DelegationWaitConsumedReason {
     Completed,
+    /// A watched child is held: the wait ended so its parent can act, and
+    /// the child has not completed. A new wait is needed for its result.
+    AttentionRequired,
     ParentSessionStopped,
     ParentSessionUnavailable,
     ParentSessionRemoved,
@@ -2259,6 +2409,19 @@ where
             acceptance_evaluation: Some(target.client_view()),
             ..record.clone()
         });
+    // A stored `running` attempt that is held or has not started is reported
+    // as such; the stored status itself is host bookkeeping.
+    let public_status = public_delegation_status(record);
+    if public_status != record.status {
+        client_record.get_or_insert_with(|| record.clone()).status = public_status;
+    }
+    // Clients get the hold; the pending-start flag and the hold-generation
+    // counter are bookkeeping behind the status and `hold.generation`.
+    if record.attempt.pending_start || record.attempt.hold_generation != 0 {
+        let client = client_record.get_or_insert_with(|| record.clone());
+        client.attempt.pending_start = false;
+        client.attempt.hold_generation = 0;
+    }
     if record.write_policy == DelegationWritePolicy::ReadOnly
         && [&record.result, &record.submitted_review_result]
             .into_iter()
@@ -3223,6 +3386,10 @@ enum DeltaEvent {
         delegation_id: String,
         status: DelegationStatus,
         updated_at: String,
+        /// The hold while `status` is `held`; null otherwise, so a client
+        /// clears a hold it showed. Sent on every update, never omitted.
+        #[serde(default)]
+        hold: Option<DelegationHold>,
     },
     DelegationCompleted {
         revision: u64,

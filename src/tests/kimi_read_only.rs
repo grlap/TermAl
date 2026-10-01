@@ -420,6 +420,7 @@ fn kimi_reviewer_record(
         queued_followup_prompt_id: None,
         review_result_submission_attempt: 1,
         acceptance_evaluation: None,
+        attempt: DelegationAttemptState::default(),
     }
 }
 

@@ -1567,6 +1567,12 @@ due; a restart before it (the record written by the failed admission, or the
 settlement saved but not yet acknowledged) keeps the interrupted hold. A mailbox wake to a session held this
 way reports `heldBehindPausedQueue`
 ([agent mailboxes](agent-mailboxes.md#dispatch-outcome-versus-notification-state)).
+A delegation whose child holds a retained prompt reports `held`, with the
+reason these states give it: `retryScheduled` while an acknowledged abort record
+holds the head, `persistenceUnknown` before the acknowledgement, `stopped` after a
+public Stop, `deliveryUnknown` for any other interruption, and
+`admissionDeferred` for a parked admission. Its parent's waits wake on that hold
+([agent delegation sessions](agent-delegation-sessions.md#held-attempts)).
 
 Opt-in tests in `src/tests/engram_root_recovery_live.rs` use a caller-identified
 Engram binary (`TERMAL_TEST_LIVE_ENGRAM_BINARY` and its SHA-256 in

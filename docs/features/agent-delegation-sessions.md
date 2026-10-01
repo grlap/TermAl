@@ -677,11 +677,83 @@ TermAl creates:
 - parent delegation card
 - SSE update for both parent and child surfaces
 
-Phase 1 REST spawn does not park records in `queued`: it either creates a
-`running` delegation immediately or rejects with `409` when the per-parent
-active limit is full. `queued` is reserved for a future scheduler/throttle layer
-that would own the queued-to-running transition and emit `delegationUpdated`
-when dispatch actually starts.
+Phase 1 REST spawn does not park records for a scheduler: it either creates a
+delegation immediately or rejects with `409` when the per-parent active limit is
+full. Once the delegation is created it is durable, and the spawn answers with
+it whatever happens to its first turn. The response's `firstTurn` says how that
+turn was left: `delivered`, `scheduled`, `queued`, `superseded` or `held`. A held
+first turn answers `202 Accepted` with the hold (see "Held attempts" below) and
+any uncertainty the host reported in `detail`; every other outcome answers
+`201`. A held turn is never a bare error, because an error invites the caller
+to spawn a duplicate of a delegation that exists. A failure to save the
+delegation itself is still an error. It names the delegation and child session
+ids it leaves in memory, says its durability is unknown and its first turn was
+not started, and tells the caller to list delegations before spawning again.
+
+### Held attempts
+
+A delegation's current attempt is `held` when its child is not executing and the
+child's queue is paused behind a prompt Engram retained
+(`engram-host-adapter.md`, "Retained prompt recovery"). A held attempt has not
+reached provider execution and has not completed. It is non-terminal: it never
+sets `completedAt` or a result, and it never counts as a finished review or
+acceptance evaluation. The stored record keeps `running` while it holds; every
+client projection (status, list, spawn and follow-up responses,
+`delegationUpdated`, the MCP tools, the UI) reports `held`, with a `hold`:
+
+- `reason`:
+  - `admissionDeferred`: Engram deferred the admission, or its outcome was
+    parked before any handoff; resuming retries it;
+  - `persistenceUnknown`: a delivery was withheld and proven unsent, but the
+    host has not yet confirmed its own record of that; or a prepared
+    authorization's promotion was not confirmed durable;
+  - `retryScheduled`: proven unsent and durably recorded, with an automatic
+    retry due at `nextRetryAt`;
+  - `deliveryUnknown`: the authorization was interrupted and the host cannot
+    prove the prompt was not delivered; it will not resend it;
+  - `stopped`: the user stopped the authorization.
+- `heldSince` and `lastActivityAt`. The latter moves only when the hold changes
+  or a retry is attempted, never on a status read.
+- `generation`: it increases with each hold the delegation enters, or each
+  change of a hold, so a notification names the exact hold it reported.
+- `retryEligible`, `nextRetryAt` and `actions`: `resume` only when a retry is
+  safe, `cancel` always.
+- `detail` (the child's guidance line) and `promptId` (the retained prompt).
+
+Every `delegationUpdated` event carries `hold`: the hold while the status is
+`held`, `null` otherwise, so a live client sees a hold's reason, generation and
+actions change, and sees it clear. An admission running for the retained prompt
+(a resume, or an automatic retry) takes precedence over the earlier hold: the
+attempt reports `queued` while it admits, and a wait judged meanwhile is not
+woken for attention. The UI's own polling wait ends the same way, with outcome
+`attentionRequired` and the held children listed apart from the completed ones;
+until it ends it keeps refreshing held children, because a hold can clear while a
+sibling still runs. A resume's `turn` reports the resumed turn's own delivery
+outcome: `scheduled` while Codex Fast discovery still resolves before handing it
+over, `superseded` when nothing was promoted, `held` when the admission held it
+again; never one inferred from the child's status. A resume is bound to the
+exact retained prompt it checked, so a successor that a concurrent cancellation
+exposes is never admitted in its place. A wait counts a hold only while the
+child still holds that same prompt, read from the child when the wait is
+judged, never from the stored hold alone. A refresh that announces a hold
+commits it together with the waits it satisfies and their parents' wakes. If
+that commit fails, the waits and wakes are restored, while the hold stays in
+memory as the child's truth; every later refresh judges the delegation's waits
+again even when its hold did not change, so the wake is retried and delivered
+once.
+
+A `running` attempt whose child is admitting its prompt (an Engram admission is
+under way) reports `queued` until the provider receives it, and so does a
+follow-up still queued behind the child. A status read in that window never
+settles the delegation: a queued head admits before its promotion, while its
+child can read idle with no result, and that is not a finished turn. A safe resume
+(`POST /api/sessions/{parent}/delegations/{id}/resume`, MCP
+`termal_resume_session`) is refused unless the hold offers `resume`. It resumes
+exactly the retained prompt through a fresh admission, and the delegation
+reports `queued`, then `running` once the provider runs, or `held` again. A hold
+whose delivery is unknown or that was stopped offers only cancellation, which
+is a real cancellation of the delegation. Automatic retry of a deferred
+admission belongs to the common recovery contract, not to this status.
 
 ### 2. Run
 
@@ -711,9 +783,22 @@ Automatic parent prompting is opt-in through a delegation wait. A wait records a
 parent session, one or more delegation ids, and a fan-in mode:
 
 - `any`: resume the parent when the first watched delegation reaches a terminal
-  state.
-- `all`: resume the parent only after every watched delegation reaches a
-  terminal state.
+  state or is held.
+- `all`: resume the parent only after every watched delegation is terminal or
+  held.
+
+A held child satisfies a wait as soon as its hold is published, without a
+timeout, because its parent has to act on it. The parent prompt then reports
+`Wait outcome: attentionRequired`, with each held child's reason, hold
+generation, retry eligibility and supported actions, beside the results of any
+terminal siblings. The consumed wait's reason is `attentionRequired`. This is
+an attention notification, not a completion: the held child is not terminal,
+and the wait has ended. After resuming the child, the parent registers a new
+wait to be woken by its result. A new wait over a child that is still held
+reports that hold once, at creation, and nothing re-arms a wait over an
+unchanged hold. A hold that clears before a wait is judged does not wake it.
+The wait is consumed in the same commit that queues the parent prompt, so a
+restart or a repeated refresh cannot deliver it twice.
 
 When the wait is scheduled, the parent can yield the current turn instead of
 polling. TermAl persists the wait and exposes it through `/api/state` and SSE so
@@ -794,19 +879,19 @@ card should preserve partial transcript access and any partial result summary.
 Cancel responses return the server's latest delegation status. The UI treats a
 `failed` response as an error because the cancel was a no-op against an already
 errored delegation. `completed` and `canceled` are idempotent terminal no-ops,
-while `queued` and `running` can occur while the cancel request has been accepted
-but follow-up state is still arriving through SSE.
+while `queued`, `running` and `held` can occur while the cancel request has been
+accepted but follow-up state is still arriving through SSE.
 
 UI messages that mention an unavailable child session derive their wording from
 the same wire status: terminal states use "already ..." (`completed`, `failed`,
-`canceled`) and in-flight states use "still ..." (`queued`, `running`). The
+`canceled`) and in-flight states use "still ..." (`queued`, `running`); `held`
+reads "held, waiting for resume or cancel". The
 phrases are display text only; callers should branch on the wire status, not the
 rendered message text.
 
-In the current REST runtime, `running` delegations are expected to have a
-`childSessionId`; a `running` response without one is treated as an unexpected
-unavailable-child state. Childless `queued` records are reserved for the future
-scheduler/throttle layer described above.
+In the current REST runtime, `queued`, `running` and `held` delegations always
+have a `childSessionId`; a response without one is treated as an unexpected
+unavailable-child state.
 
 ### 6. Delegate Agent Commands
 
@@ -1159,6 +1244,7 @@ termal_list_delegations
 termal_get_session_status
 termal_get_session_result
 termal_cancel_session
+termal_resume_session
 termal_wait_delegations
 termal_resume_after_delegations
 termal_resume_after_test_runs
@@ -1184,6 +1270,7 @@ termal_get_session_status({ delegationId }) -> DelegationStatusCommandResult
 termal_get_session_result({ delegationId }) -> DelegationResultPacket
 termal_get_session_result({ delegationId, outputOffset, outputLimit? }) -> DelegationResultOutputPage
 termal_cancel_session({ delegationId }) -> DelegationStatusCommandResult
+termal_resume_session({ delegationId }) -> DelegationStatusResponse & { turn }
 termal_wait_delegations({ delegationIds, pollIntervalMs?, timeoutMs? }) -> WaitDelegationsResult
 termal_resume_after_delegations({ delegationIds, mode?, title? }) -> DelegationWaitResponse
 termal_followup_session({ delegationId, message }) -> DelegationStatusResponse
@@ -1208,7 +1295,12 @@ respawn or direct persistence-database access is needed.
 
 `termal_followup_session` re-arms a completed or failed delegation for another
 turn — a still-running, canceled, or child-removed delegation is rejected (see
-the `/followup` route). The peer tools use a durable neutral mailbox rather than
+the `/followup` route). A follow-up whose turn is held answers `202` with the
+delegation and `turn: { state: "held", hold, detail? }` instead of an error.
+`termal_resume_session` retries a held delegation whose hold offers `resume`
+(see "Held attempts"). `termal_wait_delegations` also returns once its children
+are terminal or held: a held child ends it with `waitOutcome:
+"attentionRequired"`, listed under `held`, with no result fetched for it. The peer tools use a durable neutral mailbox rather than
 placing the message body directly into the receiver's turn queue:
 
 - `termal_list_sessions` discovers eligible root peers by id or name.

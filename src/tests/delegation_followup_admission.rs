@@ -993,15 +993,18 @@ fn queued_followup_survives_project_reset_polling_and_dispatches_once() {
                 .unwrap()
                 .is_none()
         );
-        let mut updates = 0;
+        let mut updates = Vec::new();
         while let Ok(event) = events.try_recv() {
             let event: Value = serde_json::from_str(&event).unwrap();
             if event["type"] == "delegationUpdated" && event["delegationId"] == delegation {
-                updates += 1;
+                updates.push(event["status"].as_str().unwrap_or_default().to_owned());
             }
         }
+        // One re-arm, reported as queued while the follow-up waits behind the
+        // reset, then running once its promotion starts it.
         assert_eq!(
-            updates, 1,
+            updates,
+            vec!["queued".to_owned(), "running".to_owned()],
             "queue admission and later promotion must re-arm once"
         );
         // A queue left over after an actually started turn must still be
@@ -1726,7 +1729,7 @@ fn followup_engram_queue_start_failure_settles_instead_of_stranding_running() {
 }
 
 #[test]
-fn retained_followup_promotion_uncertainty_preserves_running_wait_and_exact_queue_owner() {
+fn retained_followup_promotion_uncertainty_holds_the_attempt_wakes_its_wait_and_keeps_the_exact_queue_owner() {
     for live_reservation in [true, false] {
         for lost_operation in ["session_bind", "turn_evaluate"] {
             let (state, runtime_rx) = test_app_state_with_delegation_codex_runtime(
@@ -1896,15 +1899,15 @@ fn retained_followup_promotion_uncertainty_preserves_running_wait_and_exact_queu
             release_tx.send(()).unwrap();
 
             if let Some(worker) = live_worker {
-                let error = worker
+                // The admitted follow-up is durable; only its turn is held,
+                // and the call says so instead of failing.
+                let response = worker
                     .join()
                     .unwrap()
-                    .err()
-                    .expect("live follow-up promotion must report persistence uncertainty");
-                assert_eq!(
-                    error.kind,
-                    Some(ApiErrorKind::RetainedQueuedPromotionPersistenceUnknown)
-                );
+                    .expect("a held follow-up turn is reported with the delegation");
+                let turn = response.turn.expect("the follow-up's turn is reported");
+                assert_eq!(turn.state, DelegationTurnDeliveryState::Held);
+                assert!(turn.detail.is_some(), "the uncertainty is reported");
             }
             if let Some(worker) = delayed_worker {
                 let error = worker
@@ -1927,6 +1930,15 @@ fn retained_followup_promotion_uncertainty_preserves_running_wait_and_exact_queu
             let inner = state.inner.lock().unwrap();
             let running = &inner.delegations[inner.find_delegation_index(&delegation).unwrap()];
             assert_eq!(running.status, DelegationStatus::Running);
+            // Held, not running: the retained authorization replays on Resume.
+            assert_eq!(public_delegation_status(running), DelegationStatus::Held);
+            let hold = running.attempt.hold.as_ref().expect("the attempt is held");
+            assert_eq!(hold.reason, DelegationHoldReason::PersistenceUnknown);
+            assert_eq!(
+                hold.actions,
+                vec![DelegationHoldAction::Resume, DelegationHoldAction::Cancel]
+            );
+            assert_eq!(hold.prompt_id, prompt_id);
             assert!(running.result.is_none());
             assert_eq!(
                 running.queued_followup_prompt_id.as_deref(),
@@ -1937,11 +1949,38 @@ fn retained_followup_promotion_uncertainty_preserves_running_wait_and_exact_queu
                     .delegation_followup_admissions
                     .contains_key(&delegation)
             );
+            // The hold wakes the wait once, as an attention notification.
             assert!(
-                inner
+                !inner
                     .delegation_waits
                     .iter()
                     .any(|item| item.id == wait.wait.id)
+            );
+            let parent_record = &inner.sessions[inner.find_session_index(&parent).unwrap()];
+            // A promoted prompt stays queued until its admission settles, so
+            // the same notification can be in both places: count by id.
+            let attention = parent_record
+                .queued_prompts
+                .iter()
+                .map(|queued| (queued.pending_prompt.id.as_str(), queued.pending_prompt.text.as_str()))
+                .chain(parent_record.session.messages.iter().filter_map(|message| {
+                    match message {
+                        Message::Text {
+                            author: Author::You,
+                            id,
+                            text,
+                            ..
+                        } => Some((id.as_str(), text.as_str())),
+                        _ => None,
+                    }
+                }))
+                .filter(|(_, text)| text.contains(&wait.wait.id))
+                .collect::<BTreeMap<_, _>>();
+            assert_eq!(attention.len(), 1, "exactly one notification");
+            assert!(
+                attention
+                    .values()
+                    .all(|text| text.contains("Wait outcome: `attentionRequired`"))
             );
             let record = &inner.sessions[inner.find_session_index(&child).unwrap()];
             assert_eq!(record.session.status, SessionStatus::Idle);

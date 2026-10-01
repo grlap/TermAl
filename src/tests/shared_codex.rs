@@ -3942,6 +3942,7 @@ fn install_read_only_codex_delegation(state: &AppState, child_session_id: &str) 
         queued_followup_prompt_id: None,
         review_result_submission_attempt: 1,
         acceptance_evaluation: None,
+        attempt: DelegationAttemptState::default(),
     });
 }
 

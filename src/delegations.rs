@@ -168,6 +168,8 @@ enum DelegationLifecycleDelta {
         delegation_id: String,
         status: DelegationStatus,
         updated_at: String,
+        /// The hold while `status` is held; none otherwise.
+        hold: Option<DelegationHold>,
         parent_card_delta: Option<ParentDelegationCardDelta>,
     },
     Completed {
@@ -697,15 +699,21 @@ impl AppState {
                 0
             },
             acceptance_evaluation: evaluation.map(|seed| seed.into_target(delegation_id.clone())),
+            attempt: DelegationAttemptState::default(),
         };
         let delegation_index = inner.delegations.len();
         inner.delegations.push(record.clone());
         inner.mark_delegation_mutated(delegation_index);
         inner.sync_running_read_only_delegation_index(delegation_index);
         let parent_card_delta = add_parent_delegation_card_locked(&mut inner, &record);
-        let revision = self
-            .commit_locked(&mut inner)
-            .map_err(|err| ApiError::internal(format!("failed to persist delegation: {err:#}")))?;
+        // A failed save leaves the delegation in memory with unknown
+        // durability. Name it, so a caller recovers it instead of spawning a
+        // duplicate; its first turn is not started.
+        let revision = self.commit_locked(&mut inner).map_err(|err| {
+            ApiError::internal(format!(
+                "failed to persist delegation `{delegation_id}` (child session `{child_session_id}`); whether it survives is unknown and its first turn was not started. List delegations (termal_list_delegations) before spawning again: {err:#}"
+            ))
+        })?;
         if let Some(mut guard) = isolated_worktree_cleanup_guard.take() {
             guard.disarm();
         }
@@ -752,8 +760,11 @@ impl AppState {
         }
 
         let runtime_prompt = build_delegation_prompt(&record);
-        match self.start_delegation_child_turn(&record.id, &record.child_session_id, runtime_prompt)
-        {
+        let delivery = match self.start_delegation_child_turn(
+            &record.id,
+            &record.child_session_id,
+            runtime_prompt,
+        ) {
             TurnDispatchDeliveryOutcome::Rejected(err) => {
                 if err.status == StatusCode::CONFLICT
                     && err.message == DELEGATION_NO_LONGER_STARTABLE_MESSAGE
@@ -767,34 +778,12 @@ impl AppState {
                 )?;
                 return self.delegation_response_from_state(&record.id);
             }
-            TurnDispatchDeliveryOutcome::Held { error: Some(error) } => {
-                return Err(error);
-            }
-            TurnDispatchDeliveryOutcome::Delivered
-            | TurnDispatchDeliveryOutcome::Scheduled
-            | TurnDispatchDeliveryOutcome::Held { error: None }
-            | TurnDispatchDeliveryOutcome::Superseded => {}
-        }
-
-        let inner = self.inner.lock().expect("state mutex poisoned");
-        let latest_delegation = inner
-            .find_delegation_index(&record.id)
-            .and_then(|index| inner.delegations.get(index))
-            .cloned()
-            .ok_or_else(|| ApiError::internal("created delegation disappeared"))?;
-        let child_session = inner
-            .find_session_index(&record.child_session_id)
-            .and_then(|index| inner.sessions.get(index))
-            .map(Self::wire_session_from_record)
-            .ok_or_else(|| ApiError::internal("created child session disappeared"))?;
-        let latest_revision = inner.revision;
-
-        Ok(DelegationResponse {
-            revision: latest_revision,
-            delegation: latest_delegation,
-            child_session,
-            server_instance_id: self.server_instance_id.clone(),
-        })
+            delivery => delivery,
+        };
+        // The delegation is durable whatever happened to its first turn: a
+        // held turn is reported with the delegation, never as an error that
+        // would invite a duplicate spawn.
+        self.delegation_response_after_turn(&record.id, delivery)
     }
 
     fn delegation_response_from_state(
@@ -816,6 +805,7 @@ impl AppState {
             revision: inner.revision,
             delegation,
             child_session,
+            first_turn: None,
             server_instance_id: self.server_instance_id.clone(),
         })
     }
@@ -874,6 +864,7 @@ impl AppState {
         Ok(DelegationStatusResponse {
             revision,
             delegation,
+            turn: None,
             server_instance_id: self.server_instance_id.clone(),
         })
     }
@@ -1202,6 +1193,7 @@ impl AppState {
                 let response = DelegationStatusResponse {
                     revision,
                     delegation: delegation.clone(),
+                    turn: None,
                     server_instance_id: self.server_instance_id.clone(),
                 };
                 drop(inner);
@@ -1284,6 +1276,7 @@ impl AppState {
         Ok(DelegationStatusResponse {
             revision,
             delegation,
+            turn: None,
             server_instance_id: self.server_instance_id.clone(),
         })
     }
@@ -1381,6 +1374,13 @@ impl AppState {
                 Some(ApiError::conflict(
                     "delegation follow-up admission is already in progress",
                 ))
+            } else if let Some(hold) = delegation_current_hold(&inner.delegations[index]) {
+                // Waiting would not help: a held child needs its hold acted on.
+                Some(ApiError::conflict(format!(
+                    "delegation is held ({}), not finished; act on the hold first (supported actions: {}: termal_resume_session / termal_cancel_session)",
+                    delegation_hold_reason_label(hold.reason),
+                    delegation_hold_actions_label(&hold.actions),
+                )))
             } else if !delegation_is_terminal(status) {
                 Some(ApiError::conflict(
                     "delegation is still running; wait for it to complete (termal_resume_after_delegations) before following up",
@@ -1480,17 +1480,31 @@ impl AppState {
         ) {
             Ok(dispatch) => dispatch,
             Err(mut error) => {
-                if error.kind != Some(ApiErrorKind::RetainedQueuedPromotionPersistenceUnknown) {
-                    admission.fail_queued_start(&error.message);
-                    match admission.rollback_before_prompt() {
-                        Ok(true) => error.message.push_str(
-                            "; archive compensation scheduled; cleanup may still be pending",
-                        ),
-                        Ok(false) => {}
-                        Err(cleanup_error) => error
-                            .message
-                            .push_str(&format!("; {}", cleanup_error.message)),
-                    }
+                if error.kind == Some(ApiErrorKind::RetainedQueuedPromotionPersistenceUnknown) {
+                    // The follow-up is admitted and retained; only its turn is
+                    // held. Report it with the delegation, not as a failure.
+                    admission.release().map_err(|wait_error| {
+                        ApiError::internal(format!(
+                            "{}; failed to refresh follow-up waits: {wait_error:#}",
+                            error.message
+                        ))
+                    })?;
+                    drop(admission);
+                    return self.delegation_status_after_followup_turn(
+                        parent_session_id,
+                        delegation_id,
+                        TurnDispatchDeliveryOutcome::Held { error: Some(error) },
+                    );
+                }
+                admission.fail_queued_start(&error.message);
+                match admission.rollback_before_prompt() {
+                    Ok(true) => error.message.push_str(
+                        "; archive compensation scheduled; cleanup may still be pending",
+                    ),
+                    Ok(false) => {}
+                    Err(cleanup_error) => error
+                        .message
+                        .push_str(&format!("; {}", cleanup_error.message)),
                 }
                 if let Err(wait_error) = admission.release() {
                     error.message.push_str(&format!(
@@ -1500,7 +1514,6 @@ impl AppState {
                 return Err(error);
             }
         };
-        let admitted_response = admission.admitted_response();
         let delivery = match dispatch {
             DispatchTurnResult::Dispatched(dispatch)
             | DispatchTurnResult::DispatchedAfterQueue(dispatch) => {
@@ -1509,7 +1522,7 @@ impl AppState {
             DispatchTurnResult::Queued => TurnDispatchDeliveryOutcome::Held { error: None },
         };
         let released = admission.release();
-        if let Err(mut error) = delivery.into_public_result() {
+        if let TurnDispatchDeliveryOutcome::Rejected(mut error) = delivery {
             if let Err(wait_error) = released {
                 error.message.push_str(&format!(
                     "; failed to refresh follow-up waits: {wait_error:#}"
@@ -1521,7 +1534,9 @@ impl AppState {
             ApiError::internal(format!("failed to refresh follow-up waits: {error:#}"))
         })?;
         drop(admission);
-        admitted_response.ok_or_else(|| ApiError::internal("follow-up admission response missing"))
+        // The admission's snapshot predates delivery; report the delegation as
+        // it stands now, with how its turn was left and any hold.
+        self.delegation_status_after_followup_turn(parent_session_id, delegation_id, delivery)
     }
 
     fn refresh_delegation_for_child_session(&self, child_session_id: &str) -> Result<()> {
@@ -1895,6 +1910,7 @@ impl AppState {
                 delegation_id,
                 status,
                 updated_at,
+                hold,
                 parent_card_delta,
             } => {
                 self.publish_delta(&DeltaEvent::DelegationUpdated {
@@ -1902,6 +1918,7 @@ impl AppState {
                     delegation_id,
                     status,
                     updated_at,
+                    hold,
                 });
                 if let Some(delta) = parent_card_delta {
                     self.publish_parent_delegation_card_delta(revision, delta);
@@ -2179,8 +2196,24 @@ impl AppState {
     fn reconcile_delegation_waits_after_boot(&self) -> Result<()> {
         let (revision, wait_refresh) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
+            // Holds are read from the loaded children before any wait is
+            // judged, so a wait over a child held across the restart reports
+            // it once, and one over a child released meanwhile keeps waiting.
+            let mut attempts_changed = false;
+            for index in 0..inner.delegations.len() {
+                if inner.delegations[index].status != DelegationStatus::Running {
+                    continue;
+                }
+                let followup_awaits_first_turn =
+                    delegation_followup_awaits_first_turn(&inner, &inner.delegations[index]);
+                attempts_changed |= sync_delegation_attempt_state_locked(
+                    &mut inner,
+                    index,
+                    followup_awaits_first_turn,
+                ) != DelegationAttemptChange::Unchanged;
+            }
             let wait_refresh = refresh_delegation_waits_locked(&mut inner);
-            if !wait_refresh.did_mutate() {
+            if !wait_refresh.did_mutate() && !attempts_changed {
                 return Ok(());
             }
             let revision = self.commit_locked(&mut inner)?;
@@ -2524,7 +2557,9 @@ fn refresh_delegation_waits_matching_locked(
                 continue;
             }
         }
-        let Some(resume_prompt) = delegation_wait_resume_prompt_locked(inner, &wait) else {
+        let Some((resume_prompt, attention_required)) =
+            delegation_wait_resume_prompt_locked(inner, &wait)
+        else {
             remaining.push(wait);
             continue;
         };
@@ -2538,16 +2573,25 @@ fn refresh_delegation_waits_matching_locked(
         refresh
             .queue_results_by_wait_id
             .insert(wait.id.clone(), queue_result);
-        refresh.consume_wait(wait, DelegationWaitConsumedReason::Completed);
+        refresh.consume_wait(
+            wait,
+            if attention_required {
+                DelegationWaitConsumedReason::AttentionRequired
+            } else {
+                DelegationWaitConsumedReason::Completed
+            },
+        );
     }
     inner.delegation_waits = remaining;
     refresh
 }
 
+/// The parent prompt of a satisfied wait, and whether it reports a held
+/// child (`attentionRequired`) rather than only terminal ones.
 fn delegation_wait_resume_prompt_locked(
     inner: &StateInner,
     wait: &DelegationWaitRecord,
-) -> Option<String> {
+) -> Option<(String, bool)> {
     let records = wait
         .delegation_ids
         .iter()
@@ -2559,7 +2603,7 @@ fn delegation_wait_resume_prompt_locked(
         })
         .collect::<Vec<_>>();
     if records.len() != wait.delegation_ids.len() {
-        return Some(limit_delegation_wait_resume_prompt(format!(
+        return Some((limit_delegation_wait_resume_prompt(format!(
             "Delegation wait `{}` ended because one or more delegation records disappeared.\n\nRequested delegations:\n{}",
             wait.id,
             wait.delegation_ids
@@ -2567,7 +2611,7 @@ fn delegation_wait_resume_prompt_locked(
                 .map(|id| format!("- `{id}`"))
                 .collect::<Vec<_>>()
                 .join("\n")
-        )));
+        )), false));
     }
 
     let terminal_records = records
@@ -2580,16 +2624,30 @@ fn delegation_wait_resume_prompt_locked(
                     .contains_key(&delegation.id)
         })
         .collect::<Vec<_>>();
+    // A held child needs its parent's attention now, but it has not ended: it
+    // satisfies the wait without counting as terminal or completed anywhere.
+    let held_records = records
+        .iter()
+        .copied()
+        .filter(|delegation| delegation_hold_is_live(inner, delegation))
+        .collect::<Vec<_>>();
+    let attention_count = terminal_records.len() + held_records.len();
     let satisfied = match wait.mode {
-        DelegationWaitMode::Any => !terminal_records.is_empty(),
-        DelegationWaitMode::All => terminal_records.len() == records.len(),
+        DelegationWaitMode::Any => attention_count > 0,
+        DelegationWaitMode::All => attention_count == records.len(),
     };
     if !satisfied {
         return None;
     }
 
-    Some(limit_delegation_wait_resume_prompt(
-        build_delegation_wait_resume_prompt(wait, &records, &terminal_records),
+    Some((
+        limit_delegation_wait_resume_prompt(build_delegation_wait_resume_prompt(
+            wait,
+            &records,
+            &terminal_records,
+            &held_records,
+        )),
+        !held_records.is_empty(),
     ))
 }
 
@@ -2638,19 +2696,37 @@ fn build_delegation_wait_resume_prompt(
     wait: &DelegationWaitRecord,
     records: &[&DelegationRecord],
     terminal_records: &[&DelegationRecord],
+    held_records: &[&DelegationRecord],
 ) -> String {
-    let title = wait.title.as_deref().unwrap_or("Delegation wait completed");
+    let attention_required = !held_records.is_empty();
+    let title = wait.title.as_deref().unwrap_or(if attention_required {
+        "Delegation wait needs attention"
+    } else {
+        "Delegation wait completed"
+    });
     let mode = match wait.mode {
         DelegationWaitMode::Any => "any",
         DelegationWaitMode::All => "all",
     };
+    let outcome = if attention_required {
+        "attentionRequired"
+    } else {
+        "completed"
+    };
     let overview = records
         .iter()
         .map(|delegation| {
+            let hold = delegation_current_hold(delegation).map_or_else(String::new, |hold| {
+                format!(
+                    " ({}, hold generation {})",
+                    delegation_hold_reason_label(hold.reason),
+                    hold.generation
+                )
+            });
             format!(
-                "- `{}`: {} - {}",
+                "- `{}`: {}{hold} - {}",
                 delegation.id,
-                delegation_status_label(delegation.status),
+                delegation_status_label(public_delegation_status(delegation)),
                 delegation.title
             )
         })
@@ -2661,11 +2737,29 @@ fn build_delegation_wait_resume_prompt(
         .map(|delegation| delegation_wait_result_section(delegation))
         .collect::<Vec<_>>()
         .join("\n\n---\n\n");
-
-    format!(
-        "{title}\n\nWait id: `{}`\nMode: `{mode}`\nParent session: `{}`\n\nDelegations:\n{}\n\nResults:\n{}",
+    let results = if results.is_empty() {
+        "- None yet".to_owned()
+    } else {
+        results
+    };
+    let mut prompt = format!(
+        "{title}\n\nWait id: `{}`\nMode: `{mode}`\nWait outcome: `{outcome}`\nParent session: `{}`\n\nDelegations:\n{}\n\nResults:\n{}",
         wait.id, wait.parent_session_id, overview, results
-    )
+    );
+    if attention_required {
+        let held = held_records
+            .iter()
+            .filter_map(|delegation| {
+                delegation_current_hold(delegation)
+                    .map(|hold| delegation_wait_hold_section(delegation, hold))
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n---\n\n");
+        prompt.push_str(&format!(
+            "\n\nNeeds attention (held, not completed; this wait has ended):\n{held}"
+        ));
+    }
+    prompt
 }
 
 fn limit_delegation_wait_resume_prompt(prompt: String) -> String {
@@ -2791,6 +2885,7 @@ fn delegation_status_label(status: DelegationStatus) -> &'static str {
     match status {
         DelegationStatus::Queued => "queued",
         DelegationStatus::Running => "running",
+        DelegationStatus::Held => "held",
         DelegationStatus::Completed => "completed",
         DelegationStatus::Failed => "failed",
         DelegationStatus::Canceled => "canceled",
@@ -2940,9 +3035,23 @@ fn refresh_delegation_from_child_locked(
         return None;
     }
 
-    if delegation_followup_awaits_first_turn(inner, &delegation) {
-        return None;
+    // A held attempt, one still admitting its prompt, or a follow-up whose turn
+    // has not started has no provider outcome yet: report the attempt state and
+    // read nothing else. An admitting child can read idle with no result (a
+    // queued head admits before its promotion), which is not a finished turn.
+    let followup_awaits_first_turn = delegation_followup_awaits_first_turn(inner, &delegation);
+    let attempt_change =
+        sync_delegation_attempt_state_locked(inner, delegation_index, followup_awaits_first_turn);
+    let attempt = &inner.delegations[delegation_index].attempt;
+    if followup_awaits_first_turn || attempt.pending_start || attempt.hold.is_some() {
+        return match attempt_change {
+            DelegationAttemptChange::Changed => {
+                delegation_attempt_delta_locked(inner, delegation_index)
+            }
+            DelegationAttemptChange::Unchanged | DelegationAttemptChange::DetailOnly => None,
+        };
     }
+    let delegation = inner.delegations[delegation_index].clone();
 
     let child_outcome = delegation_child_outcome(inner, &delegation.child_session_id);
     if !matches!(&child_outcome, DelegationChildOutcome::Running) {
@@ -2971,6 +3080,13 @@ fn refresh_delegation_from_child_locked(
     }
     match child_outcome {
         DelegationChildOutcome::Running => {
+            if delegation.status == DelegationStatus::Running
+                && attempt_change == DelegationAttemptChange::Changed
+            {
+                // Admitting, or released from a hold: announce the public
+                // status even when the parent card already matches.
+                return delegation_attempt_delta_locked(inner, delegation_index);
+            }
             let running_detail = delegation_running_detail_locked(inner, &delegation);
             if delegation.status == DelegationStatus::Running {
                 if parent_delegation_card_matches_locked(
@@ -2982,6 +3098,7 @@ fn refresh_delegation_from_child_locked(
                     None
                 } else {
                     let updated_at = stamp_now();
+                    let status = public_delegation_status(&inner.delegations[delegation_index]);
                     let parent_card_delta = update_parent_delegation_card_locked(
                         inner,
                         &delegation,
@@ -2990,8 +3107,9 @@ fn refresh_delegation_from_child_locked(
                     );
                     parent_card_delta.map(|parent_card_delta| DelegationLifecycleDelta::Updated {
                         delegation_id: delegation.id,
-                        status: DelegationStatus::Running,
+                        status,
                         updated_at,
+                        hold: None,
                         parent_card_delta: Some(parent_card_delta),
                     })
                 }
@@ -3012,6 +3130,7 @@ fn refresh_delegation_from_child_locked(
                     delegation_id: delegation.id,
                     status: DelegationStatus::Running,
                     updated_at,
+                    hold: None,
                     parent_card_delta,
                 })
             }
@@ -3060,6 +3179,7 @@ fn refresh_delegation_from_child_locked(
                     record.status = DelegationStatus::Failed;
                     record.queued_followup_prompt_id = None;
                     record.completed_at = Some(completed_at.clone());
+                    clear_delegation_attempt_presentation(record);
                     record.result = Some(result.clone());
                     record.submitted_review_result = None;
                     record.review_result_schema_version = None;
@@ -3105,6 +3225,7 @@ fn refresh_delegation_from_child_locked(
                 record.status = DelegationStatus::Completed;
                 record.queued_followup_prompt_id = None;
                 record.completed_at = Some(completed_at.clone());
+                clear_delegation_attempt_presentation(record);
                 record.result = Some(result.clone());
                 record.submitted_review_result = None;
                 record.post_submission_transport_error = None;
@@ -3183,6 +3304,13 @@ fn rearm_terminal_delegation_for_followup_locked(
     }
     inner.sync_running_read_only_delegation_index(delegation_index);
     inner.mark_delegation_mutated(delegation_index);
+    // The re-armed attempt is reported as it stands: queued while its prompt
+    // waits or admits, held if its child holds it, running once it runs.
+    let followup_awaits_first_turn =
+        delegation_followup_awaits_first_turn(inner, &inner.delegations[delegation_index]);
+    sync_delegation_attempt_state_locked(inner, delegation_index, followup_awaits_first_turn);
+    let status = public_delegation_status(&inner.delegations[delegation_index]);
+    let hold = delegation_current_hold(&inner.delegations[delegation_index]).cloned();
     let parent_card_delta = update_parent_delegation_card_locked(
         inner,
         &delegation,
@@ -3191,8 +3319,9 @@ fn rearm_terminal_delegation_for_followup_locked(
     );
     Some(DelegationLifecycleDelta::Updated {
         delegation_id: delegation.id,
-        status: DelegationStatus::Running,
+        status,
         updated_at,
+        hold,
         parent_card_delta,
     })
 }
@@ -3470,6 +3599,7 @@ fn mark_delegation_failed_locked(
     record.status = DelegationStatus::Failed;
     record.queued_followup_prompt_id = None;
     record.completed_at = Some(completed_at.clone());
+    clear_delegation_attempt_presentation(record);
     record.result = Some(result.clone());
     record.submitted_review_result = None;
     record.post_submission_transport_error = None;
@@ -3526,6 +3656,7 @@ fn mark_delegation_canceled_locked(
     record.status = DelegationStatus::Canceled;
     record.queued_followup_prompt_id = None;
     record.completed_at = Some(canceled_at.clone());
+    clear_delegation_attempt_presentation(record);
     record.result = Some(result);
     // Explicit user cancellation wins the lifecycle status, but an accepted
     // structured submission remains persisted for diagnostics and future
@@ -3708,11 +3839,13 @@ fn strip_parent_card_delta(delta: DelegationLifecycleDelta) -> DelegationLifecyc
             delegation_id,
             status,
             updated_at,
+            hold,
             parent_card_delta: _,
         } => DelegationLifecycleDelta::Updated {
             delegation_id,
             status,
             updated_at,
+            hold,
             parent_card_delta: None,
         },
         DelegationLifecycleDelta::Completed {
@@ -4725,7 +4858,7 @@ fn delegation_summary_from_record(record: &DelegationRecord) -> DelegationSummar
         parent_session_id: record.parent_session_id.clone(),
         child_session_id: record.child_session_id.clone(),
         mode: record.mode,
-        status: record.status,
+        status: public_delegation_status(record),
         title: record.title.clone(),
         agent: record.agent,
         model: record.model.clone(),
@@ -4741,6 +4874,7 @@ fn delegation_summary_from_record(record: &DelegationRecord) -> DelegationSummar
             .acceptance_evaluation
             .as_ref()
             .map(DelegationAcceptanceEvaluation::client_view),
+        hold: delegation_current_hold(record).cloned(),
     }
 }
 

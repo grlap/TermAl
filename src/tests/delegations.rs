@@ -55,6 +55,7 @@ fn delegation_prompt_tells_child_to_fail_fast_on_blocking_tooling() {
         queued_followup_prompt_id: None,
         review_result_submission_attempt: 0,
         acceptance_evaluation: None,
+        attempt: DelegationAttemptState::default(),
     };
     let prompt = build_delegation_prompt(&record);
 
@@ -2692,6 +2693,7 @@ fn terminal_delegation_child_dispatch_is_blocked_before_runtime_start() {
             queued_followup_prompt_id: None,
             review_result_submission_attempt: 0,
             acceptance_evaluation: None,
+            attempt: DelegationAttemptState::default(),
         });
         state.commit_locked(&mut inner).unwrap();
         (delegation_id, child_session_id)

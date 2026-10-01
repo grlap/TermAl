@@ -251,6 +251,7 @@ fn the_read_only_gate_wins_over_the_session_policy() {
             queued_followup_prompt_id: None,
             review_result_submission_attempt: 1,
             acceptance_evaluation: None,
+            attempt: DelegationAttemptState::default(),
         });
         let delegation_index = inner.delegations.len() - 1;
         inner.mark_delegation_mutated(delegation_index);

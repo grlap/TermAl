@@ -143,6 +143,7 @@ fn delegation_wait_large_workspace_observations_do_not_hide_sibling_findings() {
         &wait,
         &[&first, &second],
         &[&first, &second],
+        &[],
     ));
     assert!(prompt.contains("Sibling finding must survive"));
     assert!(prompt.contains("additional paths omitted"));
@@ -1110,8 +1111,9 @@ fn delegation_wait_missing_record_prompt_uses_resume_prompt_cap() {
     };
 
     let inner = state.inner.lock().expect("state mutex poisoned");
-    let prompt = delegation_wait_resume_prompt_locked(&inner, &wait)
+    let (prompt, attention_required) = delegation_wait_resume_prompt_locked(&inner, &wait)
         .expect("missing delegation records should resolve the wait");
+    assert!(!attention_required);
 
     assert!(prompt.len() <= MAX_DELEGATION_WAIT_RESUME_PROMPT_BYTES);
     assert!(prompt.ends_with(DELEGATION_WAIT_RESUME_TRUNCATED_MARKER));

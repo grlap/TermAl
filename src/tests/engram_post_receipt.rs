@@ -336,7 +336,7 @@ fn orphan_recovery_retains_exact_ids_on_persistence_uncertainty_without_requeue(
 }
 
 #[test]
-fn initial_child_post_begin_persistence_unknown_retains_running_delegation_and_settles_abort() {
+fn initial_child_post_begin_persistence_unknown_reports_a_held_delegation_and_settles_abort() {
     for fail_card_commit in [true, false] {
         let (mut state, parent, receiver, _) = root_fixture([]);
         state.shutdown_persist_blocking();
@@ -434,11 +434,21 @@ fn initial_child_post_begin_persistence_unknown_retains_running_delegation_and_s
             worker.join().unwrap()
         });
 
-        let error = match result {
-            Ok(_) => panic!("persistence uncertainty must reach child creation"),
-            Err(error) => error,
-        };
-        assert!(error.message.contains("persistence is unknown"));
+        // The created delegation is durable: its held first turn is reported
+        // with it, never as an error that would invite a duplicate spawn.
+        let response = result.expect("a held first turn still returns the delegation");
+        let first_turn = response.first_turn.as_ref().expect("the first turn is reported");
+        assert_eq!(first_turn.state, DelegationTurnDeliveryState::Held);
+        assert!(
+            first_turn
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains("persistence is unknown"))
+        );
+        assert_eq!(
+            delegation_turn_response_status(&response),
+            StatusCode::ACCEPTED
+        );
         if !fail_card_commit {
             stop_persister.store(true, Ordering::SeqCst);
             state.persist_tx.send(PersistRequest::Delta).unwrap();
@@ -447,8 +457,14 @@ fn initial_child_post_begin_persistence_unknown_retains_running_delegation_and_s
         assert!(receiver.try_recv().is_err());
         let inner = state.inner.lock().unwrap();
         assert_eq!(inner.delegations.len(), 1);
+        assert_eq!(inner.delegations[0].id, response.delegation.id);
         assert_eq!(inner.delegations[0].status, DelegationStatus::Running);
+        assert_eq!(
+            public_delegation_status(&inner.delegations[0]),
+            DelegationStatus::Held
+        );
         let child_id = &inner.delegations[0].child_session_id;
+        assert_eq!(child_id, &response.delegation.child_session_id);
         let child = &inner.sessions[inner.find_session_index(child_id).unwrap()];
         assert_eq!(child.session.status, SessionStatus::Idle);
         assert!(child.session.live_activity.is_none());

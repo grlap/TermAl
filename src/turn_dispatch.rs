@@ -1067,7 +1067,37 @@ impl AppState {
         }
         self.revalidate_queued_mailbox_wakeups_before_dispatch(session_id);
         Ok(self
-            .start_next_queued_turn_off_lock_for_owner(session_id, true, false, Some(owner))?
+            .start_next_queued_turn_off_lock_for_owner(
+                session_id,
+                true,
+                false,
+                Some(QueuedDrainOwner::AbortRetry(owner)),
+            )?
+            .map(|started| started.dispatch))
+    }
+
+    /// An explicit Resume bound to the queue head its caller checked (a held
+    /// delegation's retained prompt): it bypasses the paused queue only for
+    /// `owner`, so a successor exposed by a concurrent cancellation is never
+    /// admitted in its place.
+    fn dispatch_next_queued_turn_for_resume(
+        &self,
+        session_id: &str,
+        owner: EngramQueuedAdmissionOwner,
+    ) -> Result<Option<TurnDispatch>> {
+        if let Err(err) = self.reconcile_never_woken_mailbox_notifications_for_session(session_id) {
+            eprintln!(
+                "mailbox> failed reconciling notifications before the bound resume for                  `{session_id}`: {err:#}"
+            );
+        }
+        self.revalidate_queued_mailbox_wakeups_before_dispatch(session_id);
+        Ok(self
+            .start_next_queued_turn_off_lock_for_owner(
+                session_id,
+                true,
+                false,
+                Some(QueuedDrainOwner::Resume(owner)),
+            )?
             .map(|started| started.dispatch))
     }
 
@@ -1089,15 +1119,16 @@ impl AppState {
         )
     }
 
-    /// `start_next_queued_turn_off_lock`; with `abort_retry_owner`, the
-    /// paused-queue bypass is that owner's alone and requires its abort
-    /// record to release the head (`dispatch_next_queued_turn_for_abort_retry`).
+    /// `start_next_queued_turn_off_lock`; with an `owner`, the paused-queue
+    /// bypass is that owner's alone, and an abort-retry owner also requires
+    /// its abort record to release the head
+    /// (`dispatch_next_queued_turn_for_abort_retry`).
     fn start_next_queued_turn_off_lock_for_owner(
         &self,
         session_id: &str,
         allow_blocked_dispatch: bool,
         orphaned_workflow_only: bool,
-        abort_retry_owner: Option<EngramQueuedAdmissionOwner>,
+        owner: Option<QueuedDrainOwner>,
     ) -> Result<Option<StartedQueuedTurn>> {
         // Where the session writes, for the overlap marks its turn start
         // makes under the lock.
@@ -1107,9 +1138,23 @@ impl AppState {
                 session_id,
                 allow_blocked_dispatch,
                 orphaned_workflow_only,
-                abort_retry_owner.clone(),
+                owner.clone(),
             )
         });
+        let result = self.settle_unstarted_queued_turn(result);
+        // A promotion that started nothing may have left a delegation child
+        // held (a failed promotion, a parked queued admission); a started turn
+        // reaches the delivery path, which refreshes it there.
+        if !matches!(result, Ok(Some(_))) {
+            self.sync_delegation_attempt_for_child_session(session_id);
+        }
+        result
+    }
+
+    fn settle_unstarted_queued_turn(
+        &self,
+        result: Result<Option<StartedQueuedTurn>>,
+    ) -> Result<Option<StartedQueuedTurn>> {
         if let Err(error) = &result {
             // Prepared bind/evaluate evidence survived the failed promotion.
             // It is held for explicit retry and must bypass terminal follow-up
@@ -1193,6 +1238,14 @@ impl AppState {
                     })
                 }
             };
+            if guard.is_some() {
+                // A held delegation child being resumed or retried is now
+                // admitting: report that before the admission runs, so no
+                // wait reads the earlier hold as needing attention meanwhile.
+                // It touches only the delegation and its waits, never this
+                // session's record.
+                self.sync_delegation_attempt_for_child_session(session_id);
+            }
             let result = drain();
             let retry = guard.as_ref().is_some_and(EngramAdmissionGuard::release);
             if retry && matches!(result, Ok(None)) {
@@ -1268,15 +1321,18 @@ impl AppState {
         session_id: &str,
         allow_blocked_dispatch: bool,
         orphaned_workflow_only: bool,
-        abort_retry_owner: Option<EngramQueuedAdmissionOwner>,
+        owner: Option<QueuedDrainOwner>,
     ) -> Result<Option<StartedQueuedTurn>> {
         // An explicit Send/Resume bypass is permission for the queue head
         // that existed when this drain began, not for a successor exposed by
         // cancellation while its authorization was off-lock. A retried
-        // admission's bypass is the owner it was due for, never a fresh one.
-        let releases_abort_retry = abort_retry_owner.is_some();
-        let bypass_owner = match abort_retry_owner {
-            Some(owner) => Some(owner),
+        // admission's bypass is the owner it was due for, and a bound Resume's
+        // the head its caller checked; never a fresh one.
+        let releases_abort_retry = matches!(owner, Some(QueuedDrainOwner::AbortRetry(_)));
+        let bypass_owner = match owner {
+            Some(QueuedDrainOwner::AbortRetry(owner) | QueuedDrainOwner::Resume(owner)) => {
+                Some(owner)
+            }
             None => allow_blocked_dispatch
                 .then(|| {
                     let inner = self.inner.lock().expect("state mutex poisoned");
@@ -2350,4 +2406,15 @@ impl AppState {
             Ok(DispatchTurnResult::DispatchedAfterQueue(started.dispatch))
         }
     }
+}
+
+/// Whose queue head a paused-queue drain may admit, when its caller fixed it
+/// in advance.
+#[derive(Clone)]
+enum QueuedDrainOwner {
+    /// An explicit Resume of the head its caller checked.
+    Resume(EngramQueuedAdmissionOwner),
+    /// A retried admission due for this head; its acknowledged abort record
+    /// must still release it.
+    AbortRetry(EngramQueuedAdmissionOwner),
 }

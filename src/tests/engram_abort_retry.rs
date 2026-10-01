@@ -20,14 +20,14 @@ const PROMPT: &str = "a prompt whose first delivery was withheld";
 /// A persistence worker for these tests: it fails the next `failures`
 /// fences with a deadline and acknowledges every other one. It writes
 /// nothing, so the store keeps what was saved before it took over.
-struct ScriptedPersister {
+pub(super) struct ScriptedPersister {
     stop: Arc<AtomicBool>,
     failures: Arc<std::sync::atomic::AtomicUsize>,
     handle: Option<std::thread::JoinHandle<()>>,
 }
 
 impl ScriptedPersister {
-    fn install(state: &mut AppState) -> Self {
+    pub(super) fn install(state: &mut AppState) -> Self {
         state.shutdown_persist_blocking();
         let (persist_tx, persist_rx) = mpsc::channel();
         state.persist_tx = persist_tx;
@@ -60,11 +60,11 @@ impl ScriptedPersister {
         }
     }
 
-    fn fail_next(&self, fences: usize) {
+    pub(super) fn fail_next(&self, fences: usize) {
         self.failures.store(fences, Ordering::SeqCst);
     }
 
-    fn stop(mut self, state: &AppState) {
+    pub(super) fn stop(mut self, state: &AppState) {
         self.stop.store(true, Ordering::SeqCst);
         let _ = state.persist_tx.send(PersistRequest::Delta);
         if let Some(handle) = self.handle.take() {
@@ -158,7 +158,7 @@ fn fresh_admission_steps() -> Vec<GatedEngramControlStep> {
 
 /// Waits, off the lock, for the pending acknowledgement of the session's
 /// settlement to resolve, so a following tick reads its outcome.
-fn await_settlement_acknowledgement(state: &AppState, session: &str) {
+pub(super) fn await_settlement_acknowledgement(state: &AppState, session: &str) {
     let waiter = {
         let inner = state.inner.lock().unwrap();
         inner.sessions[inner.find_session_index(session).unwrap()]
@@ -178,7 +178,7 @@ fn with_record<T>(state: &AppState, session: &str, read: impl FnOnce(&SessionRec
     read(&inner.sessions[inner.find_session_index(session).unwrap()])
 }
 
-fn prompts_received(receiver: &mpsc::Receiver<CodexRuntimeCommand>) -> usize {
+pub(super) fn prompts_received(receiver: &mpsc::Receiver<CodexRuntimeCommand>) -> usize {
     let mut prompts = 0;
     while let Ok(command) = receiver.recv_timeout(Duration::from_millis(200)) {
         if matches!(command, CodexRuntimeCommand::Prompt { .. }) {

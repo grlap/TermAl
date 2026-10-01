@@ -213,6 +213,7 @@ fn a_name_is_refused_without_the_live_claim_to_a_delegated_session_and_on_a_shar
             queued_followup_prompt_id: None,
             review_result_submission_attempt: 0,
             acceptance_evaluation: None,
+            attempt: DelegationAttemptState::default(),
         });
     let error = name_root(&claimed, label, Some(&worktree), vec![claimed_root_held(label)])
         .expect_err("a delegated session names nothing");

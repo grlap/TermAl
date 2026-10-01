@@ -393,6 +393,8 @@ impl AppState {
                 "failed to persist delegation wait: {error:#}"
             )));
         }
+        // A canceled retained head releases a held delegation child.
+        self.sync_delegation_attempt_for_child_session(session_id);
         self.resume_pending_orchestrator_transitions()
             .map_err(|err| {
                 ApiError::internal(format!(
@@ -418,6 +420,23 @@ impl AppState {
         if self.remote_session_target(session_id)?.is_some() {
             return self.proxy_remote_resume_session_queue(session_id);
         }
+        if let Some(delivery) = self.resume_local_session_queue(session_id, None)? {
+            delivery.into_public_result()?;
+        }
+        Ok(self.snapshot())
+    }
+
+    /// The local part of `resume_session_queue`, returning how the resumed
+    /// head's turn was left (none when nothing was promoted), so a caller
+    /// that reports the turn (a delegation resume) keeps a scheduled or
+    /// superseded outcome instead of reading one off the session. With
+    /// `owner`, only that exact head may be resumed: a caller that checked a
+    /// held prompt never admits a successor exposed meanwhile.
+    fn resume_local_session_queue(
+        &self,
+        session_id: &str,
+        owner: Option<EngramQueuedAdmissionOwner>,
+    ) -> std::result::Result<Option<TurnDispatchDeliveryOutcome>, ApiError> {
         {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
@@ -427,8 +446,7 @@ impl AppState {
                 .session_mut_by_index(index)
                 .expect("session index should be valid");
             if !record.orchestrator_auto_dispatch_blocked {
-                drop(inner);
-                return Ok(self.snapshot());
+                return Ok(None);
             }
             if record.queued_prompts.is_empty() {
                 record.set_auto_dispatch_blocked(false);
@@ -436,21 +454,19 @@ impl AppState {
                 self.commit_locked(&mut inner).map_err(|err| {
                     ApiError::internal(format!("failed to persist session state: {err:#}"))
                 })?;
-                drop(inner);
-                return Ok(self.snapshot());
+                return Ok(None);
             }
         }
-        let dispatch = self
-            .dispatch_next_queued_turn(session_id, true)
-            .map_err(|err| {
+        let dispatch = match owner {
+            Some(owner) => self.dispatch_next_queued_turn_for_resume(session_id, owner),
+            None => self.dispatch_next_queued_turn(session_id, true),
+        }
+        .map_err(|err| {
                 ApiError::internal(format!(
                     "failed to dispatch the resumed queue head: {err:#}"
                 ))
             })?;
-        if let Some(dispatch) = dispatch {
-            deliver_turn_dispatch(self, dispatch).into_public_result()?;
-        }
-        Ok(self.snapshot())
+        Ok(dispatch.map(|dispatch| deliver_turn_dispatch(self, dispatch)))
     }
 
     /// Public entry point for stopping a session's current turn while
@@ -477,11 +493,13 @@ impl AppState {
             return self.proxy_remote_stop_session(session_id);
         }
         if self.stop_waiting_engram_admission(session_id)? {
+            self.sync_delegation_attempt_for_child_session(session_id);
             return Ok(self.snapshot());
         }
         // A prompt waiting for its automatic retry after a withheld delivery
         // (`engram_abort_retry.rs`): Stop cancels the retry and keeps it.
         if self.stop_engram_abort_retry(session_id)? {
+            self.sync_delegation_attempt_for_child_session(session_id);
             return Ok(self.snapshot());
         }
 

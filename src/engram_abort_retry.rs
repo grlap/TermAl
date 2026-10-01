@@ -470,6 +470,8 @@ impl AppState {
     /// test-run index thread's tick; tests call it with their own clock.
     fn engram_abort_retry_tick(&self, now: chrono::DateTime<chrono::Utc>) {
         let mut due = Vec::new();
+        // Sessions whose hold changed: a held delegation child reports it.
+        let mut held_changes = Vec::new();
         {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let session_ids = inner
@@ -508,6 +510,7 @@ impl AppState {
                     EngramAbortRetryStep::Dropped | EngramAbortRetryStep::Acknowledged => {
                         inner.stamp_session_at_index(index);
                         changed = true;
+                        held_changes.push(session_id);
                     }
                     EngramAbortRetryStep::Due => {
                         // The admission bypasses the paused queue only for
@@ -525,6 +528,9 @@ impl AppState {
             if changed && let Err(error) = self.commit_locked(&mut inner) {
                 eprintln!("engram> failed persisting the abort retry tick: {error:#}");
             }
+        }
+        for session_id in held_changes {
+            self.sync_delegation_attempt_for_child_session(&session_id);
         }
         for (session_id, owner) in due {
             let prompt_id = owner.prompt_id.clone();
@@ -598,6 +604,8 @@ impl AppState {
                 "engram> session={session_id} failed persisting the postponed retry: {error:#}"
             );
         }
+        drop(inner);
+        self.sync_delegation_attempt_for_child_session(session_id);
     }
 
     /// A public Stop of a session whose prompt waits for its automatic retry:
@@ -653,6 +661,10 @@ impl AppState {
         if let Some(queued) = record.queued_prompts.front_mut() {
             queued.engram_interrupted = true;
         }
+        record.engram.stopped_prompt_id = record
+            .queued_prompts
+            .front()
+            .map(|queued| queued.pending_prompt.id.clone());
         record.set_auto_dispatch_blocked(true);
         record.session.preview = "Engram: automatic retry stopped. Prompt retained; remove it \
             before starting a new operation."
