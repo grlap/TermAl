@@ -556,7 +556,7 @@ impl PersistedSessionRecord {
         // A background full gate carried when the host went down lost its
         // credit: the host could not watch its worktree meanwhile.
         for marker in &self.engram_carried_launches {
-            let line = engram_carried_lost_to_restart_line(marker);
+            let line = EngramHost::carried_lost_to_restart_line(marker);
             eprintln!("engram> session={} {line}", record.session.id);
             record.engram.set_pending_source_root_line(line);
         }

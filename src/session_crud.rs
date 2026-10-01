@@ -2950,7 +2950,7 @@ impl AppState {
                             record.engram.begins_recorded,
                         )
                     });
-                    let carried_lines = engram_carried_checks_reset_lines(
+                    let carried_lines = EngramHost::carried_checks_reset_lines(
                         record,
                         "its project's Engram settings changed before it settled",
                     );
@@ -4694,7 +4694,7 @@ impl AppState {
                     }
                     // Its project, and with it Engram, is gone: the carried
                     // gates are logged, and no prompt will be measured again.
-                    for line in engram_carried_checks_reset_lines(
+                    for line in EngramHost::carried_checks_reset_lines(
                         record,
                         "its project was removed before it settled",
                     ) {

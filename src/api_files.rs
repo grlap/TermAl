@@ -233,9 +233,9 @@ async fn write_file(
         // The save may land under a mediated turn's open check, including one
         // that starts while it is written, so it counts as it starts and as
         // it ends, even when it fails part-way.
-        state.note_engram_host_write(&resolved_path);
+        state.engram_host().host_write(&resolved_path);
         let written = fs::write(&resolved_path, request.content.as_bytes());
-        state.note_engram_host_write(&resolved_path);
+        state.engram_host().host_write(&resolved_path);
         written.map_err(|err| {
             ApiError::internal(format!(
                 "failed to write file {}: {err}",

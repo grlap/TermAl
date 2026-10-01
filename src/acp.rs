@@ -1685,7 +1685,7 @@ fn handle_acp_session_update(
                             &command,
                             &summarize_acp_tool_output(update),
                             acp_tool_status(update),
-                            engram_acp_command_exit(update),
+                            EngramHost::acp_command_exit(update),
                         )?;
                     }
                     // An update without a status may still say what the call

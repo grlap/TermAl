@@ -501,7 +501,7 @@ fn handle_codex_app_server_item_completed(
                     command,
                     output,
                     status,
-                    engram_codex_command_exit(item),
+                    EngramHost::codex_command_exit(item),
                 )?;
             }
         }

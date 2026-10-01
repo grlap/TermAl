@@ -1554,12 +1554,13 @@ operation and nothing else.
    through the recorder. The test asserts the execution record, then the
    checkpoint request. The request's observations, evidence and idempotency
    key equal those of a fixture captured from the extraction's exact base
-   commit for the same input. The values no two runs share (the worktree
-   root, its content revision, the environment fingerprint that hashes the
-   root, and the stamped times) are each checked on their own and compared
-   as placeholders, the times by the record that carries them: the base has
-   no clock to inject, and adding one would have changed production code
-   before the capture. The base is `28e9ed5` unless a correctness fix lands
+   commit for the same input. Four values are each checked on their own and
+   compared as placeholders: the worktree root the run happens to use; the
+   environment fingerprint, which hashes that root; the stamped times, by the
+   record that carries each; and the content revision, which is the same on
+   every run on one machine but has not been shown equal on every platform.
+   The base has no clock to inject, and adding one would have changed
+   production code before the capture. The base is `28e9ed5` unless a correctness fix lands
    first; such a fix is part of the base and is preserved, never compared
    away. Fixes did land first: the extraction began at `cac212c`, and the
    fixture test records that commit as the base it was captured at. The test
@@ -1791,10 +1792,11 @@ answers at once and the evaluation is deferred.
   hold by a queue push per delta. The step measures it; if it is material,
   the alternative is a per-session publication order, which is a larger
   change.
-- The first extraction's byte-for-byte fixture (section 9.5) depends on a
-  report that is deterministic for a given input. The values that are not
-  (the root, its revision, the fingerprint that hashes it, the stamped
-  times) are checked on their own and compared as placeholders.
+- The first extraction's fixture (section 9.5) is compared byte for byte
+  after placeholders, so it depends on a report that is otherwise
+  deterministic for a given input. The values behind the placeholders (the
+  root, the fingerprint that hashes it, the stamped times, and the revision,
+  not shown equal across platforms) are checked on their own.
 - Assembling a module from existing fragments by `include!` has not been
   compiled.
 - The target keeps the rule that an unknown place counts everywhere and

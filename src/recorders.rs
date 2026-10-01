@@ -755,7 +755,9 @@ fn recorder_push_diff<R: SessionRecorderAccess>(
             change_type,
         },
     )?;
-    state.note_engram_workspace_edit(&session_id);
+    state
+        .engram_host()
+        .observe(&session_id, EngramRecorderObservation::WorkspaceEdit);
     Ok(())
 }
 
@@ -805,7 +807,10 @@ fn recorder_command_started<R: SessionRecorderAccess>(
         "",
         CommandStatus::Running,
     )?;
-    state.note_engram_command_started(&session_id, key, ran, cwd);
+    state.engram_host().observe(
+        &session_id,
+        EngramRecorderObservation::CommandStarted { key, ran, cwd },
+    );
     Ok(())
 }
 
@@ -834,7 +839,15 @@ fn recorder_command_completed<R: SessionRecorderAccess>(
     state.upsert_command_message(&session_id, &message_id, command, output, status)?;
     // A completion that still reports the command running is not its end.
     if status != CommandStatus::Running {
-        state.note_engram_command_finished(&session_id, key, command, output, exit);
+        state.engram_host().observe(
+            &session_id,
+            EngramRecorderObservation::CommandFinished {
+                key,
+                command,
+                output,
+                exit,
+            },
+        );
     }
     Ok(())
 }
@@ -1131,8 +1144,10 @@ impl TurnRecorder for SessionRecorder {
 
     fn command_described(&mut self, key: &str, ran: Option<&str>, cwd: Option<&str>) -> Result<()> {
         let session_id = self.session_id().to_owned();
-        self.state()
-            .note_engram_command_described(&session_id, key, ran, cwd);
+        self.state().engram_host().observe(
+            &session_id,
+            EngramRecorderObservation::CommandDescribed { key, ran, cwd },
+        );
         Ok(())
     }
 
@@ -1159,7 +1174,10 @@ impl TurnRecorder for SessionRecorder {
 
     fn command_abandoned(&mut self, key: &str) -> Result<()> {
         let session_id = self.session_id().to_owned();
-        self.state().note_engram_command_abandoned(&session_id, key);
+        self.state().engram_host().observe(
+            &session_id,
+            EngramRecorderObservation::CommandAbandoned { key },
+        );
         Ok(())
     }
 
@@ -1257,8 +1275,10 @@ impl TurnRecorder for BorrowedSessionRecorder<'_> {
 
     fn command_described(&mut self, key: &str, ran: Option<&str>, cwd: Option<&str>) -> Result<()> {
         let session_id = self.session_id().to_owned();
-        self.state()
-            .note_engram_command_described(&session_id, key, ran, cwd);
+        self.state().engram_host().observe(
+            &session_id,
+            EngramRecorderObservation::CommandDescribed { key, ran, cwd },
+        );
         Ok(())
     }
 
@@ -1285,7 +1305,10 @@ impl TurnRecorder for BorrowedSessionRecorder<'_> {
 
     fn command_abandoned(&mut self, key: &str) -> Result<()> {
         let session_id = self.session_id().to_owned();
-        self.state().note_engram_command_abandoned(&session_id, key);
+        self.state().engram_host().observe(
+            &session_id,
+            EngramRecorderObservation::CommandAbandoned { key },
+        );
         Ok(())
     }
 

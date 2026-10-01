@@ -1,35 +1,45 @@
-// Owns the end-to-end proof of the host architecture's first extraction
-// (docs/features/host-architecture.md, section 9.5, proof 1): a recognised
-// test driven through the recorder closes its turn with the checkpoint
-// request the extraction's base commit sent for the same input. The request
-// is compared with a fixture captured at that base, before any code moved:
-// its observations and its evidence in the byte order the idempotency key
-// hashes, the key itself, and the whole request. The base is commit
-// cac212ce8d710ee2a7aee087b7f2b42fe463e123, the tip of `master` when the
-// extraction began; the correctness fixes that landed after the brief was
-// written are part of it. The execution record does not exist at the base,
-// so its assertion joins this test in the commit that introduces it. Does
-// not own what a check is or when it is credited
+// Owns the proofs of the host architecture's first extraction
+// (docs/features/host-architecture.md, section 9.5) that hold from its first
+// commits on.
+//
+// The end-to-end proof: a recognised test driven through the recorder closes
+// its turn with the checkpoint request the extraction's base commit sent for
+// the same input. The request is compared with a fixture captured at that
+// base, before any code moved: its observations and its evidence in the byte
+// order the idempotency key hashes, the key itself, and the whole request.
+// The base is commit cac212ce8d710ee2a7aee087b7f2b42fe463e123, the tip of
+// `master` when the extraction began; the correctness fixes that landed after
+// the brief was written are part of it. The execution record does not exist
+// at the base, so its assertion joins this test in the commit that introduces
+// it.
+//
+// The boundary of the facade: no source file outside the Engram host
+// component names a function of the check machinery; the rest of the host
+// reaches it through `EngramHost` (src/engram_host.rs).
+//
+// Does not own what a check is or when it is credited
 // (src/tests/engram_turn_checks.rs, whose `CheckedTurn` fixture this child
-// module uses), nor the other proofs of section 9.5. New module; nothing was
-// split out of another file.
+// module uses). New module; nothing was split out of another file.
 use super::*;
 
-/// The request at the extraction's base, with the values that differ between
-/// machines and runs replaced by the placeholders this test writes.
-const BASE_CHECKPOINT: &str = include_str!("fixtures/engram_first_extraction_checkpoint.txt");
+/// The request at the extraction's base, with the values that are not the
+/// same wherever and whenever the test runs replaced by the placeholders this
+/// test writes.
+const BASE_CHECKPOINT: &str = include_str!("fixtures/engram-first-extraction-checkpoint.txt");
 
 /// When the check completed, in place of the time the host stamped.
 const CHECK_COMPLETED_AT: &str = "<CHECK-COMPLETED-AT>";
 /// When the turn's own observation was taken, likewise.
 const TURN_OBSERVED_AT: &str = "<TURN-OBSERVED-AT>";
 
-/// `text` with the values no two runs share replaced by placeholders: the
-/// worktree root the run's repository happened to be created at, its content
-/// revision, and the environment fingerprint, which hashes that root. Each
-/// is checked on its own before it is replaced. The stamped times are not
-/// replaced here: they are relabelled by the record that carries them, so
-/// that two equal times cannot be confused.
+/// `text` with three values replaced by placeholders: the worktree root the
+/// run's repository happened to be created at; the environment fingerprint,
+/// which hashes that root; and the content revision, which is the same on
+/// every run of this repository on one machine but has not been shown equal
+/// on every platform a checkout may run the test on. Each is checked on its
+/// own before it is replaced. The stamped times are not replaced here: they
+/// are relabelled by the record that carries them, so that two equal times
+/// cannot be confused.
 fn canonical(text: &str, workspace: &str, revision: &str, environment_fingerprint: &str) -> String {
     // A path appears in JSON text with its backslashes escaped.
     let workspace = serde_json::to_string(workspace).expect("a path should serialize");
@@ -117,21 +127,18 @@ fn a_test_driven_through_the_recorder_checkpoints_as_it_did_at_the_extractions_b
                 .expect("the environment names its components")
         )
     );
-    // The times, by the record that carries each: the environment is timed
-    // with its check, and the turn's own observation no earlier than it.
+    // The times, by the record that carries each. The environment is timed
+    // with its check. No order is asserted between the check's time and the
+    // turn's: both are wall-clock stamps, and the host promises none.
     let check_completed_at = observations[0]
         .observed_at
         .clone()
         .expect("the check is timed");
-    let turn_observed_at = observations[1]
-        .observed_at
-        .clone()
-        .expect("the turn's observation is timed");
-    assert_eq!(environment[0].observed_at, check_completed_at);
     assert!(
-        check_completed_at <= turn_observed_at,
-        "{check_completed_at} should not follow {turn_observed_at}"
+        observations[1].observed_at.is_some(),
+        "the turn's observation is timed"
     );
+    assert_eq!(environment[0].observed_at, check_completed_at);
     let mut labelled_observations = observations.clone();
     labelled_observations[0].observed_at = Some(CHECK_COMPLETED_AT.to_owned());
     labelled_observations[1].observed_at = Some(TURN_OBSERVED_AT.to_owned());
@@ -170,5 +177,115 @@ fn a_test_driven_through_the_recorder_checkpoints_as_it_did_at_the_extractions_b
         actual.trim_end() == base.trim_end(),
         "the checkpoint request differs from the one the extraction's base sent.\n\
          --- now ---\n{actual}\n--- at the base ---\n{base}"
+    );
+}
+
+/// The fragments that are the check machinery: what a check is, how it is
+/// recognised, marked, carried and reported.
+const CHECK_MACHINERY_FILES: [&str; 4] = [
+    "engram_turn_checks.rs",
+    "engram_carried_checks.rs",
+    "engram_check_recognition.rs",
+    "engram_one_call.rs",
+];
+
+/// The name of the function a line defines, if it defines one.
+fn defined_function(line: &str) -> Option<&str> {
+    let mut rest = line.trim_start();
+    // A definition, not prose: only qualifiers may precede `fn`.
+    let name = loop {
+        if let Some(name) = rest.strip_prefix("fn ") {
+            break name;
+        }
+        let (word, after) = rest.split_once(' ')?;
+        if !(word.starts_with("pub") || matches!(word, "async" | "const" | "unsafe")) {
+            return None;
+        }
+        rest = after;
+    };
+    let end = name
+        .find(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+        .unwrap_or(name.len());
+    (end > 0).then(|| &name[..end])
+}
+
+/// Each use in `text` of a name in `machinery`, with its line number.
+fn machinery_names_in(text: &str, machinery: &BTreeSet<String>) -> Vec<(usize, String)> {
+    let mut named = Vec::new();
+    for (index, line) in text.lines().enumerate() {
+        for word in
+            line.split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+        {
+            if machinery.contains(word) {
+                named.push((index + 1, word.to_owned()));
+            }
+        }
+    }
+    named
+}
+
+#[test]
+fn no_file_outside_the_component_names_a_function_of_the_check_machinery() {
+    let source = FsPath::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    // Every function the machinery defines whose name says whose it is. A
+    // method of one of its types with a general name (`refusal_line`) cannot
+    // be told from another type's by its name; reaching those types is the
+    // matter of the state they sit in, not of this boundary.
+    let mut machinery = BTreeSet::new();
+    for file in CHECK_MACHINERY_FILES {
+        let text = fs::read_to_string(source.join(file))
+            .unwrap_or_else(|error| panic!("{file} should be readable: {error}"));
+        machinery.extend(
+            text.lines()
+                .filter_map(defined_function)
+                .filter(|name| name.contains("engram"))
+                .map(str::to_owned),
+        );
+    }
+    assert!(
+        machinery.contains("note_engram_command_started")
+            && machinery.contains("engram_note_turn_started")
+            && machinery.contains("poll_engram_carried_runs")
+            && machinery.len() > 100,
+        "the machinery's functions should be found: {} were",
+        machinery.len()
+    );
+    // The scan finds a call and a mention alike, and nothing in a line that
+    // names none.
+    assert_eq!(
+        machinery_names_in(
+            "let x = 1;\n    state.note_engram_host_write(&path);\n// see `engram_note_turn_started`\n",
+            &machinery
+        ),
+        [
+            (2, "note_engram_host_write".to_owned()),
+            (3, "engram_note_turn_started".to_owned())
+        ]
+    );
+
+    // The component is the Engram fragments and the facade; its tests live
+    // under src/tests and are not source files of the host.
+    let mut named = Vec::new();
+    for entry in fs::read_dir(&source).expect("the source directory should be readable") {
+        let path = entry.expect("a source entry").path();
+        let Some(file) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if !path.is_file() || !file.ends_with(".rs") || file.starts_with("engram_") {
+            continue;
+        }
+        let text = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("{file} should be readable: {error}"));
+        named.extend(
+            machinery_names_in(&text, &machinery)
+                .into_iter()
+                .map(|(line, name)| format!("{file}:{line}: {name}")),
+        );
+    }
+    assert!(
+        named.is_empty(),
+        "these lines name a function of the check machinery; reach it through \
+         `EngramHost` (src/engram_host.rs):\n{}",
+        named.join("\n")
     );
 }

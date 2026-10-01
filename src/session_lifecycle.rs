@@ -1017,7 +1017,7 @@ impl AppState {
         // Where the session writes, for the overlap marks the drained turn's
         // start makes under the lock.
         if options.dispatch_queued_prompts_on_success {
-            self.note_engram_session_worktree_off_lock(session_id);
+            self.engram_host().turn_starting(session_id);
         }
         let prepared_queued_turn = options
             .dispatch_queued_prompts_on_success
