@@ -556,6 +556,11 @@ export type DelegationAcceptanceEvaluation = {
    * not read it.
    */
   bindings?: { criterion: number; checkKind: string; fingerprint?: string }[];
+  /**
+   * The carried failing evaluation the submission names as `--supersedes`;
+   * absent when none was carried. The UI does not read it.
+   */
+  supersedes?: string;
   attemptKey: string;
   /** The tracker store the brief was read from. */
   store?: { projectId: string; databasePath: string } | null;

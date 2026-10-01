@@ -674,6 +674,7 @@ fn acceptance_evaluator_creation_refuses_a_root_that_changed_during_the_request_
         evidence_basis: 1,
         criteria_count: 2,
         bindings: Vec::new(),
+        supersedes: None,
         store: store.clone(),
         source_fingerprint: None,
         source_claim: source_root.is_none().then(|| AcceptanceEvaluationSourceClaim {work_id:"work-requested".to_owned(), claim_id:"claim-requested".to_owned()}),

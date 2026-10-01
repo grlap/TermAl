@@ -1788,6 +1788,48 @@ the rule stated, before the tracker runs: Engram's own refusal names a
 citation as its cause, which led evaluators to downgrade a pass that a
 qualifying record supported.
 
+**Carried failure.** When a failing evaluation's criteria were revised on the
+run since, `show --full` discloses it as `work.evaluation.carried_failure`:
+its record id, who revised (`executor` or `planner`), the revision it judged,
+the criteria it judged with their bindings (`judged_bindings`), and its
+non-passing verdicts with their rationales.
+After the executor's revision Engram admits the next evaluation only if it
+names that failure with `--supersedes`, and only from an evaluator that never
+held the run; after a planner's revision naming it is optional; the host
+always names it. While that acknowledgement is required the host's preferred
+default mode never selects `same_session`; only the task's pin or a policy that
+admits nothing else can lead there, and that request is refused with `409`
+naming those two remedies. The host reads it with the contract and
+keeps it only when its id is a record id (32 hex as Engram mints them, or the
+64 of a record written before minting). When a later failing evaluation named
+it, Engram keeps the original carried and shows the newest evaluation's
+criteria, verdicts and bindings (`newest_judged_bindings`) as the middle of the
+three contracts; the briefs show that middle side as well. Both briefs show it after the
+current criteria, which stay the contract: the evaluator judges the current
+criteria, and for each criterion the revision changed it also judges whether
+the revised criteria still deliver the task's outcome, a revision that drops
+part of the outcome or a binding failing that criterion; its submission
+acknowledges the failure. The bindings it judged are listed as the before side
+of the comparison; each current criterion's binding line is the after side.
+It shrinks before a contract is refused: in full, every criterion it judged
+with each failing verdict's rationale, each clipped to 600 characters, and its
+bindings; then only its failing criteria, clipped, with their verdict words,
+and its bindings; then only its id and counts. In the independent brief it
+gives way first, as its own axis: the full and then the compact section are
+tried with every evidence entry whole and the outcome at its bound, and only
+then do evidence entries and the outcome shrink, with the section at its
+minimum. The old rationales are worth less to the evaluator than the evidence a
+pass must cite or the outcome the revised criteria are judged against. The
+same-session brief, which carries no evidence bodies, shrinks it with its
+omission detail. Each brief words the acknowledgement for the mode that records
+it: the host names the failure for an evaluator child, and a same-session
+evaluation names it itself. The evaluation target persists the id as `supersedes`, and
+the submission passes `--supersedes ID`, refusing a stored value that is not a
+record id. A `same_session` request after the executor's revision is refused
+with `409`, naming the failure and saying to request an independent
+evaluation; after a planner's revision the `same_session` brief asks the
+session to name it.
+
 The evaluator must distinguish evidence **not shown** from proof absent on
 the item. If its verdict depends on omitted evidence, it keeps the existing
 `insufficient-evidence` verdict but says "not shown" in its rationale, naming
@@ -1853,7 +1895,7 @@ kind and the admissible citation. TermAl then runs, as the evaluator:
 engram work --actor-id <child seat> --session-id <child session> [--actor-context …]
   evaluate REF --mode … --acceptance-basis N --evidence-basis M
   --verdict P=VERDICT:BASIS --rationale P=TEXT [--evidence P=LOCATOR]…
-  [--source-fingerprint content-v1:<sha256>]
+  [--source-fingerprint content-v1:<sha256>] [--supersedes <carried failure id>]
   [--model anthropic/<model> | openai/<model>] --attempt <delegation id> --json
 ```
 

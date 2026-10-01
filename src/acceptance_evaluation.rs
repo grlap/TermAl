@@ -147,6 +147,8 @@ struct AcceptanceEvaluationTargetSeed {
     criteria_count: usize,
     /// The criteria bound to a typed host check, which the submission checks.
     bindings: Vec<AcceptanceCriterionBinding>,
+    /// The carried failing evaluation the submission names as `--supersedes`.
+    supersedes: Option<String>,
     /// The store the reads above ran against.
     store: EngramAuthorityStoreKey,
     /// The content revision of the evaluator's worktree, taken after the
@@ -170,6 +172,7 @@ impl AcceptanceEvaluationTargetSeed {
             evidence_basis: self.evidence_basis,
             criteria_count: self.criteria_count,
             bindings: self.bindings,
+            supersedes: self.supersedes,
             attempt_key,
             store: Some(self.store),
             source_fingerprint: self.source_fingerprint,
@@ -249,6 +252,202 @@ struct EngramShowFullWorkForEvaluation {
     /// only with basis observed and passed verification records of that kind.
     #[serde(default)]
     acceptance_bindings: Vec<EngramAcceptanceBindingForEvaluation>,
+    /// The run's newest evaluation, which carries a failing evaluation whose
+    /// criteria were revised since.
+    #[serde(default)]
+    evaluation: Option<EngramShowEvaluationForEvaluation>,
+}
+
+/// The run's newest evaluation. When a later failing evaluation named the
+/// carried one, it is the middle of the three contracts the next evaluator
+/// compares: its own criteria, verdicts and bindings.
+#[derive(Debug, Deserialize)]
+struct EngramShowEvaluationForEvaluation {
+    #[serde(default)]
+    hash: String,
+    #[serde(default)]
+    verdicts: Vec<EngramShowEvaluationVerdictForEvaluation>,
+    #[serde(default)]
+    carried_failure: Option<EngramCarriedFailureForEvaluation>,
+}
+
+#[derive(Debug, Deserialize)]
+struct EngramShowEvaluationVerdictForEvaluation {
+    position: usize,
+    #[serde(default)]
+    criterion: String,
+    #[serde(default)]
+    verdict: String,
+    #[serde(default)]
+    rationale: String,
+}
+
+/// `show --full`'s disclosure of a failing evaluation whose criteria were
+/// revised on the run: the next evaluation sees it, and after the executor's
+/// revision must name it with `--supersedes`.
+#[derive(Debug, Deserialize)]
+struct EngramCarriedFailureForEvaluation {
+    evaluation: String,
+    #[serde(default)]
+    revised_by: String,
+    #[serde(default)]
+    judged_revision: i64,
+    #[serde(default)]
+    supersedes_required: bool,
+    #[serde(default)]
+    judged_criteria: Vec<String>,
+    #[serde(default)]
+    blocking: Vec<EngramCarriedFailureVerdictForEvaluation>,
+    /// The bindings its criteria had when it judged them: the before side of
+    /// the comparison, since dropping a binding weakens a criterion too.
+    #[serde(default)]
+    judged_bindings: Vec<EngramAcceptanceBindingForEvaluation>,
+    /// The bindings the newest evaluation judged, when it is a later failing
+    /// evaluation that named this one.
+    #[serde(default)]
+    newest_judged_bindings: Option<Vec<EngramAcceptanceBindingForEvaluation>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct EngramCarriedFailureVerdictForEvaluation {
+    criterion: usize,
+    verdict: String,
+    #[serde(default)]
+    rationale: String,
+}
+
+/// A failing evaluation the next one acknowledges, as the briefs show it and
+/// the submission names it. Tracker text in it is bounded where it is shown.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct AcceptanceCarriedFailure {
+    /// The failing evaluation's full record id, passed as `--supersedes`.
+    evaluation: String,
+    /// `executor` or `planner`.
+    revised_by: String,
+    judged_revision: i64,
+    /// After the executor's revision the next evaluation must name it, from
+    /// an evaluator that never held the run.
+    supersedes_required: bool,
+    judged_criteria: Vec<String>,
+    /// (criterion, verdict word, rationale) of each verdict that did not pass.
+    blocking: Vec<(usize, String, String)>,
+    /// The bindings of the criteria it judged.
+    judged_bindings: Vec<AcceptanceCriterionBinding>,
+    /// A later failing evaluation that named it: the middle contract.
+    newest: Option<AcceptanceNewerFailure>,
+}
+
+/// The newest failing evaluation when it is not the carried one itself.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct AcceptanceNewerFailure {
+    evaluation: String,
+    criteria: Vec<String>,
+    /// (criterion, verdict word, rationale) of each verdict that did not pass.
+    blocking: Vec<(usize, String, String)>,
+    bindings: Vec<AcceptanceCriterionBinding>,
+}
+
+/// A record id Engram accepts: 32 lowercase hex characters as it mints them,
+/// or the 64 a record written before minting keeps (its own parser takes both).
+fn is_acceptance_record_id(value: &str) -> bool {
+    matches!(value.len(), 32 | 64) && is_lowercase_hex(value)
+}
+
+/// Non-passing verdicts as (criterion, verdict word, rationale), kept only for
+/// criteria that exist; a verdict word that is not a tracker word is shown as
+/// `not_pass` rather than echoed.
+fn acceptance_blocking_verdicts(
+    verdicts: impl IntoIterator<Item = (usize, String, String)>,
+    criteria_count: usize,
+) -> Vec<(usize, String, String)> {
+    verdicts
+        .into_iter()
+        .filter(|(criterion, verdict, _)| {
+            (1..=criteria_count).contains(criterion) && verdict != "pass"
+        })
+        .map(|(criterion, verdict, rationale)| {
+            let word = if is_acceptance_tracker_word(&verdict) {
+                verdict
+            } else {
+                "not_pass".to_owned()
+            };
+            (criterion, word, rationale)
+        })
+        .collect()
+}
+
+/// The carried failure, kept only when its id is a record id: an id that is
+/// not one could not be passed to the tracker, and the evaluation then goes
+/// without it, as before this was read.
+fn acceptance_carried_failure(
+    evaluation: Option<EngramShowEvaluationForEvaluation>,
+) -> Option<AcceptanceCarriedFailure> {
+    let evaluation = evaluation?;
+    let carried = evaluation
+        .carried_failure
+        .filter(|carried| is_acceptance_record_id(&carried.evaluation))?;
+    let judged_bindings =
+        acceptance_criterion_bindings(carried.judged_bindings, carried.judged_criteria.len());
+    let blocking = acceptance_blocking_verdicts(
+        carried
+            .blocking
+            .into_iter()
+            .map(|verdict| (verdict.criterion, verdict.verdict, verdict.rationale)),
+        carried.judged_criteria.len(),
+    );
+    // The newest evaluation differs from the carried one only when a later
+    // failing evaluation named it; Engram then shows its criteria, verdicts
+    // and bindings as the middle of the three contracts.
+    let newest = (evaluation.hash != carried.evaluation
+        && is_acceptance_record_id(&evaluation.hash))
+    .then(|| {
+        // Keyed by position: sorted, one verdict per position, and only the
+        // run of positions 1, 2, … that has no gap, so a criterion text and the
+        // verdict printed under it always belong together.
+        let mut verdicts = evaluation.verdicts;
+        verdicts.sort_by_key(|verdict| verdict.position);
+        verdicts.dedup_by_key(|verdict| verdict.position);
+        let verdicts: Vec<_> = verdicts
+            .into_iter()
+            .enumerate()
+            .take_while(|(index, verdict)| verdict.position == index + 1)
+            .map(|(_, verdict)| verdict)
+            .collect();
+        let criteria: Vec<String> = verdicts
+            .iter()
+            .map(|verdict| verdict.criterion.clone())
+            .collect();
+        let blocking = acceptance_blocking_verdicts(
+            verdicts
+                .into_iter()
+                .map(|verdict| (verdict.position, verdict.verdict, verdict.rationale)),
+            criteria.len(),
+        );
+        let bindings = acceptance_criterion_bindings(
+            carried.newest_judged_bindings.unwrap_or_default(),
+            criteria.len(),
+        );
+        AcceptanceNewerFailure {
+            evaluation: evaluation.hash,
+            criteria,
+            blocking,
+            bindings,
+        }
+    });
+    Some(AcceptanceCarriedFailure {
+        judged_bindings,
+        evaluation: carried.evaluation,
+        revised_by: if is_acceptance_tracker_word(&carried.revised_by) {
+            carried.revised_by
+        } else {
+            "unknown".to_owned()
+        },
+        judged_revision: carried.judged_revision,
+        supersedes_required: carried.supersedes_required,
+        judged_criteria: carried.judged_criteria,
+        blocking,
+        newest,
+    })
 }
 
 #[derive(Debug, Deserialize)]
@@ -422,6 +621,9 @@ struct AcceptanceEvaluationTask {
     /// The criteria bound to a typed host check, by position, of the same
     /// revision as `criteria`.
     bindings: Vec<AcceptanceCriterionBinding>,
+    /// A failing evaluation whose criteria were revised since: the briefs
+    /// show it and the submission acknowledges it.
+    carried_failure: Option<AcceptanceCarriedFailure>,
     pinned_mode: Option<String>,
     acceptance_basis: i64,
     evidence_basis: i64,
@@ -481,6 +683,7 @@ fn parse_acceptance_evaluation_task(
         contract.work.acceptance_bindings,
         contract.work.acceptance.len(),
     );
+    let carried_failure = acceptance_carried_failure(contract.work.evaluation);
     Ok(AcceptanceEvaluationTask {
         work_ref: work.short_ref,
         work_id: work.work_id.filter(|work_id| !work_id.is_empty()),
@@ -488,6 +691,7 @@ fn parse_acceptance_evaluation_task(
         outcome: contract.work.outcome,
         criteria: contract.work.acceptance,
         bindings,
+        carried_failure,
         pinned_mode: work.evaluation_mode,
         acceptance_basis,
         evidence_basis,
@@ -545,6 +749,10 @@ impl AcceptanceEvaluationTask {
             evidence_basis: self.evidence_basis,
             criteria_count: self.criteria.len(),
             bindings: self.bindings.clone(),
+            supersedes: self
+                .carried_failure
+                .as_ref()
+                .map(|carried| carried.evaluation.clone()),
             store,
             source_fingerprint,
             source_root,
@@ -633,6 +841,162 @@ fn acceptance_brief_binding(binding: &AcceptanceCriterionBinding) -> String {
         "[bound to a host-recorded `{kind}` check{pinned}: a pass needs basis observed and cites only verification records of kind {kind} that passed, nothing else]",
         kind = binding.check_kind,
     )
+}
+
+/// The carried failure as both briefs state it, shrinking with the omission
+/// detail like the rest of the context: Full shows every criterion it judged
+/// with each failing verdict's rationale, Compact only its failing criteria
+/// and verdicts, Minimal only its id and counts. Each text is one bounded
+/// line. Empty when nothing is carried.
+fn acceptance_brief_carried_failure(
+    task: &AcceptanceEvaluationTask,
+    detail: AcceptanceOmissionDetail,
+    same_session: bool,
+) -> String {
+    let Some(carried) = task.carried_failure.as_ref() else {
+        return String::new();
+    };
+    // Who names the failure to the tracker differs by mode: the host passes
+    // `--supersedes` for an evaluator child; a same-session evaluation records
+    // through the session's own tool, which must name it itself.
+    let acknowledgement = if same_session {
+        format!(
+            "name it as supersedes {} when you record your evaluation",
+            carried.evaluation
+        )
+    } else {
+        "your submission acknowledges it (the host names it to the tracker)".to_owned()
+    };
+    let newer = carried
+        .newest
+        .as_ref()
+        .map(|newest| {
+            format!(
+                " A later evaluation, {}, named it and also did not pass {} of the criteria it judged.",
+                newest.evaluation,
+                newest.blocking.len()
+            )
+        })
+        .unwrap_or_default();
+    let mut lines = vec![format!(
+        "Carried failure: evaluation {} judged revision {} of these criteria and did not pass {} of them, and the run's {} revised the criteria after it.{newer} Judge the current criteria above; {acknowledgement}. For each criterion a revision changed, also judge whether the revised criteria still deliver the task's outcome, and say so in its rationale: a revision that drops part of the outcome, or a binding, fails that criterion.",
+        carried.evaluation,
+        carried.judged_revision,
+        carried.blocking.len(),
+        carried.revised_by,
+    )];
+    match detail {
+        AcceptanceOmissionDetail::Full => {
+            acceptance_brief_failed_contract(
+                &mut lines,
+                &format!("Criteria evaluation {} judged", carried.evaluation),
+                &carried.judged_criteria,
+                &carried.blocking,
+                &carried.judged_bindings,
+                true,
+            );
+            if let Some(newest) = carried.newest.as_ref() {
+                acceptance_brief_failed_contract(
+                    &mut lines,
+                    &format!("Criteria the later evaluation {} judged", newest.evaluation),
+                    &newest.criteria,
+                    &newest.blocking,
+                    &newest.bindings,
+                    true,
+                );
+            }
+        }
+        AcceptanceOmissionDetail::Compact => {
+            acceptance_brief_failed_contract(
+                &mut lines,
+                &format!("Failing criteria of evaluation {}", carried.evaluation),
+                &carried.judged_criteria,
+                &carried.blocking,
+                &carried.judged_bindings,
+                false,
+            );
+            if let Some(newest) = carried.newest.as_ref() {
+                acceptance_brief_failed_contract(
+                    &mut lines,
+                    &format!("Failing criteria of the later evaluation {}", newest.evaluation),
+                    &newest.criteria,
+                    &newest.blocking,
+                    &newest.bindings,
+                    false,
+                );
+            }
+        }
+        AcceptanceOmissionDetail::Minimal => {
+            lines.push(
+                "  The criteria, rationales and bindings it judged are not shown to fit the brief."
+                    .to_owned(),
+            );
+        }
+    }
+    format!("{}\n\n", lines.join("\n"))
+}
+
+/// One failed contract of a carried failure, as the before or middle side of
+/// the comparison: in full, every criterion with each failing verdict's
+/// rationale; otherwise only the failing criteria, clipped, with their verdict
+/// words. Its bindings follow either way, since dropping one weakens a
+/// criterion as surely as rewording it.
+fn acceptance_brief_failed_contract(
+    lines: &mut Vec<String>,
+    heading: &str,
+    criteria: &[String],
+    blocking: &[(usize, String, String)],
+    bindings: &[AcceptanceCriterionBinding],
+    full: bool,
+) {
+    let clip = |text: &str, chars: usize| acceptance_brief_text(text, chars);
+    lines.push(format!("  {heading}:"));
+    if full {
+        for (index, criterion) in criteria.iter().enumerate() {
+            let position = index + 1;
+            lines.push(format!(
+                "    {position}. {}",
+                clip(criterion, MAX_ACCEPTANCE_BRIEF_SUMMARY_CHARS)
+            ));
+            if let Some((_, verdict, rationale)) = blocking
+                .iter()
+                .find(|(criterion, _, _)| *criterion == position)
+            {
+                lines.push(format!(
+                    "       {verdict}: {}",
+                    clip(rationale, MAX_ACCEPTANCE_BRIEF_SUMMARY_CHARS)
+                ));
+            }
+        }
+    } else {
+        for (position, verdict, _) in blocking {
+            let criterion = criteria
+                .get(position - 1)
+                .map(|criterion| clip(criterion, 160))
+                .unwrap_or_default();
+            lines.push(format!("    {position}. {verdict}: {criterion}"));
+        }
+    }
+    let judged = if bindings.is_empty() {
+        "none".to_owned()
+    } else {
+        bindings
+            .iter()
+            .map(|binding| {
+                let pinned = binding
+                    .fingerprint
+                    .as_deref()
+                    .map(|fingerprint| format!(", fingerprint {fingerprint}"))
+                    .unwrap_or_default();
+                format!(
+                    "criterion {} bound to `{}`{pinned}",
+                    binding.criterion, binding.check_kind
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("; ")
+    };
+    lines.push(format!("    Bindings it judged: {judged}."));
 }
 
 /// Engram's admission rule for a pass, as both briefs state it.
@@ -1026,6 +1390,27 @@ fn build_acceptance_evaluator_brief(
         .evidence
         .len()
         .min(MAX_ACCEPTANCE_BRIEF_EVIDENCE_ENTRIES);
+    // A carried failure's old criteria and rationales give way first, before
+    // any evidence a pass must cite or the outcome the evaluator now checks
+    // the revised criteria against; with nothing carried these renders are
+    // the plain full brief.
+    for carried in [
+        AcceptanceOmissionDetail::Full,
+        AcceptanceOmissionDetail::Compact,
+    ] {
+        let brief = render_acceptance_evaluator_brief_with_details(
+            task,
+            cwd,
+            listed,
+            0,
+            MAX_ACCEPTANCE_BRIEF_OUTCOME_BYTES,
+            AcceptanceOmissionDetail::Full,
+            carried,
+        );
+        if brief.prompt.len() <= max_bytes {
+            return Ok(brief);
+        }
+    }
     let mut floor = usize::MAX;
     for detail in [
         AcceptanceOmissionDetail::Full,
@@ -1033,13 +1418,15 @@ fn build_acceptance_evaluator_brief(
         AcceptanceOmissionDetail::Minimal,
     ] {
         let render = |shown, clipped, outcome_bytes| {
-            if detail == AcceptanceOmissionDetail::Full {
-                render_acceptance_evaluator_brief(task, cwd, shown, clipped, outcome_bytes)
-            } else {
-                render_acceptance_evaluator_brief_with_detail(
-                    task, cwd, shown, clipped, outcome_bytes, detail,
-                )
-            }
+            render_acceptance_evaluator_brief_with_details(
+                task,
+                cwd,
+                shown,
+                clipped,
+                outcome_bytes,
+                detail,
+                AcceptanceOmissionDetail::Minimal,
+            )
         };
         let windows = (0..=listed)
             .map(|clipped| (listed, clipped))
@@ -1064,8 +1451,10 @@ fn build_acceptance_evaluator_brief(
     Err(acceptance_contract_too_large(task, floor, max_bytes))
 }
 
-/// The brief that lists the newest `shown` entries, the oldest `clipped` of
-/// them cut to the entry bound, with the outcome held to `outcome_bytes`.
+/// The full-detail brief listing the newest `shown` entries, the oldest
+/// `clipped` of them cut to the entry bound, with the outcome held to
+/// `outcome_bytes`: what the tests measure a brief against.
+#[cfg(test)]
 fn render_acceptance_evaluator_brief(
     task: &AcceptanceEvaluationTask,
     cwd: &str,
@@ -1073,23 +1462,29 @@ fn render_acceptance_evaluator_brief(
     clipped: usize,
     outcome_bytes: usize,
 ) -> AcceptanceEvaluatorBrief {
-    render_acceptance_evaluator_brief_with_detail(
+    render_acceptance_evaluator_brief_with_details(
         task,
         cwd,
         shown,
         clipped,
         outcome_bytes,
         AcceptanceOmissionDetail::Full,
+        AcceptanceOmissionDetail::Full,
     )
 }
 
-fn render_acceptance_evaluator_brief_with_detail(
+/// The brief that lists the newest `shown` entries, the oldest `clipped` of
+/// them cut to the entry bound, with the outcome held to `outcome_bytes`, the
+/// omission details at `detail` and the carried-failure section at `carried`,
+/// which shrinks on its own axis ahead of the evidence and the outcome.
+fn render_acceptance_evaluator_brief_with_details(
     task: &AcceptanceEvaluationTask,
     cwd: &str,
     shown: usize,
     clipped: usize,
     outcome_bytes: usize,
     detail: AcceptanceOmissionDetail,
+    carried: AcceptanceOmissionDetail,
 ) -> AcceptanceEvaluatorBrief {
     let (left_out, listed) = task.evidence.split_at(task.evidence.len() - shown);
     let locator_of = |evidence: &AcceptanceEvaluationEvidence| {
@@ -1146,6 +1541,7 @@ Outcome: {outcome}\n\
 Acceptance criteria — judge every one, by number:\n\
 {criteria}\n\
 \n\
+{carried}\
 Evidence recorded on the task — cite by locator:\n\
 {evidence}\n\
 \n\
@@ -1183,6 +1579,7 @@ of the result packet described below.",
         cwd = acceptance_brief_text(cwd, MAX_DELEGATION_CWD_CHARS),
         submit_tool = TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_TOOL_NAME,
         admission_rule = ACCEPTANCE_BRIEF_ADMISSION_RULE,
+        carried = acceptance_brief_carried_failure(task, carried, false),
     );
     AcceptanceEvaluatorBrief { prompt, cuts }
 }
@@ -1265,8 +1662,9 @@ evaluator was spawned.\n\
 Judge your own work against every acceptance criterion, by number:\n\
 {criteria}\n\
 \n\
+{carried}\
 Record it with your own Engram `evaluate` tool: mode same_session, acceptance_basis \
-{acceptance_basis}, evidence_basis {evidence_basis}{source}, and exactly one verdict per criterion \
+{acceptance_basis}, evidence_basis {evidence_basis}{source}{supersedes}, and exactly one verdict per criterion \
 (pass, fail, insufficient_evidence or needs_human) with a rationale saying what you checked and \
 what you found. A pass must cite at least one evidence locator from `show {work_ref} --notes \
 --gates`. Missing proof is insufficient_evidence, never pass. {admission_rule}\n\n\
@@ -1279,6 +1677,14 @@ Omitted evidence does not establish that proof is absent on the item; say 'not s
         evidence_basis = task.evidence_basis,
         admission_rule = ACCEPTANCE_BRIEF_ADMISSION_RULE,
         verifications = acceptance_same_session_verifications(task, detail),
+        carried = acceptance_brief_carried_failure(task, detail, true),
+        // Only a planner's revision reaches a same-session brief: after the
+        // executor's, the request is refused before any brief is built.
+        supersedes = task
+            .carried_failure
+            .as_ref()
+            .map(|carried| format!(", supersedes {}", carried.evaluation))
+            .unwrap_or_default(),
     )
 }
 
@@ -1597,6 +2003,17 @@ fn acceptance_evaluation_cli_args(
     // list always passes, so no binary that takes the rest refuses it.
     if let Some(fingerprint) = target.source_fingerprint.as_ref() {
         args.extend(["--source-fingerprint".to_owned(), fingerprint.clone()]);
+    }
+    // The carried failure the evaluation acknowledges, read with the brief.
+    // Checked again here, whatever wrote the record: a value that is not a
+    // record id is never passed.
+    if let Some(supersedes) = target.supersedes.as_ref() {
+        if !is_acceptance_record_id(supersedes) {
+            return Err(ApiError::conflict(
+                "this evaluation's stored carried failure is not a record id; request a new evaluation",
+            ));
+        }
+        args.extend(["--supersedes".to_owned(), supersedes.clone()]);
     }
     if let Some(model) = model {
         args.extend(["--model".to_owned(), model.to_owned()]);
