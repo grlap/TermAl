@@ -479,6 +479,11 @@ impl AppState {
         if self.stop_waiting_engram_admission(session_id)? {
             return Ok(self.snapshot());
         }
+        // A prompt waiting for its automatic retry after a withheld delivery
+        // (`engram_abort_retry.rs`): Stop cancels the retry and keeps it.
+        if self.stop_engram_abort_retry(session_id)? {
+            return Ok(self.snapshot());
+        }
 
         let options = StopSessionOptions::default();
         let (response, claim) = self.begin_requested_stop_session(session_id, &options)?;

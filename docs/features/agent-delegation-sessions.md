@@ -1233,8 +1233,10 @@ placing the message body directly into the receiver's turn queue:
   not merely another read through the same non-issuing bridge.
 
 Receipt `notificationDisposition` is the immutable original dispatch outcome:
-`deliveredToIdleSession`, `queuedBehindActiveTurn`, or
-`durableButNotWoken`; durability does not depend on successful wake delivery.
+`deliveredToIdleSession`, `queuedBehindActiveTurn`, `heldBehindPausedQueue`
+(no turn runs and the target's queue is paused, see
+[agent mailboxes](agent-mailboxes.md#dispatch-outcome-versus-notification-state)),
+or `durableButNotWoken`; durability does not depend on successful wake delivery.
 Mailbox reads expose the evolving wake lifecycle separately as
 `notificationState`, which can additionally be `recoveredWake` and can advance
 to `deliveredToIdleSession`. A duplicate retry with the same stable intent

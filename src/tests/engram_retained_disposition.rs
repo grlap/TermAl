@@ -782,6 +782,9 @@ fn failed_legacy_unknown_park_is_published_and_never_falls_through() {
     fs::remove_dir_all(failing_path).unwrap();
 }
 
+/// The settlement of a known Defer whose card cannot be saved is held in
+/// memory until acknowledged; the store keeps the last durable evaluation,
+/// so a restart before the acknowledgement recovers conservatively from it.
 #[test]
 fn failed_defer_card_commit_keeps_the_durable_evaluation_recovery_anchor() {
     let (mut state, session, receiver, _) = root_fixture([]);
@@ -905,21 +908,19 @@ fn failed_defer_card_commit_keeps_the_durable_evaluation_recovery_anchor() {
     assert_eq!(published_session["status"], "idle");
     assert_eq!(published_session["queuePaused"], true);
     {
+        // In memory the known Defer is settled: its evaluation retired, a
+        // fresh generation, and an abort record that retries it once the
+        // settlement is acknowledged. Until then the head stays interrupted.
         let inner = state.inner.lock().unwrap();
         let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
-        assert_eq!(record.engram.dispatch_generation, generation);
+        assert!(record.engram.dispatch_generation > generation);
         assert!(record.queued_prompts[0].engram_interrupted);
-        assert!(record.queued_prompts[0].engram_waiting);
-        assert!(
-            record.queued_prompts[0]
-                .engram_evaluate
-                .as_ref()
-                .is_some_and(|prepared| matches!(
-                    &prepared.request,
-                    EngramControlRequest::TurnEvaluate { idempotency_key, .. }
-                        if idempotency_key == "defer-persist-old-key"
-                ))
-        );
+        assert!(!record.queued_prompts[0].engram_waiting);
+        assert!(record.queued_prompts[0].engram_evaluate.is_none());
+        let retry = record.engram.abort_retry.as_ref().expect("an abort record");
+        assert_eq!(retry.reason, EngramAbortReason::DeferCard);
+        assert_eq!(retry.settled_grant_id, None);
+        assert!(!record.engram.abort_retry_acknowledged);
     }
     assert!(receiver.try_recv().is_err());
 

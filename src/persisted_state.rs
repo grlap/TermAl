@@ -359,6 +359,11 @@ struct PersistedSessionRecord {
     /// checks themselves; loading tells each holder its run lost its credit.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     engram_carried_launches: Vec<EngramCarriedLaunchMarker>,
+    /// A queue head whose delivery was withheld before provider handoff and
+    /// whose authority is settled (`engram_abort_retry.rs`). Read back, it
+    /// was durable, so loading rebuilds its retry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    engram_abort_retry: Option<EngramAbortRetry>,
     #[serde(skip)]
     message_start_index: usize,
     /// Runtime-only instruction for the SQLite serializer. Full snapshots set
@@ -456,6 +461,7 @@ impl PersistedSessionRecord {
                 .iter()
                 .map(EngramCarriedCheck::marker)
                 .collect(),
+            engram_abort_retry: record.engram.abort_retry.clone(),
             message_start_index: record.message_start_index,
             persist_prompt_history: true,
             session,
@@ -538,6 +544,7 @@ impl PersistedSessionRecord {
                 begins_recorded: self.engram_begins_recorded,
                 dispatch_generation: self.engram_dispatch_generation,
                 rebind_required: self.engram_routing_token.is_some(),
+                abort_retry: self.engram_abort_retry.clone(),
                 ..EngramSessionState::default()
             },
             engram_boot_recovery_pending: false,
@@ -596,6 +603,37 @@ impl PersistedSessionRecord {
         // and be terminalized before the retained authorization is visible.
         if record.engram.recovered_admission {
             record.set_auto_dispatch_blocked(true);
+        }
+        // A saved abort record whose acknowledgement was saved too, in exactly
+        // the shape that acknowledgement writes: the head it names is still
+        // in the record's own interrupted hold (no wire intent, not parked,
+        // its transcript position known) and nothing moved the dispatch
+        // generation since the settlement. Its retry is rebuilt; the head
+        // stays interrupted, and the tick admits it when due. Anything else
+        // is dropped and keeps the conservative hold: a record saved before
+        // its acknowledgement (a crash between the settlement write and the
+        // fence), one beside a later hold (a Stop moves the generation), or
+        // one naming another head.
+        let abort_head = record.engram.abort_retry.as_ref().and_then(|retry| {
+            record
+                .queued_prompts
+                .front()
+                .filter(|queued| {
+                    retry.acknowledged
+                        && retry.generation == record.engram.dispatch_generation
+                        && queued.pending_prompt.id == retry.prompt_id
+                        && queued.engram_interrupted
+                        && !queued.engram_waiting
+                        && queued.promotion_disposition_known
+                        && !queued.has_engram_intent()
+                })
+                .map(|_| ())
+        });
+        if abort_head.is_some() {
+            record.engram.abort_retry_acknowledged = true;
+            record.set_auto_dispatch_blocked(true);
+        } else {
+            record.engram.abort_retry = None;
         }
         sync_codex_thread_state(&mut record);
         sync_pending_prompts(&mut record);

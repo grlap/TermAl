@@ -2,10 +2,13 @@
 // Owns exact authorization replay and its original store/principal association.
 // Does not infer provider non-delivery from an Engram begin receipt.
 
+/// The admission content the durability fence compares for a saved record;
+/// `engram_admission_live_content` is the same for one in memory.
 fn engram_admission_persisted_content(record: &PersistedSessionRecord) -> Value {
     json!({ "generation": record.engram_dispatch_generation,
         "routing": record.engram_routing_token, "grant": record.engram_open_grant_id,
-        "queue": record.queued_prompts.front() })
+        "queue": record.queued_prompts.front(),
+        "abortRetry": record.engram_abort_retry })
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -363,10 +366,7 @@ impl AppState {
             }
             PersistFenceTarget::EngramAdmission {
                 session_id: session_id.to_owned(),
-                content: json!({
-                    "generation": record.engram.dispatch_generation, "routing": record.engram.routing_token,
-                    "grant": record.engram.active_grant_id, "queue": record.queued_prompts.front(),
-                }),
+                content: engram_admission_live_content(record),
             }
         };
         let (fence, waiter) = PersistFence::new(
@@ -487,6 +487,12 @@ impl AppState {
         if let Some(queued) = record.queued_prompts.front_mut() {
             queued.engram_interrupted = true;
         }
+        // A Stop of a retried admission (`engram_abort_retry.rs`) ends its
+        // automatic retry in the same write that holds the head again.
+        record.engram.abort_retry = None;
+        record.engram.abort_retry_fence = None;
+        record.engram.abort_retry_acknowledged = false;
+        record.engram.abort_retry_saved = false;
         record.set_auto_dispatch_blocked(true);
         record.session.preview = "Engram authorization canceled. Prompt retained; remove it before starting a new operation.".to_owned();
         record.session.live_activity = None;
@@ -989,12 +995,17 @@ impl AppState {
                 ));
             }
             let operation_generation = record.engram.dispatch_generation.saturating_add(1);
+            // An acknowledged abort record holds this head interrupted for
+            // its retry; the retried admission's bind ends that hold once the
+            // intent it prepares is in place, which keeps the head retained.
+            // That bind is saved like the first retention of any head.
+            let abort_retry_hold = engram_abort_retry_holds_head(record);
             let current = record
                 .queued_prompts
                 .front_mut()
                 .filter(|current| {
                     current.pending_prompt.id == queued.pending_prompt.id
-                        && !current.engram_interrupted
+                        && (!current.engram_interrupted || abort_retry_hold)
                         && rejected_request.is_none_or(|rejected| {
                             current.engram_bind.as_ref().is_some_and(|prepared| {
                                 serde_json::to_value(&prepared.request).ok()
@@ -1007,13 +1018,16 @@ impl AppState {
                         "Queued prompt was canceled during work focus",
                     )
                 })?;
-            let retained_before = current.is_engram_retained();
+            let retained_before = current.is_engram_retained() && !abort_retry_hold;
             current.engram_bind = Some(EngramQueuedBind {
                 connection: target.connection.clone(),
                 settings: target.settings.clone(),
                 request: request.clone(),
                 operation_generation: Some(operation_generation),
             });
+            if abort_retry_hold {
+                current.engram_interrupted = false;
+            }
             let retention_became_visible = !retained_before && current.is_engram_retained();
             sync_pending_prompts(record);
             if retention_became_visible {
@@ -1065,12 +1079,16 @@ impl AppState {
                 "Evaluation preparation no longer owns the queued prompt",
             ));
         }
+        // An acknowledged abort record holds this head interrupted for its
+        // retry; the retried admission's evaluation ends that hold once the
+        // intent it prepares is stored below, which keeps the head retained.
+        let abort_retry_hold = engram_abort_retry_holds_head(record);
         let Some(queued) = record.queued_prompts.front_mut() else {
             return Err(EngramTransportError::local_state(
                 "Queued prompt was canceled before evaluation",
             ));
         };
-        if queued.engram_interrupted {
+        if queued.engram_interrupted && !abort_retry_hold {
             return Err(EngramTransportError::local_state(
                 "Interrupted Engram authorization requires explicit reconciliation; prompt retained",
             ));
@@ -1117,7 +1135,9 @@ impl AppState {
             )?;
             return Ok(request);
         }
-        let retained_before = queued.is_engram_retained();
+        // The retry hold's head is saved with its new intent like the first
+        // retention of any head.
+        let retained_before = queued.is_engram_retained() && !abort_retry_hold;
         queued.engram_evaluate = Some(EngramQueuedEvaluate {
             connection: target.connection.clone(),
             settings: target.settings.clone(),
@@ -1125,6 +1145,9 @@ impl AppState {
             operation_generation: Some(intent.dispatch_generation),
             begun_grant_id: None,
         });
+        if abort_retry_hold {
+            queued.engram_interrupted = false;
+        }
         let retention_became_visible = !retained_before && queued.is_engram_retained();
         sync_pending_prompts(record);
         if retention_became_visible {

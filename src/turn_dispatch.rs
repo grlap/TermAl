@@ -186,7 +186,7 @@ impl AppState {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner.find_session_index(session_id)?;
             let queued = inner.sessions[index].queued_prompts.front()?;
-            if queued.engram_interrupted {
+            if engram_queue_head_refused_as_interrupted(&inner.sessions[index]) {
                 return None;
             }
             let dispatch_generation = inner.sessions[index].engram.dispatch_generation;
@@ -1048,6 +1048,29 @@ impl AppState {
             .map(|started| started.dispatch))
     }
 
+    /// The retried admission of a prompt whose delivery was withheld before
+    /// handoff (`engram_abort_retry.rs`): it bypasses the paused queue only
+    /// for `owner`, the exact head the retry was due for, and only while its
+    /// acknowledged abort record and authority still release that head,
+    /// checked under the promotion lock. A Cancel, takeover, Stop or changed
+    /// authority since the tick starts nothing.
+    fn dispatch_next_queued_turn_for_abort_retry(
+        &self,
+        session_id: &str,
+        owner: EngramQueuedAdmissionOwner,
+    ) -> Result<Option<TurnDispatch>> {
+        if let Err(err) = self.reconcile_never_woken_mailbox_notifications_for_session(session_id) {
+            eprintln!(
+                "mailbox> failed reconciling notifications before the retried admission for \
+                 `{session_id}`: {err:#}"
+            );
+        }
+        self.revalidate_queued_mailbox_wakeups_before_dispatch(session_id);
+        Ok(self
+            .start_next_queued_turn_off_lock_for_owner(session_id, true, false, Some(owner))?
+            .map(|started| started.dispatch))
+    }
+
     /// Evaluates and promotes one stable queue head. The prompt snapshot and
     /// generation are captured under the state mutex; all Engram work happens
     /// after releasing it; the same queue head/generation is then revalidated
@@ -1058,6 +1081,24 @@ impl AppState {
         allow_blocked_dispatch: bool,
         orphaned_workflow_only: bool,
     ) -> Result<Option<StartedQueuedTurn>> {
+        self.start_next_queued_turn_off_lock_for_owner(
+            session_id,
+            allow_blocked_dispatch,
+            orphaned_workflow_only,
+            None,
+        )
+    }
+
+    /// `start_next_queued_turn_off_lock`; with `abort_retry_owner`, the
+    /// paused-queue bypass is that owner's alone and requires its abort
+    /// record to release the head (`dispatch_next_queued_turn_for_abort_retry`).
+    fn start_next_queued_turn_off_lock_for_owner(
+        &self,
+        session_id: &str,
+        allow_blocked_dispatch: bool,
+        orphaned_workflow_only: bool,
+        abort_retry_owner: Option<EngramQueuedAdmissionOwner>,
+    ) -> Result<Option<StartedQueuedTurn>> {
         // Where the session writes, for the overlap marks its turn start
         // makes under the lock.
         self.engram_host().turn_starting(session_id);
@@ -1066,6 +1107,7 @@ impl AppState {
                 session_id,
                 allow_blocked_dispatch,
                 orphaned_workflow_only,
+                abort_retry_owner.clone(),
             )
         });
         if let Err(error) = &result {
@@ -1128,10 +1170,7 @@ impl AppState {
                     return Ok(None);
                 }
                 let record = &mut inner.sessions[index];
-                if record
-                    .queued_prompts
-                    .front()
-                    .is_some_and(|queued| queued.engram_interrupted)
+                if engram_queue_head_refused_as_interrupted(record)
                     && !record.engram.recovered_admission
                 {
                     return Ok(None);
@@ -1229,18 +1268,24 @@ impl AppState {
         session_id: &str,
         allow_blocked_dispatch: bool,
         orphaned_workflow_only: bool,
+        abort_retry_owner: Option<EngramQueuedAdmissionOwner>,
     ) -> Result<Option<StartedQueuedTurn>> {
         // An explicit Send/Resume bypass is permission for the queue head
         // that existed when this drain began, not for a successor exposed by
-        // cancellation while its authorization was off-lock.
-        let bypass_owner = allow_blocked_dispatch
-            .then(|| {
-                let inner = self.inner.lock().expect("state mutex poisoned");
-                inner
-                    .find_session_index(session_id)
-                    .and_then(|index| EngramQueuedAdmissionOwner::capture(&inner.sessions[index]))
-            })
-            .flatten();
+        // cancellation while its authorization was off-lock. A retried
+        // admission's bypass is the owner it was due for, never a fresh one.
+        let releases_abort_retry = abort_retry_owner.is_some();
+        let bypass_owner = match abort_retry_owner {
+            Some(owner) => Some(owner),
+            None => allow_blocked_dispatch
+                .then(|| {
+                    let inner = self.inner.lock().expect("state mutex poisoned");
+                    inner.find_session_index(session_id).and_then(|index| {
+                        EngramQueuedAdmissionOwner::capture(&inner.sessions[index])
+                    })
+                })
+                .flatten(),
+        };
         let mut context_preparation = self.prepare_engram_context_nudge_off_lock(session_id);
         // Base-tier context refresh is the sole external operation before this
         // queue-drain path. With base integration absent or disabled, the
@@ -1397,6 +1442,17 @@ impl AppState {
                 {
                     return Ok(None);
                 }
+                if releases_abort_retry {
+                    let authority = Self::engram_binding_target_for_session_shape_locked(
+                        &inner, session_id, true,
+                    )
+                    .ok()
+                    .flatten()
+                    .map(|target| engram_abort_authority(&target));
+                    if !engram_abort_retry_releases(&inner.sessions[index], authority.as_deref()) {
+                        return Ok(None);
+                    }
+                }
                 if inner.sessions[index].engram_boot_recovery_pending {
                     let should_retry = if orphaned_workflow_only {
                         inner.sessions[index]
@@ -1450,7 +1506,9 @@ impl AppState {
                 let Some(queued) = record.queued_prompts.front().cloned() else {
                     return Ok(None);
                 };
-                if queued.engram_interrupted && !record.engram.recovered_admission {
+                if engram_queue_head_refused_as_interrupted(record)
+                    && !record.engram.recovered_admission
+                {
                     return Ok(None);
                 }
                 (
@@ -1538,11 +1596,7 @@ impl AppState {
                 .cloned()
                 .expect("validated Engram queue head should remain current");
             let queued_prompt_id = queued_after_evaluation.pending_prompt.id.clone();
-            if inner.sessions[index]
-                .queued_prompts
-                .front()
-                .is_some_and(|queued| queued.engram_interrupted)
-            {
+            if engram_queue_head_refused_as_interrupted(&inner.sessions[index]) {
                 return Ok(None);
             }
             let Some(started) = self.start_next_queued_turn_locked(

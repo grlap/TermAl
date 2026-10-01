@@ -336,7 +336,7 @@ fn orphan_recovery_retains_exact_ids_on_persistence_uncertainty_without_requeue(
 }
 
 #[test]
-fn initial_child_post_begin_persistence_unknown_retains_running_delegation_and_exact_owner() {
+fn initial_child_post_begin_persistence_unknown_retains_running_delegation_and_settles_abort() {
     for fail_card_commit in [true, false] {
         let (mut state, parent, receiver, _) = root_fixture([]);
         state.shutdown_persist_blocking();
@@ -454,18 +454,30 @@ fn initial_child_post_begin_persistence_unknown_retains_running_delegation_and_e
         assert!(child.session.live_activity.is_none());
         assert!(child.orchestrator_auto_dispatch_blocked);
         assert_eq!(child.queued_prompts.len(), 1);
+        // The matching stale-begin checkpoint closed the begun grant of a
+        // delivery this owner withheld: the head's evaluation is retired and
+        // an abort record holds it, interrupted until the settlement is
+        // acknowledged, for a fresh admission.
         assert!(child.queued_prompts[0].engram_interrupted);
+        assert!(child.queued_prompts[0].engram_evaluate.is_none());
+        let retry = child.engram.abort_retry.as_ref().expect("an abort record");
         assert_eq!(
-            child.queued_prompts[0]
-                .engram_evaluate
-                .as_ref()
-                .and_then(|prepared| prepared.begun_grant_id.as_deref()),
+            retry.settled_grant_id.as_deref(),
             Some(if fail_card_commit {
                 "child-card-grant"
             } else {
                 "child-fence-grant"
             })
         );
+        assert_eq!(
+            retry.reason,
+            if fail_card_commit {
+                EngramAbortReason::DispatchCard
+            } else {
+                EngramAbortReason::AdmissionFence
+            }
+        );
+        assert!(child.engram.active_grant_id.is_none());
         drop(inner);
         fs::remove_dir_all(failing_path).unwrap();
     }

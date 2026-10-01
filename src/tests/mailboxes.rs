@@ -1193,7 +1193,8 @@ fn idle_blocked_receiver_coalesces_repeated_mailbox_wakes() {
         .append_mailbox_message_and_notify(&sender_id, second_request)
         .expect("second mailbox send should coalesce");
     assert_eq!(second.mailbox_id, first.mailbox_id);
-    assert_eq!(second.notification_disposition, "queuedBehindActiveTurn");
+    // The target runs no turn and its queue is paused: the wake is held.
+    assert_eq!(second.notification_disposition, "heldBehindPausedQueue");
 
     let inner = state.inner.lock().expect("state mutex poisoned");
     let target = inner
@@ -1844,6 +1845,69 @@ fn runtime_exit_restores_the_mailbox_wake_and_pauses_automatic_dispatch() {
 }
 
 #[test]
+/// A wake sent to a session whose queue head is a held Engram prompt (a
+/// delivery withheld and not yet released) reports a held disposition, and
+/// the message's stored receipt keeps it.
+fn a_mailbox_wake_to_a_held_engram_head_reports_a_held_disposition() {
+    let (state, codex_id, claude_id) = mailbox_test_state();
+    let (runtime, input_rx, _process) = test_shared_codex_runtime("mailbox-held-engram-head");
+    install_single_wire_codex_fixture(&state, Some(runtime));
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let codex_index = inner
+            .find_session_index(&codex_id)
+            .expect("Codex target should exist");
+        let target = inner
+            .session_mut_by_index(codex_index)
+            .expect("Codex target should exist");
+        target.session.status = SessionStatus::Idle;
+        target.queued_prompts.push_front(QueuedPromptRecord {
+            engram_waiting: false,
+            promoted_message_index: None,
+            promotion_disposition_known: true,
+            engram_bind: None,
+            engram_evaluate: None,
+            engram_interrupted: true,
+            source: QueuedPromptSource::User,
+            attachments: Vec::new(),
+            pending_prompt: PendingPrompt {
+                engram_interrupted: true,
+                is_engram_retained: true,
+                attachments: Vec::new(),
+                id: "held-engram-head".to_owned(),
+                timestamp: stamp_now(),
+                text: "a prompt whose delivery was withheld".to_owned(),
+                expanded_text: None,
+                source: None,
+            },
+        });
+        target.set_auto_dispatch_blocked(true);
+        sync_pending_prompts(target);
+    }
+
+    let request = || {
+        let mut request = mailbox_send_request(&codex_id);
+        request.idempotency_key = "held-engram-head-wake".to_owned();
+        request
+    };
+    let receipt = state
+        .append_mailbox_message_and_notify(&claude_id, request())
+        .expect("the durable message should append behind the held head");
+
+    assert_eq!(receipt.notification_disposition, "heldBehindPausedQueue");
+    assert!(matches!(
+        input_rx.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
+    // The stored receipt keeps the original disposition.
+    let again = state
+        .append_mailbox_message_and_notify(&claude_id, request())
+        .expect("the retried send returns the stored receipt");
+    assert!(again.duplicate);
+    assert_eq!(again.notification_disposition, "heldBehindPausedQueue");
+}
+
+#[test]
 fn idle_blocked_receiver_queues_its_first_mailbox_wake_without_reactivation() {
     let (state, codex_id, claude_id) = mailbox_test_state();
     let (runtime, input_rx, _process) = test_shared_codex_runtime("mailbox-stopped-session-pause");
@@ -1867,7 +1931,8 @@ fn idle_blocked_receiver_queues_its_first_mailbox_wake_without_reactivation() {
         .append_mailbox_message_and_notify(&claude_id, request)
         .expect("the durable message should append without waking the stopped session");
 
-    assert_eq!(receipt.notification_disposition, "queuedBehindActiveTurn");
+    // No turn runs: the wake waits for the paused queue, not behind a turn.
+    assert_eq!(receipt.notification_disposition, "heldBehindPausedQueue");
     assert!(matches!(
         input_rx.try_recv(),
         Err(mpsc::TryRecvError::Empty)

@@ -215,10 +215,18 @@ fields:
 
 - Receipt `notificationDisposition` is the immutable point-in-time outcome of
   the original send attempt: `deliveredToIdleSession`,
-  `queuedBehindActiveTurn`, or `durableButNotWoken`.
+  `queuedBehindActiveTurn`, `heldBehindPausedQueue`, or `durableButNotWoken`.
 - Message `notificationState` is the current persisted wake lifecycle state:
-  `durableButNotWoken`, `queuedBehindActiveTurn`, `recoveredWake`, or
-  `deliveredToIdleSession`.
+  `durableButNotWoken`, `queuedBehindActiveTurn`, `heldBehindPausedQueue`,
+  `recoveredWake`, or `deliveredToIdleSession`.
+
+`queuedBehindActiveTurn` means the target is running a turn and the wake waits
+for it to end. `heldBehindPausedQueue` means no turn runs and the target's
+queue is paused: a retained Engram prompt ahead of it (for example a delivery
+withheld and waiting for its automatic retry, see
+[the Engram host adapter](engram-host-adapter.md#retained-prompt-recovery)), a
+Stop, or a failed mailbox turn. Such a wake waits for that hold to clear, not
+for a turn to end.
 
 The SQLite column `notification_disposition` is the legacy storage name for
 this mutable `notificationState`; it is not the immutable receipt disposition,

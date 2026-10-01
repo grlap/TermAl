@@ -13,6 +13,9 @@ mod post_receipt;
 #[path = "engram_retained_disposition.rs"]
 mod retained_disposition;
 
+#[path = "engram_abort_retry.rs"]
+mod abort_retry;
+
 #[test]
 fn root_known_defer_resume_uses_new_evaluation_identity() {
     let (state, session, receiver, transport) = root_fixture([

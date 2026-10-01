@@ -174,12 +174,18 @@ struct QueuedPromptRecord {
 
 /// Syncs pending prompts.
 fn projected_pending_prompts(record: &SessionRecord) -> Vec<PendingPrompt> {
+    // A head an acknowledged abort record holds for its automatic retry is
+    // retained, but its delivery is known not to have happened: it projects
+    // as a retryable hold, not as an interrupted (delivery-unknown) one.
+    let retry_held_head = engram_abort_retry_holds_head(record);
     record
         .queued_prompts
         .iter()
-        .map(|queued| {
+        .enumerate()
+        .map(|(position, queued)| {
             let mut prompt = queued.pending_prompt.clone();
-            prompt.engram_interrupted = queued.engram_interrupted;
+            prompt.engram_interrupted =
+                queued.engram_interrupted && !(position == 0 && retry_held_head);
             prompt.is_engram_retained = queued.is_engram_retained();
             prompt
         })

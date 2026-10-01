@@ -508,7 +508,9 @@ impl AppState {
                     TurnDispatchDeliveryOutcome::Superseded => None,
                 }
             }
-            Ok(DispatchTurnResult::Queued) => Some("queuedBehindActiveTurn"),
+            Ok(DispatchTurnResult::Queued) => {
+                Some(self.mailbox_queued_wake_disposition(&input.target_session_id))
+            }
             Err(err) => {
                 eprintln!(
                     "mailbox> failed dispatching wake to target session `{}` for mailbox `{}` message `{}` ({}): {}",
@@ -540,6 +542,30 @@ impl AppState {
             }
         }
         Ok(receipt)
+    }
+
+    /// The disposition of a mailbox wake that was queued rather than started:
+    /// behind a turn that is running, or held, when no turn runs and the
+    /// session's queue is paused (a retained prompt, a Stop, or a failed
+    /// mailbox turn). A held wake waits for that hold to clear, not for a
+    /// turn to end.
+    fn mailbox_queued_wake_disposition(&self, target_session_id: &str) -> &'static str {
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        let held = inner
+            .find_session_index(target_session_id)
+            .map(|index| &inner.sessions[index])
+            .is_some_and(|record| {
+                record.orchestrator_auto_dispatch_blocked
+                    && !matches!(
+                        record.session.status,
+                        SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
+                    )
+            });
+        if held {
+            "heldBehindPausedQueue"
+        } else {
+            "queuedBehindActiveTurn"
+        }
     }
 
     fn mailbox_peer_names(

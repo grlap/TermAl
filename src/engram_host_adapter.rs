@@ -2392,6 +2392,18 @@ struct EngramSessionState {
     /// Evicted, missing or oversized ids can signal again; delivery safety
     /// must therefore not depend on deduplication.
     signalled_compaction_item_ids: VecDeque<String>,
+    /// The queue head whose delivery this host withheld before provider
+    /// handoff, settled and waiting for its fresh admission
+    /// (`engram_abort_retry.rs`). Saved with the session.
+    abort_retry: Option<EngramAbortRetry>,
+    /// The abort record's settlement is durably acknowledged, by its fence or
+    /// by being loaded from the store. In memory only.
+    abort_retry_acknowledged: bool,
+    /// A synchronous save, with no persistence worker, wrote the settlement.
+    /// In memory only.
+    abort_retry_saved: bool,
+    /// The pending acknowledgement of the settlement. In memory only.
+    abort_retry_fence: Option<EngramAbortAckWaiter>,
 }
 
 impl Default for EngramSessionState {
@@ -2447,6 +2459,10 @@ impl Default for EngramSessionState {
             context_nudge_delivery_turn_generation: None,
             context_refresh_needed: false,
             signalled_compaction_item_ids: VecDeque::new(),
+            abort_retry: None,
+            abort_retry_acknowledged: false,
+            abort_retry_saved: false,
+            abort_retry_fence: None,
         }
     }
 }
@@ -4261,6 +4277,9 @@ impl AppState {
         // then the re-evaluation's when begin recovery issues another. A stale
         // refusal of that grant blames it (`note_engram_request_binding_refused`).
         let mut grant_binding = pending.evaluated_work_binding.clone();
+        // A known Defer's earliest retry, honoured if its card cannot be
+        // saved and the prompt is retried automatically.
+        let mut defer_not_before = None;
         let (decision, refusal_code, directives, delivered_range, fail_mode) = loop {
             match evaluation {
                 EngramDispatchEvaluation::Grant {
@@ -4739,7 +4758,13 @@ impl AppState {
                     retry_after_ms,
                     wake_condition,
                 } => {
-                    let _ = (retry_after_ms, wake_condition);
+                    let _ = wake_condition;
+                    // Wire input: a delay too large to add falls back to the
+                    // ordinary backoff rather than overflowing the clock.
+                    defer_not_before = retry_after_ms
+                        .and_then(|delay| i64::try_from(delay).ok())
+                        .and_then(chrono::Duration::try_milliseconds)
+                        .and_then(|delay| chrono::Utc::now().checked_add_signed(delay));
                     break (
                         EngramControlCardDecision::Defer,
                         Some(code),
@@ -4811,13 +4836,18 @@ impl AppState {
         }
         let delivery_is_authorized =
             decision == EngramControlCardDecision::Grant && active_grant_id.is_some();
+        // Why this owner withheld its own delivery before provider handoff,
+        // when it did: the one case whose closed grant lets the prompt be
+        // admitted again (`engram_abort_retry.rs`).
+        let mut abort_reason = None;
         let preparation = loop {
-            match self.finish_engram_dispatch_record(
+            match self.finish_engram_dispatch_record_with_defer_retry(
                 session_id,
                 pending.dispatch_generation,
                 active_grant_id.clone(),
                 uncertain_grant_id.clone(),
                 card.clone(),
+                defer_not_before,
             ) {
                 EngramDispatchRecordFinish::Ready => {
                     if delivery_is_authorized
@@ -4846,6 +4876,7 @@ impl AppState {
                                 );
                             }
                         }
+                        abort_reason = Some(EngramAbortReason::AdmissionFence);
                         break EngramTurnDeliveryPreparation::PersistenceUnknown;
                     }
                     if delivery_is_authorized {
@@ -4855,6 +4886,8 @@ impl AppState {
                         if let Some(grant_id) = active_grant_id.as_deref() {
                             self.record_engram_turn_start_basis_off_lock(session_id, grant_id);
                         }
+                        // A retried prompt is admitted: nothing is held.
+                        self.clear_engram_abort_retry_for_delivered_head(session_id);
                         break EngramTurnDeliveryPreparation::Ready;
                     }
                     break EngramTurnDeliveryPreparation::Rejected;
@@ -4872,6 +4905,7 @@ impl AppState {
                     // commit here could persist the ambiguous card without
                     // its delta, and a held Defer has already advanced its
                     // generation.
+                    abort_reason = Some(EngramAbortReason::DispatchCard);
                     break EngramTurnDeliveryPreparation::PersistenceUnknown;
                 }
                 EngramDispatchRecordFinish::DeferredByRuntimeStop => {
@@ -4922,11 +4956,29 @@ impl AppState {
                 }
                 Err(error) => engram_grant_was_issued_but_not_begun(error),
             };
+            // Only a matching receipt closes the grant. `grant_not_begun`
+            // means it is still issued, and it keeps the existing retirement
+            // protocol: no successor admission from here.
+            let closed_by_receipt = matches!(
+                &checkpoint,
+                Ok(EngramTurnCheckpointResponse::Checkpointed { receipt })
+                    if receipt.grant_id == grant_id
+            );
+            let authority = engram_abort_authority(&target);
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             if let Some(index) = inner.find_session_index(session_id) {
-                let changed = {
+                let (changed, settles_abort) = {
                     let record = &mut inner.sessions[index];
                     let mut changed = false;
+                    // This owner withheld its own delivery and the grant it
+                    // began is closed: the prompt never reached the provider.
+                    let settles_abort = abort_reason.is_some()
+                        && closed_by_receipt
+                        && record.engram.routing_token.as_deref()
+                            == Some(routing_token.as_str())
+                        && admission_owner
+                            .as_ref()
+                            .is_some_and(|owner| owner.matches(record));
                     if record.engram.routing_token.as_deref() == Some(routing_token.as_str()) {
                         if settled {
                             if record.engram.uncertain_grant_id.as_deref()
@@ -4959,9 +5011,20 @@ impl AppState {
                             changed = true;
                         }
                     }
-                    changed
+                    (changed, settles_abort)
                 };
-                if changed {
+                let settled_abort = settles_abort
+                    && abort_reason.is_some_and(|reason| {
+                        self.settle_engram_abort_before_handoff(
+                            &mut inner,
+                            index,
+                            reason,
+                            Some(grant_id.as_str()),
+                            &authority,
+                            None,
+                        )
+                    });
+                if changed && !settled_abort {
                     // The slot was edited in place above; stamp it so the
                     // delta persister writes the settlement.
                     inner
@@ -5018,6 +5081,7 @@ impl AppState {
         preparation
     }
 
+    #[cfg(test)]
     fn finish_engram_dispatch_record(
         &self,
         session_id: &str,
@@ -5025,6 +5089,28 @@ impl AppState {
         active_grant_id: Option<String>,
         uncertain_grant_id: Option<String>,
         card: EngramControlCard,
+    ) -> EngramDispatchRecordFinish {
+        self.finish_engram_dispatch_record_with_defer_retry(
+            session_id,
+            dispatch_generation,
+            active_grant_id,
+            uncertain_grant_id,
+            card,
+            None,
+        )
+    }
+
+    /// Records the dispatch card. `defer_not_before` is a known Defer's
+    /// earliest retry, honoured if its card cannot be saved and the prompt
+    /// is retried automatically (`engram_abort_retry.rs`).
+    fn finish_engram_dispatch_record_with_defer_retry(
+        &self,
+        session_id: &str,
+        dispatch_generation: u64,
+        active_grant_id: Option<String>,
+        uncertain_grant_id: Option<String>,
+        card: EngramControlCard,
+        defer_not_before: Option<chrono::DateTime<chrono::Utc>>,
     ) -> EngramDispatchRecordFinish {
         let (revision, creates) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
@@ -5218,6 +5304,28 @@ impl AppState {
                         "engram> session={session_id} failed persisting dispatch card; \
                          withholding provider delivery: {error:#}"
                     );
+                    // A known Defer is a completed evaluation with no grant:
+                    // its settlement, already applied above, is acknowledged
+                    // later, and the prompt is then admitted afresh no
+                    // earlier than its retry_after.
+                    if defer_is_held
+                        && let Some(authority) = Self::engram_binding_target_for_session_shape_locked(
+                            &inner, session_id, true,
+                        )
+                        .ok()
+                        .flatten()
+                        .map(|target| engram_abort_authority(&target))
+                        && self.settle_engram_abort_before_handoff(
+                            &mut inner,
+                            index,
+                            EngramAbortReason::DeferCard,
+                            None,
+                            &authority,
+                            defer_not_before,
+                        )
+                    {
+                        return EngramDispatchRecordFinish::PersistenceUnknown;
+                    }
                     let record = inner
                         .session_mut_by_index(index)
                         .expect("session index should remain valid");

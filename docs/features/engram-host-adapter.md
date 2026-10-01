@@ -1483,8 +1483,10 @@ Public settings resets preserve that barrier even when they clear the transient
 recovery flag. Refusal (or control disabled before an operation) retires the
 failed head. Other degraded outcomes with retained intent, including protocol,
 store and local persistence faults, remain interrupted and cancelable; they are
-not silently retried or allowed to terminalize a waiting child. Transient
-transport failures and Defer remain explicitly retryable.
+not silently retried or allowed to terminalize a waiting child. The one
+exception is a delivery the host itself withheld before provider handoff whose
+grant is then closed (Retained prompt recovery, below). Transient transport
+failures and Defer remain explicitly retryable.
 
 Queue records persist their original promoted transcript position. Trimming the
 resident transcript cannot cause a retry to append the same prompt or composer
@@ -1503,6 +1505,68 @@ resolution, never automatically resent. If control is off after a restart, the
 retained authorization is surfaced for cancellation rather than silently
 blocking or sending it without admission. This is at-most-once host handoff,
 not a claim of exactly-once model execution.
+
+### Retained prompt recovery
+
+A granted, begun admission can still fail before the prompt reaches the
+provider: the admission durability fence misses its twenty-second budget
+(a slow local writer), or the dispatch card cannot be saved. The host then
+withholds the delivery and closes the begun grant with a stale-begin
+checkpoint (`next_intent: exit`). When that checkpoint returns a receipt for
+the same grant, this host knows the prompt never reached the provider and
+that its grant is closed, so the prompt is not left interrupted for good
+(`src/engram_abort_retry.rs`):
+
+1. Under the same lock, the head loses the evaluation and bind it was admitted
+   with, the session forgets the closed grant and moves to a new dispatch
+   generation, and an abort record names the head, the reason, the closed
+   grant, the attempt count, when it was first held, when the retry is due,
+   and the authority (project, connection and admission settings) it ran
+   under. The head stays interrupted and the queue paused, and the session
+   shows "delivery not attempted; waiting for local durability".
+2. The settlement is saved and its admission content, abort record included,
+   is acknowledged by the persistence writer against the stored record. A
+   failed acknowledgement is asked for again on the next tick; nothing is
+   admitted before it succeeds. The acknowledgement is then saved on the
+   abort record itself.
+3. Once acknowledged, the head stays interrupted, and so retained (delegation
+   polling, mailbox coalescing and cancellation keep treating it as held), but
+   it projects as a retryable hold rather than an unknown delivery, and only
+   the retried admission or an explicit Resume may pass it while nothing has
+   moved the dispatch generation since the settlement. It waits behind the
+   paused queue until its retry is due: 2, 5, 10, 20, 30, then every 60
+   seconds after each aborted attempt, plus up to 20% jitter spread by session
+   and attempt. A known Defer whose card could not be saved is settled the
+   same way (no grant to close) and is due no earlier than its `retry_after`.
+4. When due, the test-run index tick (every two seconds) admits the same
+   prompt again as a fresh operation: a new evaluation key, the same prompt,
+   attachments and transcript identity. It needs no Resume, new message or
+   restart. The queue stays paused: the admission bypasses the pause only for
+   the exact head (prompt, dispatch and turn generation) it was due for, and
+   only while, under the promotion lock, its acknowledged abort record still
+   names that head under the same authority. A head cancelled in between, a
+   takeover or a changed authority starts nothing. A successful admission
+   clears the abort record; another withheld delivery settles again with the
+   next attempt and the original held-since time. A retry the drain could not
+   start counts as an attempt and moves to the next delay.
+
+Nothing else is retried. A checkpoint answered for another grant,
+`grant_not_begun` (the grant is still issued and keeps its retirement
+protocol), or an unknown checkpoint outcome keeps the conservative hold. So do
+a Stop in progress at settlement, a head that changed or was cancelled, a
+retained state another path took over, and a changed authority, which drops
+the abort record and leaves the prompt interrupted for Cancel. A committed
+change only: while a settings transaction holds the project's fence (it may
+still roll back), the tick waits. A public Stop of a session waiting for its
+retry, or of the retried admission before it stores its intent, cancels the
+retry (moving the dispatch generation, so that admission never reaches the
+provider) and keeps the prompt interrupted for explicit removal, as a Stop
+of a waiting admission does. The abort record is saved with the session: a restart after
+its acknowledgement was saved rebuilds the retry, which the tick admits when
+due; a restart before it (the record written by the failed admission, or the
+settlement saved but not yet acknowledged) keeps the interrupted hold. A mailbox wake to a session held this
+way reports `heldBehindPausedQueue`
+([agent mailboxes](agent-mailboxes.md#dispatch-outcome-versus-notification-state)).
 
 Opt-in tests in `src/tests/engram_root_recovery_live.rs` use a caller-identified
 Engram binary (`TERMAL_TEST_LIVE_ENGRAM_BINARY` and its SHA-256 in
