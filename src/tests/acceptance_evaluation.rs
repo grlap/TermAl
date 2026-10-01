@@ -4608,7 +4608,22 @@ fn acceptance_same_session_brief_holds_complete_criteria_within_the_bound_or_ref
         build_same_session_acceptance_brief(&task, None, brief.len()).unwrap(),
         brief
     );
-    let refused = build_same_session_acceptance_brief(&task, None, brief.len() - 1).unwrap_err();
+    // The omission inventory is context too: crossing its full size first
+    // shrinks that inventory, without dropping a criterion or a citation rule.
+    let compact = build_same_session_acceptance_brief(&task, None, brief.len() - 1).unwrap();
+    assert!(compact.contains("not shown to fit the brief"));
+    assert!(compact.contains("  1. The route exists\n  2. A test covers it\n"));
+    assert!(compact.contains("A pass must cite at least one evidence locator"));
+    let minimum = render_same_session_acceptance_brief_with_detail(
+        &task,
+        None,
+        AcceptanceOmissionDetail::Minimal,
+    );
+    assert_eq!(
+        build_same_session_acceptance_brief(&task, None, minimum.len()).unwrap(),
+        minimum,
+    );
+    let refused = build_same_session_acceptance_brief(&task, None, minimum.len() - 1).unwrap_err();
     assert_eq!(refused.status, StatusCode::CONFLICT);
     assert!(
         refused

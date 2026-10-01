@@ -629,12 +629,33 @@ fn acceptance_brief_omissions(cuts: &AcceptanceBriefCuts) -> Value {
     })
 }
 
+/// Prompt-only detail levels. The captured inventory returned to the requester
+/// stays intact even when its prose gives way to the complete contract.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum AcceptanceOmissionDetail {
+    Full,
+    Compact,
+    Minimal,
+}
+
 fn acceptance_brief_unread_boundary(cuts: &AcceptanceBriefCuts) -> Option<String> {
+    acceptance_brief_unread_boundary_with_detail(cuts, AcceptanceOmissionDetail::Full)
+}
+
+fn acceptance_brief_unread_boundary_with_detail(
+    cuts: &AcceptanceBriefCuts,
+    detail: AcceptanceOmissionDetail,
+) -> Option<String> {
     if cuts.unread == 0 {
         return None;
     }
     let continuation = if let Some(token) = &cuts.paging.continuation {
-        format!("continuation at that read cut: {}", json!(token))
+        if detail == AcceptanceOmissionDetail::Full {
+            format!("continuation at that read cut: {}", json!(token))
+        } else {
+            "continuation not shown to fit the brief; it remains whole in the request response"
+                .to_owned()
+        }
     } else if cuts.paging.continuation_omitted {
         format!(
             "continuation not shown: {} bytes exceed the host bound",
@@ -773,17 +794,32 @@ fn acceptance_same_session_cut_notice(
     work_ref: &str,
     cuts: &AcceptanceBriefCuts,
 ) -> Option<String> {
+    acceptance_same_session_cut_notice_with_detail(work_ref, cuts, AcceptanceOmissionDetail::Full)
+}
+
+fn acceptance_same_session_cut_notice_with_detail(
+    work_ref: &str,
+    cuts: &AcceptanceBriefCuts,
+    detail: AcceptanceOmissionDetail,
+) -> Option<String> {
     if cuts.is_empty() {
         return None;
     }
-    let boundary = acceptance_brief_unread_boundary(cuts)
+    if detail == AcceptanceOmissionDetail::Minimal {
+        return Some("Omission details not shown to fit the brief; the bounded inventory remains in the request response. Read the evidence with your own permitted `show --notes --gates` tools before judging it.".to_owned());
+    }
+    let boundary = acceptance_brief_unread_boundary_with_detail(cuts, detail)
         .map(|line| format!(" {line}"))
         .unwrap_or_default();
     Some(format!(
         "This brief for `{}` carries no evidence bodies. Read the recorded evidence with your own permitted `show --notes --gates` tools before judging it. The host read {} not carried in this brief ({}).{boundary}",
         acceptance_brief_text(work_ref, MAX_ACCEPTANCE_BRIEF_LABEL_CHARS),
         acceptance_entry_count(cuts.left_out.len()),
-        acceptance_brief_locator_list(&cuts.left_out),
+        if detail == AcceptanceOmissionDetail::Full {
+            acceptance_brief_locator_list(&cuts.left_out)
+        } else {
+            "locator names not shown to fit the brief".to_owned()
+        },
     ))
 }
 
@@ -807,39 +843,42 @@ fn build_acceptance_evaluator_brief(
         .evidence
         .len()
         .min(MAX_ACCEPTANCE_BRIEF_EVIDENCE_ENTRIES);
-    let windows = (0..=listed)
-        .map(|clipped| (listed, clipped))
-        .chain((0..listed).rev().map(|shown| (shown, shown)));
-    for (shown, clipped) in windows {
-        let brief = render_acceptance_evaluator_brief(
-            task,
-            cwd,
-            shown,
-            clipped,
-            MAX_ACCEPTANCE_BRIEF_OUTCOME_BYTES,
-        );
-        if brief.prompt.len() <= max_bytes {
-            return Ok(brief);
+    let mut floor = usize::MAX;
+    for detail in [
+        AcceptanceOmissionDetail::Full,
+        AcceptanceOmissionDetail::Compact,
+        AcceptanceOmissionDetail::Minimal,
+    ] {
+        let render = |shown, clipped, outcome_bytes| {
+            if detail == AcceptanceOmissionDetail::Full {
+                render_acceptance_evaluator_brief(task, cwd, shown, clipped, outcome_bytes)
+            } else {
+                render_acceptance_evaluator_brief_with_detail(
+                    task, cwd, shown, clipped, outcome_bytes, detail,
+                )
+            }
+        };
+        let windows = (0..=listed)
+            .map(|clipped| (listed, clipped))
+            .chain((0..listed).rev().map(|shown| (shown, shown)));
+        for (shown, clipped) in windows {
+            let brief = render(shown, clipped, MAX_ACCEPTANCE_BRIEF_OUTCOME_BYTES);
+            if brief.prompt.len() <= max_bytes {
+                return Ok(brief);
+            }
+        }
+        let candidate_floor = render(0, 0, 0).prompt.len();
+        floor = floor.min(candidate_floor);
+        if candidate_floor <= max_bytes {
+            // One byte joins the kept text to the marker the floor carries.
+            let outcome_bytes = (max_bytes - candidate_floor)
+                .saturating_sub(1)
+                .min(MAX_ACCEPTANCE_BRIEF_OUTCOME_BYTES);
+            return Ok(render(0, 0, outcome_bytes));
         }
     }
-    let floor = render_acceptance_evaluator_brief(task, cwd, 0, 0, 0)
-        .prompt
-        .len();
-    if floor > max_bytes {
-        // True only now: no context is left to give up.
-        return Err(acceptance_contract_too_large(task, floor, max_bytes));
-    }
-    // One byte joins the kept text to the marker the floor already carries.
-    let outcome_bytes = (max_bytes - floor)
-        .saturating_sub(1)
-        .min(MAX_ACCEPTANCE_BRIEF_OUTCOME_BYTES);
-    Ok(render_acceptance_evaluator_brief(
-        task,
-        cwd,
-        0,
-        0,
-        outcome_bytes,
-    ))
+    // Only now have the outcome, evidence and omission details all given way.
+    Err(acceptance_contract_too_large(task, floor, max_bytes))
 }
 
 /// The brief that lists the newest `shown` entries, the oldest `clipped` of
@@ -850,6 +889,24 @@ fn render_acceptance_evaluator_brief(
     shown: usize,
     clipped: usize,
     outcome_bytes: usize,
+) -> AcceptanceEvaluatorBrief {
+    render_acceptance_evaluator_brief_with_detail(
+        task,
+        cwd,
+        shown,
+        clipped,
+        outcome_bytes,
+        AcceptanceOmissionDetail::Full,
+    )
+}
+
+fn render_acceptance_evaluator_brief_with_detail(
+    task: &AcceptanceEvaluationTask,
+    cwd: &str,
+    shown: usize,
+    clipped: usize,
+    outcome_bytes: usize,
+    detail: AcceptanceOmissionDetail,
 ) -> AcceptanceEvaluatorBrief {
     let (left_out, listed) = task.evidence.split_at(task.evidence.len() - shown);
     let locator_of = |evidence: &AcceptanceEvaluationEvidence| {
@@ -876,17 +933,25 @@ fn render_acceptance_evaluator_brief(
         evidence.push("  (none shown)".to_owned());
     }
     let omitted = cuts.unread + cuts.left_out.len();
-    if !cuts.left_out.is_empty() {
+    if detail == AcceptanceOmissionDetail::Minimal && !cuts.is_empty() {
+        evidence.push("  Omission details not shown to fit the brief; the bounded inventory remains in the request response.".to_owned());
+    } else if !cuts.left_out.is_empty() {
         evidence.push(format!(
             "  ({omitted} older entries not shown; the host read and left out {}: {})",
             cuts.left_out.len(),
-            acceptance_brief_locator_list(&cuts.left_out)
+            if detail == AcceptanceOmissionDetail::Full {
+                acceptance_brief_locator_list(&cuts.left_out)
+            } else {
+                "locator names not shown to fit the brief".to_owned()
+            }
         ));
     } else if omitted > 0 {
         evidence.push(format!("  ({omitted} older entries not shown)"));
     }
-    if let Some(boundary) = acceptance_brief_unread_boundary(&cuts) {
-        evidence.push(format!("  {boundary}"));
+    if detail != AcceptanceOmissionDetail::Minimal {
+        if let Some(boundary) = acceptance_brief_unread_boundary_with_detail(&cuts, detail) {
+            evidence.push(format!("  {boundary}"));
+        }
     }
     let prompt = format!(
         "You are an acceptance evaluator. Another session did the work below and asks\n\
@@ -954,8 +1019,8 @@ fn acceptance_contract_too_large(
 
 /// `same_session` spawns nothing: the caller judges its own work and records
 /// it through its own tracker tool, against the bases read here. It carries no
-/// context to shrink, so it holds the complete criteria within the same byte
-/// bound as the evaluator's brief or is refused the same way.
+/// evidence bodies. Its omission inventory is context that can shrink before
+/// the complete criteria are refused under the evaluator's same byte bound.
 /// `source_fingerprint` is the host's content revision of this session's
 /// worktree, taken when the evaluation was requested; the brief asks the
 /// session to declare it, so its own turn's report of that same revision does
@@ -965,23 +1030,47 @@ fn build_same_session_acceptance_brief(
     source_fingerprint: Option<&str>,
     max_bytes: usize,
 ) -> std::result::Result<String, ApiError> {
-    let brief = render_same_session_acceptance_brief(task, source_fingerprint);
-    if brief.len() > max_bytes {
-        return Err(acceptance_contract_too_large(task, brief.len(), max_bytes));
+    let mut floor = usize::MAX;
+    for detail in [
+        AcceptanceOmissionDetail::Full,
+        AcceptanceOmissionDetail::Compact,
+        AcceptanceOmissionDetail::Minimal,
+    ] {
+        let brief = if detail == AcceptanceOmissionDetail::Full {
+            render_same_session_acceptance_brief(task, source_fingerprint)
+        } else {
+            render_same_session_acceptance_brief_with_detail(task, source_fingerprint, detail)
+        };
+        if brief.len() <= max_bytes {
+            return Ok(brief);
+        }
+        floor = floor.min(brief.len());
     }
-    Ok(brief)
+    Err(acceptance_contract_too_large(task, floor, max_bytes))
 }
 
 fn render_same_session_acceptance_brief(
     task: &AcceptanceEvaluationTask,
     source_fingerprint: Option<&str>,
 ) -> String {
+    render_same_session_acceptance_brief_with_detail(
+        task,
+        source_fingerprint,
+        AcceptanceOmissionDetail::Full,
+    )
+}
+
+fn render_same_session_acceptance_brief_with_detail(
+    task: &AcceptanceEvaluationTask,
+    source_fingerprint: Option<&str>,
+    detail: AcceptanceOmissionDetail,
+) -> String {
     // The value is host-measured ("content-v1:" and hex), never tracker text.
     let source = source_fingerprint
         .map(|fingerprint| format!(", source_fingerprint {fingerprint}"))
         .unwrap_or_default();
     let cuts = acceptance_same_session_brief_cuts(task);
-    let omissions = acceptance_same_session_cut_notice(&task.work_ref, &cuts)
+    let omissions = acceptance_same_session_cut_notice_with_detail(&task.work_ref, &cuts, detail)
         .unwrap_or_else(|| "No evidence entries were omitted.".to_owned());
     format!(
         "Acceptance evaluation of {work_ref} runs in this session (mode same_session); no \

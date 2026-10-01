@@ -1753,12 +1753,23 @@ evaluator", which states the bytes the criteria take and the limit. Non-ASCII
 context therefore shortens the brief; it never produces that refusal for small
 criteria.
 
+Omission metadata is also shrinkable prompt context. If its full locator list
+or captured continuation would force that refusal, the brief first uses counts
+instead of locator names and omits the continuation whole, saying that those
+details were not shown to fit the brief. If needed, a short omission notice
+replaces the remaining boundary prose. The request response still carries the
+same bounded locator inventory, full permitted continuation and captured read
+cut; shrinking their presentation never changes `evidenceOmissions`, a verdict
+word, the pass-citation rules, or a criterion. A partial continuation is never
+presented as usable.
+
 The `same_session` brief is held to the same 65 536-byte bound and the same
-refusal. It carries the complete criteria and the bases and no context that
-could shrink, so a contract is briefed whole or refused alike whichever mode is
-selected. Its response and brief describe all evidence that this host brief
-does not carry, with the same bounded omission inventory and captured unread
-boundary; the session may use its own permitted tracker tools to inspect it.
+refusal. It carries the complete criteria and the bases; its omission details
+can shrink before a contract is refused, just as in the independent brief.
+Its response describes all evidence that this host brief does not carry,
+with the same bounded omission inventory and captured unread boundary; its
+brief names those details or explicitly says they were not shown to fit. The
+session may use its own permitted tracker tools to inspect the evidence.
 Its omission notice directs the session to those reads; it does not force
 `insufficient-evidence` for evidence the session subsequently reads and checks.
 

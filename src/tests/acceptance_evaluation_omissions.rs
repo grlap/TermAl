@@ -4,6 +4,77 @@
 // parent module's deterministic reader fixtures; no tracker process is run.
 use super::*;
 
+#[test]
+fn acceptance_omissions_metadata_shrinks_before_a_fitting_contract_is_refused() {
+    for mode in ["independent_session", "same_session"] {
+        for with_continuation in [false, true] {
+            let (state, project, parent, root) = fixture();
+            install_store(&state, &project, &root);
+            let criterion = "c".repeat(if with_continuation { 60_000 } else { 62_000 });
+            let mut full = full_receipt();
+            full["work"]["acceptance"] = json!([criterion, "second criterion stays whole"]);
+            let bare = parse_acceptance_evaluation_task(show_receipt(None), full.clone()).unwrap();
+            if mode == "same_session" {
+                build_same_session_acceptance_brief(&bare, None, MAX_ACCEPTANCE_BRIEF_BYTES)
+                    .expect("the complete contract fits without the omission inventory");
+            } else {
+                build_acceptance_evaluator_brief(&bare, "/repo", MAX_ACCEPTANCE_BRIEF_BYTES)
+                    .expect("the complete contract fits without the omission inventory");
+            }
+            let token = format!("captured-cursor:{}", "x".repeat(8_000));
+            let mut show = show_receipt(None);
+            show["notes"] = json!((0..110).map(|index| {
+                let mut note = evidence_note(index, "older proof");
+                note["locator"] = json!(format!("{index:064x}"));
+                note
+            }).collect::<Vec<_>>());
+            if with_continuation {
+                show["notes_omitted"] = json!(7);
+                show["notes_window"] = json!({"older": 7, "after": token,
+                    "read_cut": {"project_position": 42}});
+            }
+            let reader = move |_: &EngramConnectionConfig, args: &[String], _: Duration| {
+                if args.first().map(String::as_str) == Some("control-policy") {
+                    Ok(policy_receipt(Some(&[mode])))
+                } else if args.iter().any(|arg| arg == "held") {
+                    Ok(json!({"items": [], "omitted": 0}))
+                } else if args.iter().any(|arg| arg == "--full") {
+                    Ok(full.clone())
+                } else {
+                    Ok(show.clone())
+                }
+            };
+            let wire = serde_json::to_value(state
+                .request_acceptance_evaluation_with_runner(
+                    &parent, evaluation_request(Some(Agent::Codex)), reader)
+                .unwrap_or_else(|error| panic!("{mode}, continuation={with_continuation}: {}", error.message)))
+                .unwrap();
+            let prompt = if mode == "same_session" {
+                wire["brief"].as_str().unwrap()
+            } else {
+                wire["delegation"]["prompt"].as_str().unwrap()
+            };
+            assert!(prompt.len() <= MAX_ACCEPTANCE_BRIEF_BYTES);
+            assert!(prompt.contains(&criterion));
+            assert!(prompt.contains("second criterion stays whole"));
+            assert!(prompt.contains("not shown to fit the brief"));
+            assert!(!prompt.contains(&"x".repeat(100)), "no partial continuation is usable");
+            let omitted = &wire["evidenceOmissions"];
+            let left_out = &omitted["leftOut"];
+            assert!(left_out["count"].as_u64().unwrap() >= 70);
+            assert_eq!(left_out["locators"].as_array().unwrap().len(), 64);
+            assert_eq!(left_out["locators"][63], format!("{:064x}", left_out["count"].as_u64().unwrap() - 1));
+            if with_continuation {
+                assert_eq!(omitted["unread"]["continuation"], token);
+                assert_eq!(omitted["unread"]["continuationOmitted"], false);
+                assert_eq!(omitted["unread"]["readCut"]["project_position"], 42);
+                assert_eq!(omitted["unread"]["reason"], "entry_limit");
+            }
+            assert_eq!(compact_acceptance_evaluation_request_result(&wire)["evidenceOmissions"], *omitted);
+        }
+    }
+}
+
 // Both slots of the brief are bounded: known omitted records keep their
 // identities, while unvisited pages are reported without invented note ids.
 #[test]
