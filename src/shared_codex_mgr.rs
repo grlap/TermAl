@@ -69,11 +69,6 @@ impl AppState {
         if let Some(runtime) = shared_runtime.clone() {
             return Ok(runtime);
         }
-        #[cfg(test)]
-        if let Some(runtime) = self.test_read_only_slot_fallback(profile) {
-            return Ok(runtime);
-        }
-
         let runtime = spawn_shared_codex_runtime(self.clone(), profile)?;
         *shared_runtime = Some(runtime.clone());
         Ok(runtime)
@@ -84,32 +79,7 @@ impl AppState {
         &self,
         profile: SharedCodexProfile,
     ) -> Option<SharedCodexRuntime> {
-        let running = self
-            .shared_codex_runtime_slot(profile)
-            .lock()
-            .expect("shared Codex runtime mutex poisoned")
-            .clone();
-        #[cfg(test)]
-        let running = running.or_else(|| self.test_read_only_slot_fallback(profile));
-        running
-    }
-
-    /// Tests install, replace and clear one scripted app-server in the
-    /// default slot and exercise delegation logic, not app-server placement.
-    /// In test builds an EMPTY read-only slot is therefore served from the
-    /// default one, so no test starts a real app-server for a read-only
-    /// child; tests of the placement fill the read-only slot themselves. The
-    /// caller has found the read-only slot empty and may still hold its lock,
-    /// so this takes only the default slot's lock.
-    #[cfg(test)]
-    fn test_read_only_slot_fallback(
-        &self,
-        profile: SharedCodexProfile,
-    ) -> Option<SharedCodexRuntime> {
-        if profile != SharedCodexProfile::ReadOnlySandbox {
-            return None;
-        }
-        self.shared_codex_runtime
+        self.shared_codex_runtime_slot(profile)
             .lock()
             .expect("shared Codex runtime mutex poisoned")
             .clone()

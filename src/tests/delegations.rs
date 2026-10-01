@@ -5217,7 +5217,7 @@ fn terminal_shared_codex_delegation_releases_only_child_thread() {
             "terminal-thread-release",
             process_owner.process.clone(),
         );
-        *state.shared_codex_runtime.lock().unwrap() = Some(runtime.clone());
+        install_single_wire_codex_fixture(&state, Some(runtime.clone()));
         let parent = test_session_id(&state, Agent::Codex);
         {
             let mut inner = state.inner.lock().unwrap();

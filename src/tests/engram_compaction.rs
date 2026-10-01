@@ -307,7 +307,7 @@ fn manual_compaction_preserves_undelivered_context() {
         EngramContextNudgePreparation::Ready
     );
     let (runtime, input_rx, _process) = test_shared_codex_runtime("manual-compaction-cache");
-    *state.shared_codex_runtime.lock().unwrap() = Some(runtime);
+    install_single_wire_codex_fixture(&state, Some(runtime));
     let responder = std::thread::spawn(move || {
         let command = recv_within_guard(&input_rx, "manual compaction RPC").unwrap();
         let CodexRuntimeCommand::JsonRpcRequest {
