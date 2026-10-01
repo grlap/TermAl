@@ -13,7 +13,7 @@ const PROJECT_DECLARATION: &str = "evaluator-tool-access";
 
 /// A local project with the tracker enabled and declared, as the operator's
 /// enablement leaves it.
-fn tracker_project(state: &AppState, name: &str) -> (String, PathBuf) {
+pub(super) fn tracker_project(state: &AppState, name: &str) -> (String, PathBuf) {
     let root = state
         .test_temp_root
         .as_ref()
@@ -56,7 +56,7 @@ fn tracker_project(state: &AppState, name: &str) -> (String, PathBuf) {
 
 /// A running read-only delegation child of `parent` in `mode`, configured as
 /// delegation creation configures it.
-fn delegation_child(
+pub(super) fn delegation_child(
     state: &AppState,
     parent: &str,
     project_id: &str,

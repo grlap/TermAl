@@ -549,6 +549,10 @@ impl AppState {
         // tracker's CLI in the child's shell is held by Codex's read-only
         // sandbox, which an evaluator runs in (`shared_codex_profile.rs`).
         let acceptance_evaluator = self.session_is_acceptance_evaluator_child(parent_session_id);
+        let read_only_child = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            session_is_read_only_delegation_child_locked(&inner, parent_session_id)
+        };
         let engram = if acceptance_evaluator {
             servers.clear();
             None
@@ -582,14 +586,37 @@ impl AppState {
             "TermAl",
         )?;
         if let Some(engram) = engram {
+            let mut tracker = serde_json::to_value(&engram)
+                .context("Engram Codex MCP descriptor should serialize")?;
+            if read_only_child {
+                // Approval is per tool, not per argument. The tracker must
+                // enforce peek-only next and memories without a generation.
+                // Never approve these tools against an unrestricted server.
+                tracker["args"]
+                    .as_array_mut()
+                    .context("Engram MCP args should be an array")?
+                    .push(json!("--read-only"));
+                let words = ENGRAM_MCP_READ_TOOLS
+                    .iter()
+                    .map(|(word, _)| *word)
+                    .collect::<Vec<_>>();
+                tracker["enabled_tools"] = json!(words);
+                tracker["tools"] = Value::Object(
+                    words
+                        .into_iter()
+                        .map(|word| {
+                            (word.to_owned(), json!({ "approval_mode": "approve" }))
+                        })
+                        .collect(),
+                );
+            }
             config
                 .get_mut("mcp_servers")
                 .and_then(Value::as_object_mut)
                 .context("TermAl Codex delegation MCP config should contain mcp_servers")?
                 .insert(
                     ENGRAM_MCP_SERVER_NAME.to_owned(),
-                    serde_json::to_value(&engram)
-                        .context("Engram Codex MCP descriptor should serialize")?,
+                    tracker,
                 );
             merge_owned_agent_shell_env_into_codex_config(
                 &mut config,

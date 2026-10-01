@@ -162,6 +162,23 @@ engram --project-file <project>/.engram-project --home <home> \
   --session-id <termal-session-id>
 ```
 
+For a read-only Codex delegation child, the descriptor also passes
+`--read-only`. That Engram mode exposes only `next`, `ls`, `search`, `show` and
+`memories`, rejects non-peek `next`, `memories` with `context_generation`, and
+undeclared arguments, and opens its store read-only. Codex's thread config
+allowlists these five tools and sets their individual `approval_mode` to
+`approve`, because its ordinary annotation-based approval would refuse them
+under policy `never`. The filesystem sandbox stays `read-only`, the approval
+policy stays `never`, and evaluator children still receive no tracker server.
+No default approval for other tools is added.
+
+The configured Engram binary must implement this enforced mode before this
+configuration is installed. An older binary rejects the flag; the optional
+server then provides no Engram tools rather than falling back to an unrestricted
+server. Thread startup and its sandbox remain independent of that optional
+server. The installation handoff records the exact Engram binary and the
+read/write transport smoke. These tool settings never authorize tracker writes.
+
 The child environment contains exactly the host context Engram also exposes to
 its shell words:
 

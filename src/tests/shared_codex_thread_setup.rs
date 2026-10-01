@@ -942,11 +942,40 @@ pub(super) fn shared_codex_setup_request_for_mcp_test(
     resume_thread_id: Option<&str>,
     engram_enabled: bool,
 ) -> Value {
+    shared_codex_setup_request_for_tracker_test(codex_home, resume_thread_id, engram_enabled, false)
+}
+
+pub(super) fn shared_codex_setup_request_for_tracker_test(
+    codex_home: &FsPath,
+    resume_thread_id: Option<&str>,
+    engram_enabled: bool,
+    read_only: bool,
+) -> Value {
     let state = test_app_state();
     let session_id = if engram_enabled {
         create_test_engram_codex_session(&state, "shared-codex-seeded-mcp-config")
     } else {
         test_session_id(&state, Agent::Codex)
+    };
+    let session_id = if read_only {
+        let (project, root) = {
+            let inner = state.inner.lock().unwrap();
+            let record = &inner.sessions[inner.find_session_index(&session_id).unwrap()];
+            (
+                record.session.project_id.clone().unwrap(),
+                PathBuf::from(&record.session.workdir),
+            )
+        };
+        super::evaluator_tool_access::delegation_child(
+            &state,
+            &session_id,
+            &project,
+            &root,
+            Agent::Codex,
+            DelegationMode::Reviewer,
+        )
+    } else {
+        session_id
     };
     let (runtime, _runtime_input_rx, process) =
         test_shared_codex_runtime("shared-codex-seeded-mcp-config");
@@ -982,7 +1011,11 @@ pub(super) fn shared_codex_setup_request_for_mcp_test(
         &session_id,
         CodexPromptCommand {
             active_turn_generation: 0,
-            approval_policy: CodexApprovalPolicy::AutoApprove,
+            approval_policy: if read_only {
+                CodexApprovalPolicy::Never
+            } else {
+                CodexApprovalPolicy::AutoApprove
+            },
             attachments: Vec::new(),
             cwd: "/tmp".to_owned(),
             model: "gpt-5.4".to_owned(),
@@ -990,7 +1023,11 @@ pub(super) fn shared_codex_setup_request_for_mcp_test(
             reasoning_effort: CodexReasoningEffort::Medium,
             service_tier: None,
             resume_thread_id: resume_thread_id.map(str::to_owned),
-            sandbox_mode: CodexSandboxMode::WorkspaceWrite,
+            sandbox_mode: if read_only {
+                CodexSandboxMode::ReadOnly
+            } else {
+                CodexSandboxMode::WorkspaceWrite
+            },
         },
     )
     .expect("seeded MCP config must not prevent Codex thread setup");

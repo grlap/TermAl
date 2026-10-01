@@ -32,6 +32,7 @@ mod codex_discovery;
 mod codex_home;
 mod codex_protocol;
 mod codex_read_only_profile;
+mod codex_read_only_tracker;
 mod codex_thread_recovery;
 mod codex_threads;
 mod content_revision;
