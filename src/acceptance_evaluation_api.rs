@@ -187,7 +187,7 @@ fn acceptance_evaluation_submit_tool_definition() -> Value {
                             "basis": {
                                 "type": "string",
                                 "enum": ["observed", "asserted", "judgment", "human-required"],
-                                "description": "Defaults to judgment."
+                                "description": "Defaults to judgment. A pass on a criterion your brief marks as bound must use observed; observed cites only verification records that passed."
                             },
                             "rationale": {
                                 "type": "string",
@@ -199,7 +199,7 @@ fn acceptance_evaluation_submit_tool_definition() -> Value {
                                 "type": "array",
                                 "maxItems": MAX_ACCEPTANCE_EVALUATION_EVIDENCE_PER_CRITERION,
                                 "items": { "type": "string", "pattern": "^[a-f0-9]{8,64}$" },
-                                "description": "Evidence locators from your brief. A pass needs at least one."
+                                "description": "Evidence locators from your brief. A pass needs at least one. With basis observed, cite only records marked `verification <kind> passed` (of the bound kind, for a bound criterion) and nothing else; notes and gates go with judgment."
                             }
                         }
                     }
@@ -1029,6 +1029,9 @@ impl AppState {
         let authority = acceptance_evaluation_submit_authority_locked(&inner, child)?;
         request
             .validate_coverage(authority.target.criteria_count)
+            .map_err(ApiError::bad_request)?;
+        request
+            .validate_bindings(&authority.target.bindings)
             .map_err(ApiError::bad_request)?;
         let record = inner
             .find_session_index(child)

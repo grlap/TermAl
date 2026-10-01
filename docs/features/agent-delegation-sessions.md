@@ -621,6 +621,10 @@ selected and what is recorded, is described in the
   ordinary one, synthesized from its final answer like an explorer's.
 - **Target and submission.** The record carries `acceptanceEvaluation`:
   `workRef`, `mode`, `acceptanceBasis`, `evidenceBasis`, `criteriaCount`,
+  `bindings` (the criteria bound to a typed host check, each `criterion`,
+  `checkKind` and optional `fingerprint`; absent when none, and checked at
+  submission, see
+  [Engram host adapter](./engram-host-adapter.md#acceptance-evaluation)),
   `attemptKey` (the delegation id), `store` (the tracker store the brief was
   read from), `sourceFingerprint` (the content revision of the evaluated
   worktree taken at the request; declared as `--source-fingerprint` only if
@@ -1481,6 +1485,8 @@ type DelegationRecord = {
     acceptanceBasis: number;
     evidenceBasis: number;
     criteriaCount: number;
+    // The criteria bound to a typed host check; absent when none.
+    bindings?: { criterion: number; checkKind: string; fingerprint?: string }[];
     attemptKey: string;
     // The tracker store the brief was read from.
     store?: { projectId: string; databasePath: string } | null;
