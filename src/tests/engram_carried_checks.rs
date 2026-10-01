@@ -346,8 +346,9 @@ fn a_run_record_is_credited_only_as_it_was_first_read_and_consistent() {
         Err("its terminal record says passed, but not every stage it requested passed with code 0")
     );
 
-    // A run whose stages all passed but which requested no test stage the
-    // host recognises: a foreground gate would not be credited on it either.
+    // A run whose stages all passed but which requested no test stage (its
+    // record gives no kinds and names neither of TermAl's test stages): a
+    // foreground gate would not be credited on it either.
     let compile_only = write_run(
         temp.path(),
         "test-compile-only",
@@ -369,7 +370,7 @@ fn a_run_record_is_credited_only_as_it_was_first_read_and_consistent() {
     let digest = engram_terminal_record_digest(&compile_only).expect("a terminal record");
     assert_eq!(
         engram_read_carried_run(&compile_only, &digest),
-        Err("its run requested no test stage the host recognises")
+        Err(ENGRAM_CARRIED_RUN_NO_TEST_STAGE)
     );
 
     // A run still going has no terminal record.

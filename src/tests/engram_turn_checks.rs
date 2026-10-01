@@ -372,6 +372,7 @@ fn a_test_run_passes_only_on_evidence_that_tests_passed() {
         engram_check_showed_passing_tests(
             &check,
             &engram_check_result_lines(&check.program, output),
+            &engram_launcher_output_test_stages(output),
         )
     };
     assert!(showed("cargo test", "test result: ok. 3 passed; 0 failed"));
@@ -4035,6 +4036,10 @@ mod lost_shell_overlap;
 // module.
 #[path = "engram_carried_checks.rs"]
 mod carried_checks;
+
+// Which launcher stages are test stages, likewise a child module.
+#[path = "engram_launcher_stages.rs"]
+mod launcher_stages;
 
 // The first extraction's end-to-end proof against its base, likewise a child
 // module.

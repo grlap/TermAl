@@ -738,6 +738,13 @@ const ENGRAM_CARRIED_RUN_NEITHER: &str = concat!(
     "so it is neither credited nor recorded"
 );
 
+/// Why a passed run with no test stage is refused
+/// (`engram_launcher_test_stages`).
+const ENGRAM_CARRIED_RUN_NO_TEST_STAGE: &str = concat!(
+    "its run requested no test stage: its request record marks no stage `kind` `test`, ",
+    "or, giving no kinds, names neither `rust-tests` nor `vitest`"
+);
+
 /// What a settled run says, when the host may credit it.
 #[derive(Debug, PartialEq, Eq)]
 struct EngramCarriedRunVerdict {
@@ -757,10 +764,11 @@ struct EngramCarriedRunVerdict {
 /// Reads the run's terminal record at `directory`, which must have the
 /// digest the host first read (`digest`), and returns what it says, or why it
 /// cannot be credited. A passed run needs every stage its request lists
-/// passed with code 0 and no error, among them a test stage the host
-/// recognises (`ENGRAM_LAUNCHER_FULL_TEST_STAGES`), as a foreground gate
-/// needs; either way the expected, before and after input fingerprints must
-/// agree, and so must the request's.
+/// passed with code 0 and no error, among them a test stage by its request
+/// record (`engram_launcher_test_stages`), as a foreground gate needs; a
+/// failed one is recorded failed, whichever stage failed. Either way the
+/// expected, before and after input fingerprints must agree, and so must the
+/// request's.
 fn engram_read_carried_run(
     directory: &FsPath,
     digest: &str,
@@ -847,11 +855,8 @@ fn engram_read_carried_run(
                     "its terminal record says passed, but not every stage it requested passed with code 0",
                 );
             }
-            if !requested
-                .iter()
-                .any(|name| ENGRAM_LAUNCHER_FULL_TEST_STAGES.contains(&name.as_str()))
-            {
-                return Err("its run requested no test stage the host recognises");
+            if engram_launcher_test_stages(&request).is_empty() {
+                return Err(ENGRAM_CARRIED_RUN_NO_TEST_STAGE);
             }
             true
         }

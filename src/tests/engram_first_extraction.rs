@@ -182,10 +182,11 @@ fn a_test_driven_through_the_recorder_checkpoints_as_it_did_at_the_extractions_b
 
 /// The fragments that are the check machinery: what a check is, how it is
 /// recognised, marked, carried and reported.
-const CHECK_MACHINERY_FILES: [&str; 4] = [
+const CHECK_MACHINERY_FILES: [&str; 5] = [
     "engram_turn_checks.rs",
     "engram_carried_checks.rs",
     "engram_check_recognition.rs",
+    "engram_launcher_stages.rs",
     "engram_one_call.rs",
 ];
 

@@ -247,7 +247,8 @@ or more later, since a launch that follows an unmatched one sooner is
 refused as ambiguous. TermAl carries the
 launch past the turn and credits the run as a passed test check on the
 holder's next checkpoint for the same claim, when every stage the run
-requested passed, among them `rust-tests` or `vitest`, its input
+requested passed, among them a test stage ([Which stages count as
+tests](#which-stages-count-as-tests)), its input
 fingerprints before and after are present and agree, its terminal record is
 the one TermAl first read as terminal, the worktree's source is unchanged,
 and no write TermAl can observe reached the worktree before the run ended.
@@ -287,6 +288,34 @@ is judged without it, and Engram marks it stale when the record lands (a
 check recorded after an evaluation's evidence basis makes it stale), so
 request it after the checkpoint that records the gate. The full rules are in
 [the Engram host adapter's carried background gates](features/engram-host-adapter.md#carried-background-gates).
+
+### Which stages count as tests
+
+Another project can run its own copy of the test launcher, with its own
+stages. The rule, agreed with the Engram project's coordinator, applies to a
+full gate in the foreground and carried alike:
+
+A full-gate stage counts as a test stage when the run's request record gives
+it `kind` `test`. When no stage in the request record has a `kind`, the
+stages named `rust-tests` and `vitest` count instead. A run whose request
+record gives kinds but marks no stage `test` is not credited. A full gate is
+credited as a passed test check only when every requested stage passed with
+exit 0 and at least one test stage is among them. A full gate that failed,
+and whose request record has a test stage, is recorded as a failed test
+check for that run, whichever stage failed, so it stays visible as the
+newest check. In the foreground the host reads the request record from the
+run directory the launcher names; a carried run is judged from the request
+record the host already reads.
+
+TermAl's own launcher writes no kinds, so its `rust-tests` and `vitest`
+stages are its test stages. Engram's writes a kind for every stage, and its
+`rust`, `freeze`, `mcp`, `control` and `parity` stages are `test`. In the
+foreground, the launcher names its run directory in its summary's
+`results: PATH` line: the request record is the `request.json` beside that
+`results.json`. A summary with no such line gets TermAl's two names. A
+failed full gate whose request record has no test stage is still recorded
+as failed, as every failed gate was before this rule: a failure can only add
+a block, never let an older pass stand. A focused run is outside this rule.
 
 ## Backend Testing Guidelines
 

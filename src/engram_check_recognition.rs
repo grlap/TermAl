@@ -694,21 +694,21 @@ fn engram_passed_count(line: &str) -> Option<u64> {
     before.split_whitespace().next_back()?.parse().ok()
 }
 
-/// The test stages of the launcher's full gate: a passed one is the host's
-/// evidence that tests ran, for a foreground gate's result lines
-/// (`engram_check_showed_passing_tests`) and a carried gate's terminal record
-/// (`engram_read_carried_run`) alike.
-const ENGRAM_LAUNCHER_FULL_TEST_STAGES: &[&str] = &["rust-tests", "vitest"];
-
 /// Whether the check's result lines show that at least one test ran and
 /// passed. A run that tested nothing can exit 0 (a filter that matched
 /// nothing, a collect-only or list mode, an npm script that runs no tests),
 /// so success needs this positive evidence, runner by runner; without it the
 /// check is unknown, never passed. The test launcher shows it only through a
-/// passed test stage of the mode that ran it: a full gate's `rust-tests` or
-/// `vitest`, a live run's `engram-live`. A focused run's verdict says nothing
-/// about how many tests the wrapped command ran.
-fn engram_check_showed_passing_tests(check: &EngramCheckCommand, result_lines: &[String]) -> bool {
+/// passed test stage of the mode that ran it: for a full gate, one of
+/// `launcher_test_stages`, the test stages its own request record names
+/// (`engram_launcher_output_test_stages`); for a live run, `engram-live`. A
+/// focused run's verdict says nothing about how many tests the wrapped
+/// command ran.
+fn engram_check_showed_passing_tests(
+    check: &EngramCheckCommand,
+    result_lines: &[String],
+    launcher_test_stages: &[String],
+) -> bool {
     let passed = |prefixes: &[&str]| {
         result_lines.iter().any(|line| {
             prefixes.iter().any(|prefix| line.starts_with(prefix))
@@ -726,20 +726,21 @@ fn engram_check_showed_passing_tests(check: &EngramCheckCommand, result_lines: &
                 && !line.contains("[no test files]")
         }),
         "node" => {
-            let test_stages: &[&str] =
+            let live = ["engram-live".to_owned()];
+            let test_stages: &[String] =
                 match engram_shell_words(engram_first_command(&check.normalized))
                     .as_ref()
                     .and_then(|words| words.get(2))
                     .map(String::as_str)
                 {
-                    Some("full") => ENGRAM_LAUNCHER_FULL_TEST_STAGES,
-                    Some("live") => &["engram-live"],
+                    Some("full") => launcher_test_stages,
+                    Some("live") => &live,
                     _ => &[],
                 };
             result_lines.iter().any(|line| {
                 test_stages
                     .iter()
-                    .any(|stage| line.strip_suffix(": passed") == Some(*stage))
+                    .any(|stage| line.strip_suffix(": passed") == Some(stage.as_str()))
             })
         }
         _ => false,

@@ -995,7 +995,12 @@ reports.
   vitest or jest `Tests` total with
   passed tests, a go package `ok` without `[no tests to run]` or
   `[no test files]`, or a passed test stage of the launcher mode that ran:
-  a full gate's `rust-tests` or `vitest`, a live run's `engram-live`. A
+  for a full gate, a stage its own request record makes a test stage, read
+  from the `request.json` beside the `results.json` its summary's
+  `results: PATH` line names (`kind` `test`, or, in a record with no kinds,
+  `rust-tests` or `vitest`; a summary with no such line gets those two
+  names; [Which stages count as tests](../test.md#which-stages-count-as-tests));
+  for a live run, `engram-live`. A
   focused launcher run never shows it, since its
   verdict does not say how many tests the wrapped command ran. Without the
   evidence the check is unknown, never passed. What a check attests is that
@@ -1336,8 +1341,10 @@ its launch (`src/engram_carried_checks.rs`).
   measured in the same root generation, a carried check whose run is
   terminal settles. It is credited as a test check when: the record still
   has the digest first read; every stage its request lists passed with code
-  0 and no error, among them a test stage the host recognises (the full
-  gate's `rust-tests` or `vitest`, as for a foreground gate), and the exit
+  0 and no error, among them a test stage by its request record (`kind`
+  `test`, or, in a record with no kinds, `rust-tests` or `vitest`, as for a
+  foreground gate; [Which stages count as tests](../test.md#which-stages-count-as-tests)),
+  and the exit
   code is 0 (a complete record that says failed is recorded as failed);
   its expected, before and after input fingerprints, and the request's, are
   present and equal; a fresh source basis equals the one taken at the

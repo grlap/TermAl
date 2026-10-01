@@ -13,7 +13,8 @@
 //! Does not own the checks, their captures, the overlap marking, the carried
 //! fence or the checkpoint's composition: those stay in the fragments
 //! `engram_turn_checks.rs`, `engram_carried_checks.rs`,
-//! `engram_check_recognition.rs` and `engram_one_call.rs`, which only the
+//! `engram_check_recognition.rs`, `engram_launcher_stages.rs` and
+//! `engram_one_call.rs`, which only the
 //! component and this facade name. Does not own turn admission, source roots,
 //! settings or recovery, which keep their own entry points until their moves
 //! (section 5.5).

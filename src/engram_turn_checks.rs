@@ -1461,13 +1461,24 @@ impl AppState {
         };
         // The session's worktree, resolved off the lock for overlap marking.
         let workdir_worktree = engram_worktree_root(FsPath::new(&workdir));
+        // A launcher full gate's test stages are its own request record's,
+        // read off the lock (`engram_launcher_output_test_stages`), for
+        // whichever command the check's end is read as below.
+        let launcher_test_stages = if checked {
+            engram_launcher_output_test_stages(output)
+        } else {
+            Vec::new()
+        };
         let parsed = checked
             .then(|| engram_check_command(command))
             .flatten()
             .map(|finished| {
                 let result_lines = engram_check_result_lines(&finished.program, output);
-                let showed_passing_tests =
-                    engram_check_showed_passing_tests(&finished, &result_lines);
+                let showed_passing_tests = engram_check_showed_passing_tests(
+                    &finished,
+                    &result_lines,
+                    &launcher_test_stages,
+                );
                 (finished, result_lines, showed_passing_tests)
             });
         let mut inner = self.inner.lock().expect("state mutex poisoned");
@@ -1578,8 +1589,11 @@ impl AppState {
             // key): the check's own command decides how its output reads.
             _ => {
                 let result_lines = engram_check_result_lines(&check.command.program, output);
-                let showed_passing_tests =
-                    engram_check_showed_passing_tests(&check.command, &result_lines);
+                let showed_passing_tests = engram_check_showed_passing_tests(
+                    &check.command,
+                    &result_lines,
+                    &launcher_test_stages,
+                );
                 (result_lines, showed_passing_tests)
             }
         };
