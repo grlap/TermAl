@@ -17,6 +17,8 @@ export type DelegationResultPacket = {
   summary: string;
   findings: DelegationFinding[];
   changedFiles: string[];
+  observedWorkspaceChanges?: string[];
+  observedWorkspaceChangesOmitted?: number;
   filesInspected: string[];
   commandsRun: DelegationCommandResult[];
   notes: string[];

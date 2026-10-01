@@ -590,6 +590,8 @@ fn delegation_result_from_review_envelope(
         summary: envelope.summary.clone(),
         findings: envelope.findings.clone(),
         changed_files: Vec::new(),
+        observed_workspace_changes: Vec::new(),
+        observed_workspace_changes_omitted: 0,
         files_inspected: envelope.files_inspected.clone(),
         commands_run: envelope.commands_run.clone(),
         notes,
@@ -716,9 +718,10 @@ fn terminalize_submitted_review_result_locked(
     inner: &mut StateInner,
     delegation_index: usize,
     delegation: &DelegationRecord,
-    result: DelegationResult,
+    mut result: DelegationResult,
     post_submission_transport_error: Option<String>,
 ) -> Option<DelegationLifecycleDelta> {
+    record_delegation_workspace_observations(inner, delegation, &mut result);
     let terminal_at = stamp_now();
     let public_summary = compact_delegation_public_summary(&result.summary);
     let (card_status, lifecycle_status) = match result.status {

@@ -103,6 +103,64 @@ fn delegation_wait_fan_in_reports_unfinished_and_unknown_command_statuses() {
     assert!(!prompt.contains("unclassified command"));
 }
 
+#[test]
+fn delegation_wait_large_workspace_observations_do_not_hide_sibling_findings() {
+    let mut first: DelegationRecord = serde_json::from_value(json!({
+        "id": "first", "parentSessionId": "parent", "childSessionId": "child",
+        "mode": "reviewer", "status": "completed", "title": "First", "prompt": "Review",
+        "cwd": "/repo", "agent": "Codex", "writePolicy": {"kind": "readOnly"}, "createdAt": "now",
+        "result": {"delegationId": "first", "childSessionId": "child", "status": "completed", "summary": "First summary"}
+    })).unwrap();
+    let mut second = first.clone();
+    second.id = "second".to_owned();
+    second.title = "Second".to_owned();
+    second
+        .result
+        .as_mut()
+        .unwrap()
+        .findings
+        .push(DelegationFinding {
+            severity: "Medium".to_owned(),
+            file: None,
+            line: None,
+            message: "Sibling finding must survive".to_owned(),
+        });
+    // Legacy packets may contain arbitrarily many paths. The API bounds its
+    // projection, and fan-in must not render even that entire retained list.
+    first.result.as_mut().unwrap().changed_files = (0..5000)
+        .map(|n| format!("src/observation-{n:04}-{}", "x".repeat(100)))
+        .collect();
+    let original = first.result.clone();
+    let wait = DelegationWaitRecord {
+        id: "wait".to_owned(),
+        parent_session_id: "parent".to_owned(),
+        delegation_ids: vec![first.id.clone(), second.id.clone()],
+        mode: DelegationWaitMode::All,
+        created_at: stamp_now(),
+        title: None,
+    };
+    let prompt = limit_delegation_wait_resume_prompt(build_delegation_wait_resume_prompt(
+        &wait,
+        &[&first, &second],
+        &[&first, &second],
+    ));
+    assert!(prompt.contains("Sibling finding must survive"));
+    assert!(prompt.contains("additional paths omitted"));
+    assert!(!prompt.contains("src/observation-"));
+    assert!(!prompt.contains(DELEGATION_WAIT_RESUME_TRUNCATED_MARKER));
+    assert_eq!(
+        first.result, original,
+        "read projection must not mutate history"
+    );
+    let normalized =
+        delegation_result_for_policy(first.result.as_ref().unwrap(), &first.write_policy);
+    assert!(normalized.changed_files.is_empty());
+    assert_eq!(
+        normalized.observed_workspace_changes.len() + normalized.observed_workspace_changes_omitted,
+        5000
+    );
+}
+
 fn assert_delegation_wait_response_serializes_queue_flags(
     response: &DelegationWaitResponse,
     resume_prompt_queued: bool,
@@ -522,6 +580,8 @@ fn removing_delegation_parent_consumes_already_satisfied_wait_with_parent_remove
             summary: "Completed before parent removal.".to_owned(),
             findings: Vec::new(),
             changed_files: Vec::new(),
+            observed_workspace_changes: Vec::new(),
+            observed_workspace_changes_omitted: 0,
             files_inspected: Vec::new(),
             commands_run: Vec::new(),
             notes: Vec::new(),

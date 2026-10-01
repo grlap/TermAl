@@ -617,6 +617,9 @@ export type DelegationResult = {
   summary: string;
   findings?: DelegationFinding[];
   changedFiles?: string[];
+  /** Workspace watcher observations, not writes attributed to the child. */
+  observedWorkspaceChanges?: string[];
+  observedWorkspaceChangesOmitted?: number;
   filesInspected?: string[];
   commandsRun?: DelegationCommandResult[];
   notes?: string[];

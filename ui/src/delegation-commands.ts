@@ -1037,6 +1037,8 @@ function delegationResultPacket(
     summary: result.summary,
     findings: result.findings ?? [],
     changedFiles: result.changedFiles ?? [],
+    observedWorkspaceChanges: result.observedWorkspaceChanges ?? [],
+    observedWorkspaceChangesOmitted: result.observedWorkspaceChangesOmitted ?? 0,
     filesInspected: result.filesInspected ?? [],
     commandsRun: result.commandsRun ?? [],
     notes: result.notes ?? [],
