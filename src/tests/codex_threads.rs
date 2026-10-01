@@ -683,10 +683,7 @@ fn fork_codex_thread_creates_a_new_local_session() {
     }
 
     let (runtime, input_rx, _process) = test_shared_codex_runtime("shared-codex-fork");
-    *state
-        .shared_codex_runtime
-        .lock()
-        .expect("shared Codex runtime mutex poisoned") = Some(runtime);
+    install_single_wire_codex_fixture(&state, Some(runtime));
 
     std::thread::spawn(move || {
         let command = recv_within_guard(&input_rx, "Codex fork command should arrive")
@@ -908,10 +905,7 @@ fn fork_codex_thread_falls_back_to_note_when_history_is_unavailable() {
         .unwrap();
 
     let (runtime, input_rx, _process) = test_shared_codex_runtime("shared-codex-fork-fallback");
-    *state
-        .shared_codex_runtime
-        .lock()
-        .expect("shared Codex runtime mutex poisoned") = Some(runtime);
+    install_single_wire_codex_fixture(&state, Some(runtime));
 
     std::thread::spawn(move || {
         let command = recv_within_guard(&input_rx, "Codex fork command should arrive")
@@ -1054,10 +1048,7 @@ fn codex_archive_and_unarchive_actions_update_thread_state_and_block_dispatch() 
     );
 
     let (runtime, input_rx, _process) = test_shared_codex_runtime("shared-codex-archive");
-    *state
-        .shared_codex_runtime
-        .lock()
-        .expect("shared Codex runtime mutex poisoned") = Some(runtime);
+    install_single_wire_codex_fixture(&state, Some(runtime));
 
     std::thread::spawn(move || {
         for expected_method in ["thread/archive", "thread/unarchive"] {
@@ -1149,7 +1140,7 @@ fn codex_archive_error_reconciles_confirmed_archive_and_retry() {
         .set_external_session_id(&session_id, "released-thread".to_owned())
         .unwrap();
     let (runtime, input_rx, _process) = test_shared_codex_runtime("archive-error-reconcile");
-    *state.shared_codex_runtime.lock().unwrap() = Some(runtime);
+    install_single_wire_codex_fixture(&state, Some(runtime));
     let worker = std::thread::spawn(move || {
         while let Ok(CodexRuntimeCommand::JsonRpcRequest {
             method,
@@ -1187,7 +1178,7 @@ fn codex_archive_error_reconciles_confirmed_archive_and_retry() {
         state.archive_codex_thread(&session_id).is_ok(),
         "archive retry is idempotent"
     );
-    state.shared_codex_runtime.lock().unwrap().take();
+    install_single_wire_codex_fixture(&state, None);
     worker.join().unwrap();
 }
 
@@ -1199,7 +1190,7 @@ fn codex_archive_notification_reconciles_detached_thread() {
         .set_external_session_id(&session_id, "detached-thread".to_owned())
         .unwrap();
     let (runtime, _input_rx, _process) = test_shared_codex_runtime("late-archive-notification");
-    *state.shared_codex_runtime.lock().unwrap() = Some(runtime.clone());
+    install_single_wire_codex_fixture(&state, Some(runtime.clone()));
     handle_shared_codex_app_server_message(
         &json!({"method":"thread/archived","params":{"threadId":"detached-thread"}}),
         &state,
@@ -1247,7 +1238,7 @@ fn codex_archive_error_without_positive_evidence_remains_an_error() {
                 .set_external_session_id(&session_id, "unconfirmed-thread".to_owned())
                 .unwrap();
             let (runtime, input_rx, _process) = test_shared_codex_runtime("unconfirmed-archive");
-            *state.shared_codex_runtime.lock().unwrap() = Some(runtime);
+            install_single_wire_codex_fixture(&state, Some(runtime));
             let rpc_error = rpc_error.clone();
             let worker = std::thread::spawn(move || {
                 let methods = if matches!(rpc_error, CodexResponseError::JsonRpc(_)) {
@@ -1302,7 +1293,7 @@ fn codex_archive_notification_from_replaced_server_cannot_change_detached_thread
         .set_external_session_id(&session_id, "same-thread".to_owned())
         .unwrap();
     let (runtime, _input_rx, _process) = test_shared_codex_runtime("current-server");
-    *state.shared_codex_runtime.lock().unwrap() = Some(runtime.clone());
+    install_single_wire_codex_fixture(&state, Some(runtime.clone()));
     handle_shared_codex_app_server_message(
         &json!({"method":"thread/archived","params":{"threadId":"same-thread"}}),
         &state,
@@ -1338,7 +1329,7 @@ fn codex_archive_late_confirmation_recovers_failed_child_release() {
                 Some("fixture-delegation".to_owned());
         }
         let (runtime, input_rx, _process) = test_shared_codex_runtime("late-child-release");
-        *state.shared_codex_runtime.lock().unwrap() = Some(runtime.clone());
+        install_single_wire_codex_fixture(&state, Some(runtime.clone()));
         let worker = std::thread::spawn(move || {
             while let Ok(CodexRuntimeCommand::JsonRpcRequest {
                 method,
@@ -1396,7 +1387,7 @@ fn codex_archive_late_confirmation_recovers_failed_child_release() {
                 .codex_thread_state,
             Some(CodexThreadState::Active)
         );
-        state.shared_codex_runtime.lock().unwrap().take();
+        install_single_wire_codex_fixture(&state, None);
         drop(runtime);
         worker.join().unwrap();
     }

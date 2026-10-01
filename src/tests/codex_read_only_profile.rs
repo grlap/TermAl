@@ -179,7 +179,7 @@ fn each_profile_keeps_its_own_app_server() {
     );
 }
 
-fn codex_session_update(sandbox_mode: CodexSandboxMode) -> UpdateSessionSettingsRequest {
+pub(super) fn codex_session_update(sandbox_mode: CodexSandboxMode) -> UpdateSessionSettingsRequest {
     UpdateSessionSettingsRequest {
         kimi_effort: None,
         opencode_approval_mode: None,

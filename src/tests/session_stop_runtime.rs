@@ -49,10 +49,7 @@ fn seed_runtime_exit_active_turn_file_change(state: &AppState, session_id: &str)
 fn reuses_shared_codex_runtime_across_sessions() {
     let state = test_app_state();
     let (runtime, _input_rx, process) = test_shared_codex_runtime("shared-codex");
-    *state
-        .shared_codex_runtime
-        .lock()
-        .expect("shared Codex runtime mutex poisoned") = Some(runtime.clone());
+    install_single_wire_codex_fixture(&state, Some(runtime.clone()));
 
     let first = spawn_codex_runtime(
         state.clone(),

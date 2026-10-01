@@ -33,6 +33,7 @@ mod codex_home;
 mod codex_protocol;
 mod codex_read_only_profile;
 mod codex_read_only_tracker;
+mod codex_profile_routing;
 mod codex_thread_recovery;
 mod codex_threads;
 mod content_revision;
@@ -1723,6 +1724,21 @@ fn cursor_permission_request(request_id: &str) -> Value {
             ]
         }
     })
+}
+
+/// Opt-in single-wire fixtures test lifecycle/protocol behavior, not profile
+/// isolation. Install their script explicitly in both homes, including when
+/// replacing/clearing it. Profile witnesses install distinct scripts instead.
+fn install_single_wire_codex_fixture(state: &AppState, runtime: Option<SharedCodexRuntime>) {
+    for profile in [
+        SharedCodexProfile::Default,
+        SharedCodexProfile::ReadOnlySandbox,
+    ] {
+        *state
+            .shared_codex_runtime_slot(profile)
+            .lock()
+            .expect("shared Codex fixture mutex poisoned") = runtime.clone();
+    }
 }
 
 fn test_shared_codex_runtime(

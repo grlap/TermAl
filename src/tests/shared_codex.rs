@@ -1990,10 +1990,7 @@ fn shared_codex_turn_started_watchdog_missing_turn_id_retires_shared_runtime() {
         "shared-codex-watchdog-missing-turn-id",
         process_owner.process.clone(),
     );
-    *state
-        .shared_codex_runtime
-        .lock()
-        .expect("shared Codex runtime mutex poisoned") = Some(runtime.clone());
+    install_single_wire_codex_fixture(&state, Some(runtime.clone()));
     {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
         for (id, generation, preview) in [
@@ -2671,10 +2668,7 @@ fn shared_codex_turn_started_watchdog_retires_runtime_when_interrupt_fails() {
     let (runtime, input_rx, process) =
         test_shared_codex_runtime("shared-codex-turn-started-watchdog-interrupt-failure");
 
-    *state
-        .shared_codex_runtime
-        .lock()
-        .expect("shared Codex runtime mutex poisoned") = Some(runtime.clone());
+    install_single_wire_codex_fixture(&state, Some(runtime.clone()));
     {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
         let index = inner
@@ -4163,7 +4157,7 @@ impl EngramBootstrapFixture {
         let state = test_app_state();
         let session_id = create_test_engram_codex_session(&state, "bootstrap");
         let (runtime, input_rx, process) = test_shared_codex_runtime("bootstrap");
-        *state.shared_codex_runtime.lock().unwrap() = Some(runtime.clone());
+        install_single_wire_codex_fixture(&state, Some(runtime.clone()));
         {
             let mut inner = state.inner.lock().unwrap();
             let index = inner.find_session_index(&session_id).unwrap();

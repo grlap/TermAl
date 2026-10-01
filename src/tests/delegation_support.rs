@@ -123,10 +123,7 @@ pub(super) fn test_app_state_with_delegation_codex_runtime(
 ) -> (AppState, mpsc::Receiver<CodexRuntimeCommand>) {
     let state = super::test_app_state();
     let (runtime, input_rx, _process) = test_shared_codex_runtime(runtime_id);
-    *state
-        .shared_codex_runtime
-        .lock()
-        .expect("shared Codex runtime mutex poisoned") = Some(runtime);
+    install_single_wire_codex_fixture(&state, Some(runtime));
     (state, input_rx)
 }
 
@@ -151,9 +148,6 @@ pub(super) fn temp_delegation_state_paths() -> (TestTempRoot, PathBuf, PathBuf, 
 }
 pub(super) fn install_delegation_codex_runtime(state: &AppState, runtime_id: &str) {
     let (runtime, input_rx, _process) = test_shared_codex_runtime(runtime_id);
-    *state
-        .shared_codex_runtime
-        .lock()
-        .expect("shared Codex runtime mutex poisoned") = Some(runtime);
+    install_single_wire_codex_fixture(&state, Some(runtime));
     std::thread::spawn(move || while input_rx.recv().is_ok() {});
 }

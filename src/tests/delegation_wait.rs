@@ -1495,10 +1495,7 @@ fn delegation_wait_reconciles_after_restart_recovery() {
 
     let (runtime, input_rx, _process) =
         test_shared_codex_runtime("delegation-wait-mailbox-order-runtime");
-    *restarted
-        .shared_codex_runtime
-        .lock()
-        .expect("shared Codex runtime mutex poisoned") = Some(runtime);
+    install_single_wire_codex_fixture(&restarted, Some(runtime));
     {
         let mut inner = restarted.inner.lock().expect("state mutex poisoned");
         let parent_index = inner

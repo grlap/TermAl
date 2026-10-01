@@ -1847,10 +1847,7 @@ fn runtime_exit_restores_the_mailbox_wake_and_pauses_automatic_dispatch() {
 fn idle_blocked_receiver_queues_its_first_mailbox_wake_without_reactivation() {
     let (state, codex_id, claude_id) = mailbox_test_state();
     let (runtime, input_rx, _process) = test_shared_codex_runtime("mailbox-stopped-session-pause");
-    *state
-        .shared_codex_runtime
-        .lock()
-        .expect("shared Codex runtime mutex poisoned") = Some(runtime);
+    install_single_wire_codex_fixture(&state, Some(runtime));
     {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
         let codex_index = inner

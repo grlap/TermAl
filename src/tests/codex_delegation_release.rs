@@ -413,6 +413,15 @@ fn archive_write_failure_preserves_transport_and_recovers_after_runtime_exit() {
             .as_ref()
             .unwrap()
             .clone();
+        // This single-wire fixture shares the transport across profiles. Its
+        // retained process must be shared too, so archive recovery observes
+        // the parked origin rather than the fixture's already-exited process.
+        install_single_wire_codex_fixture(&state, Some(old.clone()));
+        let selected = state
+            .running_shared_codex_runtime(state.shared_codex_profile_of_session(&child))
+            .unwrap();
+        assert!(Arc::ptr_eq(&selected.process, &parked.process));
+        drop(selected);
         let worker = std::thread::spawn(move || {
             struct BrokenWriter;
             impl Write for BrokenWriter {
@@ -489,7 +498,7 @@ fn archive_write_failure_preserves_transport_and_recovers_after_runtime_exit() {
         let before_exit = state.prepare_codex_child_followup(&child).unwrap_err();
         assert_eq!(before_exit.status, StatusCode::CONFLICT);
         let (replacement, replacement_rx, _) = test_shared_codex_runtime("replacement");
-        *state.shared_codex_runtime.lock().unwrap() = Some(replacement);
+        install_single_wire_codex_fixture(&state, Some(replacement));
         let inventory = Arc::new(std::sync::atomic::AtomicBool::new(true));
         let worker_inventory = inventory.clone();
         let replacement_worker = std::thread::spawn(move || {
@@ -1170,7 +1179,7 @@ fn not_sent_release_retains_cleanup_and_durability_on_drop_or_enqueue_failure() 
             if failure == "queue" {
                 drop(input_rx);
             } else {
-                state.shared_codex_runtime.lock().unwrap().take();
+                install_single_wire_codex_fixture(&state, None);
             }
             ticket.start(&state);
         }

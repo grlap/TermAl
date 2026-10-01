@@ -2769,10 +2769,7 @@ async fn codex_mcp_servers_route_paginates_and_sanitizes_status() {
     let _files = HttpRouteTestFiles::capture(&state);
     let session_id = test_session_id(&state, Agent::Codex);
     let (runtime, input_rx, _process) = test_shared_codex_runtime("shared-codex-mcp-status");
-    *state
-        .shared_codex_runtime
-        .lock()
-        .expect("shared Codex runtime mutex poisoned") = Some(runtime);
+    install_single_wire_codex_fixture(&state, Some(runtime));
 
     let server = std::thread::spawn(move || {
         for expected_cursor in [None, Some("page-2")] {
@@ -2878,10 +2875,7 @@ async fn codex_mcp_servers_route_bounds_unfinished_pagination() {
     let _files = HttpRouteTestFiles::capture(&state);
     let session_id = test_session_id(&state, Agent::Codex);
     let (runtime, input_rx, _process) = test_shared_codex_runtime("shared-codex-mcp-limit");
-    *state
-        .shared_codex_runtime
-        .lock()
-        .expect("shared Codex runtime mutex poisoned") = Some(runtime);
+    install_single_wire_codex_fixture(&state, Some(runtime));
 
     let server = std::thread::spawn(move || {
         for page_index in 0..CODEX_MCP_STATUS_MAX_PAGES {
@@ -2935,10 +2929,7 @@ async fn codex_mcp_servers_route_rejects_a_repeated_pagination_cursor() {
     let session_id = test_session_id(&state, Agent::Codex);
     let (runtime, input_rx, _process) =
         test_shared_codex_runtime("shared-codex-mcp-repeated-cursor");
-    *state
-        .shared_codex_runtime
-        .lock()
-        .expect("shared Codex runtime mutex poisoned") = Some(runtime);
+    install_single_wire_codex_fixture(&state, Some(runtime));
 
     let server = std::thread::spawn(move || {
         for expected_cursor in [None, Some("loop")] {
@@ -3149,10 +3140,7 @@ async fn codex_thread_action_routes_update_session_state() {
         )
         .unwrap();
     let (runtime, input_rx, _process) = test_shared_codex_runtime("shared-codex-route-actions");
-    *state
-        .shared_codex_runtime
-        .lock()
-        .expect("shared Codex runtime mutex poisoned") = Some(runtime);
+    install_single_wire_codex_fixture(&state, Some(runtime));
 
     let (request_started_tx, request_started_rx) = mpsc::channel();
     std::thread::spawn(move || {
@@ -3329,10 +3317,7 @@ async fn codex_thread_rollback_route_falls_back_when_history_is_unavailable() {
         .unwrap();
     let (runtime, input_rx, _process) =
         test_shared_codex_runtime("shared-codex-route-rollback-fallback");
-    *state
-        .shared_codex_runtime
-        .lock()
-        .expect("shared Codex runtime mutex poisoned") = Some(runtime);
+    install_single_wire_codex_fixture(&state, Some(runtime));
 
     std::thread::spawn(move || {
         let command = recv_within_guard(&input_rx, "Codex rollback command should arrive")
@@ -3434,10 +3419,7 @@ async fn codex_thread_fork_route_returns_created_response() {
     }
 
     let (runtime, input_rx, _process) = test_shared_codex_runtime("shared-codex-route-fork");
-    *state
-        .shared_codex_runtime
-        .lock()
-        .expect("shared Codex runtime mutex poisoned") = Some(runtime);
+    install_single_wire_codex_fixture(&state, Some(runtime));
 
     std::thread::spawn(move || {
         let command = recv_within_guard(&input_rx, "Codex fork command should arrive")

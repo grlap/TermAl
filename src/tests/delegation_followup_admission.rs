@@ -84,7 +84,7 @@ fn manual_unarchive_is_not_owned_by_a_later_canceled_or_rejected_followup() {
             record.codex_delegation_release = Some(release);
         }
         let (runtime, input_rx, _) = test_shared_codex_runtime("manual-unarchive-owner");
-        *state.shared_codex_runtime.lock().unwrap() = Some(runtime);
+        install_single_wire_codex_fixture(&state, Some(runtime));
         let worker = std::thread::spawn(move || {
             let CodexRuntimeCommand::JsonRpcRequest {
                 method,
@@ -211,7 +211,7 @@ fn delayed_followup_direct_promotion_commit_failure_settles_without_delivery() {
             )
             .unwrap();
         let (runtime, input_rx, _) = test_shared_codex_runtime("delayed-promotion-commit");
-        *state.shared_codex_runtime.lock().unwrap() = Some(runtime);
+        install_single_wire_codex_fixture(&state, Some(runtime));
         {
             let mut inner = state.inner.lock().unwrap();
             assert!(
@@ -339,7 +339,7 @@ fn canceled_restored_followup_keeps_cleanup_and_manual_archive_retries_same_atte
             record.codex_delegation_release = Some(release);
         }
         let (runtime, input_rx, _) = test_shared_codex_runtime("restore-then-cancel");
-        *state.shared_codex_runtime.lock().unwrap() = Some(runtime);
+        install_single_wire_codex_fixture(&state, Some(runtime));
         let restore = std::thread::spawn(move || {
             let CodexRuntimeCommand::JsonRpcRequest {
                 method,
@@ -361,7 +361,7 @@ fn canceled_restored_followup_keeps_cleanup_and_manual_archive_retries_same_atte
             )
             .unwrap();
         let _old_receiver = restore.join().unwrap();
-        *state.shared_codex_runtime.lock().unwrap() = None;
+        install_single_wire_codex_fixture(&state, None);
         if cancel_parent {
             state.cancel_delegation(&parent, &delegation).unwrap();
         } else {
@@ -397,7 +397,7 @@ fn canceled_restored_followup_keeps_cleanup_and_manual_archive_retries_same_atte
             canceled
         };
         let (runtime, input_rx, _) = test_shared_codex_runtime("canceled-manual-archive-retry");
-        *state.shared_codex_runtime.lock().unwrap() = Some(runtime);
+        install_single_wire_codex_fixture(&state, Some(runtime));
         let archive = std::thread::spawn(move || {
             let CodexRuntimeCommand::JsonRpcRequest {
                 method,
@@ -453,7 +453,7 @@ fn followup_admission_commit_failure_settles_undelivered_attempt_and_releases_ru
         finish_delegation_child_with_assistant_text(&state, &child, "Old structured review.");
         state.refresh_delegation_for_child_session(&child).unwrap();
         let (runtime, input_rx, _) = test_shared_codex_runtime("failed-admission-commit");
-        *state.shared_codex_runtime.lock().unwrap() = Some(runtime);
+        install_single_wire_codex_fixture(&state, Some(runtime));
         let previous = {
             let mut inner = state.inner.lock().unwrap();
             let index = inner.find_session_index(&child).unwrap();
@@ -907,7 +907,7 @@ fn queued_followup_survives_project_reset_polling_and_dispatches_once() {
             state.refresh_delegation_for_child_session(&child).unwrap();
         }
         let (runtime, input_rx, _) = test_shared_codex_runtime("queued-followup");
-        *state.shared_codex_runtime.lock().unwrap() = Some(runtime);
+        install_single_wire_codex_fixture(&state, Some(runtime));
         let before_attempt = {
             let mut inner = state.inner.lock().unwrap();
             let index = inner.find_session_index(&child).unwrap();
@@ -1105,7 +1105,7 @@ fn followup_reservation_defers_all_wait_until_admission_or_rejection() {
             .refresh_delegation_for_child_session(&child_a)
             .unwrap();
         let (runtime, input_rx, _) = test_shared_codex_runtime("followup-wait");
-        *state.shared_codex_runtime.lock().unwrap() = Some(runtime);
+        install_single_wire_codex_fixture(&state, Some(runtime));
         {
             let mut inner = state.inner.lock().unwrap();
             let index = inner.find_session_index(&parent).unwrap();
@@ -1382,7 +1382,7 @@ fn followup_runtime_start_failure_never_clears_the_previous_review_or_card() {
     // No shared fake runtime: the lightweight AppState rejects runtime creation
     // inside start_turn_on_record, after validation but before the user message.
     assert!(!state.agent_runtime_spawning_enabled);
-    *state.shared_codex_runtime.lock().unwrap() = None;
+    install_single_wire_codex_fixture(&state, None);
     let mut events = state.subscribe_delta_events();
     let error = state
         .dispatch_turn_with_followup(
@@ -1463,7 +1463,7 @@ fn followup_admission_publishes_its_card_revision_before_a_later_parent_mutation
     finish_delegation_child_with_assistant_text(&state, &child, "Finished review.");
     state.refresh_delegation_for_child_session(&child).unwrap();
     let (runtime, _input_rx, _) = test_shared_codex_runtime("followup-revision");
-    *state.shared_codex_runtime.lock().unwrap() = Some(runtime);
+    install_single_wire_codex_fixture(&state, Some(runtime));
     let previous = {
         let mut inner = state.inner.lock().unwrap();
         let previous = inner.delegations[inner.find_delegation_index(&delegation).unwrap()].clone();
@@ -1547,7 +1547,7 @@ fn failed_followup_restore_preserves_structured_review_and_polling_cannot_finish
         finish_delegation_child_with_assistant_text(&state, &child, "Finished review.");
         state.refresh_delegation_for_child_session(&child).unwrap();
         let (runtime, input_rx, _) = test_shared_codex_runtime("failed-followup-restore");
-        *state.shared_codex_runtime.lock().unwrap() = Some(runtime);
+        install_single_wire_codex_fixture(&state, Some(runtime));
         let before = {
             let mut inner = state.inner.lock().unwrap();
             let index = inner.find_session_index(&child).unwrap();
@@ -1690,7 +1690,7 @@ fn followup_engram_queue_start_failure_settles_instead_of_stranding_running() {
         ));
     }
     assert!(!state.agent_runtime_spawning_enabled);
-    *state.shared_codex_runtime.lock().unwrap() = None;
+    install_single_wire_codex_fixture(&state, None);
     let error = state
         .followup_delegation(&parent, &created.delegation.id, "Cannot start".to_owned())
         .err()
@@ -2187,7 +2187,7 @@ fn followup_wait_commit_failure_retains_idle_parent_wake_for_exactly_once_retry(
             );
         }
         let (runtime, input_rx, _) = test_shared_codex_runtime("retry-wait-parent");
-        *state.shared_codex_runtime.lock().unwrap() = Some(runtime);
+        install_single_wire_codex_fixture(&state, Some(runtime));
         state.get_delegation(&parent, &delegation).unwrap();
         assert!(matches!(
             phase_sync::receive(&input_rx, "retried parent wake"),
@@ -2231,7 +2231,7 @@ fn restored_queued_followup_failure_keeps_compensation_without_runtime_on_all_di
             inner.sessions[index].codex_delegation_release = Some(release);
         }
         let (runtime, input_rx, _) = test_shared_codex_runtime("restore-before-queue");
-        *state.shared_codex_runtime.lock().unwrap() = Some(runtime);
+        install_single_wire_codex_fixture(&state, Some(runtime));
         let worker = std::thread::spawn(move || {
             let CodexRuntimeCommand::JsonRpcRequest {
                 method,
@@ -2249,7 +2249,7 @@ fn restored_queued_followup_failure_keeps_compensation_without_runtime_on_all_di
             .followup_delegation(&parent, &delegation, "Queued follow-up".to_owned())
             .unwrap();
         let _old_receiver = worker.join().unwrap();
-        *state.shared_codex_runtime.lock().unwrap() = None;
+        install_single_wire_codex_fixture(&state, None);
         {
             let mut inner = state.inner.lock().unwrap();
             assert!(
@@ -2340,7 +2340,7 @@ fn restored_queued_followup_failure_keeps_compensation_without_runtime_on_all_di
             );
         }
         let (runtime, input_rx, _) = test_shared_codex_runtime("compensation-retry");
-        *state.shared_codex_runtime.lock().unwrap() = Some(runtime);
+        install_single_wire_codex_fixture(&state, Some(runtime));
         let worker = std::thread::spawn(move || {
             let CodexRuntimeCommand::JsonRpcRequest {
                 method,
@@ -2405,7 +2405,7 @@ fn followup_archive_compensation_rejects_attached_runtime_or_remaining_queue() {
         finish_delegation_child_with_assistant_text(&state, &child, "Previous result.");
         state.refresh_delegation_for_child_session(&child).unwrap();
         let (runtime, input_rx, _) = test_shared_codex_runtime("must-not-archive-busy");
-        *state.shared_codex_runtime.lock().unwrap() = Some(runtime);
+        install_single_wire_codex_fixture(&state, Some(runtime));
         let (attached_runtime, _attached_rx) = test_codex_runtime_handle("attached-followup");
         let release = Arc::new(CodexDelegationRelease {
             terminal_release: true,

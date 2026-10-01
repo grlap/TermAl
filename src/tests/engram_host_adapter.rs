@@ -18,6 +18,9 @@ mod fixture_contracts;
 #[path = "engram_boot_recovery_targets.rs"]
 mod boot_recovery_targets;
 
+#[path = "engram_codex_profile_exit.rs"]
+mod codex_profile_exit;
+
 #[path = "engram_uncertain_begin.rs"]
 mod uncertain_begin;
 
@@ -6605,10 +6608,7 @@ fn engram_mcp_pending_revocation_surfaces_shared_codex_stop_interrupt_failure() 
         thread_sessions: Arc::new(Mutex::new(HashMap::new())),
         stdout_activity: Arc::new(Mutex::new(std::time::Instant::now())),
     };
-    *state
-        .shared_codex_runtime
-        .lock()
-        .expect("shared Codex runtime mutex poisoned") = Some(runtime.clone());
+    install_single_wire_codex_fixture(&state, Some(runtime.clone()));
     runtime
         .sessions
         .lock()
@@ -7649,10 +7649,7 @@ fn engram_mcp_shared_codex_interrupt_failure_revokes_grant_and_surfaces_degradat
         thread_sessions: Arc::new(Mutex::new(HashMap::new())),
         stdout_activity: Arc::new(Mutex::new(std::time::Instant::now())),
     };
-    *state
-        .shared_codex_runtime
-        .lock()
-        .expect("shared Codex runtime mutex poisoned") = Some(runtime.clone());
+    install_single_wire_codex_fixture(&state, Some(runtime.clone()));
     runtime
         .sessions
         .lock()

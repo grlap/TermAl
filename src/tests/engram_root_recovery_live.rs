@@ -799,10 +799,7 @@ fn live_root_restart_after_lost_evaluate_replays_issued_grant_without_rebinding(
     }
     let (runtime, receiver, _process) =
         test_shared_codex_runtime("engram-live-root-evaluate-restart-provider");
-    *restarted
-        .shared_codex_runtime
-        .lock()
-        .expect("shared Codex runtime mutex poisoned") = Some(runtime);
+    install_single_wire_codex_fixture(&restarted, Some(runtime));
 
     restarted
         .resume_session_queue(&session_id)
@@ -906,10 +903,7 @@ fn live_root_restart_after_lost_begin_never_blindly_redelivers() {
     };
     let (runtime, receiver, _process) =
         test_shared_codex_runtime("engram-live-root-restart-provider");
-    *restarted
-        .shared_codex_runtime
-        .lock()
-        .expect("shared Codex runtime mutex poisoned") = Some(runtime);
+    install_single_wire_codex_fixture(&restarted, Some(runtime));
 
     // Resume can acknowledge the reconciliation without starting a turn. Its
     // HTTP success is not evidence of provider delivery; inspect state below.

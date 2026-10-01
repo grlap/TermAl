@@ -215,7 +215,7 @@ fn structured_result_is_durable_before_child_archive_and_active_review_is_not_re
     let (state, _root_sender_id, parent) = mailbox_test_state();
     let (delegation_id, child_id) = install_required_review_delegation(&state, &parent);
     let (runtime, input_rx, process) = test_shared_codex_runtime("structured-release-order");
-    *state.shared_codex_runtime.lock().unwrap() = Some(runtime.clone());
+    install_single_wire_codex_fixture(&state, Some(runtime.clone()));
     {
         let mut inner = state.inner.lock().unwrap();
         let index = inner.find_session_index(&child_id).unwrap();
